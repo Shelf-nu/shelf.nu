@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// why: the route reads the QR state via `db.qr.findUnique` and the real
-// `assertAssetsBelongToOrg` guard reads `db.asset.findMany`; stubbing just
-// those avoids the real Prisma client (no DB in unit tests) while keeping
-// the org-ownership guard's actual comparison logic in play.
+// why: the real `assertAssetsBelongToOrg` guard reads `db.asset.findMany`;
+// stubbing just that avoids the real Prisma client (no DB in unit tests)
+// while keeping the org-ownership guard's actual comparison logic in play.
 vi.mock("~/database/db.server", () => ({
   db: {
-    qr: { findUnique: vi.fn() },
     asset: { findMany: vi.fn() },
   },
 }));
@@ -20,12 +18,13 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobilePermission: vi.fn(),
 }));
 
-// why: `updateAssetQrCode` is the web-parity service the web link route uses;
-// the module it lives in is huge and drags in storage/email integrations at
-// import time. The route's observable job is gating + state guards, so the
-// write itself is stubbed.
+// why: `relinkAssetQrCode` owns ALL QR-state guards + the audit note + the
+// inline claim (same service as the web asset-detail relink action); the
+// module it lives in is huge and drags in storage/email integrations at
+// import time. The route's observable job is gating + delegation + error
+// mapping, so the service is stubbed and its guard errors are simulated.
 vi.mock("~/modules/asset/service.server", () => ({
-  updateAssetQrCode: vi.fn(),
+  relinkAssetQrCode: vi.fn(),
 }));
 
 import { db } from "~/database/db.server";
@@ -34,15 +33,17 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { updateAssetQrCode } from "~/modules/asset/service.server";
+import { relinkAssetQrCode } from "~/modules/asset/service.server";
 import { ShelfError } from "~/utils/error";
 import { action } from "~/routes/api+/mobile+/qr.link-asset";
 
 /**
  * Tests for POST /api/mobile/qr/link-asset — the native takeover of the web
- * link-existing flow. Asserts observable branching: the QR state guards
- * (not found / unclaimed / other org / already linked), the org-scoping of
- * the user-supplied assetId, and the success envelope.
+ * link-existing flow, delegating to the shared `relinkAssetQrCode` service.
+ * Asserts observable branching: gating, body validation, org-scoping of the
+ * user-supplied assetId, delegation with the caller's resolved org, and the
+ * pass-through of the service's guard errors (404 / wrong-org 403 /
+ * already-linked 403).
  *
  * @see {@link file://../../../../app/routes/api+/mobile+/qr.link-asset.ts}
  */
@@ -63,22 +64,9 @@ async function callAction(body: unknown) {
   const result = await action({ request, params: {}, context: {} } as never);
   const { data, init } = result as unknown as DataResult<{
     qr?: { id: string; organizationId: string | null; assetId: string | null };
-    error?: { message: string; reason?: string; qrId?: string };
+    error?: { message: string };
   }>;
   return { body: data, status: init?.status ?? 200 };
-}
-
-/** Sets up the QR row the route will read. */
-function mockQr(
-  qr: {
-    id: string;
-    organizationId: string | null;
-    assetId: string | null;
-    kitId: string | null;
-  } | null
-) {
-  // why: cast — the route selects a narrow shape, not the full Qr row.
-  vi.mocked(db.qr.findUnique).mockResolvedValue(qr as any);
 }
 
 beforeEach(() => {
@@ -97,18 +85,11 @@ beforeEach(() => {
         (args?.where?.id?.in ?? []).map((id: string) => ({ id }))
       ) as any
   );
-  vi.mocked(updateAssetQrCode).mockResolvedValue({} as any);
+  vi.mocked(relinkAssetQrCode).mockResolvedValue(undefined as never);
 });
 
 describe("POST /api/mobile/qr/link-asset", () => {
-  it("links a claimed-but-unlinked QR to an org asset and returns the qr summary", async () => {
-    mockQr({
-      id: "qr-1",
-      organizationId: "org-1",
-      assetId: null,
-      kitId: null,
-    });
-
+  it("delegates to relinkAssetQrCode with the caller's resolved org and returns the qr summary", async () => {
     const { body, status } = await callAction({
       qrId: "qr-1",
       assetId: "asset-1",
@@ -123,17 +104,26 @@ describe("POST /api/mobile/qr/link-asset", () => {
         kitId: null,
       },
     });
-    // The write is org-scoped to the caller's resolved org (same service
-    // call as the web link route).
-    expect(updateAssetQrCode).toHaveBeenCalledWith({
-      newQrId: "qr-1",
+    // Same guarded service as the web asset-detail relink action; org and
+    // user always come from the verified session, never the body.
+    expect(relinkAssetQrCode).toHaveBeenCalledWith({
+      qrId: "qr-1",
       assetId: "asset-1",
       organizationId: "org-1",
+      userId: "user-1",
     });
   });
 
-  it("returns 404 when the QR does not exist", async () => {
-    mockQr(null);
+  it("maps the service's not-found error to a 404", async () => {
+    vi.mocked(relinkAssetQrCode).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message:
+          "This code doesn't exist or it doesn't belong to your current organization.",
+        label: "QR",
+        status: 404,
+      })
+    );
 
     const { body, status } = await callAction({
       qrId: "qr-missing",
@@ -141,74 +131,53 @@ describe("POST /api/mobile/qr/link-asset", () => {
     });
 
     expect(status).toBe(404);
-    expect(body.error?.message).toBe("QR code not found");
-    expect(updateAssetQrCode).not.toHaveBeenCalled();
+    expect(body.error?.message).toBe(
+      "This code doesn't exist or it doesn't belong to your current organization."
+    );
   });
 
-  it("returns 400 with reason 'unclaimed' when the QR has no organization yet", async () => {
-    mockQr({ id: "qr-1", organizationId: null, assetId: null, kitId: null });
+  it("maps the service's wrong-org guard to a 403", async () => {
+    vi.mocked(relinkAssetQrCode).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "This QR code does not belong to your organization",
+        label: "QR",
+        status: 403,
+      })
+    );
 
     const { body, status } = await callAction({
-      qrId: "qr-1",
-      assetId: "asset-1",
-    });
-
-    expect(status).toBe(400);
-    expect(body.error).toEqual({
-      message: "This QR code is not claimed yet. Claim it before linking.",
-      reason: "unclaimed",
-      qrId: "qr-1",
-    });
-    expect(updateAssetQrCode).not.toHaveBeenCalled();
-  });
-
-  it("returns 403 when the QR belongs to a different organization", async () => {
-    mockQr({
-      id: "qr-1",
-      organizationId: "org-other",
-      assetId: null,
-      kitId: null,
-    });
-
-    const { body, status } = await callAction({
-      qrId: "qr-1",
+      qrId: "qr-of-org-b",
       assetId: "asset-1",
     });
 
     expect(status).toBe(403);
     expect(body.error?.message).toBe(
-      "This QR code doesn't belong to your current organization."
+      "This QR code does not belong to your organization"
     );
-    expect(updateAssetQrCode).not.toHaveBeenCalled();
   });
 
-  it("returns 403 when the QR is already linked to an asset or kit", async () => {
-    mockQr({
-      id: "qr-1",
-      organizationId: "org-1",
-      assetId: "asset-linked",
-      kitId: null,
-    });
+  it("maps the service's already-linked guard to its 403", async () => {
+    vi.mocked(relinkAssetQrCode).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message:
+          "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
+        label: "QR",
+        status: 403,
+      })
+    );
 
     const { body, status } = await callAction({
-      qrId: "qr-1",
+      qrId: "qr-linked",
       assetId: "asset-1",
     });
 
     expect(status).toBe(403);
-    expect(body.error?.message).toBe(
-      "This QR code is already linked to an asset or a kit."
-    );
-    expect(updateAssetQrCode).not.toHaveBeenCalled();
+    expect(body.error?.message).toContain("already linked to another asset");
   });
 
-  it("rejects an assetId that is not in the caller's org (cross-org IDOR)", async () => {
-    mockQr({
-      id: "qr-1",
-      organizationId: "org-1",
-      assetId: null,
-      kitId: null,
-    });
+  it("rejects an assetId that is not in the caller's org (cross-org IDOR) before delegating", async () => {
     // why: simulate the asset living in another org — the org-scoped lookup
     // finds nothing, so the shared guard must reject before any write.
     vi.mocked(db.asset.findMany).mockResolvedValue([] as any);
@@ -222,7 +191,7 @@ describe("POST /api/mobile/qr/link-asset", () => {
     expect(body.error?.message).toContain(
       "Some of the selected assets do not exist in your workspace"
     );
-    expect(updateAssetQrCode).not.toHaveBeenCalled();
+    expect(relinkAssetQrCode).not.toHaveBeenCalled();
   });
 
   it("returns 403 and never links when the caller lacks qr:update (non-admin/owner)", async () => {
@@ -241,7 +210,7 @@ describe("POST /api/mobile/qr/link-asset", () => {
     });
 
     expect(status).toBe(403);
-    expect(updateAssetQrCode).not.toHaveBeenCalled();
+    expect(relinkAssetQrCode).not.toHaveBeenCalled();
     expect(body.error?.message).toBe(
       "You have no permission to perform this action"
     );
@@ -252,7 +221,7 @@ describe("POST /api/mobile/qr/link-asset", () => {
 
     expect(status).toBe(400);
     expect(body.error?.message).toBe("Invalid request body");
-    expect(updateAssetQrCode).not.toHaveBeenCalled();
+    expect(relinkAssetQrCode).not.toHaveBeenCalled();
   });
 
   it("returns 400 (not 500) for a non-JSON body", async () => {
@@ -274,6 +243,6 @@ describe("POST /api/mobile/qr/link-asset", () => {
 
     expect(init?.status).toBe(400);
     expect(data.error?.message).toBe("Invalid request body");
-    expect(updateAssetQrCode).not.toHaveBeenCalled();
+    expect(relinkAssetQrCode).not.toHaveBeenCalled();
   });
 });

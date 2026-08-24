@@ -1,3 +1,20 @@
+/**
+ * Mobile booking asset picker endpoint.
+ *
+ * Serves the companion's "add assets to booking" screen: an availability-aware
+ * asset list for a specific date window, plus the display code and resolved
+ * image each row renders. It owns no query or availability logic of its own —
+ * `getPaginatedAndFilterableAssets` decides what is bookable, and this route
+ * shapes that result for a native client that cannot re-resolve relations.
+ *
+ * Shaping is the part worth knowing: the response carries FLAT, already-resolved
+ * image fields rather than the nested `assetModel` relation, because the
+ * companion ships as a native binary and must inherit a model's cover image
+ * without a client release. See the loader docblock for the request contract.
+ *
+ * @see {@link file://./../../../modules/asset/image-resolution.ts}
+ * @see {@link file://./../../../modules/asset/service.server.ts} getPaginatedAndFilterableAssets
+ */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -5,6 +22,10 @@ import {
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import {
+  resolveAssetImage,
+  serializeImageExpiration,
+} from "~/modules/asset/image-resolution";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import {
   resolveDisplayCode,
@@ -82,6 +103,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       await getPaginatedAndFilterableAssets({
         request,
         organizationId,
+        // Mobile asset picker: ignores the custodian-filter seed, so scope it
+        // rather than fetch a roster the response never returns.
+        canSeeAllCustody: false,
         filters: pickerParams.toString(),
       });
 
@@ -119,15 +143,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
       assets: assets.map((asset) => {
         const codeEntity = codeByAssetId.get(asset.id);
         const resolved = codeEntity
-          ? resolveDisplayCode({ entity: codeEntity, organization: org })
+          ? resolveDisplayCode({
+              entity: codeEntity,
+              organization: org,
+              entityKind: "asset",
+            })
           : null;
         return {
           id: asset.id,
           title: asset.title,
           status: asset.status,
-          mainImage: asset.mainImage,
-          mainImageExpiration: asset.mainImageExpiration,
-          thumbnailImage: asset.thumbnailImage,
+          // Hand-written projection, so typecheck can't catch a dropped
+          // field — resolve the model-image cascade explicitly or an asset
+          // that inherits its image shows blank in the companion's picker.
+          ...(() => {
+            const image = resolveAssetImage({
+              mainImage: asset.mainImage,
+              thumbnailImage: asset.thumbnailImage,
+              assetModel: asset.assetModel,
+            });
+            const isPlaceholder = image.source === "placeholder";
+            return {
+              mainImage: isPlaceholder ? null : image.fullUrl,
+              thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+              imageSource: image.source,
+              mainImageExpiration: serializeImageExpiration(
+                image.source,
+                asset.mainImageExpiration
+              ),
+            };
+          })(),
           // Kit linkage moved to the AssetKit pivot (quantities restructure);
           // the pivot row's `kitId` FK is the legacy single-kit id the companion
           // contract expects.

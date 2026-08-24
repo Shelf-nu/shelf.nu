@@ -10,6 +10,7 @@ import { AssetType, BookingStatus, Prisma } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { assetQtyMeta } from "~/utils/asset-quantity";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -46,6 +47,7 @@ import {
   buildKitListMarkup,
   LOCATION_SORTING_OPTIONS,
 } from "./utils";
+import { getLocationKitsWhereInput } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
@@ -297,6 +299,8 @@ export async function getLocation(
             where: assetsWhereForLocation,
             orderBy: { [orderBy]: orderDirection },
             include: {
+              // Model cover image for assets with no image of their own
+              ...ASSET_MODEL_IMAGE_SELECT,
               category: {
                 select: {
                   id: true,
@@ -1414,74 +1418,27 @@ export async function getLocationKits(
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    const kitWhere: Prisma.KitWhereInput = {
+    // Shared with `resolveLocationKitIds` so a "select all" removal resolves
+    // exactly the rows this list renders.
+    const kitWhere = getLocationKitsWhereInput({
       organizationId,
       locationId: id,
-    };
-
-    if (teamMemberIds && teamMemberIds.length) {
-      kitWhere.OR = [
-        ...(kitWhere.OR ?? []),
-        {
-          custody: { custodianId: { in: teamMemberIds } },
-        },
-        {
-          custody: { custodian: { userId: { in: teamMemberIds } } },
-        },
-        {
-          assetKits: {
-            some: {
-              asset: {
-                bookingAssets: {
-                  some: {
-                    booking: {
-                      custodianTeamMemberId: { in: teamMemberIds },
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        {
-          assetKits: {
-            some: {
-              asset: {
-                bookingAssets: {
-                  some: {
-                    booking: {
-                      custodianUserId: { in: teamMemberIds },
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
-          : []),
-      ];
-    }
-
-    if (search) {
-      kitWhere.name = {
-        contains: search,
-        mode: "insensitive",
-      };
-    }
+      search,
+      teamMemberIds,
+    });
 
     const [kits, totalKits] = await Promise.all([
       db.kit.findMany({
         where: kitWhere,
         include: {
           category: true,
+          // Code-resolution relations for AssetCodeBadge / resolveDisplayCode.
+          // Kits are code-bearing entities (Qr.kitId and Barcode.kitId exist),
+          // so a kit-listing surface that omits these can never render the
+          // chip — see `.claude/rules/code-bearing-entity-list-consistency.md`.
+          // Same tight shape as KITS_INCLUDE_FIELDS in `~/modules/kit/types`.
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
           custody: {
             select: {
               custodian: {
@@ -1945,6 +1902,9 @@ export async function updateLocationAssets({
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Location writes are ADMIN/OWNER-only, so the custodian filter
+        // here can never come from a restricted viewer.
+        allowedTeamMemberIds: "all",
       });
 
       const allAssets = await db.asset.findMany({
@@ -2468,6 +2428,9 @@ export async function updateLocationKits({
       const kitWhere = getKitsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Location writes are ADMIN/OWNER-only, so the custodian filter
+        // here can never come from a restricted viewer.
+        allowedTeamMemberIds: "all",
       });
 
       const allKits = await db.kit.findMany({

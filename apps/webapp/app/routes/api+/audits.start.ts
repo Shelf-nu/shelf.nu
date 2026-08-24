@@ -184,6 +184,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
         currentSearchParams,
         settings,
         timeZone,
+        // Gated on `audit: create`, which neither BASE nor SELF_SERVICE holds —
+        // unlike `audits.add-assets`, which is `audit: update` and does narrow.
+        allowedTeamMemberIds: "all",
       });
     } else {
       // Resolve asset IDs from either direct input or context

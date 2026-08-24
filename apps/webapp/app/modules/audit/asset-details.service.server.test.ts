@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the database
@@ -7,8 +8,11 @@ vi.mock("~/database/db.server", () => ({
     auditNote: {
       create: vi.fn(),
       findFirst: vi.fn(),
+      findFirstOrThrow: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
+      deleteMany: vi.fn(),
       findMany: vi.fn(),
       count: vi.fn(),
     },
@@ -127,25 +131,44 @@ describe("audit asset details service", () => {
         updatedAt: new Date(),
       };
 
-      const updatedNote = {
+      // Typed against the query rather than `as any`: the re-read selects
+      // `displayName`, and a loose fixture silently omitted it.
+      const updatedNote: Prisma.AuditNoteGetPayload<{
+        include: {
+          user: {
+            select: {
+              id: true;
+              firstName: true;
+              lastName: true;
+              displayName: true;
+              email: true;
+              profilePicture: true;
+            };
+          };
+        };
+      }> = {
         ...existingNote,
+        type: "COMMENT",
         content: "Updated content",
         user: {
           id: "user-1",
           firstName: "John",
           lastName: "Doe",
+          displayName: "John Doe",
           email: "john@example.com",
           profilePicture: null,
         },
       };
 
       vi.mocked(db.auditNote.findFirst).mockResolvedValue(existingNote as any);
-      vi.mocked(db.auditNote.update).mockResolvedValue(updatedNote as any);
+      vi.mocked(db.auditNote.updateMany).mockResolvedValue({ count: 1 });
+      vi.mocked(db.auditNote.findFirstOrThrow).mockResolvedValue(updatedNote);
 
       const result = await updateAuditAssetNote({
         noteId: "note-1",
         content: "Updated content",
         userId: "user-1",
+        organizationId: "org-1",
       });
 
       expect(db.auditNote.findFirst).toHaveBeenCalledWith({
@@ -153,27 +176,56 @@ describe("audit asset details service", () => {
           id: "note-1",
           userId: "user-1",
           auditAssetId: { not: null },
+          auditSession: { organizationId: "org-1" },
         },
       });
 
-      expect(db.auditNote.update).toHaveBeenCalledWith({
-        where: { id: "note-1" },
-        data: { content: "Updated content" },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              displayName: true,
-              email: true,
-              profilePicture: true,
-            },
-          },
+      // The predicate rides on the mutation, not just the lookup before it.
+      expect(db.auditNote.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: "note-1",
+          userId: "user-1",
+          auditAssetId: { not: null },
+          auditSession: { organizationId: "org-1" },
         },
+        data: { content: "Updated content" },
       });
+
+      // The author comes from a re-read carrying the same scope, since
+      // updateMany cannot `include` a relation.
+      expect(db.auditNote.findFirstOrThrow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: "note-1",
+            userId: "user-1",
+            auditSession: { organizationId: "org-1" },
+          },
+        })
+      );
 
       expect(result.content).toBe("Updated content");
+    });
+
+    it("throws 404 when the scoped update matches nothing", async () => {
+      // The lookup can pass and the mutation still match zero rows — that is
+      // the whole point of moving the predicate onto the write. Nothing had
+      // covered this path.
+      vi.mocked(db.auditNote.findFirst).mockResolvedValue({
+        id: "note-1",
+        userId: "user-1",
+      } as never);
+      vi.mocked(db.auditNote.updateMany).mockResolvedValue({ count: 0 });
+
+      await expect(
+        updateAuditAssetNote({
+          noteId: "note-1",
+          content: "Updated content",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toMatchObject({ status: 404 });
+
+      expect(db.auditNote.findFirstOrThrow).not.toHaveBeenCalled();
     });
 
     it("throws 404 error when note is not found", async () => {
@@ -184,10 +236,11 @@ describe("audit asset details service", () => {
           noteId: "nonexistent-note",
           content: "Updated content",
           userId: "user-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.update).not.toHaveBeenCalled();
+      expect(db.auditNote.updateMany).not.toHaveBeenCalled();
     });
 
     it("throws 404 error when user doesn't own the note", async () => {
@@ -199,10 +252,11 @@ describe("audit asset details service", () => {
           noteId: "note-1",
           content: "Updated content",
           userId: "wrong-user",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.update).not.toHaveBeenCalled();
+      expect(db.auditNote.updateMany).not.toHaveBeenCalled();
     });
 
     it("only allows updating asset-specific notes (auditAssetId not null)", async () => {
@@ -214,6 +268,7 @@ describe("audit asset details service", () => {
           noteId: "note-1",
           content: "Updated content",
           userId: "user-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow();
 
@@ -228,6 +283,23 @@ describe("audit asset details service", () => {
   });
 
   describe("deleteAuditAssetNote", () => {
+    it("refuses a note belonging to another organization", async () => {
+      // The lookup is scoped through auditSession, so a note in org-2 simply
+      // is not found for a caller in org-1 -- previously `userId` alone let an
+      // author reach a note in an organization they had since left.
+      vi.mocked(db.auditNote.findFirst).mockResolvedValue(null);
+
+      await expect(
+        deleteAuditAssetNote({
+          noteId: "note-in-another-org",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toMatchObject({ status: 404 });
+
+      expect(db.auditNote.deleteMany).not.toHaveBeenCalled();
+    });
+
     it("successfully deletes a note owned by the user", async () => {
       const existingNote = {
         id: "note-1",
@@ -241,11 +313,12 @@ describe("audit asset details service", () => {
       };
 
       vi.mocked(db.auditNote.findFirst).mockResolvedValue(existingNote as any);
-      vi.mocked(db.auditNote.delete).mockResolvedValue(existingNote as any);
+      vi.mocked(db.auditNote.deleteMany).mockResolvedValue({ count: 1 });
 
       const result = await deleteAuditAssetNote({
         noteId: "note-1",
         userId: "user-1",
+        organizationId: "org-1",
       });
 
       expect(db.auditNote.findFirst).toHaveBeenCalledWith({
@@ -253,14 +326,40 @@ describe("audit asset details service", () => {
           id: "note-1",
           userId: "user-1",
           auditAssetId: { not: null },
+          auditSession: { organizationId: "org-1" },
         },
       });
 
-      expect(db.auditNote.delete).toHaveBeenCalledWith({
-        where: { id: "note-1" },
+      expect(db.auditNote.deleteMany).toHaveBeenCalledWith({
+        where: {
+          id: "note-1",
+          userId: "user-1",
+          auditAssetId: { not: null },
+          auditSession: { organizationId: "org-1" },
+        },
       });
 
-      expect(result).toEqual(existingNote);
+      // deleteMany reports a count; the row itself is gone, so echoing it back
+      // would be inventing a value.
+      expect(result).toEqual({ count: 1 });
+    });
+
+    it("throws 404 when the scoped delete matches nothing", async () => {
+      // The lookup can pass and the mutation still match zero rows — that is
+      // the point of moving the predicate onto the write. Nothing covered it.
+      vi.mocked(db.auditNote.findFirst).mockResolvedValue({
+        id: "note-1",
+        userId: "user-1",
+      } as never);
+      vi.mocked(db.auditNote.deleteMany).mockResolvedValue({ count: 0 });
+
+      await expect(
+        deleteAuditAssetNote({
+          noteId: "note-1",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toMatchObject({ status: 404 });
     });
 
     it("throws 404 error when note is not found", async () => {
@@ -270,10 +369,11 @@ describe("audit asset details service", () => {
         deleteAuditAssetNote({
           noteId: "nonexistent-note",
           userId: "user-1",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.delete).not.toHaveBeenCalled();
+      expect(db.auditNote.deleteMany).not.toHaveBeenCalled();
     });
 
     it("throws 404 error when user doesn't own the note", async () => {
@@ -283,10 +383,11 @@ describe("audit asset details service", () => {
         deleteAuditAssetNote({
           noteId: "note-1",
           userId: "wrong-user",
+          organizationId: "org-1",
         })
       ).rejects.toThrow(ShelfError);
 
-      expect(db.auditNote.delete).not.toHaveBeenCalled();
+      expect(db.auditNote.deleteMany).not.toHaveBeenCalled();
     });
   });
 

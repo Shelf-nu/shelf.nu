@@ -9,6 +9,7 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { removeAssets } from "~/modules/booking/service.server";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { canUserRemoveBookingAssets } from "~/utils/bookings";
@@ -75,8 +76,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, kitIds } = BodySchema.parse(
-      await request.json()
+    const { bookingId, assetIds, kitIds } = await parseMobileBody(
+      BodySchema,
+      request,
+      "Booking"
     );
 
     // Org-scoped booking lookup — a foreign-org booking id 404s here.

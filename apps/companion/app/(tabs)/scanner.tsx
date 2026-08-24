@@ -29,10 +29,11 @@ import type {
   QrResolveFailureReason,
   ScannedKit,
 } from "@/lib/api/types";
-import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { extractQrId } from "@/lib/qr-utils";
+import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
 import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
@@ -189,6 +190,19 @@ function ScannerContent() {
   const { colors } = useTheme();
   const styles = useStyles();
   const [permission, requestPermission] = useCameraPermissions();
+
+  /**
+   * Prime scan geolocation on scanner use: lazily requests location
+   * permission (once per session — see scan-location.ts) and warms a
+   * background position fix so scans can attach coordinates without waiting
+   * on GPS. Gated on camera permission so the location prompt never stacks
+   * on top of the camera prompt during first run; granting camera re-runs
+   * this effect. Never gates scanning — denied simply means scans are
+   * recorded without coordinates.
+   */
+  useEffect(() => {
+    if (isFocused && permission?.granted) primeScanLocation();
+  }, [isFocused, permission?.granted]);
 
   // Booking check-in mode
   const isBookingMode = !!bookingId;
@@ -553,10 +567,9 @@ function ScannerContent() {
    * org won the race, permission revoked) surfaces as an error card.
    *
    * @param claimQrId - The unclaimed QR id (from the resolve error payload).
-   * @param next - Which follow-up to open once the code is claimed.
    */
   const claimQrAndProceed = useCallback(
-    async (claimQrId: string, next: "create" | "link") => {
+    async (claimQrId: string) => {
       // Same lock discipline as handleBarCodeScanned: the result card's two
       // buttons are plain touchables, so a rapid double-tap (or one tap on
       // each) would otherwise start two concurrent claim flows and stack two
@@ -624,8 +637,7 @@ function ScannerContent() {
       // a clean slate (and re-scanning the same label resolves fresh).
       dismissResult();
       pushIntoTab("/(tabs)/assets", {
-        pathname:
-          next === "create" ? "/(tabs)/assets/new" : "/(tabs)/assets/link-qr",
+        pathname: "/(tabs)/assets/new",
         params: { qrId: claimQrId },
       });
     },
@@ -708,13 +720,20 @@ function ScannerContent() {
             return;
           }
 
+          // Best-effort scan geolocation (web parity). Cached / last-known
+          // position only, bounded to ~1.5s worst case and usually instant —
+          // never a fresh GPS fix in the scan hot path (see scan-location.ts).
+          // Null (no permission / no recent fix / timeout) simply means the
+          // scan is recorded without coordinates.
+          const coordinates = await getScanCoordinates();
+
           // orgId is only consumed by the server's SAM branch; on the QR path
           // the org is derived from the QR record and this is ignored.
           const {
             data: qrData,
             error,
             errorDetails,
-          } = await api.qr(qrLookupId, currentOrg?.id);
+          } = await api.qr(qrLookupId, currentOrg?.id, coordinates);
 
           if (error || !qrData) {
             flashFrame("error");
@@ -733,10 +752,12 @@ function ScannerContent() {
                 : null;
 
             if (unclaimedQrId && canManageQrCodes) {
-              // Admin/owner: native takeover of the web claim flow. Both
-              // actions claim the code into the CURRENT workspace first,
-              // then continue in-app (create form links on submit; the
-              // picker links an existing asset).
+              // Admin/owner: native takeover of the web claim flow. The two
+              // actions claim at DIFFERENT points, deliberately: "Create New
+              // Asset" claims up front (the create form needs an owned code),
+              // while "Link Existing Asset" does not claim at all here — the
+              // link endpoint claims inline, so abandoning the picker leaves
+              // the label unclaimed for anyone. See each action below.
               setScanResult({
                 type: "not_found",
                 title: "Unclaimed Code",
@@ -746,14 +767,22 @@ function ScannerContent() {
                   label: "Create New Asset",
                   icon: "add-circle-outline",
                   onPress: () => {
-                    void claimQrAndProceed(unclaimedQrId, "create");
+                    void claimQrAndProceed(unclaimedQrId);
                   },
                 },
                 secondaryAction: {
                   label: "Link Existing Asset",
                   icon: "link-outline",
+                  // No claim step: the link-asset endpoint delegates to
+                  // relinkAssetQrCode, which claims an unclaimed code inline
+                  // as part of the link. Navigating directly also means an
+                  // abandoned picker leaves the label unclaimed for anyone.
                   onPress: () => {
-                    void claimQrAndProceed(unclaimedQrId, "link");
+                    dismissResult();
+                    pushIntoTab("/(tabs)/assets", {
+                      pathname: "/(tabs)/assets/link-qr",
+                      params: { qrId: unclaimedQrId },
+                    });
                   },
                 },
               });
@@ -1303,9 +1332,9 @@ function ScannerContent() {
             setScanResult({
               type: "error",
               title: "Not Checked Out",
-              message: `"${asset.title}" is ${asset.status
-                .replace(/_/g, " ")
-                .toLowerCase()}, not checked out.`,
+              message: `"${asset.title}" is ${formatStatus(
+                asset.status
+              ).toLowerCase()}, not checked out.`,
             });
             finalizeScan();
             return;
@@ -1330,12 +1359,12 @@ function ScannerContent() {
 
         // ── VIEW mode: navigate to detail ──
         if (action === "view") {
-          const statusLabel =
-            asset.status === "IN_CUSTODY"
-              ? "In Custody"
-              : asset.status === "AVAILABLE"
-              ? "Available"
-              : asset.status.replace(/_/g, " ");
+          // why: the shared helper, not a local ternary. This hand-typed
+          // "In Custody" and fell back to `status.replace(/_/g, " ")`, which
+          // only swaps underscores — so a CHECKED_OUT asset flashed
+          // "CHECKED OUT" here and then "Checked out" on the detail screen it
+          // navigates to 950ms later.
+          const statusLabel = formatStatus(asset.status);
 
           flashFrame("success");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

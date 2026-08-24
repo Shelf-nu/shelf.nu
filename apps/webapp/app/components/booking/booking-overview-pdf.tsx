@@ -9,6 +9,7 @@ import { Image } from "~/components/shared/image";
 import { useSearchParams } from "~/hooks/search-params";
 import { BOOKING_ASSET_SORTING_OPTIONS } from "~/modules/booking/constants";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AssetImage } from "../assets/asset-image/component";
@@ -27,7 +28,16 @@ export const BookingOverviewPDF = ({
   booking: {
     id: Booking["id"];
     name: Booking["name"];
-    assets: Partial<Asset>[];
+    assets: Array<
+      Partial<Asset> & {
+        /** Cover image of the asset's model, rendered when the asset has no
+         * image of its own. See `~/modules/asset/image-resolution`. */
+        assetModel?: {
+          image: string | null;
+          thumbnailImage: string | null;
+        } | null;
+      }
+    >;
   };
   timeStamp: number;
 }) => {
@@ -174,9 +184,7 @@ const BookingPDFPreview = ({
   // model request was fulfilled concurrently) can't leak a fulfilled
   // historical row into the printed PDF. `fulfilledAt IS NULL` is the
   // canonical outstanding filter.
-  const outstandingModelRequests = (modelRequests ?? []).filter(
-    (req) => req.fulfilledAt === null
-  );
+  const outstandingModelRequests = getOutstandingModelRequests(modelRequests);
   const custodianName = booking.custodianUser
     ? `${resolveUserDisplayName(booking.custodianUser)} <${
         booking.custodianUser.email
@@ -367,6 +375,7 @@ const BookingPDFPreview = ({
                         mainImage: asset.mainImage,
                         thumbnailImage: asset.thumbnailImage,
                         mainImageExpiration: asset.mainImageExpiration,
+                        assetModel: asset.assetModel ?? null,
                       }}
                       alt={`Image of ${asset.title}`}
                       className="!size-14 object-cover"
@@ -381,6 +390,19 @@ const BookingPDFPreview = ({
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     {asset?.kit?.name}
+                    {/* Print-medium equivalent of the overview's
+                        "Removed from kit" badge — a tooltip can't exist on
+                        paper, so the explanation is printed inline. Without
+                        it a detached row is indistinguishable from a live kit
+                        member, and the kit's printed rows out-number the kit's
+                        actual contents with nothing explaining the gap.
+                        Status-neutral wording: CANCELLED bookings keep these
+                        rows too and may never have gone out. */}
+                    <When truthy={!!asset.isRemovedFromKit}>
+                      <span className="mt-1 block text-xs text-gray-500">
+                        Removed from kit — kept as a record of what was booked
+                      </span>
+                    </When>
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     {asset?.category?.name}

@@ -33,6 +33,7 @@ import UpcomingReminders from "~/components/home/upcoming-reminders";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getUpcomingRemindersForHomePage } from "~/modules/asset-reminder/service.server";
 import { getBookings } from "~/modules/booking/service.server";
 
@@ -265,6 +266,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           include: {
             category: true,
             custody: { select: { quantity: true } },
+            // Model cover image — `<AssetImage>` renders it for assets with
+            // no image of their own.
+            ...ASSET_MODEL_IMAGE_SELECT,
           },
         })
         .catch((cause) => {

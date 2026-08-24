@@ -1,3 +1,4 @@
+import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
 import { useState } from "react";
 import {
   View,
@@ -15,7 +16,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { releaseCategory } from "@shelf/quantity-control";
+import { releaseCategory, isLowStock } from "@shelf/quantity-control";
 import {
   api,
   type AssetCustodyListEntry,
@@ -39,6 +40,7 @@ import { useDateFormatter } from "@/lib/use-date-formatter";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import { AdjustQuantitySheet } from "@/components/adjust-quantity-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
@@ -132,6 +134,7 @@ export default function AssetDetailScreen() {
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
+  const [showAdjustSheet, setShowAdjustSheet] = useState(false);
   const [showImageZoom, setShowImageZoom] = useState(false);
 
   // Quantity-custody steps (QUANTITY_TRACKED assets only). Non-null values
@@ -171,6 +174,35 @@ export default function AssetDetailScreen() {
       asset.id,
       locationId
     );
+    if (err) Alert.alert("Error", err);
+    else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      await fetchAsset();
+    }
+    setIsActionLoading(false);
+  };
+
+  // ── Adjust Quantity (stock) ─────────────────────────
+
+  /**
+   * Applies a stock adjustment and refreshes the asset. Web
+   * QuickAdjustDialog parity: Add maps to RESTOCK, Remove maps to LOSS —
+   * the server writes the ConsumptionLog row and fires the low-stock alert.
+   */
+  const performAdjustQuantity = async (args: {
+    direction: "add" | "subtract";
+    quantity: number;
+    note?: string;
+  }) => {
+    if (!currentOrg || !asset) return;
+    setShowAdjustSheet(false);
+    setIsActionLoading(true);
+    const { error: err } = await api.adjustQuantity(currentOrg.id, asset.id, {
+      quantity: args.quantity,
+      direction: args.direction,
+      category: args.direction === "add" ? "RESTOCK" : "LOSS",
+      note: args.note,
+    });
     if (err) Alert.alert("Error", err);
     else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -287,6 +319,22 @@ export default function AssetDetailScreen() {
   // activity (server's getQuantityData null contract) — we fall back to the
   // plain total in that case.
   const breakdown = isQtyTracked ? asset.quantityBreakdown ?? null : null;
+  // Available units for the low-stock check + the "Available" stat. Prefer the
+  // breakdown's `available`, but fall back to the plain total (`asset.quantity`)
+  // when the server omitted the breakdown: an idle QT asset (no custody/booking
+  // activity) returns a null breakdown yet can still sit at/below its threshold.
+  // Web derives `available` unconditionally (notifier + overview card), so
+  // gating on the breakdown here would hide low-stock on exactly the idle
+  // inventory the alert is for.
+  const availableUnits = breakdown?.available ?? asset.quantity ?? null;
+  // Low-stock mirrors the web detail card: availability-aware
+  // `available <= minQuantity` (null threshold = not low).
+  const isAvailableLowStock =
+    availableUnits != null &&
+    isLowStock({
+      available: availableUnits,
+      minQuantity: asset.minQuantity ?? null,
+    });
   // Status pill label. For a QUANTITY_TRACKED asset whose units span states
   // (e.g. some held, some free), the raw enum ("IN_CUSTODY") reads wrong — the
   // web shows a derived "Partial custody". Use the shared quantity-aware label
@@ -382,27 +430,54 @@ export default function AssetDetailScreen() {
                     {totalQuantityLabel}
                   </Text>
                   <Text style={styles.quantityTotalLabel}>total</Text>
+                  {/* Stock adjust — server requires asset:update, so the
+                      affordance is hidden from roles that would 403. */}
+                  {canUpdateAsset && (
+                    <TouchableOpacity
+                      style={styles.adjustButton}
+                      onPress={() => setShowAdjustSheet(true)}
+                      disabled={isActionLoading}
+                      activeOpacity={0.7}
+                      accessibilityLabel="Adjust quantity"
+                      accessibilityRole="button"
+                    >
+                      <Ionicons
+                        name="swap-vertical"
+                        size={14}
+                        color={colors.foreground}
+                      />
+                      <Text style={styles.adjustButtonText}>Adjust</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
-                {/* Per-status slices. When the breakdown is null (no activity)
-                    we show only the total above. */}
-                {breakdown && (
+                {/* "Available" always renders for a QT asset (so an idle asset
+                    at/below its low-stock threshold still shows the amber
+                    warning); the other status slices render only when the
+                    server sent a breakdown (null = no custody/booking activity,
+                    i.e. all units available). */}
+                {availableUnits != null && (
                   <View style={styles.quantityBreakdownRow}>
                     <QuantityStat
-                      label="Available"
-                      value={`${breakdown.available}${unitSuffix}`}
+                      label={ASSET_QTY_STATUS_LABELS.AVAILABLE}
+                      value={`${availableUnits}${unitSuffix}`}
+                      warning={isAvailableLowStock}
                     />
-                    <QuantityStat
-                      label="In custody"
-                      value={`${breakdown.inCustody}${unitSuffix}`}
-                    />
-                    <QuantityStat
-                      label="Reserved"
-                      value={`${breakdown.reserved}${unitSuffix}`}
-                    />
-                    <QuantityStat
-                      label="Checked out"
-                      value={`${breakdown.checkedOut}${unitSuffix}`}
-                    />
+                    {breakdown && (
+                      <>
+                        <QuantityStat
+                          label={ASSET_QTY_STATUS_LABELS.IN_CUSTODY}
+                          value={`${breakdown.inCustody}${unitSuffix}`}
+                        />
+                        <QuantityStat
+                          label={ASSET_QTY_STATUS_LABELS.RESERVED}
+                          value={`${breakdown.reserved}${unitSuffix}`}
+                        />
+                        <QuantityStat
+                          label={ASSET_QTY_STATUS_LABELS.CHECKED_OUT}
+                          value={`${breakdown.checkedOut}${unitSuffix}`}
+                        />
+                      </>
+                    )}
                   </View>
                 )}
               </View>
@@ -493,8 +568,10 @@ export default function AssetDetailScreen() {
                     label={entry.custodian.name}
                     value={
                       kitHeldQty > 0
-                        ? `${qtyLabel ?? "In custody"} • ${kitHeldQty} via kit`
-                        : qtyLabel ?? "In custody"
+                        ? `${
+                            qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
+                          } • ${kitHeldQty} via kit`
+                        : qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
                     }
                     onPress={
                       canReleaseRow
@@ -568,6 +645,26 @@ export default function AssetDetailScreen() {
                 )}
               />
             )}
+            {asset.assetModel?.name ? (
+              <InfoRow
+                icon="cube-outline"
+                label="Asset Model"
+                value={asset.assetModel.name}
+              />
+            ) : null}
+            {asset.sequentialId ? (
+              // why: the scanner's manual entry accepts a SAM ID, so the app
+              // has to be able to tell you what an asset's SAM ID is. Web has
+              // always shown it as "Asset ID".
+              <InfoRow
+                // `barcode-outline` rather than `pricetag-outline`: the Category
+                // row above already owns the pricetag, and it also matches the
+                // scanner affordance this row exists for.
+                icon="barcode-outline"
+                label="Asset ID"
+                value={asset.sequentialId}
+              />
+            ) : null}
             <InfoRow
               icon="calendar-outline"
               label="Created"
@@ -741,6 +838,18 @@ export default function AssetDetailScreen() {
               INDIVIDUAL rendering stays byte-identical. */}
           {isQtyTracked && (
             <>
+              <AdjustQuantitySheet
+                visible={showAdjustSheet}
+                // Physical removal cap (custodyAvailable chain), NOT
+                // `breakdown.available`: available subtracts the SUM of all
+                // future reservations, which over-restricts Remove when
+                // non-overlapping bookings exist. The server enforces the
+                // real floor (in-custody + peak concurrent reservations).
+                availableQuantity={assignMax}
+                unitOfMeasure={asset.unitOfMeasure}
+                onSubmit={(args) => void performAdjustQuantity(args)}
+                onClose={() => setShowAdjustSheet(false)}
+              />
               <QuantityInputSheet
                 visible={assignQtyMember != null}
                 title="Assign Quantity"
@@ -842,18 +951,45 @@ function memberDisplayName(member: TeamMember): string {
  *
  * @param props.label - The status label (e.g. "Available").
  * @param props.value - The pre-formatted quantity string (e.g. "6 pcs").
+ * @param props.warning - When true, render an amber low-stock affordance
+ *   (icon + amber value), mirroring the web detail card's amber alert.
  */
-function QuantityStat({ label, value }: { label: string; value: string }) {
+function QuantityStat({
+  label,
+  value,
+  warning = false,
+}: {
+  label: string;
+  value: string;
+  warning?: boolean;
+}) {
   const styles = useStyles();
+  const { colors } = useTheme();
   // `accessible` groups the two Text nodes into one element so
   // VoiceOver/TalkBack reads the combined "label value" once.
   return (
     <View
       style={styles.quantityStat}
       accessible
-      accessibilityLabel={`${label} ${value}`}
+      accessibilityLabel={`${label} ${value}${warning ? ", low stock" : ""}`}
     >
-      <Text style={styles.quantityStatValue}>{value}</Text>
+      <View style={styles.quantityStatValueRow}>
+        {warning ? (
+          <Ionicons
+            name="warning-outline"
+            size={14}
+            color={colors.warningText}
+          />
+        ) : null}
+        <Text
+          style={[
+            styles.quantityStatValue,
+            warning ? { color: colors.warningText } : null,
+          ]}
+        >
+          {value}
+        </Text>
+      </View>
       <Text style={styles.quantityStatLabel}>{label}</Text>
     </View>
   );
@@ -996,6 +1132,24 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
     color: colors.muted,
   },
+  adjustButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginLeft: "auto",
+    alignSelf: "center",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    backgroundColor: colors.white,
+  },
+  adjustButtonText: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
   quantityBreakdownRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1008,6 +1162,12 @@ const useStyles = createStyles((colors, shadows) => ({
     width: "50%",
     paddingVertical: spacing.xs,
     gap: 2,
+  },
+  // Row for the (optional) low-stock warning icon + the value text.
+  quantityStatValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
   },
   quantityStatValue: {
     fontSize: fontSize.lg,

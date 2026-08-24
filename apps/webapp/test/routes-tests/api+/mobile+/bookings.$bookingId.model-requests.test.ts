@@ -100,6 +100,8 @@ function makeArgs(method: "POST" | "DELETE", body: Record<string, unknown>) {
 function withRole(role: OrganizationRoles) {
   getMobileUserContextMock.mockResolvedValue({
     role,
+    // The guard reads the full array, not roles[0].
+    roles: [role],
     canUseBarcodes: true,
     canUseAudits: true,
     canSeeAllCustody: true,

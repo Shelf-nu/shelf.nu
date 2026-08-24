@@ -51,7 +51,13 @@ const baseAsset = {
   id: "asset-123",
   title: "Test Asset",
   status: "AVAILABLE",
+  sequentialId: "SAM-0123" as string | null,
   mainImage: null,
+  thumbnailImage: null,
+  assetModel: null as {
+    image: string | null;
+    thumbnailImage: string | null;
+  } | null,
   availableToBook: true,
   category: null,
   type: "INDIVIDUAL" as const,
@@ -154,6 +160,52 @@ describe("shapeMobileAssetResponse", () => {
     expect(result).not.toHaveProperty("assetLocations");
     // `custody` IS a key on the output but as a single object, not an array.
     expect(Array.isArray(result.custody)).toBe(false);
+  });
+
+  // why: the companion reads `mainImage`/`thumbnailImage` directly and ships as
+  // a native binary, so it cannot be updated in lockstep with the API. The
+  // cascade therefore has to be resolved server-side or inherited images never
+  // reach the app.
+  it("resolves an inherited model image into mainImage/thumbnailImage", () => {
+    const result = shapeMobileAssetResponse({
+      ...baseAsset,
+      mainImage: null,
+      thumbnailImage: null,
+      assetModel: {
+        image: "https://cdn/model-main.jpg",
+        thumbnailImage: "https://cdn/model-thumb.jpg",
+      },
+    });
+
+    expect(result.mainImage).toBe("https://cdn/model-main.jpg");
+    expect(result.thumbnailImage).toBe("https://cdn/model-thumb.jpg");
+    expect(result.imageSource).toBe("model");
+    expect(result).not.toHaveProperty("assetModel");
+  });
+
+  it("keeps the asset's own image when it has one", () => {
+    const result = shapeMobileAssetResponse({
+      ...baseAsset,
+      mainImage: "https://cdn/asset-main.jpg",
+      thumbnailImage: "https://cdn/asset-thumb.jpg",
+      assetModel: {
+        image: "https://cdn/model-main.jpg",
+        thumbnailImage: "https://cdn/model-thumb.jpg",
+      },
+    });
+
+    expect(result.mainImage).toBe("https://cdn/asset-main.jpg");
+    expect(result.imageSource).toBe("asset");
+  });
+
+  // why: the companion renders its own placeholder on a null mainImage, so the
+  // placeholder PATH must not leak into the response.
+  it("leaves the image fields null when neither asset nor model has one", () => {
+    const result = shapeMobileAssetResponse(baseAsset);
+
+    expect(result.mainImage).toBeNull();
+    expect(result.thumbnailImage).toBeNull();
+    expect(result.imageSource).toBe("placeholder");
   });
 
   it("preserves top-level fields (mainImage, availableToBook, category) via ...rest", () => {

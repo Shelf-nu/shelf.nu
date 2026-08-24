@@ -477,6 +477,10 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
                 name: "teamMember",
                 queryKey: "name",
                 deletedAt: null,
+                // ASSET custody: SELF_SERVICE may only take custody itself and
+                // BASE never. Matches the scanner loader's seed, which resolves
+                // the same purpose server-side.
+                custodyPurpose: "custody-assignment",
               }}
               fieldName="custodian"
               contentLabel="Team members"

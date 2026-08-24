@@ -7,7 +7,7 @@ const { mockStripe } = vi.hoisted(() => ({
   mockStripe: {
     checkout: { sessions: { create: vi.fn() } },
     subscriptions: { create: vi.fn(), list: vi.fn(), update: vi.fn() },
-    prices: { list: vi.fn() },
+    prices: { list: vi.fn(), retrieve: vi.fn() },
     products: { retrieve: vi.fn() },
     paymentMethods: { list: vi.fn() },
   },
@@ -49,6 +49,19 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // why: `assertPriceIsForAddon` resolves the price server-side before any
+  // subscription is created, so every path here needs a valid add-on price.
+  mockStripe.prices.retrieve.mockResolvedValue({
+    id: "price_123",
+    active: true,
+    type: "recurring",
+    product: {
+      id: "prod_1",
+      deleted: false,
+      active: true,
+      metadata: { product_type: "addon", addon_type: "barcodes" },
+    },
+  });
   mockPremiumIsEnabled.value = true;
   mockOrgUpdate.mockResolvedValue({ id: "org_1" });
 });
@@ -71,6 +84,7 @@ const baseTrialParams = {
 function makeBarcodeProduct(overrides: Partial<Stripe.Product> = {}) {
   return {
     id: "prod_barcode",
+    active: true,
     metadata: { product_type: "addon", addon_type: "barcodes" },
     ...overrides,
   };
@@ -79,6 +93,7 @@ function makeBarcodeProduct(overrides: Partial<Stripe.Product> = {}) {
 function makeNonBarcodeProduct() {
   return {
     id: "prod_other",
+    active: true,
     metadata: { product_type: "plan", addon_type: undefined },
   };
 }
@@ -634,5 +649,91 @@ describe("handleBarcodeAddonWebhook", () => {
     });
 
     expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("add-on price validation (entitlement bypass)", () => {
+  /**
+   * A TIER price is an ordinary active recurring price, so before this guard
+   * it was accepted here. The route enables the feature flag eagerly, and the
+   * resulting subscription carries a tierId — which makes `isAddonSubscription`
+   * return false, so the add-on webhook that would clear the flag never runs.
+   * Net effect: a one-time 7-day trial granted the paid feature permanently.
+   *
+   * detail.dev finding D094.
+   */
+  it("surfaces the price-validation message, not the generic wrapper text", async () => {
+    // The wrapping catch used to rewrite every failure to "Please try again
+    // later", handing back a 400 that asks the user to retry a request which
+    // can never succeed.
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      type: "recurring",
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        active: true,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createBarcodeAddonTrialSubscription({
+        customerId: "cus_123",
+        priceId: "price_tier",
+        userId: "user_1",
+        organizationId: "org_1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "The selected plan is not available for this add-on.",
+    });
+  });
+
+  it("refuses a tier price and never creates a subscription", async () => {
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      type: "recurring",
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        active: true,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createBarcodeAddonTrialSubscription({
+        ...baseTrialParams,
+        priceId: "price_tier",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(mockStripe.subscriptions.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a tier price on the checkout path too", async () => {
+    mockStripe.prices.retrieve.mockResolvedValue({
+      id: "price_tier",
+      active: true,
+      type: "recurring",
+      product: {
+        id: "prod_tier",
+        deleted: false,
+        active: true,
+        metadata: { shelf_tier: "tier_2" },
+      },
+    });
+
+    await expect(
+      createBarcodeAddonCheckoutSession({
+        ...baseCheckoutParams,
+        priceId: "price_tier",
+      })
+    ).rejects.toBeInstanceOf(ShelfError);
+
+    expect(mockStripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 });

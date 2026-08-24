@@ -8,8 +8,12 @@ import {
   assertMobileCanUseBookings,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { fulfilModelRequestsAndCheckout } from "~/modules/booking/service.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  resolveMostPrivilegedRole,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -65,15 +69,16 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const body = await request.json();
-    const { bookingId, assetIds, kitIds, timeZone } = z
-      .object({
+    const { bookingId, assetIds, kitIds, timeZone } = await parseMobileBody(
+      z.object({
         bookingId: z.string().min(1),
         assetIds: z.array(z.string()).default([]),
         kitIds: z.array(z.string()).optional().default([]),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Booking"
+    );
 
     // Load the booking's reservation window so the service can run its
     // asset-conflict guard (gated on `from && to`, exactly as the plain
@@ -104,11 +109,11 @@ export async function action({ request }: ActionFunctionArgs) {
     // `fulfilModelRequestsAndCheckout` does NOT check ownership itself (unlike
     // the scan-add path, whose guard lives in `processBooking`), so without
     // this the mobile route would be more permissive than web.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { roles } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role,
+      role: resolveMostPrivilegedRole(roles),
       action: "check out",
     });
 

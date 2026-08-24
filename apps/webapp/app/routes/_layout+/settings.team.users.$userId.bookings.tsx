@@ -92,7 +92,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           statuses: [status],
         }),
         tags: filterTags,
-        extraInclude: { tags: TAG_WITH_COLOR_SELECT },
+        extraInclude: {
+          tags: TAG_WITH_COLOR_SELECT,
+          // The unassigned-units pill reads `item.modelRequests`, and this
+          // route renders the shared bookings row via `BookingsIndexPage`.
+          // Without the include the pill vanishes on a team member's bookings instead of
+          // reading zero — absence reads as "nothing to do".
+          modelRequests: {
+            include: {
+              assetModel: { select: { id: true, name: true } },
+            },
+          },
+        },
       }),
       getTagsForBookingTagsFilter({
         organizationId,

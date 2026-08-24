@@ -499,6 +499,14 @@ export async function claimQrCode({
       throw updateCause;
     }
   } catch (cause) {
+    // why: our own guard errors above carry user-facing messages ("not
+    // available for claiming", already-claimed 403). ShelfError copies
+    // status/title from a cause but NOT message, so re-wrapping would ship
+    // the generic "Failed to claim qr code" to clients (the mobile error
+    // envelope only carries `message`). Pass our own errors through intact.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw new ShelfError({
       cause,
       message: "Failed to claim qr code",

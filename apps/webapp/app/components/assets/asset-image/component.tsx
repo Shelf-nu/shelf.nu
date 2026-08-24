@@ -3,6 +3,7 @@ import { useEffect, useReducer, useState, useCallback, useRef } from "react";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import type { AssetImageProps } from "./types";
@@ -169,35 +170,60 @@ export const AssetImage = ({
   // can detect an asset swap (instance reuse) and reset its per-asset guards.
   const previousAssetIdRef = useRef(assetId);
 
-  // Safely access main image properties using the type guard
-  const hasMainImageData = "mainImage" in asset && asset.mainImage != null;
   const isPreviewAsset = isAssetForPreview(asset);
-
-  // Extract main image data when available
-  const mainImage = hasMainImageData ? asset.mainImage : null;
   const mainImageExpiration = isPreviewAsset ? asset.mainImageExpiration : null;
 
-  // Choose the appropriate image URL with fallbacks
+  // Resolve the cascade once: the asset's own image, else its model's cover
+  // image, else the placeholder. `source` decides both what renders and whether
+  // the per-asset repair endpoints may fire at all.
+  const resolved = resolveAssetImage({
+    mainImage: ("mainImage" in asset ? asset.mainImage : null) ?? null,
+    thumbnailImage: thumbnailImage ?? null,
+    assetModel: asset.assetModel,
+  });
+
+  /**
+   * Only an image the ASSET owns can be repaired. `refresh-main-image` and
+   * `generate-thumbnail` both re-sign / write against the Asset row, and a
+   * model's cover image is a public URL that never expires — so for an
+   * inherited image there is nothing to repair and the call would target the
+   * wrong row. Without this gate, a list of N assets sharing one model fires N
+   * requests at the two endpoints that already rate-limit after large imports.
+   */
+  const canRepairImage = resolved.source === "asset";
+  const mainImage = canRepairImage ? resolved.fullUrl : null;
+
   // Create a stable cache-busting key that won't change on re-renders
   const [cacheBuster] = useState(isImageError ? `?t=${Date.now()}` : "");
 
-  // Prefer a freshly-refreshed URL, falling back to the prop value. Use nullish
-  // coalescing (not `||`) so only `null` falls back, matching the
-  // `string | null` contract of these fields.
-  const currentThumbnail = refreshedThumbnailImage ?? thumbnailImage;
-  const currentMainImage = refreshedMainImage ?? mainImage;
+  /**
+   * Prefer a freshly-refreshed URL, falling back to the resolved value. Use
+   * nullish coalescing (not `||`) so only `null` falls back, matching the
+   * `string | null` contract of these fields.
+   *
+   * Gated on `canRepairImage` because a refreshed URL describes the ASSET's own
+   * row, and must not survive a fall-through to the model or placeholder tier.
+   * The reset effect below keys on `assetId`, so an asset that changes tier
+   * WITHOUT changing id would otherwise keep rendering its old image — which is
+   * exactly what "Remove image" / "Use the model's image instead" does: both
+   * `AssetImage` branches in the asset form share one slot with no `key`, so
+   * the same instance survives the swap.
+   */
+  const currentThumbnail = canRepairImage
+    ? refreshedThumbnailImage ?? resolved.thumbnailUrl
+    : resolved.thumbnailUrl;
+  const currentMainImage = canRepairImage
+    ? refreshedMainImage ?? resolved.fullUrl
+    : resolved.fullUrl;
 
   // Only add cache-buster if we've had an error and attempted refresh
   const imageUrl =
-    (useThumbnail && currentThumbnail
-      ? currentThumbnail
-      : currentMainImage || "/static/images/asset-placeholder.jpg") +
+    (useThumbnail ? currentThumbnail : currentMainImage) +
     (hasAttemptedRefresh && isImageError ? cacheBuster : "");
 
-  // For preview dialog, also add cache buster only when needed
+  // For preview dialog, always use the full-size image
   const previewImageUrl =
-    (currentMainImage || "/static/images/asset-placeholder.jpg") +
-    (hasAttemptedRefresh && isImageError ? cacheBuster : "");
+    currentMainImage + (hasAttemptedRefresh && isImageError ? cacheBuster : "");
 
   /**
    * Refreshes the asset's signed main-image (and thumbnail) URLs.
@@ -322,8 +348,9 @@ export const AssetImage = ({
   };
 
   const handleImageError = () => {
-    // Only set error state and trigger refresh once
-    if (!isImageError && !hasAttemptedRefreshRef.current) {
+    // Only set error state and trigger refresh once — and only for an image the
+    // asset owns; an inherited or placeholder image has nothing to refresh.
+    if (canRepairImage && !isImageError && !hasAttemptedRefreshRef.current) {
       dispatch({ type: "load_error" });
       void refreshImage();
     } else {
@@ -362,8 +389,8 @@ export const AssetImage = ({
     // unmounts, so a stale response can't apply the previous asset's URLs.
     const controller = new AbortController();
 
-    // Check for expiration
-    if (withPreview && mainImage && mainImageExpiration) {
+    // Check for expiration — only for an image the asset owns.
+    if (canRepairImage && withPreview && mainImage && mainImageExpiration) {
       try {
         const now = new Date();
         const expiration = new Date(mainImageExpiration);
@@ -387,6 +414,7 @@ export const AssetImage = ({
     // duplicate generation, so we don't also gate on `refreshedThumbnailImage`
     // here (its closure value would be stale right after an asset_changed reset).
     if (
+      canRepairImage &&
       useThumbnail &&
       mainImage &&
       !thumbnailImage &&
