@@ -75,6 +75,58 @@ type GetAssetModelAvailabilityArgs = {
    */
   from?: Date | null;
   to?: Date | null;
+  /**
+   * Prisma client or active transaction; defaults to the global `db`.
+   *
+   * A caller deciding whether a reservation fits MUST pass its own `tx`.
+   * Reading through the global client runs the counts outside the caller's
+   * transaction, so they neither see its uncommitted writes nor participate
+   * in the locks it holds, and two concurrent reservations both measure the
+   * same free pool and both commit.
+   */
+  db?: AssetModelAvailabilityClient;
+};
+
+/**
+ * The tagged-template `$queryRaw` an interactive transaction exposes. Declared
+ * structurally so the transaction client satisfies it without a cast.
+ */
+type RawQueryClient = {
+  $queryRaw<T = unknown>(
+    query: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<T>;
+};
+
+/**
+ * The exact reads {@link getAssetModelAvailability} issues. Structural rather
+ * than Prisma's own client type so an interactive transaction client
+ * satisfies it without casting.
+ */
+export type AssetModelAvailabilityClient = {
+  asset: {
+    count: (args: { where: Prisma.AssetWhereInput }) => Promise<number>;
+  };
+  custody: {
+    aggregate: (args: {
+      where: Prisma.CustodyWhereInput;
+      _sum: { quantity: true };
+    }) => Promise<{ _sum: { quantity: number | null } }>;
+  };
+  bookingAsset: {
+    aggregate: (args: {
+      where: Prisma.BookingAssetWhereInput;
+      _sum: { quantity: true };
+    }) => Promise<{ _sum: { quantity: number | null } }>;
+  };
+  bookingModelRequest: {
+    aggregate: (args: {
+      where: Prisma.BookingModelRequestWhereInput;
+      _sum: { quantity: true; fulfilledQuantity: true };
+    }) => Promise<{
+      _sum: { quantity: number | null; fulfilledQuantity: number | null };
+    }>;
+  };
 };
 
 export type AssetModelAvailability = {
@@ -90,6 +142,48 @@ export type AssetModelAvailability = {
 };
 
 /**
+ * Serializes reservations competing for one `AssetModel`'s pool.
+ *
+ * Availability is a read-then-decide: count what is free, then write a row
+ * claiming some of it. Under READ COMMITTED a plain `SELECT` inside a
+ * transaction takes no lock, so two concurrent reservations both read the
+ * same free pool and both commit — the sum then exceeds what exists. Taking
+ * `FOR UPDATE` on the model row first makes the second caller wait for the
+ * first to commit and re-read the pool it actually left behind.
+ *
+ * The model row is the right grain: contention is exactly "requests for this
+ * model", and every writer of a `BookingModelRequest` passes through here.
+ *
+ * Scoped by `organizationId` as well as `id`, so a caller supplying another
+ * workspace's model id takes no lock at all rather than contending on a row
+ * it cannot see — the same rule as `lockAssetForQuantityUpdate`.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param assetModelId - Model whose pool is being claimed
+ * @param organizationId - The caller's authenticated organization id
+ * @throws {ShelfError} 404 if the model is not in the caller's workspace
+ */
+async function lockAssetModelForReservation(
+  tx: RawQueryClient,
+  assetModelId: string,
+  organizationId: string
+): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "AssetModel" WHERE id = ${assetModelId} AND "organizationId" = ${organizationId} FOR UPDATE
+  `;
+
+  if (!rows || rows.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      status: 404,
+      message: "Asset model not found in current workspace.",
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Compute availability for an `AssetModel` over a booking window.
  *
  * Safe to call from any loader/action path. Does not mutate. Excludes
@@ -101,7 +195,10 @@ export async function getAssetModelAvailability({
   bookingId,
   from,
   to,
+  db: dbClient,
 }: GetAssetModelAvailabilityArgs): Promise<AssetModelAvailability> {
+  const client = dbClient ?? db;
+
   try {
     const dateOverlap =
       from && to
@@ -118,7 +215,7 @@ export async function getAssetModelAvailability({
         // Total INDIVIDUAL assets of this model in the org. QUANTITY_TRACKED
         // assets aren't part of the model-request flow (they have their own
         // quantity booking path from Phase 3b).
-        db.asset.count({
+        client.asset.count({
           where: {
             organizationId,
             assetModelId,
@@ -126,7 +223,7 @@ export async function getAssetModelAvailability({
           },
         }),
         // Units currently held by team members / users.
-        db.custody.aggregate({
+        client.custody.aggregate({
           where: {
             asset: {
               organizationId,
@@ -138,7 +235,7 @@ export async function getAssetModelAvailability({
         }),
         // Concrete BookingAsset rows for assets of this model, in OTHER
         // active-status bookings whose window overlaps.
-        db.bookingAsset.aggregate({
+        client.bookingAsset.aggregate({
           where: {
             asset: {
               organizationId,
@@ -160,7 +257,7 @@ export async function getAssetModelAvailability({
         // `reservedConcrete` above. Summing both `quantity` and
         // `fulfilledQuantity` lets us compute outstanding-only as
         // `SUM(quantity) - SUM(fulfilledQuantity)` in a single query.
-        db.bookingModelRequest.aggregate({
+        client.bookingModelRequest.aggregate({
           where: {
             assetModelId,
             bookingId: { not: bookingId },
@@ -566,12 +663,18 @@ export async function upsertBookingModelRequest({
         });
       }
 
+      // Claim the pool before measuring it. Both statements have to be in
+      // this transaction: the lock serializes competing reservations, and
+      // `db: tx` is what makes the counts observe it.
+      await lockAssetModelForReservation(tx, assetModelId, organizationId);
+
       const availability = await getAssetModelAvailability({
         assetModelId,
         organizationId,
         bookingId,
         from: booking.from,
         to: booking.to,
+        db: tx,
       });
 
       // We only need fresh pool availability for the NEW outstanding
