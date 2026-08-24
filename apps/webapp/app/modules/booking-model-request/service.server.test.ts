@@ -118,17 +118,26 @@ vitest.mock("~/modules/booking-note/service.server", () => ({
  */
 function installClaimSimulator() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (db.$queryRaw as any).mockImplementation(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const row = await (db.bookingModelRequest.findUnique as any)();
-    if (!row) return [];
-    if (row.fulfilledQuantity >= row.quantity) return [];
-    row.fulfilledQuantity += 1;
-    if (row.fulfilledQuantity >= row.quantity) row.fulfilledAt = new Date();
-    return [
-      { fulfilledQuantity: row.fulfilledQuantity, quantity: row.quantity },
-    ];
-  });
+  (db.$queryRaw as any).mockImplementation(
+    async (strings: TemplateStringsArray) => {
+      // Two different raw statements reach this stub. The pool lock announces
+      // itself by naming "AssetModel"; anything else is the unit claim
+      // simulated below. Keying on the SQL keeps one queue from answering the
+      // other's call.
+      if (Array.isArray(strings) && strings.join("").includes('"AssetModel"')) {
+        return [{ id: MODEL_ID }];
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const row = await (db.bookingModelRequest.findUnique as any)();
+      if (!row) return [];
+      if (row.fulfilledQuantity >= row.quantity) return [];
+      row.fulfilledQuantity += 1;
+      if (row.fulfilledQuantity >= row.quantity) row.fulfilledAt = new Date();
+      return [
+        { fulfilledQuantity: row.fulfilledQuantity, quantity: row.quantity },
+      ];
+    }
+  );
 }
 
 const BOOKING_ID = "booking-1";
@@ -275,6 +284,49 @@ describe("getAssetModelAvailability", () => {
   });
 });
 
+describe("getAssetModelAvailability — injected client", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("reads through the supplied client instead of the global db", async () => {
+    // A caller deciding whether a reservation fits passes its own `tx`. If
+    // these counts run on the global client they sit outside that
+    // transaction — they miss its uncommitted writes and take part in none
+    // of its locks, which is what let two reservations claim one pool.
+    const client = {
+      asset: { count: vitest.fn().mockResolvedValue(7) },
+      custody: {
+        aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 1 } }),
+      },
+      bookingAsset: {
+        aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 2 } }),
+      },
+      bookingModelRequest: {
+        aggregate: vitest
+          .fn()
+          .mockResolvedValue({ _sum: { quantity: 0, fulfilledQuantity: 0 } }),
+      },
+    };
+
+    const availability = await getAssetModelAvailability({
+      assetModelId: MODEL_ID,
+      organizationId: ORG_ID,
+      bookingId: BOOKING_ID,
+      from,
+      to,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db: client as any,
+    });
+
+    expect(client.asset.count).toHaveBeenCalledTimes(1);
+    expect(availability.total).toBe(7);
+    expect(availability.available).toBe(4);
+    // The global client must not have been consulted at all.
+    expect(db.asset.count).not.toHaveBeenCalled();
+  });
+});
+
 describe("upsertBookingModelRequest", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -288,6 +340,74 @@ describe("upsertBookingModelRequest", () => {
       from,
       to,
     });
+  });
+
+  it("locks the model pool before it measures availability", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(5);
+
+    await upsertBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    // Measuring a pool nobody has claimed is the race: two callers read the
+    // same free count and both commit. Order is the assertion, not merely
+    // that both happened.
+    const lockOrder = (db.$queryRaw as ReturnType<typeof vitest.fn>).mock
+      .invocationCallOrder[0];
+    const readOrder = (db.asset.count as ReturnType<typeof vitest.fn>).mock
+      .invocationCallOrder[0];
+
+    expect(lockOrder).toBeDefined();
+    expect(lockOrder).toBeLessThan(readOrder);
+  });
+
+  it("scopes the lock to the caller's workspace", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(5);
+
+    await upsertBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 1,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    // A foreign-org model id must match zero rows rather than take a real
+    // lock on another tenant's row — the same rule the asset lock follows.
+    const [strings, ...values] = (db.$queryRaw as ReturnType<typeof vitest.fn>)
+      .mock.calls[0];
+    expect((strings as TemplateStringsArray).join("?")).toContain(
+      '"organizationId"'
+    );
+    expect(values).toEqual([MODEL_ID, ORG_ID]);
+  });
+
+  it("refuses a model that is not in the caller's workspace", async () => {
+    expect.assertions(2);
+    // The org-scoped lock matches nothing for a foreign model id.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db.$queryRaw as any).mockResolvedValue([]);
+
+    await expect(
+      upsertBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: "model-from-another-org",
+        quantity: 1,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      })
+    ).rejects.toThrow(ShelfError);
+
+    // Refused before any pool measurement happens.
+    expect(db.asset.count).not.toHaveBeenCalled();
   });
 
   it("creates the row when quantity is within availability", async () => {

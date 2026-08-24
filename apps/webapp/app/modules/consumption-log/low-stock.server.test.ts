@@ -482,3 +482,52 @@ describe("checkAndNotifyLowStock — early bail-outs", () => {
     expect(sendEmailMock).not.toHaveBeenCalled();
   });
 });
+
+describe("checkAndNotifyLowStock — never rejects", () => {
+  // Every caller runs this AFTER its mutation has committed. An escaping
+  // rejection answers 500 for a request whose write succeeded, the client
+  // retries, and the non-idempotent mutation behind it allocates twice.
+
+  it("swallows a failure of its very first read", async () => {
+    // The opening `asset.findFirst` had no guard of its own, so a transient
+    // database error here propagated all the way out to the route.
+    findFirstMock.mockRejectedValue(new Error("connection reset"));
+
+    await expect(
+      checkAndNotifyLowStock({
+        assetId: ASSET_ID,
+        userId: USER_ID,
+        organizationId: ORG_ID,
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("swallows a failure of the availability read", async () => {
+    // Not only the first statement: the custody aggregate that computes
+    // available units is unguarded too, so the promise has to be safe end to
+    // end rather than at one chosen point.
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 1, minQuantity: 5 }));
+    custodyAggregateMock.mockRejectedValue(new Error("aggregate failed"));
+
+    await expect(
+      checkAndNotifyLowStock({
+        assetId: ASSET_ID,
+        userId: USER_ID,
+        organizationId: ORG_ID,
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("still reports low stock when nothing fails", async () => {
+    // The guard must not turn the notifier into a no-op.
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 1, minQuantity: 5 }));
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(sendEmailMock).toHaveBeenCalled();
+  });
+});
