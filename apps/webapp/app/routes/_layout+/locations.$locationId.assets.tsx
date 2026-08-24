@@ -1,3 +1,19 @@
+/**
+ * Location Assets
+ *
+ * The asset list on a location's detail page: every asset with a placement at
+ * this location, with the per-location quantity, whether that placement came
+ * from a kit, and who holds the asset.
+ *
+ * Rows come from `getLocation`, which has no `Location.assets` relation to
+ * follow and instead runs a pivot-filtered query and returns the assets
+ * alongside the location. The row type here is written by hand and must be
+ * kept in step with that query's projection.
+ *
+ * @see {@link file://./../../modules/location/service.server.ts} getLocation
+ * @see {@link file://./locations.$locationId.overview.tsx}
+ */
+
 import type {
   Asset,
   BarcodeType,
@@ -425,10 +441,15 @@ const ListAssetContent = ({
     qrCodes: { id: string }[];
     barcodes: { id: string; type: BarcodeType; value: string }[];
     /**
-     * `Asset.custody` is a LIST — an asset can be held by several custodians
-     * at once for quantity-tracked stock. Typing it as a single record made
-     * `custody?.custodian` read `undefined` on every row, which the compiler
-     * could not see because this projection is hand-written.
+     * Custody rows for this asset, one per holder — quantity-tracked stock can
+     * be held by several people at once. The list column shows one badge, so
+     * it renders the primary holder via `getPrimaryCustody`.
+     *
+     * Optionality mirrors the schema: a `TeamMember` need not be linked to a
+     * `User` (non-registered members exist), and a linked user's name fields
+     * and avatar are all optional. This projection is written by hand, so the
+     * compiler checks it against nothing — keep it in step with the `custody`
+     * select in `getLocation`.
      */
     custody: Array<{
       quantity: number;
@@ -437,10 +458,10 @@ const ListAssetContent = ({
         name: string;
         user: {
           id: string;
-          firstName: string;
-          lastName: string;
+          firstName: string | null;
+          lastName: string | null;
           displayName: string | null;
-          profilePicture: string;
+          profilePicture: string | null;
           email: string;
         } | null;
       };
