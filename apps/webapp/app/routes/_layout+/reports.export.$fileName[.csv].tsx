@@ -419,18 +419,17 @@ function formatReturnStatus(
 /**
  * Assembles a CSV document, escaping EVERY cell.
  *
- * Escaping used to be applied per field, by hand, at each call site — and was
- * missed on `custodianName`, `custodian`, `performedBy`, `category` and
- * `location`, all of which are user-controlled workspace values. A name like
- * `=cmd|'/c calc'!A1` therefore reached the file as a live formula.
+ * Escaping lives here and nowhere else. Headers and body cells alike pass
+ * through {@link escapeCsvField}, so a contributor adding a column gets a safe
+ * cell with no per-field decision to make. Cells carry user-controlled
+ * workspace values — custodian and member names, categories, locations — so
+ * the guarantee has to be unconditional rather than applied where it looks
+ * needed.
  *
- * Escaping here instead means a new column is safe by default: a contributor
- * adding one cannot forget, because there is no per-field decision left to
- * make. That is the property the previous approach lacked, not the escaping
- * itself — `escapeCsvField` was already correct, just unevenly applied.
+ * Callers pass raw values: a cell escaped before it arrives is escaped twice.
  *
  * @param headers - Column headers, escaped like any other cell
- * @param rows - Row cells, already stringified and formatted
+ * @param rows - Row cells, already stringified and formatted, NOT escaped
  * @returns The complete CSV document
  */
 function buildCsv(headers: string[], rows: string[][]): string {
