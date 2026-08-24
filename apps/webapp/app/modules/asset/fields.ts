@@ -48,6 +48,8 @@ export const ASSET_LOCATIONS_INCLUDE = {
 
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assetKits: true } },
+  // `Kit.custody` is a single optional record, not a list — there is nothing
+  // to order, and nothing here reaches `getPrimaryCustody`.
   custody: {
     select: {
       custodian: {
@@ -78,6 +80,10 @@ export const getAssetOverviewFields = (
     tags: true,
     assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
+      // Ordered so `getPrimaryCustody` picks the same row every time;
+      // without it a multi-custodian asset can show a different holder
+      // on each request.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         createdAt: true,
         quantity: true,
@@ -239,6 +245,10 @@ export const assetIndexFields = ({
     ...ASSET_MODEL_IMAGE_SELECT,
     assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
+      // Ordered so `getPrimaryCustody` picks the same row every time;
+      // without it a multi-custodian asset can show a different holder
+      // on each request.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         quantity: true,
         custodian: {
@@ -380,6 +390,10 @@ export const advancedAssetIndexFields = () => {
       },
     },
     custody: {
+      // Ordered so `getPrimaryCustody` picks the same row every time;
+      // without it a multi-custodian asset can show a different holder
+      // on each request.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         custodian: {
           select: {

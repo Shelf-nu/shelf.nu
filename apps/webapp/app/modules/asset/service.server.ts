@@ -4496,6 +4496,9 @@ export async function fetchAssetsForExport({
         assetModel: { select: { name: true } },
         notes: true,
         custody: {
+          // Ordered so `getPrimaryCustody` picks the same row every time — the
+          // custodian it returns is written into the exported file.
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           include: {
             custodian: true,
           },
@@ -6337,6 +6340,11 @@ export async function bulkCheckInAssets({
           title: true,
           type: true,
           custody: {
+            // Ordered so `getPrimaryCustody` picks the same row every time:
+            // the custodian it returns is written into the release note and
+            // the CUSTODY_RELEASED event, so an arbitrary pick puts the wrong
+            // name in the audit trail.
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
             select: { id: true, custodian: { include: { user: true } } },
           },
         },

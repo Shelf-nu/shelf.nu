@@ -51,6 +51,31 @@ describe("parseCsv", () => {
       ['MacBook "Pro" 16', "16-inch laptop"],
     ]);
   });
+
+  it("strips the UTF-8 BOM so an exported file re-imports cleanly", async () => {
+    // Every CSV Shelf serves opens with a BOM (see `~/utils/csv-utf8`), and
+    // files coming back from Excel carry one too. The mark has to be consumed
+    // here, or the mark stays glued to the first header and every column
+    // mapped by name silently misses — a round trip the import-ready export
+    // invites users to perform.
+    //
+    // Two layers strip it independently: a UTF-8 decode drops a leading mark
+    // by spec, and `bom: true` catches one that reaches the parser anyway.
+    // `bom: true` therefore looks redundant and is not — this asserts the
+    // outcome rather than either mechanism, so removing one net keeps the
+    // suite green and removing both does not.
+    const withBom = `\uFEFFtitle,category\nحاسوب محمول,أجهزة`;
+    const bytes = new TextEncoder().encode(withBom);
+
+    const result = await parseCsv(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    );
+
+    expect(result).toEqual([
+      ["title", "category"],
+      ["حاسوب محمول", "أجهزة"],
+    ]);
+  });
 });
 
 describe("csvDataFromRequest", () => {
