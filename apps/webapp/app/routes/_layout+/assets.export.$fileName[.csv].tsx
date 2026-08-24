@@ -1,6 +1,7 @@
 import { AssetIndexMode } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { csvResponse } from "~/utils/csv-utf8";
 import {
   exportAssetsBackupToCsv,
   exportAssetsForImportToCsv,
@@ -86,12 +87,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       csvString = await exportAssetsBackupToCsv({ organizationId });
     }
 
-    return new Response(csvString, {
-      status: 200,
-      headers: {
-        "content-type": "text/csv",
-      },
-    });
+    return csvResponse(csvString);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
