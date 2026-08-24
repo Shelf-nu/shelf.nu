@@ -489,8 +489,10 @@ describe("checkAndNotifyLowStock — never rejects", () => {
   // retries, and the non-idempotent mutation behind it allocates twice.
 
   it("swallows a failure of its very first read", async () => {
-    // The opening `asset.findFirst` had no guard of its own, so a transient
-    // database error here propagated all the way out to the route.
+    // why: the opening `asset.findFirst` is the first thing the check does and
+    // carries no guard of its own, so a transient database failure there is
+    // the shortest path to an escaping rejection. The contract under test is
+    // that the returned promise resolves anyway.
     findFirstMock.mockRejectedValue(new Error("connection reset"));
 
     await expect(
@@ -503,9 +505,10 @@ describe("checkAndNotifyLowStock — never rejects", () => {
   });
 
   it("swallows a failure of the availability read", async () => {
-    // Not only the first statement: the custody aggregate that computes
-    // available units is unguarded too, so the promise has to be safe end to
-    // end rather than at one chosen point.
+    // why: a healthy asset row gets the check past its first statement, so the
+    // failure lands on the custody aggregate instead — also unguarded, and far
+    // enough in to show the contract covers the whole check rather than one
+    // chosen statement.
     findFirstMock.mockResolvedValue(assetRow({ quantity: 1, minQuantity: 5 }));
     custodyAggregateMock.mockRejectedValue(new Error("aggregate failed"));
 
@@ -519,7 +522,8 @@ describe("checkAndNotifyLowStock — never rejects", () => {
   });
 
   it("still reports low stock when nothing fails", async () => {
-    // The guard must not turn the notifier into a no-op.
+    // why: an asset below its threshold with nothing failing — the case that
+    // proves the guard did not turn the notifier into a no-op.
     findFirstMock.mockResolvedValue(assetRow({ quantity: 1, minQuantity: 5 }));
 
     await checkAndNotifyLowStock({

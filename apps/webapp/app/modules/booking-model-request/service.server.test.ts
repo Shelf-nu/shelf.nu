@@ -120,10 +120,11 @@ function installClaimSimulator() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (db.$queryRaw as any).mockImplementation(
     async (strings: TemplateStringsArray) => {
-      // Two different raw statements reach this stub. The pool lock announces
-      // itself by naming "AssetModel"; anything else is the unit claim
-      // simulated below. Keying on the SQL keeps one queue from answering the
-      // other's call.
+      // why: two different raw statements reach this one stub — the pool lock
+      // and the unit claim. Answering both from a single queue lets the lock
+      // consume a row meant for the claim, so the stub routes on the statement
+      // it was handed: the lock is the one naming "AssetModel", and it expects
+      // a row back (an empty result means "not in this workspace").
       if (Array.isArray(strings) && strings.join("").includes('"AssetModel"')) {
         return [{ id: MODEL_ID }];
       }

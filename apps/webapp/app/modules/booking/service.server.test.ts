@@ -10045,13 +10045,32 @@ describe("addScannedAssetsToBooking", () => {
      * candidates, the scanned-asset metadata and the availability read — one
      * mock, different `select` shapes, which the stub does not project).
      */
+    /**
+     * Order of the two steps that matter, appended as they happen.
+     *
+     * No delegate belongs to the pool read alone — `asset.findMany` serves the
+     * org-scope check, the conflict candidates, the scanned metadata and the
+     * note builder as well — so invocation counters cannot separate them.
+     * The pool read is identifiable by its projection instead: `id` and
+     * `quantity` and nothing else.
+     */
+    let sequence: string[] = [];
+
     function mockPool(
       total: number,
       type: AssetType = AssetType.QUANTITY_TRACKED
     ) {
       (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
-        (args?: { where?: { id?: { in?: string[] } } }) =>
-          Promise.resolve(
+        (args?: {
+          where?: { id?: { in?: string[] } };
+          select?: Record<string, boolean>;
+        }) => {
+          const select = args?.select ?? {};
+          const keys = Object.keys(select).sort();
+          if (keys.length === 2 && keys[0] === "id" && keys[1] === "quantity") {
+            sequence.push("measure");
+          }
+          return Promise.resolve(
             (args?.where?.id?.in ?? []).map((id) => ({
               id,
               type,
@@ -10061,11 +10080,25 @@ describe("addScannedAssetsToBooking", () => {
               status: AssetStatus.AVAILABLE,
               bookingAssets: [],
             }))
-          )
+          );
+        }
       );
     }
 
     beforeEach(() => {
+      sequence = [];
+      // why: the lock is a module mock, so it records its own turn in the
+      // sequence and still resolves the minimal asset stub its callers expect.
+      (
+        quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+      ).mockImplementation(() => {
+        sequence.push("lock");
+        return Promise.resolve({
+          id: QT_ID,
+          title: "Folding Chairs",
+          quantity: 2,
+        });
+      });
       mockPool(2);
       // No rows anywhere: nothing already on this booking, nothing reserved
       // elsewhere, nothing checked out.
@@ -10114,6 +10147,10 @@ describe("addScannedAssetsToBooking", () => {
         QT_ID,
         "org-1"
       );
+
+      // Taking the lock is only half of it — taking it AFTER the measurement
+      // leaves the race exactly as it was.
+      expect(sequence).toEqual(["lock", "measure"]);
     });
 
     it("leaves INDIVIDUAL assets to the conflict guard", async () => {
