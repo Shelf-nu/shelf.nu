@@ -97,7 +97,7 @@ describe("BarcodeCell", () => {
     expect(screen.getByText("+3")).toBeTruthy();
     expect(
       screen.getByRole("button", {
-        name: "Show 3 more codes for Tokina 16-28mm",
+        name: "+3 more codes for Tokina 16-28mm",
       })
     ).toBeTruthy();
   });
@@ -112,7 +112,7 @@ describe("BarcodeCell", () => {
     );
 
     const overflow = screen.getByRole("button", {
-      name: "Show 1 more code for Tokina 16-28mm",
+      name: "+1 more code for Tokina 16-28mm",
     });
 
     // The button itself has to be the tooltip trigger. Radix only wires its

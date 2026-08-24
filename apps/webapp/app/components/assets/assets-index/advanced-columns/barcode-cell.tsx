@@ -220,7 +220,7 @@ function OverflowTrigger({
         <button
           type="button"
           onClick={onClick}
-          aria-label={`Show ${hiddenBarcodes.length} more code${plural} for ${itemTitle}`}
+          aria-label={`+${hiddenBarcodes.length} more code${plural} for ${itemTitle}`}
           className={TRIGGER_CLASSES}
         >
           <GrayBadge className="cursor-pointer transition-colors hover:bg-gray-200">

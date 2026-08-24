@@ -144,7 +144,7 @@ describe("CustodyColumn", () => {
     // Chip indicates 2 additional custodians
     const chip = screen.getByTestId("custody-more-chip");
     expect(chip).toHaveTextContent(/^\+2$/);
-    expect(chip).toHaveAttribute("aria-label", "2 more custodians");
+    expect(chip).toHaveAttribute("aria-label", "+2 more custodians");
   });
 
   it("lists every custodian with their quantity in the tooltip on hover", async () => {

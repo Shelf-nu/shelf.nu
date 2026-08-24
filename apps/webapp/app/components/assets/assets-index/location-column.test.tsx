@@ -102,7 +102,7 @@ describe("LocationColumn", () => {
     // Chip indicates 2 additional locations.
     const chip = screen.getByTestId("location-more-chip");
     expect(chip).toHaveTextContent(/^\+2$/);
-    expect(chip).toHaveAttribute("aria-label", "2 more locations");
+    expect(chip).toHaveAttribute("aria-label", "+2 more locations");
   });
 
   it("lists every location name in the tooltip on hover", async () => {

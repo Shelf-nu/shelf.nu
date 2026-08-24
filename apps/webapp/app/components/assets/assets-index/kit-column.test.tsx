@@ -100,7 +100,7 @@ describe("KitColumn", () => {
     // Chip indicates 2 additional kits.
     const chip = screen.getByTestId("kit-more-chip");
     expect(chip).toHaveTextContent(/^\+2$/);
-    expect(chip).toHaveAttribute("aria-label", "2 more kits");
+    expect(chip).toHaveAttribute("aria-label", "+2 more kits");
   });
 
   it("lists every kit name in the tooltip on hover", async () => {
