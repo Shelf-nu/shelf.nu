@@ -519,7 +519,7 @@ function TagsColumn({ tags }: { tags: AdvancedIndexAsset["tags"] }) {
  * INDIVIDUAL assets to keep the row clean).
  *
  * Multiple custodians: renders the primary custodian's badge plus a
- * `+N more` chip; hovering the chip reveals a tooltip listing every
+ * `+N` chip; hovering the chip reveals a tooltip listing every
  * custodian on its own line so the full custody breakdown stays one
  * hover away without inflating row height.
  */
@@ -558,7 +558,7 @@ function CustodyQuantitySuffix({ quantity }: { quantity?: number }) {
   return <span className="ml-1 text-gray-500">({quantity})</span>;
 }
 
-/** Renders the badge + optional `+N more` chip. Split out so the empty
+/** Renders the badge + optional `+N` chip. Split out so the empty
  * state can short-circuit before the tooltip provider mounts. */
 function CustodyColumnContent({
   primary,
@@ -589,8 +589,11 @@ function CustodyColumnContent({
             <span
               className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
               data-testid="custody-more-chip"
+              aria-label={`${others.length} more custodian${
+                others.length === 1 ? "" : "s"
+              }`}
             >
-              +{others.length} more
+              +{others.length}
             </span>
           </TooltipTrigger>
           <TooltipContent
@@ -625,7 +628,7 @@ function CustodyColumnContent({
  *
  * Single kit: renders the primary kit name as a link to the kit page.
  * Multiple kits (qty-tracked split across kits): renders the primary
- * kit link plus a "+N more" chip; hovering the chip reveals a tooltip
+ * kit link plus a "+N" chip; hovering the chip reveals a tooltip
  * listing every kit name on its own line. Mirrors `CustodyColumn` so
  * the asset-index never silently hides kit membership 2..N.
  */
@@ -675,8 +678,11 @@ function KitColumnContent({
             <span
               className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
               data-testid="kit-more-chip"
+              aria-label={`${others.length} more kit${
+                others.length === 1 ? "" : "s"
+              }`}
             >
-              +{others.length} more
+              +{others.length}
             </span>
           </TooltipTrigger>
           <TooltipContent className="max-w-xs" data-testid="kit-more-tooltip">
@@ -698,7 +704,7 @@ function KitColumnContent({
  * Single location: renders the primary placement as a LocationBadge
  * wrapped in a link to the location page.
  * Multiple locations (qty-tracked split across locations): renders the
- * primary location plus a "+N more" chip with a hover tooltip listing
+ * primary location plus a "+N" chip with a hover tooltip listing
  * every location. Mirror of `KitColumn` / `CustodyColumn`.
  */
 export function LocationColumn({
@@ -758,8 +764,11 @@ function LocationColumnContent({
             <span
               className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
               data-testid="location-more-chip"
+              aria-label={`${others.length} more location${
+                others.length === 1 ? "" : "s"
+              }`}
             >
-              +{others.length} more
+              +{others.length}
             </span>
           </TooltipTrigger>
           <TooltipContent

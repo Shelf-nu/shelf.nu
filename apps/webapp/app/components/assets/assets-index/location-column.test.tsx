@@ -4,7 +4,7 @@
  * Behavior tests for the multi-location rendering on the advanced asset
  * index. A QUANTITY_TRACKED asset can be placed at multiple locations
  * with different per-location quantities; the column shows the primary
- * location plus a "+N more" affordance whose hover tooltip lists every
+ * location plus a "+N" affordance whose hover tooltip lists every
  * placement.
  *
  * Mirrors {@link file://./kit-column.test.tsx} — same shape, location
@@ -89,7 +89,7 @@ describe("LocationColumn", () => {
     expect(screen.queryByTestId("location-more-chip")).not.toBeInTheDocument();
   });
 
-  it("renders the primary location plus a +N more chip for multiple locations", () => {
+  it("renders the primary location plus a +N chip for multiple locations", () => {
     renderCell([
       makeLocation("loc-1", "Office"),
       makeLocation("loc-2", "Warehouse"),
@@ -101,7 +101,8 @@ describe("LocationColumn", () => {
 
     // Chip indicates 2 additional locations.
     const chip = screen.getByTestId("location-more-chip");
-    expect(chip).toHaveTextContent("+2 more");
+    expect(chip).toHaveTextContent(/^\+2$/);
+    expect(chip).toHaveAttribute("aria-label", "2 more locations");
   });
 
   it("lists every location name in the tooltip on hover", async () => {

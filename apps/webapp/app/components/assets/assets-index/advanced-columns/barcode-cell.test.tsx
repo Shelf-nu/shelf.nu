@@ -4,8 +4,10 @@
  * Pins the layout contract that keeps advanced-index rows one line tall:
  *  - Only the first `MAX_VISIBLE_BARCODES` chips render inline; the rest
  *    collapse into a single `+N` control.
- *  - The chip container never wraps (`flex-wrap` here is what stretched the
- *    whole table row when an asset carried many barcodes).
+ *  - The chip container never wraps. A cell sets the height of its row, so a
+ *    wrapping container turns N barcodes into N lines of table row.
+ *  - The `+N` control is a focusable button carrying the tooltip, so the
+ *    hidden values are reachable by keyboard and not only by hover.
  *  - Barcodes of other types never leak into a type's column.
  *  - Assets with no barcode of the column's type render the empty value.
  *
@@ -13,7 +15,7 @@
  */
 
 import type { ReactElement } from "react";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "~/components/shared/tooltip";
 import type { AdvancedIndexAsset } from "~/modules/asset/types";
@@ -86,13 +88,46 @@ describe("BarcodeCell", () => {
     expect(screen.getByText("AAA-111")).toBeTruthy();
     expect(screen.getByText("BBB-222")).toBeTruthy();
 
-    // … and one control standing in for the other three.
+    // … the rest absent from the row …
+    expect(screen.queryByText("CCC-333")).toBeNull();
+    expect(screen.queryByText("DDD-444")).toBeNull();
+    expect(screen.queryByText("EEE-555")).toBeNull();
+
+    // … and one control standing in for them.
     expect(screen.getByText("+3")).toBeTruthy();
     expect(
       screen.getByRole("button", {
         name: "Show 3 more codes for Tokina 16-28mm",
       })
     ).toBeTruthy();
+  });
+
+  it("exposes the hidden values on keyboard focus, not just hover", () => {
+    renderCell(
+      buildAsset([
+        { id: "b1", type: "Code128", value: "AAA-111" },
+        { id: "b2", type: "Code128", value: "BBB-222" },
+        { id: "b3", type: "Code128", value: "CCC-333" },
+      ])
+    );
+
+    const overflow = screen.getByRole("button", {
+      name: "Show 1 more code for Tokina 16-28mm",
+    });
+
+    // The button itself has to be the tooltip trigger. Radix only wires its
+    // focus handlers onto the element it is given, so a tooltip attached to an
+    // inner <span> never opens for a keyboard user.
+    expect(overflow.getAttribute("data-state")).toBe("closed");
+
+    // why: focusing opens the tooltip through a Radix Presence transition,
+    // so the render it schedules has to be flushed before asserting.
+    act(() => {
+      fireEvent.focus(overflow);
+    });
+
+    expect(screen.getAllByText("CCC-333").length).toBeGreaterThan(0);
+    expect(overflow.getAttribute("data-state")).not.toBe("closed");
   });
 
   it("keeps the chip row on a single line regardless of barcode count", () => {
@@ -108,8 +143,8 @@ describe("BarcodeCell", () => {
 
     const chipRow = container.querySelector("td > div");
 
-    // The regression this file exists for: a wrapping container turns N
-    // barcodes into N lines and stretches the height of the entire row.
+    // A wrapping container turns N barcodes into N lines, and a cell sets
+    // the height of its row.
     expect(chipRow?.className).not.toContain("flex-wrap");
     // At most 2 chips + 1 overflow control can ever be in the row.
     expect(chipRow?.childElementCount).toBe(3);

@@ -110,7 +110,7 @@ describe("CustodyColumn", () => {
 
     // No "(N)" suffix should appear for quantity <= 1.
     expect(screen.queryByText(/\(\d+\)/)).not.toBeInTheDocument();
-    // No "+N more" chip with a single custodian.
+    // No "+N" chip with a single custodian.
     expect(screen.queryByTestId("custody-more-chip")).not.toBeInTheDocument();
   });
 
@@ -130,7 +130,7 @@ describe("CustodyColumn", () => {
     expect(screen.queryByText(/\(\d+\)/)).not.toBeInTheDocument();
   });
 
-  it("renders the primary badge plus a +N more chip for multiple custodians", () => {
+  it("renders the primary badge plus a +N chip for multiple custodians", () => {
     renderCell([
       makeCustody("Alice", 4),
       makeCustody("Bob", 7),
@@ -143,7 +143,8 @@ describe("CustodyColumn", () => {
 
     // Chip indicates 2 additional custodians
     const chip = screen.getByTestId("custody-more-chip");
-    expect(chip).toHaveTextContent("+2 more");
+    expect(chip).toHaveTextContent(/^\+2$/);
+    expect(chip).toHaveAttribute("aria-label", "2 more custodians");
   });
 
   it("lists every custodian with their quantity in the tooltip on hover", async () => {

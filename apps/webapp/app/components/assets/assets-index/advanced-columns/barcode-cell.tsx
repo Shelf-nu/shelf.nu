@@ -8,22 +8,17 @@
  * `QrIdCell` / `SamIdCell`.
  *
  * An asset can carry an unbounded number of barcodes of a single type. The
- * cell therefore shows at most `MAX_VISIBLE_BARCODES` chips on ONE line and
- * collapses the rest behind a `+N` badge — the same overflow convention the
- * tags column gets from `ItemsWithViewMore`. This is a hard layout
- * requirement, not just polish: the cell previously rendered every chip in a
- * `flex-wrap` container, so an asset with many barcodes wrapped onto several
- * lines and stretched the height of the whole table row (every other column
- * in that row grew with it).
+ * cell shows at most `MAX_VISIBLE_BARCODES` chips on ONE line and collapses
+ * the rest behind a `+N` badge — the same overflow convention the tags column
+ * gets from `ItemsWithViewMore`. The single line is a hard layout requirement:
+ * a cell sets the height of its row, so a wrapping chip container stretches
+ * every other column in that row along with it.
  *
  * The `+N` badge is a dialog trigger rather than the tooltip-only badge
  * `ItemsWithViewMore` renders, because these chips are interactive — Radix
  * tooltip content is not, so hiding clickable chips inside one would drop the
- * click-to-preview affordance for the overflow. Hovering still lists the
- * hidden values as text.
- *
- * Extracted from `advanced-asset-columns.tsx` to keep that file under the
- * react-doctor giant-component threshold.
+ * click-to-preview affordance for the overflow. Hover or keyboard focus still
+ * lists the hidden values as text.
  *
  * @see {@link file://./qr-id-cell.tsx}
  * @see {@link file://../../../list/items-with-view-more.tsx}
@@ -163,9 +158,9 @@ function BarcodeChip({
 }
 
 /**
- * `+N` overflow control. Hovering lists the hidden barcode values; clicking
- * opens the code preview dialog on the first hidden barcode, from where the
- * dialog's own code selector reaches the rest.
+ * `+N` overflow control. Hover or keyboard focus lists the hidden barcode
+ * values; activating it opens the code preview dialog on the first hidden
+ * barcode, from where the dialog's own code selector reaches the rest.
  */
 function OverflowBadge({
   hiddenBarcodes,
@@ -185,43 +180,67 @@ function OverflowBadge({
       }}
       selectedBarcodeId={hiddenBarcodes[0].id}
       trigger={
-        <button
-          type="button"
-          aria-label={`Show ${hiddenBarcodes.length} more code${
-            hiddenBarcodes.length === 1 ? "" : "s"
-          } for ${item.title}`}
-          className={TRIGGER_CLASSES}
-        >
-          <Tooltip>
-            {/*
-              `asChild` on a plain span: TooltipTrigger renders a <button> by
-              default, which would nest inside the dialog trigger button above
-              and produce invalid HTML.
-            */}
-            <TooltipTrigger asChild>
-              <span>
-                <GrayBadge className="cursor-pointer transition-colors hover:bg-gray-200">
-                  {`+${hiddenBarcodes.length}`}
-                </GrayBadge>
-              </span>
-            </TooltipTrigger>
-
-            <TooltipContent side="top" className="max-w-72">
-              <div className="text-left">
-                <div className="mb-1 font-semibold text-gray-700">
-                  {hiddenBarcodes.length} more code
-                  {hiddenBarcodes.length === 1 ? "" : "s"}
-                </div>
-                <div className="flex flex-col gap-0.5 font-normal text-gray-500">
-                  {hiddenBarcodes.map((barcode) => (
-                    <span key={barcode.id}>{barcode.value}</span>
-                  ))}
-                </div>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </button>
+        <OverflowTrigger
+          hiddenBarcodes={hiddenBarcodes}
+          itemTitle={item.title}
+        />
       }
     />
+  );
+}
+
+/**
+ * The `+N` button itself, split out so it can be BOTH the tooltip trigger and
+ * the dialog trigger.
+ *
+ * `CodePreviewDialog` clones the element it is handed to attach `onClick`, so
+ * whatever it receives must be the outermost node — which means the tooltip
+ * cannot wrap it from outside. Taking `onClick` as a prop and forwarding it
+ * lets the `<button>` carry the Radix trigger props directly, so the tooltip
+ * opens on keyboard focus and not only on hover.
+ *
+ * @param hiddenBarcodes - The barcodes past the visible cap
+ * @param itemTitle - Asset title, used in the button's accessible name
+ * @param onClick - Injected by `CodePreviewDialog`; opens the preview dialog
+ */
+function OverflowTrigger({
+  hiddenBarcodes,
+  itemTitle,
+  onClick,
+}: {
+  hiddenBarcodes: ItemBarcode[];
+  itemTitle: string;
+  onClick?: () => void;
+}) {
+  const plural = hiddenBarcodes.length === 1 ? "" : "s";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onClick}
+          aria-label={`Show ${hiddenBarcodes.length} more code${plural} for ${itemTitle}`}
+          className={TRIGGER_CLASSES}
+        >
+          <GrayBadge className="cursor-pointer transition-colors hover:bg-gray-200">
+            {`+${hiddenBarcodes.length}`}
+          </GrayBadge>
+        </button>
+      </TooltipTrigger>
+
+      <TooltipContent side="top" className="max-w-72">
+        <div className="text-left">
+          <div className="mb-1 font-semibold text-gray-700">
+            {hiddenBarcodes.length} more code{plural}
+          </div>
+          <div className="flex flex-col gap-0.5 font-normal text-gray-500">
+            {hiddenBarcodes.map((barcode) => (
+              <span key={barcode.id}>{barcode.value}</span>
+            ))}
+          </div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }

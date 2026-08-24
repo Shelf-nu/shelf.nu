@@ -361,8 +361,13 @@ export const ListAssetContent = ({
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-                        +{otherCustodians.length} more
+                      <span
+                        className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+                        aria-label={`${otherCustodians.length} more custodian${
+                          otherCustodians.length === 1 ? "" : "s"
+                        }`}
+                      >
+                        +{otherCustodians.length}
                       </span>
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">

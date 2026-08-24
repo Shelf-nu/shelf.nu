@@ -2011,6 +2011,9 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
     ) AS bookings`
     : Prisma.sql``;
 
+  // Everything between the backticks below is a template literal, so a stray
+  // backtick or dollar-brace anywhere in it — SQL comments included — ends the
+  // literal and reinterprets the rest of the query as JavaScript.
   const barcodesSelect = withBarcodes
     ? Prisma.sql`,
     (
@@ -2024,9 +2027,6 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       -- Oldest-first (createdAt, id) is the same key the per-type barcode
       -- scalar columns below use, so element 0 of this array is the same
       -- barcode those columns sort on.
-      -- NOTE: keep backticks and dollar-brace sequences out of this comment.
-      -- It lives inside a Prisma.sql template literal, so either one ends the
-      -- literal and turns the rest of the SQL into JavaScript.
       SELECT COALESCE(
         jsonb_agg(
           jsonb_build_object(
