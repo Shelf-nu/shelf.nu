@@ -708,10 +708,23 @@ export async function updateUserFromSSO(
           // only while a role still maps, since a revoked transition is
           // removing this user's access rather than restoring it.
           if (desiredRole) {
-            await ensureUserTeamMember(db, {
-              userId,
-              organizationId: org.id,
-              name: `${firstName} ${lastName}`,
+            await db.$transaction(async (tx) => {
+              // `TeamMember` has no uniqueness on (userId, organizationId), so
+              // two logins arriving together would both find nothing and both
+              // insert, leaving one user with two live custodian records. The
+              // membership row does have that uniqueness and always exists on
+              // this branch, so locking it serialises the pair of repairs.
+              await tx.$queryRaw`
+                SELECT id FROM "UserOrganization"
+                WHERE "userId" = ${userId} AND "organizationId" = ${org.id}
+                FOR UPDATE
+              `;
+
+              await ensureUserTeamMember(tx, {
+                userId,
+                organizationId: org.id,
+                name: `${firstName} ${lastName}`,
+              });
             });
           }
 
