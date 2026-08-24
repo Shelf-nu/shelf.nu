@@ -3,10 +3,18 @@ import { supabase } from "../supabase";
 /**
  * Base URL for the Shelf webapp API.
  * In development, this is your local dev server.
- * In production, this would be the deployed webapp URL.
+ * In production, this is the deployed webapp URL.
+ *
+ * why the __DEV__ split in the fallback: EXPO_PUBLIC_* vars are inlined at
+ * bundle time, so an OTA update published without the production env scope
+ * would bake the fallback into every install. With a bare localhost fallback
+ * that mistake breaks every API call in the field; falling back to the
+ * production URL instead makes the worst case "points at prod", which is
+ * what release builds want anyway.
  */
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
+  process.env.EXPO_PUBLIC_API_URL ||
+  (__DEV__ ? "http://localhost:3000" : "https://app.shelf.nu");
 if (__DEV__) console.log("[API] Base URL:", API_BASE_URL);
 
 /**
@@ -73,9 +81,55 @@ export async function getAccessToken(): Promise<string | null> {
 export type ApiFetchOptions = RequestInit & { retry?: boolean };
 
 /**
+ * Structured error payload from the mobile API's `{ error: { … } }` envelope.
+ * `message` mirrors the flat `error` string consumers already display.
+ * `reason` is an additive machine-readable discriminator some endpoints emit
+ * (today: `"unclaimed"` on the QR RESOLVE routes only — the link route claims
+ * unclaimed codes inline and no longer emits it), with `qrId` echoing
+ * the scanned code id whenever `reason` is present. Branch on `reason`, never
+ * on `message` text — messages are human copy and can change; the reason
+ * field is the wire contract.
+ */
+export type ApiErrorDetails = {
+  message: string;
+  reason?: string;
+  qrId?: string;
+};
+
+/**
+ * Extracts the structured error payload from a parsed non-OK response body.
+ *
+ * @param json - The parsed response body (unknown: may be an HTML error page
+ *   coerced to null, an empty body, or a proxy's own JSON).
+ * @returns The typed error payload, or `null` when the body doesn't match the
+ *   mobile API's `{ error: { message } }` envelope.
+ */
+function extractErrorDetails(json: unknown): ApiErrorDetails | null {
+  if (typeof json !== "object" || json === null) return null;
+  const err = (json as { error?: unknown }).error;
+  if (typeof err !== "object" || err === null) return null;
+  const { message, reason, qrId } = err as {
+    message?: unknown;
+    reason?: unknown;
+    qrId?: unknown;
+  };
+  if (typeof message !== "string") return null;
+  return {
+    message,
+    ...(typeof reason === "string" ? { reason } : {}),
+    ...(typeof qrId === "string" ? { qrId } : {}),
+  };
+}
+
+/**
  * Makes an authenticated API call to the Shelf webapp.
  * Automatically attaches the current Supabase session JWT.
  * - Returns structured { data, error } -- never throws.
+ * - On HTTP errors carrying the mobile API's `{ error: { … } }` envelope,
+ *   `errorDetails` additionally exposes the structured payload (message +
+ *   optional machine-readable `reason` / `qrId`) so callers can branch on
+ *   contract fields instead of message strings. Absent for transport-level
+ *   failures (timeout, network, non-JSON bodies).
  * - Detects 401/session-expired and notifies global auth listeners.
  * - Enforces a request timeout to avoid hanging on slow networks.
  */
@@ -83,7 +137,11 @@ export async function apiFetch<T>(
   path: string,
   options: ApiFetchOptions = {},
   _retryCount = 0
-): Promise<{ data: T | null; error: string | null }> {
+): Promise<{
+  data: T | null;
+  error: string | null;
+  errorDetails?: ApiErrorDetails | null;
+}> {
   // Declared outside try so catch block can read it
   let timedOut = false;
 
@@ -148,6 +206,7 @@ export async function apiFetch<T>(
           error: "Session expired. Please sign in again.",
         };
       }
+      const errorDetails = extractErrorDetails(json);
       // 403 = forbidden → user lacks permission, but session is valid
       if (response.status === 403) {
         return {
@@ -155,11 +214,13 @@ export async function apiFetch<T>(
           error:
             json?.error?.message ||
             "You don't have permission to perform this action.",
+          errorDetails,
         };
       }
       return {
         data: null,
         error: json?.error?.message || `Request failed (${response.status})`,
+        errorDetails,
       };
     }
 
@@ -171,8 +232,6 @@ export async function apiFetch<T>(
       return { data: null, error: null };
     }
 
-    if (__DEV__) console.error("[API] Fetch error:", err);
-
     // Auto-retry on timeout or network errors (not on auth/permission
     // errors). Requests sent with `retry: false` are exempt: a timed-out
     // POST may have landed server-side, and re-sending a non-idempotent
@@ -180,7 +239,21 @@ export async function apiFetch<T>(
     const isRetryable =
       (err instanceof Error && err.name === "AbortError" && timedOut) ||
       err instanceof TypeError; // TypeError = network failure
-    if (isRetryable && options.retry !== false && _retryCount < MAX_RETRIES) {
+    const willRetry =
+      isRetryable && options.retry !== false && _retryCount < MAX_RETRIES;
+
+    // why warn, not error, when a retry follows: in development React
+    // Native's LogBox promotes every console.error into a full-screen red
+    // overlay. A timeout we are about to retry — and usually recover from —
+    // is not worth stopping the app for, and on a slow or flaky connection
+    // it made the app unusable for testing while nothing was actually
+    // broken. Reserve the red box for the request that has given up.
+    if (__DEV__) {
+      const log = willRetry ? console.warn : console.error;
+      log("[API] Fetch failed:", path, err);
+    }
+
+    if (willRetry) {
       if (__DEV__) console.log("[API] Retrying…", path);
       return apiFetch<T>(path, options, _retryCount + 1);
     }

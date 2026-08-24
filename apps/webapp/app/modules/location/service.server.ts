@@ -10,6 +10,7 @@ import { AssetType, BookingStatus, Prisma } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { assetQtyMeta } from "~/utils/asset-quantity";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -21,12 +22,15 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  throwIfAssetQuantityOverAllocation,
+  throwIfIndividualAssetAlreadyPlaced,
 } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapDescriptionForNote,
   wrapLinkForNote,
@@ -43,6 +47,7 @@ import {
   buildKitListMarkup,
   LOCATION_SORTING_OPTIONS,
 } from "./utils";
+import { getLocationKitsWhereInput } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
@@ -294,6 +299,8 @@ export async function getLocation(
             where: assetsWhereForLocation,
             orderBy: { [orderBy]: orderDirection },
             include: {
+              // Model cover image for assets with no image of their own
+              ...ASSET_MODEL_IMAGE_SELECT,
               category: {
                 select: {
                   id: true,
@@ -337,6 +344,12 @@ export async function getLocation(
               qrCodes: { take: 1, select: { id: true } },
               barcodes: { select: { id: true, type: true, value: true } },
               custody: {
+                // The list column shows ONE custodian, chosen as `custody[0]`
+                // by `getPrimaryCustody`. Without an order the database is
+                // free to return the rows differently between requests, so a
+                // multi-custodian asset would show a different holder on
+                // refresh. `id` breaks ties on identical timestamps.
+                orderBy: [{ createdAt: "asc" }, { id: "asc" }],
                 select: {
                   quantity: true,
                   custodian: {
@@ -1041,7 +1054,11 @@ async function createLocationEditNotes({
     parentId?: string | null;
   };
 }) {
-  const escape = (v: string) => `**${v.replace(/([*_`~])/g, "\\$1")}**`;
+  // Strips Markdoc delimiters BEFORE escaping markdown emphasis: location name
+  // and address are free-form user input rendered through Markdoc, so escaping
+  // `*_~` alone still lets `{% … %}` through as a live tag.
+  const escape = (v: string) =>
+    `**${stripMarkdocDelimiters(v).replace(/([*_`~])/g, "\\$1")}**`;
   const changes: string[] = [];
 
   // Name change
@@ -1407,74 +1424,27 @@ export async function getLocationKits(
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    const kitWhere: Prisma.KitWhereInput = {
+    // Shared with `resolveLocationKitIds` so a "select all" removal resolves
+    // exactly the rows this list renders.
+    const kitWhere = getLocationKitsWhereInput({
       organizationId,
       locationId: id,
-    };
-
-    if (teamMemberIds && teamMemberIds.length) {
-      kitWhere.OR = [
-        ...(kitWhere.OR ?? []),
-        {
-          custody: { custodianId: { in: teamMemberIds } },
-        },
-        {
-          custody: { custodian: { userId: { in: teamMemberIds } } },
-        },
-        {
-          assetKits: {
-            some: {
-              asset: {
-                bookingAssets: {
-                  some: {
-                    booking: {
-                      custodianTeamMemberId: { in: teamMemberIds },
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        {
-          assetKits: {
-            some: {
-              asset: {
-                bookingAssets: {
-                  some: {
-                    booking: {
-                      custodianUserId: { in: teamMemberIds },
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
-          : []),
-      ];
-    }
-
-    if (search) {
-      kitWhere.name = {
-        contains: search,
-        mode: "insensitive",
-      };
-    }
+      search,
+      teamMemberIds,
+    });
 
     const [kits, totalKits] = await Promise.all([
       db.kit.findMany({
         where: kitWhere,
         include: {
           category: true,
+          // Code-resolution relations for AssetCodeBadge / resolveDisplayCode.
+          // Kits are code-bearing entities (Qr.kitId and Barcode.kitId exist),
+          // so a kit-listing surface that omits these can never render the
+          // chip — see `.claude/rules/code-bearing-entity-list-consistency.md`.
+          // Same tight shape as KITS_INCLUDE_FIELDS in `~/modules/kit/types`.
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
           custody: {
             select: {
               custodian: {
@@ -1938,6 +1908,9 @@ export async function updateLocationAssets({
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Location writes are ADMIN/OWNER-only, so the custodian filter
+        // here can never come from a restricted viewer.
+        allowedTeamMemberIds: "all",
       });
 
       const allAssets = await db.asset.findMany({
@@ -2379,6 +2352,21 @@ export async function updateLocationAssets({
       assetQuantities,
     });
   } catch (cause) {
+    // Translate the DB `AssetLocation total ... exceeds Asset.quantity` trigger
+    // violation into a friendly 400 (user tried to place more units across
+    // locations than the asset has). No-ops for every other error. See
+    // SHELF-WEBAPP-21N.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label,
+      additionalData: { assetIds, organizationId, locationId },
+    });
+    // Likewise translate the single-location trigger: an INDIVIDUAL asset added
+    // here while it's still placed at another location. See SHELF-WEBAPP-1P4.
+    throwIfIndividualAssetAlreadyPlaced(cause, {
+      label,
+      additionalData: { assetIds, organizationId, locationId },
+    });
+
     if (isLikeShelfError(cause)) {
       throw cause;
     }
@@ -2446,6 +2434,9 @@ export async function updateLocationKits({
       const kitWhere = getKitsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Location writes are ADMIN/OWNER-only, so the custodian filter
+        // here can never come from a restricted viewer.
+        allowedTeamMemberIds: "all",
       });
 
       const allKits = await db.kit.findMany({
@@ -2588,12 +2579,26 @@ export async function updateLocationKits({
           }
         })
         .catch((cause) => {
+          // Adding kit-driven `AssetLocation` rows can trip two DB triggers.
+          // Translate both into friendly 400s (no-op for any other error):
+          // - a QUANTITY_TRACKED member exceeding Asset.quantity across
+          //   locations, and
+          // - an INDIVIDUAL member still placed at another location.
+          // See SHELF-WEBAPP-1P4.
+          throwIfAssetQuantityOverAllocation(cause, {
+            label,
+            additionalData: { kitIds, userId, locationId },
+          });
+          throwIfIndividualAssetAlreadyPlaced(cause, {
+            label,
+            additionalData: { kitIds, userId, locationId },
+          });
           throw new ShelfError({
             cause,
             message:
               "Something went wrong while adding the kits to the location. Please try again or contact support.",
             additionalData: { kitIds, userId, locationId },
-            label: "Location",
+            label,
           });
         });
 

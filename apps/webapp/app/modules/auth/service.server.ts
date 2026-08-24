@@ -367,6 +367,45 @@ export async function sendResetPasswordLink(email: string) {
   }
 }
 
+/**
+ * Updates a user's password via the Supabase admin API.
+ *
+ * On success the user's existing sessions are revoked in two layers:
+ *
+ * 1. Explicit (this function): when an `accessToken` is supplied, we call
+ *    `admin.signOut(accessToken, "others")` to revoke every OTHER session for
+ *    the user, keeping the caller's own session alive.
+ * 2. Implicit (GoTrue): `admin.updateUserById({ password })` runs
+ *    `UpdatePassword(tx, nil)` internally, which calls `Logout(tx, userId)` —
+ *    deleting ALL sessions for the user (including the caller's), with refresh
+ *    tokens cascade-deleted via `refresh_tokens_session_id_fkey`.
+ *
+ * Layer 2 alone is sufficient on current GoTrue (≥ v2.79.0), so layer 1 is
+ * deliberate defense-in-depth: it is not a documented API contract, so if a
+ * future or self-hosted GoTrue stops cascading the logout, the explicit
+ * `signOut` still revokes other sessions and prevents a "password changed but
+ * stolen session still works" bug. It runs BEFORE the update on purpose — the
+ * update deletes the session behind `accessToken`, after which the token can no
+ * longer authenticate a `signOut` call.
+ *
+ * Layer 1 is best-effort: because layer 2 is the primary revocation, a `signOut`
+ * failure must never block the password change, so it is caught and reported to
+ * Sentry (`shouldBeCaptured: true`) rather than thrown — never swallowed
+ * silently, since it is the safety net for exactly the GoTrue-regression case.
+ *
+ * Because all sessions (including the caller's) are gone after the update,
+ * callers that must keep the user logged in have to mint a fresh session
+ * afterwards (see the `signInWithEmail` call in the onboarding route). Shelf's
+ * `protect()` middleware calls {@link validateSession} on every non-public
+ * request, so any other logged-in browser is signed out on its next request.
+ *
+ * @param id - The Supabase auth user id whose password is being changed
+ * @param password - The new plaintext password
+ * @param accessToken - The caller's current access token. When provided, other
+ *   sessions are explicitly revoked (defense-in-depth) before the password
+ *   update; omit it when the caller has no live session to preserve.
+ * @throws {ShelfError} If the user is SSO-backed, or the update fails
+ */
 export async function updateAccountPassword(
   id: string,
   password: string,
@@ -386,11 +425,37 @@ export async function updateAccountPassword(
         label,
       });
     }
-    //logout all the others session expect the current sesssion.
+
+    // Defense-in-depth: explicitly revoke all other sessions before the update.
+    // The update below also revokes sessions on its own (see JSDoc), but that
+    // is an undocumented GoTrue detail we don't want to depend on alone.
+    //
+    // Best-effort by design: this layer must never block the password change
+    // (layer 2 below is the primary revocation). But it is a security-critical
+    // safety net, so a failure is captured in Sentry rather than swallowed
+    // silently — `admin.signOut` returns its error instead of throwing, so we
+    // surface it explicitly. `shouldBeCaptured: true` guarantees the capture.
     if (accessToken) {
-      await getSupabaseAdmin().auth.admin.signOut(accessToken, "others");
+      try {
+        const { error: signOutError } =
+          await getSupabaseAdmin().auth.admin.signOut(accessToken, "others");
+        if (signOutError) {
+          throw signOutError;
+        }
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message:
+              "Failed to revoke other sessions before a password change. The password update still revokes all sessions on current GoTrue, but this defense-in-depth layer did not run — investigate if this recurs.",
+            additionalData: { id },
+            label,
+            shouldBeCaptured: true,
+          })
+        );
+      }
     }
-    //on password update, it is remvoing the session in th supbase.
+
     const { error } = await getSupabaseAdmin().auth.admin.updateUserById(id, {
       password,
     });
@@ -399,6 +464,13 @@ export async function updateAccountPassword(
       throw error;
     }
   } catch (cause) {
+    // Preserve already-specific ShelfErrors (e.g. the SSO guard above).
+    // Wrapping them would replace their actionable message with the generic
+    // one below, so the user would never learn why the update was refused.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message:
@@ -495,7 +567,7 @@ export async function validateSession(token: string) {
     Logger.error(
       new ShelfError({
         cause: null,
-        message: "Something went wrong while valdiating the session",
+        message: "Something went wrong while validating the session",
         label,
         shouldBeCaptured: false,
       })

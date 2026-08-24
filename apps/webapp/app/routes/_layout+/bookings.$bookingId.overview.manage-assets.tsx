@@ -67,6 +67,7 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
@@ -84,11 +85,14 @@ import {
 import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { createNotes } from "~/modules/note/service.server";
+import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
 import { getClientHint } from "~/utils/client-hints";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
+import type { RowWithCustody } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -101,6 +105,7 @@ import {
 } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapAssetsWithDataForNote,
   wrapAssetWithCountForNote,
@@ -115,6 +120,9 @@ import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
 export type AssetWithBooking = Asset & {
+  /** Cover image of the asset's model, rendered when the asset has no image
+   * of its own. See `~/modules/asset/image-resolution`. */
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   bookingAssets: { booking: Booking }[];
   custody: Custody | null;
   category: Category;
@@ -155,6 +163,18 @@ export type AssetWithBooking = Asset & {
    * booking). Only meaningful for QUANTITY_TRACKED assets.
    */
   checkedOutQuantity?: number | null;
+  /**
+   * True when this row is detached kit residue: the booking slice was created
+   * as part of a kit (`BookingAsset.sourceKitId`) but its membership row is
+   * gone (`assetKitId IS NULL`, `ON DELETE SET NULL`). The row still renders
+   * grouped under its original kit — this flag lets the row explain WHY, since
+   * it would otherwise be indistinguishable from a live kit member.
+   *
+   * Resolved by the booking-overview loader (planning-status bookings delete
+   * such slices outright, so only ONGOING/OVERDUE/COMPLETE/ARCHIVED/CANCELLED
+   * bookings ever see it). Absent on surfaces that don't project it.
+   */
+  isRemovedFromKit?: boolean | null;
   // Pickup location rendered in the booking Location column. On the
   // pivot model this comes from `assetLocations[0].location` via the
   // loader's `getPrimaryLocation` normalisation.
@@ -182,13 +202,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId, userOrganizations, isSelfServiceOrBase } =
-      await requirePermission({
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const {
+      organizationId,
+      userOrganizations,
+      isSelfServiceOrBase,
+      canSeeAllCustody,
+    } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     // getPaginatedAndFilterableAssets + getBooking both only need
     // `organizationId` (from requirePermission above). They're
@@ -213,6 +237,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getPaginatedAndFilterableAssets({
         request,
         organizationId,
+        // Ignores the custodian-filter seed — scope it rather than fetch a
+        // roster nobody renders.
+        canSeeAllCustody: false,
         extraInclude: {
           assetLocations: {
             select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
@@ -228,91 +255,41 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ]);
 
     /**
-     * For QUANTITY_TRACKED assets, compute available quantity factoring
-     * in kit allocations, custody, AND overlapping booking reservations.
-     * Exclude the current booking so its own reservation doesn't reduce
-     * the displayed availability.
+     * For QUANTITY_TRACKED assets, compute available quantity via the
+     * shared `getAssetAvailabilityBatch` primitive — the SAME formula
+     * `getAssetAvailability` uses (kit allocations, custody, checked-out,
+     * and windowed reservations), batched across every candidate asset in
+     * ONE round of queries so listing N qty-tracked assets doesn't turn
+     * into N per-asset lookups. Exclude the current booking so its own
+     * reservation doesn't reduce the displayed availability.
      *
-     * Kits MUST be in the formula — qty-tracked-in-kit assets are
-     * selectable in the picker for their free pool, so the picker's
-     * MAX has to subtract the slices committed to any kit. Matches the
-     * asset-overview "Available" formula in `quantity-overview-card.tsx`
-     * so the two surfaces agree.
+     * Reserved rows are restricted to standalone (`assetKitId: null`)
+     * slices inside the primitive — kit-driven slices are already counted
+     * via `inKits`, so this also fixes the double-count the old inline
+     * `groupBy` had (it summed EVERY overlapping `BookingAsset` row,
+     * including kit-driven ones, on top of subtracting `inKits`
+     * separately). The window is peak-concurrent swept rather than
+     * plain-summed, so two non-overlapping bookings inside the query
+     * window no longer stack (the bb1/bb2 bug).
      */
     const qtyAssetIds = assets
       .filter((a) => a.type === "QUANTITY_TRACKED")
       .map((a) => a.id);
 
-    const [assetKitSums, custodySums, bookingSums] =
-      qtyAssetIds.length > 0
-        ? await Promise.all([
-            db.assetKit.groupBy({
-              by: ["assetId"],
-              where: { assetId: { in: qtyAssetIds }, organizationId },
-              _sum: { quantity: true },
-            }),
-            db.custody.groupBy({
-              by: ["assetId"],
-              where: { assetId: { in: qtyAssetIds } },
-              _sum: { quantity: true },
-            }),
-            db.bookingAsset.groupBy({
-              by: ["assetId"],
-              where: {
-                assetId: { in: qtyAssetIds },
-                bookingId: { not: id },
-                booking: {
-                  status: {
-                    in: [
-                      BookingStatus.RESERVED,
-                      BookingStatus.ONGOING,
-                      BookingStatus.OVERDUE,
-                    ],
-                  },
-                  /**
-                   * Only count reservations from bookings whose dates
-                   * overlap with the current booking. Non-overlapping
-                   * bookings don't compete for the same quantity window.
-                   */
-                  ...(booking.from &&
-                    booking.to && {
-                      OR: [
-                        {
-                          from: { lte: booking.to },
-                          to: { gte: booking.from },
-                        },
-                        {
-                          from: { gte: booking.from },
-                          to: { lte: booking.to },
-                        },
-                      ],
-                    }),
-                },
-              },
-              _sum: { quantity: true },
-            }),
-          ])
-        : [[], [], []];
-
-    const inKitsByAsset = new Map(
-      assetKitSums.map((k) => [k.assetId, k._sum.quantity ?? 0])
-    );
-    const custodyByAsset = new Map(
-      custodySums.map((c) => [c.assetId, c._sum.quantity ?? 0])
-    );
-    const reservedByAsset = new Map(
-      bookingSums.map((b) => [b.assetId, b._sum.quantity ?? 0])
-    );
+    const availabilityByAsset = await getAssetAvailabilityBatch(qtyAssetIds, {
+      organizationId,
+      window:
+        booking.from && booking.to
+          ? { from: booking.from, to: booking.to }
+          : null,
+      excludeBookingId: id,
+    });
 
     /** Attach availableQuantity and filter out fully-allocated qty assets */
     const assetsWithAvailability = assets
       .map((a) => {
         if (a.type !== "QUANTITY_TRACKED") return a;
-        const inKits = inKitsByAsset.get(a.id) ?? 0;
-        const inCustody = custodyByAsset.get(a.id) ?? 0;
-        const reserved = reservedByAsset.get(a.id) ?? 0;
-        const availableQuantity =
-          (a.quantity ?? 0) - inKits - inCustody - reserved;
+        const availableQuantity = availabilityByAsset.get(a.id)?.bookable ?? 0;
         return { ...a, availableQuantity };
       })
       .filter((a) => {
@@ -398,7 +375,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       showSidebar: true,
       noScroll: true,
       booking,
-      items: assetsWithAvailability,
+      // `assetIndexFields()` selects the whole `custody.custodian.user`,
+      // `email` included, and this picker is reachable with `booking: update`
+      // — which BASE and SELF_SERVICE both hold on their own DRAFT booking.
+      // Scoping the custodian FILTER does not shape the rows, so the identity
+      // has to be redacted here too. The cast mirrors `asset/data.server.ts`:
+      // the declared row type resolves `custody` to the raw Prisma model with
+      // no `custodian`, while the runtime include nests one.
+      items: redactCustodianForViewer(
+        assetsWithAvailability as unknown as Array<
+          (typeof assetsWithAvailability)[number] & RowWithCustody
+        >,
+        { canSeeAllCustody, userId: authSession?.userId }
+      ),
       categories,
       tags,
       search,
@@ -446,12 +435,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, isSelfServiceOrBase, canSeeAllCustody } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     let {
       assetIds,
@@ -530,6 +520,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // `booking: update` is held by BASE and SELF_SERVICE. Select-all here
+        // ADDS the matched assets to the booking, which then lists them — so an
+        // unscoped custodian filter would hand a restricted user a readable
+        // copy of exactly what a colleague holds.
+        allowedTeamMemberIds: await scopeCustodianFilterIds({
+          teamMemberIds: searchParams.getAll("teamMember"),
+          canSeeAllCustody,
+          userId: authSession?.userId,
+          organizationId,
+        }),
       });
 
       const allAssets = await db.asset.findMany({
@@ -708,6 +708,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         assetIds: newAssetIds, // Only the newly added assets
         userId,
         quantities: newQuantities,
+        // This route writes its own booking-side note below (the one that
+        // carries the quantity annotations). Without this the service writes
+        // a second one that is byte-identical for a single INDIVIDUAL asset,
+        // so the feed reports one add twice. `userId` is still passed — it
+        // attributes the BOOKING_ASSETS_ADDED events and the model-request
+        // assignment notes, which are separate concerns.
+        skipBookingNote: true,
       });
 
       /**
@@ -767,11 +774,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             });
           })
         );
+      } catch (noteError) {
+        Logger.error(
+          makeShelfError(noteError, {
+            userId,
+            bookingId,
+            newAssetIds,
+            context: "manage-assets per-asset add-note creation",
+          })
+        );
+      }
 
+      try {
         const assetListContent = wrapAssetsWithDataForNote(newAssets, "added");
         const qtyAnnotations = newAssets
           .filter((a) => isQuantityTracked(a) && newQuantities[a.id] != null)
-          .map((a) => `**${a.title}** (x${newQuantities[a.id]})`)
+          // Asset titles are user input rendered as literal text here.
+          .map(
+            (a) =>
+              `**${stripMarkdocDelimiters(a.title)}** (x${newQuantities[a.id]})`
+          )
           .join(", ");
         const qtySuffix = qtyAnnotations
           ? ` with quantities: ${qtyAnnotations}`
@@ -861,6 +883,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         assetIds: changedAssetIds,
         userId,
         quantities: changedQuantities,
+        // These assets are ALREADY on the booking — this is a pure quantity
+        // edit. The service derives `addedAssetIds` from everything the call
+        // touched, not from what is new, so without this it logs a phantom
+        // "added X to the booking." for an asset that was already there. The
+        // route's own "adjusted booked quantity" note below is the truthful
+        // record of what happened.
+        skipBookingNote: true,
       });
 
       /**
@@ -906,11 +935,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const bookingAdjustSummary = adjustments
           .map(
             (adj) =>
-              `{% link to="/assets/${
-                adj.asset!.id
-              }" text="${adj.asset!.title.replace(/"/g, "&quot;")}" /%} (**${
-                adj.from
-              }** → **${adj.to}**)`
+              // Use the shared wrapper rather than hand-rolling the tag: it is
+              // the one place that guarantees the title lands inside a quoted,
+              // escaped attribute.
+              `${wrapLinkForNote(
+                `/assets/${adj.asset!.id}`,
+                adj.asset!.title
+              )} (**${adj.from}** → **${adj.to}**)`
           )
           .join(", ");
         await createSystemBookingNote({
@@ -1525,6 +1556,7 @@ const RowComponent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
@@ -1580,6 +1612,7 @@ const RowComponent = ({
                     {...resolveDisplayCode({
                       entity: item,
                       organization: currentOrganization,
+                      entityKind: "asset",
                     })}
                   />
                 ) : null}

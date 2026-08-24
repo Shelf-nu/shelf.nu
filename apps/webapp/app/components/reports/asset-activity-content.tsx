@@ -39,7 +39,9 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
       <AssetCell
         name={row.original.assetName}
         thumbnailImage={row.original.thumbnailImage}
+        mainImage={row.original.mainImage}
         assetId={row.original.assetId}
+        assetModel={row.original.assetModel}
       />
     ),
   },
@@ -91,7 +93,9 @@ const ASSET_ACTIVITY_COLUMNS: ColumnDef<AssetActivityRow>[] = [
   {
     accessorKey: "occurredAt",
     header: "Date & Time",
-    cell: ({ row }) => <DateCell date={row.original.occurredAt} />,
+    // `includeTime` renders date + time in the user's format, matching the
+    // "Date & Time" column header.
+    cell: ({ row }) => <DateCell date={row.original.occurredAt} includeTime />,
   },
 ];
 

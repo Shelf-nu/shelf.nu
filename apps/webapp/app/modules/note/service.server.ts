@@ -7,6 +7,7 @@ import type {
   Note,
   Prisma,
   Tag,
+  Organization,
   User,
 } from "@prisma/client";
 import type { AssetType, ConsumptionType } from "@prisma/client";
@@ -58,6 +59,9 @@ export type NotesTxClient = OrgValidationTxClient & {
     createMany: (args: {
       data: Prisma.NoteUncheckedCreateInput[];
     }) => Promise<{ count: number }>;
+    // why: `createNote` (singular) writes through nested `connect`, so it needs
+    // `NoteCreateInput` rather than the unchecked shape `createMany` takes.
+    create: (args: { data: Prisma.NoteCreateInput }) => Promise<Note>;
   };
 };
 
@@ -71,22 +75,31 @@ export type TagSummary = Pick<Tag, "id" | "name">;
  * where a caller supplies an asset ID from another tenant.
  *
  * @param params.organizationId - Caller's validated organization ID
+ * @param tx - Optional transaction client. When the note must commit or roll
+ *   back together with the mutation it describes — e.g. the QR relink, where a
+ *   note for a link that lost a race would falsify the audit trail — pass it so
+ *   the org guard and the note write join that transaction.
  * @throws {ShelfError} 400 if the asset is not in `organizationId`
  */
-export async function createNote({
-  content,
-  type,
-  userId,
-  assetId,
-  organizationId,
-}: Pick<Note, "content"> & {
-  type?: Note["type"];
-  userId: User["id"];
-  assetId: Asset["id"];
-  organizationId: string;
-}) {
+export async function createNote(
+  {
+    content,
+    type,
+    userId,
+    assetId,
+    organizationId,
+  }: Pick<Note, "content"> & {
+    type?: Note["type"];
+    userId: User["id"];
+    assetId: Asset["id"];
+    organizationId: string;
+  },
+  tx?: NotesTxClient
+) {
   try {
-    await assertAssetsBelongToOrg({ assetIds: [assetId], organizationId });
+    const client = tx ?? db;
+
+    await assertAssetsBelongToOrg({ assetIds: [assetId], organizationId }, tx);
 
     const data = {
       content,
@@ -103,7 +116,7 @@ export async function createNote({
       },
     };
 
-    return await db.note.create({
+    return await client.note.create({
       data,
     });
   } catch (cause) {
@@ -172,12 +185,40 @@ export async function createNotes(
 export async function deleteNote({
   id,
   userId,
-}: Pick<Note, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<Note, "id"> & {
+  userId: User["id"];
+  /**
+   * Required, not optional: Note has no organizationId column, so the only
+   * scoping was `userId` -- which let an author delete a asset note belonging to
+   * an organization they are no longer part of. Making it required means the
+   * compiler, not a grep, finds every call site.
+   */
+  organizationId: Organization["id"];
+}) {
   try {
-    return await db.note.deleteMany({
-      where: { id, userId },
+    // Scoped through the parent asset, which is where organizationId lives.
+    // Still one query -- a relation filter, not an extra round trip.
+    const result = await db.note.deleteMany({
+      where: { id, userId, asset: { organizationId } },
     });
+
+    if (result.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Note not found or you don't have permission to delete it.",
+        additionalData: { id, userId, organizationId },
+        label,
+        status: 403,
+      });
+    }
+
+    return result;
   } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting the note",

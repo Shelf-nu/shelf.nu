@@ -186,7 +186,7 @@ export default function BulkPartialCheckinDialog({
       <Dialog
         open={open}
         onClose={handleCloseDialog}
-        className={tw("bulk-tagging-dialog lg:w-[400px]")}
+        className="lg:w-[400px]"
         title={
           <div className="w-full">
             <div className={tw("mb-2")}>
@@ -291,6 +291,7 @@ export default function BulkPartialCheckinDialog({
                                 thumbnailImage: asset.thumbnailImage,
                                 mainImage: asset.mainImage,
                                 mainImageExpiration: asset.mainImageExpiration,
+                                assetModel: asset.assetModel ?? null,
                               }}
                               alt={`${asset.title} main image`}
                             />
@@ -322,6 +323,7 @@ export default function BulkPartialCheckinDialog({
                               thumbnailImage: asset.thumbnailImage,
                               mainImage: asset.mainImage,
                               mainImageExpiration: asset.mainImageExpiration,
+                              assetModel: asset.assetModel ?? null,
                             }}
                             alt={`${asset.title} main image`}
                           />

@@ -24,6 +24,12 @@ vi.mock("~/database/db.server", () => ({
     booking: {
       create: dbMocks.booking.create,
     },
+    // why: the action now resolves the acting user's timezone preference via
+    // resolveUserFormatPrefsById (db.user.findFirst). null → HARDCODED_DEFAULT_PREFS
+    // / hint-derived zone, matching the pre-existing hint-based parse behavior.
+    user: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -57,17 +63,29 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
 }));
 
 // why: controlling form data parsing and response formatting for predictable test behavior
+// why: stands in for parseData + BookingFormSchema so these cases can exercise
+// the action's org-scoping and redirect behaviour without building a payload
+// that satisfies the real future-date / working-hours rules (the fixture dates
+// are deliberately in the past).
 vi.mock("~/utils/http.server", () => ({
   assertIsPost: vi.fn(),
   parseData: vi.fn().mockImplementation((formData) => {
     const name = formData.get("name");
     const custodian = JSON.parse(formData.get("custodian") || "{}");
+    // The real parseData runs the schema, whose `coerceLocalDate` yields Date
+    // instances on `startDate`/`endDate`; the action consumes those directly
+    // rather than re-reading the raw form fields. Mirror that here — returning
+    // them undefined makes the action's "dates are required" guard fire.
+    const startDate = formData.get("startDate");
+    const endDate = formData.get("endDate");
     return {
       name,
       custodian,
       assetIds: [],
       description: null,
       tags: "",
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
     };
   }),
   data: vi.fn((x) => ({ success: true, ...x })),

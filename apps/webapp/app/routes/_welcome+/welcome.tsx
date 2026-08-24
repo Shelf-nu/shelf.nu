@@ -18,13 +18,19 @@ import {
   createBarcodeAddonTrialSubscription,
   getBarcodeAddonPrices,
 } from "~/modules/barcode/addon.server";
+import {
+  claimAddonTrial,
+  mayHaveCreatedSubscription,
+  releaseAddonTrial,
+} from "~/modules/billing/addon-trial-claim.server";
 import { signalsTeamIntent } from "~/modules/onboarding/constants";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, parseData, payload } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import { getOrCreateCustomerId } from "~/utils/stripe.server";
 
 export const meta: MetaFunction = () => [
@@ -108,14 +114,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       throw new Error("Invalid intent");
     }
 
-    // Get the personal org with trial flags to prevent duplicate trials
+    // The trial flags are deliberately NOT selected here: whether a trial is
+    // still available is decided by claiming it, not by reading it first.
     const personalOrg = await db.organization.findFirstOrThrow({
       where: { owner: { is: { id: userId } }, type: "PERSONAL" },
-      select: {
-        id: true,
-        usedAuditTrial: true,
-        usedBarcodeTrial: true,
-      },
+      select: { id: true },
     });
 
     const user = await getUserByID(userId, {
@@ -131,20 +134,55 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const customerId = await getOrCreateCustomerId(user);
 
-    // Create audit trial if selected (skip if already used)
-    if (auditPriceId && !personalOrg.usedAuditTrial) {
-      const { hasPaymentMethod } = await createAuditAddonTrialSubscription({
-        customerId,
-        priceId: auditPriceId,
-        userId,
+    // Create audit trial if selected. Claiming the one-time trial is what
+    // decides whether to proceed: reading the flag and writing it after the
+    // Stripe call leaves a window as wide as a network round trip, and two
+    // submissions inside it both create a real subscription. A lost claim
+    // means someone else is already creating this trial, so this request has
+    // nothing to do — onboarding continues rather than failing.
+    if (
+      auditPriceId &&
+      (await claimAddonTrial({
         organizationId: personalOrg.id,
-      });
+        addon: "audits",
+      }))
+    ) {
+      let hasPaymentMethod: boolean;
+      try {
+        ({ hasPaymentMethod } = await createAuditAddonTrialSubscription({
+          customerId,
+          priceId: auditPriceId,
+          userId,
+          organizationId: personalOrg.id,
+        }));
+      } catch (cause) {
+        // A refusal Stripe never received is safe to undo. An ambiguous
+        // failure is not: the subscription may exist and only its response
+        // was lost, so handing the trial back would let a retry open a
+        // second one.
+        if (!mayHaveCreatedSubscription(cause)) {
+          await releaseAddonTrial({
+            organizationId: personalOrg.id,
+            addon: "audits",
+          }).catch((releaseCause: unknown) => {
+            Logger.error(
+              new ShelfError({
+                cause: releaseCause,
+                message: "Failed to release an unclaimed audit trial",
+                additionalData: { organizationId: personalOrg.id },
+                label: "Stripe",
+              })
+            );
+          });
+        }
+        throw cause;
+      }
 
+      // `usedAuditTrial` is owned by the claim above.
       await db.organization.update({
         where: { id: personalOrg.id },
         data: {
           auditsEnabled: true,
-          usedAuditTrial: true,
           auditsEnabledAt: new Date(),
         },
         select: { id: true },
@@ -158,20 +196,50 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    // Create barcode trial if selected (skip if already used)
-    if (barcodePriceId && !personalOrg.usedBarcodeTrial) {
-      const { hasPaymentMethod } = await createBarcodeAddonTrialSubscription({
-        customerId,
-        priceId: barcodePriceId,
-        userId,
+    // Same claim-then-create rule as the audit trial above.
+    if (
+      barcodePriceId &&
+      (await claimAddonTrial({
         organizationId: personalOrg.id,
-      });
+        addon: "barcodes",
+      }))
+    ) {
+      let hasPaymentMethod: boolean;
+      try {
+        ({ hasPaymentMethod } = await createBarcodeAddonTrialSubscription({
+          customerId,
+          priceId: barcodePriceId,
+          userId,
+          organizationId: personalOrg.id,
+        }));
+      } catch (cause) {
+        // A refusal Stripe never received is safe to undo. An ambiguous
+        // failure is not: the subscription may exist and only its response
+        // was lost, so handing the trial back would let a retry open a
+        // second one.
+        if (!mayHaveCreatedSubscription(cause)) {
+          await releaseAddonTrial({
+            organizationId: personalOrg.id,
+            addon: "barcodes",
+          }).catch((releaseCause: unknown) => {
+            Logger.error(
+              new ShelfError({
+                cause: releaseCause,
+                message: "Failed to release an unclaimed barcode trial",
+                additionalData: { organizationId: personalOrg.id },
+                label: "Stripe",
+              })
+            );
+          });
+        }
+        throw cause;
+      }
 
+      // `usedBarcodeTrial` is owned by the claim above.
       await db.organization.update({
         where: { id: personalOrg.id },
         data: {
           barcodesEnabled: true,
-          usedBarcodeTrial: true,
           barcodesEnabledAt: new Date(),
         },
         select: { id: true },

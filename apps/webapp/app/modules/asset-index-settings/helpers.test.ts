@@ -25,4 +25,16 @@ describe("asset index column metadata", () => {
     const expectedPositions = positions.map((_, index) => index);
     expect(positions).toEqual(expectedPositions);
   });
+
+  it("registers min quantity as a fixed, hidden-by-default field with a label", () => {
+    expect(fixedFields).toContain("minQuantity");
+    expect(columnsLabelsMap.minQuantity).toBe("Min quantity");
+
+    const minQuantityColumn = defaultFields.find(
+      (column) => column.name === "minQuantity"
+    );
+    expect(minQuantityColumn).toEqual(
+      expect.objectContaining({ visible: false })
+    );
+  });
 });

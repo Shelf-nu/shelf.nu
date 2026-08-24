@@ -44,7 +44,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
       "bulk-cancel": PermissionAction.update,
     };
 
-    const { organizationId } = await requirePermission({
+    // `role` decides whether the bulk query is scoped to the caller's own
+    // bookings. It is the same authority the singular write paths use.
+    const { organizationId, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -59,6 +61,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           bookingIds,
           organizationId,
           userId,
+          role,
           hints: getClientHint(request),
           currentSearchParams,
         });
@@ -80,6 +83,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           bookingIds,
           organizationId,
           userId,
+          role,
           currentSearchParams,
         });
 
@@ -100,6 +104,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           bookingIds,
           organizationId,
           userId,
+          role,
           hints: getClientHint(request),
           currentSearchParams,
         });

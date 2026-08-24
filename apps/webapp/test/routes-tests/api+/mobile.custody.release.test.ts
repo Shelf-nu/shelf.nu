@@ -43,6 +43,13 @@ vitest.mock("~/database/db.server", () => ({
     custody: {
       findFirst: vitest.fn(),
     },
+    // why: the route reads the asset's `type` before releasing, because
+    // `releaseCustody` releases EVERY custodian on the asset and so must never
+    // run for a QUANTITY_TRACKED one. Without this stub the read hits real
+    // Prisma and the route returns an error instead of the asset.
+    asset: {
+      findFirst: vitest.fn(),
+    },
   },
 }));
 
@@ -151,6 +158,10 @@ describe("POST /api/mobile/custody/release", () => {
         user: { id: "user-2" },
       },
     });
+
+    // Default to the only shape this endpoint accepts. QUANTITY_TRACKED is
+    // refused — see the dedicated test below.
+    (db.asset.findFirst as any).mockResolvedValue({ type: "INDIVIDUAL" });
   });
 
   it("should release custody successfully and create a note", async () => {
@@ -185,6 +196,30 @@ describe("POST /api/mobile/custody/release", () => {
         assetId: "asset-1",
       })
     );
+  });
+
+  /**
+   * `releaseCustody` deletes EVERY custody row on the asset. For an INDIVIDUAL
+   * asset that is the single custodian; for a QUANTITY_TRACKED one it would
+   * wipe every other custodian's slice while releasing just one person's.
+   *
+   * The web route has always refused QT here. This endpoint did not, so the
+   * mobile app was the only way into that state — QT releases belong to
+   * POST /api/mobile/custody/release-quantity.
+   */
+  it("refuses a quantity-tracked asset instead of releasing every custodian", async () => {
+    (db.asset.findFirst as any).mockResolvedValue({ type: "QUANTITY_TRACKED" });
+
+    const request = createCustodyReleaseRequest({ assetId: "asset-1" });
+
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(400);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toContain("quantity release flow");
+
+    // The whole point: no custody rows may be touched.
+    expect(releaseCustody).not.toHaveBeenCalled();
   });
 
   it("should return error when permission is denied", async () => {

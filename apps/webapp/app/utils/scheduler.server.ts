@@ -1,4 +1,6 @@
 import PgBoss from "pg-boss";
+import { ShelfError } from "./error";
+import { Logger } from "./logger";
 import { DATABASE_URL, NODE_ENV } from "../utils/env";
 
 export enum QueueNames {
@@ -40,6 +42,31 @@ export const init = async () => {
       }
       pgBossInstance = global.pgBossScheduler;
     }
+
+    // Register an error handler before starting. PgBoss extends EventEmitter and
+    // re-emits worker/maintenance failures (e.g. transient EAUTHTIMEOUT / 08006)
+    // as 'error' events. An unhandled 'error' event on an EventEmitter throws and
+    // crashes the Node process (the SHELF-WEBAPP-1KJ / 21E production crashes and
+    // subsequent machine restarts). Logging it keeps the process alive.
+    //
+    // why the listenerCount guard: in dev the instance is a surviving `global`
+    // while the `!pgBossInstance` guard above is on a module-local that resets on
+    // every Vite hot reload, so init() re-runs against the same instance. Without
+    // this guard each reload attaches another listener (MaxListenersExceededWarning
+    // + duplicate logs). Attaching only when none exists is idempotent.
+    if (pgBossInstance.listenerCount("error") === 0) {
+      pgBossInstance.on("error", (cause: unknown) => {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "pg-boss worker error",
+            label: "Scheduler",
+            shouldBeCaptured: true,
+          })
+        );
+      });
+    }
+
     await pgBossInstance.start();
   }
   return;

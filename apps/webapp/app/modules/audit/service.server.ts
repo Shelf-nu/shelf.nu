@@ -11,11 +11,13 @@ import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
 } from "~/modules/note/service.server";
 import type { ClientHint } from "~/utils/client-hints";
+import type { RawFormatPrefs } from "~/utils/date-format";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -36,6 +38,7 @@ import {
   createAssetScanNote,
   createAuditCreationNote,
   createAuditStartedNote,
+  createAuditResumedNote,
   createAuditCompletedNote,
   createAuditUpdateNote,
   createDueDateChangedNote,
@@ -47,6 +50,7 @@ import {
 } from "./helpers.server";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import { resolveAssetImage } from "../asset/image-resolution";
 import { getPrimaryLocation } from "../asset/utils";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 const label: ErrorLabel = "Audit";
@@ -177,8 +181,13 @@ export type RecordAuditScanInput = {
   qrId: string;
   /** The ID of the asset that was scanned */
   assetId: string;
-  /** Whether this asset was expected in the audit (true) or unexpected (false) */
-  isExpected: boolean;
+  /**
+   * Deliberately absent: whether the asset was expected is NOT an input.
+   * A scanning device's copy of the expected list goes stale, so
+   * `recordAuditScan` derives it from the audit's own AuditAsset row inside
+   * the transaction. Callers may still accept an `isExpected` flag on the
+   * wire for older clients, but must not forward it.
+   */
   /** The ID of the user who performed the scan */
   userId: string;
   /** The organization ID for security validation */
@@ -655,6 +664,8 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Model cover image for assets with no image of their own
+                ...ASSET_MODEL_IMAGE_SELECT,
                 // Asset-code resolution: surface code data so the audit
                 // field worker can match the physical asset to the row.
                 // See `app/modules/barcode/display.ts`.
@@ -768,14 +779,33 @@ export async function getAuditSessionDetails({
           custodian?.name ||
           null;
 
+        /**
+         * Resolve the model-image cascade HERE rather than forwarding the raw
+         * columns. This is a hand-written projection, so nothing downstream can
+         * reach `asset.assetModel` — `GetAuditSessionResult.session` doesn't
+         * even declare the relation. Both consumers of this payload (the mobile
+         * audit screen and the web scan drawer) read the flat fields, so an
+         * asset inheriting its model's cover renders blank unless it is
+         * collapsed at this point.
+         *
+         * Placeholder stays `null` so the existing client-side "no image"
+         * branches keep working — same contract as `serializeAssetImage`.
+         */
+        const image = resolveAssetImage({
+          mainImage: auditAsset.asset?.mainImage ?? null,
+          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+          assetModel: auditAsset.asset?.assetModel ?? null,
+        });
+        const hasImage = image.source !== "placeholder";
+
         return {
           id: auditAsset.assetId,
           name: auditAsset.asset?.title ?? "",
           auditAssetId: auditAsset.id, // ID of the AuditAsset record (for notes/images)
           auditNotesCount: auditAsset._count?.notes ?? 0,
           auditImagesCount: auditAsset._count?.images ?? 0,
-          mainImage: auditAsset.asset?.mainImage ?? null,
-          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
+          mainImage: hasImage ? image.fullUrl : null,
+          thumbnailImage: hasImage ? image.thumbnailUrl : null,
           // An asset can sit at multiple locations via the AssetLocation
           // pivot; surface only its single primary placement on the row.
           locationName: getPrimaryLocation(auditAsset.asset)?.name ?? null,
@@ -965,6 +995,21 @@ export async function getAssetsForAuditSession({
         assetId: true,
         expected: true,
         status: true,
+        // why: so the overview row can SAY it holds evidence. The notes and
+        // photos were always reachable — via the Activity feed, or by opening
+        // a row on the off-chance — but nothing in the assets table indicated
+        // which rows were worth opening. On a 200-asset audit that makes the
+        // one damaged item indistinguishable from the 199 clean ones.
+        //
+        // COMMENT only, matching `getAuditScans`: system notes are audit
+        // trail, not something a person wrote about the asset's condition,
+        // and counting them would inflate every row to a uniform number.
+        _count: {
+          select: {
+            notes: { where: { type: "COMMENT" } },
+            images: true,
+          },
+        },
       },
     });
 
@@ -978,6 +1023,8 @@ export async function getAssetsForAuditSession({
           auditAssetId: aa.id,
           expected: aa.expected,
           auditStatus: aa.status,
+          auditNotesCount: aa._count.notes,
+          auditImagesCount: aa._count.images,
         },
       ])
     );
@@ -1042,6 +1089,8 @@ export async function getAssetsForAuditSession({
         title: true,
         mainImage: true,
         thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
         mainImageExpiration: true,
         // Asset-code resolution fields. Audits are the strongest use case —
         // a field worker matches the physical label to a row. See
@@ -1176,8 +1225,7 @@ function isAuditAssetFkViolation(cause: unknown): boolean {
 export async function recordAuditScan(
   input: RecordAuditScanInput
 ): Promise<RecordAuditScanResult> {
-  const { auditSessionId, qrId, assetId, isExpected, userId, organizationId } =
-    input;
+  const { auditSessionId, qrId, assetId, userId, organizationId } = input;
 
   try {
     // Verify the audit session exists and belongs to the organization
@@ -1278,37 +1326,118 @@ export async function recordAuditScan(
     // Record the scan in a transaction
     const result = await db.$transaction(
       async (tx) => {
-        // If this is the first scan and audit is still PENDING, activate it
+        // Activate a PENDING audit on its first scan.
+        //
+        // Gated on the pre-transaction snapshot so an already-ACTIVE audit —
+        // i.e. every scan after the first — issues no session-status writes at
+        // all. Ungated, both updates below match zero rows on every one of
+        // them, so auditing several hundred assets paid two wasted round-trips
+        // per scan inside this 15s transaction.
+        //
+        // The concurrency case the claim exists for is *both* scanners seeing
+        // PENDING in their own snapshot, so gating on the snapshot does not
+        // weaken it: whoever sees PENDING still has to win the claim.
         if (session.status === AuditStatus.PENDING) {
-          await tx.auditSession.update({
-            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven org-owned by the db.auditSession.findFirst({ where: { id: auditSessionId, organizationId } }) guard earlier in this fn (throws 404 otherwise); update() requires a unique-only where.
-            where: { id: auditSessionId },
+          // The claim is a guarded updateMany INSIDE the transaction, not a
+          // read from the pre-transaction `session` snapshot: two scanners
+          // hitting a fresh audit at the same moment would both see
+          // PENDING/startedAt null and both write a start note and an
+          // AUDIT_STARTED event. Only the row that actually matches
+          // `startedAt: null` can win, so exactly one of them records the
+          // first start.
+          //
+          // Scoping the update to `status: PENDING` also stops a scan in
+          // flight from resurrecting an audit someone cancelled or completed a
+          // moment earlier — an unconditional update would have overwritten
+          // that.
+          //
+          // `startedAt` is stamped only by this claim, so an audit that returns
+          // to PENDING and is scanned again keeps the moment it truly began.
+          // Production data showed one audit carrying three "started the audit"
+          // entries, with both surfaces reporting only the latest as "Started".
+          const firstStartClaim = await tx.auditSession.updateMany({
+            where: {
+              id: auditSessionId,
+              organizationId,
+              status: AuditStatus.PENDING,
+              startedAt: null,
+            },
             data: {
               status: AuditStatus.ACTIVE,
               startedAt: new Date(),
             },
           });
 
-          // Create automatic note for audit being started
-          await createAuditStartedNote({
-            auditSessionId,
-            userId,
-            tx,
-            prefetchedUser: scannerUser,
-          });
-
-          // Activity event — AUDIT_STARTED.
-          await recordEvent(
-            {
-              organizationId,
-              actorUserId: userId,
-              action: "AUDIT_STARTED",
-              entityType: "AUDIT",
-              entityId: auditSessionId,
+          if (firstStartClaim.count === 1) {
+            // Automatic note for the audit being started. Guarded by the
+            // claim, so the activity feed cannot show one audit starting
+            // several times.
+            await createAuditStartedNote({
               auditSessionId,
-            },
-            tx
-          );
+              userId,
+              tx,
+              prefetchedUser: scannerUser,
+            });
+
+            // Activity event — AUDIT_STARTED.
+            await recordEvent(
+              {
+                organizationId,
+                actorUserId: userId,
+                action: "AUDIT_STARTED",
+                entityType: "AUDIT",
+                entityId: auditSessionId,
+                auditSessionId,
+              },
+              tx
+            );
+          } else {
+            // Still PENDING but already carrying a startedAt: it was started
+            // before. Bring it back to ACTIVE without restamping the original
+            // start or re-noting it.
+            const resumeClaim = await tx.auditSession.updateMany({
+              where: {
+                id: auditSessionId,
+                organizationId,
+                status: AuditStatus.PENDING,
+              },
+              data: { status: AuditStatus.ACTIVE },
+            });
+
+            // PENDING -> ACTIVE is a tracked status transition, so it needs a
+            // trail of its own: without one the audit silently reappears as
+            // ACTIVE with nothing in the feed or the event stream explaining
+            // it. Reported as a status change rather than a second
+            // AUDIT_STARTED, which stays reserved for the genuine first start
+            // so reports can still count how many audits ever began.
+            //
+            // Guarded on the claim so the scanner that lost this race — the
+            // audit was flipped to ACTIVE a moment ago by someone else — does
+            // not add a duplicate entry.
+            if (resumeClaim.count === 1) {
+              await createAuditResumedNote({
+                auditSessionId,
+                userId,
+                tx,
+                prefetchedUser: scannerUser,
+              });
+
+              await recordEvent(
+                {
+                  organizationId,
+                  actorUserId: userId,
+                  action: "AUDIT_UPDATED",
+                  entityType: "AUDIT",
+                  entityId: auditSessionId,
+                  auditSessionId,
+                  field: "status",
+                  fromValue: AuditStatus.PENDING,
+                  toValue: AuditStatus.ACTIVE,
+                },
+                tx
+              );
+            }
+          }
         }
 
         // Create the scan record
@@ -1322,16 +1451,102 @@ export async function recordAuditScan(
           },
         });
 
-        let auditAssetId: string | null = null;
+        // Whether this asset was expected is derived from the audit's own
+        // rows, never taken from the request body.
+        //
+        // A scanning device sends the flag from the expected list it cached at
+        // audit start, and that copy goes stale: an admin can remove an asset
+        // from a still-PENDING audit (`removeAssetFromAudit`) after the device
+        // loaded it. Trusting the flag then matched zero rows on the
+        // expected-asset update, so the scan got no AuditAsset row at all —
+        // notes and photos could never attach to it — while the session counts
+        // still moved, driving `missingAssetCount` negative and reporting a
+        // found asset that is no longer part of the audit.
+        //
+        // AuditAsset is unique on (auditSessionId, assetId), so that one row is
+        // the authority on whether this asset belongs to the audit.
+        let auditAssetRow = await tx.auditAsset.findUnique({
+          where: { auditSessionId_assetId: { auditSessionId, assetId } },
+          select: { id: true, expected: true, status: true },
+        });
 
-        // Update or create the audit asset record
-        if (isExpected) {
-          // Expected asset - update its status to FOUND
-          await tx.auditAsset.updateMany({
+        // Session-count movements for this scan, applied as relative
+        // increments below. 0 means "this scan does not move that count".
+        let foundDelta = 0;
+        let missingDelta = 0;
+        let unexpectedDelta = 0;
+
+        // Tracks whether THIS scan is the one that inserted the row, which is
+        // what decides who owns the unexpected count.
+        let insertedUnexpectedRow = false;
+
+        if (!auditAssetRow) {
+          // The asset is not part of the audit yet — add it as unexpected,
+          // idempotently.
+          //
+          // The read above and this write are not atomic, and the
+          // duplicate-scan short-circuit runs OUTSIDE the transaction, so the
+          // row can appear in between: another scanner recording the same
+          // unexpected asset, or an admin adding it to the still-PENDING audit
+          // as expected (`addAssetsToAudit`). A plain `create` then raises
+          // Prisma P2002 on the (auditSessionId, assetId) unique — which
+          // neither `isLikeShelfError` nor `isAuditAssetFkViolation` (P2003
+          // only) recognises, so it surfaced as a captured 500 and rolled the
+          // whole scan back.
+          //
+          // `skipDuplicates` compiles to ON CONFLICT DO NOTHING, which does not
+          // abort the transaction, and its `count` is exactly the "did WE
+          // insert it" signal the count below needs.
+          const created = await tx.auditAsset.createMany({
+            data: [
+              {
+                auditSessionId,
+                assetId,
+                expected: false,
+                status: AuditAssetStatus.UNEXPECTED,
+                scannedAt: new Date(),
+                scannedById: userId,
+              },
+            ],
+            skipDuplicates: true,
+          });
+          insertedUnexpectedRow = created.count === 1;
+
+          // Re-read rather than trust what we tried to write: on a conflict the
+          // winner's row is what persisted, and it may be an EXPECTED row.
+          // ON CONFLICT DO NOTHING waits for the conflicting transaction, so by
+          // now that row is committed and visible to this statement.
+          auditAssetRow = await tx.auditAsset.findUniqueOrThrow({
+            where: { auditSessionId_assetId: { auditSessionId, assetId } },
+            select: { id: true, expected: true, status: true },
+          });
+        }
+
+        const isExpected = auditAssetRow.expected;
+        const auditAssetId = auditAssetRow.id;
+
+        if (insertedUnexpectedRow) {
+          // We created the row, already UNEXPECTED and stamped with this scan.
+          unexpectedDelta = 1;
+        } else if (auditAssetRow.expected) {
+          // Expected asset - update its status to FOUND.
+          //
+          // Reached either normally, or when the insert above lost to an admin
+          // adding this asset to the audit as expected mid-transaction. Both
+          // want the same outcome: a scanned asset must not be left PENDING, or
+          // completion would report it missing.
+          //
+          // Scoped to a row that is not already FOUND so the counts move
+          // exactly once: the duplicate-scan short-circuit above runs outside
+          // the transaction, so two scanners can both reach this point for the
+          // same asset. Without the status guard the second one decrements
+          // `missingAssetCount` again and it goes negative.
+          const foundClaim = await tx.auditAsset.updateMany({
             where: {
               auditSessionId,
               assetId,
               expected: true,
+              status: { not: AuditAssetStatus.FOUND },
             },
             data: {
               status: AuditAssetStatus.FOUND,
@@ -1340,54 +1555,54 @@ export async function recordAuditScan(
             },
           });
 
-          // Get the audit asset ID for return
-          const updatedAsset = await tx.auditAsset.findFirst({
-            where: {
-              auditSessionId,
-              assetId,
-              expected: true,
-            },
-            select: { id: true },
-          });
-
-          auditAssetId = updatedAsset?.id ?? null;
+          if (foundClaim.count === 1) {
+            foundDelta = 1;
+            missingDelta = -1;
+          }
         } else {
-          // Unexpected asset - create a new audit asset record
-          const auditAsset = await tx.auditAsset.create({
+          // An unexpected row already exists for this asset — its scan was
+          // removed but the row survived, or a concurrent scanner just inserted
+          // it. The unique constraint rules out a second row, so reuse this one
+          // and refresh its scan metadata.
+          await tx.auditAsset.update({
+            where: { id: auditAssetRow.id },
             data: {
-              auditSessionId,
-              assetId,
-              expected: false,
               status: AuditAssetStatus.UNEXPECTED,
               scannedAt: new Date(),
               scannedById: userId,
             },
           });
-          auditAssetId = auditAsset.id;
+
+          // Only count it if it was not already counted as unexpected. A row a
+          // concurrent scanner just inserted is already UNEXPECTED and already
+          // counted by them, so this correctly contributes nothing.
+          if (auditAssetRow.status !== AuditAssetStatus.UNEXPECTED) {
+            unexpectedDelta = 1;
+          }
         }
 
-        // Link the scan to the audit asset so we can query it later
-        if (auditAssetId) {
-          await tx.auditScan.update({
-            where: { id: scan.id },
-            data: { auditAssetId },
-          });
-        }
+        // Link the scan to the audit asset so we can query it later. Always
+        // resolvable now: every branch above either found or created the row.
+        await tx.auditScan.update({
+          where: { id: scan.id },
+          data: { auditAssetId },
+        });
 
-        // Update the audit session counts
+        // Update the audit session counts.
+        //
+        // Every field is written as a RELATIVE increment, 0 for the ones this
+        // scan does not move. `session` is a pre-transaction snapshot, so
+        // writing its absolute values back for the untouched fields let two
+        // concurrent scanners clobber each other: an unexpected scan committing
+        // `unexpectedAssetCount` 0 -> 1 was immediately undone by an expected
+        // scan writing its own stale `unexpectedAssetCount: 0` back.
         const updatedSession = await tx.auditSession.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven org-owned by the db.auditSession.findFirst({ where: { id: auditSessionId, organizationId } }) guard earlier in this fn (throws 404 otherwise); update() requires a unique-only where.
           where: { id: auditSessionId },
           data: {
-            foundAssetCount: isExpected
-              ? { increment: 1 }
-              : session.foundAssetCount,
-            missingAssetCount: isExpected
-              ? { decrement: 1 }
-              : session.missingAssetCount,
-            unexpectedAssetCount: !isExpected
-              ? { increment: 1 }
-              : session.unexpectedAssetCount,
+            foundAssetCount: { increment: foundDelta },
+            missingAssetCount: { increment: missingDelta },
+            unexpectedAssetCount: { increment: unexpectedDelta },
           },
         });
 
@@ -1411,7 +1626,7 @@ export async function recordAuditScan(
             entityType: "AUDIT",
             entityId: auditSessionId,
             auditSessionId,
-            auditAssetId: auditAssetId ?? undefined,
+            auditAssetId,
             assetId,
             meta: { isExpected },
           },
@@ -1781,6 +1996,12 @@ export async function completeAuditSession({
             firstName: true,
             lastName: true,
             displayName: true,
+            // Recipient format prefs so the completion email renders dates in
+            // the creator's locale/timezone (resolved from the loaded row).
+            dateFormat: true,
+            timeFormat: true,
+            weekStart: true,
+            timeZone: true,
           },
         },
         assignments: {
@@ -1791,6 +2012,11 @@ export async function completeAuditSession({
                 firstName: true,
                 lastName: true,
                 displayName: true,
+                // Recipient format prefs (resolved from the loaded row).
+                dateFormat: true,
+                timeFormat: true,
+                weekStart: true,
+                timeZone: true,
               },
             },
           },
@@ -1827,6 +2053,12 @@ export async function completeAuditSession({
             firstName: completedAudit.createdBy.firstName,
             lastName: completedAudit.createdBy.lastName,
             displayName: completedAudit.createdBy.displayName,
+            // Carry the creator's format prefs so their notify row resolves the
+            // same way an assignee row does (from the loaded row, no N+1).
+            dateFormat: completedAudit.createdBy.dateFormat,
+            timeFormat: completedAudit.createdBy.timeFormat,
+            weekStart: completedAudit.createdBy.weekStart,
+            timeZone: completedAudit.createdBy.timeZone,
           },
         });
       }
@@ -1997,41 +2229,67 @@ export async function getAuditsForOrganization(params: {
 }
 
 /**
- * Validates that the user is assigned to the audit session.
- * Throws a 403 ShelfError if the user is not an assignee.
+ * Validates that the user may act on the audit session.
  *
- * When isSelfServiceOrBase is false (admin/owner), allows the user to perform
- * actions if the audit has no assignees.
+ * ADMIN/OWNER users (isSelfServiceOrBase = false) always pass: they manage
+ * every audit in their workspace, mirroring both
+ * requireAuditAssigneeForBaseSelfService and the ADMIN/OWNER allow-all
+ * short-circuit in @shelf/permissions. BASE/SELF_SERVICE users must be
+ * assignees of the audit.
  *
- * @throws {ShelfError} 403 error if user is not an assignee
+ * @throws {ShelfError} 403 error if a BASE/SELF_SERVICE user is not an assignee
  */
 export async function requireAuditAssignee({
   auditSessionId,
   organizationId,
   userId,
-  request,
   isSelfServiceOrBase = true,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
-  request?: Request;
-  /** When true, always require assignee. When false (admin/owner), allow if no assignees. */
+  /** When true (BASE/SELF_SERVICE), require assignee. When false (admin/owner), always allow. */
   isSelfServiceOrBase?: boolean;
 }): Promise<void> {
-  const { session } = await getAuditSessionDetails({
-    id: auditSessionId,
-    organizationId,
-    userOrganizations: [],
-    request,
-  });
-
-  const hasNoAssignees = session.assignments.length === 0;
-  const isAdminOrOwner = !isSelfServiceOrBase;
-
-  // Allow admin/owner to perform actions if audit has no assignees
-  if (isAdminOrOwner && hasNoAssignees) {
+  // ADMIN/OWNER act on any audit in their workspace. Returning before the
+  // session fetch is safe: every caller's downstream service re-verifies the
+  // session against organizationId (recordAuditScan, completeAuditSession,
+  // requireAuditAssetInSession all 404 on cross-org ids).
+  if (!isSelfServiceOrBase) {
     return;
+  }
+
+  // why: this guard runs on the per-scan hot path, so it fetches only the
+  // assignment user ids — not the full session details with every expected
+  // asset (that would make an N-asset audit O(N²) in transferred data).
+  let session: { assignments: { userId: string }[] } | null;
+  try {
+    session = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      select: { assignments: { select: { userId: true } } },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while validating audit access. Please try again or contact support.",
+      additionalData: { auditSessionId, organizationId },
+      label,
+    });
+  }
+
+  if (!session) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit session not found",
+      additionalData: { auditSessionId, organizationId },
+      status: 404,
+      label,
+      // An authorization outcome, not a fault: this fires whenever a caller
+      // names an audit outside their workspace, which the read routes hit on
+      // ordinary use. Capturing it turns routine refusals into Sentry volume.
+      shouldBeCaptured: false,
+    });
   }
 
   const isAssignee = session.assignments.some(
@@ -2046,6 +2304,10 @@ export async function requireAuditAssignee({
       additionalData: { auditSessionId, userId },
       status: 403,
       label,
+      // Same reasoning as the 404 above, and it matters more here: the
+      // evidence route runs this on every row tap, so an unassigned user
+      // browsing generates one capture per request.
+      shouldBeCaptured: false,
     });
   }
 }
@@ -2127,6 +2389,12 @@ export async function cancelAuditSession({
             firstName: true,
             lastName: true,
             displayName: true,
+            // Recipient format prefs so the cancellation email renders dates in
+            // the creator's locale/timezone (resolved from the loaded row).
+            dateFormat: true,
+            timeFormat: true,
+            weekStart: true,
+            timeZone: true,
           },
         },
         organization: {
@@ -2144,6 +2412,11 @@ export async function cancelAuditSession({
                 firstName: true,
                 lastName: true,
                 displayName: true,
+                // Recipient format prefs (resolved from the loaded row).
+                dateFormat: true,
+                timeFormat: true,
+                weekStart: true,
+                timeZone: true,
               },
             },
           },
@@ -2279,12 +2552,14 @@ export async function cancelAuditSession({
     //    the creator that their audit was killed.
     const assigneesToNotify: Array<{
       userId: string;
+      // Raw format-preference columns travel on each recipient row so the email
+      // helper resolves prefs from the loaded row (no per-recipient DB fetch).
       user: {
         email: string;
         firstName: string | null;
         lastName: string | null;
         displayName?: string | null;
-      };
+      } & RawFormatPrefs;
     }> = auditSession.assignments
       .filter(
         (assignment) => assignment.userId !== userId && assignment.user.email
@@ -2309,6 +2584,12 @@ export async function cancelAuditSession({
           firstName: auditSession.createdBy.firstName,
           lastName: auditSession.createdBy.lastName,
           displayName: auditSession.createdBy.displayName,
+          // Carry the creator's format prefs so their notify row resolves the
+          // same way an assignee row does (from the loaded row, no N+1).
+          dateFormat: auditSession.createdBy.dateFormat,
+          timeFormat: auditSession.createdBy.timeFormat,
+          weekStart: auditSession.createdBy.weekStart,
+          timeZone: auditSession.createdBy.timeZone,
         },
       });
     }
@@ -2583,26 +2864,58 @@ export async function removeAssetFromAudit({
         });
       }
 
-      // Fetch the audit asset to get the actual asset ID
-      const auditAsset = await tx.auditAsset.findUnique({
-        where: { id: auditAssetId },
+      // SECURITY (cross-tenant IDOR): scope the lookup to THIS audit.
+      //
+      // `auditAssetId` arrives from the request body. `AuditAsset` carries no
+      // `organizationId` of its own — it inherits the tenant purely through
+      // `auditSession` — so `auditSessionId` is the only thing that can scope
+      // it, and an id-only `findUnique` matched any row in the table. Proving
+      // the AUDIT is org-owned above does not help: nothing tied the audit
+      // asset to that audit. A caller could delete another organization's
+      // audit rows (cascading to their scans), and the count decrement below
+      // would then corrupt their OWN audit's totals as well.
+      const auditAsset = await tx.auditAsset.findFirst({
+        where: { id: auditAssetId, auditSessionId: auditId },
         select: { assetId: true, expected: true },
       });
 
       if (!auditAsset) {
         throw new ShelfError({
           cause: null,
-          message: "Audit asset not found",
-          additionalData: { auditAssetId },
+          // Deliberately does not distinguish "no such row" from "belongs to
+          // another audit" — the id is caller-supplied and the difference is
+          // an existence oracle.
+          message: "Audit asset not found in this audit",
+          additionalData: { auditAssetId, auditId },
           label,
           status: 404,
+          shouldBeCaptured: false,
         });
       }
 
-      // Delete the audit asset (cascade will delete related scans)
-      await tx.auditAsset.delete({
-        where: { id: auditAssetId },
+      // Delete the audit asset (cascade will delete related scans). Scoped
+      // again rather than by id alone: defence in depth, so the write cannot
+      // outlive a future refactor of the check above.
+      const removed = await tx.auditAsset.deleteMany({
+        where: { id: auditAssetId, auditSessionId: auditId },
       });
+
+      // `deleteMany` reports zero rows where `delete` would have thrown
+      // P2025, so the count has to be checked explicitly or the scoping change
+      // above would have quietly cost us a concurrency guard: two simultaneous
+      // removals of the same asset would both pass the read, the second would
+      // delete nothing, and it would still decrement the counters and write a
+      // second note. Throwing here rolls the whole transaction back.
+      if (removed.count !== 1) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit asset not found in this audit",
+          additionalData: { auditAssetId, auditId },
+          label,
+          status: 404,
+          shouldBeCaptured: false,
+        });
+      }
 
       // Update audit session counts
       // If it was an expected asset, decrement expectedAssetCount
@@ -2699,9 +3012,13 @@ export async function removeAssetsFromAudit({
         });
       }
 
-      // Fetch the audit assets to get the actual asset IDs
+      // SECURITY (cross-tenant IDOR): same unscoped lookup as the singular
+      // path — see the comment there. The current web caller happens to
+      // resolve these ids itself from `auditSessionId`, so it is safe by
+      // construction, but that is the CALLER's property and not this
+      // function's. Scoping here is what makes it true for every caller.
       const auditAssets = await tx.auditAsset.findMany({
-        where: { id: { in: auditAssetIds } },
+        where: { id: { in: auditAssetIds }, auditSessionId: auditId },
         select: { id: true, assetId: true, expected: true },
       });
 
@@ -2712,10 +3029,36 @@ export async function removeAssetsFromAudit({
       const assetIds = auditAssets.map((aa) => aa.assetId);
       const expectedCount = auditAssets.filter((aa) => aa.expected).length;
 
-      // Delete the audit assets (cascade will delete related scans)
-      await tx.auditAsset.deleteMany({
-        where: { id: { in: auditAssetIds } },
+      // Delete only the rows just PROVEN to belong to this audit, rather than
+      // the caller's original id list — a foreign id in the input must not
+      // reach the delete even though it was filtered out of the counts above.
+      const provenAuditAssetIds = auditAssets.map((aa) => aa.id);
+      const removed = await tx.auditAsset.deleteMany({
+        where: { id: { in: provenAuditAssetIds }, auditSessionId: auditId },
       });
+
+      // Same reasoning as the singular path. `expectedCount` was derived from
+      // the READ, so if a concurrent removal took some of these rows first,
+      // decrementing by it would overshoot — and the `expected` flag needed to
+      // pick the right counter cannot be recovered from a row that is already
+      // gone. Aborting and letting the caller retry keeps the counters honest;
+      // silently proceeding would corrupt audit totals, which is the thing
+      // this whole path exists to keep accurate.
+      if (removed.count !== provenAuditAssetIds.length) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Some of those assets were removed by someone else while this request was running. Nothing was changed — please reload the audit and try again.",
+          additionalData: {
+            auditId,
+            expected: provenAuditAssetIds.length,
+            removed: removed.count,
+          },
+          label,
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
 
       // Update audit session counts
       if (expectedCount > 0) {

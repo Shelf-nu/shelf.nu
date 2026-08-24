@@ -33,11 +33,20 @@ export type FieldChangeAction =
   | "ASSET_TAGS_CHANGED"
   | "ASSET_STATUS_CHANGED"
   | "ASSET_VALUATION_CHANGED"
+  | "ASSET_QUANTITY_CHANGED"
+  | "ASSET_MIN_QUANTITY_CHANGED"
   | "ASSET_CUSTOM_FIELD_CHANGED"
   | "ASSET_PREFERRED_BARCODE_CHANGED"
   | "BOOKING_STATUS_CHANGED"
   | "BOOKING_DATES_CHANGED"
   | "AUDIT_DUE_DATE_CHANGED"
+  // Not named `*_CHANGED`, but shaped like one on purpose: this is a per-field
+  // audit change (today only `status`, when a scan resumes a PENDING audit that
+  // already has a `startedAt`). Listing it here rather than in
+  // `GenericEventInput` is what stops it becoming the umbrella "audit was
+  // updated somehow" event that `record-event-payload-shapes` forbids —
+  // `count(action, field)` has to stay answerable without parsing JSON.
+  | "AUDIT_UPDATED"
   | "ORGANIZATION_QR_ID_DISPLAY_PREFERENCE_CHANGED";
 
 /** Fields shared by every event input. */

@@ -15,6 +15,7 @@
   },
   "scripts": {
     "build": "prisma generate",
+    "test": "node --import tsx --test",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:prepare-migration": "prisma generate && prisma migrate dev --create-only --skip-seed && tsx src/post-migration.ts",

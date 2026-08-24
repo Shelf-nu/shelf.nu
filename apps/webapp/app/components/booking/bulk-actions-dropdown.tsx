@@ -5,6 +5,7 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isBookingArchivable } from "~/modules/booking/helpers";
 import { isFormProcessing } from "~/utils/form";
 import {
   PermissionAction,
@@ -53,9 +54,16 @@ function ConditionalDropdown() {
     (booking) => booking.status === "DRAFT"
   );
 
-  const allBookingAreCompleted = selectedBookings.every(
-    (b) => b.status === "COMPLETE"
-  );
+  /**
+   * Archive is enabled only when every selected booking is archivable —
+   * COMPLETE, or a RESERVED booking whose end date has passed. The server
+   * re-checks via {@link isBookingArchivable}; this is the matching UI gate.
+   */
+  const allBookingsArchivable =
+    selectedBookings.length > 0 &&
+    selectedBookings.every((b) =>
+      isBookingArchivable({ status: b.status, to: b.to })
+    );
 
   const cancelIsDisabled = selectedBookings.some((b) =>
     [
@@ -79,7 +87,7 @@ function ConditionalDropdown() {
     action: PermissionAction.archive,
   });
 
-  const archiveDisabled = !allBookingAreCompleted || !canArchiveBooking;
+  const archiveDisabled = !allBookingsArchivable || !canArchiveBooking;
 
   /** Base users dont have permissions to delete bookings unless they are draft */
   const deleteDisabled = (isBase && !someBookingInDraft) || isBase || isLoading;
@@ -183,7 +191,7 @@ function ConditionalDropdown() {
                   archiveDisabled
                     ? {
                         reason:
-                          "Some of the selected bookings are not completed. You can only archive bookings that are completed.",
+                          "Some selected bookings can't be archived. You can only archive completed bookings, or reserved bookings whose end date has passed.",
                       }
                     : isLoading
                 }

@@ -32,6 +32,7 @@ import {
 } from "~/modules/auth/service.server";
 
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import type { DetectedFormatPrefs } from "~/utils/date-format";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError, isNotFoundError } from "~/utils/error";
@@ -228,12 +229,15 @@ export async function createUserOrAttachOrg({
   firstName,
   lastName,
   createdWithInvite = false,
+  formatPrefs,
 }: Pick<User, "email" | "firstName"> &
   Partial<Pick<User, "lastName">> & {
     organizationId: Organization["id"];
     roles: OrganizationRoles[];
     password: string;
     createdWithInvite: boolean;
+    /** Browser-detected prefs threaded down from the invite-accept action. */
+    formatPrefs?: DetectedFormatPrefs;
   }) {
   try {
     const shelfUser = await db.user.findFirst({
@@ -276,6 +280,7 @@ export async function createUserOrAttachOrg({
         firstName,
         lastName,
         createdWithInvite,
+        formatPrefs,
       });
 
       await ensureAssetIndexModeForRole({
@@ -347,7 +352,9 @@ export async function createUserFromSSO(
       zipPostalCode?: string;
       countryRegion?: string;
     };
-  }
+  },
+  /** Browser-detected prefs from the SSO callback action; stamped on the new row. */
+  formatPrefs?: DetectedFormatPrefs
 ) {
   try {
     const { email, userId } = authSession;
@@ -362,6 +369,7 @@ export async function createUserFromSSO(
       userId,
       username: randomUsernameFromEmail(email),
       isSSO: true,
+      formatPrefs,
     });
 
     // Update contact information if provided
@@ -451,14 +459,31 @@ async function handleSCIMTransition(
   try {
     if (!desiredRole) {
       // User has no valid SCIM groups, revoke access
-      await db.userOrganization.delete({
-        where: {
-          userId_organizationId: {
-            userId,
-            organizationId: organization.id,
-          },
-        },
+      const deleted = await deleteMembershipUnlessOwner({
+        userId,
+        organizationId: organization.id,
       });
+
+      if (deleted === 0) {
+        /**
+         * The workspace owner lost their SCIM groups. Removing them would
+         * strand the workspace with no owner and no way back, and this runs
+         * during SSO login — throwing would lock the owner out of their own
+         * workspace on the way in. Keep the access and make the divergence
+         * loud instead; an operator must transfer ownership before the IdP
+         * can deprovision them.
+         */
+        Logger.warn({
+          message:
+            "SCIM would have revoked the workspace owner's access; kept it and skipped the revocation",
+          additionalData: { userId, organizationId: organization.id },
+        });
+
+        transition.transitionType = "ROLE_CHANGE";
+        transition.newRole = currentRoles[0];
+
+        return transition;
+      }
 
       transition.transitionType = "ACCESS_REVOKED";
 
@@ -519,6 +544,46 @@ async function handleSCIMTransition(
  * Updates an existing SSO user on subsequent logins.
  * Handles both Pure SSO and SCIM SSO scenarios for multiple domains.
  */
+/**
+ * Whether SCIM has deliberately deactivated this user in this organization.
+ *
+ * SCIM represents deactivation as "mapping row survives, membership removed"
+ * (see `~/modules/scim/service.server`), so a `UserScimExternalId` with no
+ * matching `UserOrganization` is a user the IdP has switched off — not one who
+ * was never provisioned.
+ *
+ * The distinction matters on SSO login: without it, group claims that still
+ * grant a role would immediately re-create the membership SCIM just removed,
+ * letting a deprovisioned user back in — potentially as an admin — whenever
+ * group propagation lags behind the SCIM deactivation, or whenever group
+ * membership is managed separately from SCIM scoping. A user SCIM never touched
+ * has no mapping, so normal SSO provisioning is unaffected.
+ *
+ * This infers state rather than reading it; an explicit SCIM lifecycle column is
+ * the robust fix and is deferred to the lifecycle-state work.
+ *
+ * @param userId - The Shelf user signing in
+ * @param organizationId - The org whose group mapping matched
+ * @returns `true` when SCIM manages this user here and has removed their access
+ */
+async function isScimDeactivated(
+  userId: string,
+  organizationId: string
+): Promise<boolean> {
+  const mapping = await db.userScimExternalId.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { id: true },
+  });
+
+  if (mapping) {
+    Logger.info(
+      `SSO login: skipping role grant for user ${userId} in org ${organizationId} — SCIM has deactivated them`
+    );
+  }
+
+  return !!mapping;
+}
+
 export async function updateUserFromSSO(
   authSession: AuthSession,
   existingUser: Prisma.UserGetPayload<{
@@ -586,10 +651,6 @@ export async function updateUserFromSSO(
           (uo) => uo.organization.id === org.id
         );
 
-        if (desiredRole) {
-          firstMatchedOrg ??= org;
-        }
-
         if (existingOrgAccess) {
           const transition = await handleSCIMTransition(
             userId,
@@ -598,7 +659,14 @@ export async function updateUserFromSSO(
             desiredRole
           );
           transitions.push(transition);
-        } else if (desiredRole) {
+
+          // The user keeps access only when a role still maps; a null
+          // desiredRole makes handleSCIMTransition revoke it, so that org must
+          // not become the post-login landing org.
+          if (desiredRole) {
+            firstMatchedOrg ??= org;
+          }
+        } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
           await createUserOrgAssociation(db, {
             userId: user.id,
             organizationIds: [org.id],
@@ -618,7 +686,13 @@ export async function updateUserFromSSO(
             newRole: desiredRole,
             transitionType: "ACCESS_GRANTED",
           });
+
+          // Access was just granted, so this org is a valid landing org.
+          firstMatchedOrg ??= org;
         }
+        // Deliberately no `firstMatchedOrg` assignment when the grant is blocked
+        // (SCIM-deactivated user): returning an org the user cannot access sends
+        // the SSO callback to a 403 instead of /sso-pending-assignment.
       }
     }
 
@@ -657,6 +731,9 @@ export async function createUser(
     lastName?: User["lastName"];
     isSSO?: boolean;
     createdWithInvite?: boolean;
+    /** Browser-detected prefs to stamp on the new row; undefined → resolved at read time. */
+    formatPrefs?: DetectedFormatPrefs;
+    skipPersonalOrg?: boolean;
   }
 ) {
   const {
@@ -669,12 +746,15 @@ export async function createUser(
     lastName,
     isSSO,
     createdWithInvite,
+    formatPrefs,
+    skipPersonalOrg,
   } = payload;
 
   /**
    * We only create a personal org if the signup is not disabled
-   * */
-  const shouldCreatePersonalOrg = !config.disableSignup;
+   * and the caller hasn't opted out (e.g. SCIM provisioning)
+   */
+  const shouldCreatePersonalOrg = !skipPersonalOrg && !config.disableSignup;
 
   try {
     const createdUser = await db.$transaction(
@@ -687,6 +767,9 @@ export async function createUser(
             firstName,
             lastName,
             createdWithInvite,
+            // Stamp browser-detected date/time/week/timezone prefs when supplied.
+            // `{...undefined}` is a no-op, so unset prefs leave the columns null.
+            ...formatPrefs,
             roles: {
               connect: {
                 name: Roles["USER"],
@@ -795,6 +878,65 @@ export async function createUser(
   } catch (cause) {
     const isUniqueViolation =
       cause instanceof PrismaClientKnownRequestError && cause.code === "P2002";
+
+    /**
+     * Idempotency on `id` (SHELF-WEBAPP-1EA): a P2002 unique-constraint
+     * violation raised on the primary key means a `User` row already exists for
+     * this Supabase auth id — e.g. a re-signup, or a prior partial signup whose
+     * stored email differs from the OTP email, so the route's email-keyed race
+     * guard missed it. The `user.create` and ALL its side-effects (personal
+     * org, org association, team member, asset index settings) run inside one
+     * `$transaction`, so the P2002 rolled the whole thing back. Return the
+     * pre-existing row (using the exact same select shape the create returns)
+     * instead of failing the signup.
+     *
+     * ONE piece of state still needs reconciling: for invite/SSO callers
+     * (`organizationId` present), the rolled-back transaction never created the
+     * requested org association, so a concurrent P2002 race would otherwise
+     * return the existing user un-attached to the org they were invited to. We
+     * re-attach that association idempotently below (only when they aren't
+     * already a member). The personal-org / OTP self-signup case has no
+     * `organizationId`, so there is nothing to reconcile there.
+     *
+     * We deliberately do NOT re-fire the `signup_completed` analytics event on
+     * this path: no new account was created. If the lookup unexpectedly finds
+     * no row (P2002 on some OTHER unique field, e.g. `email`, with no row for
+     * this `id`), that is a genuine conflict — fall through and throw.
+     */
+    if (isUniqueViolation) {
+      const existingUser = await db.user.findUnique({
+        where: { id: userId },
+        select: {
+          ...USER_WITH_SSO_DETAILS_SELECT,
+          organizations: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      });
+
+      if (existingUser) {
+        // The rolled-back transaction never created the org association. For
+        // invite/SSO callers (organizationId present), a concurrent P2002 race
+        // would otherwise leave the existing user un-attached to the requested
+        // org. Reconcile idempotently — only attach when not already a member
+        // (the membership check avoids re-pushing roles via the upsert's
+        // `push` update branch). SHELF-WEBAPP-1EA follow-up.
+        if (
+          organizationId &&
+          !existingUser.organizations.some((org) => org.id === organizationId)
+        ) {
+          await createUserOrgAssociation(db, {
+            userId,
+            organizationIds: [organizationId],
+            roles: roles ?? [],
+          });
+          existingUser.organizations.push({ id: organizationId });
+        }
+        return existingUser;
+      }
+    }
 
     throw new ShelfError({
       cause,
@@ -1181,6 +1323,7 @@ export async function softDeleteUser(id: User["id"]) {
             id,
             newOwnerId,
             organizationId: userOrg.organizationId,
+            reason: "removal",
           });
         }
         /**
@@ -1309,6 +1452,46 @@ export async function createUserAccountForTesting(
   return authSession;
 }
 
+/**
+ * Deletes a user's membership row unless they own the workspace.
+ *
+ * A workspace must always have an owner, and deleting the owner's
+ * `UserOrganization` row is a one-way door: it is the record
+ * `transferOwnership` looks up to hand ownership on. Once gone,
+ * `Organization.userId` still names the ex-owner but they have no membership,
+ * so they get a 403 and no transfer path can run.
+ *
+ * The owner condition lives **in the DELETE itself** rather than in a preceding
+ * read. A check-then-delete loses to an ownership transfer that commits in
+ * between: the read sees ADMIN, the transfer promotes them to OWNER, and the
+ * unqualified delete removes the new owner anyway. As a conditional delete this
+ * is a compare-and-set — Postgres re-evaluates the qualification against the
+ * committed row version, so the race arm matches nothing.
+ *
+ * @param args - The membership to remove
+ * @param client - Transaction client, when the caller needs this to commit with
+ *   other writes
+ * @returns Number of rows deleted: 0 means the user owns the workspace or has
+ *   no membership — the caller must decide which and how to react
+ */
+async function deleteMembershipUnlessOwner(
+  {
+    userId,
+    organizationId,
+  }: { userId: User["id"]; organizationId: Organization["id"] },
+  client: Omit<ExtendedPrismaClient, ITXClientDenyList> = db
+) {
+  const { count } = await client.userOrganization.deleteMany({
+    where: {
+      userId,
+      organizationId,
+      NOT: { roles: { has: OrganizationRoles.OWNER } },
+    },
+  });
+
+  return count;
+}
+
 export async function revokeAccessToOrganization({
   userId,
   organizationId,
@@ -1318,6 +1501,32 @@ export async function revokeAccessToOrganization({
 }) {
   try {
     /**
+     * Read first purely so the common case gets an actionable message instead
+     * of a generic failure. {@link deleteMembershipUnlessOwner} is what
+     * actually enforces the rule — this read can go stale.
+     *
+     * This mirrors `changeUserRole`, which already refuses to touch the OWNER
+     * and points the caller at ownership transfer.
+     */
+    const targetUserOrg = await db.userOrganization.findFirst({
+      where: { userId, organizationId },
+      select: { roles: true },
+    });
+
+    if (targetUserOrg?.roles.includes(OrganizationRoles.OWNER)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Cannot revoke the owner's access",
+        message:
+          "This user owns the workspace. Transfer ownership to someone else first, then revoke their access.",
+        additionalData: { userId, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
      * if I want to revokeAccess access, i simply need to:
      * 1. Remove relation between user and team member
      * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
@@ -1326,25 +1535,50 @@ export async function revokeAccessToOrganization({
       where: { userId, organizationId },
     });
 
-    const result = await db.user.update({
-      where: { id: userId },
-      data: {
-        ...(teamMember?.id && {
-          teamMembers: {
-            disconnect: {
-              id: teamMember.id,
+    const result = await db.$transaction(async (tx) => {
+      const deleted = await deleteMembershipUnlessOwner(
+        { userId, organizationId },
+        tx
+      );
+
+      if (deleted === 0) {
+        /**
+         * Either they became the owner since the read above (the race this
+         * conditional delete exists to catch) or they were never a member.
+         * Re-read inside the transaction to tell those apart, so a genuine
+         * ownership race is reported rather than passing silently.
+         */
+        const survivor = await tx.userOrganization.findFirst({
+          where: { userId, organizationId },
+          select: { roles: true },
+        });
+
+        if (survivor) {
+          throw new ShelfError({
+            cause: null,
+            title: "Cannot revoke the owner's access",
+            message:
+              "This user owns the workspace. Transfer ownership to someone else first, then revoke their access.",
+            additionalData: { userId, organizationId },
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      return tx.user.update({
+        where: { id: userId },
+        data: {
+          ...(teamMember?.id && {
+            teamMembers: {
+              disconnect: {
+                id: teamMember.id,
+              },
             },
-          },
-        }),
-        userOrganizations: {
-          delete: {
-            userId_organizationId: {
-              userId,
-              organizationId,
-            },
-          },
+          }),
         },
-      },
+      });
     });
 
     // Clear lastSelectedOrganizationId if it points to the revoked org.
@@ -1368,6 +1602,12 @@ export async function revokeAccessToOrganization({
 
     return result;
   } catch (cause) {
+    // Preserve our own errors — the owner guard above is a 400 the user needs
+    // to read, and rewrapping would turn it into a generic captured 500.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Failed to revoke user access to organization",
@@ -1498,24 +1738,85 @@ export async function changeUserRole({
   }
 }
 
+/**
+ * Why a user's entities are being moved. The two callers have opposite
+ * requirements, so this is required with no default — every call site must
+ * declare intent and the compiler enforces it.
+ *
+ * - `"removal"` — the user is losing workspace access entirely. `Booking.creator`
+ *   and `Booking.custodianUser` are `onDelete: Cascade` FKs, so they must be
+ *   cleared off the departing user. `creatorId` is non-nullable → transferred
+ *   rather than nulled.
+ * - `"demotion"` — the user KEEPS membership; only their role rank drops. The
+ *   `User` row is untouched, so no cascade applies. Only OWNERSHIP columns move.
+ */
+export type EntityTransferReason = "removal" | "demotion";
+
+/**
+ * Prisma `where` selecting the bookings a DEMOTION reassigns to the new owner:
+ * those the user created for a DIFFERENT registered custodian. Shared by
+ * {@link transferEntitiesToNewOwner} (which moves them) and the change-role
+ * dialog's entity-count endpoint (which tells the admin how many will move), so
+ * the number the admin consents to and the rows actually reassigned cannot drift.
+ *
+ * The custodian filter is `IS NOT NULL AND <> userId`, written explicitly rather
+ * than as the terser `{ not: userId }`: a null `custodianUserId` marks the
+ * booking as the user's own — an unassigned draft, or a legacy row held via the
+ * team-member link — which must stay theirs. `{ not: userId }` alone excludes
+ * nulls only because this Prisma version compiles `not` to a bare `<>`; the
+ * explicit `not: null` keeps those rows out regardless of that behaviour. See
+ * the JSDoc on {@link transferEntitiesToNewOwner} for the full rationale.
+ */
+export function bookingsReassignedOnDemotionWhere({
+  userId,
+  organizationId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+}): Prisma.BookingWhereInput {
+  return {
+    creatorId: userId,
+    organizationId,
+    AND: [
+      { custodianUserId: { not: null } },
+      { custodianUserId: { not: userId } },
+    ],
+  };
+}
+
 /** Move entries inside an organization from 1 owner to another.
- * Affects the following models:
- *   - [x] Asset
- *   - [x] Category
- *   - [x] Tag
- *   - [x] Location
- *   - [x] CustomField
- *   - [x] Invite (skippable via `skipInvites`)
- *   - [x] Booking
- *   - [x] Image
- *   - [x] Kit
- *   - [x] AssetReminder
+ *
+ * OWNERSHIP — moved for EVERY `reason`: `Asset`/`Category`/`Tag`/`Location`/
+ * `CustomField`/`Image.userId`, `Kit`/`AssetReminder.createdById`.
+ *
+ * AUTHORSHIP + ASSIGNMENT:
+ * - `removal`: `Invite.inviterId` and `Booking.creatorId` transfer to the new
+ *   owner, and `Booking.custodianUserId` is nulled — a departing user must come
+ *   off every FK before their row is anonymized (`Booking.creator`/`custodianUser`
+ *   are `onDelete: Cascade`; `creatorId` is non-nullable, so it transfers rather
+ *   than nulls).
+ * - `demotion`: the user keeps membership, so `Invite.inviterId` stays theirs
+ *   and `Booking.custodianUserId` is left untouched. `Booking.creatorId`
+ *   transfers ONLY for bookings whose custodian is a DIFFERENT registered user
+ *   — bookings the user created on someone else's behalf. Their own bookings
+ *   keep `creatorId`: either they are the custodian, or there is no registered
+ *   custodian (an unassigned draft, or a legacy row held via the team-member
+ *   link with a null `custodianUserId`).
+ *
+ * Why scope demotion that way: `validateBookingOwnership` grants
+ * SELF_SERVICE/BASE access on `creatorId === userId || custodianUserId === userId`.
+ * Transferring ALL of a demoted user's `creatorId` would hide their own drafts
+ * from them (DRAFT visibility keys solely on `creatorId`) and leak those drafts
+ * to the recipient; keeping ALL of it would let them retain write access to
+ * bookings they created for other people. Moving only the created-for-others
+ * slice avoids both.
+ *
+ * Narrow, accepted residue on `demotion`: a booking created for a NON-registered
+ * member (null `custodianUserId`, custody on the team-member link only) keeps
+ * the demoted user as creator — there is no registered custodian to hand it to.
  *
  * Note: Notes (Note, BookingNote, LocationNote) are intentionally NOT
  * transferred — their userId represents authorship, not ownership.
- *
- * Invites can be skipped via `skipInvites` (used during demotion) because
- * inviterId represents "who sent this" (authorship), not ownership.
  *
  * Required to be used inside a transaction
  */
@@ -1524,13 +1825,13 @@ export async function transferEntitiesToNewOwner({
   id,
   newOwnerId,
   organizationId,
-  skipInvites = false,
+  reason,
 }: {
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
   id: User["id"];
   newOwnerId: User["id"];
   organizationId: Organization["id"];
-  skipInvites?: boolean;
+  reason: EntityTransferReason;
 }) {
   /** Update assets */
   await tx.asset.updateMany({
@@ -1587,8 +1888,14 @@ export async function transferEntitiesToNewOwner({
     },
   });
 
-  /** Update invites (skipped during demotion — inviterId is authorship) */
-  if (!skipInvites) {
+  /**
+   * AUTHORSHIP + ASSIGNMENT rewrites — removal only. On demotion the user
+   * keeps membership, so inviterId (authorship) stays theirs, and the
+   * Booking.creator/custodianUser cascade-defusing rewrites below don't
+   * apply (see the accepted-consequence note in the JSDoc above).
+   */
+  if (reason === "removal") {
+    /** Update invites */
     await tx.invite.updateMany({
       where: {
         inviterId: id,
@@ -1598,29 +1905,48 @@ export async function transferEntitiesToNewOwner({
         inviterId: newOwnerId,
       },
     });
+
+    /** Update bookings */
+    await tx.booking.updateMany({
+      where: {
+        creatorId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        creatorId: newOwnerId,
+      },
+    });
+
+    /** Update bookings where the person deleted is the custodian */
+    await tx.booking.updateMany({
+      where: {
+        custodianUserId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        custodianUserId: null,
+      },
+    });
   }
 
-  /** Update bookings */
-  await tx.booking.updateMany({
-    where: {
-      creatorId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      creatorId: newOwnerId,
-    },
-  });
-
-  /** Update bookings where the person deleted is the custodian */
-  await tx.booking.updateMany({
-    where: {
-      custodianUserId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      custodianUserId: null,
-    },
-  });
+  if (reason === "demotion") {
+    /**
+     * Hand over ONLY the bookings the demoted user created for a different
+     * registered custodian; their own bookings keep `creatorId`. The predicate
+     * (and the reason it is null-safe) lives in
+     * {@link bookingsReassignedOnDemotionWhere}, shared with the count the
+     * change-role dialog shows the admin.
+     */
+    await tx.booking.updateMany({
+      where: bookingsReassignedOnDemotionWhere({
+        userId: id,
+        organizationId,
+      }),
+      data: {
+        creatorId: newOwnerId,
+      },
+    });
+  }
 
   /** Update images */
   await tx.image.updateMany({

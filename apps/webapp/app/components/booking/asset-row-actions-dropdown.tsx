@@ -40,10 +40,32 @@ import { tw } from "~/utils/tw";
 import { AdjustBookingAssetQuantityDialog } from "./adjust-booking-asset-quantity-dialog";
 import { RemoveAssetFromBooking } from "./remove-asset-from-booking";
 
+/**
+ * Windowed QT availability figures for this row's asset, sourced from the
+ * booking-overview loader's `availableUnitsByAsset` map (see
+ * `~/modules/booking/booking-overview-availability.server`). Threaded
+ * through so the "Adjust booked quantity" dialog can show the real
+ * per-booking-window cap (`bookable`) instead of the workspace TOTAL
+ * (`asset.quantity`), plus explain why the cap is lower via `reserved`.
+ * Optional — callers that don't have the map (e.g. legacy list views)
+ * simply omit it and the dialog falls back to `asset.quantity` unexplained,
+ * matching the previous behavior.
+ */
+export interface QtyAvailabilityForRow {
+  /** Real windowed max for this booking's dates — the dialog's new cap. */
+  bookable: number;
+  /** Units held by OTHER bookings within this window (drives the note). */
+  reserved: number;
+  /** Workspace total stock (`Asset.quantity`) — shown as the "of N" figure. */
+  total: number;
+}
+
 interface Props {
   /** The asset. For qty-tracked assets, must include `bookedQuantity` (attached by loader). */
   asset: Asset & { bookedQuantity?: number | null };
   fullWidth?: boolean;
+  /** See {@link QtyAvailabilityForRow}. */
+  qtyAvailability?: QtyAvailabilityForRow;
 }
 
 /**
@@ -76,7 +98,11 @@ const TriggerButton = forwardRef<HTMLButtonElement, TriggerButtonProps>(
 );
 TriggerButton.displayName = "AssetRowActionsTrigger";
 
-const ConditionalActionsDropdown = ({ asset, fullWidth }: Props) => {
+const ConditionalActionsDropdown = ({
+  asset,
+  fullWidth,
+  qtyAvailability,
+}: Props) => {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false);
   const isQtyTracked = isQuantityTracked(asset);
@@ -228,7 +254,14 @@ const ConditionalActionsDropdown = ({ asset, fullWidth }: Props) => {
           assetId={asset.id}
           assetTitle={asset.title}
           currentQuantity={asset.bookedQuantity ?? 1}
-          maxQuantity={asset.quantity ?? undefined}
+          // Real windowed max for this booking's dates when we have it;
+          // falls back to the workspace total (the old, wrong-but-only
+          // option) for callers that don't ship `qtyAvailability`.
+          maxQuantity={qtyAvailability?.bookable ?? asset.quantity ?? undefined}
+          totalQuantity={qtyAvailability?.total}
+          reservedByOthers={qtyAvailability?.reserved}
+          windowFrom={booking.from}
+          windowTo={booking.to}
           unitOfMeasure={asset.unitOfMeasure}
           open={isAdjustDialogOpen}
           onOpenChange={setIsAdjustDialogOpen}
@@ -238,7 +271,11 @@ const ConditionalActionsDropdown = ({ asset, fullWidth }: Props) => {
   );
 };
 
-export const AssetRowActionsDropdown = ({ asset, fullWidth }: Props) => {
+export const AssetRowActionsDropdown = ({
+  asset,
+  fullWidth,
+  qtyAvailability,
+}: Props) => {
   /**
    * SSR fallback: render a static trigger until hydration so server and
    * client markup agree. Matches the pattern in `location/actions-dropdown`
@@ -264,7 +301,11 @@ export const AssetRowActionsDropdown = ({ asset, fullWidth }: Props) => {
         fullWidth ? "w-full" : ""
       )}
     >
-      <ConditionalActionsDropdown asset={asset} fullWidth={fullWidth} />
+      <ConditionalActionsDropdown
+        asset={asset}
+        fullWidth={fullWidth}
+        qtyAvailability={qtyAvailability}
+      />
     </div>
   );
 };

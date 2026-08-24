@@ -1,3 +1,8 @@
+import {
+  ASSET_STATUS_LABELS,
+  BOOKING_RESERVE_BLOCKED_LABELS,
+  BOOKING_STATUS_LABELS,
+} from "@shelf/labels";
 import { useState, useCallback, useRef } from "react";
 import {
   View,
@@ -16,6 +21,8 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { pushIntoTab } from "@/lib/navigation";
+import { formatPersonName } from "@/lib/person-name";
+import { TagChip } from "@/components/tag-chip";
 import {
   consumeBookingDirty,
   markBookingsListDirty,
@@ -30,13 +37,8 @@ import {
   type CheckinDisposition,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
-import {
-  fontSize,
-  spacing,
-  borderRadius,
-  formatStatus,
-  formatDateTime,
-} from "@/lib/constants";
+import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { BookingDetailSkeleton } from "@/components/skeleton-loader";
@@ -79,15 +81,19 @@ function getBookingAssetState({
   const checkedOut = booked - clampedOut; // units taken from the workspace
   const checkedIn = booked - clampedIn; // units reconciled back in
 
+  // why: the labels that name a real status read from @shelf/labels. The
+  // fraction forms and "Returned" stay bespoke — they are booking-scoped
+  // progress, not statuses, so the package has no entry for them.
   if (booked <= 0 || checkedOut <= 0) {
     return bookingStatus === "DRAFT"
-      ? { key: "DRAFT", label: "Draft" }
-      : { key: "RESERVED", label: "Reserved" };
+      ? { key: "DRAFT", label: BOOKING_STATUS_LABELS.DRAFT }
+      : { key: "RESERVED", label: BOOKING_STATUS_LABELS.RESERVED };
   }
   if (checkedIn >= booked) return { key: "COMPLETE", label: "Returned" };
   if (checkedIn > 0)
     return { key: "ONGOING", label: `${checkedIn}/${booked} returned` };
-  if (checkedOut >= booked) return { key: "ONGOING", label: "Checked out" };
+  if (checkedOut >= booked)
+    return { key: "ONGOING", label: ASSET_STATUS_LABELS.CHECKED_OUT };
   return { key: "ONGOING", label: `${checkedOut}/${booked} out` };
 }
 
@@ -110,6 +116,7 @@ export default function BookingDetailScreen() {
   const { currentOrg } = useOrg();
   const { colors, statusBadge, bookingStatusBadge } = useTheme();
   const styles = useStyles();
+  const { formatDateTime } = useDateFormatter();
 
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [checkedInAssetIds, setCheckedInAssetIds] = useState<string[]>([]);
@@ -212,6 +219,19 @@ export default function BookingDetailScreen() {
     announce("Content refreshed");
   };
 
+  /**
+   * The DEVICE zone, deliberately — not the user's preference zone.
+   *
+   * The booking action endpoints take this as a client HINT, standing in for
+   * the `CH-time-zone` cookie a native client cannot set. Web fills the same
+   * field from `getClientHint(request)`, which is also the device. Sending the
+   * preference zone here would make the two platforms disagree on one request
+   * field for no gain.
+   *
+   * The booking FORM screens are the opposite case and use `prefs.timeZone`:
+   * there the zone is not a hint, it is the encoding of a wall-clock string
+   * the user typed. Don't unify the two.
+   */
   const getTimeZone = () => {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -832,17 +852,38 @@ export default function BookingDetailScreen() {
             <Text style={styles.assetTitle} numberOfLines={1}>
               {item.title}
             </Text>
-            {item.type === "QUANTITY_TRACKED" && (
-              <QuantityBadge
-                value={item.quantity}
-                unitOfMeasure={item.unitOfMeasure}
-                label="booked"
-              />
-            )}
-            {item.kit && (
-              <Text style={styles.assetKit} numberOfLines={1}>
-                Kit: {item.kit.name}
-              </Text>
+            {item.type === "QUANTITY_TRACKED" &&
+            item.slices &&
+            item.slices.length > 1 ? (
+              <View style={styles.sliceList}>
+                {item.slices.map((slice) => (
+                  <View key={slice.bookingAssetId} style={styles.sliceRow}>
+                    <QuantityBadge
+                      value={slice.quantity}
+                      unitOfMeasure={item.unitOfMeasure}
+                      label="booked"
+                    />
+                    <Text style={styles.assetKit} numberOfLines={1}>
+                      {slice.kit ? `Kit: ${slice.kit.name}` : "Standalone"}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <>
+                {item.type === "QUANTITY_TRACKED" && (
+                  <QuantityBadge
+                    value={item.quantity}
+                    unitOfMeasure={item.unitOfMeasure}
+                    label="booked"
+                  />
+                )}
+                {item.kit && (
+                  <Text style={styles.assetKit} numberOfLines={1}>
+                    Kit: {item.kit.name}
+                  </Text>
+                )}
+              </>
             )}
             {item.category && (
               <Text style={styles.assetCategory} numberOfLines={1}>
@@ -902,12 +943,38 @@ export default function BookingDetailScreen() {
     text: colors.muted,
   };
 
+  /**
+   * Why Reserve is unavailable, or null when it is fine. Mirrors all THREE of
+   * the web form's disable rules so the app never offers a tap the server
+   * refuses: a booking with neither assets nor model reservations reserves
+   * nothing, an asset flagged unavailable is unavailable on either surface,
+   * and an asset already booked for this window conflicts on either surface.
+   *
+   * The first two are decided from rows this screen already holds. The third
+   * cannot be — it needs the overlapping-booking query — so the server sends
+   * it as a flag. `?? false` keeps a not-yet-updated server (rolling deploy,
+   * field absent) on the old behavior rather than blocking Reserve outright.
+   *
+   * All three are enforced server-side too: the first two in
+   * `bookings.reserve.ts`, the third by `reserveBooking`'s race-safe conflict
+   * check, which names the offending assets.
+   *
+   * `booking` is non-null here — the early return above already handled it.
+   */
+  const reserveBlockedReason: string | null =
+    booking.assetCount === 0 && (booking.modelRequestCount ?? 0) === 0
+      ? BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE
+      : booking.assets.some((a) => a.availableToBook === false)
+      ? BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS
+      : booking.hasAlreadyBookedAssets ?? false
+      ? BOOKING_RESERVE_BLOCKED_LABELS.ALREADY_BOOKED
+      : null;
+
+  const creatorName = formatPersonName(booking.creator);
+
   const custodianName =
     booking.custodianTeamMember?.name ||
-    [booking.custodianUser?.firstName, booking.custodianUser?.lastName]
-      .filter(Boolean)
-      .join(" ") ||
-    null;
+    formatPersonName(booking.custodianUser);
 
   // Lifecycle counts for the progress bar: every asset is in exactly one of three
   // states. `checkedOutCount` (status === CHECKED_OUT) already EXCLUDES returned
@@ -932,16 +999,6 @@ export default function BookingDetailScreen() {
   // omits the card rather than crashing.
   const lp = booking.lifecycleProgress ?? null;
 
-  // Progressive check-out stays available while the booking is active AND still
-  // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
-  // RESERVED/ONGOING/OVERDUE, but the loader's `canCheckout` is RESERVED-only (it
-  // gates the full "Check Out All" button), so we derive our own flag for the
-  // partial path — otherwise "Select to Check Out" disappears the moment the
-  // first batch flips the booking to ONGOING.
-  const canPartialCheckout =
-    reservedCount > 0 &&
-    ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
-
   // Book-by-model reservations still awaiting assignment. Fulfilled rows
   // (`fulfilledAt` set) are hidden here — the concrete assets they became
   // already appear in the assets list, so showing them too would double up.
@@ -952,6 +1009,24 @@ export default function BookingDetailScreen() {
   const outstandingModelRequests = (booking.modelRequests ?? []).filter(
     (mr) => mr.fulfilledAt === null
   );
+  // A booking with unfulfilled model reservations can't be checked out at all
+  // (full OR partial): the shared checkout service hard-blocks RESERVED →
+  // ONGOING until every request is assigned to concrete assets. So gate BOTH
+  // checkout paths on this — the app surfaces an "Assign to check out" CTA
+  // instead of a checkout the server would reject. (`canCheckout` from the
+  // loader already accounts for this; `canPartialCheckout` is derived here.)
+  const hasOutstandingModelRequests = outstandingModelRequests.length > 0;
+
+  // Progressive check-out stays available while the booking is active AND still
+  // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
+  // RESERVED/ONGOING/OVERDUE, but the loader's `canCheckout` is RESERVED-only (it
+  // gates the full "Check Out All" button), so we derive our own flag for the
+  // partial path — otherwise "Select to Check Out" disappears the moment the
+  // first batch flips the booking to ONGOING.
+  const canPartialCheckout =
+    reservedCount > 0 &&
+    !hasOutstandingModelRequests &&
+    ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
   // Same gate the manage buttons use: an editable booking, and self-service
   // users only on their own DRAFTs (server re-checks ownership + status).
@@ -1058,6 +1133,11 @@ export default function BookingDetailScreen() {
                     {booking.assetCount} total
                     {booking.checkedOutCount > 0 &&
                       `, ${booking.checkedOutCount} checked out`}
+                    {/* Book-by-model: surface reserved-but-not-yet-assigned
+                        units so "0 total" never reads as an empty booking when
+                        it actually holds a reservation. */}
+                    {booking.outstandingModelUnitCount > 0 &&
+                      `, ${booking.outstandingModelUnitCount} reserved`}
                   </Text>
                 </View>
 
@@ -1072,7 +1152,34 @@ export default function BookingDetailScreen() {
                     <Text style={styles.infoValue}>{custodianName}</Text>
                   </View>
                 )}
+
+                {/* why: web shows who created the booking on this same screen,
+                    and the field was already in the payload — fetched, then
+                    dropped. Custodian and creator are different people often
+                    enough that showing only one is misleading. */}
+                {creatorName ? (
+                  <View style={styles.infoRow}>
+                    <Ionicons
+                      name="create-outline"
+                      size={15}
+                      color={colors.muted}
+                    />
+                    <Text style={styles.infoLabel}>Created by</Text>
+                    <Text style={styles.infoValue}>{creatorName}</Text>
+                  </View>
+                ) : null}
               </View>
+
+              {/* Tag names were already in the payload and shown by web; the
+                  colour they are keyed by was not, and was added with the
+                  chip so the phone can tell two tags apart the way web can. */}
+              {booking.tags?.length ? (
+                <View style={styles.tagRow}>
+                  {booking.tags.map((tag) => (
+                    <TagChip key={tag.id} tag={tag} />
+                  ))}
+                </View>
+              ) : null}
             </View>
 
             {/* Lifecycle progress: reserved → out → returned (single bar) */}
@@ -1178,6 +1285,16 @@ export default function BookingDetailScreen() {
                 </View>
               </View>
             )}
+            {/* why visible rather than only in an alert: the disabled Reserve
+                  button was a dead control - tapping it produced nothing on
+                  device, so the one thing a user needs (what to fix) was
+                  unreachable. Stating it here does not depend on a tap firing,
+                  and it is readable before you even reach for the button. */}
+            {booking.status === "DRAFT" && reserveBlockedReason ? (
+              <Text style={styles.reserveBlockedNote}>
+                {reserveBlockedReason}
+              </Text>
+            ) : null}
 
             {/* Action buttons */}
             {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(
@@ -1202,9 +1319,22 @@ export default function BookingDetailScreen() {
 
                 {booking.status === "DRAFT" && (
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.manageRowItem]}
+                    style={[
+                      styles.actionButton,
+                      styles.manageRowItem,
+                      reserveBlockedReason ? styles.actionButtonDisabled : null,
+                    ]}
+                    // why: `disabled` is the real prop. Setting only
+                    // `accessibilityState={{ disabled }}` ALSO disables the
+                    // touchable — RN's `_createPressabilityConfig` falls back
+                    // to it — which silently made an onPress fallback here
+                    // unreachable. RN copies this prop back into
+                    // `accessibilityState`, so screen readers still announce
+                    // the disabled state without setting it by hand.
+                    disabled={!!reserveBlockedReason}
                     onPress={handleReserve}
                     accessibilityLabel="Reserve this booking"
+                    accessibilityHint={reserveBlockedReason ?? undefined}
                     accessibilityRole="button"
                   >
                     <Ionicons
@@ -1396,6 +1526,54 @@ export default function BookingDetailScreen() {
                 </Text>
               </TouchableOpacity>
             )}
+
+            {/* Book-by-model: a RESERVED booking with unfulfilled reservations
+                has no plain checkout button (the server hard-blocks checkout
+                until every reserved unit is assigned to a concrete asset).
+                Route the operator to the fulfil-and-check-out SCANNER
+                (`bookingAction=fulfil`): it shows what's reserved, they scan
+                the physical units, and on submit the reservations are
+                materialised AND the booking is checked out in one atomic call
+                (`fulfilModelRequestsAndCheckout`) — full web parity with the
+                web `fulfil-and-checkout` scanner. Scan-first IS the point of
+                book-by-model: reserve the count now, scan the items when you
+                grab them, no browse picker. (Browse to Add above stays for
+                hand-picking.) Gated `!isSelfService` to match the add/browse
+                affordances above: a self-service custodian can only edit a
+                DRAFT booking, so on a RESERVED booking the assign+checkout flow
+                can't succeed for them — showing the CTA would just lead to a
+                rejected submit. */}
+            {!isSelfService &&
+              booking.status === "RESERVED" &&
+              hasOutstandingModelRequests && (
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() =>
+                    router.push(
+                      `/(tabs)/scanner?bookingId=${
+                        booking.id
+                      }&bookingName=${encodeURIComponent(
+                        booking.name
+                      )}&bookingAction=fulfil`
+                    )
+                  }
+                  accessibilityLabel={`Scan to assign ${
+                    booking.outstandingModelUnitCount
+                  } reserved unit${
+                    booking.outstandingModelUnitCount === 1 ? "" : "s"
+                  } and check out`}
+                  accessibilityRole="button"
+                >
+                  <Ionicons
+                    name="scan"
+                    size={18}
+                    color={colors.primaryForeground}
+                  />
+                  <Text style={styles.actionButtonText}>
+                    Scan to assign & check out
+                  </Text>
+                </TouchableOpacity>
+              )}
 
             {canCheckin && (
               <View style={styles.checkinActions}>
@@ -1888,6 +2066,12 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
     lineHeight: 20,
   },
+  tagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
   infoRows: {
     gap: spacing.sm,
   },
@@ -1994,6 +2178,25 @@ const useStyles = createStyles((colors, shadows) => ({
   manageRow: {
     flexDirection: "row",
     gap: spacing.sm,
+  },
+  // The blocking reason is the ONLY thing that tells the user why Reserve is
+  // greyed out, so it is styled as a warning callout rather than as incidental
+  // metadata. `warningText` is the token picked for WCAG AA contrast on light
+  // surfaces (see theme-colors.ts); `muted` at xs read as a caption nobody
+  // looked at.
+  reserveBlockedNote: {
+    fontSize: fontSize.sm,
+    color: colors.warningText,
+    backgroundColor: colors.warningBg,
+    borderRadius: 8,
+    padding: spacing.sm,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.sm,
+    lineHeight: 16,
+  },
+  actionButtonDisabled: {
+    opacity: 0.45,
   },
   manageRowItem: {
     flex: 1,
@@ -2134,6 +2337,14 @@ const useStyles = createStyles((colors, shadows) => ({
   assetKit: {
     fontSize: fontSize.xs,
     color: colors.checkedOut,
+  },
+  sliceList: {
+    gap: 2,
+  },
+  sliceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   assetCategory: {
     fontSize: fontSize.xs,

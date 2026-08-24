@@ -1,3 +1,4 @@
+import Markdoc from "@markdoc/markdoc";
 import { action } from "~/routes/api+/mobile+/asset.create";
 import { createActionArgs } from "@mocks/remix";
 
@@ -77,6 +78,18 @@ vi.mock("~/modules/tag/service.server", () => ({
   })),
 }));
 
+// why: the route writes the two creation notes web writes. Mock the module so
+// tests assert the note contract itself rather than exercising Prisma; the
+// db mock below deliberately has no `note` model.
+vi.mock("~/modules/note/service.server", () => ({
+  createNote: vi.fn().mockResolvedValue({ id: "note-1" }),
+}));
+
+// why: the route logs a swallowed note failure; keep it off the test output.
+vi.mock("~/utils/logger", () => ({
+  Logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+}));
+
 // why: error utility — we mock to control error formatting in tests
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn((cause: any) => ({
@@ -98,6 +111,8 @@ import {
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
 import { createAsset } from "~/modules/asset/service.server";
+import { createNote } from "~/modules/note/service.server";
+import { Logger } from "~/utils/logger";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { extractCustomFieldValuesFromPayload } from "~/utils/custom-fields";
 import { assertTagsAssignableToAssets } from "~/utils/org-validation.server";
@@ -127,6 +142,75 @@ function createRequest(
   });
 }
 
+/**
+ * The shape `createAsset` actually resolves to. It includes `user` and the
+ * `assetLocations` pivot, so a bare `{ id, title }` mock is a lie that lets a
+ * route read an undefined field and still pass. Keep this in step with the
+ * `include` in createAsset.
+ */
+type CreatedAsset = Awaited<ReturnType<typeof createAsset>>;
+
+/**
+ * One `assetLocations` row. The route reads `location.id`, `location.name` and
+ * the row's own `quantity` (the multiplier the note phrasing uses for a
+ * quantity-tracked asset), so the cast is confined here rather than repeated at
+ * every call site.
+ */
+function assetLocationRow(
+  id: string,
+  name: string,
+  quantity = 1
+): CreatedAsset["assetLocations"][number] {
+  return {
+    location: { id, name },
+    quantity,
+  } as unknown as CreatedAsset["assetLocations"][number];
+}
+
+/**
+ * One `user` row. `createAsset` includes `user: true`, so the real type is the
+ * full Prisma User (~14 scalars). The cast is confined here — same pattern as
+ * `assetLocationRow` — so call sites stay typed and a typo in a name field is
+ * still a compile error.
+ */
+function assetUserRow(
+  overrides: Partial<
+    Pick<CreatedAsset["user"], "id" | "displayName" | "firstName" | "lastName">
+  > = {}
+): CreatedAsset["user"] {
+  return {
+    id: "user-1",
+    displayName: null,
+    firstName: "Carlos",
+    lastName: "Virreira",
+    ...overrides,
+  } as unknown as CreatedAsset["user"];
+}
+
+function createdAsset(overrides: Partial<CreatedAsset> = {}): CreatedAsset {
+  return {
+    id: "asset-1",
+    title: "New Laptop",
+    // The full User row, as createAsset's `user: true` include returns it —
+    // `displayName` included, because the note wrapper prefers it and a fixture
+    // without the field cannot show that the route drops it.
+    user: assetUserRow(),
+    type: "INDIVIDUAL",
+    unitOfMeasure: null,
+    assetLocations: [],
+    ...overrides,
+    // The fixture carries only the fields this route reads. The single cast
+    // lives here so call sites stay typed: a typo in `overrides` is a compile
+    // error, which is what would have caught the missing `user` in the first
+    // place.
+  } as unknown as CreatedAsset;
+}
+
+/** The `content` of each note the route wrote, in the order it wrote them. */
+function noteContents(): string[] {
+  return vi.mocked(createNote).mock.calls.map(([args]) => args.content);
+}
+
 describe("POST /api/mobile/asset/create", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -144,10 +228,7 @@ describe("POST /api/mobile/asset/create", () => {
   });
 
   it("should create an asset and return its id and title", async () => {
-    (createAsset as any).mockResolvedValue({
-      id: "asset-1",
-      title: "New Laptop",
-    });
+    vi.mocked(createAsset).mockResolvedValue(createdAsset());
 
     const request = createRequest({ title: "New Laptop" });
     const result = await action(createActionArgs({ request }));
@@ -166,8 +247,264 @@ describe("POST /api/mobile/asset/create", () => {
     );
   });
 
+  // The point of this route change: an asset created from the phone used to
+  // open with an empty history, while the same asset created on the website
+  // said who made it and where they put it.
+  describe("creation notes (parity with the web create route)", () => {
+    it("writes the creation note naming the actor", async () => {
+      vi.mocked(createAsset).mockResolvedValue(createdAsset());
+
+      await action(
+        createActionArgs({ request: createRequest({ title: "New Laptop" }) })
+      );
+
+      expect(createNote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content:
+            'Asset was created by {% link to="/settings/team/users/user-1" text="Carlos Virreira" /%}.',
+          type: "UPDATE",
+          userId: "user-1",
+          assetId: "asset-1",
+          organizationId: "org-1",
+        })
+      );
+    });
+
+    it("names the location when the asset was placed", async () => {
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({
+          assetLocations: [assetLocationRow("loc-1", " Warehouse A ")],
+        })
+      );
+
+      await action(
+        createActionArgs({
+          request: createRequest({ title: "New Laptop", locationId: "loc-1" }),
+        })
+      );
+
+      expect(createNote).toHaveBeenCalledTimes(2);
+      expect(createNote).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          content:
+            '{% link to="/settings/team/users/user-1" text="Carlos Virreira" /%} set the location to {% link to="/locations/loc-1" text="Warehouse A" /%}.',
+          assetId: "asset-1",
+        })
+      );
+    });
+
+    it("still reports success when a note fails, so the phone cannot create a duplicate", async () => {
+      // The asset and its activity event are committed before the notes run.
+      // Answering "failed" here made the create screen offer a retry for an
+      // asset that already existed - and a scanned qrId went to the retry.
+      vi.mocked(createAsset).mockResolvedValue(createdAsset());
+      vi.mocked(createNote).mockRejectedValueOnce(
+        new Error("note insert failed")
+      );
+
+      const result = await action(
+        createActionArgs({ request: createRequest({ title: "New Laptop" }) })
+      );
+
+      expect((result as unknown as Response).status).toBe(200);
+      const body = await (result as unknown as Response).json();
+      expect(body.asset.id).toBe("asset-1");
+      expect(createAsset).toHaveBeenCalledTimes(1);
+      // The other half of "fail quietly but visibly": without this assertion,
+      // deleting the whole catch block from the route still passes the test.
+      expect(Logger.error).toHaveBeenCalledTimes(1);
+    });
+
+    it("still writes the creation note when the location note fails", async () => {
+      // Notes go out one at a time and are swallowed individually, so the note
+      // that matters most can't be lost to the one that matters least.
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({
+          assetLocations: [assetLocationRow("loc-1", "Warehouse A")],
+        })
+      );
+      vi.mocked(createNote)
+        .mockResolvedValueOnce({ id: "note-1" } as never)
+        .mockRejectedValueOnce(new Error("note insert failed"));
+
+      const result = await action(
+        createActionArgs({
+          request: createRequest({ title: "New Laptop", locationId: "loc-1" }),
+        })
+      );
+
+      expect((result as unknown as Response).status).toBe(200);
+      expect(createNote).toHaveBeenCalledTimes(2);
+      expect(noteContents()[0]).toContain("Asset was created by");
+      expect(Logger.error).toHaveBeenCalledTimes(1);
+    });
+
+    it("finishes the creation note before starting the placement note", async () => {
+      // Both notes used to be issued in the same tick; two inserts landing in
+      // the same millisecond let the feed (ordered by createdAt desc) show the
+      // placement above the creation it describes. Asserting on overlap rather
+      // than on call order — `mock.calls` is in argument order either way, so
+      // it cannot tell concurrent from sequential.
+      const timeline: string[] = [];
+      vi.mocked(createNote).mockImplementation(async ({ content }) => {
+        const label = content.includes("created by") ? "creation" : "placement";
+        timeline.push(`start:${label}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        timeline.push(`end:${label}`);
+        return { id: label } as never;
+      });
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({
+          assetLocations: [assetLocationRow("loc-1", "Warehouse A")],
+        })
+      );
+
+      await action(
+        createActionArgs({
+          request: createRequest({ title: "New Laptop", locationId: "loc-1" }),
+        })
+      );
+
+      expect(timeline).toEqual([
+        "start:creation",
+        "end:creation",
+        "start:placement",
+        "end:placement",
+      ]);
+    });
+
+    it("names the user by displayName when they have set one", async () => {
+      // `wrapUserLinkForNote` prefers displayName; the route used to hand-pick
+      // first+last past it, renaming anyone who had one.
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({ user: assetUserRow({ displayName: "Dr. Smith" }) })
+      );
+
+      await action(
+        createActionArgs({ request: createRequest({ title: "New Laptop" }) })
+      );
+
+      expect(createNote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content:
+            'Asset was created by {% link to="/settings/team/users/user-1" text="Dr. Smith" /%}.',
+        })
+      );
+    });
+
+    it("counts the units when a quantity-tracked asset is placed", async () => {
+      // The shared helper's QT phrasing. The hand-rolled sentence said "set the
+      // location to X" at creation and "moved 50 boxes …" on every later move
+      // of the very same asset.
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({
+          type: "QUANTITY_TRACKED",
+          unitOfMeasure: "boxes",
+          assetLocations: [assetLocationRow("loc-1", "Warehouse A", 50)],
+        })
+      );
+
+      await action(
+        createActionArgs({
+          request: createRequest({ title: "Screws", locationId: "loc-1" }),
+        })
+      );
+
+      expect(createNote).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          content:
+            '{% link to="/settings/team/users/user-1" text="Carlos Virreira" /%} placed 50 boxes at {% link to="/locations/loc-1" text="Warehouse A" /%}.',
+        })
+      );
+    });
+
+    // `Location.name` is free-form workspace input spliced into Markdoc note
+    // content. Asserted on the PARSE rather than the string: a substring check
+    // misses payloads that only become a tag after concatenation.
+    it.each([
+      ["closes the wrapper", 'A {% link to="javascript:alert(1)" text="x" /%}'],
+      [
+        "closes the tag first",
+        'A /%} {% link to="javascript:alert(1)" text="x" /%}',
+      ],
+      [
+        "pre-encodes its quotes",
+        "A&quot; to=&quot;javascript:alert(1)&quot; x=&quot;",
+      ],
+      [
+        "doubles the delimiter",
+        'A{{% link to="javascript:alert(1)" text="x" /%}',
+      ],
+    ])(
+      "cannot inject a Markdoc tag via a location name that %s",
+      async (_label, evilName) => {
+        vi.mocked(createAsset).mockResolvedValue(
+          createdAsset({
+            assetLocations: [assetLocationRow("loc-1", evilName)],
+          })
+        );
+
+        await action(
+          createActionArgs({
+            request: createRequest({
+              title: "New Laptop",
+              locationId: "loc-1",
+            }),
+          })
+        );
+
+        const tags = [...Markdoc.parse(noteContents()[1]).walk()].filter(
+          (node) => node.type === "tag"
+        );
+        // Exactly the two links we meant to emit, both pointing in-app — an
+        // escaped payload adds a third tag or an off-site `to`.
+        expect(tags).toHaveLength(2);
+        for (const tag of tags) {
+          expect(String(tag.attributes.to)).toMatch(/^\//);
+        }
+      }
+    );
+
+    it("cannot inject a Markdoc tag via a quantity-tracked asset's unit label", async () => {
+      // The QT phrasing splices `unitOfMeasure` in as LITERAL text, not inside a
+      // quoted attribute, so the escaping that protects the location name does
+      // not cover it — `sanitizeUnitOfMeasureLabel` stripping {, % and } does.
+      vi.mocked(createAsset).mockResolvedValue(
+        createdAsset({
+          type: "QUANTITY_TRACKED",
+          unitOfMeasure: '{% link to="javascript:alert(1)" text="x" /%}',
+          assetLocations: [assetLocationRow("loc-1", "Warehouse A", 50)],
+        })
+      );
+
+      await action(
+        createActionArgs({
+          request: createRequest({ title: "Screws", locationId: "loc-1" }),
+        })
+      );
+
+      const tags = [...Markdoc.parse(noteContents()[1]).walk()].filter(
+        (node) => node.type === "tag"
+      );
+      expect(tags).toHaveLength(2);
+      for (const tag of tags) {
+        expect(String(tag.attributes.to)).toMatch(/^\//);
+      }
+    });
+
+    it("writes only the creation note when the asset has no location", async () => {
+      vi.mocked(createAsset).mockResolvedValue(createdAsset());
+
+      await action(
+        createActionArgs({ request: createRequest({ title: "New Laptop" }) })
+      );
+
+      expect(createNote).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("org-validates submitted tags and connects them to the new asset", async () => {
-    (createAsset as any).mockResolvedValue({ id: "asset-1", title: "Tagged" });
+    vi.mocked(createAsset).mockResolvedValue(createdAsset({ title: "Tagged" }));
 
     const request = createRequest({
       title: "Tagged",
@@ -262,10 +599,7 @@ describe("POST /api/mobile/asset/create", () => {
       (extractCustomFieldValuesFromPayload as any).mockReturnValue([
         { id: "cf-serial", value: { raw: "SN-123" } },
       ]);
-      (createAsset as any).mockResolvedValue({
-        id: "asset-1",
-        title: "New Laptop",
-      });
+      vi.mocked(createAsset).mockResolvedValue(createdAsset());
 
       const request = createRequest({
         title: "New Laptop",
@@ -345,7 +679,7 @@ describe("POST /api/mobile/asset/create", () => {
     });
 
     it("calls getActiveCustomFields with category: null when no categoryId is provided", async () => {
-      (createAsset as any).mockResolvedValue({ id: "asset-1", title: "T" });
+      vi.mocked(createAsset).mockResolvedValue(createdAsset({ title: "T" }));
 
       const request = createRequest({ title: "Test Asset" });
       await action(createActionArgs({ request }));
@@ -357,7 +691,7 @@ describe("POST /api/mobile/asset/create", () => {
     });
 
     it("calls getActiveCustomFields with the provided categoryId", async () => {
-      (createAsset as any).mockResolvedValue({ id: "asset-1", title: "T" });
+      vi.mocked(createAsset).mockResolvedValue(createdAsset({ title: "T" }));
       (db.category.findFirst as any).mockResolvedValue({ id: "cat-42" });
 
       const request = createRequest({
@@ -408,7 +742,7 @@ describe("POST /api/mobile/asset/create", () => {
           return [{ id: "cf-active", value: { raw: true } }];
         }
       );
-      (createAsset as any).mockResolvedValue({ id: "asset-1", title: "T" });
+      vi.mocked(createAsset).mockResolvedValue(createdAsset({ title: "T" }));
 
       const request = createRequest({
         title: "New Laptop",

@@ -13,7 +13,6 @@ import {
   Link,
   NavLink,
   Outlet,
-  useFetchers,
   useLoaderData,
 } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -43,7 +42,6 @@ import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import { CHANGE_CURRENT_ORGANIZATION_ACTION } from "~/modules/organization/constants";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -282,7 +280,6 @@ export default function App() {
     needsSequentialIdMigration,
     currentOrganizationId,
   } = useLoaderData<typeof loader>();
-  const fetchers = useFetchers();
   const isHydrated = useHydrated();
   // Several authenticated routes (assets._index, kits._index, locations.*, …)
   // call `userHasPermission` from `permission.validator.client` during their
@@ -294,14 +291,12 @@ export default function App() {
   // spinner until the client has hydrated. This matches the prior status
   // quo, when `switchingWorkspaceAtom` defaulted to `true` and produced the
   // same one-frame spinner on every full reload.
+  //
+  // This also covers a workspace switch: that posts as a native document
+  // submission, so the new workspace arrives as a fresh document and shows
+  // this spinner while it hydrates.
   // TODO: lift `userHasPermission` checks into route loaders so SSR works.
-  const workspaceSwitching =
-    !isHydrated ||
-    fetchers.some(
-      (f) =>
-        f.formAction === CHANGE_CURRENT_ORGANIZATION_ACTION &&
-        (f.state === "submitting" || f.state === "loading")
-    );
+  const workspaceSwitching = !isHydrated;
   const [feedbackModalOpen, setFeedbackModalOpen] = useAtom(
     feedbackModalOpenAtom
   );

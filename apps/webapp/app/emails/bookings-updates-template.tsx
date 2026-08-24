@@ -11,8 +11,7 @@ import {
   type ReservationEmailAsset,
   type ReservationEmailModelRequest,
 } from "~/modules/booking/constants";
-import type { ClientHint } from "~/utils/client-hints";
-import { getDateTimeFormatFromHints } from "~/utils/client-hints";
+import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { SERVER_URL } from "~/utils/env";
 import { resolveUserDisplayName } from "~/utils/user";
 import { CustomEmailFooter } from "./components/custom-footer";
@@ -29,7 +28,8 @@ interface Props {
   heading: string;
   booking: BookingForEmail;
   assetCount: number;
-  hints: ClientHint;
+  /** Resolved formatting prefs — the recipient's, for recipient-specific dates. */
+  prefs: ResolvedFormatPrefs;
   hideViewButton?: boolean;
   isAdminEmail?: boolean;
   cancellationReason?: string;
@@ -62,7 +62,7 @@ interface Props {
 export function BookingUpdatesEmailTemplate({
   booking,
   heading,
-  hints,
+  prefs,
   assetCount,
   hideViewButton = false,
   isAdminEmail = false,
@@ -80,14 +80,12 @@ export function BookingUpdatesEmailTemplate({
   const outstandingModelRequests = (modelRequests ?? []).filter(
     (req) => req.fulfilledAt === null
   );
-  const fromDate = getDateTimeFormatFromHints(hints, {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(booking.from as Date);
-  const toDate = getDateTimeFormatFromHints(hints, {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(booking.to as Date);
+  const fromDate = formatDate(booking.from as Date, prefs, {
+    includeTime: true,
+  });
+  const toDate = formatDate(booking.to as Date, prefs, {
+    includeTime: true,
+  });
   return (
     <Html>
       <Head>
@@ -368,7 +366,7 @@ export const bookingUpdatesTemplateString = ({
   booking,
   heading,
   assetCount,
-  hints,
+  prefs,
   hideViewButton = false,
   isAdminEmail = false,
   cancellationReason,
@@ -383,7 +381,7 @@ export const bookingUpdatesTemplateString = ({
       booking={booking}
       heading={heading}
       assetCount={assetCount}
-      hints={hints}
+      prefs={prefs}
       hideViewButton={hideViewButton}
       isAdminEmail={isAdminEmail}
       cancellationReason={cancellationReason}

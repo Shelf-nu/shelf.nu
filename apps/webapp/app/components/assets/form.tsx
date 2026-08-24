@@ -27,6 +27,7 @@ import type {
   AssetEditLoaderData,
   loader,
 } from "~/routes/_layout+/assets.$assetId_.edit";
+import { resolveCancelTo } from "~/utils/cancel-destination";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
@@ -55,6 +56,7 @@ import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-
 import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
+import { DisabledReasonHoverCard } from "../shared/disabled-reason-hover-card";
 import {
   HoverCard,
   HoverCardContent,
@@ -444,13 +446,106 @@ export const AssetForm = ({
   const [hasPickedAssetModel, setHasPickedAssetModel] = useState<boolean>(
     Boolean(assetModelId)
   );
+  /**
+   * The model currently chosen in the form. Mirrors the DynamicSelect rather
+   * than reading the `assetModelId` prop, so the inherited-image preview
+   * updates the moment the user picks a different model on the create form —
+   * before anything is saved.
+   */
+  const [selectedAssetModelId, setSelectedAssetModelId] = useState<
+    string | undefined
+  >(assetModelId ?? undefined);
   const navigate = useNavigate();
   const location = useLocation();
 
+  /**
+   * Snapshot of the referer as it was when this form first mounted.
+   *
+   * Deliberately ignores later updates to the `referer` prop — this is not a
+   * stale-state bug. The Referer header is only meaningful at the moment the
+   * user arrives. Any in-route navigation re-runs the loader and overwrites it
+   * with this page's own URL: picking a Category navigates to
+   * `/assets/new?category=<id>` (see the effect below), so the prop becomes
+   * `/assets/new` and "where I came from" is lost. ~93% of assets carry a
+   * category, so that is the normal path, not an edge case.
+   *
+   * Capturing once keeps Cancel pointing at the user's real origin (including
+   * its filters) for the whole life of the form.
+   */
+  const [initialReferer] = useState(referer);
+
+  /**
+   * Where Cancel goes. The referer is best-effort and unusable in three
+   * separate cases (absent prop, no Referer header, and self-reference).
+   * `resolveCancelTo` owns all three — see its JSDoc.
+   *
+   * The self-reference guard is still load-bearing even with the snapshot
+   * above: if this form ever mounts *after* an in-route navigation, the very
+   * first value it captures is already self-referential. Worst case it falls
+   * back to the index, which is exactly the pre-snapshot behaviour, so the
+   * snapshot can only ever improve the destination, never worsen it.
+   */
+  const cancelTo = resolveCancelTo({
+    referer: initialReferer,
+    currentPathname: location.pathname,
+    fallback: id ? `/assets/${id}` : "/assets",
+  });
+
   /** Asset models from the loader, used to look up defaults on selection. */
   const assetModelsData = useLoaderData<{
-    assetModels?: Array<{ id: string; defaultCategoryId?: string | null }>;
+    assetModels?: Array<{
+      id: string;
+      name?: string;
+      defaultCategoryId?: string | null;
+      image?: string | null;
+      thumbnailImage?: string | null;
+    }>;
   }>()?.assetModels;
+
+  /** The chosen model's row, used for the inherited-image preview + copy. */
+  const selectedAssetModel = selectedAssetModelId
+    ? assetModelsData?.find((m) => m.id === selectedAssetModelId)
+    : undefined;
+
+  /**
+   * Intent to drop this asset's own image so it falls back down the cascade —
+   * to its model's cover image, or to the placeholder. Submitted as a hidden
+   * field and applied by the edit action.
+   *
+   * Without this the override is one-way: there is no other way to remove an
+   * asset image, so an asset that once had its own could never show its
+   * model's again.
+   */
+  const [clearMainImage, setClearMainImage] = useState(false);
+
+  /**
+   * True when the asset currently stores an image of its own.
+   *
+   * Decided by `mainImage` ALONE, mirroring the resolver. Requiring a
+   * thumbnail or an expiration here would misclassify every asset that has an
+   * image but no thumbnail yet — CSV imports, duplicated assets and legacy
+   * rows all land in that state, and thumbnails are generated lazily. Such an
+   * asset would be told it "inherits" its model's image and would lose access
+   * to the Remove control.
+   *
+   * @see {@link file://./../../modules/asset/image-resolution.ts}
+   */
+  const hasOwnImage = Boolean(id && mainImage);
+
+  /** Whether the preview should show the asset's own image. */
+  const showOwnImagePreview = hasOwnImage && !clearMainImage;
+
+  /**
+   * The model's cover image in the shape `AssetImage` expects. This is what
+   * makes "pick a model → see its picture" work with no copying: the create
+   * request simply omits an image and the cascade resolves it at render time.
+   */
+  const inheritableAssetModelImage = selectedAssetModel?.image
+    ? {
+        image: selectedAssetModel.image,
+        thumbnailImage: selectedAssetModel.thumbnailImage ?? null,
+      }
+    : null;
 
   /**
    * When a model is selected, apply its default category by updating
@@ -466,6 +561,7 @@ export const AssetForm = ({
     // hasn't committed the hidden input update yet) so it would
     // wrongly flash the error.
     setHasPickedAssetModel(Boolean(modelId));
+    setSelectedAssetModelId(modelId);
     const params = new URLSearchParams(location.search);
 
     if (!modelId) {
@@ -593,7 +689,7 @@ export const AssetForm = ({
           <div className="hidden flex-1 justify-end gap-2 md:flex">
             <Actions
               disabled={disabled}
-              referer={referer}
+              cancelTo={cancelTo}
               showAddAnother={!bulkMode}
             />
           </div>
@@ -866,19 +962,104 @@ export const AssetForm = ({
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">
           <div className="flex items-center gap-2">
-            {id && thumbnailImage && mainImageExpiration ? (
+            {/*
+              One preview for both tiers of the cascade. `clearMainImage` makes
+              the row behave as though the asset's own image were already gone,
+              so the user sees exactly what saving will produce — the model's
+              picture, or the placeholder.
+            */}
+            {id && showOwnImagePreview ? (
               <AssetImage
-                className="size-16"
+                className="size-16 shrink-0 rounded border object-cover"
                 asset={{
                   id,
-                  thumbnailImage: thumbnailImage,
-                  mainImage: mainImage,
-                  mainImageExpiration: new Date(mainImageExpiration),
+                  // Null-safe: an asset can own an image without a thumbnail
+                  // (lazy generation) or without an expiration.
+                  thumbnailImage: thumbnailImage ?? null,
+                  mainImage: mainImage ?? null,
+                  mainImageExpiration: mainImageExpiration
+                    ? new Date(mainImageExpiration)
+                    : null,
+                  assetModel: inheritableAssetModelImage,
                 }}
                 alt={`${title} main image`}
               />
+            ) : inheritableAssetModelImage ? (
+              <AssetImage
+                className="size-16 shrink-0 rounded border object-cover"
+                asset={{
+                  id: id ?? "new-asset",
+                  mainImage: null,
+                  thumbnailImage: null,
+                  mainImageExpiration: null,
+                  assetModel: inheritableAssetModelImage,
+                }}
+                alt={`Image from asset model ${
+                  selectedAssetModel?.name ?? "selected model"
+                }`}
+              />
             ) : null}
             <div>
+              <When truthy={Boolean(inheritableAssetModelImage)}>
+                <p className="mb-1 text-sm text-gray-600">
+                  {showOwnImagePreview ? (
+                    <>
+                      This asset uses its own image.{" "}
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="!p-0 text-sm"
+                        onClick={() => setClearMainImage(true)}
+                      >
+                        Use the model's image instead
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      Using the image from{" "}
+                      <span className="font-medium text-gray-700">
+                        {selectedAssetModel?.name ?? "the selected model"}
+                      </span>
+                      . Upload one below to override it for this asset.
+                      <When truthy={clearMainImage}>
+                        {" "}
+                        <Button
+                          type="button"
+                          variant="link"
+                          className="!p-0 text-sm"
+                          onClick={() => setClearMainImage(false)}
+                        >
+                          Undo
+                        </Button>
+                      </When>
+                    </>
+                  )}
+                </p>
+              </When>
+              {/*
+                Signals the intent to drop the asset's own image so it falls
+                back down the cascade. Read by the edit action; a create has no
+                image to clear, so it is inert there.
+              */}
+              <input
+                type="hidden"
+                name="clearMainImage"
+                value={clearMainImage ? "true" : "false"}
+              />
+              <When
+                truthy={Boolean(hasOwnImage && !inheritableAssetModelImage)}
+              >
+                <p className="mb-1 text-sm text-gray-600">
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="!p-0 text-sm"
+                    onClick={() => setClearMainImage(!clearMainImage)}
+                  >
+                    {clearMainImage ? "Undo remove image" : "Remove image"}
+                  </Button>
+                </p>
+              </When>
               <p className="hidden lg:block">
                 <HoverCard openDelay={50} closeDelay={50}>
                   <HoverCardTrigger className={tw("inline-flex w-full  ")}>
@@ -1049,33 +1230,32 @@ export const AssetForm = ({
             value={locationId || ""}
           />
           {isKitAsset ? (
-            <HoverCard openDelay={50} closeDelay={50}>
-              <HoverCardTrigger className="disabled w-full cursor-not-allowed">
-                <DynamicSelect
-                  disabled={locationDisabled}
-                  selectionMode="set"
-                  fieldName="newLocationId"
-                  triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
-                  defaultValue={locationId || undefined}
-                  model={{ name: "location", queryKey: "name" }}
-                  contentLabel="Locations"
-                  label="Location"
-                  hideLabel
-                  initialDataKey="locations"
-                  countKey="totalLocations"
-                  closeOnSelect
-                  allowClear
-                />
-              </HoverCardTrigger>
-              <HoverCardContent side="left">
-                <h5 className="text-left text-[14px]">Action disabled</h5>
-                <p className="text-left text-[14px]">
+            <DisabledReasonHoverCard
+              triggerClassName="disabled w-full cursor-not-allowed"
+              reason={
+                <>
                   This asset's location is managed by its parent kit{" "}
                   <strong>"{kitMembership?.name}"</strong>. Update the kit's
                   location instead.
-                </p>
-              </HoverCardContent>
-            </HoverCard>
+                </>
+              }
+            >
+              <DynamicSelect
+                disabled={locationDisabled}
+                selectionMode="set"
+                fieldName="newLocationId"
+                triggerWrapperClassName="flex flex-col !gap-0 justify-start items-start [&_.inner-label]:w-full [&_.inner-label]:text-left "
+                defaultValue={locationId || undefined}
+                model={{ name: "location", queryKey: "name" }}
+                contentLabel="Locations"
+                label="Location"
+                hideLabel
+                initialDataKey="locations"
+                countKey="totalLocations"
+                closeOnSelect
+                allowClear
+              />
+            </DisabledReasonHoverCard>
           ) : (
             <DynamicSelect
               disabled={disabled}
@@ -1208,7 +1388,7 @@ export const AssetForm = ({
           <div className="flex flex-1 justify-end gap-2">
             <Actions
               disabled={disabled}
-              referer={referer}
+              cancelTo={cancelTo}
               showAddAnother={!bulkMode}
             />
           </div>
@@ -1220,11 +1400,14 @@ export const AssetForm = ({
 
 const Actions = ({
   disabled,
-  referer,
+  cancelTo,
   showAddAnother = true,
 }: {
   disabled: boolean;
-  referer?: string | null;
+  /** Already-resolved Cancel destination. Must never be null/undefined —
+   * the caller applies the fallback, because `<Button to>` degrades
+   * silently (dead button on `undefined`, links to `/` on `null`). */
+  cancelTo: string;
   /** "Add another" submits the form and reloads `/assets/new?` to clear
    * the fields for a second entry. In bulk-create mode it makes no
    * sense — one submit already creates many assets, and the success
@@ -1238,7 +1421,7 @@ const Actions = ({
     </Button>
 
     <ButtonGroup>
-      <Button to={referer} variant="secondary" disabled={disabled}>
+      <Button to={cancelTo} variant="secondary" disabled={disabled}>
         Cancel
       </Button>
       {showAddAnother ? <AddAnother disabled={disabled} /> : null}

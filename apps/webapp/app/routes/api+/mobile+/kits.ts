@@ -1,10 +1,12 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibility.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -24,6 +26,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+    const { canSeeAllCustody } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     await requireMobilePermission({
       userId: user.id,
@@ -77,7 +83,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           location: { select: { id: true, name: true } },
           custody: {
             select: {
-              custodian: { select: { id: true, name: true } },
+              // why: `userId` distinguishes the viewer's own custody from a
+              // colleague's for the visibility gate applied to the response.
+              custodian: { select: { id: true, name: true, userId: true } },
             },
           },
         },
@@ -94,6 +102,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const kitsForResponse = kits.map(({ _count, ...rest }) => ({
       ...rest,
       _count: { assets: _count.assetKits },
+      /**
+       * `kit: read` is held by BASE and SELF_SERVICE, and this list had no
+       * custody gate at all — a restricted viewer read every kit's holder
+       * from it. Null the object for holders the viewer may not see, matching
+       * the mobile detail routes; the caller's own custody stays visible.
+       */
+      custody:
+        rest.custody &&
+        viewerCanSeeLegacyCustody({
+          custodianUserId: rest.custody.custodian.userId,
+          viewerUserId: user.id,
+          canSeeAllCustody,
+        })
+          ? rest.custody
+          : null,
     }));
 
     return data({

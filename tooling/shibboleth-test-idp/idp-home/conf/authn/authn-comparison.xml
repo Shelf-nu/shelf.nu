@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:util="http://www.springframework.org/schema/util"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:c="http://www.springframework.org/schema/c"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+                           
+       default-init-method="initialize"
+       default-destroy-method="destroy">
+
+    <!--
+    This is a map used to "weight" particular methods above others if the IdP has to randomly select one
+    to insert into a SAML authentication statement. The typical use shown below is to bias the IdP in favor
+    of expressing the SAML 2 PasswordProtectedTransport class over the more vanilla Password class on the
+    assumption that the IdP doesn't accept passwords via an insecure channel. This map never causes the IdP
+    to violate its matching rules if an RP requests a particular value; it only matters when nothing specific
+    is chosen. Anything not in the map has a weight of zero.
+    -->
+    
+    <util:map id="shibboleth.AuthenticationPrincipalWeightMap">
+        <entry>
+            <key>
+                <bean parent="shibboleth.SAML2AuthnContextClassRef"
+                    c:classRef="urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport" />
+            </key>
+            <value>1</value>
+        </entry>
+    </util:map>
+
+    <!--
+    Uncomment and add entries to this map to support "inexact" SAML RequestedAuthnContext operators.
+    Please refer to the AuthenticationFlowSelection documentation topic for details and examples. 
+    -->
+    <!--
+    <util:map id="shibboleth.AuthnComparisonRules">
+    </util:map>
+    -->
+
+    <!-- List of context classes or declarations to ignore if an SP requests them. -->
+
+    <util:list id="shibboleth.IgnoredContexts">
+        <value>urn:oasis:names:tc:SAML:2.0:ac:classes:unspecified</value>
+    </util:list>
+    
+    <!--
+    Mappings to transform custom Principals for proxied AuthnRequests.
+    Key is the input, value is a collection of possibly empty outputs.
+    Used by default to transform authentication type values from
+    SPs -> Proxied IdPs.
+    -->
+    <util:map id="shibboleth.PrincipalProxyRequestMappings">
+        <!--
+        <entry>
+            <key>
+                <bean parent="shibboleth.SAML1AuthenticationMethod"
+                    c:method="https://sp.example.org/context" />
+            </key>
+            <list>
+                <bean parent="shibboleth.SAML2AuthnContextClassRef"
+                    c:classRef="https://proxy.example.org/context1" />
+                <bean parent="shibboleth.SAML2AuthnContextClassRef"
+                    c:classRef="https://proxy.example.org/context2" />
+            </list>
+        </entry>
+        <entry>
+            <key>
+                <bean parent="shibboleth.SAML2AuthnContextClassRef"
+                    c:classRef="https://sp.example.org/context" />
+            </key>
+            <list>
+                <bean parent="shibboleth.SAML2AuthnContextClassRef"
+                    c:classRef="https://proxy.example.org/context1" />
+                <bean parent="shibboleth.SAML2AuthnContextClassRef"
+                    c:classRef="https://proxy.example.org/context2" />
+            </list>
+        </entry>
+        -->
+    </util:map>
+
+    <!--
+    Mappings to transform proxied Principals for inclusion in Subjects.
+    Key is the input, value is a collection of possibly empty outputs.
+    Used by default to transform values from Proxied IdP. -> 
+    -->
+    <util:map id="shibboleth.PrincipalProxyResponseMappings">
+        <!--
+        <entry>
+            <key>
+                <bean parent="shibboleth.SAML2AuthnContextClassRef"
+                    c:classRef="https://proxy.example.org/context1" />
+            </key>
+            <list>
+                <bean parent="shibboleth.SAML1AuthenticationMethod"
+                    c:method="https://sp.example.org/context" />
+                <bean parent="shibboleth.SAML2AuthnContextClassRef"
+                    c:classRef="https://sp.example.org/context" />
+            </list>
+        </entry>
+        <entry>
+            <key>
+                <bean parent="shibboleth.SAML2AuthnContextClassRef"
+                    c:classRef="https://proxy.example.org/context2" />
+            </key>
+            <list>
+                <bean parent="shibboleth.SAML1AuthenticationMethod"
+                    c:method="https://sp.example.org/context" />
+                <bean parent="shibboleth.SAML2AuthnContextClassRef"
+                    c:classRef="https://sp.example.org/context" />
+            </list>
+        </entry>
+        -->
+    </util:map>
+    
+</beans>

@@ -1,4 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { BookingCalendar } from "@/components/bookings/booking-calendar";
+import { BOOKING_STATUS_LABELS } from "@shelf/labels";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import {
   View,
   Text,
@@ -14,7 +22,7 @@ import {
   Alert,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
+import { useNavigation, useRouter } from "expo-router";
 import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, type BookingListItem } from "@/lib/api";
@@ -24,10 +32,10 @@ import {
   spacing,
   borderRadius,
   formatStatus,
-  formatDateTime,
   bookingCountdown,
   hitSlop,
 } from "@/lib/constants";
+import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -42,24 +50,76 @@ import {
 const PAGE_SIZE = 20;
 const bookingKeyExtractor = (item: BookingListItem) => item.id;
 
+/** One status filter pill, plus the copy its empty state renders. */
+type StatusFilter = {
+  /** Chip text. Status filters read from `@shelf/labels`; groups are prose. */
+  label: string;
+  /** Comma-separated `BookingStatus` subset sent to the list route. */
+  value: string;
+  /** Empty-state heading shown when this filter matches nothing. */
+  emptyTitle: string;
+  /** Empty-state body shown under `emptyTitle`. */
+  emptyHint: string;
+};
+
 /**
  * Status filter pills. The mobile list route already accepts any
  * comma-separated subset of statuses, so we expose the field-critical
  * individual statuses (Reserved = upcoming, Ongoing = in progress, Overdue =
- * needs attention) alongside the grouped Active/Completed/All — letting a tech
+ * needs attention) alongside the grouped Active/Complete/All — letting a tech
  * isolate exactly what they care about on a job.
+ *
+ * why: the empty-state copy is spelled out per filter instead of being derived
+ * from `label`. Deriving it broke in two directions — a chip label is a noun
+ * ("Complete") where the sentence needs a participle ("No completed bookings"),
+ * and the grouped filters have no grammatical form at all ("No all bookings").
+ * Pairing the copy with the filter also removes the hardcoded indices the old
+ * empty state branched on, which silently went stale when this array grew.
  */
-const STATUS_FILTERS: { label: string; value: string }[] = [
+const STATUS_FILTERS: StatusFilter[] = [
   // DRAFT counts as active: a booking being built (e.g. scan-to-add) must
   // not vanish from the default view the moment the user leaves it.
-  { label: "Active", value: "DRAFT,RESERVED,ONGOING,OVERDUE" },
-  { label: "Reserved", value: "RESERVED" },
-  { label: "Ongoing", value: "ONGOING" },
-  { label: "Overdue", value: "OVERDUE" },
-  { label: "Completed", value: "COMPLETE" },
+  {
+    label: "Active",
+    value: "DRAFT,RESERVED,ONGOING,OVERDUE",
+    emptyTitle: "No active bookings",
+    emptyHint: "Active bookings will appear here when created",
+  },
+  // why: the four single-status chips below read from @shelf/labels rather
+  // than being hand-typed. The COMPLETE one is where that drifted visibly — it
+  // said "Completed" while the badge on the very same row said "Complete",
+  // because badges go through formatStatus and these did not.
+  {
+    label: BOOKING_STATUS_LABELS.RESERVED,
+    value: "RESERVED",
+    emptyTitle: "No reserved bookings",
+    emptyHint: "Try selecting a different status filter",
+  },
+  {
+    label: BOOKING_STATUS_LABELS.ONGOING,
+    value: "ONGOING",
+    emptyTitle: "No ongoing bookings",
+    emptyHint: "Try selecting a different status filter",
+  },
+  {
+    label: BOOKING_STATUS_LABELS.OVERDUE,
+    value: "OVERDUE",
+    emptyTitle: "No overdue bookings",
+    emptyHint: "Nothing is past its due date — nothing to chase",
+  },
+  {
+    label: BOOKING_STATUS_LABELS.COMPLETE,
+    value: "COMPLETE",
+    emptyTitle: "No completed bookings",
+    emptyHint: "Try selecting a different status filter",
+  },
   {
     label: "All",
     value: "DRAFT,RESERVED,ONGOING,OVERDUE,COMPLETE,ARCHIVED,CANCELLED",
+    emptyTitle: "No bookings",
+    // why: "All" is already the broadest filter, so telling the user to try a
+    // different one is a dead end.
+    emptyHint: "Bookings you create will appear here",
   },
 ];
 
@@ -98,6 +158,7 @@ function BookingsListContent() {
   } = useOrg();
   const { colors, bookingStatusBadge } = useTheme();
   const styles = useStyles();
+  const { formatDateTime } = useDateFormatter();
   const [bookings, setBookings] = useState<BookingListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -110,6 +171,55 @@ function BookingsListContent() {
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
   const listRef = useRef<FlatList>(null);
+
+  /**
+   * List or calendar. The calendar is the same bookings through a different
+   * lens, so it lives here rather than as a sixth tab: the tab bar stays at
+   * five, and someone looking for bookings already comes to this screen.
+   */
+  const [view, setView] = useState<"list" | "calendar">("list");
+  /**
+   * Bumped when a booking is mutated elsewhere, so the calendar drops its
+   * cached months and refetches the one on screen.
+   */
+  const [calendarRefreshToken, setCalendarRefreshToken] = useState(0);
+  const navigation = useNavigation();
+
+  /**
+   * The lens switch lives in the header, not in the body.
+   *
+   * why: it used to sit under the search box as a third stacked control row,
+   * which pushed the actual bookings down and read as clutter. It also changes
+   * the WHOLE screen, so it belongs with the title rather than among the
+   * filters it replaces. Both options stay visible, since a segmented control
+   * is discoverable in a way a single toggling icon is not, and this is a
+   * feature nobody knows exists yet.
+   */
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={styles.lens}>
+          {(["list", "calendar"] as const).map((v) => (
+            <TouchableOpacity
+              key={v}
+              style={styles.lensItem}
+              onPress={() => setView(v)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: view === v }}
+              accessibilityLabel={v === "list" ? "List view" : "Calendar view"}
+              hitSlop={hitSlop.sm}
+            >
+              <Ionicons
+                name={v === "list" ? "list-outline" : "calendar-outline"}
+                size={20}
+                color={view === v ? colors.primary : colors.mutedLight}
+              />
+            </TouchableOpacity>
+          ))}
+        </View>
+      ),
+    });
+  }, [navigation, view, styles, colors]);
   useScrollToTop(listRef);
 
   // Swipe-to-filter gesture (Instagram-style horizontal swipe between filters)
@@ -178,14 +288,23 @@ function BookingsListContent() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  // Re-fetch immediately when the filter, search, or sort changes
+  /**
+   * Re-fetch immediately when the filter, search, or sort changes.
+   *
+   * Skipped entirely while the calendar is the visible lens: it runs its own
+   * query against the same filters, so every pill tap and every debounced
+   * keystroke was firing BOTH - a findMany and a count for a list that is not
+   * on screen, alongside the calendar's own. `view` is a dependency so
+   * switching back to the list refetches it with whatever the filters became
+   * in the meantime.
+   */
   useEffect(() => {
-    if (!currentOrg || !hasFetchedBookings.current) return;
+    if (!currentOrg || !hasFetchedBookings.current || view !== "list") return;
     nextPage.current = 1;
     fetchBookings(1, true).finally(() => {
       lastFetchedAt.current = Date.now();
     });
-  }, [activeFilter, debouncedSearch, sortIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeFilter, debouncedSearch, sortIndex, view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFocusEffect(
     useCallback(() => {
@@ -194,6 +313,11 @@ function BookingsListContent() {
       // delete/duplicate) marks the list dirty; bypass the freshness gate so we
       // don't show stale rows on return.
       const mustRefresh = consumeBookingsListDirty();
+      // The calendar keeps its own state and its own month cache, so the flag
+      // has to reach it too. Raising a token here rather than letting the
+      // calendar consume the flag itself: it is a one-shot flag, and whichever
+      // consumer ran first would eat it and leave the other stale.
+      if (mustRefresh) setCalendarRefreshToken((t) => t + 1);
       if (
         !mustRefresh &&
         hasFetchedBookings.current &&
@@ -294,7 +418,11 @@ function BookingsListContent() {
           activeOpacity={0.6}
           accessibilityLabel={`Booking: ${item.name}, ${formatStatus(
             item.status
-          )}, ${item.assetCount} assets`}
+          )}, ${item.assetCount} assets${
+            (item.outstandingModelUnitCount ?? 0) > 0
+              ? `, ${item.outstandingModelUnitCount} reserved`
+              : ""
+          }`}
           accessibilityRole="button"
         >
           <View style={styles.bookingHeader}>
@@ -351,6 +479,15 @@ function BookingsListContent() {
               />
               <Text style={styles.metaText}>
                 {item.assetCount} {item.assetCount === 1 ? "asset" : "assets"}
+                {/* A booking can hold reserved units with no concrete asset
+                    behind them yet, and `assetCount` only counts concrete
+                    rows. Without this the card reads "0 assets" while the
+                    action hint below says "Assign assets to check out" — and
+                    the reserved units are genuinely held, unavailable to
+                    everyone else. Same signal, every surface. */}
+                {(item.outstandingModelUnitCount ?? 0) > 0
+                  ? ` · ${item.outstandingModelUnitCount} reserved`
+                  : ""}
               </Text>
             </View>
 
@@ -370,26 +507,40 @@ function BookingsListContent() {
 
           {isActive && (
             <View style={styles.actionHint}>
+              {/* A RESERVED booking is only "ready to check out" when it has
+                  concrete assets AND no outstanding book-by-model reservations
+                  (the server hard-blocks checkout until every reserved unit is
+                  assigned). Otherwise the honest next step is to assign/add
+                  assets, so the hint points there instead of promising a
+                  checkout that isn't possible yet. */}
               <Ionicons
                 name={
-                  item.status === "RESERVED"
+                  item.status !== "RESERVED"
+                    ? "log-in-outline"
+                    : (item.outstandingModelCount ?? 0) > 0
+                    ? "cube-outline"
+                    : item.assetCount > 0
                     ? "log-out-outline"
-                    : "log-in-outline"
+                    : "add-outline"
                 }
                 size={14}
                 color={colors.iconDefault}
               />
               <Text style={styles.actionHintText}>
-                {item.status === "RESERVED"
+                {item.status !== "RESERVED"
+                  ? "Tap to check in"
+                  : (item.outstandingModelCount ?? 0) > 0
+                  ? "Assign assets to check out"
+                  : item.assetCount > 0
                   ? "Ready to check out"
-                  : "Tap to check in"}
+                  : "Add assets to check out"}
               </Text>
             </View>
           )}
         </TouchableOpacity>
       );
     },
-    [router, colors, bookingStatusBadge, styles]
+    [router, colors, bookingStatusBadge, styles, formatDateTime]
   );
 
   if (orgLoading) {
@@ -432,7 +583,14 @@ function BookingsListContent() {
 
   return (
     <View style={styles.container}>
-      {/* Keyword search + sort */}
+      {/* Keyword search + sort.
+          why here rather than inside the list branch: search and the status
+          pills say WHAT you are looking at, and the header switch says HOW.
+          They compose. Hiding them in calendar mode meant a filter you had
+          set was silently ignored the moment you switched lens, and the two
+          views disagreed by default — the list opens on Active (four
+          statuses) while the calendar was drawing five. Web applies the same
+          filter set to its calendar; this now matches. */}
       <View style={styles.searchRow}>
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={18} color={colors.mutedLight} />
@@ -462,14 +620,18 @@ function BookingsListContent() {
             </TouchableOpacity>
           ) : null}
         </View>
-        <TouchableOpacity
-          style={styles.sortButton}
-          onPress={openSortMenu}
-          accessibilityLabel="Sort bookings"
-          accessibilityRole="button"
-        >
-          <Ionicons name="swap-vertical" size={20} color={colors.muted} />
-        </TouchableOpacity>
+        {/* why list-only: sort orders rows. A calendar is positioned by
+                date, so there is nothing for it to order. */}
+        {view === "list" && (
+          <TouchableOpacity
+            style={styles.sortButton}
+            onPress={openSortMenu}
+            accessibilityLabel="Sort bookings"
+            accessibilityRole="button"
+          >
+            <Ionicons name="swap-vertical" size={20} color={colors.muted} />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Status filter pills — scrollable: more statuses than fit one row */}
@@ -508,87 +670,92 @@ function BookingsListContent() {
         ))}
       </ScrollView>
 
-      {/* Swipeable content area — swipe left/right to cycle filter pills */}
-      <View style={styles.flexFill} {...swipePanHandlers}>
-        <Animated.View style={[styles.flexFill, swipeAnimatedStyle]}>
-          {error ? (
-            <View style={styles.centered}>
-              <Ionicons
-                name="alert-circle-outline"
-                size={48}
-                color={colors.error}
-              />
-              <Text style={styles.emptyText}>{error}</Text>
-              <TouchableOpacity
-                style={styles.retryButton}
-                onPress={onRefresh}
-                accessibilityLabel="Retry loading bookings"
-                accessibilityRole="button"
-              >
-                <Text style={styles.retryText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : isLoading && bookings.length === 0 ? (
-            <BookingListSkeleton />
-          ) : bookings.length === 0 ? (
-            <View style={styles.centered}>
-              <Ionicons
-                name="calendar-outline"
-                size={48}
-                color={colors.border}
-              />
-              <Text style={styles.emptyTitle}>
-                {activeFilter === 0
-                  ? "No active bookings"
-                  : activeFilter === 2
-                  ? "No bookings"
-                  : `No ${STATUS_FILTERS[
-                      activeFilter
-                    ].label.toLowerCase()} bookings`}
-              </Text>
-              <Text style={styles.emptyText}>
-                {activeFilter === 0
-                  ? "Active bookings will appear here when created"
-                  : "Try selecting a different status filter"}
-              </Text>
-            </View>
-          ) : (
-            <FlatList
-              ref={listRef}
-              data={bookings}
-              renderItem={renderBooking}
-              keyExtractor={bookingKeyExtractor}
-              contentContainerStyle={styles.list}
-              removeClippedSubviews
-              maxToRenderPerBatch={10}
-              windowSize={5}
-              initialNumToRender={10}
-              refreshControl={
-                <RefreshControl
-                  refreshing={isRefreshing}
-                  onRefresh={onRefresh}
-                  tintColor={colors.muted}
-                  accessibilityLabel="Pull to refresh"
+      {view === "calendar" ? (
+        <BookingCalendar
+          orgId={currentOrg?.id}
+          statuses={STATUS_FILTERS[activeFilter].value}
+          search={debouncedSearch}
+          refreshToken={calendarRefreshToken}
+          canCreate={currentOrg?.type === "TEAM"}
+        />
+      ) : (
+        /* Swipeable content area — swipe left/right to cycle filter pills */
+        <View style={styles.flexFill} {...swipePanHandlers}>
+          <Animated.View style={[styles.flexFill, swipeAnimatedStyle]}>
+            {error ? (
+              <View style={styles.centered}>
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={48}
+                  color={colors.error}
                 />
-              }
-              onEndReached={onEndReached}
-              onEndReachedThreshold={0.5}
-              ListFooterComponent={
-                isLoadingMore ? (
-                  <ActivityIndicator
-                    style={styles.footer}
-                    color={colors.muted}
+                <Text style={styles.emptyText}>{error}</Text>
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={onRefresh}
+                  accessibilityLabel="Retry loading bookings"
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : isLoading && bookings.length === 0 ? (
+              <BookingListSkeleton />
+            ) : bookings.length === 0 ? (
+              <View style={styles.centered}>
+                <Ionicons
+                  name="calendar-outline"
+                  size={48}
+                  color={colors.border}
+                />
+                <Text style={styles.emptyTitle}>
+                  {STATUS_FILTERS[activeFilter].emptyTitle}
+                </Text>
+                <Text style={styles.emptyText}>
+                  {STATUS_FILTERS[activeFilter].emptyHint}
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                ref={listRef}
+                data={bookings}
+                renderItem={renderBooking}
+                keyExtractor={bookingKeyExtractor}
+                contentContainerStyle={styles.list}
+                removeClippedSubviews
+                maxToRenderPerBatch={10}
+                windowSize={5}
+                initialNumToRender={10}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={isRefreshing}
+                    onRefresh={onRefresh}
+                    tintColor={colors.muted}
+                    accessibilityLabel="Pull to refresh"
                   />
-                ) : null
-              }
-            />
-          )}
-        </Animated.View>
-      </View>
+                }
+                onEndReached={onEndReached}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={
+                  isLoadingMore ? (
+                    <ActivityIndicator
+                      style={styles.footer}
+                      color={colors.muted}
+                    />
+                  ) : null
+                }
+              />
+            )}
+          </Animated.View>
+        </View>
+      )}
 
       {/* Create booking — only TEAM workspaces can use bookings (matches the
-          server premium gate; personal workspaces 403 on create). */}
-      {currentOrg?.type === "TEAM" && (
+          server premium gate; personal workspaces 403 on create).
+          Not in the calendar: anchored bottom right it lands in the middle of
+          the day panel and covers the first row's status pill, so that view
+          carries the same action in its panel header instead. */}
+      {currentOrg?.type === "TEAM" && view === "list" && (
         <TouchableOpacity
           style={styles.fab}
           onPress={() => {
@@ -621,6 +788,29 @@ const useStyles = createStyles((colors, shadows) => ({
   },
 
   // Keyword search box + sort button
+  /**
+   * Two-state lens switch in the native header.
+   *
+   * why: no track. A grey track on a white header is nearly invisible, and the
+   * active chip inside it was white on near-white, so the selected state did
+   * not read at all. Colour carries the state instead, using exactly the
+   * active/inactive language of the tab bar directly below, which users already
+   * understand without being taught.
+   */
+  lens: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  // No active-state style: the selected lens is carried by the icon colour
+  // alone, matching the tab bar directly below (see the note above).
+  lensItem: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: borderRadius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",

@@ -330,6 +330,48 @@ export function InsufficientStockBadge({
 }
 
 /**
+ * "Pending return" badge for QT booking rows on a not-yet-started booking
+ * (DRAFT/RESERVED) whose booked quantity FITS within the booking's own
+ * window (no genuine over-commit — see `InsufficientStockBadge`) but
+ * currently exceeds what's physically on the shelf RIGHT NOW: some of the
+ * needed units are checked out on OTHER bookings at this moment.
+ *
+ * Amber (`variant="warning"`, the default) because this is a SOFT signal,
+ * not a blocker — those units are expected back before this booking starts.
+ * Mirrors the tone of the existing INDIVIDUAL-asset "Checked out" badge
+ * above (`AvailabilityLabel`, ~line 199: "...and should be available for
+ * your selected date range period") for QUANTITY_TRACKED rows, which are
+ * exempted from that badge (a QT asset can be checked out elsewhere while
+ * still having free units — see the QT short-circuit at ~line 165).
+ *
+ * Callers decide WHEN to render this via `resolveQtyStockBadgeVariant`
+ * (`~/utils/booking-assets`) — it returns `"pending-return"` only when the
+ * booking hasn't started, the row isn't already checked out/fulfilled, and
+ * `bookedQuantity <= bookable` but `bookedQuantity > physicalNow`.
+ *
+ * @param bookedQuantity - units this booking reserves of the asset
+ * @param physicalUnitsNow - units physically on the shelf right now
+ *   (window-independent "physical-now" headline; the rest are checked out
+ *   elsewhere)
+ */
+export function PendingReturnBadge({
+  bookedQuantity,
+  physicalUnitsNow,
+}: {
+  bookedQuantity: number;
+  physicalUnitsNow: number;
+}) {
+  return (
+    <AvailabilityBadge
+      variant="warning"
+      badgeText="Checked out elsewhere"
+      tooltipTitle="Some units are checked out right now"
+      tooltipContent={`This booking reserves ${bookedQuantity} units, but only ${physicalUnitsNow} are physically on the shelf right now — the rest are checked out on other bookings. They're expected back before this booking starts, so no action is needed yet.`}
+    />
+  );
+}
+
+/**
  * A kit is not available for the following reasons
  * 1. Kit has unavailable status
  * 2. Kit or some asset is in custody

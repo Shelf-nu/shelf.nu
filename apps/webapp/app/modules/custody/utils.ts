@@ -18,6 +18,12 @@
  * @param custody - Array of custody records from the Asset relation
  * @returns The first custody record, or null if none exist
  */
+/**
+ * The caller's query decides which row this returns: it takes the FIRST one.
+ * A relation fetched without an `orderBy` has no guaranteed order, so a query
+ * feeding this helper should order the custody rows — `createdAt` ascending,
+ * with `id` to break ties — or the holder shown can change between requests.
+ */
 export function getPrimaryCustody<T extends Record<string, unknown>>(
   custody: T[] | null | undefined
 ): T | null {

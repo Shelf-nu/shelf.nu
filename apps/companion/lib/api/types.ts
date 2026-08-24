@@ -1,3 +1,9 @@
+import type {
+  DateFormatPreference,
+  TimeFormatPreference,
+  WeekStartPreference,
+} from "@shelf/datetime";
+
 // ── Types ──────────────────────────────────────────────
 
 export type Organization = {
@@ -23,6 +29,17 @@ export type MeResponse = {
     firstName: string | null;
     lastName: string | null;
     profilePicture: string | null;
+    /**
+     * The user's date/time format preferences (raw, nullable — an unset column
+     * means "not chosen yet"). Resolved on the client via `resolveFormatPrefs`
+     * (`@shelf/datetime`) with a device-hint fallback so every date/time in the
+     * companion renders in the user's chosen format + timezone. Absent on older
+     * servers (pre-format-prefs) — the resolver then falls back to device hints.
+     */
+    dateFormat?: DateFormatPreference | null;
+    timeFormat?: TimeFormatPreference | null;
+    weekStart?: WeekStartPreference | null;
+    timeZone?: string | null;
   };
   organizations: Organization[];
 };
@@ -101,6 +118,12 @@ export type AssetQuantityFields = {
 export type AssetListItem = {
   id: string;
   title: string;
+  /**
+   * Workspace-scoped human ID ("SAM-0017"). Lets a row show WHICH id matched a
+   * SAM-ID search instead of identifying itself by title alone. Absent on older
+   * servers.
+   */
+  sequentialId?: string | null;
   status: string;
   mainImage: string | null;
   thumbnailImage: string | null;
@@ -160,6 +183,12 @@ export type AssetQuantityBreakdown = {
 export type AssetDetail = {
   id: string;
   title: string;
+  /**
+   * Workspace-scoped human ID ("SAM-0017"); what the scanner accepts as a SAM
+   * ID. Absent on older servers — this app build ships before the webapp half
+   * reaches every self-hosted deployment.
+   */
+  sequentialId?: string | null;
   description: string | null;
   status: string;
   mainImage: string | null;
@@ -170,6 +199,13 @@ export type AssetDetail = {
   updatedAt: string;
   organizationId: string;
   category: { id: string; name: string; color: string } | null;
+  /**
+   * Name only — cover images arrive pre-resolved in mainImage/thumbnailImage,
+   * and there is no mobile asset-model screen to navigate to. Absent on older
+   * servers, and on the quantity-custody / adjust-quantity responses, which are
+   * shaped from the canonical mobile asset select rather than the detail one.
+   */
+  assetModel?: { name: string } | null;
   location: { id: string; name: string } | null;
   custody: {
     createdAt: string;
@@ -243,11 +279,48 @@ export type QrResponse = {
       kitId: string | null;
       /** Drives the scan-to-booking "not available to book" blocker */
       availableToBook: boolean;
+      /**
+       * Model this asset belongs to, or null. The fulfil-and-check-out scanner
+       * matches it against the booking's outstanding reservations so it can
+       * count only units that actually fulfil one. Absent on older servers.
+       */
+      assetModelId?: string | null;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
     /** Set when the QR is linked to a kit instead of an asset */
     kit: ScannedKit | null;
+  };
+};
+
+/**
+ * Machine-readable failure discriminator carried by the QR RESOLVE error
+ * payloads (`{ error: { message, reason?, qrId? } }`), surfaced client
+ * side via `apiFetch`'s `errorDetails`. Mirrors the server's
+ * `ResolveMobileCodeFailureReason`.
+ *
+ * `"unclaimed"` — the QR row exists, has no organization yet (a printed
+ * Shelf code nobody claimed) and is not linked to an asset or kit. The
+ * scanner offers the native claim → create / link flow for it. (The link
+ * route does not emit this: it claims an unclaimed code inline.) Absence of a
+ * reason (plain not-found 404, wrong-org 403, or an orgless-but-linked
+ * corrupted row the web claim flow refuses) MUST keep the existing dead-end /
+ * web-bridge behaviour — never offer claim for those.
+ */
+export type QrResolveFailureReason = "unclaimed";
+
+/**
+ * Response of `POST /api/mobile/qr/claim` and `POST /api/mobile/qr/link-asset`:
+ * the mutated QR summary. After a claim, `assetId`/`kitId` are both `null`
+ * (freshly claimed codes are unlinked); after a link, `assetId` is the linked
+ * asset's id (navigate straight to its detail) and `kitId` stays `null`.
+ */
+export type QrMutationResponse = {
+  qr: {
+    id: string;
+    organizationId: string;
+    assetId: string | null;
+    kitId: string | null;
   };
 };
 
@@ -268,6 +341,12 @@ export type BarcodeResponse = {
       kitId: string | null;
       /** Drives the scan-to-booking "not available to book" blocker */
       availableToBook: boolean;
+      /**
+       * Model this asset belongs to, or null. Lets the fulfil scanner tell a
+       * unit that fulfils a reservation from one that does not. Absent on
+       * older servers.
+       */
+      assetModelId?: string | null;
       category: { name: string } | null;
       location: { name: string } | null;
     } | null;
@@ -309,6 +388,11 @@ export type KitDetailAsset = {
   thumbnailImage: string | null;
   category: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
+  // QT-aware fields (additive; absent on older servers). `kitQuantity` is the
+  // units of this asset held by the kit (AssetKit.quantity).
+  type?: AssetType;
+  kitQuantity?: number;
+  unitOfMeasure?: string | null;
 };
 
 export type KitDetail = {
@@ -362,6 +446,10 @@ export type TeamMember = {
 
 export type TeamMembersResponse = {
   teamMembers: TeamMember[];
+  page?: number;
+  perPage?: number;
+  totalCount?: number;
+  totalPages?: number;
 };
 
 export type Location = {
@@ -374,6 +462,10 @@ export type Location = {
 
 export type LocationsResponse = {
   locations: Location[];
+  page?: number;
+  perPage?: number;
+  totalCount?: number;
+  totalPages?: number;
 };
 
 export type CustodyResponse = {
@@ -395,7 +487,24 @@ export type CustodyResponse = {
  */
 export type QuantityCustodyResponse = {
   success: boolean;
-  asset?: AssetDetail;
+  /**
+   * Refreshed viewer-shaped asset. The route always serializes the key and
+   * sends `null` when the post-commit refresh failed (the mutation itself
+   * still succeeded) — same wire contract as {@link AdjustQuantityResponse}.
+   */
+  asset?: AssetDetail | null;
+};
+
+/**
+ * Response of the mobile adjust-quantity endpoint — same envelope as the
+ * quantity-custody mutations: `asset` is the refreshed, viewer-shaped asset.
+ * The route always serializes the key and sends `null` when the post-commit
+ * refresh failed (the mutation itself still succeeded), so the type carries
+ * `| null` to match the wire truth.
+ */
+export type AdjustQuantityResponse = {
+  success: boolean;
+  asset?: AssetDetail | null;
 };
 
 export type UpdateLocationResponse = {
@@ -452,6 +561,21 @@ export type BookingListItem = {
   custodianName: string | null;
   custodianImage: string | null;
   assetCount: number;
+  /**
+   * Outstanding book-by-model reservations still to assign (units reserved at
+   * the model level with no concrete asset behind them yet). > 0 means the
+   * booking can't be checked out until matching assets are assigned. Optional
+   * for back-compat with an older server response.
+   */
+  outstandingModelCount?: number;
+  /**
+   * How many UNITS those reservations still need, summed across them. The
+   * count above answers "is anything outstanding?"; this answers "how much?",
+   * which is what the card shows next to the asset count so a booking holding
+   * reserved units never reads as empty. Optional for back-compat: installs
+   * running against an older server fall back to showing nothing extra.
+   */
+  outstandingModelUnitCount?: number;
 };
 
 export type BookingsResponse = {
@@ -462,10 +586,24 @@ export type BookingsResponse = {
   totalPages: number;
 };
 
+/**
+ * One BookingAsset slice of a QUANTITY_TRACKED asset on a booking: its booked
+ * units and its source (a kit, or standalone when `kit` is null). Additive —
+ * absent on older servers, in which case the app renders the merged row.
+ */
+export type BookingAssetSlice = {
+  bookingAssetId: string;
+  quantity: number;
+  assetKitId: string | null;
+  kit: { id: string; name: string } | null;
+};
+
 export type BookingAsset = {
   id: string;
   title: string;
   status: string;
+  /** False when the asset is flagged unavailable for bookings. */
+  availableToBook?: boolean;
   mainImage: string | null;
   kitId: string | null;
   category: { id: string; name: string; color: string } | null;
@@ -479,6 +617,8 @@ export type BookingAsset = {
   unitOfMeasure?: string | null;
   consumptionType?: ConsumptionType | null;
   assetKitId?: string | null;
+  /** Per-slice breakdown; present when the server sends it (see gap 1). */
+  slices?: BookingAssetSlice[];
   /** Units currently checked out on this booking that can still be checked in. */
   remainingToCheckIn?: number;
   /** Units still reserved on this booking that can still be checked out. */
@@ -536,11 +676,15 @@ export type BookingDetail = {
   updatedAt: string;
   creator: {
     id: string;
+    /** Preferred over first+last when set — see `formatPersonName`. */
+    displayName: string | null;
     firstName: string | null;
     lastName: string | null;
   };
   custodianUser: {
     id: string;
+    /** Preferred over first+last when set — see `formatPersonName`. */
+    displayName: string | null;
     firstName: string | null;
     lastName: string | null;
     profilePicture: string | null;
@@ -549,7 +693,7 @@ export type BookingDetail = {
     id: string;
     name: string;
   } | null;
-  tags: { id: string; name: string }[];
+  tags: { id: string; name: string; color: string | null }[];
   assets: BookingAsset[];
   assetCount: number;
   checkedOutCount: number;
@@ -559,6 +703,16 @@ export type BookingDetail = {
   modelRequestCount: number;
   /** Total units still to assign across all model requests. */
   outstandingModelUnitCount: number;
+  /**
+   * True when any asset on this booking is already booked for the same window
+   * — the third rule web's Reserve button disables on, and the one the client
+   * cannot derive from `assets` (it needs the overlapping-booking query).
+   *
+   * Sent for DRAFT bookings only, since Reserve is its sole consumer. Optional
+   * because a not-yet-updated server (rolling deploy) omits it; treat absent
+   * as `false` rather than blocking Reserve.
+   */
+  hasAlreadyBookedAssets?: boolean;
   /**
    * Segmented lifecycle progress (Booked / Partial / Fully out / Returned),
    * computed server-side by the SAME shared helper the web booking overview
@@ -697,6 +851,13 @@ export type AvailableAsset = {
   mainImageExpiration: string | null;
   thumbnailImage: string | null;
   kitId: string | null;
+  /**
+   * The workspace's display code for this asset (QR Code ID by default, or a
+   * SAM ID / barcode per the org preference), resolved server-side. Shown on
+   * the picker row so the operator can match a physical label by eye and toggle
+   * the exact unit. Null when the asset has no resolvable code.
+   */
+  displayCode?: { value: string; label: string } | null;
 };
 
 export type AvailableAssetsResponse = {
@@ -754,12 +915,21 @@ export type AvailableModelExistingRequest = {
 export type AvailableModelsResponse = {
   /** False when the workspace has no AssetModel at all — hide the picker. */
   showModelsTab: boolean;
-  /** Per-model availability for this booking's window (first 50 by name). */
+  /** Per-model availability for this booking's window, for THIS page. */
   assetModels: AvailableModel[];
-  /** Full workspace model count (the list above is capped at 50). */
+  /** Full workspace model count, ignoring any search. */
   totalAssetModels: number;
   /** This booking's existing model reservations, to pre-fill the inputs. */
   modelRequests: AvailableModelExistingRequest[];
+  /** 1-based page this response represents. */
+  page?: number;
+  perPage?: number;
+  /**
+   * Models matching the current search — the pagination denominator. The
+   * picker stops requesting pages once it holds this many rows.
+   */
+  matchedAssetModels?: number;
+  totalPages?: number;
 };
 
 /** Response from the model-request upsert/remove endpoint. */
@@ -813,6 +983,15 @@ export type AuditExpectedAsset = {
   id: string;
   name: string;
   auditAssetId: string;
+  /**
+   * Evidence recorded against this asset, whether or not anyone scanned it —
+   * a note or photo can be attached to an expected asset directly.
+   *
+   * Optional because a server predating them omits both; absent then means
+   * "unknown", and the caller falls back to the scan's counts.
+   */
+  auditNotesCount?: number;
+  auditImagesCount?: number;
   mainImage: string | null;
   thumbnailImage: string | null;
   /**
@@ -881,6 +1060,80 @@ export type AuditDetailResponse = {
   existingScans: AuditScanData[];
   canScan: boolean;
   canComplete: boolean;
+};
+
+/**
+ * One note or photo recorded on an audit, as the evidence route serves it.
+ *
+ * `authorName` is null when the account has been removed — the evidence
+ * survives the person, so the UI says "Unknown" rather than hiding the row.
+ */
+/**
+ * One note a person wrote during an audit, as the evidence route serves it.
+ *
+ * Only `COMMENT` rows reach here — the system activity trail is `UPDATE` and is
+ * filtered out server-side, so this never carries Markdoc tag source the phone
+ * cannot render.
+ *
+ * @see GET /api/mobile/audits/:auditId/evidence
+ */
+export type AuditEvidenceNote = {
+  id: string;
+  content: string;
+  createdAt: string;
+  authorName: string | null;
+  authorImage: string | null;
+};
+
+/**
+ * One photo taken during an audit, as the evidence route serves it.
+ *
+ * URLs arrive resolved and ready to render — the client never rebuilds them.
+ *
+ * @see GET /api/mobile/audits/:auditId/evidence
+ */
+export type AuditEvidenceImage = {
+  id: string;
+  imageUrl: string;
+  /** Always populated — the server falls back to `imageUrl`. */
+  thumbnailUrl: string;
+  description: string | null;
+  createdAt: string;
+  authorName: string | null;
+  authorImage: string | null;
+};
+
+/**
+ * Everything recorded ON an audit, split the way the schema splits it.
+ *
+ * `general` is the completion note and any photos attached when the audit was
+ * closed. `byAuditAsset` is keyed by the same `auditAssetId` the detail
+ * payload already carries, so a row looks up its own evidence directly.
+ *
+ * @see GET /api/mobile/audits/:auditId/evidence
+ */
+export type AuditEvidenceResponse = {
+  general: {
+    notes: AuditEvidenceNote[];
+    images: AuditEvidenceImage[];
+  };
+  byAuditAsset: Record<
+    string,
+    { notes: AuditEvidenceNote[]; images: AuditEvidenceImage[] }
+  >;
+  /**
+   * The server clamped the response, so what arrived is the most recent rows
+   * rather than all of them.
+   *
+   * The clamp applies across the WHOLE audit on an audit-wide request, so once
+   * it bites, older per-asset buckets come back short — or empty — while their
+   * count chips still promise the real number. Request a single
+   * `auditAssetId` to get a bucket no unrelated row can clamp.
+   *
+   * Optional so a client built against an older server still type-checks;
+   * absent means the server predates the flag, not that nothing was clamped.
+   */
+  truncated?: boolean;
 };
 
 export type RecordScanResponse = {
@@ -1124,4 +1377,40 @@ export type DashboardResponse = {
   activeBookings: DashboardBooking[];
   overdueBookings: DashboardBooking[];
   activeAudits: DashboardAudit[];
+};
+
+/**
+ * One booking as the calendar needs it. Ranges, not points: `from`/`to` are
+ * what get drawn as a band across the days the booking covers.
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/bookings.calendar.ts}
+ */
+export type CalendarBooking = {
+  id: string;
+  name: string;
+  status: BookingStatus;
+  from: string;
+  to: string;
+  custodianName: string | null;
+};
+
+/** Bookings overlapping the requested window. */
+export type CalendarBookingsResponse = {
+  bookings: CalendarBooking[];
+  /**
+   * The window held more bookings than one response carries. Rows come back
+   * soonest first, so what is missing is the END of the window - the view has
+   * to say so rather than draw those days as empty.
+   */
+  truncated?: boolean;
+  /**
+   * What the same filter matches beyond the visible month. The bookings LIST is
+   * date-blind, so without this the calendar can look empty while the list is
+   * full, and nothing explains the difference.
+   */
+  outsideWindow: {
+    count: number;
+    /** ISO date to jump to, or null when there is nothing outside. */
+    jumpTo: string | null;
+  };
 };

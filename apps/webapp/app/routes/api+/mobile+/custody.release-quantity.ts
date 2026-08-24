@@ -1,15 +1,34 @@
 /**
  * POST /api/mobile/custody/release-quantity
  *
- * Releases (returns) N units of a QUANTITY_TRACKED asset from a team member
- * back to the available pool. Mobile twin of the web's
- * `/api/assets/release-quantity-custody` route — same Zod schema, same
- * SELF_SERVICE guard, same `releaseQuantity` service call, same best-effort
- * audit note. Deliberately NO low-stock check: release ADDS stock back, and
- * the web release route has none either (verified: no
- * `checkAndNotifyLowStock` import/call in that file).
+ * Ends a team member's hold on N units of a QUANTITY_TRACKED asset. Mobile twin
+ * of the web's `/api/assets/release-quantity-custody` route — same Zod schema,
+ * same SELF_SERVICE guard, same `releaseQuantity` service call, same
+ * best-effort audit note.
  *
- * Body: { assetId: string, teamMemberId: string, quantity: number, note?: string }
+ * **What happens to the units is decided server-side** from the asset's
+ * `consumptionType` (see `releaseCategory` in `@shelf/quantity-control`), with
+ * an optional operator-supplied split:
+ *
+ * - `RETURN` (`TWO_WAY`, and legacy rows with no `consumptionType`) — the units
+ *   go back into the available pool and `Asset.quantity` is untouched. These
+ *   assets reject a non-zero `consumed`.
+ * - `CONSUME` (`ONE_WAY` consumables) — the units default to used-up, so
+ *   `Asset.quantity` is permanently decremented. A `consumed` field below the
+ *   released quantity hands the remainder back instead.
+ *
+ * The audit note is worded from the split the service reports back, so what the
+ * operator reads always matches what was persisted.
+ *
+ * Runs the debounced low-stock notifier (best-effort) after every release.
+ * Available stock is `Asset.quantity - SUM(Custody.quantity)`: ending a hold
+ * drops custody by the full release and total by the consumed part, so
+ * available rises by exactly the RETURNED units — and is unchanged when
+ * everything was consumed. The notifier still runs so a recovery clears the
+ * now-stale debounce marker and sends the recovery notice, or the next genuine
+ * alert is suppressed. Mirrors the web route.
+ *
+ * Body: { assetId: string, teamMemberId: string, quantity: number, consumed?: number, note?: string }
  * Org: `?orgId=` query param or `x-shelf-organization` header.
  *
  * Success envelope: `{ success: true, asset }` where `asset` is the
@@ -33,12 +52,14 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { releaseQuantity } from "~/modules/asset/service.server";
+import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import {
+  appendUserTextToNote,
   wrapCustodianForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
@@ -59,6 +80,12 @@ const ReleaseQuantityCustodySchema = z.object({
     .number()
     .int()
     .positive("Quantity must be a positive integer"),
+  /**
+   * How many of the released units were used up. Optional: when absent the
+   * server derives it from the asset's consumptionType. Only a consumable
+   * accepts a non-zero value, which the service enforces.
+   */
+  consumed: z.coerce.number().int().nonnegative().optional(),
   note: z
     .string()
     .optional()
@@ -107,7 +134,7 @@ export async function action({ request }: ActionFunctionArgs) {
         status: 400,
       });
     }
-    const { assetId, teamMemberId, quantity, note } = parsed.data;
+    const { assetId, teamMemberId, quantity, consumed, note } = parsed.data;
 
     /**
      * Validate that the team member belongs to the same organization.
@@ -150,14 +177,23 @@ export async function action({ request }: ActionFunctionArgs) {
     // lookup, over-release check) lives inside the service. Kit-allocated
     // custody rows are NOT releasable here by design — only the operator
     // row (kitCustodyId: null) is targeted.
-    await releaseQuantity({
-      assetId,
-      teamMemberId,
-      quantity,
-      userId: user.id,
-      organizationId,
-      note,
-    });
+    /**
+     * The service resolves the split from `Asset.consumptionType` when the
+     * caller sends no `consumed`, and reports back what it persisted — so the
+     * audit note below describes reality instead of re-deriving the branch
+     * here. App builds predating the field simply omit it and keep the
+     * server-derived outcome they always had.
+     */
+    const { consumed: consumedUnits, returned: returnedUnits } =
+      await releaseQuantity({
+        assetId,
+        teamMemberId,
+        quantity,
+        consumed,
+        userId: user.id,
+        organizationId,
+        note,
+      });
 
     /** Best-effort audit note — don't fail the action if note creation fails */
     try {
@@ -183,8 +219,17 @@ export async function action({ request }: ActionFunctionArgs) {
         },
       });
 
-      const baseLine = `${actor} released **${quantity}** unit(s) from ${custodianDisplay}'s custody.`;
-      const noteContent = note ? `${baseLine} *"${note}"*` : baseLine;
+      /**
+       * Same three shapes the web route writes, so an activity feed reads the
+       * same whichever client performed the release.
+       */
+      const baseLine =
+        consumedUnits > 0 && returnedUnits > 0
+          ? `${actor} ended ${custodianDisplay}'s hold on **${quantity}** unit(s): **${consumedUnits}** consumed and **${returnedUnits}** returned to stock.`
+          : consumedUnits > 0
+          ? `${actor} marked **${consumedUnits}** unit(s) held by ${custodianDisplay} as consumed. Stock reduced permanently.`
+          : `${actor} released **${returnedUnits}** unit(s) from ${custodianDisplay}'s custody.`;
+      const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({
         content: noteContent,
@@ -206,7 +251,31 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // No route-level sendNotification success toast here: that's the web's
     // SSE emitter and mobile has no listener (matches custody.assign.ts).
-    // And no checkAndNotifyLowStock — see the file JSDoc.
+
+    // Available stock is `Asset.quantity - SUM(Custody.quantity)`. Ending a
+    // hold drops custody by the full release and total by the consumed part,
+    // so available rises by exactly the RETURNED units — and is unchanged when
+    // everything was consumed. Run the notifier so a recovery clears the
+    // now-stale debounce marker and sends the recovery notice, or the next
+    // genuine alert is suppressed. Best-effort: releaseQuantity has already
+    // committed, so a notifier failure must NOT surface as an action error
+    // (the client could retry the non-idempotent release).
+    try {
+      await checkAndNotifyLowStock({
+        assetId,
+        userId: user.id,
+        organizationId,
+      });
+    } catch (lowStockError) {
+      Logger.error(
+        new ShelfError({
+          cause: lowStockError,
+          message: "Failed to run low-stock check after mobile custody release",
+          label: "Assets",
+          additionalData: { assetId, organizationId },
+        })
+      );
+    }
 
     // Refreshed asset, shaped for mobile with the caller's custody
     // visibility already applied, so the app can update state directly.

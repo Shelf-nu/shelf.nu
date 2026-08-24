@@ -3,7 +3,9 @@ import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import type { AuditPdfDbResult } from "~/modules/audit/pdf-helpers";
 import { fetchAllAuditPdfRelatedData } from "~/modules/audit/pdf-helpers";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
+import { formatDate } from "~/utils/date-format";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
 import { sanitizeNoteContent } from "~/utils/note-sanitizer.server";
@@ -58,11 +60,18 @@ export const loader = async ({
       request
     );
 
-    // Format dates in user's local timezone for display in PDF
-    const dateTimeFormat = getDateTimeFormat(request, {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
+    // Resolve the acting user's format preferences (date order, time format,
+    // timezone) so PDF dates render per their settings rather than the request
+    // locale.
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
+    // Preserve the existing `.format(date)` call shape used below.
+    const dateTimeFormat = {
+      format: (date: Date) => formatDate(date, prefs, { includeTime: true }),
+    };
 
     const { createdAt, completedAt } = pdfMeta.session;
 
@@ -76,10 +85,19 @@ export const loader = async ({
       pdfMeta.to = dateTimeFormat.format(new Date(completedAt));
     }
 
-    // Sanitize activity note content to remove markdoc tags (server-side only)
+    // Sanitize note content to remove markdoc tags (server-side only).
+    //
+    // why BOTH lists: a condition note written alongside photos carries an
+    // embedded `{% audit_images ... /%}` tag (helpers.server.ts,
+    // buildAuditImagesNoteContent). The PDF prints note content as plain text,
+    // so an unsanitised one would put raw tag source in the receipt.
+    pdfMeta.conditionNotes = pdfMeta.conditionNotes.map((note) => ({
+      ...note,
+      content: sanitizeNoteContent(note.content || "", prefs),
+    }));
     pdfMeta.activityNotes = pdfMeta.activityNotes.map((note) => ({
       ...note,
-      content: sanitizeNoteContent(note.content || "", dateTimeFormat),
+      content: sanitizeNoteContent(note.content || "", prefs),
     }));
 
     return data(payload({ pdfMeta }));

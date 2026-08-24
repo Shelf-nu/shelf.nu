@@ -1,5 +1,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { NRM_ID_PARAM } from "~/components/nrm/export-nrm-button";
+import { csvResponse } from "~/utils/csv-utf8";
 import { exportNRMsToCsv } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getCurrentSearchParams } from "~/utils/http.server";
@@ -34,12 +35,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const csvString = await exportNRMsToCsv({
       organizationId,
       nrmIds: nrmIds.split(","),
+      // The export button forwards the index's current search params, so
+      // "select all" exports exactly the filtered set the user can see.
+      search: searchParams.get("s"),
     });
 
-    return new Response(csvString, {
-      status: 200,
-      headers: { "Content-Type": "text/csv" },
-    });
+    return csvResponse(csvString);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
