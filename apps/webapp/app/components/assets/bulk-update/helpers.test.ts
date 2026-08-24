@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatUnrecognizedColumnLabel,
+  splitCsvRecords,
   validateCsvClientSide,
 } from "./helpers";
 
@@ -65,5 +66,56 @@ describe("formatUnrecognizedColumnLabel (final review fix)", () => {
 
   it("leaves a malformed short 'cf:' header unchanged (guards the non-null assertion)", () => {
     expect(formatUnrecognizedColumnLabel("cf:")).toBe("cf:");
+  });
+});
+
+describe("splitCsvRecords — quoted fields carrying line breaks", () => {
+  /**
+   * A description typed with paragraph breaks, as the Import-ready export
+   * writes it: quoted, CRLF inside the field, CRLF between records.
+   */
+  const MULTILINE_CSV =
+    '"id","title","description"\r\n' +
+    '"a1","Tecles de cadena","Tecles de cadena\r\nMarca EMTOP\r\nSon 2 iguales"\r\n' +
+    '"a2","Mazos","MAZO DE IMPACTO\r\n2 UNDS"\r\n';
+
+  it("counts a field's line breaks as part of its record", () => {
+    expect(splitCsvRecords(MULTILINE_CSV)).toHaveLength(3);
+  });
+
+  it("keeps the quotes so the record still splits on its delimiters", () => {
+    const [, first] = splitCsvRecords(MULTILINE_CSV);
+    expect(first.startsWith('"a1"')).toBe(true);
+  });
+
+  it("treats a doubled quote as an escaped quote, not a boundary", () => {
+    const csv = '"id","note"\n"a1","he said ""hi""\nthen left"\n';
+    expect(splitCsvRecords(csv)).toHaveLength(2);
+  });
+
+  it("handles LF-only and CRLF line endings alike", () => {
+    expect(splitCsvRecords("a,b\nc,d\n")).toHaveLength(2);
+    expect(splitCsvRecords("a,b\r\nc,d\r\n")).toHaveLength(2);
+  });
+
+  it("drops blank records", () => {
+    expect(splitCsvRecords("a,b\n\n\nc,d\n")).toHaveLength(2);
+  });
+});
+
+describe("validateCsvClientSide — row count with multi-line descriptions", () => {
+  it("reports assets, not lines", () => {
+    // Two assets whose descriptions span three and two lines respectively.
+    const csv =
+      '"id","title","description"\r\n' +
+      '"a1","Tecles","Tecles de cadena\r\nMarca EMTOP\r\nSon 2 iguales"\r\n' +
+      '"a2","Mazos","MAZO DE IMPACTO\r\n2 UNDS"\r\n';
+
+    const result = validateCsvClientSide(csv);
+
+    expect(result.rowCount).toBe(2);
+    expect(result.headerCount).toBe(3);
+    expect(result.idColumnFound).toBe("ID");
+    expect(result.valid).toBe(true);
   });
 });

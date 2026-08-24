@@ -37,8 +37,8 @@ export interface ClientValidation {
 export function validateCsvClientSide(text: string): ClientValidation {
   // Strip BOM that Excel adds to UTF-8 CSVs
   const cleanText = text.replace(/^\uFEFF/, "");
-  const lines = cleanText.split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length === 0) {
+  const records = splitCsvRecords(cleanText);
+  if (records.length === 0) {
     return {
       valid: false,
       idColumnFound: null,
@@ -48,8 +48,8 @@ export function validateCsvClientSide(text: string): ClientValidation {
     };
   }
 
-  // Parse first line as headers (simple CSV split — handles most cases)
-  const headers = parseSimpleCsvLine(lines[0]);
+  // Parse the header record (simple CSV split — handles most cases)
+  const headers = parseSimpleCsvLine(records[0]);
   const headerTrimmed = headers.map((h) => h.trim());
 
   // Find best available identifier column (priority order). Case-insensitive
@@ -60,7 +60,7 @@ export function validateCsvClientSide(text: string): ClientValidation {
       headerTrimmed.some((h) => h.toLowerCase() === col.toLowerCase())
     ) ?? null;
 
-  const rowCount = Math.max(0, lines.length - 1);
+  const rowCount = Math.max(0, records.length - 1);
   const warnings: string[] = [];
 
   if (!idColumnFound) {
@@ -83,13 +83,66 @@ export function validateCsvClientSide(text: string): ClientValidation {
 }
 
 /**
- * Simple CSV line parser for client-side validation.
+ * Splits CSV text into records, honouring quoted fields.
+ *
+ * A quoted field may contain line breaks — a description typed with paragraph
+ * breaks is the common case — and such a field spans several lines of the file
+ * while still being ONE record. Splitting on newlines alone counts each of
+ * those lines as a row, so a file of 174 assets reports hundreds.
+ *
+ * Quotes are preserved in the returned records, because {@link
+ * parseSimpleCsvLine} splits on the delimiters they protect. Blank records are
+ * dropped.
+ *
+ * @param text - Full CSV text, BOM already stripped
+ * @returns One string per record, header first
+ */
+export function splitCsvRecords(text: string): string[] {
+  const records: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (char === '"') {
+      // A doubled quote is an escaped quote, not a boundary
+      if (inQuotes && text[i + 1] === '"') {
+        current += '""';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+        current += char;
+      }
+      continue;
+    }
+
+    if (!inQuotes && (char === "\n" || char === "\r")) {
+      // Consume CRLF as a single break
+      if (char === "\r" && text[i + 1] === "\n") i++;
+      if (current.trim()) records.push(current);
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.trim()) records.push(current);
+  return records;
+}
+
+/**
+ * Simple CSV parser for one record, for client-side validation.
  * Handles quoted values (via {@link stripQuotes}) and both `,` and `;` delimiters.
  *
+ * Takes a single record, not a slice of the file: record boundaries are
+ * {@link splitCsvRecords}'s job, because a quoted field can carry line breaks.
+ *
  * Note: This is intentionally simplified for quick client-side checks.
- * It does not handle multi-line quoted values, encoding/BOM detection,
- * or leading whitespace trimming. The server uses `csv-parse` with full
- * encoding detection and edge-case handling as the source of truth.
+ * It does not handle encoding/BOM detection or leading whitespace trimming.
+ * The server uses `csv-parse` with full encoding detection and edge-case
+ * handling as the source of truth.
  */
 export function parseSimpleCsvLine(line: string): string[] {
   const result: string[] = [];
