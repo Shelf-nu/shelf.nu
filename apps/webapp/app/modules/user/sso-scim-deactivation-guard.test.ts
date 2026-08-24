@@ -14,18 +14,27 @@
  *
  * @see {@link file://./service.server.ts}
  */
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: exercise the guard's real DB reads/writes without a database
-vi.mock("~/database/db.server", () => ({
-  db: {
+vi.mock("~/database/db.server", () => {
+  const db = {
     user: { update: vi.fn() },
     // Drives isScimDeactivated: a row here (with no membership) = deactivated.
     userScimExternalId: { findUnique: vi.fn() },
     // createUserOrgAssociation upserts here when a grant proceeds.
     userOrganization: { upsert: vi.fn(), delete: vi.fn(), update: vi.fn() },
-  },
-}));
+    // A grant writes the org association and the team member together, so the
+    // team-member record is reachable only through this delegate now.
+    teamMember: { findFirst: vi.fn(), create: vi.fn() },
+    // why: the grant runs both writes in one interactive transaction. Routing
+    // the callback to the same mocked client is what lets the assertions see
+    // the writes it makes.
+    $transaction: vi.fn((cb: (tx: unknown) => unknown) => cb(db)),
+  };
+  return { db };
+});
 
 // why: the SSO org set is fetched from the organization module; stub it so the
 // test controls which orgs (and group mappings) the login reconciles against
@@ -33,7 +42,9 @@ vi.mock("../organization/service.server", () => ({
   getOrganizationsBySsoDomain: vi.fn(),
 }));
 
-// why: a granted membership also creates a team member; isolate that side effect
+// why: other paths in the module under test reach the team-member service;
+// stubbing it keeps them off a database. The SSO grant no longer goes through
+// it — it writes the record inside its own transaction.
 vi.mock("../team-member/service.server", () => ({
   createTeamMember: vi.fn(),
 }));
@@ -68,7 +79,14 @@ function domainOrg() {
  * matched org, so the login takes the "grant new access" branch — the one the
  * guard protects. firstName/lastName match to skip the profile-update path.
  */
-function login() {
+/**
+ * Runs an SSO login.
+ *
+ * @param overrides.userOrganizations - Memberships the user already holds.
+ *   Empty (the default) exercises the grant path; a membership for the domain
+ *   org exercises the existing-access path instead.
+ */
+function login(overrides: { userOrganizations?: unknown[] } = {}) {
   // Only the fields the function reads are supplied; cast to satisfy the
   // Prisma-derived parameter types without building a full user payload.
   return updateUserFromSSO(
@@ -79,7 +97,7 @@ function login() {
       id: USER_ID,
       firstName: "Jane",
       lastName: "Doe",
-      userOrganizations: [],
+      userOrganizations: overrides.userOrganizations ?? [],
     } as unknown as Parameters<typeof updateUserFromSSO>[1],
     { firstName: "Jane", lastName: "Doe", groups: ["g-admin"] }
   );
@@ -94,6 +112,11 @@ describe("updateUserFromSSO — SCIM deactivation guard", () => {
     mockDb.db.userOrganization.upsert.mockResolvedValue({});
     // @ts-expect-error - vitest mock type
     mockTeam.createTeamMember.mockResolvedValue({});
+    // Default: no team-member record yet, so a grant writes one.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.findFirst.mockResolvedValue(null);
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.create.mockResolvedValue({ id: "tm-1" });
   });
 
   it("blocks the group-driven grant for a SCIM-deactivated user", async () => {
@@ -119,8 +142,53 @@ describe("updateUserFromSSO — SCIM deactivation guard", () => {
     const result = await login();
 
     expect(mockDb.db.userOrganization.upsert).toHaveBeenCalled();
-    expect(mockTeam.createTeamMember).toHaveBeenCalled();
+    expect(mockDb.db.teamMember.create).toHaveBeenCalled();
     expect(result.org?.id).toBe(ORG_ID);
+  });
+
+  it("writes the access and the team member in one transaction", async () => {
+    // Separately, a failure between them leaves a user who can sign in and see
+    // the workspace but can never be assigned custody — and the next login
+    // finds the access and takes the branch that does not create the record.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(null);
+
+    await login();
+
+    expect(mockDb.db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates a missing team member for a user who already has access", async () => {
+    // The repair path: an account left half-provisioned by an earlier failure
+    // reaches the existing-access branch on every later login, so that branch
+    // is the only place it can be fixed.
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(null);
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.findFirst.mockResolvedValue(null);
+
+    await login({
+      userOrganizations: [
+        { organization: { id: ORG_ID }, roles: [OrganizationRoles.ADMIN] },
+      ],
+    });
+
+    expect(mockDb.db.teamMember.create).toHaveBeenCalled();
+  });
+
+  it("does not duplicate a team member that already exists", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(null);
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.findFirst.mockResolvedValue({ id: "tm-1" });
+
+    await login({
+      userOrganizations: [
+        { organization: { id: ORG_ID }, roles: [OrganizationRoles.ADMIN] },
+      ],
+    });
+
+    expect(mockDb.db.teamMember.create).not.toHaveBeenCalled();
   });
 
   // The guard recognises only SOFT deactivation (active:false), where the
