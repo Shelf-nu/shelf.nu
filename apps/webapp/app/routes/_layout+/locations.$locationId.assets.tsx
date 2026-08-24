@@ -48,6 +48,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { resolveLocationAssetIds } from "~/modules/location/bulk-select.server";
 import {
   getLocation,
@@ -423,7 +424,14 @@ const ListAssetContent = ({
     }>;
     qrCodes: { id: string }[];
     barcodes: { id: string; type: BarcodeType; value: string }[];
-    custody: {
+    /**
+     * `Asset.custody` is a LIST — an asset can be held by several custodians
+     * at once for quantity-tracked stock. Typing it as a single record made
+     * `custody?.custodian` read `undefined` on every row, which the compiler
+     * could not see because this projection is hand-written.
+     */
+    custody: Array<{
+      quantity: number;
       custodian: {
         id: string;
         name: string;
@@ -431,15 +439,20 @@ const ListAssetContent = ({
           id: string;
           firstName: string;
           lastName: string;
+          displayName: string | null;
           profilePicture: string;
           email: string;
-        };
+        } | null;
       };
-    };
+    }>;
   };
   extraProps: { canReadCustody: boolean; userRoleCanManageAssets: boolean };
 }) => {
   const { category, tags, custody } = item;
+  // The list column shows one badge, so it shows the primary holder — the
+  // same choice `getPrimaryCustody` makes everywhere else custody is
+  // summarised in a single slot.
+  const primaryCustody = getPrimaryCustody(custody);
   // The location whose detail page we're on — used to pick this asset's
   // pivot row out of `item.assetLocations`. Mirrors the kit-page
   // `useParams<{ kitId }>` pattern at `kits.$kitId.assets.tsx:179`.
@@ -624,8 +637,8 @@ const ListAssetContent = ({
       {/* Custodian */}
       <When truthy={extraProps.canReadCustody}>
         <Td>
-          {custody?.custodian ? (
-            <TeamMemberBadge teamMember={custody.custodian} />
+          {primaryCustody?.custodian ? (
+            <TeamMemberBadge teamMember={primaryCustody.custodian} />
           ) : (
             <EmptyTableValue />
           )}

@@ -72,3 +72,34 @@ describe("getAssetOverviewFields", () => {
     ).toBe(assetId);
   });
 });
+
+describe("getAssetOverviewFields — bookingAssets", () => {
+  const testAssetId = "asset-123";
+
+  it("returns only the booking the asset is currently out on", () => {
+    // The overview shows ONE booking, taken as `bookingAssets[0]`, and the
+    // loader derives nothing further from it. That is only correct because
+    // the query has already narrowed the relation to the live booking —
+    // if this filter ever widens, the page starts showing an arbitrary one.
+    const result = getAssetOverviewFields(testAssetId, true) as {
+      bookingAssets: {
+        where: {
+          booking: {
+            status: { in: string[] };
+            NOT: { partialCheckins: { some: { assetIds: { has: string } } } };
+          };
+        };
+      };
+    };
+
+    expect(result.bookingAssets.where.booking.status.in).toEqual([
+      "ONGOING",
+      "OVERDUE",
+    ]);
+    // A booking this asset has already been checked in from is not the
+    // booking it is currently out on.
+    expect(
+      result.bookingAssets.where.booking.NOT.partialCheckins.some.assetIds.has
+    ).toBe(testAssetId);
+  });
+});
