@@ -183,9 +183,11 @@ export async function findUserByEmail(email: User["email"]) {
  *
  * Org access and the team-member record are two writes, and only the second one
  * makes custody possible — a user holding the first without the second can sign
- * in, see the workspace, and never be assignable as a custodian. Returning
- * early on existing access alone would leave such a user stuck for good, so
- * every SSO login re-checks rather than assuming the pair is intact.
+ * in, see the workspace, and never be assignable as a custodian. Existing
+ * access alone is therefore not taken as proof the pair is intact: a login that
+ * still maps to a role re-checks, so an account left half-written can recover.
+ * A login that maps to no role does not, because that transition is removing
+ * the user's access rather than restoring it.
  *
  * Soft-deleted records do not count: a member removed from the workspace and
  * then re-granted access needs a live record again.
@@ -440,16 +442,21 @@ export async function createUserFromSSO(
 
         if (role) {
           firstMatchedOrg ??= org;
-          await createUserOrgAssociation(db, {
-            userId: user.id,
-            organizationIds: [org.id],
-            roles: [role],
-          });
+          // Both writes or neither, for the same reason as the returning-user
+          // path: access without a team member is an account that can open the
+          // workspace but can never be assigned custody.
+          await db.$transaction(async (tx) => {
+            await createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [org.id],
+              roles: [role],
+            });
 
-          await createTeamMember({
-            name: `${firstName} ${lastName}`,
-            organizationId: org.id,
-            userId,
+            await ensureUserTeamMember(tx, {
+              userId,
+              organizationId: org.id,
+              name: `${firstName} ${lastName}`,
+            });
           });
         }
       }

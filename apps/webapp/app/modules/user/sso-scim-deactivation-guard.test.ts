@@ -223,9 +223,9 @@ describe("updateUserFromSSO — SCIM deactivation guard", () => {
   });
 
   it("creates a missing team member for a user who already has access", async () => {
-    // The repair path: an account left half-provisioned by an earlier failure
-    // reaches the existing-access branch on every later login, so that branch
-    // is the only place it can be fixed.
+    // The repair path: an account left half-provisioned reaches the
+    // existing-access branch on every later login, so that branch is the only
+    // place it can be fixed.
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.findUnique.mockResolvedValue(null);
     // @ts-expect-error - vitest mock type
