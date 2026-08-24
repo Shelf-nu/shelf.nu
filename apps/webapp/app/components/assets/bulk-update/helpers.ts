@@ -21,6 +21,17 @@ export const ACCEPTED_ID_COLUMNS = ["Asset ID", "ID"] as const;
 /** Maximum number of asset change rows to display in the preview */
 export const PREVIEW_DISPLAY_LIMIT = 50;
 
+/** What {@link splitCsvRecords} found in a CSV document. */
+export interface CsvRecordSplit {
+  /** One string per record, header first. Blank records are dropped. */
+  records: string[];
+  /**
+   * The text ended inside a quoted field, so a `"` is unbalanced. Records
+   * after the stray quote were absorbed into one, making the row count wrong.
+   */
+  unterminatedQuote: boolean;
+}
+
 export interface ClientValidation {
   valid: boolean;
   /** Which identifier column was found (null if none) */
@@ -37,7 +48,7 @@ export interface ClientValidation {
 export function validateCsvClientSide(text: string): ClientValidation {
   // Strip BOM that Excel adds to UTF-8 CSVs
   const cleanText = text.replace(/^\uFEFF/, "");
-  const records = splitCsvRecords(cleanText);
+  const { records, unterminatedQuote } = splitCsvRecords(cleanText);
   if (records.length === 0) {
     return {
       valid: false,
@@ -69,12 +80,19 @@ export function validateCsvClientSide(text: string): ClientValidation {
     );
   }
 
-  if (rowCount === 0) {
+  if (unterminatedQuote) {
+    // Say what is wrong rather than reporting the symptom. A stray quote
+    // absorbs every following row into one record, so without this the file
+    // looks empty or short — and the real cause is nowhere on screen.
+    warnings.push(
+      'Unbalanced quote: a " is opened and never closed, so the rows after it run together. Write a literal quote as two ("").'
+    );
+  } else if (rowCount === 0) {
     warnings.push("No data rows found — only a header row.");
   }
 
   return {
-    valid: !!idColumnFound && rowCount > 0,
+    valid: !!idColumnFound && rowCount > 0 && !unterminatedQuote,
     idColumnFound,
     headerCount: headerTrimmed.filter(Boolean).length,
     rowCount,
@@ -95,9 +113,9 @@ export function validateCsvClientSide(text: string): ClientValidation {
  * dropped.
  *
  * @param text - Full CSV text, BOM already stripped
- * @returns One string per record, header first
+ * @returns The records (header first) and whether the text ended mid-quote
  */
-export function splitCsvRecords(text: string): string[] {
+export function splitCsvRecords(text: string): CsvRecordSplit {
   const records: string[] = [];
   let current = "";
   let inQuotes = false;
@@ -106,7 +124,13 @@ export function splitCsvRecords(text: string): string[] {
     const char = text[i];
 
     if (char === '"') {
-      // A doubled quote is an escaped quote, not a boundary
+      // A doubled quote is an escaped quote, not a boundary.
+      //
+      // Redundant by construction: two adjacent quotes toggle `inQuotes` twice,
+      // which lands on the state this branch keeps, and no line break can sit
+      // between them — so removing it changes no output. It is kept because it
+      // states the intent, and because a future splitter that reads `inQuotes`
+      // mid-field would need it. Do not read it as load-bearing today.
       if (inQuotes && text[i + 1] === '"') {
         current += '""';
         i++;
@@ -118,7 +142,9 @@ export function splitCsvRecords(text: string): string[] {
     }
 
     if (!inQuotes && (char === "\n" || char === "\r")) {
-      // Consume CRLF as a single break
+      // Consume CRLF as a single break. Also redundant on its own — the blank
+      // check below already drops the empty record a lone `\n` would push —
+      // but it keeps the boundary explicit rather than incidental.
       if (char === "\r" && text[i + 1] === "\n") i++;
       if (current.trim()) records.push(current);
       current = "";
@@ -129,7 +155,11 @@ export function splitCsvRecords(text: string): string[] {
   }
 
   if (current.trim()) records.push(current);
-  return records;
+
+  // Ending inside a quoted field means a `"` was opened and never closed.
+  // Everything after it was absorbed into one record, so the count is wrong and
+  // the file will not parse server-side either.
+  return { records, unterminatedQuote: inQuotes };
 }
 
 /**
