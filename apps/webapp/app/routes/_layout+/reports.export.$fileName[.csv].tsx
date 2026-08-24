@@ -40,6 +40,7 @@ import type {
   MonthlyBookingTrendRow,
 } from "~/modules/reports/types";
 import { getClientHint } from "~/utils/client-hints";
+import { csvResponse } from "~/utils/csv-utf8";
 import { type ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -280,10 +281,8 @@ export const loader = async ({
     // Get filename from URL params (e.g., "booking-compliance-last_30d-2026-04-22")
     const fileName = params.fileName || `${reportId}-export`;
 
-    return new Response(csvString, {
-      status: 200,
+    return csvResponse(csvString, {
       headers: {
-        "content-type": "text/csv",
         "content-disposition": `attachment; filename="${fileName}.csv"`,
         "cache-control": "no-cache",
       },
