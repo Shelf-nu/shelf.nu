@@ -116,6 +116,10 @@ export async function getOrganizationsBySsoDomain(emailDomain: string) {
             ssoDetails: {
               domain: {
                 contains: emailDomain,
+                // Stored casing is unconstrained, so a case-sensitive filter
+                // would drop "ACME.com" here and the exact-match filter below
+                // would never see it.
+                mode: "insensitive" as const,
               },
             },
           },
