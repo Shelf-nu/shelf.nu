@@ -267,10 +267,17 @@ describe("updateUserFromSSO — SCIM deactivation guard", () => {
     // callback whose claims revoke access can delete the row in between. The
     // lock then finds nothing, and creating the record anyway would attach a
     // custodian to a workspace its user is no longer in.
+
+    // why: no SCIM mapping, so the deactivation guard lets the login through
+    // and it reaches the repair branch this test is about.
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.findUnique.mockResolvedValue(null);
+    // why: no existing record, so the repair would go on to create one — the
+    // lock is the only thing that can stop it.
     // @ts-expect-error - vitest mock type
     mockDb.db.teamMember.findFirst.mockResolvedValue(null);
+    // why: this IS the condition under test. An empty result is how the lock
+    // reports that the membership row is gone.
     // @ts-expect-error - vitest mock type
     mockDb.db.$queryRaw.mockResolvedValue([]);
 
@@ -285,8 +292,11 @@ describe("updateUserFromSSO — SCIM deactivation guard", () => {
   });
 
   it("does not duplicate a team member that already exists", async () => {
+    // why: no SCIM mapping, so the login reaches the repair branch.
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.findUnique.mockResolvedValue(null);
+    // why: a record already present is the condition under test — the repair
+    // has to leave it alone rather than add a second one.
     // @ts-expect-error - vitest mock type
     mockDb.db.teamMember.findFirst.mockResolvedValue({ id: "tm-1" });
 
