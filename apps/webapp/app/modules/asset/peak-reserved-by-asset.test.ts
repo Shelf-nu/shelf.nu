@@ -29,7 +29,11 @@ function txWith(
   loggedGroups: unknown[] = []
 ): Parameters<typeof getPeakReservedUnitsByAsset>[0]["tx"] {
   return {
+    // why: the reservation rows are the timeline under test — feeding them
+    // directly is what lets a case state a set of booking windows.
     bookingAsset: { findMany: vi.fn().mockResolvedValue(reservedRows) },
+    // why: dispositions decide how much of each row is still reserved, and
+    // which row they attach to is the distinction several cases turn on.
     consumptionLog: { groupBy: vi.fn().mockResolvedValue(loggedGroups) },
   } as unknown as Parameters<typeof getPeakReservedUnitsByAsset>[0]["tx"];
 }
@@ -204,6 +208,44 @@ describe("getPeakReservedUnitsByAsset", () => {
       // The standalone 60 is untouched; the kit slice never enters the peak.
       expect(peaks.get(ASSET)).toBe(60);
     });
+  });
+
+  it("only lets a kit slice absorb what it has not already returned", async () => {
+    // The kit row's 40 units were returned under its own row id, so it can
+    // soak up none of the legacy total — all 10 reaches the standalone row.
+    const tx = txWith(
+      [
+        reservation(ASSET, "b1", 60, "2026-01-01", "2026-01-10", {
+          id: "standalone-row",
+        }),
+        reservation(ASSET, "b1", 40, "2026-01-01", "2026-01-10", {
+          id: "kit-row",
+          assetKitId: "ak-1",
+        }),
+      ],
+      [
+        {
+          bookingAssetId: "kit-row",
+          bookingId: "b1",
+          assetId: ASSET,
+          _sum: { quantity: 40 },
+        },
+        {
+          bookingAssetId: null,
+          bookingId: "b1",
+          assetId: ASSET,
+          _sum: { quantity: 10 },
+        },
+      ]
+    );
+
+    const peaks = await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx,
+    });
+
+    expect(peaks.get(ASSET)).toBe(50);
   });
 
   it("fills kit slices first with a disposition that predates row attribution", async () => {

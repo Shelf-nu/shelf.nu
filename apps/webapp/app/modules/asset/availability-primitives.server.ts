@@ -372,11 +372,19 @@ export async function getPeakReservedUnitsByAsset({
   // standalone row would shrink the reservation this guard is protecting.
   const legacyForStandalone = new Map<string, number>();
   for (const [pair, legacyQuantity] of legacyLoggedByPair) {
+    // What the kit slices can still absorb, not what they hold: a kit row
+    // whose units were already returned under its own row id has nothing left
+    // to soak up, and treating its full quantity as capacity would swallow the
+    // legacy total before any of it reached the standalone row.
     const kitDrivenCapacity = rows
       .filter(
         (r) => r.assetKitId !== null && `${r.bookingId}:${r.assetId}` === pair
       )
-      .reduce((sum, r) => sum + r.quantity, 0);
+      .reduce(
+        (sum, r) =>
+          sum + Math.max(0, r.quantity - (loggedByRowId.get(r.id) ?? 0)),
+        0
+      );
 
     legacyForStandalone.set(
       pair,
