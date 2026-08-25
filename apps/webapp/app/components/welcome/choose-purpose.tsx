@@ -110,7 +110,7 @@ const PLAN_DETAILS: Record<
   personal: {
     title: "Personal",
     description:
-      "For testing or individual use. Includes 3 custom fields and branded QR labels.",
+      "For one person. You won't be able to invite teammates or use bookings. Includes 3 custom fields and branded QR labels.",
     chip: "Free",
     helper: "Personal workspaces are free and ready to use immediately.",
     analytics: "cta-start-personal",
@@ -119,7 +119,7 @@ const PLAN_DETAILS: Record<
   },
   team: {
     title: "Team",
-    description: `For organizations and labs. Includes collaboration features with a ${config.freeTrialDays}-day free trial. No credit card required.`,
+    description: `Invite teammates, assign custody, and manage bookings together. Includes a ${config.freeTrialDays}-day free trial. No credit card required.`,
     chip: `${config.freeTrialDays}-day trial`,
     badge: "Recommended",
     analytics: "cta-next-team",
@@ -128,21 +128,33 @@ const PLAN_DETAILS: Record<
   },
 };
 
+/**
+ * Onboarding plan picker (Personal vs Team) shown on `/welcome`.
+ *
+ * @param defaultSelectedPlan - Plan to pre-select on mount, derived from the
+ *   user's onboarding "how many people" answer.
+ * @param teamIntent - Set when the user told us more than one person will use
+ *   Shelf; used to caution against picking Personal (which can't invite anyone).
+ */
 export function ChoosePurpose({
   auditPrices,
   barcodePrices,
   usedAuditTrial,
   usedBarcodeTrial,
+  defaultSelectedPlan = null,
+  teamIntent = null,
 }: {
   auditPrices: AddonPrices;
   barcodePrices: AddonPrices;
   usedAuditTrial: boolean;
   usedBarcodeTrial: boolean;
+  defaultSelectedPlan?: SignupPlan | null;
+  teamIntent?: { teamSize: string } | null;
 }) {
-  const [state, dispatch] = useReducer(
-    choosePurposeReducer,
-    INITIAL_CHOOSE_PURPOSE_STATE
-  );
+  const [state, dispatch] = useReducer(choosePurposeReducer, {
+    ...INITIAL_CHOOSE_PURPOSE_STATE,
+    selectedPlan: defaultSelectedPlan,
+  });
   const {
     selectedPlan,
     wantsAudits,
@@ -208,7 +220,7 @@ export function ChoosePurpose({
           </h3>
           <p className="mt-3 text-base text-gray-600">
             Your choice determines which features we prepare for you. You can
-            always switch later.
+            upgrade to Team later from your workspace settings.
           </p>
           <p className="mt-4 rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600">
             If your organization already uses Shelf, you don't need to create a
@@ -244,6 +256,24 @@ export function ChoosePurpose({
           <p className="mt-1 w-full text-sm text-gray-500">
             {PLAN_DETAILS.personal.helper}
           </p>
+        ) : null}
+
+        {teamIntent && selectedPlan === "personal" ? (
+          <div className="mt-3 flex w-full flex-col gap-2 rounded-lg border border-orange-200 bg-orange-50 p-3 text-left sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-orange-800">
+              You told us your team has {teamIntent.teamSize}. Personal
+              workspaces are for one person and can't invite anyone.
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="whitespace-nowrap"
+              onClick={() => dispatch({ type: "select_plan", plan: "team" })}
+            >
+              Switch to Team
+            </Button>
+          </div>
         ) : null}
 
         {showAddonsSection ? (
