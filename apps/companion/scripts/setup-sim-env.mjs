@@ -114,15 +114,14 @@ if (!supabaseUrl || !supabaseAnonKey) {
   supabaseUrl = fromDotenv(envPath, "SUPABASE_URL");
   supabaseAnonKey = fromDotenv(envPath, "SUPABASE_ANON_PUBLIC");
   source = envPath;
+}
 
-  if (supabaseUrl && useLan) {
-    // A device cannot reach the Mac's loopback, and a local Supabase is served
-    // from it — so the host has to be rewritten too, not just the API URL.
-    supabaseUrl = supabaseUrl.replace(
-      /\/\/(localhost|127\.0\.0\.1)/,
-      `//${host}`
-    );
-  }
+// Applied to whichever source produced the URL, not just the dotenv fallback:
+// a local webapp answers /api/mobile/config with its own loopback Supabase URL,
+// and a device cannot reach the Mac's loopback any more than it can reach
+// localhost:3000.
+if (supabaseUrl && useLan) {
+  supabaseUrl = supabaseUrl.replace(/\/\/(localhost|127\.0\.0\.1)/, `//${host}`);
 }
 
 if (!supabaseUrl || !supabaseAnonKey) {

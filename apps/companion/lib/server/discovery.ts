@@ -44,8 +44,13 @@ import {
   type ConnectOutcome,
 } from "./contract";
 
-// Re-exported so callers import the connect flow's vocabulary from the module
-// that runs it; both are declared and documented in ./contract.
+/**
+ * The connect flow's result vocabulary, re-exported so callers take it from the
+ * module that produces it rather than reaching into `./contract`, where both
+ * are declared and documented.
+ *
+ * @see ./contract.ts — `ConnectFailureReason`, `ConnectOutcome`
+ */
 export type { ConnectFailureReason, ConnectOutcome } from "./contract";
 
 /** The registry lookup runs while the user waits — keep it short. */
