@@ -484,9 +484,12 @@ export function parseServerConfigResponse(
  * How a newly fetched server config differs from the active one.
  *
  * - `none` — nothing to apply.
- * - `credentials` — SAME instance, but its Supabase URL, anon key or display
- *   name changed. The app must adopt them without tearing down data that still
- *   belongs to this server.
+ * - `credentials` — SAME instance, with a refreshed config: its Supabase URL,
+ *   anon key, display name, or the sign-in methods it advertises. The app must
+ *   adopt them without tearing down data that still belongs to this server.
+ *   This value does not decide whether the session ends — `setActiveServer`
+ *   does that from whether the Supabase pair actually moved, so a server that
+ *   only renames itself or turns SSO off signs nobody out.
  * - `switch` — a different instance entirely; everything server-scoped goes.
  */
 export type ServerChange = "none" | "credentials" | "switch";
@@ -514,9 +517,12 @@ export function classifyServerChange(
   if (normalizeBaseUrl(current.baseUrl) !== normalizeBaseUrl(next.baseUrl)) {
     return "switch";
   }
-  // Capabilities ride along with credentials: a server that turns SSO off is
-  // the same server, so the login screen must follow it without signing anyone
-  // out or wiping their drafts.
+  // "credentials" means "same server, refreshed config" — it covers the display
+  // name and the advertised sign-in methods as well as the Supabase pair. It
+  // does NOT by itself imply a teardown: `setActiveServer` decides that
+  // separately, from whether the Supabase URL or anon key actually moved, so a
+  // server that merely turns SSO off updates the login screen without signing
+  // anyone out.
   const sameCredentials =
     normalizeBaseUrl(current.supabaseUrl) ===
       normalizeBaseUrl(next.supabaseUrl) &&

@@ -626,9 +626,22 @@ test("parseServerConfigResponse disables a method only on an explicit false", ()
 
 test("classifyServerChange treats a capability change as a credentials refresh", () => {
   // Same server, different offer — the login screen must follow it without
-  // signing the user out or wiping their drafts.
+  // signing the user out or wiping their drafts. `credentials` here means
+  // "refresh the config", not "tear down the session": setActiveServer gates
+  // the sign-out on the Supabase pair, which is untouched below.
   assert.equal(
     classifyServerChange(baseServer, { ...baseServer, ssoEnabled: false }),
     "credentials"
   );
+  assert.equal(
+    classifyServerChange(baseServer, {
+      ...baseServer,
+      passwordLoginEnabled: false,
+    }),
+    "credentials"
+  );
+  // The Supabase pair is what a teardown keys on, and it has not moved.
+  const capabilityOnly = { ...baseServer, ssoEnabled: false };
+  assert.equal(capabilityOnly.supabaseUrl, baseServer.supabaseUrl);
+  assert.equal(capabilityOnly.supabaseAnonKey, baseServer.supabaseAnonKey);
 });

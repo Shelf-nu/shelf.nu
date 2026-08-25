@@ -51,9 +51,10 @@ type ParsedLink =
       type: "qr";
       id: string;
       /**
-       * Origin the link came from, when it carried one. A QR id is only
+       * Origin the link came from, set only for http(s) links. A QR id is only
        * meaningful on the instance that minted it, so a link from another
-       * origin must not be resolved against the active server.
+       * origin must not be resolved against the active server. A custom-scheme
+       * link names no server, so it is left undefined and resolved here.
        */
       origin?: string;
     }
@@ -91,10 +92,19 @@ function parseDeepLink(url: string): ParsedLink {
         return id ? { type: "booking", id } : { type: "unknown" };
       case "audits":
         return id ? { type: "audit", id } : { type: "unknown" };
-      case "qr":
-        return id
-          ? { type: "qr", id, origin: new URL(url).origin }
-          : { type: "unknown" };
+      case "qr": {
+        if (!id) return { type: "unknown" };
+        // Only an http(s) link names a server. `new URL()` reports the string
+        // "null" as the origin of a custom-scheme URL, and carrying that
+        // forward would mark the app's own `shelf://qr/<id>` links foreign and
+        // send them to "null/qr/<id>".
+        const parsed = new URL(url);
+        const origin =
+          parsed.protocol === "http:" || parsed.protocol === "https:"
+            ? parsed.origin
+            : undefined;
+        return { type: "qr", id, origin };
+      }
       case "scanner":
       case "scan":
         return { type: "scanner" };
