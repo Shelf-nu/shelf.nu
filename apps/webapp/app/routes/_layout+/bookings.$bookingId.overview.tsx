@@ -5,7 +5,6 @@ import {
   OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
-import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -31,6 +30,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import { buildAvailableUnitsByAsset } from "~/modules/booking/booking-overview-availability.server";
 import {
@@ -91,8 +91,7 @@ import {
   canUserRemoveBookingAssets,
 } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getClientHint, getHints } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { getClientHint } from "~/utils/client-hints";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -148,6 +147,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       currentOrganization,
       userOrganizations,
       canSeeAllBookings,
+      canSeeAllCustody,
     } = await requirePermission({
       userId: authSession?.userId,
       request,
@@ -364,12 +364,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const allBookingKitIds = [
       ...new Set(
         booking.bookingAssets
-          .map((ba) => {
-            if (!ba.assetKitId) return null;
-            return (
-              ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kitId ??
-              null
-            );
+          .flatMap((ba) => {
+            // Live membership: resolve the slice's `assetKitId` to its kit.
+            const liveKitId = ba.assetKitId
+              ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)
+                  ?.kitId ?? null
+              : null;
+            // Detached kit residue: once the asset leaves the kit its
+            // `AssetKit` row is gone and the FK above was `SET NULL`'d, so the
+            // two-hop join resolves nothing. `sourceKitId` is the durable
+            // provenance, so include it too and the single (already
+            // org-scoped) `db.kit.findMany` below covers live AND snapshot
+            // kits with no extra query. The two agree while the membership
+            // lives, so the Set dedupes them.
+            return [liveKitId, ba.sourceKitId];
           })
           .filter((id): id is string => id !== null)
       ),
@@ -403,10 +411,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        selectedTeamMembers: booking.custodianTeamMemberId
+        // Server-derived: this booking's own custodian, which the viewer may
+        // not otherwise be allowed to see. It has to render regardless, or the
+        // sidebar loses the chip for the custodian already on the booking.
+        trustedSelectedTeamMembers: booking.custodianTeamMemberId
           ? [booking.custodianTeamMemberId]
           : [],
-        filterByUserId: isSelfServiceOrBase,
+        // A sidebar FILTER, so the custody read-visibility rule governs — the
+        // role alone ignored the workspace's `selfServiceCanSeeCustody` /
+        // `baseUserCanSeeCustody` overrides, which made this seed disagree with
+        // the search endpoint.
+        filterByUserId: !canSeeAllCustody,
         userId,
       }),
 
@@ -464,6 +479,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // `~/modules/barcode/display.ts`.
           qrCodes: { take: 1, select: { id: true } },
           barcodes: { select: { id: true, type: true, value: true } },
+          // Model cover image. These rows REPLACE the pivot's `ba.asset`
+          // (`detail ?? ba.asset` below), so every relation `<AssetImage>`
+          // needs must be re-included here — image scalars alone are not
+          // enough for assets that inherit their image from their model.
+          ...ASSET_MODEL_IMAGE_SELECT,
           bookingAssets: {
             where: {
               booking: {
@@ -556,10 +576,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
-    // Index the enriched assets for lookup during per-slice projection below
-    // (`shapeBookingAssets` consumes `rawKits` directly, so we don't index it
-    // here — main's helper builds its own kits map internally).
+    // Index the enriched assets for lookup during per-slice projection below.
     const assetDetailsMap = new Map(rawAssets.map((a) => [a.id, a]));
+
+    /**
+     * Kits indexed by id, used ONLY by the detached-residue fallback in the
+     * per-slice projection below. `shapeBookingAssets` consumes `rawKits`
+     * directly and builds its own map internally, so this is not a duplicate
+     * of the render-side lookup.
+     */
+    const kitsById = new Map(rawKits.map((kit) => [kit.id, kit]));
 
     /**
      * Build the view-asset array `shapeBookingAssets` consumes: one entry
@@ -582,13 +608,74 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             (ak) => ak.id === ba.assetKitId
           ) ?? null
         : null;
+
+      /**
+       * Detached kit residue. When an asset leaves a kit, its `AssetKit` row
+       * disappears and `BookingAsset.assetKitId` is `SET NULL`'d, so the
+       * two-hop join above resolves nothing and the slice would render as a
+       * loose standalone asset — retroactively rewriting what a finished job
+       * contained. `sourceKitId` is the durable provenance, so we fall back to
+       * it and keep the row grouped under the kit it was booked as part of.
+       *
+       * Planning-status bookings now delete such slices outright, so a row
+       * reaching this branch is by construction a snapshot of a non-planning
+       * booking — no status gate is needed here.
+       *
+       * Normalised to the exact shape `matchedAssetKit.kit` has (the two
+       * queries select different depths) so every downstream consumer —
+       * grouping, sorting, in-memory search, the serialised client payload —
+       * keeps seeing one kit type. `kitsById` comes from the org-scoped kit
+       * query, which also contains the cross-org guard: `sourceKitId`'s FK
+       * accepts a `Kit` in any organization, so an unresolvable id simply
+       * leaves the row standalone.
+       */
+      const rawSnapshotKit =
+        !matchedAssetKit && ba.sourceKitId
+          ? kitsById.get(ba.sourceKitId) ?? null
+          : null;
+      const snapshotKit = rawSnapshotKit
+        ? {
+            id: rawSnapshotKit.id,
+            name: rawSnapshotKit.name,
+            image: rawSnapshotKit.image,
+            location: rawSnapshotKit.location
+              ? {
+                  id: rawSnapshotKit.location.id,
+                  name: rawSnapshotKit.location.name,
+                }
+              : null,
+            category: rawSnapshotKit.category
+              ? { name: rawSnapshotKit.category.name }
+              : null,
+          }
+        : null;
+
+      /**
+       * Row-level marker for the detached-residue case above, so the UI can
+       * label a slice that renders inside a kit group but is no longer a
+       * member of it. Derived HERE (not in the component) because
+       * `clientLoader` re-runs `shapeBookingAssets` over the cached
+       * `rawAssets`, which carry only the projected fields — neither
+       * `assetKitId` nor `sourceKitId` survives that trip.
+       *
+       * Suppressed when the asset has since been re-added to the same kit:
+       * membership then exists again (under a NEW `AssetKit` id the old slice
+       * doesn't point at), so calling the row "removed" would be a lie.
+       * `ba.asset.assetKits` is the pivot-included membership list, which
+       * carries `kitId` (same source the kit-id collection above walks).
+       */
+      const isRemovedFromKit =
+        Boolean(snapshotKit) &&
+        !ba.asset.assetKits.some((ak) => ak.kitId === ba.sourceKitId);
+
       return {
         ...base,
-        kitId: matchedAssetKit?.kitId ?? null,
-        kit: matchedAssetKit?.kit ?? null,
+        kitId: matchedAssetKit?.kitId ?? snapshotKit?.id ?? null,
+        kit: matchedAssetKit?.kit ?? snapshotKit,
         location: getPrimaryLocation(base) ?? null,
         bookingAssetId: ba.id,
         bookedQuantity: ba.quantity ?? 1,
+        isRemovedFromKit,
       };
     });
 
@@ -665,6 +752,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetKitId: string | null;
       }>
     >();
+    /**
+     * Live asset status per qty-tracked asset on this booking. Feeds the
+     * per-asset half of the legacy all-at-once fallback below — the status
+     * already rides along on `BOOKING_WITH_ASSETS_INCLUDE`, so this costs no
+     * extra query.
+     */
+    const assetStatusByAsset = new Map<string, AssetStatus>();
     for (const ba of booking.bookingAssets) {
       if (ba.asset?.type !== "QUANTITY_TRACKED") continue;
       const arr = bookingAssetRowsByAsset.get(ba.assetId) ?? [];
@@ -674,6 +768,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetKitId: ba.assetKitId ?? null,
       });
       bookingAssetRowsByAsset.set(ba.assetId, arr);
+      assetStatusByAsset.set(ba.assetId, ba.asset.status);
     }
 
     /** Logs grouped by assetId (each carries its own category). */
@@ -851,24 +946,34 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // `booked − 0 = booked` and wrongly offers a fully-out QT asset for more
     // checkout in the bulk-checkout dialog + scanner drawer.
     //
+    // Decided PER ASSET, not per booking: an asset ADDED after that checkout is
+    // still AVAILABLE and genuinely has units left (GitHub #2815), and an asset
+    // that already has progressive claims needs no fallback at all. Keying on
+    // the booking having zero sessions would also flip every already-out asset
+    // back to "fully remaining" the moment one later batch records a session.
+    //
     // KEEP IN SYNC with the canonical `computeBookingAssetRemainingToCheckOut`
     // (modules/booking/service.server.ts), which the checkout-assets route uses;
     // this loader mirrors that logic in-memory to avoid an extra query per asset.
-    const isLegacyAllAtOnceCheckout =
-      checkoutSessions.length === 0 &&
-      (booking.status === BookingStatus.ONGOING ||
-        booking.status === BookingStatus.OVERDUE);
+    const isActiveBooking =
+      booking.status === BookingStatus.ONGOING ||
+      booking.status === BookingStatus.OVERDUE;
 
     const remainingToCheckOutByAsset: Record<string, number> = {};
     for (const [assetId, rows] of bookingAssetRowsByAsset) {
       const totalBooked = rows.reduce((sum, row) => sum + row.quantity, 0);
-      if (isLegacyAllAtOnceCheckout && totalBooked > 0) {
-        remainingToCheckOutByAsset[assetId] = 0;
-        continue;
-      }
       let totalCheckedOut = 0;
       for (const row of rows) {
         totalCheckedOut += checkedOutByBookingAsset.get(row.id) ?? 0;
+      }
+      if (
+        isActiveBooking &&
+        totalBooked > 0 &&
+        totalCheckedOut === 0 &&
+        assetStatusByAsset.get(assetId) === AssetStatus.CHECKED_OUT
+      ) {
+        remainingToCheckOutByAsset[assetId] = 0;
+        continue;
       }
       remainingToCheckOutByAsset[assetId] = Math.max(
         0,
@@ -1046,18 +1151,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // post-enriched with per-row qty disposition data (Polish-6 multi-row).
         items: enrichedItems,
         page,
-        // `totalItems` drives the `ListTitle` header count. We include
-        // outstanding `BookingModelRequest` rows on top of the paginated
-        // asset/kit items because the Assets & Kits list now renders a
-        // model-request row per outstanding request (Phase 3d-Polish).
-        // `totalPaginationItems` stays at `view.totalPaginationItems` so
-        // pagination arithmetic over the concrete asset/kit list is
-        // unaffected.
-        totalItems:
-          view.totalPaginationItems +
-          (booking.modelRequests ?? []).filter(
-            (req) => req.fulfilledAt === null
-          ).length,
+        // `totalItems` counts CONCRETE asset/kit rows only, and is identical to
+        // `totalPaginationItems` by construction. Do not add anything to it.
+        //
+        // It used to have the outstanding-`BookingModelRequest` count added on
+        // top, because reservations were rendered as rows inside the assets
+        // table. One number meaning two things drifted two ways: the
+        // `clientLoader` below re-derives it WITHOUT the addend, so re-sorting
+        // the list silently changed the header count while the rows stayed
+        // put; and the bookings index, which counts concrete assets, always
+        // disagreed with it. A customer reported the latter as a counting bug.
+        //
+        // Reservations now render in their own titled section above the table
+        // (`BookingModelReservationsSection`), so this count describes exactly
+        // the rows beneath it and there is no addend left to forget.
+        totalItems: view.totalPaginationItems,
         totalPaginationItems: view.totalPaginationItems,
         perPage,
         totalPages: view.totalPages,
@@ -1276,8 +1384,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkOut: PermissionAction.checkout,
       checkOutRemaining: PermissionAction.checkout,
       checkIn: PermissionAction.checkin,
-      archive: PermissionAction.update,
-      cancel: PermissionAction.update,
+      // archive/cancel have dedicated permissions, and BASE deliberately holds
+      // neither. Mapping them to `update` -- which BASE does hold -- let a BASE
+      // user archive or cancel bookings the role was never granted.
+      archive: PermissionAction.archive,
+      cancel: PermissionAction.cancel,
       removeKit: PermissionAction.update,
       "revert-to-draft": PermissionAction.update,
       "extend-booking": PermissionAction.extend,
@@ -1393,7 +1504,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       [
         db.booking.findFirstOrThrow({
           where: { id, organizationId },
-          select: { id: true, status: true, from: true, to: true },
+          // creatorId/custodianUserId feed the ownership guard below.
+          select: {
+            id: true,
+            status: true,
+            from: true,
+            to: true,
+            creatorId: true,
+            custodianUserId: true,
+          },
         }),
         getWorkingHoursForOrganization(organizationId),
         getBookingSettingsForOrganization(organizationId),
@@ -1433,22 +1552,47 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
+    /**
+     * Cross-user guard for every mutating intent.
+     *
+     * Hoisted rather than repeated per case, deliberately: the route had one
+     * ownership check (inside `delete`) and fifteen intents, so each new intent
+     * silently arrived unguarded. SELF_SERVICE legitimately holds
+     * `booking:checkout`, `checkin`, `archive`, `cancel` and `extend`, and none
+     * of the services behind them checks ownership -- `checkoutBooking`,
+     * `checkinBooking`, `archiveBooking` and `cancelBooking` all have zero
+     * ownership references -- so this is the only thing standing between a
+     * restricted role and someone else's booking.
+     *
+     * No-op for ADMIN/OWNER. `delete` is not reachable here -- it returns
+     * before this point, with its own check, because it must not fetch the
+     * booking first. The compiler confirms it: `intent` has already narrowed to
+     * exclude it.
+     */
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking: basicBookingInfo,
+        userId,
+        role,
+        action: intent,
+      });
+    }
+
     switch (intent) {
       case "save": {
-        const hints = getHints(request);
         // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
         // RESOLVED timezone preference (the same one date DISPLAY uses), not the
         // browser hint. Resolved lazily — only this date-parsing branch needs it.
-        const prefTimeZone = (
-          await resolveUserFormatPrefsById(userId, getClientHint(request))
-        ).timeZone;
-        const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
+        const prefs = await resolveUserFormatPrefsById(
+          userId,
+          getClientHint(request)
+        );
         const parsedData = parseData(
           formData,
           BookingFormSchema({
             action: "save",
             status: basicBookingInfo.status,
-            hints: hintsWithPrefTz,
+            prefs,
             workingHours,
             bookingSettings,
             isAdminOrOwner,
@@ -1458,20 +1602,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        const from = formData.get("startDate");
-        const to = formData.get("endDate");
-
-        const formattedFrom = from
-          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: prefTimeZone,
-            }).toJSDate()
-          : undefined;
-
-        const formattedTo = to
-          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: prefTimeZone,
-            }).toJSDate()
-          : undefined;
+        // Use the schema-coerced instants rather than re-parsing the raw form
+        // fields: `coerceLocalDate` accepts second precision via `fromISO`,
+        // while DATE_TIME_FORMAT is minute-only, so a value the schema accepted
+        // could re-parse to an Invalid Date and reach the service. Same
+        // reasoning as the duplicate dialog and the extend branch below.
+        const formattedFrom = parsedData.startDate;
+        const formattedTo = parsedData.endDate;
 
         const tags = buildTagsSet(parsedData.tags).set;
 
@@ -1501,19 +1638,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "reserve": {
-        const hints = getHints(request);
         // TIMEZONE FIX: parse submitted wall-clock dates in the acting user's
         // RESOLVED timezone preference (the same one date DISPLAY uses), not the
         // browser hint. Resolved lazily — only this date-parsing branch needs it.
-        const prefTimeZone = (
-          await resolveUserFormatPrefsById(userId, getClientHint(request))
-        ).timeZone;
-        const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
+        const prefs = await resolveUserFormatPrefsById(
+          userId,
+          getClientHint(request)
+        );
 
         const parsedData = parseData(
           formData,
           BookingFormSchema({
-            hints: hintsWithPrefTz,
+            prefs,
             action: "reserve",
             status: basicBookingInfo.status,
             workingHours,
@@ -1525,21 +1661,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        const from = formData.get("startDate");
-        const to = formData.get("endDate");
         const tags = buildTagsSet(parsedData.tags).set;
 
-        const formattedFrom = from
-          ? DateTime.fromFormat(from.toString(), DATE_TIME_FORMAT, {
-              zone: prefTimeZone,
-            }).toJSDate()
-          : undefined;
-
-        const formattedTo = to
-          ? DateTime.fromFormat(to.toString(), DATE_TIME_FORMAT, {
-              zone: prefTimeZone,
-            }).toJSDate()
-          : undefined;
+        // Schema-coerced instants, not a re-parse of the raw form fields — see
+        // the "save" branch above for why the minute-only DATE_TIME_FORMAT
+        // cannot be used on a value `coerceLocalDate` already accepted.
+        const formattedFrom = parsedData.startDate;
+        const formattedTo = parsedData.endDate;
 
         const booking = await reserveBooking({
           id,
@@ -1914,14 +2042,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // TIMEZONE FIX: parse the submitted wall-clock end date in the acting
         // user's RESOLVED pref timezone (matches display), not the browser
         // hint. Resolved lazily — only this date-parsing branch needs it.
-        const prefTimeZone = (await resolveUserFormatPrefsById(userId, hints))
-          .timeZone;
+        const prefs = await resolveUserFormatPrefsById(userId, hints);
 
         const { endDate } = parseData(
           formData,
           ExtendBookingSchema({
             workingHours,
-            timeZone: prefTimeZone,
+            prefs,
             bookingSettings,
             isAdminOrOwner,
           }),

@@ -15,13 +15,19 @@
  */
 import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "react-router";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { hasCustody } from "~/modules/custody/utils";
 import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { BADGE_COLORS } from "~/utils/badge-colors";
+import {
+  canAssignModelUnits,
+  countUnassignedModelUnits,
+} from "~/utils/booking-model-requests";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AvailabilityBadge } from "./availability-label";
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
 import { BookingStatusBadge } from "./booking-status-badge";
+import { UnassignedModelUnitsPill } from "./unassigned-model-units-pill";
 import LineBreakText from "../layout/line-break-text";
 import ItemsWithViewMore from "../list/items-with-view-more";
 import { Badge } from "../shared/badge";
@@ -110,6 +116,9 @@ type ListBookingsContentProps = {
               mainImage: true;
               thumbnailImage: true;
               mainImageExpiration: true;
+              // Model cover image for assets with no image of their own. Type
+              // literal, so it mirrors ASSET_MODEL_IMAGE_SELECT by hand.
+              assetModel: { select: { image: true; thumbnailImage: true } };
               // Code-resolution fields - mirror of getBookings' assets select
               sequentialId: true;
               preferredBarcodeId: true;
@@ -208,9 +217,31 @@ export default function ListBookingsContent({
     bookingAssets: rawItem.bookingAssets ?? [],
   };
 
+  /**
+   * `hasCustody` is a bare "does this asset have ANY custody row" test, which
+   * is the right question for an INDIVIDUAL asset (one custodian holds the
+   * one physical thing, so the booking really is compromised) and the WRONG
+   * one for `QUANTITY_TRACKED`. A QT asset is a pool: handing 20 of 29 units
+   * to a custodian leaves 9 bookable, and a booking drawing on those free
+   * units is perfectly valid. Flagging it "Includes unavailable assets"
+   * scared a customer off a booking that had already checked out cleanly.
+   *
+   * Every other surface already makes this distinction — `getBookingFlags`
+   * (`hasAssetsInCustody`), the per-asset booking row, and the three
+   * server-side checkout guards all exempt QT from custody blocking. This
+   * row was the last one keying off raw custody presence.
+   *
+   * The genuine QT signal is stock, not custody, and it has its own pill:
+   * `item.hasStockConflict` → `<StockConflictPill />` further down this row
+   * fires when booked quantity exceeds available quantity. `availableToBook`
+   * still applies to both types — that flag means "never bookable", which is
+   * true regardless of how the asset counts its units.
+   */
   const hasUnavaiableAssets =
     item.bookingAssets.some(
-      (ba) => !ba.asset.availableToBook || hasCustody(ba.asset.custody)
+      (ba) =>
+        !ba.asset.availableToBook ||
+        (!isQuantityTracked(ba.asset) && hasCustody(ba.asset.custody))
     ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
 
   /**
@@ -285,6 +316,14 @@ export default function ListBookingsContent({
             dispositionedByAsset={dispositionedByAsset}
             dispositionBreakdownByAsset={dispositionBreakdownByAsset}
             checkedOutByAsset={checkedOutByAsset}
+          />
+          {/* The asset count above is concrete assets only. A booking can also
+              hold model-level reservations with no physical asset behind them
+              yet, which the count cannot express — so they get their own
+              signal rather than being folded into the number. */}
+          <UnassignedModelUnitsPill
+            count={countUnassignedModelUnits(item.modelRequests)}
+            canAssign={canAssignModelUnits(item.status)}
           />
           {item.hasStockConflict ? <StockConflictPill /> : null}
         </div>

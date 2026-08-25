@@ -200,3 +200,90 @@ describe("ListBookingsContent — Stock conflict pill", () => {
     expect(screen.getByText("Stock conflict")).toBeInTheDocument();
   });
 });
+
+/**
+ * The "Includes unavailable assets" badge has TWO triggers and they are not
+ * equivalent:
+ *
+ * - `availableToBook === false` means "this asset may never be booked",
+ *   which is true regardless of how the asset counts its units.
+ * - custody presence means "someone is holding it", which only makes the
+ *   booking unavailable for an INDIVIDUAL asset. A quantity-tracked asset is
+ *   a pool: 20 of 29 units on loan still leaves 9 bookable.
+ *
+ * Keying the badge off raw custody presence flagged perfectly valid
+ * quantity-tracked bookings — including one that had already checked out
+ * successfully. The QT stock signal is `hasStockConflict` → the separate
+ * "Stock conflict" pill covered by the suite above.
+ */
+describe("ListBookingsContent — 'Includes unavailable assets' badge", () => {
+  const BADGE_TEXT = "Includes unavailable assets";
+
+  beforeEach(() => {
+    mockUseLoaderData.mockReturnValue({});
+  });
+
+  /** Renders one row whose single booked asset carries the given overrides. */
+  function renderRowWithAsset(assetOverrides: Record<string, unknown>) {
+    const base = buildItem({});
+    const [firstSlice] = (
+      base as unknown as {
+        bookingAssets: Array<{ asset: Record<string, unknown> }>;
+      }
+    ).bookingAssets;
+
+    const item = buildItem({
+      bookingAssets: [
+        {
+          ...firstSlice,
+          asset: { ...firstSlice.asset, ...assetOverrides },
+        },
+      ],
+    } as never);
+
+    render(
+      <table>
+        <tbody>
+          <tr>
+            <ListBookingsContent item={item} />
+          </tr>
+        </tbody>
+      </table>
+    );
+  }
+
+  it("does NOT flag a quantity-tracked asset that merely has units on custody", () => {
+    renderRowWithAsset({
+      type: "QUANTITY_TRACKED",
+      availableToBook: true,
+      // 20 of 29 units are with a custodian; the booking drew on the free 9.
+      custody: [{ id: "custody-1", quantity: 20 }],
+      status: "IN_CUSTODY",
+    });
+
+    expect(screen.queryByText(BADGE_TEXT)).not.toBeInTheDocument();
+  });
+
+  it("DOES flag an individual asset in custody — one custodian holds the one thing", () => {
+    renderRowWithAsset({
+      type: "INDIVIDUAL",
+      availableToBook: true,
+      custody: [{ id: "custody-1" }],
+      status: "IN_CUSTODY",
+    });
+
+    expect(screen.getByText(BADGE_TEXT)).toBeInTheDocument();
+  });
+
+  it("DOES flag a quantity-tracked asset marked as not available to book", () => {
+    // `availableToBook` is type-agnostic: the flag means "never bookable".
+    renderRowWithAsset({
+      type: "QUANTITY_TRACKED",
+      availableToBook: false,
+      custody: [],
+      status: "AVAILABLE",
+    });
+
+    expect(screen.getByText(BADGE_TEXT)).toBeInTheDocument();
+  });
+});

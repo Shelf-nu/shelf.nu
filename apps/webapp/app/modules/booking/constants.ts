@@ -1,4 +1,5 @@
 import { BookingStatus, type Prisma } from "@prisma/client";
+import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
 /**
@@ -19,6 +20,25 @@ export const ADDABLE_BOOKING_STATUSES: BookingStatus[] = [
   BookingStatus.RESERVED,
   BookingStatus.ONGOING,
   BookingStatus.OVERDUE,
+];
+
+/**
+ * Statuses where a booking is still being planned and nothing has physically
+ * left the warehouse.
+ *
+ * Drives kit-membership removal: a kit-driven `BookingAsset` slice on one of
+ * these bookings is DELETED when the asset leaves the kit (the booking tracks
+ * the kit's contents), whereas on any other status the row survives as a
+ * snapshot of what actually went out. See `removeKitSlicesFromPlanningBookings`
+ * in `~/modules/kit/service.server`.
+ *
+ * Deliberately NOT {@link ADDABLE_BOOKING_STATUSES}: that list also includes
+ * ONGOING/OVERDUE, where the items ARE physically out and deleting a slice
+ * would strand custody and checkout attribution.
+ */
+export const PLANNING_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
 ];
 
 /**
@@ -210,6 +230,8 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           // second round-trip for images.
           mainImage: true,
           thumbnailImage: true,
+          // Model cover image for assets with no image of their own
+          ...ASSET_MODEL_IMAGE_SELECT,
           // Tag names — searchable in-memory by filterBookingAssets (assets only).
           tags: { select: { name: true } },
           category: {
@@ -254,6 +276,14 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
                   id: true,
                   name: true,
                   image: true,
+                  // Kit-code resolution, mirroring the asset select above.
+                  // Kits carry Qr and Barcode rows too, and the sidebar's kit
+                  // group header is a kit-listing surface — without these it
+                  // is the only row in that sidebar with no code chip.
+                  // Kit has no sequentialId / preferredBarcodeId; the resolver
+                  // tolerates their absence and falls back to QR.
+                  qrCodes: { take: 1, select: { id: true } },
+                  barcodes: { select: { id: true, type: true, value: true } },
                   location: {
                     select: { id: true, name: true },
                   },

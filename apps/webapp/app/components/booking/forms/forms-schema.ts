@@ -9,7 +9,7 @@ import {
   getOverrideDateKey,
   normalizeWorkingHoursForValidation,
 } from "~/modules/working-hours/utils";
-import type { getHints } from "~/utils/client-hints";
+import type { ResolvedFormatPrefs } from "~/utils/date-format";
 
 /**
  * Parses a `datetime-local` wire string (e.g. `"2026-05-01T16:10"`) in the
@@ -19,8 +19,11 @@ import type { getHints } from "~/utils/client-hints";
  *
  * Returns a Zod string schema whose `.transform()` yields a correct Date.
  *
- * @param timeZone - IANA zone (from `getHints(request).timeZone`). Falls back
- *   to UTC if missing.
+ * @param timeZone - IANA zone, always the acting user's RESOLVED preference
+ *   zone (`ResolvedFormatPrefs.timeZone`, which is non-optional). The `?? "UTC"`
+ *   is a defensive backstop for a hand-built prefs object, not a supported path
+ *   — see the docblock on {@link BookingFormSchemaParams} for why an implicit
+ *   UTC here is dangerous.
  */
 function coerceLocalDate(timeZone?: string) {
   const zone = timeZone ?? "UTC";
@@ -180,7 +183,36 @@ function validateFutureDate(
 }
 
 interface BookingFormSchemaParams {
-  hints?: ReturnType<typeof getHints>;
+  /**
+   * The acting user's fully-resolved formatting preferences. Only `timeZone` is
+   * read, but the whole object is taken deliberately — see below.
+   *
+   * REQUIRED, and typed as `ResolvedFormatPrefs` rather than a bare zone string
+   * or a browser-hints object, because BOTH weaker shapes have already shipped
+   * bugs:
+   *
+   * 1. OMITTING the zone. `coerceLocalDate` falls back to UTC, so every typed
+   *    wall-clock time is read as UTC. For a user west of UTC that makes
+   *    near-future starts look like the past, and "Start date must be in the
+   *    future" blocks them for the length of their UTC offset (5 hours in US
+   *    Central, 7 in US Pacific). That shipped for three months while this
+   *    param was optional and one caller omitted it.
+   *
+   * 2. Passing the BROWSER hint zone instead of the preference zone. Date
+   *    DISPLAY resolves through `resolveFormatPrefs`, where a stored user
+   *    preference WINS over the browser hint. Validating in the hint zone while
+   *    displaying and storing in the preference zone makes the form reject
+   *    times the server would accept (and vice-versa) for any user who set an
+   *    explicit timezone.
+   *
+   * `ResolvedFormatPrefs` closes (2) structurally: a `ClientHint` is only
+   * `{ locale, timeZone }`, so it does not satisfy this type and passing raw
+   * hints is a compile error rather than a silent wrong answer.
+   *
+   * Build it from `useFormatPrefs()` on the client, or
+   * `resolveUserFormatPrefsById(userId, getClientHint(request))` on the server.
+   */
+  prefs: ResolvedFormatPrefs;
   action: "new" | "save" | "reserve";
   status?: BookingStatus;
   workingHours: any; // Accept any type, normalize internally
@@ -209,7 +241,7 @@ interface BookingFormSchemaParams {
  */
 export type BookingDateSchemaParams = Pick<
   BookingFormSchemaParams,
-  "hints" | "workingHours" | "bookingSettings" | "isAdminOrOwner"
+  "prefs" | "workingHours" | "bookingSettings" | "isAdminOrOwner"
 >;
 
 /**
@@ -226,13 +258,13 @@ export type BookingDateSchemaParams = Pick<
  * restrictions are bypassed; working-hours restrictions still apply when
  * enabled.
  *
- * @param params - The hints, raw working hours, booking settings, and
- *   admin/owner flag. See {@link BookingDateSchemaParams}.
+ * @param params - The resolved format prefs, raw working hours, booking
+ *   settings, and admin/owner flag. See {@link BookingDateSchemaParams}.
  * @returns The `startDateSchema`, `endDateSchema`, and `crossFieldDateValidation`
  *   refinement, ready to compose into a `z.object(...).superRefine(...)`.
  */
 function buildBookingDateSchemas({
-  hints,
+  prefs,
   workingHours: rawWorkingHours,
   bookingSettings,
   isAdminOrOwner = false,
@@ -249,13 +281,13 @@ function buildBookingDateSchemas({
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
 
   // Create enhanced date schemas with working hours and buffer validation
-  const startDateSchema = coerceLocalDate(hints?.timeZone).superRefine(
+  const startDateSchema = coerceLocalDate(prefs.timeZone).superRefine(
     (data, ctx) => {
       // 1. Validate future date with buffer (skipped for ADMIN/OWNER when effectiveBufferStartTime is 0)
       const futureValidation = validateFutureDate(
         data,
         effectiveBufferStartTime,
-        hints?.timeZone
+        prefs.timeZone
       );
       if (!futureValidation.isValid) {
         ctx.addIssue({
@@ -265,12 +297,13 @@ function buildBookingDateSchemas({
         return;
       }
 
-      // 2. Validate working hours if available
-      if (workingHours && hints?.timeZone) {
+      // 2. Validate working hours if available. `prefs.timeZone` is a
+      // non-optional resolved zone, so only the working-hours data can be absent.
+      if (workingHours) {
         const workingHoursValidation = validateWorkingHours(
           data,
           workingHours,
-          hints.timeZone
+          prefs.timeZone
         );
         if (!workingHoursValidation.isValid) {
           ctx.addIssue({
@@ -282,14 +315,14 @@ function buildBookingDateSchemas({
     }
   );
 
-  const endDateSchema = coerceLocalDate(hints?.timeZone).superRefine(
+  const endDateSchema = coerceLocalDate(prefs.timeZone).superRefine(
     (data, ctx) => {
       // Only validate working hours for end date (no future date requirement)
-      if (workingHours && hints?.timeZone) {
+      if (workingHours) {
         const validation = validateWorkingHours(
           data,
           workingHours,
-          hints.timeZone
+          prefs.timeZone
         );
         if (!validation.isValid) {
           ctx.addIssue({
@@ -322,7 +355,8 @@ function buildBookingDateSchemas({
         durationInHours = calculateBusinessHoursDuration(
           startDate,
           endDate,
-          workingHours
+          workingHours,
+          prefs.timeZone
         );
       } else {
         // Standard calendar hours calculation
@@ -364,7 +398,8 @@ function buildBookingDateSchemas({
  *   - Only base-level validation applies.
  *
  * @param params - The form schema inputs. See {@link BookingFormSchemaParams}.
- * @param params.hints - Client hints (timezone) used to coerce/validate dates.
+ * @param params.prefs - The acting user's resolved format prefs; its `timeZone`
+ *   is the zone every typed wall-clock date is coerced and validated in.
  * @param params.action - The form action ("new" | "save" | "reserve"); selects
  *   which field set and refinements apply.
  * @param params.status - The current booking status (drives the "save" branch).
@@ -377,7 +412,7 @@ function buildBookingDateSchemas({
  *   shaped per the given `action`/`status`.
  */
 export function BookingFormSchema({
-  hints,
+  prefs,
   action,
   status,
   workingHours: rawWorkingHours,
@@ -390,7 +425,7 @@ export function BookingFormSchema({
   // exactly the same rules as the duplicate dialog (single source of truth).
   const { startDateSchema, endDateSchema, crossFieldDateValidation } =
     buildBookingDateSchemas({
-      hints,
+      prefs,
       workingHours: rawWorkingHours,
       bookingSettings,
       isAdminOrOwner,
@@ -420,8 +455,8 @@ export function BookingFormSchema({
           userId: z.string().optional().nullable(),
         })
       ),
-    startDate: coerceLocalDate(hints?.timeZone).optional(),
-    endDate: coerceLocalDate(hints?.timeZone).optional(),
+    startDate: coerceLocalDate(prefs.timeZone).optional(),
+    endDate: coerceLocalDate(prefs.timeZone).optional(),
     tags: tagsRequired
       ? z.string().min(1, "At least one tag is required")
       : z.string().optional(),
@@ -489,20 +524,20 @@ export type BookingFormSchemaType = ReturnType<typeof BookingFormSchema>;
  * working-hours check, end-after-start check, and max-booking-length check all
  * produce identical messages and error paths (`startDate` / `endDate`).
  *
- * @param params - The hints, raw working hours, booking settings, and
- *   admin/owner flag. See {@link BookingDateSchemaParams}.
+ * @param params - The resolved format prefs, raw working hours, booking
+ *   settings, and admin/owner flag. See {@link BookingDateSchemaParams}.
  * @returns A `z.object({ startDate, endDate })` schema with the cross-field
  *   refinement applied via `superRefine`.
  */
 export function DuplicateBookingSchema({
-  hints,
+  prefs,
   workingHours,
   bookingSettings,
   isAdminOrOwner = false,
 }: BookingDateSchemaParams) {
   const { startDateSchema, endDateSchema, crossFieldDateValidation } =
     buildBookingDateSchemas({
-      hints,
+      prefs,
       workingHours,
       bookingSettings,
       isAdminOrOwner,
@@ -523,7 +558,15 @@ export type DuplicateBookingSchemaType = ReturnType<
 
 interface ExtendBookingSchemaParams {
   workingHours?: any;
-  timeZone?: string;
+  /**
+   * The acting user's fully-resolved formatting preferences. Same contract, and
+   * the same reasoning, as {@link BookingFormSchemaParams.prefs} — read that
+   * docblock before changing this type. This was previously an optional
+   * `timeZone?: string`, which let the extend dialog validate in the BROWSER
+   * zone while the server action parsed the submitted date in the PREFERENCE
+   * zone; the two disagreed for every user who had set an explicit timezone.
+   */
+  prefs: ResolvedFormatPrefs;
   bookingSettings: Pick<
     BookingSettings,
     "bufferStartTime" | "maxBookingLength" | "maxBookingLengthSkipClosedDays"
@@ -538,10 +581,11 @@ interface ExtendBookingSchemaParams {
 
 export function ExtendBookingSchema({
   workingHours: rawWorkingHours,
-  timeZone,
+  prefs,
   bookingSettings,
   isAdminOrOwner = false,
 }: ExtendBookingSchemaParams) {
+  const { timeZone } = prefs;
   const { bufferStartTime, maxBookingLength, maxBookingLengthSkipClosedDays } =
     bookingSettings;
 
@@ -603,7 +647,8 @@ export function ExtendBookingSchema({
           durationInHours = calculateBusinessHoursDuration(
             startDate,
             endDate,
-            workingHours
+            workingHours,
+            timeZone
           );
         } else {
           // Standard calendar hours calculation

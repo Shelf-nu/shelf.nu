@@ -82,7 +82,11 @@ export default function KitRow({
   // optional fields tolerate that and fall back to QR when workspace pref
   // is SAM.
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: kit, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: kit,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
     : null;
 
   // Create booking asset IDs set for context-aware status calculation
@@ -184,6 +188,13 @@ export default function KitRow({
               tooltipContent="This kit is already added to a booking that is overlapping the selected time period."
             />
           </When>
+          {/*
+            Deliberately the count of RENDERED slices, never the kit's
+            `_count.assetKits`. The latter is CURRENT membership, so a kit
+            whose members have since been removed (its booking slices survive
+            via `BookingAsset.sourceKitId`) would print a count that
+            contradicts the rows listed directly beneath it.
+          */}
           <div className="text-sm text-gray-600">{assets.length} assets</div>
         </Td>
 

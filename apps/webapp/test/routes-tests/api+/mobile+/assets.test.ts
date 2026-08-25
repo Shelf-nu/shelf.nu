@@ -22,6 +22,7 @@ import { createLoaderArgs } from "@mocks/remix";
 import { db } from "~/database/db.server";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
@@ -36,12 +37,15 @@ import { assertIsDataWithResponseInit } from "@helpers/assertions";
 // whole point is to inspect the `where` clause Prisma receives, so we mock
 // `db.asset.findMany` + `count` to a jest spy. (vi.mock calls hoist above the
 // imports above at runtime, so importing `db` doesn't load the real module.)
+// `$queryRaw` is mocked too — the search resolver now runs the shared
+// org-scoped UNION as a raw query instead of a Prisma multi-table OR.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: {
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -58,11 +62,18 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
     ...actual,
     requireMobileAuth: vi.fn(),
     requireOrganizationAccess: vi.fn(),
+    // why: the route now resolves custody visibility here. Default the
+    // existing shape assertions to "may see all" so they keep measuring the
+    // shaper, not the custody gate — which has its own tests below.
+    getMobileUserContext: vi.fn().mockResolvedValue({
+      canSeeAllCustody: true,
+    }),
   };
 });
 
 const findManyMock = vi.mocked(db.asset.findMany);
 const countMock = vi.mocked(db.asset.count);
+const queryRawMock = vi.mocked(db.$queryRaw);
 const requireMobileAuthMock = vi.mocked(requireMobileAuth);
 const requireOrganizationAccessMock = vi.mocked(requireOrganizationAccess);
 
@@ -80,6 +91,9 @@ beforeEach(() => {
 
   findManyMock.mockResolvedValue([]);
   countMock.mockResolvedValue(0);
+  // why: default to no search matches — tests that exercise search override
+  // this to a known id set.
+  queryRawMock.mockResolvedValue([]);
 });
 
 describe("GET /api/mobile/assets", () => {
@@ -192,5 +206,328 @@ describe("GET /api/mobile/assets", () => {
       location: null,
       custody: null,
     });
+  });
+
+  it("sends mainImageExpiration only when the asset's own image won the cascade", async () => {
+    // why: expiration describes the asset's OWN signed URL only. A model
+    // cover is a public URL that never expires, and the row's date can be
+    // stale residue from a removed own image — a client-side expiry check
+    // fed that pairing discards a valid image. This pins the source gate.
+    findManyMock.mockResolvedValueOnce([
+      // Own image: the signed URL and its expiration travel together.
+      {
+        id: "asset-own",
+        title: "Own image",
+        status: "AVAILABLE",
+        mainImage: "https://supabase.test/sign/assets/own.png",
+        thumbnailImage: "https://supabase.test/sign/assets/own-thumbnail.png",
+        mainImageExpiration: "2026-08-01T00:00:00.000Z",
+        availableToBook: true,
+        category: null,
+        assetModel: null,
+        assetKits: [],
+        assetLocations: [],
+        custody: [],
+      },
+      // Inherited image: stale per-asset expiration residue must NOT ship
+      // next to the model's never-expiring public URL.
+      {
+        id: "asset-inherited",
+        title: "Inherited image",
+        status: "AVAILABLE",
+        mainImage: null,
+        thumbnailImage: null,
+        mainImageExpiration: "2026-08-01T00:00:00.000Z",
+        availableToBook: true,
+        category: null,
+        assetModel: {
+          image: "https://supabase.test/public/files/model.png",
+          thumbnailImage:
+            "https://supabase.test/public/files/model-thumbnail.png",
+        },
+        assetKits: [],
+        assetLocations: [],
+        custody: [],
+      },
+    ] as never);
+
+    // why: the loader runs findMany + count in parallel for the pagination
+    // envelope; the count must match the two mocked rows above.
+    countMock.mockResolvedValueOnce(2);
+
+    const args = createLoaderArgs({
+      request: new Request("http://localhost:3000/api/mobile/assets"),
+    });
+
+    const response = await loader(args);
+    assertIsDataWithResponseInit(response);
+    const body = response.data as {
+      assets: Array<{
+        id: string;
+        mainImage: string | null;
+        imageSource: string;
+        mainImageExpiration: string | null;
+      }>;
+    };
+
+    expect(body.assets[0]).toMatchObject({
+      id: "asset-own",
+      mainImage: "https://supabase.test/sign/assets/own.png",
+      imageSource: "asset",
+      mainImageExpiration: "2026-08-01T00:00:00.000Z",
+    });
+    expect(body.assets[1]).toMatchObject({
+      id: "asset-inherited",
+      mainImage: "https://supabase.test/public/files/model.png",
+      imageSource: "model",
+      mainImageExpiration: null,
+    });
+  });
+});
+
+describe("GET /api/mobile/assets — status filter", () => {
+  it("returns 400 for an unknown status instead of silently unfiltering", async () => {
+    // Regression: an unrecognized status used to reach Prisma and 500;
+    // a later guard silently dropped the filter, which returned the FULL
+    // list under what the client believes is a filtered request. The
+    // contract is a loud 400.
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?status=toString"
+      ),
+    });
+
+    const response = await loader(args);
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(400);
+    expect(
+      (response.data as { error: { message: string } }).error.message
+    ).toContain("Invalid status filter");
+    expect(findManyMock).not.toHaveBeenCalled();
+    expect(countMock).not.toHaveBeenCalled();
+  });
+
+  it("makes AVAILABLE QT-aware via the shared fragment", async () => {
+    // A QUANTITY_TRACKED row's status flips as soon as ANY unit is
+    // allocated even while free stock remains — raw equality would hide it
+    // from the Available pill. Mirrors getAssets.
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?status=AVAILABLE"
+      ),
+    });
+
+    await loader(args);
+
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { type: "INDIVIDUAL", status: "AVAILABLE" },
+          { type: "QUANTITY_TRACKED" },
+        ],
+      },
+    ]);
+    expect(where).not.toHaveProperty("status");
+  });
+
+  it("keeps raw equality for non-AVAILABLE statuses", async () => {
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?status=IN_CUSTODY"
+      ),
+    });
+
+    await loader(args);
+
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where).toMatchObject({ status: "IN_CUSTODY" });
+    expect(where).not.toHaveProperty("AND");
+  });
+});
+
+describe("GET /api/mobile/assets — search", () => {
+  it("resolves a search via the shared UNION into a single query", async () => {
+    // The endpoint now runs one query: the org-scoped UNION resolves the
+    // matching asset ids (mocked via db.$queryRaw), and those ids are ANDed
+    // into the same findMany/count call — no narrow/fallback re-query.
+    queryRawMock.mockResolvedValueOnce([{ id: "asset-1" }, { id: "asset-2" }]);
+    countMock.mockResolvedValueOnce(2);
+
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?search=tripod"
+      ),
+    });
+
+    await loader(args);
+
+    expect(queryRawMock).toHaveBeenCalledTimes(1);
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where).toMatchObject({
+      organizationId: FAKE_ORG_ID,
+      id: { in: ["asset-1", "asset-2"] },
+    });
+  });
+
+  it("id-shaped searches also resolve via the single UNION query (superset, pre-approved)", async () => {
+    // Previously ID-shaped terms took a narrow indexed fast path with a
+    // full-clause fallback on zero rows. The UNION always searches all 10
+    // sources in one query, so an ID-shaped search now returns the full
+    // (more correct) result set directly — no second query.
+    queryRawMock.mockResolvedValueOnce([{ id: "asset-9" }]);
+    countMock.mockResolvedValueOnce(1);
+
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?search=SAM-0001"
+      ),
+    });
+
+    await loader(args);
+
+    expect(queryRawMock).toHaveBeenCalledTimes(1);
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where).toMatchObject({ id: { in: ["asset-9"] } });
+  });
+
+  it("does not run the UNION or filter by id for an empty search", async () => {
+    const args = createLoaderArgs({
+      request: new Request("http://localhost:3000/api/mobile/assets"),
+    });
+
+    await loader(args);
+
+    expect(queryRawMock).not.toHaveBeenCalled();
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where).not.toHaveProperty("id");
+  });
+
+  it("matches nothing (not everything) for whitespace/comma-only search", async () => {
+    // In a debounced type-ahead a single typed space must not flash the
+    // full unfiltered list.
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?search=%20%2C%20"
+      ),
+    });
+
+    await loader(args);
+
+    expect(queryRawMock).not.toHaveBeenCalled();
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where).toMatchObject({ id: { in: [] } });
+  });
+
+  it("pages deterministically with an id tiebreaker", async () => {
+    const args = createLoaderArgs({
+      request: new Request("http://localhost:3000/api/mobile/assets"),
+    });
+
+    await loader(args);
+
+    expect(findManyMock.mock.calls[0]![0]!.orderBy).toEqual([
+      { createdAt: "desc" },
+      { id: "asc" },
+    ]);
+  });
+});
+
+describe("GET /api/mobile/assets — custody visibility", () => {
+  /** One asset held by a colleague, shaped as the select returns it. */
+  const colleaguesAsset = {
+    id: "asset-1",
+    title: "Camera",
+    status: "IN_CUSTODY",
+    mainImage: null,
+    thumbnailImage: null,
+    mainImageExpiration: null,
+    assetModel: null,
+    availableToBook: true,
+    category: null,
+    type: "INDIVIDUAL",
+    quantity: null,
+    minQuantity: null,
+    unitOfMeasure: null,
+    consumptionType: null,
+    assetKits: [],
+    assetLocations: [],
+    custody: [
+      {
+        quantity: 1,
+        kitCustodyId: null,
+        custodian: {
+          id: "tm-colleague",
+          name: "Colleague Name",
+          userId: "someone-else",
+        },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    findManyMock.mockResolvedValue([colleaguesAsset] as never);
+    vi.mocked(db.asset.count).mockResolvedValue(1 as never);
+  });
+
+  it("hides a colleague's custody from a viewer who may not see all custody", async () => {
+    // The mobile asset DETAIL route gated this; the list did not, so the same
+    // holder name was readable one endpoint over.
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      canSeeAllCustody: false,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+
+    const response = await loader(createLoaderArgs({}));
+    const body = (response as any).data ?? (await (response as any).json());
+
+    expect(body.assets[0].custody).toBeNull();
+    expect(body.assets[0].custodyList).toEqual([]);
+    expect(JSON.stringify(body)).not.toContain("Colleague Name");
+  });
+
+  it("keeps the viewer's OWN custody visible to a restricted viewer", async () => {
+    // The direction the other two cases miss. Hiding here would take an item
+    // away from the person actually holding it, and the gate is supposed to
+    // reject on OWNERSHIP, not on the role alone.
+    // why: same fixture as above with the custodian re-pointed at the caller —
+    // isolates ownership as the only variable.
+    findManyMock.mockResolvedValue([
+      {
+        ...colleaguesAsset,
+        custody: [
+          {
+            ...colleaguesAsset.custody[0],
+            custodian: {
+              ...colleaguesAsset.custody[0].custodian,
+              userId: FAKE_USER_ID,
+            },
+          },
+        ],
+      },
+    ] as never);
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      canSeeAllCustody: false,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+
+    const response = await loader(createLoaderArgs({}));
+    const body = (response as any).data ?? (await (response as any).json());
+
+    expect(body.assets[0].custody).not.toBeNull();
+    expect(body.assets[0].custodyList).toHaveLength(1);
+  });
+
+  it("keeps custody visible for a viewer who may see all of it", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      canSeeAllCustody: true,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+
+    const response = await loader(createLoaderArgs({}));
+    const body = (response as any).data ?? (await (response as any).json());
+
+    expect(body.assets[0].custody?.custodian?.name).toBe("Colleague Name");
   });
 });

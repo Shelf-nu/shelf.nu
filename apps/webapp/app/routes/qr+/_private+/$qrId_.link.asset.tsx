@@ -110,6 +110,9 @@ export const loader = async ({
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // This route ignores the custodian-filter seed, so scope it: no reason to
+      // fetch a roster nobody renders.
+      canSeeAllCustody: false,
     });
 
     if (totalPages !== 0 && page > totalPages) {
@@ -335,7 +338,15 @@ export default function QrLinkExisting() {
   );
 }
 
-const RowComponent = ({ item }: { item: Asset }) => (
+const RowComponent = ({
+  item,
+}: {
+  item: Asset & {
+    /** Cover image of the asset's model, rendered when the asset has no image
+     * of its own. See `~/modules/asset/image-resolution`. */
+    assetModel: { image: string | null; thumbnailImage: string | null } | null;
+  };
+}) => (
   <>
     <Td className="w-full p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:px-6">
@@ -347,6 +358,7 @@ const RowComponent = ({ item }: { item: Asset }) => (
                 mainImage: item.mainImage,
                 thumbnailImage: item.thumbnailImage,
                 mainImageExpiration: item.mainImageExpiration,
+                assetModel: item.assetModel ?? null,
               }}
               alt={`Image of ${item.title}`}
               className="size-full rounded-[4px] border object-cover"

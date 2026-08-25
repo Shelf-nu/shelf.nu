@@ -14,6 +14,7 @@ import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 
+import { db } from "~/database/db.server";
 import {
   ADDABLE_BOOKING_STATUSES,
   isAddableBooking,
@@ -21,6 +22,7 @@ import {
 import {
   assertKitsAddableToActiveBooking,
   buildKitSlicesForBooking,
+  createKitBookingNote,
   getExistingBookingDetails,
   loadBookingsData,
   updateBookingAssets,
@@ -68,18 +70,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.create,
-    });
+    const { organizationId, role, canSeeAllBookings } = await requirePermission(
+      {
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      }
+    );
 
     const loaderData = await loadBookingsData({
       request,
       organizationId,
       userId: authSession?.userId,
-      isSelfServiceOrBase,
+      role,
+      canSeeAllBookings,
       ids: kitId ? [kitId] : undefined,
     });
 
@@ -235,6 +240,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       new Set(kitSlices.map((slice) => slice.assetId))
     );
 
+    /**
+     * Booking-side note for the kit add.
+     *
+     * This route forwards a non-empty `kitIds` to `updateBookingAssets`, which
+     * suppresses the service's own booking note on the assumption that a kit
+     * caller writes its own. `manage-kits` does. This route did not — so adding
+     * a kit to a booking from the KIT's page left the booking's activity feed
+     * completely silent, while the same action from the booking's page recorded
+     * it. Two doors to one outcome, two different audit trails.
+     *
+     * Names are fetched (rather than letting `createKitBookingNote` fall back
+     * to `wrapKitsForNote`'s id-only tag) so both doors produce an identical
+     * note. Org-scoped: `kitIds` is request-supplied.
+     */
+    const addedKits = await db.kit.findMany({
+      where: { id: { in: kitIds }, organizationId },
+      select: { id: true, name: true },
+    });
+
+    await createKitBookingNote({
+      bookingId: booking.id,
+      organizationId,
+      kitIds,
+      kits: addedKits,
+      userId: authSession.userId,
+      action: "added",
+    });
+
     const actor = wrapUserLinkForNote({
       id: authSession.userId,
       firstName: user?.firstName,
@@ -303,10 +336,6 @@ export default function ExistingBooking() {
               // `loadBookingsData` seeds the list with — otherwise searching
               // returns bookings this dialog then refuses to render.
               status: ADDABLE_BOOKING_STATUSES.join(","),
-              // Keep the typed list inside the same custodian scope
-              // `loadBookingsData` seeds it with, so SELF_SERVICE / BASE users
-              // are not offered bookings that submit would then reject.
-              scopeToCustodian: true,
             }}
             fieldName="bookingId"
             contentLabel=" Existing Bookings"

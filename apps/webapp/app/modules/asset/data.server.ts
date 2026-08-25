@@ -14,6 +14,8 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import type { RowWithCustody } from "~/utils/custody-visibility.server";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -61,6 +63,12 @@ interface Props {
   currentOrganization: OrganizationFromUser;
   user: { firstName: string | null };
   settings: AssetIndexSettings;
+  /**
+   * Resolved custody read-visibility, from `requirePermission`. Required, not
+   * optional: the custodian filter seed previously passed no scoping at all,
+   * and an optional field would let a caller silently restore that.
+   */
+  canSeeAllCustody: boolean;
 }
 
 const searchFieldTooltipText = `
@@ -146,7 +154,11 @@ export async function simpleModeLoader({
   currentOrganization,
   user,
   settings,
+  canSeeAllCustody,
 }: Props) {
+  // Threaded into the asset query so the custodian FILTER seed is scoped —
+  // it used a role-only check that let BASE through unscoped. See
+  // `getPaginatedAndFilterableAssets`.
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
   const isSelfServiceOrBase =
@@ -224,6 +236,9 @@ export async function simpleModeLoader({
     getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // The fix: this route DOES render the custodian filter, and the seed was
+      // scoped on a role check that let BASE through unscoped.
+      canSeeAllCustody,
       filters,
       extraInclude:
         view === "availability"
@@ -243,8 +258,23 @@ export async function simpleModeLoader({
                       from: true,
                       to: true,
                       description: true,
-                      custodianTeamMember: true,
-                      custodianUser: true,
+                      // Narrowed from `true` on both: that shipped the whole
+                      // TeamMember row and the ENTIRE User row — email,
+                      // Stripe `customerId`, billing flags — to render a name
+                      // and an avatar. `userId` stays so the redaction can
+                      // tell the viewer's own booking from a colleague's.
+                      custodianTeamMember: {
+                        select: { id: true, name: true, userId: true },
+                      },
+                      custodianUser: {
+                        select: {
+                          id: true,
+                          firstName: true,
+                          lastName: true,
+                          displayName: true,
+                          profilePicture: true,
+                        },
+                      },
                       tags: TAG_WITH_COLOR_SELECT,
                       creator: {
                         select: {
@@ -375,7 +405,22 @@ export async function simpleModeLoader({
   return data(
     payload({
       header,
-      items: assets,
+      /**
+       * `TeamMemberBadge` only decides whether to DRAW the custodian; the name
+       * and `user.email` shipped in this payload regardless, so a restricted
+       * viewer read them out of `/assets.data` while the column said "private".
+       *
+       * The cast is load-bearing, not cosmetic. `getAssets` builds its include
+       * dynamically from `assetIndexFields()`, which nests `custodian` — but
+       * the DECLARED return type resolves `custody` to the raw Prisma model,
+       * with no `custodian` at all. Trusting the type here means skipping the
+       * redaction entirely; the browser payload proves the custodian is
+       * present at runtime.
+       */
+      items: redactCustodianForViewer(
+        assets as unknown as Array<(typeof assets)[number] & RowWithCustody>,
+        { canSeeAllCustody, userId }
+      ),
       categories,
       tags,
       search,
@@ -443,6 +488,7 @@ export async function advancedModeLoader({
   currentOrganization,
   user,
   settings,
+  canSeeAllCustody,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
@@ -572,6 +618,9 @@ export async function advancedModeLoader({
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
       userId,
+      // A FILTER. This passed no scoping argument at all, so the seed
+      // disagreed with the search endpoint for any restricted role.
+      filterByUserId: !canSeeAllCustody,
     }),
 
     // Kits
@@ -680,7 +729,14 @@ export async function advancedModeLoader({
   return data(
     payload({
       header,
-      items: refreshedAssets,
+      // Same redaction as simple mode. ADVANCED is ADMIN/OWNER-only today
+      // (`assets._index.tsx` refuses it to restricted roles), so this is a
+      // no-op in practice — applied so the rule lives with the payload rather
+      // than depending on a gate two files away.
+      items: redactCustodianForViewer(refreshedAssets, {
+        canSeeAllCustody,
+        userId,
+      }),
       search,
       page,
       totalItems: totalAssets,

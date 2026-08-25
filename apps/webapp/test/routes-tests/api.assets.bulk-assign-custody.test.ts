@@ -65,6 +65,10 @@ vi.mock("~/modules/asset/service.server", () => ({
 // why: testing team member organization validation without database lookups
 vi.mock("~/modules/team-member/service.server", () => ({
   getTeamMember: teamMemberServiceMocks.getTeamMember,
+  // why: the custodian-filter narrowing has its own suite; here it only needs
+  // to not hit the database. "all" keeps the route's select-all behaviour
+  // unchanged for these role-forwarding assertions.
+  scopeCustodianFilterIds: vi.fn().mockResolvedValue([]),
 }));
 
 // why: preventing actual notification sending during route tests

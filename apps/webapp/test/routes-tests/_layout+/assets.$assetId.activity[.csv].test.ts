@@ -137,11 +137,19 @@ describe("app/routes/_layout+/assets.$assetId.activity[.csv] loader", () => {
     expect(response instanceof Response).toBe(true);
     expect((response as unknown as Response).status).toBe(200);
     expect((response as unknown as Response).headers.get("content-type")).toBe(
-      "text/csv"
+      "text/csv; charset=utf-8"
     );
     expect(
       (response as unknown as Response).headers.get("content-disposition")
     ).toContain("Test Asset-activity");
+
+    // Excel reads the leading byte order mark to pick UTF-8; without it,
+    // non-Latin note content opens in the machine's locale codepage. Read as
+    // bytes, because `text()` decodes as UTF-8 and drops the mark.
+    const bytes = new Uint8Array(
+      await (response as unknown as Response).clone().arrayBuffer()
+    );
+    expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
 
     const csv = await (response as unknown as Response).text();
     const rows = csv.trim().split("\n");

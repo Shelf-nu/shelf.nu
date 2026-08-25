@@ -1,5 +1,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { serializeAssetImage } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
@@ -45,13 +47,20 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         id: true,
         title: true,
         mainImage: true,
+        thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
       },
       orderBy: {
         title: "asc",
       },
     });
 
-    return data(payload({ assets }));
+    /**
+     * Resolve the image cascade server-side so JSON consumers get one flat
+     * answer instead of having to re-implement it. See `serializeAssetImage`.
+     */
+    return data(payload({ assets: assets.map(serializeAssetImage) }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

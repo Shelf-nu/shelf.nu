@@ -85,7 +85,16 @@ export const loader = async ({
       pdfMeta.to = dateTimeFormat.format(new Date(completedAt));
     }
 
-    // Sanitize activity note content to remove markdoc tags (server-side only)
+    // Sanitize note content to remove markdoc tags (server-side only).
+    //
+    // why BOTH lists: a condition note written alongside photos carries an
+    // embedded `{% audit_images ... /%}` tag (helpers.server.ts,
+    // buildAuditImagesNoteContent). The PDF prints note content as plain text,
+    // so an unsanitised one would put raw tag source in the receipt.
+    pdfMeta.conditionNotes = pdfMeta.conditionNotes.map((note) => ({
+      ...note,
+      content: sanitizeNoteContent(note.content || "", prefs),
+    }));
     pdfMeta.activityNotes = pdfMeta.activityNotes.map((note) => ({
       ...note,
       content: sanitizeNoteContent(note.content || "", prefs),

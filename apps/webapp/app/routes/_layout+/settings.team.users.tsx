@@ -13,6 +13,7 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import ImportUsersDialog from "~/components/settings/import-users-dialog/import-users-dialog";
 import InviteUserDialog from "~/components/settings/invite-user-dialog";
+import TransferOwnershipButton from "~/components/settings/transfer-ownership-button";
 import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 
@@ -52,9 +53,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    /** Cannot manage users for PERSONAL organization */
+    /**
+     * Personal workspaces can't manage registered users. Send them to the Team
+     * page (which explains how to upgrade) instead of a contextless redirect.
+     */
     if (organization?.type === "PERSONAL") {
-      return redirect("/settings/general");
+      return redirect("/settings/team/nrm");
     }
 
     const searchParams = getCurrentSearchParams(request);
@@ -161,16 +165,20 @@ export default function UserTeamSetting() {
       </p>
 
       <ListContentWrapper>
-        <Filters>
-          <div className="flex items-center gap-1">
+        {/* innerWrapperClassName: the search wrapper defaults to w-full, which
+        squeezes the actions slot to leftovers. Content-size it on md+ so the
+        three action buttons get the actual free space. */}
+        <Filters innerWrapperClassName="md:w-auto">
+          {/* Three buttons don't always fit one row: stack them full-width on
+          mobile, and let the row wrap on tighter md screens. The container owns
+          the spacing and the stretch — children must NOT add their own `mt-*`
+          or `w-full`, or the gaps stop being uniform. */}
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:flex-wrap md:items-center md:justify-end">
+            <TransferOwnershipButton />
             <ImportUsersDialog />
             <InviteUserDialog
               trigger={
-                <Button
-                  type="button"
-                  className="mt-2 w-full md:mt-0 md:w-max"
-                  variant="primary"
-                >
+                <Button type="button" variant="primary">
                   <span className="whitespace-nowrap">Invite a user</span>
                 </Button>
               }

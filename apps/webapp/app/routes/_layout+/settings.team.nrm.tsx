@@ -202,8 +202,8 @@ export default function NrmSettings() {
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={TeamMemberRow}
           customEmptyStateContent={{
-            title: "No team members on database",
-            text: "What are you waiting for? Add your first team member now!",
+            title: "No non-registered members yet",
+            text: "Non-registered members are name-only records for assigning custody. They can't log in.",
             newButtonRoute: "add-member",
             newButtonContent: "Add NRM",
           }}

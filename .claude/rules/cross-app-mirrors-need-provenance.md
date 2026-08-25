@@ -1,5 +1,5 @@
 ---
-description: Hand-copied webapp logic in the companion (or any second app) must be marked as a mirror, point at its source, and prefer extraction to packages/*
+description: Hand-copied webapp logic in the companion must be marked as a mirror, point at its source, and prefer extraction to packages/*. Companion is the only secondary app today — extend the glob when another appears.
 globs: apps/companion/**
 ---
 
@@ -35,5 +35,7 @@ const ROLE_PERMISSIONS = { OWNER: { qr: ["read", "update"] } };
  */
 ```
 
-Existing mirrors: `apps/companion/lib/permissions.ts`. When you touch one,
-diff it against its canonical source before shipping.
+Existing mirrors: none — the permissions mirror was extracted to
+`@shelf/permissions` (packages/permissions). If you create a new mirror,
+add it to this list; when you touch one, diff it against its canonical
+source before shipping.

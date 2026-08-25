@@ -5,6 +5,11 @@ import {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  serializeAssetImage,
+  type AssetImageSource,
+} from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
@@ -117,13 +122,41 @@ export async function requireMobileAuth(request: Request) {
 }
 
 /**
- * Fetches organizations for a user, with their roles.
+ * Fetches a user's organizations, with their roles, in landing order.
+ *
+ * `organizations[0]` is the workspace the companion should open: the app has
+ * no workspace cookie, so the ARRAY ORDER is the wire contract for where a
+ * session lands. The order mirrors the web resolver in
+ * `~/modules/organization/context.server.ts` so both clients answer "which
+ * workspace am I in?" the same way:
+ *
+ *   1. the user's `lastSelectedOrganizationId`, when they still belong to it
+ *   2. for non-SSO users, their personal workspace
+ *   3. everything else, oldest first (stable across calls)
+ *
+ * SSO users never see their personal workspace — it is filtered out here for
+ * the same reason the web filters it at every touchpoint: their membership is
+ * driven by the IdP, and the personal workspace is not part of that world.
+ *
+ * `lastSelectedOrganizationId` is also returned explicitly (null when unset or
+ * no longer valid) so the app can distinguish "the server picked for me" from
+ * "I chose this workspace" without re-deriving the hierarchy.
+ *
+ * @param userId - the authenticated user
+ * @returns organizations in landing order, plus the explicit last-selected id
  */
 export async function getUserOrganizations(userId: string) {
   const userOrgs = await db.userOrganization.findMany({
     where: { userId },
+    // Oldest-first base order keeps rank ties deterministic across calls; the
+    // id tie-break pins organizations created in the same instant.
+    orderBy: [
+      { organization: { createdAt: "asc" } },
+      { organization: { id: "asc" } },
+    ],
     select: {
       roles: true,
+      user: { select: { sso: true, lastSelectedOrganizationId: true } },
       organization: {
         select: {
           id: true,
@@ -137,18 +170,43 @@ export async function getUserOrganizations(userId: string) {
     },
   });
 
+  const isSSO = userOrgs[0]?.user?.sso === true;
+  const lastSelectedId = userOrgs[0]?.user?.lastSelectedOrganizationId ?? null;
+
+  const visible = isSSO
+    ? userOrgs.filter((uo) => uo.organization.type !== "PERSONAL")
+    : userOrgs;
+
+  const lastSelectedOrganizationId = visible.some(
+    (uo) => uo.organization.id === lastSelectedId
+  )
+    ? lastSelectedId
+    : null;
+
+  /** Landing rank per the hierarchy above; sort is stable, so ties keep the
+   * oldest-first base order. */
+  const rank = (uo: (typeof visible)[number]) => {
+    if (uo.organization.id === lastSelectedOrganizationId) return 0;
+    if (!isSSO && uo.organization.type === "PERSONAL") return 1;
+    return 2;
+  };
+  const ordered = [...visible].sort((a, b) => rank(a) - rank(b));
+
   // Serialize the *canonical* add-on capability (premium-aware), not the
   // raw DB flags, so the companion's client-side gating
   // (`currentOrg.auditsEnabled` / `.barcodesEnabled`) stays aligned with
   // the server gating, which now uses canUseAudits/canUseBarcodes. Without
   // this, non-premium/self-hosted deployments would allow the feature on
   // the API but hide it in the app.
-  return userOrgs.map((uo) => ({
-    ...uo.organization,
-    barcodesEnabled: canUseBarcodes(uo.organization),
-    auditsEnabled: canUseAudits(uo.organization),
-    roles: uo.roles,
-  }));
+  return {
+    organizations: ordered.map((uo) => ({
+      ...uo.organization,
+      barcodesEnabled: canUseBarcodes(uo.organization),
+      auditsEnabled: canUseAudits(uo.organization),
+      roles: uo.roles,
+    })),
+    lastSelectedOrganizationId,
+  };
 }
 
 /**
@@ -237,6 +295,14 @@ export async function getMobileUserContext(
   organizationId: string
 ): Promise<{
   role: OrganizationRoles;
+  /**
+   * Every role on this membership. `role` is `roles[0]`, which is wrong for
+   * any authorization decision: a membership ordered `[SELF_SERVICE, ADMIN]`
+   * resolves to SELF_SERVICE and an actual admin gets treated as restricted.
+   * Callers making a privilege decision should use this with
+   * `resolveMostPrivilegedRole`.
+   */
+  roles: OrganizationRoles[];
   canUseBarcodes: boolean;
   canUseAudits: boolean;
   canSeeAllCustody: boolean;
@@ -275,6 +341,7 @@ export async function getMobileUserContext(
 
   return {
     role,
+    roles: userOrg.roles,
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
     canSeeAllCustody: computeCanSeeAllCustody({
@@ -333,7 +400,16 @@ export const MOBILE_ASSET_SELECT = {
   id: true,
   title: true,
   status: true,
+  // The workspace-visible identifier ("SAM-0017"). Web shows it on the asset
+  // overview and the scanner invites you to type one, so every mobile surface
+  // that names an asset needs to be able to show WHICH id it is.
+  sequentialId: true,
   mainImage: true,
+  thumbnailImage: true,
+  // Cover image of the asset's model. `shapeMobileAssetResponse` resolves the
+  // cascade into `mainImage`/`thumbnailImage` before the row leaves the server,
+  // so the companion inherits model images with no client release.
+  ...ASSET_MODEL_IMAGE_SELECT,
   // why: powers the scan-to-booking "not available to book" blocker.
   availableToBook: true,
   // why: the fulfil-and-check-out scanner matches each scan against the
@@ -477,9 +553,23 @@ export type MobileAssetResponse = {
   id: string;
   title: string;
   status: string;
+  /** Workspace-visible identifier, e.g. "SAM-0017". Null until one is assigned. */
+  sequentialId: string | null;
   /** Model this asset belongs to, or null. Drives fulfil-scan matching. */
   assetModelId?: string | null;
+  /**
+   * Image to render, with the model-image cascade already resolved: the
+   * asset's own image, else its model's cover image, else `null` (the
+   * companion draws its own placeholder — the placeholder PATH is never sent).
+   */
   mainImage: string | null;
+  /** 108px counterpart of {@link mainImage}, resolved from the same tier. */
+  thumbnailImage: string | null;
+  /**
+   * Where {@link mainImage} came from. Additive — lets the companion label an
+   * inherited image later without a second request.
+   */
+  imageSource: AssetImageSource;
   availableToBook: boolean;
   category: { name: string } | null;
   kitId: string | null;
@@ -537,7 +627,10 @@ export function shapeMobileAssetResponse(asset: {
   id: string;
   title: string;
   status: string;
+  sequentialId: string | null;
   mainImage: string | null;
+  thumbnailImage: string | null;
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   availableToBook: boolean;
   category: { name: string } | null;
   type: AssetType;
@@ -555,6 +648,14 @@ export function shapeMobileAssetResponse(asset: {
 }): MobileAssetResponse {
   const { assetKits, assetLocations, custody, ...rest } = asset;
   const kit = assetKits[0]?.kit ?? null;
+  /**
+   * Collapse the model-image cascade before the row leaves the server. The
+   * companion reads `mainImage`/`thumbnailImage` directly and cannot be
+   * updated in lockstep with the API (native binary, no OTA for native
+   * changes), so resolving here is what makes inherited images work without a
+   * client release. `imageSource` is additive, for later provenance UI.
+   */
+  const image = serializeAssetImage(rest);
   // Aggregate custody rows by custodian so a holder with more than one row on
   // the same asset (e.g. a kit-driven row plus a standalone row) shows once
   // with their summed quantity rather than duplicated. Insertion order follows
@@ -579,9 +680,9 @@ export function shapeMobileAssetResponse(asset: {
     }
   }
   return {
-    // `...rest` carries the new scalar quantity fields (type, quantity,
-    // minQuantity, unitOfMeasure, consumptionType) through verbatim.
-    ...rest,
+    // `...image` carries `...rest` through verbatim (including the new scalar
+    // quantity fields) with the image cascade already resolved.
+    ...image,
     kitId: kit?.id ?? null,
     kit,
     location: assetLocations[0]?.location ?? null,

@@ -92,6 +92,8 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
 
   it("forwards a non-UTC timezone into the filter query, changing the resolved id set", async () => {
     const tokyoIds = await resolveAssetIdsForBulkOperation({
+      // Not the subject of these tests; the narrowing has its own suite.
+      allowedTeamMemberIds: "all" as const,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams: "createdAt=is:2026-07-20",
@@ -100,6 +102,8 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
     });
 
     const utcIds = await resolveAssetIdsForBulkOperation({
+      // Not the subject of these tests; the narrowing has its own suite.
+      allowedTeamMemberIds: "all" as const,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams: "createdAt=is:2026-07-20",
@@ -120,6 +124,8 @@ describe("resolveAssetIdsForBulkOperation - timezone forwarding", () => {
 
   it("defaults the resolution timezone to UTC when none is supplied", async () => {
     const ids = await resolveAssetIdsForBulkOperation({
+      // Not the subject of these tests; the narrowing has its own suite.
+      allowedTeamMemberIds: "all" as const,
       assetIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       currentSearchParams: "createdAt=is:2026-07-20",

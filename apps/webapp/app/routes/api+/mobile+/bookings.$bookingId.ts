@@ -1,4 +1,9 @@
-import { AssetStatus, AssetType, OrganizationRoles } from "@prisma/client";
+import {
+  AssetStatus,
+  AssetType,
+  BookingStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -8,10 +13,13 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { serializeAssetImage } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
   computeBookingAssetRemainingToCheckOut,
+  getBookingFlags,
   getPartiallyCheckedInAssetIds,
 } from "~/modules/booking/service.server";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
@@ -79,6 +87,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         creator: {
           select: {
             id: true,
+            displayName: true,
             firstName: true,
             lastName: true,
           },
@@ -86,6 +95,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodianUser: {
           select: {
             id: true,
+            displayName: true,
             firstName: true,
             lastName: true,
             profilePicture: true,
@@ -98,7 +108,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           },
         },
         tags: {
-          select: { id: true, name: true },
+          select: { id: true, name: true, color: true },
         },
         // Walk the BookingAsset pivot to reach assets. `quantity` +
         // `assetKitId` per row let the loader below collapse multi-row
@@ -114,6 +124,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 id: true,
                 title: true,
                 status: true,
+                // why: lets the app grey out Reserve for the same reason web
+                // does, instead of offering a tap the server will refuse.
+                // It reaches the client through the `serializeAssetImage(rest)`
+                // spread that builds each row — there is no explicit mapping to
+                // grep for, so do not assume it is unused.
+                availableToBook: true,
                 // Quantity-tracked metadata so the app can render the
                 // check-in / check-out quantity + disposition pickers: `type`
                 // gates the picker to QT assets, `consumptionType` decides
@@ -122,6 +138,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 unitOfMeasure: true,
                 consumptionType: true,
                 mainImage: true,
+                thumbnailImage: true,
+                // Model cover image; collapsed into the flat image fields by
+                // `serializeAssetImage` below, so an asset inheriting its
+                // model's photo is not blank on the companion booking screen.
+                ...ASSET_MODEL_IMAGE_SELECT,
                 category: {
                   select: { id: true, name: true, color: true },
                 },
@@ -182,50 +203,89 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // = mixed standalone + kit-driven). Mobile clients that don't know
     // about `assetKitId` see the same flat shape they always did.
     //
-    // `kit`/`kitId` keep their legacy synthesis (the first AssetKit
-    // pointer the asset has at booking time) for older clients that
-    // still rely on those — but the `assetKitId` field is the accurate
-    // per-booking-slice signal when mobile is ready to adopt it.
+    // `slices` additively exposes the per-BookingAsset-row breakdown (Gap 1,
+    // Companion QT display parity) so the app can render standalone vs.
+    // kit-driven booked units separately instead of only the merged total.
+    type SliceRow = {
+      bookingAssetId: string;
+      quantity: number;
+      assetKitId: string | null;
+      kit: { id: string; name: string } | null;
+    };
     type CollapsedRow = {
       assetId: string;
       first: (typeof booking.bookingAssets)[number];
       totalQuantity: number;
       assetKitIds: Set<string | null>;
+      slices: SliceRow[];
     };
     const byAssetId = new Map<string, CollapsedRow>();
     for (const ba of booking.bookingAssets) {
+      // Resolve THIS slice's kit by matching its assetKitId against the
+      // asset's memberships (assetKits[].id). Standalone slice
+      // (assetKitId null) → null.
+      const sliceKit =
+        ba.assetKitId != null
+          ? ba.asset.assetKits.find((ak) => ak.id === ba.assetKitId)?.kit ??
+            null
+          : null;
+      const slice: SliceRow = {
+        bookingAssetId: ba.id,
+        quantity: ba.quantity,
+        assetKitId: ba.assetKitId,
+        kit: sliceKit,
+      };
       const existing = byAssetId.get(ba.asset.id);
       if (existing) {
         existing.totalQuantity += ba.quantity;
         existing.assetKitIds.add(ba.assetKitId);
+        existing.slices.push(slice);
       } else {
         byAssetId.set(ba.asset.id, {
           assetId: ba.asset.id,
           first: ba,
           totalQuantity: ba.quantity,
           assetKitIds: new Set([ba.assetKitId]),
+          slices: [slice],
         });
       }
     }
 
     const assets = Array.from(byAssetId.values()).map((row) => {
       const { assetKits, ...rest } = row.first.asset;
-      const primaryKit = assetKits[0]?.kit ?? null;
+      // why: no `sourceKitId` fallback for detached kit residue here. This
+      // response collapses per asset rather than grouping by kit, and the
+      // unanimous rule below deliberately reports `null` rather than guessing
+      // a source. Resolving the snapshot kit would re-introduce exactly the
+      // arbitrary attribution that rule exists to remove.
       // Unanimous-kit rule: every collapsed row for this asset points at
       // the same `assetKitId`. Mixed → `null` so clients don't
       // mis-attribute the slice to one of multiple sources.
       const unanimousAssetKitId =
         row.assetKitIds.size === 1 ? Array.from(row.assetKitIds)[0] : null;
+      // Merged kit = the kit of the unanimous membership, else null. This
+      // REPLACES the legacy `assetKits[0].kit` synthesis, which mislabelled
+      // standalone/mixed rows with an arbitrary membership. Safe for old
+      // clients: they already render a null kit (INDIVIDUAL assets have one).
+      const mergedKit =
+        unanimousAssetKitId != null
+          ? assetKits.find((ak) => ak.id === unanimousAssetKitId)?.kit ?? null
+          : null;
       return {
-        ...rest,
-        kit: primaryKit,
-        kitId: primaryKit?.id ?? null,
+        // Resolves the model-image cascade and drops the nested `assetModel`,
+        // so the companion keeps one source of truth for the image.
+        ...serializeAssetImage(rest),
+        kit: mergedKit,
+        kitId: mergedKit?.id ?? null,
         // Per-booking quantity (sum of all slices for this asset in
         // this booking).
         quantity: row.totalQuantity,
         // Per-row kit-source discriminator — `null` for standalone or
         // mixed (assets with both standalone and kit-driven slices).
         assetKitId: unanimousAssetKitId,
+        // Per-BookingAsset-slice breakdown (additive). One entry per slice; a
+        // QT asset booked standalone + via 2 kits has 3. Old clients ignore it.
+        slices: row.slices,
       };
     });
 
@@ -437,6 +497,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       countKitsAsSingleUnit: bookingSettings.countKitsAsSingleUnit ?? false,
     });
 
+    /**
+     * The third rule web's Reserve button disables on, which the companion had
+     * no way to evaluate: whether any asset is already booked for this window.
+     * Unlike "no assets" and "unavailable asset", it cannot be derived from the
+     * rows in this response — it needs the overlapping-booking query — so
+     * without this flag the phone showed an enabled Reserve, the user tapped,
+     * confirmed, and only then got a 400 from `reserveBooking`'s conflict check.
+     *
+     * Computed for DRAFT bookings only: Reserve is the sole consumer and it is
+     * the only status that renders it, so no other request pays for the query.
+     */
+    const hasAlreadyBookedAssets =
+      booking.status === BookingStatus.DRAFT && booking.from && booking.to
+        ? (
+            await getBookingFlags({
+              id: booking.id,
+              organizationId,
+              assetIds: assetsForResponse.map((a) => a.id),
+              modelRequestCount,
+              from: booking.from,
+              to: booking.to,
+            })
+          ).hasAlreadyBookedAssets
+        : false;
+
     return data({
       booking: {
         id: booking.id,
@@ -458,6 +543,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelRequestCount,
         outstandingModelUnitCount,
         lifecycleProgress,
+        hasAlreadyBookedAssets,
       },
       checkedInAssetIds,
       canCheckout,

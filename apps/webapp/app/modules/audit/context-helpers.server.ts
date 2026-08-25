@@ -339,7 +339,16 @@ export async function resolveAssetIdsForKitSelection({
       organizationId,
       assetKits: {
         some: {
-          kit: getKitsWhereInput({ organizationId, currentSearchParams }),
+          kit: getKitsWhereInput({
+            organizationId,
+            currentSearchParams,
+            // Sole caller is `api+/audits.start`, gated on `audit: create`,
+            // which BASE and SELF_SERVICE do not hold — so `?teamMember=` here
+            // cannot come from a viewer restricted from seeing custody. Pass a
+            // narrowed allow-list instead if this is ever called from an
+            // `audit: read`/`update` route, which both restricted roles have.
+            allowedTeamMemberIds: "all",
+          }),
         },
       },
     };

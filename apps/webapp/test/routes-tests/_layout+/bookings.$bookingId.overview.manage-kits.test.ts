@@ -353,11 +353,13 @@ describe("manage-kits route validation", () => {
             {
               assetId: "asset-shared",
               assetKitId: "ak-kit1-shared",
+              kitId: "kit1",
               quantity: 10,
             },
             {
               assetId: "asset-shared",
               assetKitId: "ak-kit2-shared",
+              kitId: "kit2",
               quantity: 5,
             },
           ],
@@ -765,6 +767,7 @@ describe("manage-kits route validation", () => {
             {
               assetId: "asset3",
               assetKitId: "ak-kit1-asset3",
+              kitId: "kit1",
               quantity: 1,
             },
           ],
@@ -1035,5 +1038,59 @@ describe("manage-kits loader — Models tab payload", () => {
       organizationId: "org123",
       booking: mockLoaderBooking,
     });
+  });
+
+  it("redacts custodian identity from picker rows for a restricted viewer", async () => {
+    // why: this fixture stands in for what KITS_INCLUDE_FIELDS actually selects
+    // — the full `custody.custodian.user`, `email` included — so the assertion
+    // measures redaction rather than the shape of a real query. The picker
+    // renders no custodian column, so nothing prints "private": the identity
+    // simply rides along in the route payload, and BASE/SELF_SERVICE both hold
+    // `booking:update` and can open this picker on their own DRAFT booking.
+    vi.mocked(kitService.getPaginatedAndFilterableKits).mockResolvedValue({
+      ...mockPaginatedKits,
+      kits: [
+        {
+          id: "kit1",
+          name: "Camera Kit",
+          custody: {
+            custodian: {
+              name: "Colleague Name",
+              userId: "someone-else",
+              user: {
+                id: "someone-else",
+                email: "colleague@example.com",
+                firstName: "Colleague",
+                lastName: "Name",
+              },
+            },
+          },
+        },
+      ],
+    } as any);
+
+    // why: the Models tab is unrelated to custody redaction; this is the
+    // minimal payload that lets the loader finish without it.
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: false,
+      assetModels: [],
+      initialAssetModels: [],
+      totalAssetModels: 0,
+      matchedAssetModels: 0,
+      modelRequests: [],
+    });
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    const custodian = result.items[0].custody.custodian;
+    expect(custodian.name).toBe("");
+    expect(custodian.userId).toBeNull();
+    expect(custodian.user).toBeNull();
+    // The custody row itself must survive — the picker's availability label
+    // tests it for presence (`hasCustody`), so dropping it would change which
+    // kits read as available.
+    expect(result.items[0].custody).toBeTruthy();
   });
 });

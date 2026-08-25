@@ -1,3 +1,4 @@
+import { ASSET_STATUS_LABELS } from "@shelf/labels";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
@@ -42,10 +43,16 @@ const keyExtractor = (item: AssetListItem) => item.id;
 type FilterConfig = { label: string; status: string; myCustody?: boolean };
 const FILTERS: FilterConfig[] = [
   { label: "All", status: "" },
-  { label: "My Custody", status: "", myCustody: true },
-  { label: "Available", status: "AVAILABLE" },
-  { label: "In Custody", status: "IN_CUSTODY" },
-  { label: "Checked Out", status: "CHECKED_OUT" },
+  // why: sentence case ("My custody", not "My Custody") to sit consistently
+  // beside the @shelf/labels chips below, which are sentence case. This one has
+  // no package entry — it is not a status, it is a custodian filter.
+  { label: "My custody", status: "", myCustody: true },
+  // why: read from @shelf/labels, not hand-typed. The chips said "In Custody"
+  // and "Checked Out" while the badge on the very same row said "In custody"
+  // and "Checked out", because badges go through formatStatus and these did not.
+  { label: ASSET_STATUS_LABELS.AVAILABLE, status: "AVAILABLE" },
+  { label: ASSET_STATUS_LABELS.IN_CUSTODY, status: "IN_CUSTODY" },
+  { label: ASSET_STATUS_LABELS.CHECKED_OUT, status: "CHECKED_OUT" },
 ];
 const MY_CUSTODY_INDEX = 1;
 
@@ -253,10 +260,10 @@ function AssetsListContent() {
           onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
           activeOpacity={0.6}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
-            quantityLabel ? `, quantity ${quantityLabel}` : ""
-          }${item.category ? `, ${item.category.name}` : ""}${
-            item.location ? `, ${item.location.name}` : ""
-          }`}
+            item.sequentialId ? `, ${item.sequentialId}` : ""
+          }${quantityLabel ? `, quantity ${quantityLabel}` : ""}${
+            item.category ? `, ${item.category.name}` : ""
+          }${item.location ? `, ${item.location.name}` : ""}`}
           accessibilityRole="button"
         >
           {item.thumbnailImage || item.mainImage ? (
@@ -276,6 +283,15 @@ function AssetsListContent() {
               {item.title}
             </Text>
             <View style={styles.assetMeta}>
+              {/* Search accepts a SAM ID, so a hit has to be able to show WHICH
+                  id it is — otherwise the row identifies itself by title only
+                  and the user has to open it to find out. Absent on older
+                  servers, where the row renders exactly as before. */}
+              {item.sequentialId ? (
+                <Text style={styles.assetSequentialId} numberOfLines={1}>
+                  {item.sequentialId}
+                </Text>
+              ) : null}
               {item.category && (
                 <Text style={styles.assetCategory} numberOfLines={1}>
                   {item.category.name}
@@ -452,6 +468,11 @@ function AssetsListContent() {
               <Text style={styles.emptyTitle}>
                 {debouncedSearch
                   ? "No results found"
+                  : // why: the custodian filter needs its own sentence — running
+                  // its label through the status template yields "No my custody
+                  // assets". The kits list already branches this way.
+                  FILTERS[activeFilter].myCustody
+                  ? "No assets in your custody"
                   : activeFilter > 0
                   ? `No ${FILTERS[activeFilter].label.toLowerCase()} assets`
                   : "No assets yet"}
@@ -653,6 +674,12 @@ const useStyles = createStyles((colors, shadows) => ({
   assetLocation: {
     fontSize: fontSize.xs,
     color: colors.mutedLight,
+  },
+  assetSequentialId: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+    // Tabular so a column of SAM ids lines up while scanning the list.
+    fontVariant: ["tabular-nums"],
   },
 
   // Status badge — pill shape like webapp

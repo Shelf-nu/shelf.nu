@@ -90,8 +90,10 @@ import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import {
+  buildAssetOverviewCustomFields,
   buildCustomFieldValue,
   getCustomFieldDisplayValue,
 } from "~/utils/custom-fields";
@@ -149,6 +151,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       currentOrganization,
       canUseBarcodes,
       role,
+      canSeeAllCustody,
     } = await requirePermission({
       userId,
       request,
@@ -243,12 +246,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         0
       );
 
+      // Manual rows only (`assetKitId === null`). This is the sum
+      // `enforce_asset_location_sum_within_total` actually bounds — since
+      // `20260602100000_assetlocation_sum_exclude_kit_driven` the trigger
+      // ignores kit-driven rows, which are bounded on their own axis by
+      // `enforce_asset_kit_sum_within_total`. Deriving "over-placed" from the
+      // combined `inLocations` would flag a perfectly valid asset (80 manual +
+      // 50 kit-driven of 100) as over-allocated.
+      const inLocationsManual = (asset.assetLocations ?? []).reduce(
+        (sum: number, al) =>
+          sum + (al.assetKitId === null ? al.quantity ?? 0 : 0),
+        0
+      );
+
       const availability = await getAssetAvailability({
         assetId: asset.id,
         organizationId,
       });
 
-      quantityData = buildQuantityData({ availability, inLocations });
+      quantityData = buildQuantityData({
+        availability,
+        inLocations,
+        inLocationsManual,
+      });
     }
 
     /**
@@ -260,17 +280,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           organizationId,
           request,
           userId,
-          isSelfService: role === OrganizationRoles.SELF_SERVICE,
+          // The rule, not a role check: `isSelfService` was false for BASE, so
+          // the seed shipped the whole roster — with every user's email and
+          // Stripe id — to a role that cannot assign custody at all.
+          role,
+          canSeeAllCustody,
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
-    const bookingAsset =
-      asset.bookingAssets.length > 0 ? asset.bookingAssets[0] : undefined;
-    const currentBooking: any = null;
-
-    if (bookingAsset && bookingAsset.booking.from) {
-      asset.bookingAssets = [currentBooking];
-    }
+    // `bookingAssets` is already the asset's current booking: the query
+    // filters to ONGOING/OVERDUE and excludes bookings this asset has been
+    // partially checked in from, so the first row is the one the page shows.
+    // Nothing further is derived from it here.
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
       ? asset.customFields.filter(
@@ -368,10 +389,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : 0;
 
     return payload({
-      asset: {
-        ...asset,
-        customFields,
-      },
+      // Same reasoning as the parent detail route: this payload carries
+      // `custody[].custodian` and is reachable with `asset: read`.
+      asset: redactCustodianForViewer([{ ...asset, customFields }], {
+        canSeeAllCustody,
+        userId,
+      })[0],
       currentOrganization,
       userId,
       lastScan,
@@ -752,6 +775,17 @@ export default function AssetOverview() {
   /** Route URL used by all three `MoveUnitsDialog` form submissions. */
   const moveUnitsActionUrl = `/assets/${asset.id}/overview`;
 
+  /**
+   * The model's cover image, if the linked model has one. Used only to decide
+   * whether to explain that the displayed image is inherited — the image
+   * itself is resolved inside `AssetImage`.
+   *
+   * Read directly off the loader type, NOT through a cast: an `as {...}` here
+   * previously masked the fact that the select wasn't returning these columns
+   * at all, which is exactly the compile-time guard this feature relies on.
+   */
+  const assetModelImage = asset.assetModel?.image;
+
   const booking =
     asset.status === AssetStatus.CHECKED_OUT && asset?.bookingAssets?.length
       ? asset?.bookingAssets[0]?.booking
@@ -762,18 +796,15 @@ export default function AssetOverview() {
    * Each entry pairs the field definition with its stored value (or null
    * if not set). This keeps fields in a stable position regardless of
    * whether they have values — no jumping when a user adds or clears data.
+   *
+   * The asset's own values are the primary source: `allCustomFieldDefs` is
+   * loaded ONLY for users who can update the asset, so building the list from
+   * it alone hid every custom field from BASE and SELF_SERVICE users.
    */
-  const customFieldsValueMap = new Map(
-    (asset?.customFields ?? [])
-      .filter((f) => f.value)
-      .map((f) => [f.customField.id, f])
-  );
-  const allCustomFields = (allCustomFieldDefs ?? [])
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((def) => ({
-      def,
-      storedValue: customFieldsValueMap.get(def.id) ?? null,
-    }));
+  const allCustomFields = buildAssetOverviewCustomFields({
+    storedValues: asset?.customFields ?? [],
+    editableDefinitions: allCustomFieldDefs ?? [],
+  });
 
   const location = asset ? getPrimaryLocation(asset) : null;
   usePosition();
@@ -1157,6 +1188,18 @@ export default function AssetOverview() {
                     ) : (
                       <span>{asset.assetModel.name}</span>
                     )}
+                    {/*
+                      Explains why this asset looks identical to every other
+                      one of its model. Shown only when the image actually
+                      comes from the model — an asset with its own upload
+                      overrides it, and saying otherwise would be wrong.
+                    */}
+                    <When truthy={!asset.mainImage && !!assetModelImage}>
+                      <div className="mt-1 text-[12px] text-gray-500">
+                        Image shown for this asset comes from its model. Upload
+                        an image on the asset to override it.
+                      </div>
+                    </When>
                   </div>
                 </li>
               ) : null}
@@ -1242,8 +1285,15 @@ export default function AssetOverview() {
               />
               <Card className="my-3 px-[-4] py-[-5] md:border">
                 <ul className="item-information">
-                  {allCustomFields.map(({ def, storedValue }) => {
+                  {allCustomFields.map(({ def, storedValue, isEditable }) => {
                     const hasValue = !!storedValue;
+                    /**
+                     * A field the action would refuse to write (its definition
+                     * is outside the asset's category scope) stays visible but
+                     * read-only — offering an editor there would dead-end on a
+                     * 400.
+                     */
+                    const canEditField = canEditAsset && isEditable;
                     const fieldValue = hasValue
                       ? (storedValue.value as unknown as ShelfAssetCustomFieldValueType["value"])
                       : null;
@@ -1255,8 +1305,8 @@ export default function AssetOverview() {
                       ? getCustomFieldDisplayValue(fieldValue!, prefs)
                       : null;
 
-                    /* Hide "Not set" rows from view-only users */
-                    if (!hasValue && !canEditAsset) return null;
+                    /* Hide "Not set" rows from users who can't fill them in */
+                    if (!hasValue && !canEditField) return null;
 
                     return (
                       <InlineEditableField
@@ -1264,7 +1314,7 @@ export default function AssetOverview() {
                         fieldName={`customField-${def.id}`}
                         formFieldName="customField"
                         label={def.name}
-                        canEdit={canEditAsset}
+                        canEdit={canEditField}
                         extraHiddenInputs={{
                           customFieldId: def.id,
                         }}
@@ -1730,6 +1780,7 @@ export default function AssetOverview() {
               inCustodyQuantity={quantityData?.inCustody}
               inKitsQuantity={quantityData?.inKits}
               inLocationsQuantity={quantityData?.inLocations}
+              inLocationsManualQuantity={quantityData?.inLocationsManual}
               reservedQuantity={quantityData?.reserved}
               reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}

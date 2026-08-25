@@ -280,17 +280,20 @@ export async function createMobileAuthCode(
  * already-consumed code yields a uniform 400 (no oracle about which check
  * failed).
  *
- * PKCE: if the code was minted with an S256 `codeChallenge` (a PKCE-capable
- * app), the caller MUST present a `codeVerifier` that hashes to it — otherwise
- * the (now-consumed) code is rejected with the SAME uniform 400, so an
- * intercepted code is useless without the verifier. Codes minted WITHOUT a
- * challenge (legacy, pre-PKCE builds) redeem with no verifier — backward
- * compatible. Verification runs AFTER the atomic consume, so a wrong verifier
- * burns the single-use code; acceptable, since the legitimate app always
- * presents the matching verifier.
+ * PKCE is mandatory and unconditional. The caller MUST present a
+ * `codeVerifier` that hashes to the code's stored S256 `codeChallenge`;
+ * anything else — a missing verifier, a wrong one, or a code carrying no
+ * challenge at all — is rejected with the SAME uniform 400, so an intercepted
+ * code is useless without the verifier. A NULL `codeChallenge` is treated as
+ * poison rather than as a legacy opt-out: an unbound code is a bearer token,
+ * which is precisely what PKCE exists to prevent on a custom-scheme callback
+ * any app can claim. Verification runs AFTER the atomic consume, so a wrong
+ * verifier burns the single-use code; acceptable, since the legitimate app
+ * always presents the matching verifier.
  *
  * @param code - The plaintext authorization code from the deeplink
- * @param codeVerifier - PKCE verifier; required iff the code carries a challenge
+ * @param codeVerifier - PKCE verifier. Optional in the signature only so the
+ *   refusal path stays reachable; a redemption without one always fails.
  * @returns A freshly minted, mapped auth session for the device
  * @throws {ShelfError} 400 if the code is missing/invalid/expired/used, or if a
  *   PKCE-bound code is presented without a matching verifier
@@ -333,12 +336,20 @@ export async function redeemMobileAuthCode(
       select: { codeChallenge: true, user: { select: { email: true } } },
     });
 
-    // PKCE check — only for codes minted with a challenge. Same uniform 400 as
-    // an invalid code (no oracle about why redemption failed). The code is
-    // already consumed above, so a wrong/absent verifier burns it.
+    // PKCE is MANDATORY. A code minted without a challenge is a bearer token —
+    // whoever holds the plaintext from the `shelf://` deeplink gets a session —
+    // and the custom-scheme callback is exactly the channel PKCE exists to
+    // protect (RFC 8252 §8.1). So a NULL challenge is unredeemable rather than
+    // a check to skip: refusing here means a code that somehow reached the
+    // database unbound can never be spent.
+    //
+    // Same uniform 400 as an invalid code, so redemption failures give no
+    // oracle about why. The code is already consumed above, so a wrong or
+    // absent verifier burns it.
     if (
-      codeChallenge &&
-      (!codeVerifier || !verifyPkceChallenge(codeVerifier, codeChallenge))
+      !codeChallenge ||
+      !codeVerifier ||
+      !verifyPkceChallenge(codeVerifier, codeChallenge)
     ) {
       throw new ShelfError({
         cause: null,

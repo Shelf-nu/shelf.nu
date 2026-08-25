@@ -59,14 +59,18 @@ export function getStatusClasses(
         "md:focus:!bg-purple-100",
       ];
       break;
+    // Red, not amber. `bookingStatusColorMap` maps OVERDUE to red and every
+    // other place a booking status is shown reads from it - the badge on the
+    // bookings index, the booking detail, the asset page, the companion app.
+    // The calendar was the only surface calling an overdue booking a warning.
     case "OVERDUE":
       statusClasses = [
-        "md:!text-warning-700",
-        "md:bg-warning-50",
-        "md:border-warning-200",
-        "[&_.fc-daygrid-event-dot]:!border-warning-700",
-        "[&_.fc-list-event-dot]:!border-warning-700",
-        "md:focus:!bg-warning-100",
+        "md:!text-error-700",
+        "md:bg-error-50",
+        "md:border-error-200",
+        "[&_.fc-daygrid-event-dot]:!border-error-700",
+        "[&_.fc-list-event-dot]:!border-error-700",
+        "md:focus:!bg-error-100",
       ];
       break;
     case "COMPLETE":
@@ -97,7 +101,7 @@ export const statusClassesOnHover: Record<BookingStatus, string> = {
   CANCELLED: "md:!bg-gray-100",
   RESERVED: "md:!bg-blue-100",
   ONGOING: "md:!bg-purple-100",
-  OVERDUE: "md:!bg-warning-100",
+  OVERDUE: "md:!bg-error-100",
   COMPLETE: "md:!bg-success-100",
 };
 

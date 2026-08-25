@@ -2,7 +2,10 @@ import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import { formatBookingDuration } from "~/modules/booking/helpers";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
+import {
+  canAssignModelUnits,
+  countUnassignedModelUnits,
+} from "~/utils/booking-model-requests";
 import { BookingAssetsColumn } from "./booking-assets-column";
 import { BookingStatistics } from "./booking-statistics";
 import { EditBookingForm } from "./forms/edit-booking-form";
@@ -48,8 +51,6 @@ export function BookingPageContent() {
               name: booking.name,
               description: booking.description,
               bookingFlags,
-              startDate: dateForDateTimeInputValue(new Date(booking.from)),
-              endDate: dateForDateTimeInputValue(new Date(booking.to)),
               custodianRef: custodian?.id || "", // We have an old bug that some users dont have a teamMember attached to them. This is a safety just so the UI doesnt break until we solve the data
               tags: booking.tags,
             }}
@@ -61,6 +62,10 @@ export function BookingPageContent() {
             totalAssets={totalAssets}
             kitsCount={totalKits}
             assetsCount={assetsCount}
+            unassignedModelUnits={countUnassignedModelUnits(
+              booking.modelRequests
+            )}
+            canAssignModelUnits={canAssignModelUnits(booking.status)}
             totalValue={totalValue}
             lifecycleProgress={lifecycleProgress}
             allCategories={allCategories}

@@ -79,6 +79,7 @@ export default defineConfig({
       "@shelf/database",
       "@shelf/datetime",
       "@shelf/labels",
+      "@shelf/permissions",
       "@shelf/quantity-control",
     ],
   },

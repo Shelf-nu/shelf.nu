@@ -160,6 +160,7 @@ export const AssetsList = ({
                           barcodes: resource.extendedProps?.barcodes,
                         },
                         organization: currentOrganization,
+                        entityKind: "asset",
                       })
                     : null;
                   return (
@@ -172,6 +173,8 @@ export const AssetsList = ({
                             resource.extendedProps?.thumbnailImage,
                           mainImageExpiration:
                             resource.extendedProps?.mainImageExpiration,
+                          assetModel:
+                            resource.extendedProps?.assetModel ?? null,
                         }}
                         alt={`Image of ${resource.title}`}
                         className="size-14 shrink-0 rounded border object-cover"
@@ -251,7 +254,11 @@ export const ListAssetContent = ({
   } = formatCustodyList(custodyArray);
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "asset",
+      })
     : null;
   return (
     <>
@@ -271,6 +278,7 @@ export const ListAssetContent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
@@ -353,9 +361,15 @@ export const ListAssetContent = ({
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-                        +{otherCustodians.length} more
-                      </span>
+                      <button
+                        type="button"
+                        className="shrink-0 cursor-help whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-1"
+                        aria-label={`+${otherCustodians.length} more custodian${
+                          otherCustodians.length === 1 ? "" : "s"
+                        }`}
+                      >
+                        +{otherCustodians.length}
+                      </button>
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
                       <ul className="flex flex-col gap-1 text-sm">
