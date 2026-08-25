@@ -31,6 +31,7 @@ import { getAppVersion } from "../app-update";
 import {
   CLOUD_SERVER,
   getActiveServer,
+  getServerVersion,
   setActiveServer,
 } from "./active-server";
 import {
@@ -43,6 +44,8 @@ import {
   type ConnectOutcome,
 } from "./contract";
 
+// Re-exported so callers import the connect flow's vocabulary from the module
+// that runs it; both are declared and documented in ./contract.
 export type { ConnectFailureReason, ConnectOutcome } from "./contract";
 
 /** The registry lookup runs while the user waits — keep it short. */
@@ -201,8 +204,15 @@ export async function refreshActiveServerConfig(): Promise<void> {
   const active = getActiveServer();
   if (active.isCloud) return;
 
+  const versionAtStart = getServerVersion();
   const parsed = await fetchServerConfig(active.baseUrl);
   if (parsed === null) return;
+
+  // The user can disconnect or connect somewhere else while this request is in
+  // flight. Applying the answer then would drag them back to the server they
+  // just left and wipe their state a second time, so a superseded refresh is
+  // dropped rather than committed.
+  if (getServerVersion() !== versionAtStart) return;
 
   const outcome = decideServerConnection(parsed, getAppVersion());
   if (!outcome.ok) {

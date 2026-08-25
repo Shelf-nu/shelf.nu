@@ -108,9 +108,16 @@ export default function SettingsScreen() {
                   // while it runs. Requests started in that window would be
                   // resolving against a server that is being torn down.
                   setIsSwitchingServer(true);
-                  void disconnectFromServer().finally(() =>
-                    setIsSwitchingServer(false)
-                  );
+                  void disconnectFromServer()
+                    .catch(() => {
+                      // Rebuilding the client can throw. Say so rather than
+                      // leaving the row looking unchanged for no stated reason.
+                      Alert.alert(
+                        "Couldn't disconnect",
+                        "Something went wrong returning to Shelf Cloud. Please try again."
+                      );
+                    })
+                    .finally(() => setIsSwitchingServer(false));
                 },
               },
             ]),

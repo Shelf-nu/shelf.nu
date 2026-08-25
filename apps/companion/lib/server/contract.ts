@@ -92,10 +92,9 @@ export const ACTIVE_SERVER_STORAGE_KEY = "shelf_active_server";
  */
 export const SERVER_SCOPED_STORAGE_KEYS: readonly string[] = [
   "shelf_selected_org_id",
-  // Written by an earlier build's domain → server cache, which no longer
-  // exists. Swept anyway: the record it holds — which private server a domain
-  // belongs to — would otherwise outlive every disconnect on installs that ran
-  // that build.
+  // Holds a domain → private-server mapping, which belongs to one server and
+  // must not outlive a disconnect. No current code writes it; it is swept so
+  // that installs still carrying one lose it with everything else.
   "shelf_domain_resolutions",
 ];
 
