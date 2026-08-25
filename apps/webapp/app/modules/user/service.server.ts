@@ -55,7 +55,6 @@ import { defaultFields } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
-import { createTeamMember } from "../team-member/service.server";
 import { USER_CONTACT_SELECT } from "../user-contact/constants";
 import {
   getUserContactById,
@@ -176,6 +175,52 @@ export async function findUserByEmail(email: User["email"]) {
       label,
     });
   }
+}
+
+/**
+ * Makes sure an SSO user has a `TeamMember` in an organization they can access.
+ *
+ * Org access and the team-member record are two writes, and only the second one
+ * makes custody possible — a user holding the first without the second can sign
+ * in, see the workspace, and never be assignable as a custodian. Existing
+ * access alone is therefore not taken as proof the pair is intact: a login that
+ * still maps to a role re-checks, so an account left half-written can recover.
+ * A login that maps to no role does not, because that transition is removing
+ * the user's access rather than restoring it.
+ *
+ * Soft-deleted records do not count: a member removed from the workspace and
+ * then re-granted access needs a live record again.
+ *
+ * @param tx - Prisma client or active transaction
+ * @param params.userId - The signing-in user
+ * @param params.organizationId - Organization they hold access to
+ * @param params.name - Display name for a record that has to be created
+ */
+async function ensureUserTeamMember(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    userId,
+    organizationId,
+    name,
+  }: {
+    userId: User["id"];
+    organizationId: Organization["id"];
+    name: string;
+  }
+) {
+  const existing = await tx.teamMember.findFirst({
+    where: { userId, organizationId, deletedAt: null },
+    select: { id: true },
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  return tx.teamMember.create({
+    data: { name, organizationId, userId },
+    select: { id: true },
+  });
 }
 
 async function createUserOrgAssociation(
@@ -396,16 +441,21 @@ export async function createUserFromSSO(
 
         if (role) {
           firstMatchedOrg ??= org;
-          await createUserOrgAssociation(db, {
-            userId: user.id,
-            organizationIds: [org.id],
-            roles: [role],
-          });
+          // Both writes or neither, for the same reason as the returning-user
+          // path: access without a team member is an account that can open the
+          // workspace but can never be assigned custody.
+          await db.$transaction(async (tx) => {
+            await createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [org.id],
+              roles: [role],
+            });
 
-          await createTeamMember({
-            name: `${firstName} ${lastName}`,
-            organizationId: org.id,
-            userId,
+            await ensureUserTeamMember(tx, {
+              userId,
+              organizationId: org.id,
+              name: `${firstName} ${lastName}`,
+            });
           });
         }
       }
@@ -660,6 +710,39 @@ export async function updateUserFromSSO(
           );
           transitions.push(transition);
 
+          // Repair an account whose team-member record never got written —
+          // only while a role still maps, since a revoked transition is
+          // removing this user's access rather than restoring it.
+          if (desiredRole) {
+            await db.$transaction(async (tx) => {
+              // `TeamMember` has no uniqueness on (userId, organizationId), so
+              // two logins arriving together would both find nothing and both
+              // insert, leaving one user with two live custodian records. The
+              // membership row does have that uniqueness and always exists on
+              // this branch, so locking it serialises the pair of repairs.
+              const membership = await tx.$queryRaw<{ id: string }[]>`
+                SELECT id FROM "UserOrganization"
+                WHERE "userId" = ${userId} AND "organizationId" = ${org.id}
+                FOR UPDATE
+              `;
+
+              // The membership was read before the transition ran and can be
+              // gone by the time the lock resolves — a concurrent callback
+              // whose group claims revoke access deletes the row. Creating the
+              // record anyway would leave a custodian attached to a workspace
+              // its user is no longer in.
+              if (!membership || membership.length === 0) {
+                return;
+              }
+
+              await ensureUserTeamMember(tx, {
+                userId,
+                organizationId: org.id,
+                name: `${firstName} ${lastName}`,
+              });
+            });
+          }
+
           // The user keeps access only when a role still maps; a null
           // desiredRole makes handleSCIMTransition revoke it, so that org must
           // not become the post-login landing org.
@@ -667,16 +750,21 @@ export async function updateUserFromSSO(
             firstMatchedOrg ??= org;
           }
         } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
-          await createUserOrgAssociation(db, {
-            userId: user.id,
-            organizationIds: [org.id],
-            roles: [desiredRole],
-          });
+          // Both writes or neither: access without a team member is a state
+          // this flow cannot reach again, because the next login would find
+          // the access and take the branch above.
+          await db.$transaction(async (tx) => {
+            await createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [org.id],
+              roles: [desiredRole],
+            });
 
-          await createTeamMember({
-            name: `${firstName} ${lastName}`,
-            organizationId: org.id,
-            userId,
+            await ensureUserTeamMember(tx, {
+              userId,
+              organizationId: org.id,
+              name: `${firstName} ${lastName}`,
+            });
           });
 
           transitions.push({
@@ -1062,11 +1150,38 @@ export async function updateUserEmail({
         where: { id: userId },
         data: { email: newEmail },
       })
-      .catch((cause) => {
-        // On failure, revert the change of the user update in auth
-        void getSupabaseAdmin().auth.admin.updateUserById(userId, {
-          email: currentEmail,
-        });
+      .catch(async (cause) => {
+        // Auth already holds the new address, so the revert is what keeps the
+        // two systems agreeing. It has to be awaited: sign-in resolves the
+        // account by its AUTH email and then looks the user up by that address
+        // in the database, so a divergence locks the account out of both apps
+        // with no way back in. A dropped promise would also reject unhandled.
+        const { error: revertError } = await getSupabaseAdmin()
+          .auth.admin.updateUserById(userId, { email: currentEmail })
+          .catch((revertCause: unknown) => ({ error: revertCause }));
+
+        if (revertError) {
+          // Nothing further can be done from here, so say plainly which
+          // address each system holds — repairing it means setting one of
+          // them by hand.
+          Logger.error(
+            new ShelfError({
+              cause: revertError,
+              message:
+                "Email change failed and could not be rolled back in auth. The auth account and the database now hold different addresses, which blocks sign-in until one is corrected.",
+              additionalData: { userId, newEmail, currentEmail },
+              label,
+            })
+          );
+
+          throw new ShelfError({
+            cause,
+            message:
+              "Failed to update your email, and we could not restore the previous one. Please contact support before signing out.",
+            additionalData: { userId, newEmail, currentEmail },
+            label,
+          });
+        }
 
         // Unique email constraint is being handled automatically by `getSupabaseAdmin().auth.admin.generateLink`
         throw new ShelfError({
@@ -1081,7 +1196,12 @@ export async function updateUserEmail({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to update email",
+      // The steps above already say which of the two systems refused, and
+      // whether the previous address was restored. Replacing that with one
+      // generic line would drop the only guidance the user gets.
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to update email",
       additionalData: { userId, currentEmail, newEmail },
       label,
     });
