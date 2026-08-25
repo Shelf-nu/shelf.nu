@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -75,20 +76,32 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * The live selection, readable from async continuations. `fetchOrgs` is
+   * memoized on `[user]`, so its closure's `currentOrg` can be stale by the
+   * time a fetch resolves; a landing decision taken then must see the
+   * workspace the user has ACTUALLY selected meanwhile, not the one from
+   * when the fetch started.
+   */
+  const currentOrgRef = useRef<Organization | null>(null);
+
   /** The user chose this workspace — apply it and remember the choice. */
   const handleSetCurrentOrg = useCallback((org: Organization) => {
+    currentOrgRef.current = org;
     setCurrentOrg(org);
     AsyncStorage.setItem(SELECTED_ORG_KEY, org.id).catch(() => {});
   }, []);
 
   /** The app landed here on its own — apply it without recording a choice. */
   const applyLandingOrg = useCallback((org: Organization) => {
+    currentOrgRef.current = org;
     setCurrentOrg(org);
   }, []);
 
   const fetchOrgs = useCallback(async () => {
     if (!user) {
       setOrganizations([]);
+      currentOrgRef.current = null;
       setCurrentOrg(null);
       setUserProfile(null);
       setIsLoading(false);
@@ -132,9 +145,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       return serverChoice || orgs[0];
     };
 
-    // Preserve current selection if still valid
-    if (currentOrg) {
-      const stillExists = orgs.find((o) => o.id === currentOrg.id);
+    // Preserve the LIVE selection if still valid — read through the ref, so a
+    // workspace picked while this fetch was in flight is never stomped by a
+    // landing decision based on pre-fetch state.
+    const liveOrg = currentOrgRef.current;
+    if (liveOrg) {
+      const stillExists = orgs.find((o) => o.id === liveOrg.id);
       if (!stillExists && orgs.length > 0) {
         applyLandingOrg(resolveLandingOrg());
       }
