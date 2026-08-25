@@ -122,13 +122,41 @@ export async function requireMobileAuth(request: Request) {
 }
 
 /**
- * Fetches organizations for a user, with their roles.
+ * Fetches a user's organizations, with their roles, in landing order.
+ *
+ * `organizations[0]` is the workspace the companion should open: the app has
+ * no workspace cookie, so the ARRAY ORDER is the wire contract for where a
+ * session lands. The order mirrors the web resolver in
+ * `~/modules/organization/context.server.ts` so both clients answer "which
+ * workspace am I in?" the same way:
+ *
+ *   1. the user's `lastSelectedOrganizationId`, when they still belong to it
+ *   2. for non-SSO users, their personal workspace
+ *   3. everything else, oldest first (stable across calls)
+ *
+ * SSO users never see their personal workspace — it is filtered out here for
+ * the same reason the web filters it at every touchpoint: their membership is
+ * driven by the IdP, and the personal workspace is not part of that world.
+ *
+ * `lastSelectedOrganizationId` is also returned explicitly (null when unset or
+ * no longer valid) so the app can distinguish "the server picked for me" from
+ * "I chose this workspace" without re-deriving the hierarchy.
+ *
+ * @param userId - the authenticated user
+ * @returns organizations in landing order, plus the explicit last-selected id
  */
 export async function getUserOrganizations(userId: string) {
   const userOrgs = await db.userOrganization.findMany({
     where: { userId },
+    // Oldest-first base order keeps rank ties deterministic across calls; the
+    // id tie-break pins organizations created in the same instant.
+    orderBy: [
+      { organization: { createdAt: "asc" } },
+      { organization: { id: "asc" } },
+    ],
     select: {
       roles: true,
+      user: { select: { sso: true, lastSelectedOrganizationId: true } },
       organization: {
         select: {
           id: true,
@@ -142,18 +170,43 @@ export async function getUserOrganizations(userId: string) {
     },
   });
 
+  const isSSO = userOrgs[0]?.user?.sso === true;
+  const lastSelectedId = userOrgs[0]?.user?.lastSelectedOrganizationId ?? null;
+
+  const visible = isSSO
+    ? userOrgs.filter((uo) => uo.organization.type !== "PERSONAL")
+    : userOrgs;
+
+  const lastSelectedOrganizationId = visible.some(
+    (uo) => uo.organization.id === lastSelectedId
+  )
+    ? lastSelectedId
+    : null;
+
+  /** Landing rank per the hierarchy above; sort is stable, so ties keep the
+   * oldest-first base order. */
+  const rank = (uo: (typeof visible)[number]) => {
+    if (uo.organization.id === lastSelectedOrganizationId) return 0;
+    if (!isSSO && uo.organization.type === "PERSONAL") return 1;
+    return 2;
+  };
+  const ordered = [...visible].sort((a, b) => rank(a) - rank(b));
+
   // Serialize the *canonical* add-on capability (premium-aware), not the
   // raw DB flags, so the companion's client-side gating
   // (`currentOrg.auditsEnabled` / `.barcodesEnabled`) stays aligned with
   // the server gating, which now uses canUseAudits/canUseBarcodes. Without
   // this, non-premium/self-hosted deployments would allow the feature on
   // the API but hide it in the app.
-  return userOrgs.map((uo) => ({
-    ...uo.organization,
-    barcodesEnabled: canUseBarcodes(uo.organization),
-    auditsEnabled: canUseAudits(uo.organization),
-    roles: uo.roles,
-  }));
+  return {
+    organizations: ordered.map((uo) => ({
+      ...uo.organization,
+      barcodesEnabled: canUseBarcodes(uo.organization),
+      auditsEnabled: canUseAudits(uo.organization),
+      roles: uo.roles,
+    })),
+    lastSelectedOrganizationId,
+  };
 }
 
 /**
