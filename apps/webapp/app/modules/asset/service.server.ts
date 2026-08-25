@@ -61,6 +61,7 @@ import {
   createCategoriesIfNotExists,
   getCategory,
 } from "~/modules/category/service.server";
+import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import {
   createCustomFieldsIfNotExists,
@@ -6420,6 +6421,14 @@ export async function bulkCheckInAssets({
      * 2. Update status of all assets to AVAILABLE
      */
     await db.$transaction(async (tx) => {
+      // Kit-derived custody is owned by the kit; the kit release path is the
+      // only door out, or the kit and its members disagree about the custodian.
+      await assertNoKitDerivedCustody(
+        tx,
+        assets.map((asset) => asset.id),
+        organizationId
+      );
+
       /** Deleting custodies over assets */
       await tx.custody.deleteMany({
         where: {

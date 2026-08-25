@@ -137,3 +137,43 @@ describe("releaseCustody status write", () => {
     });
   });
 });
+
+describe("releaseCustody kit-derived custody guard", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("refuses to release custody that a kit put on the asset", async () => {
+    // why: the guard reads custody rows inside the transaction; a row with
+    // kitCustodyId set is the kit's, and only the kit release removes it.
+    vitest
+      .mocked(db.custody.findFirst)
+      .mockResolvedValueOnce({ assetId: "asset-1" } as never);
+
+    await expect(
+      releaseCustody({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(/release the kit/i);
+
+    expect(db.custody.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("releases operator-assigned custody untouched by any kit", async () => {
+    vitest.mocked(db.custody.findFirst).mockResolvedValue(null as never);
+
+    await releaseCustody({
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    expect(db.custody.deleteMany).toHaveBeenCalledWith({
+      where: { assetId: "asset-1", asset: { organizationId: "org-1" } },
+    });
+  });
+});

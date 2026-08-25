@@ -6,12 +6,59 @@ import { ShelfError } from "~/utils/error";
 import { releaseAssetsToAvailableUnlessCheckedOut } from "../asset/custody-status.server";
 
 /**
+ * Refuses to release custody rows that a kit put there.
+ *
+ * A `Custody` row with `kitCustodyId` set exists because the asset's KIT is in
+ * custody; the kit is the source of truth for it, and releasing the kit is what
+ * removes it (the FK cascades). Deleting such a row directly makes the member
+ * read "Available" while the kit still names a custodian — the system would
+ * give two answers to "who has this?".
+ *
+ * Read inside the caller's transaction so the answer cannot change between the
+ * check and the delete.
+ *
+ * @param tx - the active transaction the release runs in
+ * @param assetIds - assets about to have their custody rows deleted
+ * @param organizationId - proves org ownership of the rows being checked
+ * @throws {ShelfError} 400 when any custody on these assets is kit-derived
+ */
+export async function assertNoKitDerivedCustody(
+  tx: Pick<typeof db, "custody">,
+  assetIds: Asset["id"][],
+  organizationId: Asset["organizationId"]
+) {
+  const kitDerived = await tx.custody.findFirst({
+    where: {
+      assetId: { in: assetIds },
+      asset: { organizationId },
+      kitCustodyId: { not: null },
+    },
+    select: { assetId: true },
+  });
+
+  if (kitDerived) {
+    throw new ShelfError({
+      cause: null,
+      title: "Custody is managed by the kit",
+      message:
+        "This asset is in custody because its kit is. Release the kit's custody instead.",
+      additionalData: { assetId: kitDerived.assetId, organizationId },
+      label: "Custody",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Releases all custody for an asset, setting its status to AVAILABLE unless it
  * is checked out on a booking.
  *
- * **INDIVIDUAL assets only.** The `deleteMany` below releases ALL custodians at
- * once, which is exactly one row for an INDIVIDUAL asset and every custodian's
- * row for a `QUANTITY_TRACKED` one. QT releases belong to `releaseQuantity()`
+ * **INDIVIDUAL assets only, and never kit-derived custody.** The `deleteMany`
+ * below releases ALL custodians at once, which is exactly one row for an
+ * INDIVIDUAL asset and every custodian's row for a `QUANTITY_TRACKED` one.
+ * Custody a kit put on the asset is owned by the kit and is refused here by
+ * {@link assertNoKitDerivedCustody} — releasing the kit is the one door out. QT releases belong to `releaseQuantity()`
  * in the asset service, which takes a quantity and releases one custodian's
  * slice. Both callers enforce the contract with `isQuantityTracked` before
  * calling in, so the delete is deliberately NOT scoped to a single custodian —
@@ -99,6 +146,8 @@ export async function releaseCustody({
        *
        * @see {@link file://./../asset/custody-status.server.ts}
        */
+      await assertNoKitDerivedCustody(tx, [assetId], organizationId);
+
       // `asset: { organizationId }` — `assetId` is request input, so the delete
       // must prove org ownership itself. Splitting the old org-scoped
       // `asset.update` (which carried the nested delete) left this statement
