@@ -148,8 +148,12 @@ export async function requireMobileAuth(request: Request) {
 export async function getUserOrganizations(userId: string) {
   const userOrgs = await db.userOrganization.findMany({
     where: { userId },
-    // Oldest-first base order keeps rank ties deterministic across calls.
-    orderBy: { organization: { createdAt: "asc" } },
+    // Oldest-first base order keeps rank ties deterministic across calls; the
+    // id tie-break pins organizations created in the same instant.
+    orderBy: [
+      { organization: { createdAt: "asc" } },
+      { organization: { id: "asc" } },
+    ],
     select: {
       roles: true,
       user: { select: { sso: true, lastSelectedOrganizationId: true } },

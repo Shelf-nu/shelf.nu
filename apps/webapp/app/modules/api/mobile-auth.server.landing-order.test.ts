@@ -22,6 +22,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import { getUserOrganizations } from "~/modules/api/mobile-auth.server";
 
+// why: the subject under test is the ordering/filtering applied on top of the
+// query result, so the query itself is the one boundary mocked. Rows are fed
+// in the query's own (createdAt, id ascending) order.
 vi.mock("~/database/db.server", () => ({
   db: {
     userOrganization: {
