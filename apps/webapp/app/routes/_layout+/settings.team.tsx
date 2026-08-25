@@ -130,9 +130,15 @@ export default function TeamSettings() {
           <h1 className="text-[18px] font-semibold">
             {isPersonalOrg ? "Team" : `${orgName}’s team`}
           </h1>
+          {/*
+            A Personal workspace has no team to manage, so the standard line
+            promises something the banner below it immediately withdraws. It
+            still has custody, which is what the page is good for there.
+          */}
           <p className="mb-6 text-sm text-gray-600">
-            Manage your existing team and give team members custody to certain
-            assets.
+            {isPersonalOrg
+              ? "Track who has custody of your assets."
+              : "Manage your existing team and give team members custody to certain assets."}
           </p>
           {isPersonalOrg ? (
             <TeamUpgradeBanner

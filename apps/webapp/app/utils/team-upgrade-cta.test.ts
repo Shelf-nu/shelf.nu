@@ -5,8 +5,8 @@ import { resolveTeamUpgradeCta } from "./team-upgrade-cta";
 describe("resolveTeamUpgradeCta", () => {
   it("sends Team-entitled users straight to workspace creation", () => {
     /**
-     * They already pay for Team, so the only thing missing is the workspace
-     * itself. They must never be sent to billing.
+     * Their plan already permits a Team workspace, so the only thing missing
+     * is the workspace itself. They must never be sent to billing.
      */
     for (const usedFreeTrial of [true, false]) {
       expect(
@@ -63,15 +63,16 @@ describe("resolveTeamUpgradeCta", () => {
 });
 
 /**
- * The cases that made this take entitlement rather than a tier id. Each was a
- * user the previous `tierId`-based resolution sent somewhere useless.
+ * Entitlement does not follow from a tier id, and these pin the situations
+ * where it comes from somewhere else: a deployment with premium features off,
+ * an admin-set `CustomTierLimit`, and a plan whose allowance is already spent
+ * on a workspace that exists.
  *
  * The caller computes `canCreateTeamWorkspace` as
  * `!premiumIsEnabled || tierLimit.maxOrganizations > 1`
- * (see `routes/_layout+/settings.team.tsx`); these pin what each of those
- * situations has to resolve to.
+ * (see `routes/_layout+/settings.team.tsx`).
  */
-describe("resolveTeamUpgradeCta — entitlement sources beyond the tier id", () => {
+describe("resolveTeamUpgradeCta — entitlement beyond the tier id", () => {
   it("routes a self-hosted user to workspace creation, not billing", () => {
     /**
      * With premium features disabled nothing is gated, and

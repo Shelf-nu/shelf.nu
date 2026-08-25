@@ -27,10 +27,13 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
-// why: both reads hit Prisma; the loader only needs their shape.
+// why: hits Prisma; the loader only needs the trial flag off the user.
 vi.mock("~/modules/user/service.server", () => ({
   getUserByID: vi.fn(),
 }));
+
+// why: hits Prisma, and resolves the custom-tier override itself — mocking it
+// lets each test state an allowance without seeding tier rows.
 vi.mock("~/modules/tier/service.server", () => ({
   getUserTierLimit: vi.fn(),
 }));
