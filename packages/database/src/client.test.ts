@@ -11,12 +11,14 @@
  * @see ./client.ts
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+
+import { Prisma } from "@prisma/client";
 
 import {
+  createDatabaseClient,
   getRetryableErrorCode,
+  isReadOperation,
   isLockTableExhaustionError,
   isRetryablePrismaError,
   PRISMA_RETRYABLE_ERROR_CODES,
@@ -548,42 +550,275 @@ test("withPrismaRetry", async (t) => {
   });
 });
 
-test("createDatabaseClient wires the transient-retry extension onto the client", () => {
-  // The retry LOGIC is covered exhaustively above; this guards the WIRING — the
-  // exact regression that already happened once, when the monorepo migration
-  // silently dropped the retry `$extends` from this factory.
-  //
-  // A behavioral guard would have to intercept the applied extension chain, but
-  // Prisma's client is a Proxy (its `$extends` isn't reachable on the prototype)
-  // and injecting a fake base client perturbs Prisma's inferred client type
-  // enough to break downstream typechecks. So this asserts the wiring at the
-  // source level — the same cheap regression guard the repo uses elsewhere for
-  // seams that can't be mocked (see the raw-SQL `@map` column-name rule).
-  const source = readFileSync(
-    fileURLToPath(new URL("./client.ts", import.meta.url)),
-    "utf8"
-  );
+/**
+ * A syntactically valid connection string that is never dialled: every test
+ * below short-circuits the engine (see {@link clientWithProbe}), so no socket
+ * is ever opened. A test that DOES reach the engine fails with a connection
+ * error, which is the loud signal that the short-circuit stopped working.
+ */
+const UNREACHABLE_URL = "postgresql://user:pass@127.0.0.1:1/never-dialled";
 
-  const factoryStart = source.indexOf("export function createDatabaseClient");
-  assert.notEqual(factoryStart, -1, "createDatabaseClient factory not found");
+/**
+ * Builds a real client from {@link createDatabaseClient} with a probe chained
+ * onto it, standing in for the database.
+ *
+ * Query-extension callbacks run in registration order, so the factory's retry
+ * extension runs first and its `query(args)` resolves into the probe rather
+ * than the engine. That makes the factory's own wiring observable — the probe
+ * counts how many times each operation actually reached "the database", which
+ * is exactly what a retry changes.
+ *
+ * @param respond - Called per attempt with the 1-based attempt number for that
+ *   operation. Return a value to resolve the query; throw to fail it.
+ * @returns The client, plus the operations recorded in the order they arrived.
+ */
+function clientWithProbe(respond: (attempt: number) => unknown) {
+  const attempts: string[] = [];
+  const seenArgs: unknown[] = [];
+  const client = createDatabaseClient(UNREACHABLE_URL).$extends({
+    query: {
+      async $allOperations({ operation, args }) {
+        attempts.push(operation);
+        seenArgs.push(args);
+        return respond(attempts.length) as never;
+      },
+    },
+  });
+  return { client, attempts, seenArgs };
+}
 
-  // Bound the slice to the factory body — stop at the next top-level `export`
-  // (or EOF) so a `$extends` / `withPrismaRetry` reference elsewhere in the file
-  // can't satisfy these assertions after the factory wiring is removed. Collapse
-  // whitespace so the assertions survive prettier reformatting.
-  const afterFactory = source.indexOf("\nexport ", factoryStart + 1);
-  const factory = source
-    .slice(factoryStart, afterFactory === -1 ? undefined : afterFactory)
-    .replace(/\s+/g, " ");
+/**
+ * Exercises the client the factory actually builds, rather than asserting on
+ * the shape of its source. Retrying is observable as a repeated attempt, so
+ * the probe's attempt count is a direct read of whether an operation is
+ * covered — which no source-level pattern match can tell you.
+ *
+ * A case that provokes an extension retry sleeps for real, since the backoff
+ * belongs to the extension and no test can reach past it — 500ms before the
+ * first retry. Cases that drive the backoff themselves pass a no-op `delay`.
+ */
+test("createDatabaseClient retries raw SQL, not just model operations", async (t) => {
+  await t.test("retries $queryRaw on a connection-level error", async () => {
+    // Raw SQL carries the SSO user-id migration, sequential-ID generation and
+    // the dashboard aggregates. A connection blip on any of them surfaced to
+    // the user as a 503 while every model query beside it was quietly retried.
+    const { client, attempts } = clientWithProbe((attempt) => {
+      if (attempt === 1) throw prismaError("P1001");
+      return [{ ok: true }];
+    });
 
-  assert.match(
-    factory,
-    /\$extends\(\{ query: \{ \$allModels: \{/,
-    "the retry query `$extends` appears to have been removed from createDatabaseClient"
+    const rows = await client.$queryRaw`SELECT 1`;
+
+    assert.deepEqual(rows, [{ ok: true }]);
+    assert.deepEqual(attempts, ["$queryRaw", "$queryRaw"]);
+  });
+
+  await t.test("retries all four raw entry points", async () => {
+    // `$executeRaw` and the two `Unsafe` variants are separate Prisma
+    // operations with their own dispatch, so covering one proves nothing
+    // about the others.
+    for (const run of [
+      (c: ReturnType<typeof clientWithProbe>["client"]) =>
+        c.$executeRaw`SELECT 1`,
+      (c: ReturnType<typeof clientWithProbe>["client"]) =>
+        c.$queryRawUnsafe("SELECT 1"),
+      (c: ReturnType<typeof clientWithProbe>["client"]) =>
+        c.$executeRawUnsafe("SELECT 1"),
+    ]) {
+      const { client, attempts } = clientWithProbe((attempt) => {
+        if (attempt === 1) throw prismaError("P1002");
+        return 1;
+      });
+
+      await run(client);
+
+      assert.equal(attempts.length, 2, `${attempts[0]} was not retried`);
+    }
+  });
+
+  await t.test("still retries model reads on an in-flight error", async () => {
+    // The switch that brings raw SQL in must not cost model operations their
+    // existing classification.
+    const { client, attempts } = clientWithProbe((attempt) => {
+      if (attempt === 1) throw prismaError("P1017");
+      return [];
+    });
+
+    await client.user.findMany({});
+
+    assert.deepEqual(attempts, ["findMany", "findMany"]);
+  });
+
+  await t.test("does NOT retry raw SQL on an in-flight error", async () => {
+    // `P1017` can surface after the statement reached the server, so the
+    // statement may already have run. Raw SQL is opaque to this layer — a
+    // `$queryRaw` in this repo consumes a Postgres sequence, and several take
+    // `FOR UPDATE` locks — so it is classified as a write and left alone.
+    const { client, attempts } = clientWithProbe(() => {
+      throw prismaError("P1017");
+    });
+
+    await assert.rejects(
+      client.$queryRaw`SELECT get_next_sequential_id('org', 'SAM')`,
+      (error: unknown) => rejectedWithCode(error, "P1017")
+    );
+    assert.deepEqual(attempts, ["$queryRaw"]);
+  });
+
+  await t.test("does not stack its retries on a caller's own", async () => {
+    // Two raw queries in the app wrap themselves in `withPrismaRetry` to claim
+    // read semantics the extension cannot infer. If both layers retried, the
+    // attempts would multiply and a failing request would hold on ~4x longer
+    // during the outage that provoked it.
+    const { client, attempts } = clientWithProbe(() => {
+      throw prismaError("P1001");
+    });
+
+    await assert.rejects(
+      withPrismaRetry(() => client.$queryRaw`SELECT 1`, {
+        operationIsRead: true,
+        // why: the caller's own backoff is not what this asserts, and skipping
+        // it keeps the case instant. An extension retry that wrongly stacked
+        // would still be counted — it just would not be slow about it.
+        delay: async () => {},
+      }),
+      (error: unknown) => rejectedWithCode(error, "P1001")
+    );
+
+    // Three: the caller's own attempt plus its two retries, and no more.
+    assert.equal(attempts.length, 3);
+  });
+
+  await t.test("honours a caller's read claim on a raw query", async () => {
+    // The extension classifies raw SQL as a write, so it would not retry an
+    // in-flight failure. A caller that has read its own statement can, and
+    // that judgement has to survive passing through the extension — it is why
+    // the advanced asset index recovers from lock-table exhaustion.
+    const { client, attempts } = clientWithProbe((attempt) => {
+      if (attempt === 1) throw prismaError("P1017");
+      return [];
+    });
+
+    await withPrismaRetry(() => client.$queryRaw`SELECT 1`, {
+      operationIsRead: true,
+      // why: as above — the backoff itself is covered by the withPrismaRetry
+      // tests, so this case skips it and stays instant.
+      delay: async () => {},
+    });
+
+    assert.deepEqual(attempts, ["$queryRaw", "$queryRaw"]);
+  });
+
+  await t.test("hands raw parameters to the engine unchanged", async () => {
+    // Intercepting an operation makes Prisma clone its arguments before the
+    // callback sees them — a step the raw path skipped entirely while it had
+    // no callback. The cloner reconstructs `Sql` and rebuilds each parameter
+    // by type, so a type it mishandled would corrupt every raw query in the
+    // codebase without raising anything.
+    const { client, seenArgs } = clientWithProbe(() => []);
+
+    const id = "org-1";
+    const when = new Date("2026-08-25T10:00:00.000Z");
+    const bytes = Buffer.from([1, 2, 3]);
+    const amount = new Prisma.Decimal("12.34");
+
+    await client.$queryRaw`SELECT ${id}, ${when}, ${1n}, ${bytes}, ${amount}, ${null}`;
+
+    const tagged = seenArgs[0] as Prisma.Sql;
+    assert.equal(tagged.text, "SELECT $1, $2, $3, $4, $5, $6");
+    const [gotId, gotDate, gotBigInt, gotBytes, gotAmount, gotNull] =
+      tagged.values as unknown[];
+    assert.equal(gotId, id);
+    assert.ok(gotDate instanceof Date, "a Date parameter must stay a Date");
+    assert.equal((gotDate as Date).getTime(), when.getTime());
+    assert.equal(gotBigInt, 1n);
+    assert.ok(ArrayBuffer.isView(gotBytes), "bytes must stay a typed array");
+    assert.deepEqual([...(gotBytes as Uint8Array)], [1, 2, 3]);
+    assert.equal(String(gotAmount), "12.34");
+    assert.equal(gotNull, null);
+
+    // `$queryRawUnsafe`/`$executeRawUnsafe` arrive as `[sql, ...params]`
+    // instead of a `Sql`, and take a different branch of the same cloner.
+    await client.$queryRawUnsafe("SELECT $1::text, $2::int", id, 7);
+    assert.deepEqual(seenArgs[1], ["SELECT $1::text, $2::int", id, 7]);
+  });
+
+  await t.test(
+    "does NOT retry a model write on an in-flight error",
+    async () => {
+      const { client, attempts } = clientWithProbe(() => {
+        throw prismaError("P1017");
+      });
+
+      await assert.rejects(
+        client.user.update({ where: { id: "u1" }, data: {} }),
+        (error: unknown) => rejectedWithCode(error, "P1017")
+      );
+      assert.deepEqual(attempts, ["update"]);
+    }
   );
-  assert.match(
-    factory,
-    /withPrismaRetry\(\(\) => query\(args\)/,
-    "createDatabaseClient no longer routes operations through withPrismaRetry"
-  );
+});
+
+test("isReadOperation", async (t) => {
+  await t.test("classifies the model read operations as reads", () => {
+    for (const operation of [
+      "findUnique",
+      "findUniqueOrThrow",
+      "findFirst",
+      "findFirstOrThrow",
+      "findMany",
+      "count",
+      "aggregate",
+      "groupBy",
+    ]) {
+      assert.equal(
+        isReadOperation({ model: "Asset", operation }),
+        true,
+        `${operation} should classify as a read`
+      );
+    }
+  });
+
+  await t.test("classifies model mutations as writes", () => {
+    for (const operation of [
+      "create",
+      "createMany",
+      "update",
+      "updateMany",
+      "upsert",
+      "delete",
+      "deleteMany",
+    ]) {
+      assert.equal(isReadOperation({ model: "Asset", operation }), false);
+    }
+  });
+
+  await t.test("classifies every raw operation as a write", () => {
+    // A raw `SELECT` is not a promise of purity, and this layer cannot read
+    // the SQL to find out: `SELECT get_next_sequential_id(...)` consumes a
+    // Postgres sequence, and `SELECT ... FOR UPDATE` takes locks. Calling
+    // either one a read would let an in-flight failure re-run it.
+    for (const operation of [
+      "$queryRaw",
+      "$queryRawUnsafe",
+      "$executeRaw",
+      "$executeRawUnsafe",
+    ]) {
+      assert.equal(
+        isReadOperation({ model: undefined, operation }),
+        false,
+        `${operation} must not be treated as a read`
+      );
+    }
+  });
+
+  await t.test("keys off the missing model, not the operation name", () => {
+    // Prisma passes no model for a raw query, which is the only signal that
+    // separates the two. An operation name that happens to look like a read
+    // does not make an unmodelled operation retryable.
+    assert.equal(
+      isReadOperation({ model: undefined, operation: "findMany" }),
+      false
+    );
+  });
 });

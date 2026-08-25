@@ -56,8 +56,8 @@ export async function resolveMobileAssetSearchWhere({
   }
 
   // Shared with the web getAssets fetcher: resolveAssetSearchIds runs the
-  // org-scoped UNION (retry-wrapped, since a raw $queryRaw bypasses the
-  // client's auto-retry extension) and guards the id set against Postgres'
+  // org-scoped UNION (retry-wrapped, to claim the read semantics the client
+  // extension cannot infer) and guards the id set against Postgres'
   // ~65k bind-param ceiling, throwing a friendly 400 rather than hard-failing.
   const ids = await resolveAssetSearchIds({
     organizationId,

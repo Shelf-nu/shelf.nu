@@ -31,11 +31,14 @@ import { assertAssetSearchIdCeiling } from "./search.server";
  * the shared org-scoped UNION ({@link buildAssetSearchUnion}) — index-driven,
  * org-scoped branches across all 10 search sources.
  *
- * Wrapped in `withPrismaRetry({ operationIsRead: true })` because a raw
- * `$queryRaw` bypasses the client's auto-retry extension, so a transient
- * pool/connection blip on this id-resolution query would otherwise surface as a
- * hard error (the SHELF-WEBAPP-227 class) instead of being retried. Guards the
- * materialized set against the bind-param ceiling before returning.
+ * Wrapped in `withPrismaRetry({ operationIsRead: true })` to declare what the
+ * client extension cannot work out on its own: this raw statement is a pure
+ * read. The extension classifies all raw SQL as a write and so retries it only
+ * when the connection never opened, which would leave a transient pool blip
+ * mid-flight (the SHELF-WEBAPP-227 class) surfacing as a hard error. The
+ * extension steps aside while this wrapper runs, so the attempts are not
+ * doubled. Guards the materialized set against the bind-param ceiling before
+ * returning.
  *
  * @param params.organizationId - Tenant scope (bound as a literal in every branch).
  * @param params.terms - Non-empty list of trimmed, lowercased search terms.
