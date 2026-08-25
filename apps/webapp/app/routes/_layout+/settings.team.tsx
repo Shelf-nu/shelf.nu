@@ -1,15 +1,16 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
-import { UsersIcon } from "lucide-react";
 import type { LoaderFunctionArgs } from "react-router";
 import { data, Outlet, useLoaderData, useParams } from "react-router";
 import { ErrorContent } from "~/components/errors";
-import { PremiumFeatureTeaser } from "~/components/home/premium-feature-teaser";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import type { Item } from "~/components/layout/horizontal-tabs/types";
+import { TeamUpgradeBanner } from "~/components/settings/team-upgrade-banner";
 import When from "~/components/when/when";
+import { getUserTierLimit } from "~/modules/tier/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import {
@@ -17,6 +18,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { premiumIsEnabled } from "~/utils/subscription.server";
 import { resolveTeamUpgradeCta } from "~/utils/team-upgrade-cta";
 
 export type UserFriendlyRoles =
@@ -48,23 +50,44 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       label: "Start a Team trial",
     };
     if (isPersonalOrg) {
-      const user = await getUserByID(userId, {
-        select: {
-          tierId: true,
-          usedFreeTrial: true,
-        } satisfies Prisma.UserSelect,
-      });
+      const [user, tierLimit] = await Promise.all([
+        getUserByID(userId, {
+          select: {
+            usedFreeTrial: true,
+          } satisfies Prisma.UserSelect,
+        }),
+        getUserTierLimit(userId),
+      ]);
+
+      /**
+       * Entitlement, not remaining headroom. `maxOrganizations` counts the
+       * Personal workspace, so anything above 1 permits a Team workspace —
+       * the same arithmetic `/account-details/workspace` shows the user.
+       * A Team-tier user who already created their one Team workspace is
+       * still entitled and must not be told to upgrade.
+       *
+       * With premium features off (self-hosted) nothing is gated, and
+       * `/account-details/subscription` redirects away, so the only CTA that
+       * leads anywhere is workspace creation.
+       */
+      const canCreateTeamWorkspace =
+        !premiumIsEnabled || tierLimit.maxOrganizations > 1;
+
       upgradeCta = resolveTeamUpgradeCta({
-        tierId: user.tierId,
+        canCreateTeamWorkspace,
         usedFreeTrial: user.usedFreeTrial,
       });
     }
+
+    const userPrefsCookie =
+      (await userPrefs.parse(request.headers.get("Cookie"))) || {};
 
     return payload({
       isPersonalOrg,
       orgName: currentOrganization.name,
       upgradeCtaTo: upgradeCta.to,
       upgradeCtaLabel: upgradeCta.label,
+      upgradeBannerCollapsed: !!userPrefsCookie.teamUpgradeBannerCollapsed,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -80,8 +103,13 @@ export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
 };
 
 export default function TeamSettings() {
-  const { isPersonalOrg, orgName, upgradeCtaTo, upgradeCtaLabel } =
-    useLoaderData<typeof loader>();
+  const {
+    isPersonalOrg,
+    orgName,
+    upgradeCtaTo,
+    upgradeCtaLabel,
+    upgradeBannerCollapsed,
+  } = useLoaderData<typeof loader>();
 
   const TABS: Item[] = [
     ...(!isPersonalOrg
@@ -107,15 +135,11 @@ export default function TeamSettings() {
             assets.
           </p>
           {isPersonalOrg ? (
-            <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 py-8">
-              <PremiumFeatureTeaser
-                icon={<UsersIcon className="size-5" />}
-                headline="Inviting people needs a Team workspace"
-                description="Your workspace is Personal, meant for one person. Create a Team workspace to invite teammates, assign custody, and manage bookings together."
-                ctaLabel={upgradeCtaLabel}
-                ctaTo={upgradeCtaTo}
-              />
-            </div>
+            <TeamUpgradeBanner
+              ctaTo={upgradeCtaTo}
+              ctaLabel={upgradeCtaLabel}
+              collapsed={upgradeBannerCollapsed}
+            />
           ) : null}
           <HorizontalTabs items={TABS} />
           <Outlet />

@@ -183,8 +183,9 @@ export default function OrganizationSelector() {
             {currentOrganization.type === "PERSONAL" ? (
               <Button
                 to="/settings/team"
+                icon="user"
                 variant="link"
-                className="w-full select-none justify-start rounded p-2 text-left font-medium text-primary-700 outline-none hover:bg-gray-50"
+                className=" w-full select-none justify-start rounded p-2 text-left font-medium text-gray-900 outline-none  hover:bg-gray-50 hover:text-gray-800 "
                 onClick={closeDropdown}
               >
                 Invite your team

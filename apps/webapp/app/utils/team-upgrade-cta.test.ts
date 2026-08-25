@@ -5,22 +5,25 @@ import { resolveTeamUpgradeCta } from "./team-upgrade-cta";
 describe("resolveTeamUpgradeCta", () => {
   it("sends Team-entitled users straight to workspace creation", () => {
     /**
-     * tier_2 and custom already pay for Team, so the only thing missing is the
-     * workspace itself. They must never be sent to billing.
+     * They already pay for Team, so the only thing missing is the workspace
+     * itself. They must never be sent to billing.
      */
-    for (const tierId of ["tier_2", "custom"] as const) {
-      for (const usedFreeTrial of [true, false]) {
-        expect(resolveTeamUpgradeCta({ tierId, usedFreeTrial })).toEqual({
-          to: "/account-details/workspace",
-          label: "Create a Team workspace",
-        });
-      }
+    for (const usedFreeTrial of [true, false]) {
+      expect(
+        resolveTeamUpgradeCta({ canCreateTeamWorkspace: true, usedFreeTrial })
+      ).toEqual({
+        to: "/account-details/workspace",
+        label: "Create a Team workspace",
+      });
     }
   });
 
-  it("offers the trial to free users who still have one", () => {
+  it("offers the trial to unentitled users who still have one", () => {
     expect(
-      resolveTeamUpgradeCta({ tierId: "free", usedFreeTrial: false })
+      resolveTeamUpgradeCta({
+        canCreateTeamWorkspace: false,
+        usedFreeTrial: false,
+      })
     ).toEqual({
       to: "/account-details/subscription",
       label: "Start a Team trial",
@@ -33,28 +36,86 @@ describe("resolveTeamUpgradeCta", () => {
      * so a trial CTA here would send the user to a dead end.
      */
     expect(
-      resolveTeamUpgradeCta({ tierId: "free", usedFreeTrial: true })
+      resolveTeamUpgradeCta({
+        canCreateTeamWorkspace: false,
+        usedFreeTrial: true,
+      })
     ).toEqual({
       to: "/account-details/subscription",
       label: "Upgrade to Team",
     });
   });
 
-  it("treats a paying Plus customer as an upgrade, not a trial", () => {
+  it("keys the destination on entitlement alone, never on the trial flag", () => {
+    /**
+     * `usedFreeTrial` may only change the wording. If it ever reaches the
+     * destination, a paying customer gets routed to billing for something
+     * they already have.
+     */
+    const destinations = [true, false].map(
+      (usedFreeTrial) =>
+        resolveTeamUpgradeCta({ canCreateTeamWorkspace: true, usedFreeTrial })
+          .to
+    );
+
+    expect(new Set(destinations).size).toBe(1);
+  });
+});
+
+/**
+ * The cases that made this take entitlement rather than a tier id. Each was a
+ * user the previous `tierId`-based resolution sent somewhere useless.
+ *
+ * The caller computes `canCreateTeamWorkspace` as
+ * `!premiumIsEnabled || tierLimit.maxOrganizations > 1`
+ * (see `routes/_layout+/settings.team.tsx`); these pin what each of those
+ * situations has to resolve to.
+ */
+describe("resolveTeamUpgradeCta — entitlement sources beyond the tier id", () => {
+  it("routes a self-hosted user to workspace creation, not billing", () => {
+    /**
+     * With premium features disabled nothing is gated, and
+     * `/account-details/subscription` redirects to account settings — so a
+     * trial CTA lands the user on a page about their name and email.
+     */
     expect(
-      resolveTeamUpgradeCta({ tierId: "tier_1", usedFreeTrial: true })
+      resolveTeamUpgradeCta({
+        canCreateTeamWorkspace: true, // !premiumIsEnabled
+        usedFreeTrial: false,
+      })
     ).toEqual({
-      to: "/account-details/subscription",
-      label: "Upgrade to Team",
+      to: "/account-details/workspace",
+      label: "Create a Team workspace",
     });
   });
 
-  it("still offers Plus a trial if they somehow never used one", () => {
+  it("routes a user granted extra workspaces by an admin to workspace creation", () => {
+    /**
+     * `CustomTierLimit.maxOrganizations` is set per user from the admin
+     * dashboard, so entitlement does not have to follow the tier id.
+     */
     expect(
-      resolveTeamUpgradeCta({ tierId: "tier_1", usedFreeTrial: false })
+      resolveTeamUpgradeCta({
+        canCreateTeamWorkspace: true, // custom limit > 1
+        usedFreeTrial: true,
+      })
     ).toEqual({
-      to: "/account-details/subscription",
-      label: "Start a Team trial",
+      to: "/account-details/workspace",
+      label: "Create a Team workspace",
     });
+  });
+
+  it("keeps offering creation to a Team user who already made their workspace", () => {
+    /**
+     * Entitlement, not headroom: `tier_2` allows 2 organizations, so a user
+     * with Personal + Team has none left to create but is plainly still
+     * entitled. Telling them to upgrade would be the worst answer available.
+     */
+    expect(
+      resolveTeamUpgradeCta({
+        canCreateTeamWorkspace: true,
+        usedFreeTrial: true,
+      }).label
+    ).toBe("Create a Team workspace");
   });
 });
