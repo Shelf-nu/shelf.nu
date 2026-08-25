@@ -602,7 +602,11 @@ test("decideServerConnection returns the server when every gate passes", () => {
 test("parseServerConfigResponse disables a method only on an explicit false", () => {
   // A server predating these fields supports both; hiding a control on a
   // missing field would lock those users out of an app that works.
-  const { ssoEnabled: _s, passwordLoginEnabled: _p, ...withoutFlags } = validBody;
+  const {
+    ssoEnabled: _s,
+    passwordLoginEnabled: _p,
+    ...withoutFlags
+  } = validBody;
   const older = parseServerConfigResponse(
     withoutFlags,
     "https://acme.i.shelf.nu",

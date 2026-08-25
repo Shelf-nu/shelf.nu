@@ -136,7 +136,11 @@ async function fetchServerConfig(
       async (response) => {
         if (!response.ok) return null;
         const json: unknown = await response.json();
-        return parseServerConfigResponse(json, normalizeBaseUrl(baseUrl), false);
+        return parseServerConfigResponse(
+          json,
+          normalizeBaseUrl(baseUrl),
+          false
+        );
       }
     );
   } catch {

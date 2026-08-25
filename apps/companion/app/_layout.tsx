@@ -14,10 +14,7 @@ import { useQuickActions } from "@/lib/quick-actions";
 import { getStartPage, getStartPageRoute } from "@/lib/start-page";
 import { preloadScanSound } from "@/lib/scan-sound";
 import { initSentry, trackServerTag } from "@/lib/sentry";
-import {
-  hydrateActiveServer,
-  refreshActiveServerConfig,
-} from "@/lib/server";
+import { hydrateActiveServer, refreshActiveServerConfig } from "@/lib/server";
 import * as Sentry from "@sentry/react-native";
 import Constants from "expo-constants";
 

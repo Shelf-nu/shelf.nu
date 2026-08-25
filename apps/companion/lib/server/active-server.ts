@@ -137,7 +137,9 @@ export async function hydrateActiveServer(): Promise<void> {
     // time; a record failing them falls back to Shelf Cloud.
     const urls = [parsed.baseUrl, parsed.supabaseUrl];
     if (
-      urls.some((url) => !url.startsWith("https://") || !hasUsableHttpsHost(url))
+      urls.some(
+        (url) => !url.startsWith("https://") || !hasUsableHttpsHost(url)
+      )
     ) {
       if (__DEV__)
         console.error("[Server] persisted config rejected; using Shelf Cloud");
