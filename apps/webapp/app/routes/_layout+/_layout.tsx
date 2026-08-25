@@ -236,7 +236,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       {
         headers: [
           setCookie(await userPrefs.serialize(userPrefsCookie)),
-          expireHostOnlyUserPrefsCookie(),
+          ...expireHostOnlyUserPrefsCookie(),
           ...(cookieRefreshNeeded
             ? [setCookie(await setSelectedOrganizationIdCookie(organizationId))]
             : []),
