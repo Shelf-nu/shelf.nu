@@ -68,6 +68,10 @@ import {
 } from "~/utils/org-validation.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { MergeInclude } from "~/utils/utils";
+import {
+  computeKitClaimablePool,
+  KIT_POOL_OCCUPYING_BOOKINGS,
+} from "./picker-meta.server";
 import type { UpdateKitPayload } from "./types";
 import {
   GET_KIT_STATIC_INCLUDES,
@@ -4895,17 +4899,12 @@ export async function updateKitAssets({
           //   - quantity (this kit's slice for qty-change diff)
           assetKits: { select: { kitId: true, quantity: true } },
           custody: true,
-          // Ongoing/overdue booking allocations subtract from the strict-
-          // available pool checked below — pull them here so the
-          // validation pass doesn't need a second round-trip.
+          // Booked units that occupy the strict-available pool checked below
+          // — pulled here so the validation pass needs no second round-trip.
+          // The filter is shared with the picker so the guard cannot refuse
+          // what the picker offered, or accept what it did not.
           bookingAssets: {
-            where: {
-              booking: {
-                status: {
-                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                },
-              },
-            },
+            where: KIT_POOL_OCCUPYING_BOOKINGS,
             select: { quantity: true },
           },
           assetLocations: {
@@ -5005,20 +5004,13 @@ export async function updateKitAssets({
      * surface as a generic 500. Re-check the strict-available pool here
      * for any qty-tracked submission and return a clean 400.
      *
-     * Strict-available formula (matches the picker loader):
-     *   spaceWithoutMe = Asset.quantity
-     *                  − sum(other kits' AssetKit.quantity)
-     *                  − sum(operator-only Custody.quantity)
-     *                  − sum(ongoing/overdue BookingAsset.quantity)
-     *   max            = max(currentInThisKit, spaceWithoutMe)
+     * The formula itself lives in `computeKitClaimablePool`, shared with the
+     * picker: a guard that computed the pool differently would refuse what
+     * the picker offered, or accept what it did not.
      *
      * `operator-only` filters by `kitCustodyId IS NULL` — kit-allocated
      * Custody rows mirror the source kit's AssetKit slice and would
      * otherwise double-count against the multi-kit + in-custody case.
-     *
-     * `max(current, spaceWithoutMe)` lets the user keep their existing
-     * slice in the overcommitted edge case (operator / booking growth
-     * pushed the pool below the kit's current allocation).
      */
     const oversubscribed: Array<{
       assetId: string;
@@ -5040,16 +5032,18 @@ export async function updateKitAssets({
       const operatorOnlyCustody = (asset.custody ?? [])
         .filter((c) => c.kitCustodyId == null)
         .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
-      const ongoingBookings = (asset.bookingAssets ?? []).reduce(
+      const occupyingBooked = (asset.bookingAssets ?? []).reduce(
         (sum, ba) => sum + (ba.quantity ?? 0),
         0
       );
 
-      const spaceWithoutMe = Math.max(
-        0,
-        totalQty - otherKitsQty - operatorOnlyCustody - ongoingBookings
-      );
-      const max = Math.max(currentInThisKit, spaceWithoutMe);
+      const { maxAllowedForThisKit: max } = computeKitClaimablePool({
+        totalQuantity: totalQty,
+        currentInThisKit,
+        otherKitsQuantity: otherKitsQty,
+        operatorCustodyQuantity: operatorOnlyCustody,
+        occupyingBookedQuantity: occupyingBooked,
+      });
 
       if (submitted > max) {
         oversubscribed.push({

@@ -16,6 +16,8 @@
  * @see {@link file://./service.server.ts} — `updateKitAssets` re-validates with the same formula
  */
 
+import type { Prisma } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { AssetType } from "@prisma/client";
 
 import { db } from "~/database/db.server";
@@ -48,6 +50,78 @@ export type PickerAssetMeta = {
   /** Unit of measure label (passed through for the qty input suffix). */
   unitOfMeasure: string | null;
 };
+
+/**
+ * Booking rows that occupy units a kit would otherwise be free to claim.
+ *
+ * Two things this filter has to get right, and they pull in opposite
+ * directions:
+ *
+ * - **RESERVED counts.** A reservation has promised units for a future
+ *   window, and a kit slice holds units indefinitely, so letting a kit claim
+ *   them leaves the reservation unable to check out. Only ONGOING/OVERDUE is
+ *   what units are out *right now*, which is a different question.
+ * - **Kit-driven rows do not count.** A `BookingAsset` with `assetKitId` set
+ *   is a kit's own slice being booked; that kit is already subtracted through
+ *   its `AssetKit` row, so counting it here removes the same units twice.
+ *   Mirrors the same restriction in `getAssetAvailability`.
+ */
+export const KIT_POOL_OCCUPYING_BOOKINGS = {
+  assetKitId: null,
+  booking: {
+    status: {
+      in: [
+        BookingStatus.RESERVED,
+        BookingStatus.ONGOING,
+        BookingStatus.OVERDUE,
+      ],
+    },
+  },
+} satisfies Prisma.BookingAssetWhereInput;
+
+/**
+ * How many units of one asset a given kit may hold.
+ *
+ * Shared so the picker and the write guard cannot answer differently — the
+ * guard exists to refuse what the picker would not have offered, which only
+ * holds while both compute the same number.
+ *
+ * @param args.totalQuantity - `Asset.quantity`, the whole pool
+ * @param args.currentInThisKit - what this kit already holds
+ * @param args.otherKitsQuantity - Σ of every other kit's `AssetKit.quantity`
+ * @param args.operatorCustodyQuantity - Σ of operator-only `Custody.quantity`
+ * @param args.occupyingBookedQuantity - Σ of standalone booked units, per
+ *   {@link KIT_POOL_OCCUPYING_BOOKINGS}
+ * @returns `spaceWithoutMe` (the pool ignoring this kit) and the ceiling the
+ *   picker offers, which keeps an over-committed slice reducible rather than
+ *   locking the user out of fixing it
+ */
+export function computeKitClaimablePool({
+  totalQuantity,
+  currentInThisKit,
+  otherKitsQuantity,
+  operatorCustodyQuantity,
+  occupyingBookedQuantity,
+}: {
+  totalQuantity: number;
+  currentInThisKit: number;
+  otherKitsQuantity: number;
+  operatorCustodyQuantity: number;
+  occupyingBookedQuantity: number;
+}): { spaceWithoutMe: number; maxAllowedForThisKit: number } {
+  const spaceWithoutMe = Math.max(
+    0,
+    totalQuantity -
+      otherKitsQuantity -
+      operatorCustodyQuantity -
+      occupyingBookedQuantity
+  );
+
+  return {
+    spaceWithoutMe,
+    maxAllowedForThisKit: Math.max(currentInThisKit, spaceWithoutMe),
+  };
+}
 
 /**
  * Fetches and computes `PickerAssetMeta` for every QUANTITY_TRACKED
@@ -121,9 +195,7 @@ export async function getKitPickerMeta({
       // that are the materialised custody of a kit. See subtlety (1).
       custody: { select: { quantity: true, kitCustodyId: true } },
       bookingAssets: {
-        where: {
-          booking: { status: { in: ["ONGOING", "OVERDUE"] } },
-        },
+        where: KIT_POOL_OCCUPYING_BOOKINGS,
         select: { quantity: true },
       },
     },
@@ -146,11 +218,13 @@ export async function getKitPickerMeta({
         (sum, ba) => sum + (ba.quantity ?? 0),
         0
       );
-      const spaceWithoutMe = Math.max(
-        0,
-        totalQty - otherKitsQty - operatorCustodyTotal - ongoingBookingTotal
-      );
-      const maxAllowedForThisKit = Math.max(currentInThisKit, spaceWithoutMe);
+      const { maxAllowedForThisKit } = computeKitClaimablePool({
+        totalQuantity: totalQty,
+        currentInThisKit,
+        otherKitsQuantity: otherKitsQty,
+        operatorCustodyQuantity: operatorCustodyTotal,
+        occupyingBookedQuantity: ongoingBookingTotal,
+      });
 
       const meta: PickerAssetMeta = {
         assetQuantity: totalQty,
