@@ -49,7 +49,7 @@ export default function LoginScreen() {
 
   // Which Shelf server we're connected to. The connect sheet can switch this
   // while the screen is mounted, so it must re-render rather than be read once.
-  const [server, setServer] = useState(getActiveServer());
+  const [server, setServer] = useState(() => getActiveServer());
   useEffect(
     () => subscribeToServerChange(() => setServer(getActiveServer())),
     []

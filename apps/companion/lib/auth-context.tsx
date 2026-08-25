@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Changes whenever the app switches servers. The session effect below keys
   // off it so it re-reads and re-subscribes against the REBUILT Supabase
   // client — a `[]` dep array would leave it bound to the discarded one.
-  const [serverVersion, setServerVersion] = useState(getServerVersion());
+  const [serverVersion, setServerVersion] = useState(() => getServerVersion());
 
   useEffect(
     () => subscribeToServerChange(() => setServerVersion(getServerVersion())),

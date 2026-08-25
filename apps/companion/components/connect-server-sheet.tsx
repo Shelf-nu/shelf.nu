@@ -19,7 +19,7 @@
  * @see {@link file://../lib/server/discovery.ts} `resolveServerForDomain`
  * @see {@link file://../app/(auth)/login.tsx} the primary entry point
  */
-import { useEffect, useReducer, useRef } from "react";
+import { useReducer, useRef } from "react";
 import {
   View,
   Text,
@@ -141,13 +141,20 @@ export default function ConnectServerSheet({
    */
   const connectPendingRef = useRef(false);
 
-  // Reset on each open so a previous failure never greets the next attempt.
-  useEffect(() => {
-    if (visible) {
-      dispatch({ type: "reset" });
-      connectPendingRef.current = false;
-    }
-  }, [visible]);
+  /**
+   * Clears the sheet on the way out, so a previous failure never greets the
+   * next attempt.
+   *
+   * Done here rather than in an effect watching `visible`: resetting on OPEN
+   * would repaint mid-animation, flashing the old error while the sheet slides
+   * in. Every path that closes the sheet goes through this or
+   * {@link handleConnect}'s success branch.
+   */
+  const closeAndReset = () => {
+    dispatch({ type: "reset" });
+    connectPendingRef.current = false;
+    onClose();
+  };
 
   const handleConnect = async () => {
     if (connectPendingRef.current) return;
@@ -157,6 +164,7 @@ export default function ConnectServerSheet({
     try {
       const outcome = await resolveServerForDomain(domain);
       if (outcome.ok) {
+        dispatch({ type: "reset" });
         onConnected(outcome.server);
         return;
       }
@@ -177,7 +185,7 @@ export default function ConnectServerSheet({
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      onRequestClose={closeAndReset}
       // why: imperative focus once the sheet has actually presented — an
       // autoFocus prop fires before the modal animation and misses the keyboard.
       onShow={() => inputRef.current?.focus()}
@@ -186,7 +194,7 @@ export default function ConnectServerSheet({
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Connect to a server</Text>
           <TouchableOpacity
-            onPress={onClose}
+            onPress={closeAndReset}
             style={styles.closeButton}
             accessibilityLabel="Close connect to a server"
             accessibilityRole="button"
