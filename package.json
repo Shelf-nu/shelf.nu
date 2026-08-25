@@ -29,6 +29,7 @@
     "webapp:clean:reporting-demo:staging": "pnpm --filter @shelf/webapp clean:reporting-demo:staging",
     "companion:dev": "pnpm --filter @shelf/companion dev",
     "companion:dev:clear": "pnpm --filter @shelf/companion dev:clear",
+    "companion:sim:env": "pnpm --filter @shelf/companion sim:env",
     "companion:dev:tunnel": "pnpm --filter @shelf/companion dev:tunnel",
     "companion:build:ios": "pnpm --filter @shelf/companion build:ios",
     "companion:build:ios:device": "pnpm --filter @shelf/companion build:ios:device",
