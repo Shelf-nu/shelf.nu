@@ -1,20 +1,25 @@
 /**
  * Companion-app server resolution (Shelf Cloud only).
  *
- * The companion app posts the domain of the email the user typed at login and
- * gets back the base URL of the Shelf instance that domain belongs to, so it
- * can point itself at the right server before authenticating. Deliberately NOT
- * behind `requireMobileAuth` — the caller has no session yet, and resolving
- * *where* to authenticate is the whole point.
+ * The companion app posts a domain the user deliberately entered — its
+ * "Connect to a private server" flow — and gets back the base URL of the Shelf
+ * instance that domain belongs to. Deliberately NOT behind `requireMobileAuth`:
+ * the caller has no session yet, and resolving *where* to authenticate is the
+ * whole point.
+ *
+ * Always answered by Shelf Cloud, even for an app already connected elsewhere,
+ * because Cloud owns the registry.
  *
  * Returns exactly one answer for exactly one domain and never enumerates the
  * registry, so the endpoint can't be used to dump the customer list. It
  * inherits the per-IP rate limit applied to `/api/mobile/*` in
  * `server/index.ts`, which caps domain probing.
  *
- * Fail-open by design: any bad input resolves to `{ baseUrl: null }` ("use
- * Shelf Cloud") rather than an error status, so a malformed request can never
- * block sign-in.
+ * Bad input resolves to `{ baseUrl: null }` rather than an error status. That
+ * is the same answer an unregistered domain gets, and the app treats it as
+ * "this domain has no private server" — it reports that to the user and does
+ * NOT switch. Returning null is therefore not a fallback to Shelf Cloud; it is
+ * a refusal the caller surfaces.
  *
  * @see {@link file://./../../../modules/api/companion-servers.server.ts}
  * @see {@link file://./config.ts} — what the app fetches once it knows the URL

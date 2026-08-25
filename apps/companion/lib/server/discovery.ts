@@ -28,7 +28,11 @@
  * @see apps/webapp/app/routes/api+/mobile+/config.ts
  */
 import { getAppVersion } from "../app-update";
-import { CLOUD_SERVER, setActiveServer } from "./active-server";
+import {
+  CLOUD_SERVER,
+  getActiveServer,
+  setActiveServer,
+} from "./active-server";
 import {
   decideServerCandidate,
   decideServerConnection,
@@ -158,6 +162,46 @@ export async function resolveServerForDomain(
 
   await setActiveServer(outcome.server);
   return outcome;
+}
+
+/**
+ * Re-reads the connected server's config at startup and adopts any change.
+ *
+ * Connecting validates once. Without this, nothing ever revalidates: a customer
+ * who rotates their Supabase project behind an unchanged base URL would strand
+ * every enrolled device on a dead anon key, and a raised `minCompanionVersion`
+ * would never reach an app that is already connected.
+ *
+ * Best-effort and deliberately non-blocking — an unreachable server leaves the
+ * persisted config in place, because being offline must not cost the user their
+ * connection. Shelf Cloud is skipped: its credentials are bundled, so there is
+ * nothing to re-read.
+ *
+ * A refusal here does NOT disconnect. `setActiveServer` is reached only for a
+ * config that passes every gate, so a too-old app keeps the server it can still
+ * partly talk to rather than being cut off at launch. Surfacing that refusal in
+ * the UI is connect-time only today; a launch-time prompt is not built yet.
+ *
+ * @returns Resolves once the refresh has been attempted.
+ */
+export async function refreshActiveServerConfig(): Promise<void> {
+  const active = getActiveServer();
+  if (active.isCloud) return;
+
+  const parsed = await fetchServerConfig(active.baseUrl);
+  if (parsed === null) return;
+
+  const outcome = decideServerConnection(parsed, getAppVersion());
+  if (!outcome.ok) {
+    if (__DEV__)
+      console.error("[Server] config refresh refused:", outcome.reason);
+    return;
+  }
+
+  // `setActiveServer` classifies this itself: a rotated project or anon key is
+  // a credentials refresh (no teardown, no sign-out of unrelated state), and an
+  // unchanged config is a no-op.
+  await setActiveServer(outcome.server);
 }
 
 /**

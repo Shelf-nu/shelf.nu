@@ -1,8 +1,9 @@
 /**
  * Companion-app server registry.
  *
- * Maps an email domain to the Shelf instance its users belong to, so the
- * companion app can silently connect to the right server at login. This module
+ * Maps a customer domain to the Shelf instance its users belong to, so the
+ * companion app can connect to the right server when a user asks it to. This
+ * module
  * is the ONLY reader of `COMPANION_SERVERS` — when the registry moves to a
  * database table (per-entry expiry, revocation, paid entitlement), only this
  * file changes.

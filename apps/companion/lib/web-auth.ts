@@ -24,10 +24,10 @@ import { getSupabase } from "./supabase";
 /** Deeplink the web SSO callback redirects to once it has a code for the app. */
 const AUTH_CALLBACK_URL = "shelf://auth-callback";
 
-/** Result of an SSO sign-in attempt. `error` is null on success or on a plain
- *  user cancellation (nothing to surface).
- *  failure a retry can never fix: this build is too old for the target server,
- *  so the caller should offer a store link instead. */
+/**
+ * Result of an SSO sign-in attempt. `error` is null on success and on a plain
+ * user cancellation, neither of which has anything to surface.
+ */
 export type SsoSignInResult = {
   error: string | null;
 };

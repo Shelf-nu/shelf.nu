@@ -38,7 +38,6 @@
     "companion:test": "pnpm --filter @shelf/companion test",
     "companion:test:e2e": "pnpm --filter @shelf/companion test:e2e",
     "companion:test:e2e:suite": "pnpm --filter @shelf/companion test:e2e:suite --",
-    "companion:test": "pnpm --filter @shelf/companion test",
     "companion:doctor": "pnpm --filter @shelf/companion run doctor",
     "docs:dev": "turbo run dev --filter=@shelf/docs",
     "docs:build": "turbo run build --filter=@shelf/docs",

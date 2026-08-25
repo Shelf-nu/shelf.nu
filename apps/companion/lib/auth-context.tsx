@@ -16,10 +16,10 @@ type AuthState = {
   user: User | null;
   isLoading: boolean;
   /**
-   * Signs in with a password, resolving the correct server first.
+   * Signs in with a password against the ACTIVE server.
    *
-   * `updateRequired` marks the one failure a retry cannot fix — this build is
-   * too old for the target server — so the caller can offer a store link.
+   * Which server that is was decided earlier and explicitly, through the
+   * connect flow; nothing here inspects the email to choose one.
    */
   signIn: (
     email: string,

@@ -43,11 +43,22 @@ export type ScannedCodeClassification =
  * reported as "not found" — a baffling error for a code that is perfectly valid
  * elsewhere.
  *
+ * Only the canonical `/qr/<id>` label names the instance that minted it, so it
+ * is the only form the origin rule may judge. A short link is minted on a
+ * separate shortener domain (`URL_SHORTENER`) that the server never advertises
+ * — `/api/mobile/config` carries no shortener field — so its origin says
+ * nothing about which instance owns it, and treating a mismatch as foreign
+ * would reject every short-link code, including this instance's own.
+ *
+ * This is an affordance, not an authorization control: resolution stays
+ * authenticated and org-scoped on the server, so admitting an ambiguous format
+ * costs a "not found" at worst.
+ *
  * @param data - The raw scanned value.
  * @param activeBaseUrl - The active server's base URL.
- * @returns `{ kind: "id" }` when usable here, `{ kind: "foreign" }` for a Shelf
- *   URL belonging to another server, `{ kind: "unknown" }` for anything that
- *   isn't a Shelf code at all.
+ * @returns `{ kind: "id" }` when usable here, `{ kind: "foreign" }` for a
+ *   canonical Shelf QR URL belonging to another server, `{ kind: "unknown" }`
+ *   for anything that isn't a Shelf code at all.
  */
 export function classifyScannedCode(
   data: string,
@@ -58,6 +69,12 @@ export function classifyScannedCode(
 
   // A bare id carries no host, so it can only be meant for this server.
   if (!/^https?:\/\//i.test(data)) return { kind: "id", qrId };
+
+  // Anything other than the canonical label — i.e. a short link — carries an
+  // origin that cannot be attributed to any instance. Admit it.
+  if (!/^https?:\/\/[^/]+\/qr\/[a-zA-Z0-9]+$/.test(data)) {
+    return { kind: "id", qrId };
+  }
 
   return isSameOrigin(data, activeBaseUrl)
     ? { kind: "id", qrId }

@@ -25,6 +25,7 @@ export {
 } from "./active-server";
 export {
   disconnectFromServer,
+  refreshActiveServerConfig,
   resolveServerForDomain,
   type ConnectFailureReason,
   type ConnectOutcome,

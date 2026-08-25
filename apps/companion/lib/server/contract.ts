@@ -84,6 +84,11 @@ export const ACTIVE_SERVER_STORAGE_KEY = "shelf_active_server";
  */
 export const SERVER_SCOPED_STORAGE_KEYS: readonly string[] = [
   "shelf_selected_org_id",
+  // Written by an earlier build's domain → server cache, which no longer
+  // exists. Swept anyway: the record it holds — which private server a domain
+  // belongs to — would otherwise outlive every disconnect on installs that ran
+  // that build.
+  "shelf_domain_resolutions",
 ];
 
 /**
@@ -366,7 +371,7 @@ export function decideServerConnection(
  * @param value - The candidate URL.
  * @returns `true` only when it parses as https with a non-empty host.
  */
-function hasUsableHttpsHost(value: string): boolean {
+export function hasUsableHttpsHost(value: string): boolean {
   try {
     const parsed = new URL(value);
     // Assert the hostname explicitly rather than relying on the constructor to

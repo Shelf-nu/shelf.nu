@@ -1,4 +1,7 @@
-import { subscribeToServerChange } from "../server/active-server";
+import {
+  getServerVersion,
+  subscribeToServerChange,
+} from "../server/active-server";
 import { apiFetch } from "./client";
 
 // ── Response cache for low-churn data ───────────────────
@@ -35,8 +38,12 @@ export async function cachedApiFetch<T>(
   if (cached && now - cached.cachedAt < ttl) {
     return { data: cached.data as T, error: null };
   }
+  const versionAtStart = getServerVersion();
   const result = await apiFetch<T>(path);
-  if (result.data && !result.error) {
+  // A switch during the request already flushed the cache, so writing this
+  // response now would hand the previous server's data to the new one — the
+  // exact leak the subscription above exists to prevent.
+  if (result.data && !result.error && getServerVersion() === versionAtStart) {
     responseCache.set(path, { data: result.data, cachedAt: Date.now() });
   }
   return result;

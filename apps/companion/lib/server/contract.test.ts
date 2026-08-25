@@ -293,10 +293,16 @@ test("isSameOrigin treats a scheme change as a different origin", () => {
 
 // ── teardown key coverage ────────────────────────────────
 
-test("SERVER_SCOPED_STORAGE_KEYS lists the selected organisation", () => {
+test("SERVER_SCOPED_STORAGE_KEYS lists every key a switch must wipe", () => {
   // Guards against a new server-scoped key being added without teardown
   // coverage. Update this list AND the assertion together, never one alone.
-  assert.deepEqual([...SERVER_SCOPED_STORAGE_KEYS], ["shelf_selected_org_id"]);
+  // `shelf_domain_resolutions` is written by no current code — it is swept so
+  // installs that ran an earlier build do not keep a domain → private-server
+  // map across a disconnect.
+  assert.deepEqual(
+    [...SERVER_SCOPED_STORAGE_KEYS],
+    ["shelf_selected_org_id", "shelf_domain_resolutions"]
+  );
 });
 
 test("SERVER_SCOPED_KEY_PREFIXES covers audit scan drafts", () => {
@@ -554,7 +560,8 @@ test("decideServerConnection tells a too-old SERVER apart from a too-old APP", (
   );
   assert.equal(!serverTooOld.ok && serverTooOld.reason, "incompatible");
   assert.equal(
-    !serverTooOld.ok && serverTooOld.message.includes("server needs to be updated"),
+    !serverTooOld.ok &&
+      serverTooOld.message.includes("server needs to be updated"),
     true
   );
 

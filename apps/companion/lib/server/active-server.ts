@@ -21,6 +21,7 @@ import { getSupabase, rebuildSupabase } from "../supabase";
 import {
   ACTIVE_SERVER_STORAGE_KEY,
   classifyServerChange,
+  hasUsableHttpsHost,
   normalizeBaseUrl,
   SERVER_SCOPED_KEY_PREFIXES,
   SERVER_SCOPED_STORAGE_KEYS,
@@ -125,6 +126,22 @@ export async function hydrateActiveServer(): Promise<void> {
       return;
     }
 
+    // Re-validate rather than trust the record. AsyncStorage is not encrypted
+    // and, on Android, sits in the backup set — so a persisted config is a
+    // server the app was HANDED, not one the registry vouched for. Without this
+    // it would be adopted on the strength of three `typeof` checks, and every
+    // subsequent login and bearer header would follow it. The same two checks
+    // `decideServerCandidate` and `parseServerConfigResponse` apply at connect
+    // time; a record failing them falls back to Shelf Cloud.
+    const urls = [parsed.baseUrl, parsed.supabaseUrl];
+    if (
+      urls.some((url) => !url.startsWith("https://") || !hasUsableHttpsHost(url))
+    ) {
+      if (__DEV__)
+        console.error("[Server] persisted config rejected; using Shelf Cloud");
+      return;
+    }
+
     activeServer = {
       baseUrl: normalizeBaseUrl(parsed.baseUrl),
       supabaseUrl: normalizeBaseUrl(parsed.supabaseUrl),
@@ -166,6 +183,33 @@ async function clearServerScopedState(): Promise<void> {
 }
 
 /**
+ * Ends the current session on the outgoing client.
+ *
+ * A network failure does NOT throw — supabase-js returns the error and, for a
+ * non-4xx failure, skips removing the local session. Left at that, the previous
+ * server's refresh token stays in SecureStore under its own project key and is
+ * silently restored the next time the app reconnects there: the UI would show a
+ * signed-out user while a live session waited on disk. So a failed revoke falls
+ * back to a local teardown, which cannot fail for network reasons.
+ *
+ * @returns Resolves once the session is gone locally, whatever the server said.
+ */
+async function endSessionOnOutgoingClient(): Promise<void> {
+  try {
+    const { error } = await getSupabase().auth.signOut();
+    if (!error) return;
+  } catch {
+    // Fall through to the local teardown below.
+  }
+
+  try {
+    await getSupabase().auth.signOut({ scope: "local" });
+  } catch (e) {
+    if (__DEV__) console.error("[Server] local sign-out failed:", e);
+  }
+}
+
+/**
  * Persists the active server config, best-effort.
  *
  * @param config - The config to store.
@@ -193,10 +237,10 @@ async function persistActiveServer(config: ServerConfig): Promise<void> {
  *
  * A credential refresh deliberately does NOT tear down server-scoped state: the
  * selected organisation and audit drafts still belong to this same instance, so
- * wiping them would turn a silent config update into visible data loss. It also
- * does not force a sign-out — if the session is still valid under the new
- * credentials it keeps working, and if it is not, the existing 401 handling
- * routes the user to login.
+ * wiping them would turn a silent config update into visible data loss. The
+ * session, however, cannot survive: it was minted by the previous Supabase
+ * project and no token signed by it verifies under the new one, so it is ended
+ * locally rather than left to fail as a confusing 401 later.
  *
  * On a full switch, order matters: sign out of the old client while it is still
  * live, then rebuild, then wipe persisted state, and only then notify
@@ -215,28 +259,36 @@ export async function setActiveServer(config: ServerConfig): Promise<void> {
       activeServer.supabaseUrl !== config.supabaseUrl ||
       activeServer.supabaseAnonKey !== config.supabaseAnonKey;
 
+    // Ended BEFORE the rebuild, while the client that owns the session is still
+    // the live one — afterwards there is nothing left to sign out of.
+    if (credentialsChanged) await endSessionOnOutgoingClient();
+
+    await persistActiveServer(config);
+
     activeServer = config;
     // A rename alone needs no new client — rebuilding would drop the auth
     // subscription and reset the token cache for nothing.
     if (credentialsChanged) rebuildSupabase(config);
-    await persistActiveServer(config);
     // Notify regardless: the display name is user-visible on the login chip
     // and the Settings row, and subscribers rearm caches after a rebuild.
     notifyServerChange();
     return;
   }
 
-  try {
-    await getSupabase().auth.signOut();
-  } catch {
-    // A failed sign-out must not block the switch: the client is discarded
-    // immediately afterwards and its session storage is namespaced per project.
-  }
+  await endSessionOnOutgoingClient();
 
-  activeServer = config;
-  rebuildSupabase(config);
+  // Everything awaited happens BEFORE the flip. `getApiBaseUrl()` and
+  // `getSupabaseClientUrl()` both move the instant `activeServer` is reassigned,
+  // but the API layer's cached access token is only cleared by
+  // `notifyServerChange`. An await between the two leaves a window in which a
+  // request passes the session/server guard, reads the OLD server's cached
+  // token, and sends it to the NEW server's URL — the precise leak that guard
+  // exists to prevent. Neither helper below reads `activeServer`, so ordering
+  // them first costs nothing.
   await clearServerScopedState();
   await persistActiveServer(config);
 
+  activeServer = config;
+  rebuildSupabase(config);
   notifyServerChange();
 }

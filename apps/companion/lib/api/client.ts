@@ -1,5 +1,6 @@
 import {
   getActiveServer,
+  getServerVersion,
   subscribeToServerChange,
 } from "../server/active-server";
 import { getSupabase, getSupabaseClientUrl } from "../supabase";
@@ -125,15 +126,32 @@ function guardSessionServerMatch(): { data: null; error: string } | null {
   };
 }
 
-/** Returns a valid access token, using cache when possible. */
+/**
+ * Returns a valid access token for the ACTIVE server, using cache when
+ * possible.
+ *
+ * Reading a session is slow — `getSession()` reassembles several chunked
+ * SecureStore entries — and a server switch can complete in that window. The
+ * token then belongs to the server that was active when it was requested, so
+ * it is discarded rather than returned, and above all is NOT written to the
+ * cache: `setActiveServer` clears the cache as it switches, and writing here
+ * afterwards would resurrect the previous server's token for the whole TTL.
+ *
+ * @returns The token, or `null` when there is no session or the active server
+ *   changed while it was being read.
+ */
 export async function getAccessToken(): Promise<string | null> {
   const now = Date.now();
   if (cachedAccessToken && now - cachedAt < SESSION_CACHE_TTL_MS) {
     return cachedAccessToken;
   }
+  const versionAtStart = getServerVersion();
   const {
     data: { session },
   } = await getSupabase().auth.getSession();
+
+  if (getServerVersion() !== versionAtStart) return null;
+
   if (session?.access_token) {
     cachedAccessToken = session.access_token;
     cachedAt = now;
@@ -142,6 +160,44 @@ export async function getAccessToken(): Promise<string | null> {
   cachedAccessToken = null;
   cachedAt = 0;
   return null;
+}
+
+/**
+ * Resolves the base URL and token for one authenticated request, proving both
+ * belong to the same server.
+ *
+ * `guardSessionServerMatch` is synchronous and cannot cover the `await` that
+ * follows it, and it could not detect a completed switch anyway:
+ * `setActiveServer` moves the active record and rebuilds the Supabase client
+ * together, so afterwards the guard compares the new server against itself and
+ * passes. Capturing the server up front and re-checking the version after the
+ * await is what actually closes the window — and returning the CAPTURED base
+ * URL keeps the token and the destination from ever disagreeing, which reading
+ * live state at send time cannot guarantee.
+ *
+ * @returns The URL prefix and token to use, or the error result to return.
+ */
+async function resolveRequestTarget(): Promise<
+  | { ok: true; baseUrl: string; accessToken: string }
+  | { ok: false; result: { data: null; error: string } }
+> {
+  const mismatch = guardSessionServerMatch();
+  if (mismatch) return { ok: false, result: mismatch };
+
+  const server = getActiveServer();
+  const versionAtStart = getServerVersion();
+
+  const accessToken = await getAccessToken();
+
+  if (!accessToken || getServerVersion() !== versionAtStart) {
+    notifyAuthError();
+    return {
+      ok: false,
+      result: { data: null, error: "Session expired. Please sign in again." },
+    };
+  }
+
+  return { ok: true, baseUrl: server.baseUrl, accessToken };
 }
 
 /**
@@ -219,17 +275,11 @@ export async function apiFetch<T>(
   let timedOut = false;
 
   try {
-    const mismatch = guardSessionServerMatch();
-    if (mismatch) return mismatch;
+    const target = await resolveRequestTarget();
+    if (!target.ok) return target.result;
+    const { accessToken } = target;
 
-    const accessToken = await getAccessToken();
-
-    if (!accessToken) {
-      notifyAuthError();
-      return { data: null, error: "Session expired. Please sign in again." };
-    }
-
-    const url = `${getApiBaseUrl()}${path}`;
+    const url = `${target.baseUrl}${path}`;
     if (__DEV__)
       console.log(
         "[API] Fetching:",
@@ -353,17 +403,11 @@ export async function apiUpload<T>(
   formData: FormData
 ): Promise<{ data: T | null; error: string | null }> {
   try {
-    const mismatch = guardSessionServerMatch();
-    if (mismatch) return mismatch;
+    const target = await resolveRequestTarget();
+    if (!target.ok) return target.result;
+    const { accessToken } = target;
 
-    const accessToken = await getAccessToken();
-
-    if (!accessToken) {
-      notifyAuthError();
-      return { data: null, error: "Session expired. Please sign in again." };
-    }
-
-    const url = `${getApiBaseUrl()}${path}`;
+    const url = `${target.baseUrl}${path}`;
     if (__DEV__) console.log("[API] Uploading to:", url);
 
     // Abort controller for timeout (longer than regular fetch for uploads)

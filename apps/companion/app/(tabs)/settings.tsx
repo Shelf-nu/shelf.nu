@@ -28,7 +28,11 @@ import {
   setScanSoundEnabled,
   playScanSound,
 } from "@/lib/scan-sound";
-import { disconnectFromServer, getActiveServer } from "@/lib/server";
+import {
+  disconnectFromServer,
+  getActiveServer,
+  subscribeToServerChange,
+} from "@/lib/server";
 import ConnectServerSheet from "@/components/connect-server-sheet";
 import { getApiBaseUrl } from "@/lib/api";
 
@@ -56,10 +60,16 @@ export default function SettingsScreen() {
   const [startPage, setStartPageState] = useState<StartPage>("assets");
   const [scanSoundOn, setScanSoundOn] = useState(true);
   const [isConnectVisible, setIsConnectVisible] = useState(false);
+  const [isSwitchingServer, setIsSwitchingServer] = useState(false);
 
-  // Read at render rather than subscribed: a server switch signs the user out,
-  // so this screen is never mounted across one.
-  const server = getActiveServer();
+  // Subscribed, not read once: this screen is where a signed-in user changes
+  // servers, so it is mounted across the switch it starts and must re-render
+  // rather than keep showing the previous host.
+  const [server, setServer] = useState(() => getActiveServer());
+  useEffect(
+    () => subscribeToServerChange(() => setServer(getActiveServer())),
+    []
+  );
   /** Host only — the full URL would overflow the row on narrow screens. */
   const serverLabel = (() => {
     try {
@@ -76,6 +86,7 @@ export default function SettingsScreen() {
    * clears server-scoped state — so each is confirmed before anything happens.
    */
   const handleServerPress = () => {
+    if (isSwitchingServer) return;
     const connectLabel = server.isCloud
       ? "Connect to a private server"
       : "Connect to a different server";
@@ -92,7 +103,14 @@ export default function SettingsScreen() {
                 text: "Disconnect",
                 style: "destructive" as const,
                 onPress: () => {
-                  void disconnectFromServer();
+                  // Locked for the duration: the switch signs out and rebuilds
+                  // the Supabase client, and this screen stays interactive
+                  // while it runs. Requests started in that window would be
+                  // resolving against a server that is being torn down.
+                  setIsSwitchingServer(true);
+                  void disconnectFromServer().finally(() =>
+                    setIsSwitchingServer(false)
+                  );
                 },
               },
             ]),
@@ -370,6 +388,7 @@ export default function SettingsScreen() {
             testID="server-row"
             style={styles.settingRow}
             onPress={handleServerPress}
+            disabled={isSwitchingServer}
             activeOpacity={0.7}
             accessibilityLabel={`Server: ${serverLabel}. Change which Shelf server this app connects to.`}
             accessibilityRole="button"
