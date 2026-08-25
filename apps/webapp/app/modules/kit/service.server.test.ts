@@ -2956,7 +2956,7 @@ describe("updateKitAssets - check-in floor guard (Polish-7b)", () => {
     db.assetKit.findMany.mockResolvedValue([
       { id: "ak-pens", assetId: "pens", quantity: 60 },
     ]);
-    // Two different reads share this delegate: the floor guard asks for the
+    // why: two different reads share this delegate — the floor guard asks for the
     // KIT-DRIVEN slices of this AssetKit, and the strict-available pool asks
     // for STANDALONE reservations (`assetKitId: null`) to peak over. Answering
     // both from one queue hands the pool a row with no booking dates, so the

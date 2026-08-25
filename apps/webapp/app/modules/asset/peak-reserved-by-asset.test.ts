@@ -41,12 +41,18 @@ function reservation(
   qty: number,
   from: string,
   to: string,
-  status: BookingStatus = BookingStatus.RESERVED
+  {
+    id = `${bookingId}-${assetId}`,
+    assetKitId = null,
+    status = BookingStatus.RESERVED,
+  }: { id?: string; assetKitId?: string | null; status?: BookingStatus } = {}
 ) {
   return {
+    id,
     assetId,
     bookingId,
     quantity: qty,
+    assetKitId,
     booking: { from: new Date(from), to: new Date(to), status },
   };
 }
@@ -119,7 +125,14 @@ describe("getPeakReservedUnitsByAsset", () => {
     // BookingAsset.quantity, so the raw quantity overstates what is still out.
     const tx = txWith(
       [reservation(ASSET, "b1", 60, "2026-01-01", "2026-01-10")],
-      [{ bookingId: "b1", assetId: ASSET, _sum: { quantity: 25 } }]
+      [
+        {
+          bookingAssetId: "b1-asset-1",
+          bookingId: "b1",
+          assetId: ASSET,
+          _sum: { quantity: 25 },
+        },
+      ]
     );
 
     const peaks = await getPeakReservedUnitsByAsset({
@@ -139,7 +152,14 @@ describe("getPeakReservedUnitsByAsset", () => {
         reservation(ASSET, "b1", 60, "2026-01-01", "2026-01-10"),
         reservation(OTHER, "b1", 60, "2026-01-01", "2026-01-10"),
       ],
-      [{ bookingId: "b1", assetId: ASSET, _sum: { quantity: 60 } }]
+      [
+        {
+          bookingAssetId: "b1-asset-1",
+          bookingId: "b1",
+          assetId: ASSET,
+          _sum: { quantity: 60 },
+        },
+      ]
     );
 
     const peaks = await getPeakReservedUnitsByAsset({
@@ -150,5 +170,73 @@ describe("getPeakReservedUnitsByAsset", () => {
 
     expect(peaks.get(ASSET)).toBeUndefined();
     expect(peaks.get(OTHER)).toBe(60);
+  });
+  it("does not let a kit slice's return shrink the standalone reservation", () => {
+    // One (booking, asset) pair can hold a standalone slice and kit-driven
+    // ones at once. A return logged against the kit slice belongs to that
+    // slice — attributing it to the standalone row would understate what is
+    // still reserved and let a kit claim units the booking still needs.
+    const tx = txWith(
+      [
+        reservation(ASSET, "b1", 60, "2026-01-01", "2026-01-10", {
+          id: "standalone-row",
+        }),
+        reservation(ASSET, "b1", 40, "2026-01-01", "2026-01-10", {
+          id: "kit-row",
+          assetKitId: "ak-1",
+        }),
+      ],
+      [
+        {
+          bookingAssetId: "kit-row",
+          bookingId: "b1",
+          assetId: ASSET,
+          _sum: { quantity: 40 },
+        },
+      ]
+    );
+
+    return getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx,
+    }).then((peaks) => {
+      // The standalone 60 is untouched; the kit slice never enters the peak.
+      expect(peaks.get(ASSET)).toBe(60);
+    });
+  });
+
+  it("fills kit slices first with a disposition that predates row attribution", async () => {
+    // Legacy logs carry no row id. Per `ConsumptionLog.bookingAssetId` they
+    // attribute kit-driven-first, so only what exceeds the kit capacity may
+    // reduce the standalone row.
+    const tx = txWith(
+      [
+        reservation(ASSET, "b1", 60, "2026-01-01", "2026-01-10", {
+          id: "standalone-row",
+        }),
+        reservation(ASSET, "b1", 40, "2026-01-01", "2026-01-10", {
+          id: "kit-row",
+          assetKitId: "ak-1",
+        }),
+      ],
+      [
+        {
+          bookingAssetId: null,
+          bookingId: "b1",
+          assetId: ASSET,
+          _sum: { quantity: 50 },
+        },
+      ]
+    );
+
+    const peaks = await getPeakReservedUnitsByAsset({
+      assetIds: [ASSET],
+      organizationId: "org",
+      tx,
+    });
+
+    // 40 absorbed by the kit slice, 10 left to reduce the standalone 60.
+    expect(peaks.get(ASSET)).toBe(50);
   });
 });
