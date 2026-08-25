@@ -9,19 +9,16 @@
  * been fine.
  *
  * The picker and the write guard both compute this, and the guard only means
- * anything while it computes the same number — which is why the formula and
- * the query filter are shared rather than written twice.
+ * anything while it computes the same number — which is why the formula is
+ * shared rather than written twice. The booking term itself comes from
+ * `getPeakReservedUnitsByAsset`, which both callers use.
  *
  * @see {@link file://./picker-meta.server.ts}
  */
 
-import { BookingStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import {
-  computeKitClaimablePool,
-  KIT_POOL_OCCUPYING_BOOKINGS,
-} from "./picker-meta.server";
+import { computeKitClaimablePool } from "./picker-meta.server";
 
 /** A pool with nothing claimed against it; each test moves one term. */
 const UNCLAIMED = {
@@ -31,28 +28,6 @@ const UNCLAIMED = {
   operatorCustodyQuantity: 0,
   occupyingBookedQuantity: 0,
 };
-
-describe("KIT_POOL_OCCUPYING_BOOKINGS", () => {
-  it("counts reserved bookings, not only what is out right now", () => {
-    // A reservation has promised units for a future window, and a kit slice
-    // holds units indefinitely. Counting only ONGOING/OVERDUE answers "what is
-    // physically out today", which lets a kit claim units a reservation is
-    // relying on — that booking then cannot be checked out.
-    expect(KIT_POOL_OCCUPYING_BOOKINGS.booking.status.in).toEqual([
-      BookingStatus.RESERVED,
-      BookingStatus.ONGOING,
-      BookingStatus.OVERDUE,
-    ]);
-  });
-
-  it("ignores booked units that belong to a kit", () => {
-    // A `BookingAsset` carrying an `assetKitId` is some kit's own slice being
-    // booked. That kit is already subtracted through its `AssetKit` row, so
-    // counting the booking too removes the same units twice and the picker
-    // under-reports what is free.
-    expect(KIT_POOL_OCCUPYING_BOOKINGS.assetKitId).toBeNull();
-  });
-});
 
 describe("computeKitClaimablePool", () => {
   it("offers the whole pool when nothing else holds any of it", () => {
@@ -120,5 +95,17 @@ describe("computeKitClaimablePool", () => {
     });
 
     expect(maxAllowedForThisKit).toBe(60);
+  });
+
+  it("takes the booked term as a peak, so disjoint reservations do not stack", () => {
+    // Two 60-unit reservations that never overlap hold 60 at once, never 120.
+    // The caller passes the peak for exactly this reason — summing them would
+    // report a pool of 0 and refuse a slice that is perfectly safe.
+    const { maxAllowedForThisKit } = computeKitClaimablePool({
+      ...UNCLAIMED,
+      occupyingBookedQuantity: 60,
+    });
+
+    expect(maxAllowedForThisKit).toBe(40);
   });
 });

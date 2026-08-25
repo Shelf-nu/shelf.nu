@@ -16,11 +16,10 @@
  * @see {@link file://./service.server.ts} — `updateKitAssets` re-validates with the same formula
  */
 
-import type { Prisma } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
 import { AssetType } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { getPeakReservedUnitsByAsset } from "~/modules/asset/availability-primitives.server";
 
 /**
  * Per-asset picker metadata for QUANTITY_TRACKED rows.
@@ -52,34 +51,6 @@ export type PickerAssetMeta = {
 };
 
 /**
- * Booking rows that occupy units a kit would otherwise be free to claim.
- *
- * Two things this filter has to get right, and they pull in opposite
- * directions:
- *
- * - **RESERVED counts.** A reservation has promised units for a future
- *   window, and a kit slice holds units indefinitely, so letting a kit claim
- *   them leaves the reservation unable to check out. Only ONGOING/OVERDUE is
- *   what units are out *right now*, which is a different question.
- * - **Kit-driven rows do not count.** A `BookingAsset` with `assetKitId` set
- *   is a kit's own slice being booked; that kit is already subtracted through
- *   its `AssetKit` row, so counting it here removes the same units twice.
- *   Mirrors the same restriction in `getAssetAvailability`.
- */
-export const KIT_POOL_OCCUPYING_BOOKINGS = {
-  assetKitId: null,
-  booking: {
-    status: {
-      in: [
-        BookingStatus.RESERVED,
-        BookingStatus.ONGOING,
-        BookingStatus.OVERDUE,
-      ],
-    },
-  },
-} satisfies Prisma.BookingAssetWhereInput;
-
-/**
  * How many units of one asset a given kit may hold.
  *
  * Shared so the picker and the write guard cannot answer differently — the
@@ -90,8 +61,8 @@ export const KIT_POOL_OCCUPYING_BOOKINGS = {
  * @param args.currentInThisKit - what this kit already holds
  * @param args.otherKitsQuantity - Σ of every other kit's `AssetKit.quantity`
  * @param args.operatorCustodyQuantity - Σ of operator-only `Custody.quantity`
- * @param args.occupyingBookedQuantity - Σ of standalone booked units, per
- *   {@link KIT_POOL_OCCUPYING_BOOKINGS}
+ * @param args.occupyingBookedQuantity - peak concurrent standalone booked
+ *   units, from {@link getPeakReservedUnitsByAsset}
  * @returns `spaceWithoutMe` (the pool ignoring this kit) and the ceiling the
  *   picker offers, which keeps an over-committed slice reducible rather than
  *   locking the user out of fixing it
@@ -194,11 +165,13 @@ export async function getKitPickerMeta({
       // `kitCustodyId` distinguishes operator-allocated rows from rows
       // that are the materialised custody of a kit. See subtlety (1).
       custody: { select: { quantity: true, kitCustodyId: true } },
-      bookingAssets: {
-        where: KIT_POOL_OCCUPYING_BOOKINGS,
-        select: { quantity: true },
-      },
     },
+  });
+
+  const peakReservedByAsset = await getPeakReservedUnitsByAsset({
+    assetIds: rows.map((row) => row.id),
+    organizationId,
+    tx: db,
   });
 
   return new Map(
@@ -214,10 +187,10 @@ export async function getKitPickerMeta({
       const operatorCustodyTotal = row.custody
         .filter((c) => c.kitCustodyId == null)
         .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
-      const ongoingBookingTotal = row.bookingAssets.reduce(
-        (sum, ba) => sum + (ba.quantity ?? 0),
-        0
-      );
+      // Peak, not sum: a kit slice has no dates, so it competes with the
+      // highest demand at any one instant. Two reservations that never
+      // overlap never hold units together.
+      const ongoingBookingTotal = peakReservedByAsset.get(row.id) ?? 0;
       const { maxAllowedForThisKit } = computeKitClaimablePool({
         totalQuantity: totalQty,
         currentInThisKit,

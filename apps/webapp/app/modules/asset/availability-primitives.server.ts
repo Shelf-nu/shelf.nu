@@ -215,6 +215,110 @@ export type AssertAssetQuantityNotBelowReservationsTxClient = Pick<
  * @param args - See {@link AssertAssetQuantityNotBelowReservationsArgs}.
  * @throws {ShelfError} 400 (`shouldBeCaptured: false`) when `newTotal` would drop below `committed`.
  */
+/**
+ * Peak concurrent standalone reserved units, per asset, across the whole
+ * future timeline.
+ *
+ * This is the booking term for anything holding units WITHOUT dates of its
+ * own — a kit slice, or the asset's own total. Such a holder has to survive
+ * every future instant, so what it competes against is the highest demand at
+ * any one moment, not the sum of every reservation: two bookings that never
+ * overlap never hold units at the same time, and stacking them would refuse
+ * allocations that are perfectly safe.
+ *
+ * Batched because the kit picker asks about a page of assets at once; the
+ * single-asset guard below asks the same question of one.
+ *
+ * Reservations are STANDALONE only (`assetKitId: null`) — kit-driven slices
+ * are counted through `AssetKit.quantity` by every caller of this, and would
+ * otherwise be subtracted twice. Already-logged
+ * {@link RESERVATION_REDUCING_CATEGORIES} dispositions reduce a booking's
+ * remaining footprint first, exactly as the windowed reads do.
+ *
+ * @param args.assetIds - Assets to compute for. Empty issues no queries.
+ * @param args.organizationId - Caller's organization; scopes every read
+ * @param args.tx - Prisma client or active transaction
+ * @returns Peak reserved units keyed by asset id; absent means zero
+ */
+export async function getPeakReservedUnitsByAsset({
+  assetIds,
+  organizationId,
+  tx,
+}: {
+  assetIds: string[];
+  organizationId: string;
+  tx: AssertAssetQuantityNotBelowReservationsTxClient;
+}): Promise<Map<string, number>> {
+  const peaks = new Map<string, number>();
+  if (assetIds.length === 0) return peaks;
+
+  const reservedRows = await tx.bookingAsset.findMany({
+    where: {
+      assetId: { in: assetIds },
+      assetKitId: null,
+      // `window: null` — the full active-reservation timeline, because the
+      // holder asking has no window of its own.
+      booking: buildActiveBookingWhere(organizationId, null),
+    },
+    select: {
+      assetId: true,
+      bookingId: true,
+      quantity: true,
+      booking: { select: { from: true, to: true, status: true } },
+    },
+  });
+
+  if (reservedRows.length === 0) return peaks;
+
+  const loggedGroups = await tx.consumptionLog.groupBy({
+    by: ["bookingId", "assetId"],
+    where: {
+      assetId: { in: assetIds },
+      bookingId: { in: [...new Set(reservedRows.map((r) => r.bookingId))] },
+      category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
+    },
+    _sum: { quantity: true },
+  });
+
+  // Keyed by booking AND asset: one booking can carry several assets, and a
+  // disposition logged against one of them must not reduce another's.
+  const loggedByBookingAsset = new Map<string, number>();
+  for (const group of loggedGroups) {
+    if (group.bookingId) {
+      loggedByBookingAsset.set(
+        `${group.bookingId}:${group.assetId}`,
+        group._sum.quantity ?? 0
+      );
+    }
+  }
+
+  const intervalsByAsset = new Map<string, AvailabilityInterval[]>();
+  for (const row of reservedRows) {
+    if (!row.booking) continue;
+
+    const logged =
+      loggedByBookingAsset.get(`${row.bookingId}:${row.assetId}`) ?? 0;
+    const remaining = Math.max(0, row.quantity - logged);
+    if (remaining === 0) continue;
+
+    const to = resolveIntervalTo(
+      row.booking.status,
+      row.booking.to,
+      row.booking.to
+    );
+
+    const intervals = intervalsByAsset.get(row.assetId) ?? [];
+    intervals.push({ from: row.booking.from, to, qty: remaining });
+    intervalsByAsset.set(row.assetId, intervals);
+  }
+
+  for (const [assetId, intervals] of intervalsByAsset) {
+    peaks.set(assetId, peakConcurrent(intervals));
+  }
+
+  return peaks;
+}
+
 export async function assertAssetQuantityNotBelowReservations({
   assetId,
   organizationId,

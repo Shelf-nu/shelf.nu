@@ -26,6 +26,7 @@ import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { getPeakReservedUnitsByAsset } from "~/modules/asset/availability-primitives.server";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -68,10 +69,7 @@ import {
 } from "~/utils/org-validation.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { MergeInclude } from "~/utils/utils";
-import {
-  computeKitClaimablePool,
-  KIT_POOL_OCCUPYING_BOOKINGS,
-} from "./picker-meta.server";
+import { computeKitClaimablePool } from "./picker-meta.server";
 import type { UpdateKitPayload } from "./types";
 import {
   GET_KIT_STATIC_INCLUDES,
@@ -4899,14 +4897,6 @@ export async function updateKitAssets({
           //   - quantity (this kit's slice for qty-change diff)
           assetKits: { select: { kitId: true, quantity: true } },
           custody: true,
-          // Booked units that occupy the strict-available pool checked below
-          // — pulled here so the validation pass needs no second round-trip.
-          // The filter is shared with the picker so the guard cannot refuse
-          // what the picker offered, or accept what it did not.
-          bookingAssets: {
-            where: KIT_POOL_OCCUPYING_BOOKINGS,
-            select: { quantity: true },
-          },
           assetLocations: {
             select: { location: { select: { id: true, name: true } } },
           },
@@ -5018,6 +5008,17 @@ export async function updateKitAssets({
       submitted: number;
       max: number;
     }> = [];
+
+    // Same booking term the picker uses: peak concurrent standalone demand
+    // across the whole timeline, because a kit slice has no dates of its own.
+    const peakReservedByAsset = await getPeakReservedUnitsByAsset({
+      assetIds: allAssetsForKit
+        .filter((asset) => asset.type === AssetType.QUANTITY_TRACKED)
+        .map((asset) => asset.id),
+      organizationId,
+      tx: db,
+    });
+
     for (const asset of allAssetsForKit) {
       if (asset.type !== AssetType.QUANTITY_TRACKED) continue;
       const submitted = assetQuantities[asset.id];
@@ -5032,10 +5033,7 @@ export async function updateKitAssets({
       const operatorOnlyCustody = (asset.custody ?? [])
         .filter((c) => c.kitCustodyId == null)
         .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
-      const occupyingBooked = (asset.bookingAssets ?? []).reduce(
-        (sum, ba) => sum + (ba.quantity ?? 0),
-        0
-      );
+      const occupyingBooked = peakReservedByAsset.get(asset.id) ?? 0;
 
       const { maxAllowedForThisKit: max } = computeKitClaimablePool({
         totalQuantity: totalQty,
