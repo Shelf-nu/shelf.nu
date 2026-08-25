@@ -3,6 +3,7 @@ import * as Linking from "expo-linking";
 import { api, getApiBaseUrl } from "./api";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
 import { getScanCoordinates } from "./scan-location";
+import { isSameOrigin } from "./server/contract";
 
 /**
  * Supported deep link patterns:
@@ -46,7 +47,16 @@ type ParsedLink =
   | { type: "kit"; id: string }
   | { type: "booking"; id: string }
   | { type: "audit"; id: string }
-  | { type: "qr"; id: string }
+  | {
+      type: "qr";
+      id: string;
+      /**
+       * Origin the link came from, when it carried one. A QR id is only
+       * meaningful on the instance that minted it, so a link from another
+       * origin must not be resolved against the active server.
+       */
+      origin?: string;
+    }
   | { type: "scanner" }
   | { type: "unknown" };
 
@@ -82,7 +92,9 @@ function parseDeepLink(url: string): ParsedLink {
       case "audits":
         return id ? { type: "audit", id } : { type: "unknown" };
       case "qr":
-        return id ? { type: "qr", id } : { type: "unknown" };
+        return id
+          ? { type: "qr", id, origin: new URL(url).origin }
+          : { type: "unknown" };
       case "scanner":
       case "scan":
         return { type: "scanner" };
@@ -106,9 +118,20 @@ function parseDeepLink(url: string): ParsedLink {
  * `Linking.openURL`, because `/qr/*` is now a verified Android App Link and
  * `Linking.openURL` would re-enter the app and loop back here.
  *
+ * A link from another origin is handed straight to the web without a lookup:
+ * the id belongs to the instance that minted it, so resolving it against the
+ * active server would report "not found" for a code that is perfectly valid
+ * where it came from.
+ *
  * @param qrId - the scanned or linked QR code id
+ * @param origin - origin the link carried, when it had one
  */
-async function resolveQrAndNavigate(qrId: string) {
+async function resolveQrAndNavigate(qrId: string, origin?: string) {
+  if (origin && !isSameOrigin(origin, getApiBaseUrl())) {
+    void openShelfWebUrl(`${origin}/qr/${qrId}`);
+    return;
+  }
+
   try {
     // Best-effort scan geolocation: a /qr deep link usually means the user
     // physically scanned the label with the OS camera, so the recorded scan
@@ -177,7 +200,7 @@ export function useDeepLinkHandler() {
           break;
         case "qr":
           // Resolve the QR code to an asset and navigate directly
-          void resolveQrAndNavigate(link.id);
+          void resolveQrAndNavigate(link.id, link.origin);
           break;
         case "scanner":
           pushIntoTab("/(tabs)/scanner");

@@ -122,6 +122,8 @@ test("parseServerConfigResponse accepts a well-formed body", () => {
     supabaseAnonKey: "anon-key-123",
     name: "Acme University",
     isCloud: false,
+    ssoEnabled: true,
+    passwordLoginEnabled: true,
   });
 });
 
@@ -418,6 +420,8 @@ const baseServer = {
   supabaseAnonKey: "anon-key-123",
   name: "Acme University",
   isCloud: false,
+  ssoEnabled: true,
+  passwordLoginEnabled: true,
 };
 
 test("classifyServerChange reports none for an identical config", () => {
@@ -425,8 +429,10 @@ test("classifyServerChange reports none for an identical config", () => {
 });
 
 test("classifyServerChange reports credentials for a rotated anon key", () => {
-  // The whole point: same instance, new key. Previously invisible, because
-  // both the discovery and setActiveServer guards keyed only on baseUrl.
+  // The whole point: same instance, new key. A rotated anon key MUST classify
+  // as `credentials` so the config refreshes in place — treating it as `none`
+  // would strand the device on a dead key, and as a `switch` would sign the
+  // user out and wipe their drafts for what is still the same server.
   assert.equal(
     classifyServerChange(baseServer, {
       ...baseServer,
@@ -589,4 +595,36 @@ test("decideServerConnection returns the server when every gate passes", () => {
   );
   assert.equal(outcome.ok, true);
   assert.equal(outcome.ok && outcome.server.name, "Acme University");
+});
+
+// ── advertised sign-in methods ───────────────────────────
+
+test("parseServerConfigResponse disables a method only on an explicit false", () => {
+  // A server predating these fields supports both; hiding a control on a
+  // missing field would lock those users out of an app that works.
+  const { ssoEnabled: _s, passwordLoginEnabled: _p, ...withoutFlags } = validBody;
+  const older = parseServerConfigResponse(
+    withoutFlags,
+    "https://acme.i.shelf.nu",
+    false
+  );
+  assert.equal(older.ok && older.config.ssoEnabled, true);
+  assert.equal(older.ok && older.config.passwordLoginEnabled, true);
+
+  const ssoOnly = parseServerConfigResponse(
+    { ...validBody, passwordLoginEnabled: false },
+    "https://acme.i.shelf.nu",
+    false
+  );
+  assert.equal(ssoOnly.ok && ssoOnly.config.ssoEnabled, true);
+  assert.equal(ssoOnly.ok && ssoOnly.config.passwordLoginEnabled, false);
+});
+
+test("classifyServerChange treats a capability change as a credentials refresh", () => {
+  // Same server, different offer — the login screen must follow it without
+  // signing the user out or wiping their drafts.
+  assert.equal(
+    classifyServerChange(baseServer, { ...baseServer, ssoEnabled: false }),
+    "credentials"
+  );
 });

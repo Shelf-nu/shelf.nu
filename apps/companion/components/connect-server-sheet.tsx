@@ -151,8 +151,12 @@ export default function ConnectServerSheet({
    * {@link handleConnect}'s success branch.
    */
   const closeAndReset = () => {
+    // Refused mid-connect. `resolveServerForDomain` commits the switch before
+    // it returns, so dismissing here would not cancel anything — the user would
+    // simply be signed out and moved to another server moments after choosing
+    // not to. The close affordances are disabled to match.
+    if (connectPendingRef.current) return;
     dispatch({ type: "reset" });
-    connectPendingRef.current = false;
     onClose();
   };
 
@@ -195,7 +199,8 @@ export default function ConnectServerSheet({
           <Text style={styles.headerTitle}>Connect to a server</Text>
           <TouchableOpacity
             onPress={closeAndReset}
-            style={styles.closeButton}
+            disabled={isConnecting}
+            style={[styles.closeButton, isConnecting && styles.buttonDisabled]}
             accessibilityLabel="Close connect to a server"
             accessibilityRole="button"
           >

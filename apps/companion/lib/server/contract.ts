@@ -26,6 +26,14 @@ export type ServerConfig = {
   name: string;
   /** True only for the bundled Shelf Cloud default. */
   isCloud: boolean;
+  /**
+   * Sign-in methods this server actually offers, so the login screen does not
+   * present one that cannot work. Both default to true: a server predating
+   * these fields supports both, and hiding a control on a missing field would
+   * lock those users out.
+   */
+  ssoEnabled: boolean;
+  passwordLoginEnabled: boolean;
 };
 
 /**
@@ -416,12 +424,16 @@ export function parseServerConfigResponse(
     supabaseAnonKey,
     mobileApiVersion,
     minCompanionVersion,
+    ssoEnabled,
+    passwordLoginEnabled,
   } = json as {
     name?: unknown;
     supabaseUrl?: unknown;
     supabaseAnonKey?: unknown;
     mobileApiVersion?: unknown;
     minCompanionVersion?: unknown;
+    ssoEnabled?: unknown;
+    passwordLoginEnabled?: unknown;
   };
 
   if (
@@ -462,6 +474,9 @@ export function parseServerConfigResponse(
       supabaseAnonKey,
       name: typeof name === "string" && name.trim() ? name.trim() : "Shelf",
       isCloud,
+      // Only an explicit `false` disables a method — see the type.
+      ssoEnabled: ssoEnabled !== false,
+      passwordLoginEnabled: passwordLoginEnabled !== false,
     },
   };
 }
@@ -500,11 +515,16 @@ export function classifyServerChange(
   if (normalizeBaseUrl(current.baseUrl) !== normalizeBaseUrl(next.baseUrl)) {
     return "switch";
   }
+  // Capabilities ride along with credentials: a server that turns SSO off is
+  // the same server, so the login screen must follow it without signing anyone
+  // out or wiping their drafts.
   const sameCredentials =
     normalizeBaseUrl(current.supabaseUrl) ===
       normalizeBaseUrl(next.supabaseUrl) &&
     current.supabaseAnonKey === next.supabaseAnonKey &&
-    current.name === next.name;
+    current.name === next.name &&
+    current.ssoEnabled === next.ssoEnabled &&
+    current.passwordLoginEnabled === next.passwordLoginEnabled;
   return sameCredentials ? "none" : "credentials";
 }
 

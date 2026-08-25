@@ -47,6 +47,8 @@ export const CLOUD_SERVER: ServerConfig = {
   supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_PUBLIC!,
   name: "Shelf",
   isCloud: true,
+  ssoEnabled: true,
+  passwordLoginEnabled: true,
 };
 
 let activeServer: ServerConfig = CLOUD_SERVER;
@@ -148,6 +150,10 @@ export async function hydrateActiveServer(): Promise<void> {
       supabaseAnonKey: parsed.supabaseAnonKey,
       name: parsed.name || "Shelf",
       isCloud: parsed.isCloud === true,
+      // Absent in records written before these fields existed; only an
+      // explicit `false` hides a sign-in method.
+      ssoEnabled: parsed.ssoEnabled !== false,
+      passwordLoginEnabled: parsed.passwordLoginEnabled !== false,
     };
     rebuildSupabase(activeServer);
     // Notify so `api/client.ts` rearms its auth listener against the client we

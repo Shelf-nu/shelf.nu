@@ -443,7 +443,7 @@ export default function SettingsScreen() {
             onPress={() => {
               Alert.alert(
                 "Delete Account",
-                "Account deletion is handled through the Shelf web app. You will be redirected to shelf.nu to complete this process.",
+                `Account deletion is handled through the Shelf web app. You will be redirected to ${serverLabel} to complete this process.`,
                 [
                   { text: "Cancel", style: "cancel" },
                   {

@@ -155,8 +155,7 @@ function createForServer(
   supabaseUrl: string,
   supabaseAnonKey: string
 ): SupabaseClient {
-  clientUrl = supabaseUrl;
-  return createClient(supabaseUrl, supabaseAnonKey, {
+  const created = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       storage: secureStoreAdapter,
       autoRefreshToken: true,
@@ -164,6 +163,14 @@ function createForServer(
       detectSessionInUrl: false,
     },
   });
+
+  // Recorded only once construction has succeeded. `createClient` validates the
+  // URL and throws on a malformed one; setting this first would leave
+  // `clientUrl` naming a server the live client is not connected to, and
+  // `guardSessionServerMatch` — which compares exactly these two values — would
+  // then agree with itself and wave the previous server's token through.
+  clientUrl = supabaseUrl;
+  return created;
 }
 
 /**
@@ -213,8 +220,10 @@ export function getSupabaseClientUrl(): string | null {
  */
 export function rebuildSupabase(config: ServerConfig): SupabaseClient {
   const previous = client;
-  // Reassign first, so a throw below can never leave `client` pointing at the
-  // server we just switched away from.
+  // A throw from `createForServer` leaves BOTH `client` and `clientUrl` on the
+  // previous server, which is the safe pairing: the two still agree, so the
+  // request chokepoint keeps working rather than silently matching a client
+  // that was never built.
   client = createForServer(config.supabaseUrl, config.supabaseAnonKey);
 
   // why: with `autoRefreshToken: true` and no `document` (React Native),

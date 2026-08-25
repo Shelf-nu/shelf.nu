@@ -85,7 +85,14 @@ export default function LoginScreen() {
     // survives, and the 500ms-later callback carries the isSsoSubmitting=false
     // captured by the render that armed it — so the guard inside handleLogin
     // reads a stale false and signs in underneath the SSO exchange.
-    if (!email.trim() || !password || isSubmitting || isSsoSubmitting) return;
+    if (
+      !email.trim() ||
+      !password ||
+      isSubmitting ||
+      isSsoSubmitting ||
+      isResetting
+    )
+      return;
 
     const { email: ec, password: pc } = changeCountRef.current;
     if (ec === 1 && pc === 1) {
@@ -98,7 +105,7 @@ export default function LoginScreen() {
     // why: handleLogin is defined inline below and recreated each render; including it
     // in deps would cause the effect to re-fire on every keystroke
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [email, password, isSubmitting, isSsoSubmitting]);
+  }, [email, password, isSubmitting, isSsoSubmitting, isResetting]);
 
   const handleLogin = async () => {
     Keyboard.dismiss();
@@ -109,7 +116,7 @@ export default function LoginScreen() {
     // starting mid-SSO would switch servers under the in-flight exchange.
     // Read through the ref, not the state: a deferred caller (the auto-submit
     // timer) holds the value from the render that created this closure.
-    if (isSsoSubmittingRef.current) return;
+    if (isSsoSubmittingRef.current || resetPendingRef.current) return;
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
@@ -196,6 +203,13 @@ export default function LoginScreen() {
     }
   };
 
+  // Sign-in methods this server actually offers. A server advertising NEITHER
+  // is misconfigured, and a screen with no way in is a worse failure than a
+  // control that turns out not to work — so that case shows both.
+  const offersNeither = !server.ssoEnabled && !server.passwordLoginEnabled;
+  const showPassword = server.passwordLoginEnabled || offersNeither;
+  const showSso = server.ssoEnabled || offersNeither;
+
   /**
    * Returns the app to Shelf Cloud.
    *
@@ -261,57 +275,61 @@ export default function LoginScreen() {
 
           {/* ── Form ──────────────────────────────────────────────── */}
           <View style={styles.form}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              testID="email-input"
-              style={[styles.input, error ? styles.inputError : null]}
-              value={email}
-              onChangeText={(t) => {
-                setEmail(t);
-                setError(null);
-                changeCountRef.current.email++;
-              }}
-              placeholder="you@example.com"
-              placeholderTextColor={colors.placeholderText}
-              autoCapitalize="none"
-              autoComplete="email"
-              autoCorrect={false}
-              keyboardType="email-address"
-              textContentType="emailAddress"
-              returnKeyType="next"
-              onSubmitEditing={() => passwordRef.current?.focus()}
-              blurOnSubmit={false}
-              editable={!isSubmitting && !isSsoSubmitting}
-              accessibilityLabel="Email"
-            />
+            {showPassword && (
+              <>
+                <Text style={styles.label}>Email</Text>
+                <TextInput
+                  testID="email-input"
+                  style={[styles.input, error ? styles.inputError : null]}
+                  value={email}
+                  onChangeText={(t) => {
+                    setEmail(t);
+                    setError(null);
+                    changeCountRef.current.email++;
+                  }}
+                  placeholder="you@example.com"
+                  placeholderTextColor={colors.placeholderText}
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  textContentType="emailAddress"
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordRef.current?.focus()}
+                  blurOnSubmit={false}
+                  editable={!isSubmitting && !isSsoSubmitting}
+                  accessibilityLabel="Email"
+                />
 
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              testID="password-input"
-              ref={passwordRef}
-              style={[styles.input, error ? styles.inputError : null]}
-              value={password}
-              onChangeText={(t) => {
-                setPassword(t);
-                setError(null);
-                changeCountRef.current.password++;
-              }}
-              placeholder="Your password"
-              placeholderTextColor={colors.placeholderText}
-              secureTextEntry
-              // why: without this iOS applies its default sentence-casing to the
-              // first character, silently sending "Trixie01" for "trixie01" and
-              // failing login for any password that starts with a lowercase
-              // letter. The email field already guards against this.
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="password"
-              textContentType="password"
-              returnKeyType="go"
-              onSubmitEditing={handleLogin}
-              editable={!isSubmitting && !isSsoSubmitting}
-              accessibilityLabel="Password"
-            />
+                <Text style={styles.label}>Password</Text>
+                <TextInput
+                  testID="password-input"
+                  ref={passwordRef}
+                  style={[styles.input, error ? styles.inputError : null]}
+                  value={password}
+                  onChangeText={(t) => {
+                    setPassword(t);
+                    setError(null);
+                    changeCountRef.current.password++;
+                  }}
+                  placeholder="Your password"
+                  placeholderTextColor={colors.placeholderText}
+                  secureTextEntry
+                  // why: without this iOS applies its default sentence-casing to the
+                  // first character, silently sending "Trixie01" for "trixie01" and
+                  // failing login for any password that starts with a lowercase
+                  // letter. The email field already guards against this.
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="password"
+                  textContentType="password"
+                  returnKeyType="go"
+                  onSubmitEditing={handleLogin}
+                  editable={!isSubmitting && !isSsoSubmitting}
+                  accessibilityLabel="Password"
+                />
+              </>
+            )}
 
             {error && (
               <Text
@@ -323,70 +341,80 @@ export default function LoginScreen() {
               </Text>
             )}
 
-            <TouchableOpacity
-              testID="forgot-password-link"
-              style={[
-                styles.forgotLink,
-                (isSubmitting || isSsoSubmitting || isResetting) &&
-                  styles.buttonDisabled,
-              ]}
-              onPress={handleForgotPassword}
-              disabled={isSubmitting || isSsoSubmitting || isResetting}
-              activeOpacity={0.7}
-              accessibilityLabel="Forgot your password? Reset it on the web"
-              accessibilityRole="link"
-            >
-              <Text style={styles.forgotText}>Forgot password?</Text>
-            </TouchableOpacity>
+            {showPassword && (
+              <>
+                <TouchableOpacity
+                  testID="forgot-password-link"
+                  style={[
+                    styles.forgotLink,
+                    (isSubmitting || isSsoSubmitting || isResetting) &&
+                      styles.buttonDisabled,
+                  ]}
+                  onPress={handleForgotPassword}
+                  disabled={isSubmitting || isSsoSubmitting || isResetting}
+                  activeOpacity={0.7}
+                  accessibilityLabel="Forgot your password? Reset it on the web"
+                  accessibilityRole="link"
+                >
+                  <Text style={styles.forgotText}>Forgot password?</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              testID="sign-in-button"
-              style={[
-                styles.button,
-                (isSubmitting || isSsoSubmitting || isResetting) &&
-                  styles.buttonDisabled,
-              ]}
-              onPress={handleLogin}
-              disabled={isSubmitting || isSsoSubmitting || isResetting}
-              activeOpacity={0.8}
-              accessibilityLabel={
-                isSubmitting ? "Signing in" : "Sign in to your account"
-              }
-              accessibilityRole="button"
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color={colors.primaryForeground} />
-              ) : (
-                <Text style={styles.buttonText}>Sign In</Text>
-              )}
-            </TouchableOpacity>
+                <TouchableOpacity
+                  testID="sign-in-button"
+                  style={[
+                    styles.button,
+                    (isSubmitting || isSsoSubmitting || isResetting) &&
+                      styles.buttonDisabled,
+                  ]}
+                  onPress={handleLogin}
+                  disabled={isSubmitting || isSsoSubmitting || isResetting}
+                  activeOpacity={0.8}
+                  accessibilityLabel={
+                    isSubmitting ? "Signing in" : "Sign in to your account"
+                  }
+                  accessibilityRole="button"
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator color={colors.primaryForeground} />
+                  ) : (
+                    <Text style={styles.buttonText}>Sign In</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
 
-            {/* ── SSO (web-delegated) ─────────────────────────────── */}
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
+            {showSso && (
+              <>
+                {/* The divider only separates two things. */}
+                {showPassword && (
+                  <View style={styles.divider}>
+                    <View style={styles.dividerLine} />
+                    <Text style={styles.dividerText}>or</Text>
+                    <View style={styles.dividerLine} />
+                  </View>
+                )}
 
-            <TouchableOpacity
-              testID="sso-sign-in-button"
-              style={[
-                styles.ssoButton,
-                (isSubmitting || isSsoSubmitting || isResetting) &&
-                  styles.buttonDisabled,
-              ]}
-              onPress={handleSsoLogin}
-              disabled={isSubmitting || isSsoSubmitting || isResetting}
-              activeOpacity={0.8}
-              accessibilityLabel="Sign in with SSO"
-              accessibilityRole="button"
-            >
-              {isSsoSubmitting ? (
-                <ActivityIndicator color={colors.primary} />
-              ) : (
-                <Text style={styles.ssoButtonText}>Sign in with SSO</Text>
-              )}
-            </TouchableOpacity>
+                <TouchableOpacity
+                  testID="sso-sign-in-button"
+                  style={[
+                    styles.ssoButton,
+                    (isSubmitting || isSsoSubmitting || isResetting) &&
+                      styles.buttonDisabled,
+                  ]}
+                  onPress={handleSsoLogin}
+                  disabled={isSubmitting || isSsoSubmitting || isResetting}
+                  activeOpacity={0.8}
+                  accessibilityLabel="Sign in with SSO"
+                  accessibilityRole="button"
+                >
+                  {isSsoSubmitting ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : (
+                    <Text style={styles.ssoButtonText}>Sign in with SSO</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
 
             <TouchableOpacity
               testID="connect-server-link"

@@ -54,20 +54,29 @@ const CONFIG_TIMEOUT_MS = 10_000;
 /**
  * `fetch` with an abort-based timeout.
  *
+ * The timeout covers reading the BODY as well as receiving the response. A
+ * server that sends headers promptly and then stalls its body would otherwise
+ * hang the caller forever, because clearing the timer once `fetch` resolves
+ * leaves `json()` unbounded — and this runs while the user waits on a spinner.
+ *
  * @param url - Absolute URL to request.
  * @param init - Standard fetch init; a `signal` here would be overwritten.
- * @param timeoutMs - Abort after this many milliseconds.
- * @returns The response. Rejects on timeout, like any other network failure.
+ * @param timeoutMs - Abort after this many milliseconds, including the body.
+ * @param readBody - Consumes the response inside the timeout window.
+ * @returns Whatever `readBody` returns. Rejects on timeout, like any other
+ *   network failure.
  */
-async function fetchWithTimeout(
+async function fetchWithTimeout<T>(
   url: string,
   init: RequestInit,
-  timeoutMs: number
-): Promise<Response> {
+  timeoutMs: number,
+  readBody: (response: Response) => Promise<T>
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    return await readBody(response);
   } finally {
     clearTimeout(timer);
   }
@@ -86,18 +95,20 @@ async function fetchWithTimeout(
  */
 async function askRegistry(domain: string): Promise<string | null | undefined> {
   try {
-    const response = await fetchWithTimeout(
+    return await fetchWithTimeout(
       `${CLOUD_SERVER.baseUrl}/api/mobile/resolve-server`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ domain }),
       },
-      RESOLVE_TIMEOUT_MS
+      RESOLVE_TIMEOUT_MS,
+      async (response) => {
+        if (!response.ok) return undefined;
+        const body = (await response.json()) as { baseUrl?: unknown };
+        return typeof body?.baseUrl === "string" ? body.baseUrl : null;
+      }
     );
-    if (!response.ok) return undefined;
-    const body = (await response.json()) as { baseUrl?: unknown };
-    return typeof body?.baseUrl === "string" ? body.baseUrl : null;
   } catch {
     return undefined;
   }
@@ -115,14 +126,16 @@ async function fetchServerConfig(
   baseUrl: string
 ): Promise<ConfigParseResult | null> {
   try {
-    const response = await fetchWithTimeout(
+    return await fetchWithTimeout(
       `${normalizeBaseUrl(baseUrl)}/api/mobile/config`,
       { method: "GET", headers: { accept: "application/json" } },
-      CONFIG_TIMEOUT_MS
+      CONFIG_TIMEOUT_MS,
+      async (response) => {
+        if (!response.ok) return null;
+        const json: unknown = await response.json();
+        return parseServerConfigResponse(json, normalizeBaseUrl(baseUrl), false);
+      }
     );
-    if (!response.ok) return null;
-    const json: unknown = await response.json();
-    return parseServerConfigResponse(json, normalizeBaseUrl(baseUrl), false);
   } catch {
     return null;
   }
