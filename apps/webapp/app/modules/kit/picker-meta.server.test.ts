@@ -86,9 +86,9 @@ describe("computeKitClaimablePool", () => {
   });
 
   it("leaves a reservation checkable after a kit takes the rest", () => {
-    // The reported failure, as arithmetic: 100 units, 40 promised to a
-    // standalone reservation. The kit may take 60. Ignoring the reservation
-    // would have offered 100 and left the booking unable to check out.
+    // 100 units with 40 promised to a standalone reservation leaves 60 for
+    // the kit. Offering all 100 would leave the reservation unable to check
+    // out, since a kit slice holds its units for good.
     const { maxAllowedForThisKit } = computeKitClaimablePool({
       ...UNCLAIMED,
       occupyingBookedQuantity: 40,
