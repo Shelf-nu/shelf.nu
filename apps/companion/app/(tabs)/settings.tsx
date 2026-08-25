@@ -28,7 +28,8 @@ import {
   setScanSoundEnabled,
   playScanSound,
 } from "@/lib/scan-sound";
-import { getActiveServer } from "@/lib/server";
+import { disconnectFromServer, getActiveServer } from "@/lib/server";
+import ConnectServerSheet from "@/components/connect-server-sheet";
 import { getApiBaseUrl } from "@/lib/api";
 
 const appVersion =
@@ -54,6 +55,7 @@ export default function SettingsScreen() {
 
   const [startPage, setStartPageState] = useState<StartPage>("assets");
   const [scanSoundOn, setScanSoundOn] = useState(true);
+  const [isConnectVisible, setIsConnectVisible] = useState(false);
 
   // Read at render rather than subscribed: a server switch signs the user out,
   // so this screen is never mounted across one.
@@ -66,6 +68,38 @@ export default function SettingsScreen() {
       return server.name;
     }
   })();
+
+  /**
+   * Offers the server actions available from this row.
+   *
+   * Both of them end the current session — `setActiveServer` signs out and
+   * clears server-scoped state — so each is confirmed before anything happens.
+   */
+  const handleServerPress = () => {
+    const connectLabel = server.isCloud
+      ? "Connect to a private server"
+      : "Connect to a different server";
+
+    Alert.alert(
+      `Connected to ${server.name}`,
+      "Changing servers signs you out of this one.",
+      [
+        { text: "Cancel", style: "cancel" },
+        ...(server.isCloud
+          ? []
+          : [
+              {
+                text: "Disconnect",
+                style: "destructive" as const,
+                onPress: () => {
+                  void disconnectFromServer();
+                },
+              },
+            ]),
+        { text: connectLabel, onPress: () => setIsConnectVisible(true) },
+      ]
+    );
+  };
 
   // Load persisted start page and scan sound preference on mount
   useEffect(() => {
@@ -329,9 +363,17 @@ export default function SettingsScreen() {
             </View>
             <Text style={styles.settingValue}>v{appVersion}</Text>
           </View>
-          {/* Which Shelf server this install is talking to. Read-only: the
-              server is chosen by the domain of the email used at sign-in. */}
-          <View style={styles.settingRow}>
+          {/* Which Shelf server this install is talking to, and the only place
+              to change it once signed in. The login screen carries the same
+              action for anyone who has not signed in yet. */}
+          <TouchableOpacity
+            testID="server-row"
+            style={styles.settingRow}
+            onPress={handleServerPress}
+            activeOpacity={0.7}
+            accessibilityLabel={`Server: ${serverLabel}. Change which Shelf server this app connects to.`}
+            accessibilityRole="button"
+          >
             <View style={styles.settingLeft}>
               <Ionicons
                 name="server-outline"
@@ -340,8 +382,15 @@ export default function SettingsScreen() {
               />
               <Text style={styles.settingLabel}>Server</Text>
             </View>
-            <Text style={styles.settingValue}>{serverLabel}</Text>
-          </View>
+            <View style={styles.settingLeft}>
+              <Text style={styles.settingValue}>{serverLabel}</Text>
+              <Ionicons
+                name="chevron-forward"
+                size={18}
+                color={colors.mutedLight}
+              />
+            </View>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -427,6 +476,13 @@ export default function SettingsScreen() {
         <Ionicons name="log-out-outline" size={20} color={colors.error} />
         <Text style={styles.signOutText}>Sign Out</Text>
       </TouchableOpacity>
+
+      <ConnectServerSheet
+        visible={isConnectVisible}
+        warnSignOut
+        onClose={() => setIsConnectVisible(false)}
+        onConnected={() => setIsConnectVisible(false)}
+      />
     </ScrollView>
   );
 }

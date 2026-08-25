@@ -1,48 +1,47 @@
 /**
- * Server discovery.
+ * Connecting the app to a Shelf server.
  *
- * Turns the email a user typed at login into the Shelf server they belong to:
- * Shelf Cloud resolves the domain to a base URL, then that server describes
- * itself via `/api/mobile/config`.
+ * The user types their organisation's domain; Shelf Cloud resolves it to a base
+ * URL, that server describes itself via `/api/mobile/config`, and only if every
+ * check passes does the app switch to it. This is the sole path that changes
+ * the active server, which is why the barrel deliberately withholds
+ * `setActiveServer` from screens.
  *
- * Fail-open throughout. A Shelf Cloud outage, a timeout, or a garbled response
- * leaves the app on its current server and lets login proceed — discovery is an
- * optimisation for enterprise users, never a gate for cloud users.
+ * Connecting is a deliberate act, so it FAILS LOUDLY. Every failure returns a
+ * reason the caller renders — a domain nobody recognises, a server that cannot
+ * be reached, a version mismatch. Nothing is inferred from what the user typed
+ * elsewhere, and nothing happens silently in the background.
  *
- * @see ./contract.ts — the pure validation this builds on
+ * This module is I/O only. Every verdict comes from `decideServerCandidate` and
+ * `decideServerConnection` in `./contract`, which are pure and therefore
+ * testable — this file imports Expo and AsyncStorage transitively and cannot be
+ * reached by the Node test runner. Keep new rules on that side of the line.
+ *
+ * Shelf Cloud must be reachable to connect, because the registry lives there.
+ * Nothing afterwards needs it: once connected, login and every request go to
+ * the connected server alone, so a network that blocks `shelf.nu` still works
+ * for daily use.
+ *
+ * @see ./contract.ts — the pure decisions this orchestrates
+ * @see ./active-server.ts — owns the switch and its teardown
  * @see apps/webapp/app/routes/api+/mobile+/resolve-server.ts
  * @see apps/webapp/app/routes/api+/mobile+/config.ts
  */
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getAppVersion } from "../app-update";
+import { CLOUD_SERVER, setActiveServer } from "./active-server";
 import {
-  CLOUD_SERVER,
-  getActiveServer,
-  setActiveServer,
-} from "./active-server";
-import {
-  extractEmailDomain,
-  isAppVersionSupported,
-  isResolutionFresh,
+  decideServerCandidate,
+  decideServerConnection,
   normalizeBaseUrl,
+  normalizeDomainInput,
   parseServerConfigResponse,
-  RESOLUTION_CACHE_STORAGE_KEY,
   type ConfigParseResult,
-  type DomainResolution,
+  type ConnectOutcome,
 } from "./contract";
 
-/**
- * Result of a discovery attempt. `message` is ready-to-display copy.
- *
- * `updateRequired` means the failure is this build being too old for the target
- * server — the caller should offer a store link rather than a plain retry,
- * because retrying can never succeed.
- */
-export type DiscoveryOutcome =
-  | { ok: true }
-  | { ok: false; message: string; updateRequired?: boolean };
+export type { ConnectFailureReason, ConnectOutcome } from "./contract";
 
-/** Registry lookups sit on the login path — keep the wait short. */
+/** The registry lookup runs while the user waits — keep it short. */
 const RESOLVE_TIMEOUT_MS = 5_000;
 
 /** The target server may be behind a slow corporate network or VPN. */
@@ -71,76 +70,15 @@ async function fetchWithTimeout(
 }
 
 /**
- * Reads the whole domain → resolution cache.
- *
- * @returns The cache, or an empty object when missing or unreadable.
- */
-async function readCache(): Promise<Record<string, DomainResolution>> {
-  try {
-    const raw = await AsyncStorage.getItem(RESOLUTION_CACHE_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    return typeof parsed === "object" &&
-      parsed !== null &&
-      !Array.isArray(parsed)
-      ? (parsed as Record<string, DomainResolution>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Writes one cache entry.
- *
- * @param domain - The email domain being cached.
- * @param baseUrl - Resolved base URL, or `null` for Shelf Cloud.
- * @returns Resolves when written. Never throws — a failed write only costs one
- *   extra network call next time.
- */
-async function writeCacheEntry(
-  domain: string,
-  baseUrl: string | null
-): Promise<void> {
-  try {
-    const cache = await readCache();
-    cache[domain] = { baseUrl, cachedAt: Date.now() };
-    await AsyncStorage.setItem(
-      RESOLUTION_CACHE_STORAGE_KEY,
-      JSON.stringify(cache)
-    );
-  } catch {
-    // Non-fatal by design.
-  }
-}
-
-/**
- * Removes one cache entry so the next attempt re-resolves.
- *
- * @param domain - The email domain to forget.
- * @returns Resolves when removed. Never throws — the entry would otherwise just
- *   expire on its TTL.
- */
-async function dropCacheEntry(domain: string): Promise<void> {
-  try {
-    const cache = await readCache();
-    delete cache[domain];
-    await AsyncStorage.setItem(
-      RESOLUTION_CACHE_STORAGE_KEY,
-      JSON.stringify(cache)
-    );
-  } catch {
-    // Non-fatal by design.
-  }
-}
-
-/**
  * Asks Shelf Cloud which server a domain belongs to.
  *
- * @param domain - Lowercased email domain.
- * @returns The base URL, `null` when the domain belongs to Shelf Cloud, or
- *   `undefined` when the lookup itself failed. The caller must NOT cache
- *   `undefined` — a transient outage would otherwise be remembered for a week.
+ * Always queried at `CLOUD_SERVER`, never the active server: Shelf Cloud owns
+ * the registry, so an app already connected elsewhere still asks Cloud when the
+ * user connects somewhere new.
+ *
+ * @param domain - A normalised domain, from `normalizeDomainInput`.
+ * @returns The base URL, `null` when the domain is not registered to an
+ *   instance, or `undefined` when the lookup itself failed.
  */
 async function askRegistry(domain: string): Promise<string | null | undefined> {
   try {
@@ -165,127 +103,73 @@ async function askRegistry(domain: string): Promise<string | null | undefined> {
  * Fetches and validates a server's self-description.
  *
  * @param baseUrl - The candidate server's base URL.
- * @returns The parse result, or `{ ok: false, reason: "unreachable" }` when the
- *   server could not be contacted at all — a distinct case from a server that
- *   answered with something invalid.
+ * @returns The parse result, or `null` when the server could not be contacted
+ *   at all — a distinct case from a server that answered with something
+ *   invalid, and one `decideServerConnection` reports differently.
  */
 async function fetchServerConfig(
   baseUrl: string
-): Promise<
-  { ok: true; config: ConfigParseResult } | { ok: false; reason: "unreachable" }
-> {
+): Promise<ConfigParseResult | null> {
   try {
     const response = await fetchWithTimeout(
       `${normalizeBaseUrl(baseUrl)}/api/mobile/config`,
       { method: "GET", headers: { accept: "application/json" } },
       CONFIG_TIMEOUT_MS
     );
-    if (!response.ok) return { ok: false, reason: "unreachable" };
+    if (!response.ok) return null;
     const json: unknown = await response.json();
-    return {
-      ok: true,
-      config: parseServerConfigResponse(json, normalizeBaseUrl(baseUrl), false),
-    };
+    return parseServerConfigResponse(json, normalizeBaseUrl(baseUrl), false);
   } catch {
-    return { ok: false, reason: "unreachable" };
+    return null;
   }
 }
 
 /**
- * Resolves and switches to the server the given email belongs to.
+ * Connects the app to the Shelf server registered for a domain.
  *
- * Call before password sign-in and before opening the SSO web flow, so
- * credentials go to the right server's Supabase project.
+ * Switches only after the domain resolves, the server answers, and both version
+ * gates pass — so a failed attempt always leaves the app on the server it was
+ * already using rather than half-connected to one it cannot talk to.
  *
- * @param email - Raw contents of the email field.
- * @returns `{ ok: true }` when the app is on the correct server — including
- *   when nothing needed to change — or `{ ok: false, message }` with copy to
- *   display.
+ * @param input - Raw contents of the connect field: a domain, an email address
+ *   or a pasted URL.
+ * @returns `{ ok: true, server }` once connected, or `{ ok: false, reason,
+ *   message }` with copy to display and a reason the UI can branch on.
  */
-export async function resolveServerForEmail(
-  email: string
-): Promise<DiscoveryOutcome> {
-  const domain = extractEmailDomain(email);
-  if (!domain) return { ok: true };
+export async function resolveServerForDomain(
+  input: string
+): Promise<ConnectOutcome> {
+  const domain = normalizeDomainInput(input);
 
-  const cache = await readCache();
-  const cached = cache[domain];
-  const useCached = Boolean(cached && isResolutionFresh(cached, Date.now()));
+  // Skip the round trip for a value that cannot be a domain. What is passed as
+  // the answer in that case does not matter: `decideServerCandidate` normalises
+  // the input itself and reports `invalid_domain` before reading it.
+  const candidate = decideServerCandidate(
+    input,
+    domain ? await askRegistry(domain) : undefined
+  );
+  if (!candidate.ok) return candidate;
 
-  let baseUrl: string | null | undefined;
-  if (useCached) {
-    baseUrl = cached.baseUrl;
-  } else {
-    baseUrl = await askRegistry(domain);
-    // Registry unreachable — stay put and let login proceed against the
-    // current server rather than blocking on our own availability.
-    if (baseUrl === undefined) return { ok: true };
-    await writeCacheEntry(domain, baseUrl);
-  }
+  const outcome = decideServerConnection(
+    await fetchServerConfig(candidate.baseUrl),
+    getAppVersion()
+  );
+  if (!outcome.ok) return outcome;
 
-  // Domain belongs to Shelf Cloud.
-  if (baseUrl === null) {
-    if (!getActiveServer().isCloud) await setActiveServer(CLOUD_SERVER);
-    return { ok: true };
-  }
+  await setActiveServer(outcome.server);
+  return outcome;
+}
 
-  // Re-read the config on every login, even when the resolved URL already
-  // matches the active server. A customer can rotate their Supabase project
-  // behind an unchanged base URL, and skipping the fetch leaves enrolled
-  // devices on a stale anon key with no in-app way to recover. `setActiveServer`
-  // decides whether anything actually changed, so a no-op login costs one
-  // request and touches nothing.
-  const alreadyConnected =
-    normalizeBaseUrl(baseUrl) === getActiveServer().baseUrl;
-
-  const fetched = await fetchServerConfig(baseUrl);
-
-  // Already working against this server and the refresh failed: keep going with
-  // the config we have. The refresh is an optimisation — a transient blip on it
-  // must never block a login that the stored config can still serve.
-  if (!fetched.ok && alreadyConnected) {
-    return { ok: true };
-  }
-
-  if (!fetched.ok) {
-    // A stale cached entry is the likely cause, so drop it and re-resolve once
-    // against the registry — a server that moved then heals on this attempt
-    // instead of needing a reinstall. Terminates: dropCacheEntry guarantees the
-    // retry takes the askRegistry branch, where useCached is false.
-    if (useCached) {
-      await dropCacheEntry(domain);
-      return resolveServerForEmail(email);
-    }
-    return {
-      ok: false,
-      message:
-        "Can't reach your organization's Shelf server. If you're off the company network, connect to VPN and try again.",
-    };
-  }
-
-  if (!fetched.config.ok) {
-    return {
-      ok: false,
-      message:
-        fetched.config.reason === "unsupported_version"
-          ? "This Shelf server needs to be updated before the app can connect."
-          : "This server isn't set up for the Shelf app. Contact your administrator.",
-    };
-  }
-
-  // Force-update gate. Checked BEFORE setActiveServer so a too-old app never
-  // half-switches: it keeps its current working server instead of landing on
-  // one it cannot talk to.
-  if (
-    !isAppVersionSupported(getAppVersion(), fetched.config.minCompanionVersion)
-  ) {
-    return {
-      ok: false,
-      updateRequired: true,
-      message: `${fetched.config.config.name} requires a newer version of Shelf. Update the app to continue.`,
-    };
-  }
-
-  await setActiveServer(fetched.config.config);
-  return { ok: true };
+/**
+ * Returns the app to Shelf Cloud.
+ *
+ * Routed through this module rather than exposing `setActiveServer` to screens,
+ * so every server change stays in one place. Carries the same teardown as
+ * connecting: the current session is signed out and server-scoped state is
+ * cleared.
+ *
+ * @returns Resolves once the app is back on Shelf Cloud.
+ */
+export async function disconnectFromServer(): Promise<void> {
+  await setActiveServer(CLOUD_SERVER);
 }

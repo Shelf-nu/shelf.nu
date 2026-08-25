@@ -12,15 +12,16 @@ import { test } from "node:test";
 
 import {
   classifyServerChange,
+  decideServerCandidate,
+  decideServerConnection,
   extractEmailDomain,
   isAppVersionSupported,
-  isResolutionFresh,
   isSameOrigin,
   isSessionServerMismatched,
   MAX_SERVER_MOBILE_API_VERSION,
   normalizeBaseUrl,
+  normalizeDomainInput,
   parseServerConfigResponse,
-  RESOLUTION_CACHE_TTL_MS,
   SERVER_SCOPED_KEY_PREFIXES,
   SERVER_SCOPED_STORAGE_KEYS,
 } from "./contract";
@@ -46,6 +47,38 @@ test("extractEmailDomain uses the LAST @ so a quoted local part can't spoof", ()
 test("extractEmailDomain returns null for input without a usable domain", () => {
   for (const input of ["", "jane", "jane@", "@acme.edu", "jane@localhost"]) {
     assert.equal(extractEmailDomain(input), null, JSON.stringify(input));
+  }
+});
+
+// ── normalizeDomainInput ─────────────────────────────────
+
+test("normalizeDomainInput accepts a bare domain", () => {
+  assert.equal(normalizeDomainInput("Acme.COM"), "acme.com");
+  assert.equal(normalizeDomainInput("  acme.co.uk  "), "acme.co.uk");
+});
+
+test("normalizeDomainInput accepts an email address", () => {
+  // The connect field takes whatever identifies the organisation; the registry
+  // is keyed by domain either way.
+  assert.equal(normalizeDomainInput("Jane@Acme.EDU"), "acme.edu");
+  assert.equal(normalizeDomainInput("jane+phone@acme.edu"), "acme.edu");
+});
+
+test("normalizeDomainInput accepts a pasted URL", () => {
+  assert.equal(normalizeDomainInput("https://acme.com"), "acme.com");
+  assert.equal(normalizeDomainInput("http://acme.com/login"), "acme.com");
+  assert.equal(normalizeDomainInput("acme.com/"), "acme.com");
+});
+
+test("normalizeDomainInput uses the LAST @ so a quoted local part can't spoof", () => {
+  assert.equal(normalizeDomainInput('"a@evil.com"@acme.edu'), "acme.edu");
+});
+
+test("normalizeDomainInput returns null for input with no usable domain", () => {
+  // A value with no dot can never be a registered customer domain, so it is
+  // rejected here rather than costing a round trip to find out.
+  for (const input of ["", "   ", "acme", "jane@", "@acme.edu", "localhost"]) {
+    assert.equal(normalizeDomainInput(input), null, JSON.stringify(input));
   }
 });
 
@@ -228,38 +261,6 @@ test("parseServerConfigResponse normalises a trailing slash on both URLs", () =>
     "https://xyz.supabase.co"
   );
 });
-
-// ── isResolutionFresh ────────────────────────────────────
-
-test("isResolutionFresh honours the TTL boundary", () => {
-  const now = 1_000_000_000_000;
-  assert.equal(isResolutionFresh({ baseUrl: null, cachedAt: now }, now), true);
-  assert.equal(
-    isResolutionFresh(
-      { baseUrl: null, cachedAt: now - RESOLUTION_CACHE_TTL_MS + 1 },
-      now
-    ),
-    true
-  );
-  assert.equal(
-    isResolutionFresh(
-      { baseUrl: null, cachedAt: now - RESOLUTION_CACHE_TTL_MS },
-      now
-    ),
-    false
-  );
-});
-
-test("isResolutionFresh treats a future timestamp as stale", () => {
-  const now = 1_000_000_000_000;
-  // Clock moved backwards — never let an entry from the "future" pin forever.
-  assert.equal(
-    isResolutionFresh({ baseUrl: null, cachedAt: now + 60_000 }, now),
-    false
-  );
-});
-
-// ── isSameOrigin ─────────────────────────────────────────
 
 test("isSameOrigin compares origins, ignoring path and trailing slash", () => {
   assert.equal(
@@ -467,4 +468,118 @@ test("classifyServerChange reports switch when moving to or from cloud", () => {
     }),
     "switch"
   );
+});
+
+// ── decideServerCandidate ────────────────────────────────
+//
+// The connect flow's refusal table. `discovery.ts` is unreachable from this
+// runner (it pulls Expo and AsyncStorage transitively), which is exactly why
+// every verdict lives here instead.
+
+test("decideServerCandidate refuses input that cannot be a domain", () => {
+  for (const input of ["", "   ", "acme", "localhost"]) {
+    const decision = decideServerCandidate(input, "https://acme.i.shelf.nu");
+    assert.equal(decision.ok, false, JSON.stringify(input));
+    assert.equal(!decision.ok && decision.reason, "invalid_domain");
+  }
+});
+
+test("decideServerCandidate reports invalid input before the registry answer", () => {
+  // Ordering matters: an unusable value must never be blamed on the lookup,
+  // which the caller skips entirely in that case.
+  const decision = decideServerCandidate("acme", undefined);
+  assert.equal(!decision.ok && decision.reason, "invalid_domain");
+});
+
+test("decideServerCandidate distinguishes an unreachable registry from an unknown domain", () => {
+  const unreachable = decideServerCandidate("acme.com", undefined);
+  assert.equal(!unreachable.ok && unreachable.reason, "registry_unreachable");
+
+  const unknown = decideServerCandidate("acme.com", null);
+  assert.equal(!unknown.ok && unknown.reason, "not_registered");
+});
+
+test("decideServerCandidate names the domain in the not-registered message", () => {
+  const decision = decideServerCandidate("Jane@Acme.COM", null);
+  assert.equal(!decision.ok && decision.message.includes("acme.com"), true);
+});
+
+test("decideServerCandidate refuses a plaintext base URL from the registry", () => {
+  // Defence in depth: the server already rejects these, so this makes the
+  // invariant hold at both ends rather than only one.
+  const decision = decideServerCandidate("acme.com", "http://acme.i.shelf.nu");
+  assert.equal(!decision.ok && decision.reason, "incompatible");
+});
+
+test("decideServerCandidate passes a registered https base URL through", () => {
+  const decision = decideServerCandidate("acme.com", "https://acme.i.shelf.nu");
+  assert.deepEqual(decision, { ok: true, baseUrl: "https://acme.i.shelf.nu" });
+});
+
+// ── decideServerConnection ───────────────────────────────
+
+/**
+ * The parsed `validBody` as a real `ServerConfig`.
+ *
+ * Narrowed through the parser rather than hand-built, so these tests cannot
+ * drift from the shape the parser actually produces.
+ */
+function validConfig() {
+  const parsed = parseServerConfigResponse(
+    validBody,
+    "https://acme.i.shelf.nu",
+    false
+  );
+  if (!parsed.ok) throw new Error("validBody should parse");
+  return parsed.config;
+}
+
+test("decideServerConnection reports an unreachable server", () => {
+  const outcome = decideServerConnection(null, "1.4.0");
+  assert.equal(!outcome.ok && outcome.reason, "server_unreachable");
+});
+
+test("decideServerConnection refuses a server that answered with something invalid", () => {
+  const outcome = decideServerConnection(
+    { ok: false, reason: "malformed" },
+    "1.4.0"
+  );
+  assert.equal(!outcome.ok && outcome.reason, "incompatible");
+});
+
+test("decideServerConnection tells a too-old SERVER apart from a too-old APP", () => {
+  const serverTooOld = decideServerConnection(
+    { ok: false, reason: "unsupported_version" },
+    "1.4.0"
+  );
+  assert.equal(!serverTooOld.ok && serverTooOld.reason, "incompatible");
+  assert.equal(
+    !serverTooOld.ok && serverTooOld.message.includes("server needs to be updated"),
+    true
+  );
+
+  const appTooOld = decideServerConnection(
+    { ok: true, config: validConfig(), minCompanionVersion: "2.0.0" },
+    "1.4.0"
+  );
+  assert.equal(!appTooOld.ok && appTooOld.reason, "update_required");
+});
+
+test("decideServerConnection does NOT connect when the app is too old", () => {
+  // The caller switches only on `ok: true`, so a refusal here is what keeps a
+  // too-old build on the server it can still talk to.
+  const outcome = decideServerConnection(
+    { ok: true, config: validConfig(), minCompanionVersion: "9.9.9" },
+    "1.4.0"
+  );
+  assert.equal(outcome.ok, false);
+});
+
+test("decideServerConnection returns the server when every gate passes", () => {
+  const outcome = decideServerConnection(
+    { ok: true, config: validConfig(), minCompanionVersion: null },
+    "1.4.0"
+  );
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.ok && outcome.server.name, "Acme University");
 });

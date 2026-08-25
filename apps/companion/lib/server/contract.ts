@@ -28,9 +28,6 @@ export type ServerConfig = {
   isCloud: boolean;
 };
 
-/** A cached domain → server resolution. `baseUrl: null` means "Shelf Cloud". */
-export type DomainResolution = { baseUrl: string | null; cachedAt: number };
-
 /**
  * Outcome of validating a `/api/mobile/config` response.
  *
@@ -74,19 +71,8 @@ export const MIN_SERVER_MOBILE_API_VERSION = 1;
  */
 export const MAX_SERVER_MOBILE_API_VERSION = 1;
 
-/**
- * How long a domain → server resolution stays usable without re-checking.
- *
- * Without a TTL, a customer whose base URL changes would strand every already
- * enrolled device permanently.
- */
-export const RESOLUTION_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
 /** AsyncStorage key holding the serialised active `ServerConfig`. */
 export const ACTIVE_SERVER_STORAGE_KEY = "shelf_active_server";
-
-/** AsyncStorage key holding the domain → resolution cache. */
-export const RESOLUTION_CACHE_STORAGE_KEY = "shelf_domain_resolutions";
 
 /**
  * Every fixed AsyncStorage key whose value belongs to ONE server and must be
@@ -139,6 +125,28 @@ export function extractEmailDomain(email: string): string | null {
 
   const domain = normalized.slice(at + 1);
   return domain.length > 0 && domain.includes(".") ? domain : null;
+}
+
+/**
+ * Normalises whatever the user typed into the connect field to a registry key.
+ *
+ * The registry is keyed by email domain, so that is what this produces. The
+ * field accepts the three things people actually type — a bare domain, a full
+ * email address, or a pasted URL — because all three identify the same
+ * organisation and rejecting two of them teaches nothing.
+ *
+ * @param input - Raw contents of the connect field.
+ * @returns The lowercased domain, or `null` when the input has no usable one.
+ *   A value with no dot is rejected: it can never be a registered customer
+ *   domain, so probing for it would be a wasted round trip.
+ */
+export function normalizeDomainInput(input: string): string | null {
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return null;
+  if (trimmed.includes("@")) return extractEmailDomain(trimmed);
+
+  const host = trimmed.replace(/^https?:\/\//, "").split("/")[0];
+  return host.length > 0 && host.includes(".") ? host : null;
 }
 
 /**
@@ -205,6 +213,143 @@ export function isAppVersionSupported(
     if (a < r) return false;
   }
   return true;
+}
+
+/**
+ * Why a connection attempt failed.
+ *
+ * Distinct values because the UI does different things with them: only
+ * `update_required` offers a store link, and only the two `unreachable` cases
+ * are worth retrying unchanged.
+ */
+export type ConnectFailureReason =
+  | "invalid_domain"
+  | "not_registered"
+  | "registry_unreachable"
+  | "server_unreachable"
+  | "incompatible"
+  | "update_required";
+
+/** A refusal to connect, carrying ready-to-display copy. */
+export type ConnectRefusal = {
+  ok: false;
+  reason: ConnectFailureReason;
+  message: string;
+};
+
+/** Result of a connection attempt. */
+export type ConnectOutcome =
+  | { ok: true; server: ServerConfig }
+  | ConnectRefusal;
+
+/** Either a base URL worth fetching a config from, or a refusal. */
+export type CandidateDecision = { ok: true; baseUrl: string } | ConnectRefusal;
+
+/**
+ * Decides whether the registry's answer for a domain is worth pursuing.
+ *
+ * Pure so the whole refusal table is testable without a network: the live
+ * lookup is the caller's job, its answer is this function's input.
+ *
+ * @param input - Raw contents of the connect field.
+ * @param registryAnswer - The registry's reply: a base URL, `null` when the
+ *   domain is not registered to an instance, or `undefined` when the lookup
+ *   itself failed. The last two are deliberately distinct — one means "no such
+ *   customer", the other means "ask again later".
+ * @returns The base URL to fetch a config from, or a refusal to show.
+ */
+export function decideServerCandidate(
+  input: string,
+  registryAnswer: string | null | undefined
+): CandidateDecision {
+  const domain = normalizeDomainInput(input);
+  if (!domain) {
+    return {
+      ok: false,
+      reason: "invalid_domain",
+      message: "Enter your organization's domain, for example acme.com.",
+    };
+  }
+
+  if (registryAnswer === undefined) {
+    return {
+      ok: false,
+      reason: "registry_unreachable",
+      message:
+        "Can't reach Shelf to look up that domain. Check your connection and try again.",
+    };
+  }
+
+  if (registryAnswer === null) {
+    return {
+      ok: false,
+      reason: "not_registered",
+      message: `${domain} isn't set up for a private server. Check with your administrator.`,
+    };
+  }
+
+  // Refuse plaintext BEFORE the config request rather than after: this is the
+  // first moment the app holds a URL it did not construct, and by the time
+  // `parseServerConfigResponse` repeats the check the request has already left
+  // the device.
+  if (!registryAnswer.startsWith("https://")) {
+    return {
+      ok: false,
+      reason: "incompatible",
+      message: "That server isn't set up securely. Contact your administrator.",
+    };
+  }
+
+  return { ok: true, baseUrl: registryAnswer };
+}
+
+/**
+ * Decides whether a server that answered is one this build may connect to.
+ *
+ * Pure for the same reason as {@link decideServerCandidate}: the fetch belongs
+ * to the caller, the verdict belongs here.
+ *
+ * @param parsed - The parsed `/api/mobile/config` response, or `null` when the
+ *   server could not be contacted at all.
+ * @param appVersion - This build's version, compared against the server's
+ *   advertised minimum.
+ * @returns The server to switch to, or a refusal to show. A refusal here always
+ *   means the caller must NOT switch: a half-connected app would be pointed at
+ *   a server it cannot talk to.
+ */
+export function decideServerConnection(
+  parsed: ConfigParseResult | null,
+  appVersion: string
+): ConnectOutcome {
+  if (parsed === null) {
+    return {
+      ok: false,
+      reason: "server_unreachable",
+      message:
+        "Can't reach your organization's Shelf server. If you're off the company network, connect to VPN and try again.",
+    };
+  }
+
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      reason: "incompatible",
+      message:
+        parsed.reason === "unsupported_version"
+          ? "This Shelf server needs to be updated before the app can connect."
+          : "That server isn't set up for the Shelf app. Contact your administrator.",
+    };
+  }
+
+  if (!isAppVersionSupported(appVersion, parsed.minCompanionVersion)) {
+    return {
+      ok: false,
+      reason: "update_required",
+      message: `${parsed.config.name} requires a newer version of Shelf. Update the app to continue.`,
+    };
+  }
+
+  return { ok: true, server: parsed.config };
 }
 
 /**
@@ -385,23 +530,6 @@ export function isSessionServerMismatched(
 ): boolean {
   if (!clientUrl) return false;
   return normalizeBaseUrl(clientUrl) !== normalizeBaseUrl(activeSupabaseUrl);
-}
-
-/**
- * Whether a cached resolution is still usable.
- *
- * @param entry - The cached resolution.
- * @param now - Current epoch milliseconds, injected so this stays pure and
- *   testable without faking the clock.
- * @returns `false` once the TTL has elapsed, and also for a timestamp in the
- *   future — a backwards clock jump must not pin a stale entry forever.
- */
-export function isResolutionFresh(
-  entry: DomainResolution,
-  now: number
-): boolean {
-  if (entry.cachedAt > now) return false;
-  return now - entry.cachedAt < RESOLUTION_CACHE_TTL_MS;
 }
 
 /**

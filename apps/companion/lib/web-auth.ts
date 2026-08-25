@@ -18,19 +18,18 @@ import * as Crypto from "expo-crypto";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { getApiBaseUrl } from "./api";
-import { getServerVersion, resolveServerForEmail } from "./server";
+import { getServerVersion } from "./server";
 import { getSupabase } from "./supabase";
 
 /** Deeplink the web SSO callback redirects to once it has a code for the app. */
 const AUTH_CALLBACK_URL = "shelf://auth-callback";
 
 /** Result of an SSO sign-in attempt. `error` is null on success or on a plain
- *  user cancellation (nothing to surface). `updateRequired` marks the one
+ *  user cancellation (nothing to surface).
  *  failure a retry can never fix: this build is too old for the target server,
  *  so the caller should offer a store link instead. */
 export type SsoSignInResult = {
   error: string | null;
-  updateRequired?: boolean;
 };
 
 /** Shape of the `/api/mobile/exchange` JSON response. */
@@ -99,25 +98,17 @@ async function createPkcePair(): Promise<{
  * calls `getSupabase().auth.setSession` (which fires `onAuthStateChange`, so the
  * existing auth context navigates the user into the app).
  *
+ * Runs entirely against the ACTIVE server: it serves the SSO page, mints the
+ * code and redeems it. Which server that is was decided earlier and explicitly,
+ * by `resolveServerForDomain` — this function takes no part in choosing one and
+ * never switches, which is what keeps the whole flow on a single host.
+ *
  * Never throws — failures are returned as `{ error }` for the caller to display.
  *
- * @param email - The email typed on the login screen. Its domain decides which
- *   Shelf server the SSO hand-off targets, so callers must not pass an empty
- *   string: that would silently start the flow against Shelf Cloud.
  * @returns `{ error: null }` on success or user cancellation, otherwise
  *   `{ error: <message> }`.
  */
-export async function signInViaWeb(email: string): Promise<SsoSignInResult> {
-  // Point the app at the right server BEFORE opening the browser: the SSO
-  // hand-off and the code exchange must both happen against that server.
-  const discovery = await resolveServerForEmail(email);
-  if (!discovery.ok) {
-    return {
-      error: discovery.message,
-      updateRequired: discovery.updateRequired,
-    };
-  }
-
+export async function signInViaWeb(): Promise<SsoSignInResult> {
   // Captured once, deliberately: re-reading this after the browser round trip
   // would be correct today but silently wrong if anything switched servers
   // mid-flow. The authorization code is only valid on the server that minted it.

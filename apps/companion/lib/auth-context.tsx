@@ -8,11 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import {
-  getServerVersion,
-  resolveServerForEmail,
-  subscribeToServerChange,
-} from "./server";
+import { getServerVersion, subscribeToServerChange } from "./server";
 import { getSupabase } from "./supabase";
 
 type AuthState = {
@@ -28,7 +24,7 @@ type AuthState = {
   signIn: (
     email: string,
     password: string
-  ) => Promise<{ error: string | null; updateRequired?: boolean }>;
+  ) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 };
 
@@ -73,16 +69,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [serverVersion]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    // Point the app at the right server BEFORE authenticating: the credentials
-    // must go to that server's Supabase project, not whichever was last active.
-    const discovery = await resolveServerForEmail(email);
-    if (!discovery.ok) {
-      return {
-        error: discovery.message,
-        updateRequired: discovery.updateRequired,
-      };
-    }
-
+    // Authenticates against the ACTIVE server, whichever that is. Choosing the
+    // server is a separate, explicit act (`resolveServerForDomain`), so nothing
+    // here inspects the email — a login is only ever sent where the user
+    // already connected the app.
     const { error } = await getSupabase().auth.signInWithPassword({
       email,
       password,
@@ -91,8 +81,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Signing out deliberately KEEPS the active server: the user almost always
-  // signs back into the same instance. Typing a cloud email re-resolves back to
-  // Shelf Cloud, so there is no dead end and no escape-hatch UI needed.
+  // signs back into the same instance, and re-entering the domain every time
+  // would be busywork. Returning to Shelf Cloud is an explicit action —
+  // `disconnectFromServer`, surfaced on the login screen and in Settings.
   const signOut = useCallback(async () => {
     await getSupabase().auth.signOut();
   }, []);

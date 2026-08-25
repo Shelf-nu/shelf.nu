@@ -14,11 +14,18 @@ export * from "./contract";
 // `CLOUD_SERVER` and `setActiveServer` are deliberately NOT re-exported: only
 // ./discovery.ts drives a switch, and it imports ./active-server directly.
 // Exposing them here would invite a screen to switch servers without going
-// through discovery, skipping the config validation that makes it safe.
+// through discovery, skipping the config validation that makes it safe. That is
+// why returning to Shelf Cloud goes through `disconnectFromServer` rather than
+// a bare `setActiveServer(CLOUD_SERVER)` at the call site.
 export {
   getActiveServer,
   getServerVersion,
   hydrateActiveServer,
   subscribeToServerChange,
 } from "./active-server";
-export { resolveServerForEmail, type DiscoveryOutcome } from "./discovery";
+export {
+  disconnectFromServer,
+  resolveServerForDomain,
+  type ConnectFailureReason,
+  type ConnectOutcome,
+} from "./discovery";
