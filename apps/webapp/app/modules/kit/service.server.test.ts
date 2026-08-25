@@ -2956,16 +2956,27 @@ describe("updateKitAssets - check-in floor guard (Polish-7b)", () => {
     db.assetKit.findMany.mockResolvedValue([
       { id: "ak-pens", assetId: "pens", quantity: 60 },
     ]);
-    // One kit-driven BookingAsset slice for this AssetKit.
+    // why: two different reads share this delegate — the floor guard asks for the
+    // KIT-DRIVEN slices of this AssetKit, and the strict-available pool asks
+    // for STANDALONE reservations (`assetKitId: null`) to peak over. Answering
+    // both from one queue hands the pool a row with no booking dates, so the
+    // stub routes on which one it was handed.
     //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue([
-      {
-        id: "ba-1",
-        assetKitId: "ak-pens",
-        asset: { title: "Pens" },
-        booking: { name: "Spring Shoot" },
-      },
-    ]);
+    db.bookingAsset.findMany.mockImplementation(
+      (args?: { where?: { assetKitId?: unknown } }) =>
+        Promise.resolve(
+          args?.where?.assetKitId === null
+            ? []
+            : [
+                {
+                  id: "ba-1",
+                  assetKitId: "ak-pens",
+                  asset: { title: "Pens" },
+                  booking: { name: "Spring Shoot" },
+                },
+              ]
+        )
+    );
     // `checkedIn` units already reconciled against that slice.
     //@ts-expect-error missing vitest type
     db.consumptionLog.groupBy.mockResolvedValue([
@@ -3044,7 +3055,6 @@ describe("updateKitAssets - server-side strict-available validation", () => {
         // Strict-available space = 100 - 40 - 20 - 10 = 30.
         assetKits: [{ kitId: "other-kit", quantity: 40 }],
         custody: [{ quantity: 20, kitCustodyId: null }],
-        bookingAssets: [{ quantity: 10 }],
         location: null,
       },
     ]);
@@ -3089,7 +3099,6 @@ describe("updateKitAssets - server-side strict-available validation", () => {
         quantity: 100,
         assetKits: [{ kitId: "other-kit", quantity: 40 }],
         custody: [{ quantity: 20, kitCustodyId: null }],
-        bookingAssets: [{ quantity: 10 }],
         location: null,
       },
     ]);
