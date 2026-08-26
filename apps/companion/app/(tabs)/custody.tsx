@@ -19,8 +19,8 @@ import {
   fontSize,
   spacing,
   borderRadius,
-  formatStatus,
   hitSlop,
+  getListRowStatusLabel,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -164,7 +164,7 @@ function MyCustodyContent() {
             pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${item.id}`)
           }
           activeOpacity={0.6}
-          accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
+          accessibilityLabel={`${item.title}, ${getListRowStatusLabel(item)}${
             item.category ? `, ${item.category.name}` : ""
           }${item.location ? `, ${item.location.name}` : ""}`}
           accessibilityRole="button"
@@ -209,7 +209,7 @@ function MyCustodyContent() {
           <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
             <View style={[styles.statusDot, { backgroundColor: badge.text }]} />
             <Text style={[styles.statusText, { color: badge.text }]}>
-              {formatStatus(item.status)}
+              {getListRowStatusLabel(item)}
             </Text>
           </View>
         </TouchableOpacity>
