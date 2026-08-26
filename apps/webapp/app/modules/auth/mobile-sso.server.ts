@@ -103,15 +103,47 @@ function sleep(ms: number): Promise<void> {
  * @param cause - The error thrown by a Supabase admin call
  * @returns true if the failure is a rate-limit
  */
+/**
+ * Reads Supabase's machine-readable error code off a thrown value.
+ *
+ * @param cause - Anything caught from the auth client.
+ * @returns The `code` when present, otherwise `undefined`.
+ */
+function errorCode(cause: unknown): unknown {
+  return typeof cause === "object" && cause !== null && "code" in cause
+    ? (cause as { code: unknown }).code
+    : undefined;
+}
+
 function isRateLimitError(cause: unknown): boolean {
-  const code =
-    typeof cause === "object" && cause !== null && "code" in cause
-      ? (cause as { code: unknown }).code
-      : undefined;
   return (
-    code === "over_email_send_rate_limit" ||
+    errorCode(cause) === "over_email_send_rate_limit" ||
     (isAuthApiError(cause) && cause.status === 429)
   );
+}
+
+/**
+ * Whether a just-minted magic-link token was rejected as no longer valid.
+ *
+ * `mintMobileSessionOnce` generates a link and verifies it microseconds later,
+ * so "expired" never means elapsed time here. Supabase answers `otp_expired`
+ * for an INVALID token too, and the way a token that new becomes invalid is
+ * being superseded — generating another link for the same user voids the
+ * previous one. Two overlapping sign-ins for one account do exactly that, and
+ * the first one to verify loses.
+ *
+ * This is the one 4xx worth retrying: each attempt calls `generateLink` again
+ * and gets a brand-new token, so the very thing that failed the attempt is what
+ * the retry replaces. Treating it as deterministic — which the shape of the
+ * error invites — turns a recoverable collision into a hard sign-in failure.
+ *
+ * @param cause - Anything caught from the mint.
+ * @returns `true` when a fresh token would plausibly succeed.
+ */
+function isSupersededTokenError(cause: unknown): boolean {
+  if (errorCode(cause) === "otp_expired") return true;
+  // Releases before the error-code vocabulary answer with the message alone.
+  return isAuthApiError(cause) && /invalid or has expired/i.test(cause.message);
 }
 
 /**
@@ -172,11 +204,14 @@ async function mintMobileSessionOnce(email: string): Promise<AuthSession> {
  * pattern. The resulting session is a brand-new token family, decoupled from
  * the user's web session.
  *
- * Resilience: only transient Supabase failures (504s / network, surfaced as
- * `AuthRetryableFetchError`) are retried — up to {@link MINT_MAX_ATTEMPTS} times
- * with a short backoff. Rate-limits surface as a clear 429 (not retried — the
- * window won't clear in time). Deterministic failures (4xx, or our own
- * no-token/no-session errors) fail fast, since retrying can't change the result.
+ * Resilience: retried up to {@link MINT_MAX_ATTEMPTS} times with a short
+ * backoff, for the two failures a retry can actually fix — transient Supabase
+ * errors (504s / network, surfaced as `AuthRetryableFetchError`) and a
+ * superseded magic-link token (see {@link isSupersededTokenError}, which
+ * explains why that 4xx is the exception). Rate-limits surface as a clear 429,
+ * not retried, because the window will not clear in time. Everything else —
+ * other 4xx, or our own no-token/no-session errors — fails fast, since
+ * retrying cannot change the result.
  *
  * SECURITY: this hands out a full session for `email` with no further checks —
  * it must ONLY be called after the caller has independently authorized the
@@ -206,10 +241,12 @@ async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
         });
       }
 
-      // Only transient Supabase failures (504s / network) are worth retrying;
-      // deterministic 4xx errors and our own ShelfErrors won't change on retry.
+      // A retry helps in exactly two cases: the failure was transient, or the
+      // token was superseded and a new one will be minted on the next attempt.
+      // Every other 4xx, and our own ShelfErrors, would fail identically.
       const canRetry =
-        attempt < MINT_MAX_ATTEMPTS && isAuthRetryableFetchError(cause);
+        attempt < MINT_MAX_ATTEMPTS &&
+        (isAuthRetryableFetchError(cause) || isSupersededTokenError(cause));
       if (canRetry) {
         await sleep(attempt * MINT_RETRY_BASE_MS);
         continue;
