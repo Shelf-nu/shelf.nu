@@ -14,8 +14,10 @@ import { releaseAssetsToAvailableUnlessCheckedOut } from "../asset/custody-statu
  * read "Available" while the kit still names a custodian — the system would
  * give two answers to "who has this?".
  *
- * Read inside the caller's transaction so the answer cannot change between the
- * check and the delete.
+ * Call it AFTER the release's own (kit-scoped-away) delete, inside the same
+ * transaction: the delete never touches kit-derived rows, so any such row this
+ * read sees — whether it predates the release or was committed concurrently by
+ * a kit assignment — aborts the whole transaction rather than being lost.
  *
  * @param tx - the active transaction the release runs in
  * @param assetIds - assets about to have their custody rows deleted
@@ -146,8 +148,6 @@ export async function releaseCustody({
        *
        * @see {@link file://./../asset/custody-status.server.ts}
        */
-      await assertNoKitDerivedCustody(tx, [assetId], organizationId);
-
       // `asset: { organizationId }` — `assetId` is request input, so the delete
       // must prove org ownership itself. Splitting the old org-scoped
       // `asset.update` (which carried the nested delete) left this statement
@@ -155,9 +155,16 @@ export async function releaseCustody({
       // only be undone by the `findUniqueOrThrow` below happening to throw. That
       // is incidental ordering, not a guard.
       // @see .claude/rules/org-scope-user-supplied-ids.md
+      // `kitCustodyId: null` — this release owns only operator-assigned rows.
+      // Kit-derived rows are the kit's to remove, and scoping them out of the
+      // delete makes that true even against a kit assignment committing
+      // concurrently: such a row survives the delete and the assert below
+      // rolls the whole release back.
       await tx.custody.deleteMany({
-        where: { assetId, asset: { organizationId } },
+        where: { assetId, asset: { organizationId }, kitCustodyId: null },
       });
+
+      await assertNoKitDerivedCustody(tx, [assetId], organizationId);
 
       await releaseAssetsToAvailableUnlessCheckedOut(
         tx,

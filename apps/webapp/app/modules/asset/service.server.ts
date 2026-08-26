@@ -6421,20 +6421,23 @@ export async function bulkCheckInAssets({
      * 2. Update status of all assets to AVAILABLE
      */
     await db.$transaction(async (tx) => {
-      // Kit-derived custody is owned by the kit; the kit release path is the
-      // only door out, or the kit and its members disagree about the custodian.
+      /** Deleting custodies over assets. `kitCustodyId: null` — this release
+       * owns only operator-assigned rows; kit-derived custody is the kit's to
+       * remove, and scoping it out of the delete holds even against a kit
+       * assignment committing concurrently: such a row survives the delete and
+       * the assert below rolls the whole release back. */
+      await tx.custody.deleteMany({
+        where: {
+          assetId: { in: assets.map((asset) => asset.id) },
+          kitCustodyId: null,
+        },
+      });
+
       await assertNoKitDerivedCustody(
         tx,
         assets.map((asset) => asset.id),
         organizationId
       );
-
-      /** Deleting custodies over assets */
-      await tx.custody.deleteMany({
-        where: {
-          assetId: { in: assets.map((asset) => asset.id) },
-        },
-      });
 
       /**
        * Updating status of assets to AVAILABLE.

@@ -133,7 +133,11 @@ describe("releaseCustody status write", () => {
     // incidental: `assetId` is request input, so this delete proves org
     // ownership rather than relying on a later read to roll it back.
     expect(db.custody.deleteMany).toHaveBeenCalledWith({
-      where: { assetId: "asset-1", asset: { organizationId: "org-1" } },
+      where: {
+        assetId: "asset-1",
+        asset: { organizationId: "org-1" },
+        kitCustodyId: null,
+      },
     });
   });
 });
@@ -143,9 +147,10 @@ describe("releaseCustody kit-derived custody guard", () => {
     vitest.clearAllMocks();
   });
 
-  it("refuses to release custody that a kit put on the asset", async () => {
-    // why: the guard reads custody rows inside the transaction; a row with
-    // kitCustodyId set is the kit's, and only the kit release removes it.
+  it("rolls the release back when a kit holds custody of the asset", async () => {
+    // why: the guard's post-delete read is the boundary under test — a row
+    // with kitCustodyId set is the kit's, whether it predates the release or
+    // was committed concurrently, and seeing one must abort the transaction.
     vitest
       .mocked(db.custody.findFirst)
       .mockResolvedValueOnce({ assetId: "asset-1" } as never);
@@ -159,10 +164,22 @@ describe("releaseCustody kit-derived custody guard", () => {
       })
     ).rejects.toThrow(/release the kit/i);
 
-    expect(db.custody.deleteMany).not.toHaveBeenCalled();
+    // The delete may run first, but only ever against operator rows...
+    expect(db.custody.deleteMany).toHaveBeenCalledWith({
+      where: {
+        assetId: "asset-1",
+        asset: { organizationId: "org-1" },
+        kitCustodyId: null,
+      },
+    });
+    // ...and the guard aborts before any status write can mark the asset
+    // AVAILABLE while the kit still names a custodian.
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
   });
 
   it("releases operator-assigned custody untouched by any kit", async () => {
+    // why: the guard reads through the same mocked findFirst; null models an
+    // asset whose custody rows are all operator-assigned.
     vitest.mocked(db.custody.findFirst).mockResolvedValue(null as never);
 
     await releaseCustody({
@@ -173,7 +190,11 @@ describe("releaseCustody kit-derived custody guard", () => {
     });
 
     expect(db.custody.deleteMany).toHaveBeenCalledWith({
-      where: { assetId: "asset-1", asset: { organizationId: "org-1" } },
+      where: {
+        assetId: "asset-1",
+        asset: { organizationId: "org-1" },
+        kitCustodyId: null,
+      },
     });
   });
 });
