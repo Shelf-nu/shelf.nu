@@ -47,8 +47,9 @@ const ResolveServerSchema = z.object({
  * Body: `{ domain: string }`.
  *
  * @param args - React Router action args carrying the incoming request.
- * @returns `{ baseUrl: string | null }`, where `null` means "use Shelf Cloud";
- *   405 when the method is not POST.
+ * @returns `{ baseUrl: string | null, disablePasswordLogin: boolean }`, where a
+ *   null `baseUrl` means no private server is registered for the domain and the
+ *   app must NOT switch; 405 when the method is not POST.
  */
 export async function action({ request }: ActionFunctionArgs) {
   if (getActionMethod(request) !== "POST") {

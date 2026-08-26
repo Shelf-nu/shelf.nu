@@ -143,7 +143,8 @@ function isRateLimitError(cause: unknown): boolean {
 function isSupersededTokenError(cause: unknown): boolean {
   if (!isAuthApiError(cause)) return false;
   if (errorCode(cause) === "otp_expired") return true;
-  // Releases before the error-code vocabulary answer with the message alone.
+  // Not every response carries a `code`; the message is the only signal when
+  // it does not.
   return /invalid or has expired/i.test(cause.message);
 }
 

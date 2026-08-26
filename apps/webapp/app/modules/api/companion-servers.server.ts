@@ -3,15 +3,15 @@
  *
  * Maps a customer domain to the Shelf instance its users belong to, so the
  * companion app can connect to the right server when a user asks it to. This
- * module
- * is the ONLY reader of `COMPANION_SERVERS` — when the registry moves to a
- * database table (per-entry expiry, revocation, paid entitlement), only this
+ * module is the ONLY reader of `COMPANION_SERVERS` — when the registry moves to
+ * a database table (per-entry expiry, revocation, paid entitlement), only this
  * file changes.
  *
- * Deliberately fail-open: a missing, malformed, or partially invalid registry
- * resolves to `null`, which callers treat as "use Shelf Cloud". This sits on
- * the login path for every companion user, so a bad env value must degrade to
- * the default rather than break sign-in.
+ * Deliberately forgiving: a missing, malformed, or partially invalid registry
+ * resolves to `null` — no private server is registered for that domain — rather
+ * than throwing. This sits on the connect path that every companion user can
+ * reach, so a bad env value must leave the app on the server it is already
+ * using rather than break the screen.
  *
  * An entry is either a bare URL string or an object carrying per-server
  * options:
@@ -140,13 +140,6 @@ function getRegistry(): Record<string, CompanionServerEntry> | null {
 }
 
 /**
- * Resolves an email domain to the base URL of its Shelf instance.
- *
- * @param domain - Email domain, e.g. `acme.edu`. Case- and whitespace-tolerant.
- * @returns The instance base URL without a trailing slash, or `null` when the
- *   domain is not registered — meaning the caller should use Shelf Cloud.
- */
-/**
  * Finds an entry by customer domain, or failing that by the instance's own
  * hostname.
  *
@@ -178,6 +171,15 @@ function findEntry(domain: string): CompanionServerEntry | null {
   return null;
 }
 
+/**
+ * Resolves a customer domain to the base URL of its Shelf instance.
+ *
+ * @param domain - The domain a customer knows themselves by, e.g. `acme.edu`,
+ *   or the hostname of their Shelf. Case- and whitespace-tolerant.
+ * @returns The instance base URL without a trailing slash, or `null` when the
+ *   domain is not registered — meaning there is no private server to connect
+ *   to, NOT that the caller should fall back to Shelf Cloud.
+ */
 export function resolveCompanionServer(domain: string): string | null {
   return findEntry(domain)?.baseUrl ?? null;
 }

@@ -1,9 +1,9 @@
 /**
  * Tests for the companion-app server registry resolver.
  *
- * The resolver is deliberately fail-open — a missing or malformed registry must
- * resolve to `null` ("use Shelf Cloud") rather than throw, because it sits on
- * the login path for every companion user, cloud ones included.
+ * The resolver is deliberately forgiving — a missing or malformed registry must
+ * resolve to `null` ("no private server for this domain") rather than throw,
+ * because it sits on the connect path every companion user can reach.
  *
  * @see ./companion-servers.server.ts
  */
