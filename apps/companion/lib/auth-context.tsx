@@ -47,16 +47,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const client = getSupabase();
 
+    // Restoring a session is asynchronous, and connecting to another server
+    // rebuilds the client while that read is still in flight. Whatever the
+    // OUTGOING client answers describes a server the app has already left, so
+    // it must not reach state: it would show the user as signed in to an
+    // instance that every subsequent request now bypasses. The re-run for the
+    // new server reports its own session and its own loading state.
+    let isCurrentServer = true;
+
     client.auth
       .getSession()
       .then(({ data: { session } }) => {
-        setSession(session);
+        if (isCurrentServer) setSession(session);
       })
       .catch((err) => {
         if (__DEV__) console.error("Failed to restore session:", err);
       })
       .finally(() => {
-        setIsLoading(false);
+        if (isCurrentServer) setIsLoading(false);
       });
 
     const {
@@ -65,7 +73,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isCurrentServer = false;
+      subscription.unsubscribe();
+    };
   }, [serverVersion]);
 
   const signIn = useCallback(async (email: string, password: string) => {
