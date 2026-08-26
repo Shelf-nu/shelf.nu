@@ -1,5 +1,6 @@
 import {
   COLLECT_BUSINESS_INTEL,
+  DISABLE_PASSWORD_LOGIN,
   DISABLE_SIGNUP,
   DISABLE_SSO,
   ENABLE_PREMIUM_FEATURES,
@@ -17,6 +18,7 @@ export const config: Config = {
   freeTrialDays: Number(FREE_TRIAL_DAYS || 7),
   disableSignup: DISABLE_SIGNUP || false,
   disableSSO: DISABLE_SSO || false,
+  disablePasswordLogin: DISABLE_PASSWORD_LOGIN || false,
   enableScim: ENABLE_SCIM || false,
 
   logoPath: {

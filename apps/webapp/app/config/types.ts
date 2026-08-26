@@ -45,6 +45,12 @@ export interface Config {
    * Disable SSO
    */
   disableSSO: boolean;
+  /**
+   * Hides and refuses email/password sign-in, leaving SSO as the only route in.
+   * Enforced on the web; advertised to the companion app, which authenticates
+   * against Supabase directly and therefore cannot be gated from here.
+   */
+  disablePasswordLogin: boolean;
 
   /**
    * Enable SCIM user provisioning (RFC 7643/7644).

@@ -15,7 +15,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/lib/auth-context";
-import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
+import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { signInViaWeb } from "@/lib/web-auth";
@@ -254,20 +254,6 @@ export default function LoginScreen() {
                 <Text style={styles.serverChipText}>
                   Connected to {server.name}
                 </Text>
-                <TouchableOpacity
-                  testID="disconnect-server-button"
-                  onPress={handleDisconnect}
-                  // The chip is deliberately small, so the label alone is a
-                  // ~13pt tap target — under both the 44pt HIG minimum and the
-                  // 24px WCAG 2.1 AA one. hitSlop buys the touch area back
-                  // without inflating the chip.
-                  hitSlop={hitSlop.lg}
-                  disabled={isSubmitting || isSsoSubmitting || isResetting}
-                  accessibilityLabel={`Disconnect from ${server.name} and return to Shelf Cloud`}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.serverChipAction}>Disconnect</Text>
-                </TouchableOpacity>
               </View>
             )}
           </View>
@@ -421,23 +407,39 @@ export default function LoginScreen() {
               </>
             )}
 
+            {/* One server action, and it is whichever the current state is
+                not: connect when on Shelf Cloud, disconnect when not. Changing
+                to a third server is disconnect-then-connect, which keeps the
+                choice explicit rather than offering a silent re-point. */}
             <TouchableOpacity
-              testID="connect-server-link"
+              testID={
+                server.isCloud
+                  ? "connect-server-link"
+                  : "disconnect-server-link"
+              }
               style={[
                 styles.connectLink,
                 (isSubmitting || isSsoSubmitting || isResetting) &&
                   styles.buttonDisabled,
               ]}
-              onPress={() => setIsConnectVisible(true)}
+              onPress={
+                server.isCloud
+                  ? () => setIsConnectVisible(true)
+                  : handleDisconnect
+              }
               disabled={isSubmitting || isSsoSubmitting || isResetting}
               activeOpacity={0.7}
-              accessibilityLabel="Connect to a private Shelf server"
+              accessibilityLabel={
+                server.isCloud
+                  ? "Connect to a private Shelf server"
+                  : `Disconnect from ${server.name} and return to Shelf Cloud`
+              }
               accessibilityRole="button"
             >
               <Text style={styles.connectLinkText}>
                 {server.isCloud
                   ? "Connect to a private server"
-                  : "Connect to a different server"}
+                  : `Disconnect from ${server.name}`}
               </Text>
             </TouchableOpacity>
           </View>
@@ -480,9 +482,6 @@ const useStyles = createStyles((colors, shadows) => ({
   // borderLight/gray700 is the pair the DRAFT status badge already uses, so it
   // is theme-aware and vetted for WCAG 2.1 AA contrast in light and dark.
   serverChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
     marginTop: spacing.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
@@ -493,11 +492,6 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     color: colors.gray700,
     fontWeight: "500",
-  },
-  serverChipAction: {
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-    color: colors.primary,
   },
   connectLink: {
     alignSelf: "center",

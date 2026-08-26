@@ -9,7 +9,7 @@
  * @see apps/webapp/app/routes/api+/mobile+/config.ts
  */
 import { createLoaderArgs } from "@mocks/remix";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // why: React Router v7's single-fetch `data()` returns a DataWithResponseInit,
 // not a Response. Mapping it to a real Response matches the rest of this suite.
@@ -41,12 +41,16 @@ vi.mock("~/utils/env", () => ({
   MIN_COMPANION_VERSION: "1.4.0",
 }));
 
-// why: `ssoEnabled` is derived from `config.disableSSO`, which reads the
-// DISABLE_SSO env var. Pinning it keeps the asserted payload deterministic
-// regardless of the local or CI environment.
-vi.mock("~/config/shelf.config", () => ({
-  config: { disableSSO: false },
+// why: `ssoEnabled` and `passwordLoginEnabled` are derived from config flags
+// that read DISABLE_SSO / DISABLE_PASSWORD_LOGIN. Pinning them keeps the
+// asserted payload deterministic regardless of the local or CI environment.
+// Mutable so a test can flip a flag and re-read the loader.
+const mockConfig = vi.hoisted(() => ({
+  disableSSO: false,
+  disablePasswordLogin: false,
 }));
+
+vi.mock("~/config/shelf.config", () => ({ config: mockConfig }));
 
 const { loader } = await import("~/routes/api+/mobile+/config");
 
@@ -91,5 +95,37 @@ describe("GET /api/mobile/config", () => {
       "supabaseAnonKey",
       "supabaseUrl",
     ]);
+  });
+});
+
+describe("GET /api/mobile/config — advertised sign-in methods", () => {
+  afterEach(() => {
+    mockConfig.disableSSO = false;
+    mockConfig.disablePasswordLogin = false;
+  });
+
+  it("advertises both methods by default", async () => {
+    const body = (await (await invoke()).json()) as Record<string, unknown>;
+    expect(body.ssoEnabled).toBe(true);
+    expect(body.passwordLoginEnabled).toBe(true);
+  });
+
+  it("withdraws password login when the instance disables it", async () => {
+    // The app hides its password fields on this. It is an affordance, not a
+    // gate — the app authenticates against Supabase directly, so this instance
+    // never sees the attempt and cannot refuse it.
+    mockConfig.disablePasswordLogin = true;
+
+    const body = (await (await invoke()).json()) as Record<string, unknown>;
+    expect(body.passwordLoginEnabled).toBe(false);
+    expect(body.ssoEnabled).toBe(true);
+  });
+
+  it("withdraws SSO when the instance disables it", async () => {
+    mockConfig.disableSSO = true;
+
+    const body = (await (await invoke()).json()) as Record<string, unknown>;
+    expect(body.ssoEnabled).toBe(false);
+    expect(body.passwordLoginEnabled).toBe(true);
   });
 });

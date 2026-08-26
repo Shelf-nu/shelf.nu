@@ -52,6 +52,7 @@ declare global {
       ENABLE_PREMIUM_FEATURES: string;
       DISABLE_SIGNUP: string;
       DISABLE_SSO: string;
+      DISABLE_PASSWORD_LOGIN: string;
       ENABLE_SCIM: string;
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
@@ -370,6 +371,23 @@ export const DISABLE_SIGNUP =
 
 export const DISABLE_SSO =
   getEnv("DISABLE_SSO", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+/**
+ * Turns off email/password sign-in for this instance, leaving SSO as the only
+ * way in. For an organisation that authenticates everyone through an IdP, a
+ * visible password form is a support burden and a second credential to manage.
+ *
+ * Enforced on the web, where this server performs the sign-in. NOT enforceable
+ * for the companion app, which authenticates against Supabase directly — the
+ * app is told through `/api/mobile/config` and hides its password fields, but
+ * that is an affordance. To make it absolute, disable the email provider in
+ * Supabase.
+ */
+export const DISABLE_PASSWORD_LOGIN =
+  getEnv("DISABLE_PASSWORD_LOGIN", {
     isSecret: false,
     isRequired: false,
   }) === "true" || false;

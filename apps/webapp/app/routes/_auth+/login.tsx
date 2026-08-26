@@ -50,13 +50,21 @@ import { validEmail } from "~/utils/misc";
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
-  const { disableSignup, disableSSO } = config;
+  const { disableSignup, disableSSO, disablePasswordLogin } = config;
 
   if (context.isAuthenticated) {
     return redirect("/assets");
   }
 
-  return data(payload({ title, subHeading, disableSignup, disableSSO }));
+  return data(
+    payload({
+      title,
+      subHeading,
+      disableSignup,
+      disableSSO,
+      disablePasswordLogin,
+    })
+  );
 }
 
 const LoginFormSchema = z.object({
@@ -116,6 +124,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
           );
         }
 
+        // Refused server-side, not merely hidden: the form is absent for an
+        // ordinary visitor, but the endpoint is still reachable directly.
+        if (config.disablePasswordLogin) {
+          throw new ShelfError({
+            cause: null,
+            title: "Password sign-in is disabled",
+            message:
+              "This Shelf instance uses single sign-on. Please sign in with SSO.",
+            label: "Auth",
+            status: 403,
+            shouldBeCaptured: false,
+          });
+        }
+
         const { email, password, redirectTo } = parseData(
           formData,
           LoginFormSchema,
@@ -168,7 +190,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function IndexLoginForm() {
-  const { disableSignup, disableSSO } = useLoaderData<typeof loader>();
+  const { disableSignup, disableSSO, disablePasswordLogin } =
+    useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
@@ -197,56 +220,67 @@ export default function IndexLoginForm() {
           password to login.
         </div>
       ) : null}
-      <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">
-        <div>
-          <Input
-            ref={emailInputRef}
-            data-test-id="email"
-            label="Email address"
-            placeholder="zaans@huisje.com"
-            required
-            name={zo.fields.email()}
-            type="email"
-            autoComplete="username"
+      {!disablePasswordLogin && (
+        <Form
+          ref={zo.ref}
+          method="post"
+          replace
+          className="flex flex-col gap-5"
+        >
+          <div>
+            <Input
+              ref={emailInputRef}
+              data-test-id="email"
+              label="Email address"
+              placeholder="zaans@huisje.com"
+              required
+              name={zo.fields.email()}
+              type="email"
+              autoComplete="username"
+              disabled={disabled}
+              inputClassName="w-full"
+              error={zo.errors.email()?.message || data?.error.message}
+            />
+          </div>
+          <PasswordInput
+            label="Password"
+            placeholder="**********"
+            data-test-id="password"
+            name={zo.fields.password()}
+            autoComplete="current-password"
             disabled={disabled}
             inputClassName="w-full"
-            error={zo.errors.email()?.message || data?.error.message}
+            error={zo.errors.password()?.message || data?.error.message}
           />
-        </div>
-        <PasswordInput
-          label="Password"
-          placeholder="**********"
-          data-test-id="password"
-          name={zo.fields.password()}
-          autoComplete="current-password"
-          disabled={disabled}
-          inputClassName="w-full"
-          error={zo.errors.password()?.message || data?.error.message}
-        />
-        <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />
-        <Button
-          className="text-center"
-          type="submit"
-          data-test-id="login"
-          disabled={disabled}
-        >
-          Log In
-        </Button>
-        <div className="flex flex-col items-center justify-center">
-          <div className="text-center text-sm text-gray-500">
-            Don't remember your password?{" "}
-            <Button
-              variant="link"
-              to={{
-                pathname: "/forgot-password",
-                search: searchParams.toString(),
-              }}
-            >
-              Reset password
-            </Button>
+          <input
+            type="hidden"
+            name={zo.fields.redirectTo()}
+            value={redirectTo}
+          />
+          <Button
+            className="text-center"
+            type="submit"
+            data-test-id="login"
+            disabled={disabled}
+          >
+            Log In
+          </Button>
+          <div className="flex flex-col items-center justify-center">
+            <div className="text-center text-sm text-gray-500">
+              Don't remember your password?{" "}
+              <Button
+                variant="link"
+                to={{
+                  pathname: "/forgot-password",
+                  search: searchParams.toString(),
+                }}
+              >
+                Reset password
+              </Button>
+            </div>
           </div>
-        </div>
-      </Form>
+        </Form>
+      )}
       {!disableSSO && (
         <div className="mt-6 text-center">
           <Button variant="link" to="/sso-login">
@@ -256,22 +290,28 @@ export default function IndexLoginForm() {
       )}
 
       <div className="mt-6">
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-300" />
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="bg-white px-2 text-gray-500">
-              Or use a{" "}
-              <strong title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email.">
-                One Time Password
-              </strong>
-            </span>
-          </div>
-        </div>
-        <div className="mt-6">
-          <ContinueWithEmailForm mode="login" />
-        </div>
+        {/* A one-time password is still an email credential, so it goes with
+            the password form: an SSO-only instance means SSO only. */}
+        {!disablePasswordLogin && (
+          <>
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-300" />
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="bg-white px-2 text-gray-500">
+                  Or use a{" "}
+                  <strong title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email.">
+                    One Time Password
+                  </strong>
+                </span>
+              </div>
+            </div>
+            <div className="mt-6">
+              <ContinueWithEmailForm mode="login" />
+            </div>
+          </>
+        )}
         {disableSignup ? null : (
           <div className="mt-6 text-center text-sm text-gray-500">
             Don't have an account?{" "}
