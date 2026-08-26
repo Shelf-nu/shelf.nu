@@ -12,6 +12,7 @@ import {
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 /**
  * GET /api/mobile/barcode/:value?orgId=<orgId>
@@ -76,9 +77,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (!foundBarcode) {
       const memberships = await db.userOrganization.findMany({
         where: { userId: user.id, organizationId: { not: organizationId } },
-        select: { organizationId: true },
+        // The owning workspace must hold the barcode capability itself —
+        // resolving through a sibling whose add-on lapsed would bypass its
+        // gate. Same canonical rule the /me serializer applies.
+        select: {
+          organizationId: true,
+          organization: { select: { barcodesEnabled: true } },
+        },
       });
+      const matches: { organizationId: string; barcode: typeof barcode }[] = [];
       for (const membership of memberships) {
+        if (!canUseBarcodes(membership.organization)) continue;
         const candidate = await getBarcodeByValue({
           value,
           organizationId: membership.organizationId,
@@ -88,10 +97,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           },
         });
         if (candidate) {
-          foundOrganizationId = membership.organizationId;
-          foundBarcode = candidate;
-          break;
+          matches.push({
+            organizationId: membership.organizationId,
+            barcode: candidate,
+          });
         }
+      }
+      // Barcode uniqueness is per-workspace, so the same value can exist in
+      // several sibling workspaces. Only a UNIQUE match may drive the jump —
+      // picking one arbitrarily would open the wrong asset.
+      if (matches.length === 1) {
+        foundOrganizationId = matches[0].organizationId;
+        foundBarcode = matches[0].barcode;
+      } else if (matches.length > 1) {
+        return data(
+          {
+            error: {
+              message:
+                "This barcode exists in more than one of your workspaces. Switch to the right workspace to scan it there.",
+            },
+          },
+          { status: 404 }
+        );
       }
     }
 
