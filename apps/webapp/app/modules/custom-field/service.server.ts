@@ -18,6 +18,7 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import type { Column } from "../asset-index-settings/helpers";
+import { syncCustomFieldColumn } from "../asset-index-settings/helpers";
 import {
   removeCustomFieldFromAssetIndexSettings,
   updateAssetIndexSettingsAfterCfUpdate,
@@ -71,17 +72,16 @@ export async function createCustomField({
     if (customField.active) {
       await Promise.all(
         assetIndexSettingsEntries.map(async (entry) => {
-          const columns = Array.from(entry.columns as Prisma.JsonArray);
-          const prevHighestPosition = (columns as Column[]).reduce(
-            (acc, col) => (col.position > acc ? col.position : acc),
-            0
+          const columns = syncCustomFieldColumn(
+            Array.from(entry.columns as Prisma.JsonArray) as Column[],
+            {
+              // A field being created has no former name and no column yet.
+              oldName: customField.name,
+              newName: customField.name,
+              active: true,
+              cfType: customField.type,
+            }
           );
-
-          columns.push({
-            name: `cf_${customField.name}`,
-            visible: true,
-            position: prevHighestPosition + 1,
-          });
 
           await db.assetIndexSettings.update({
             where: { id: entry.id, organizationId },
@@ -676,37 +676,19 @@ export async function bulkActivateOrDeactivateCustomFields({
 
     /** Update the asset index settings for each entry */
     const updates = settings.map((entry) => {
-      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
-
-      customFields.forEach((field) => {
-        const oldField = field;
-        const newField = { ...field, active };
-        const cfIndex = columns.findIndex(
-          (col) => col?.name === `cf_${oldField.name}`
-        );
-        if (newField.active) {
-          /** Field is missing so we add it */
-          if (cfIndex === -1) {
-            const prevHighestPosition = columns.reduce(
-              (acc, col) => (col.position > acc ? col.position : acc),
-              0
-            );
-            columns.push({
-              name: `cf_${newField.name}`,
-              visible: true,
-              position: prevHighestPosition + 1,
-            });
-          } else {
-            columns[cfIndex] = {
-              name: `cf_${newField.name}`,
-              visible: columns[cfIndex].visible,
-              position: columns[cfIndex].position,
-            };
-          }
-        } else {
-          columns.splice(cfIndex, 1);
-        }
-      });
+      // Each field folds into the running column list, so a batch touching
+      // several fields on one row lands as one write.
+      const columns = customFields.reduce(
+        (acc, field) =>
+          syncCustomFieldColumn(acc, {
+            // The batch only flips `active`; names are unchanged by it.
+            oldName: field.name,
+            newName: field.name,
+            active,
+            cfType: field.type,
+          }),
+        Array.from(entry.columns as Prisma.JsonArray) as Column[]
+      );
 
       return db.assetIndexSettings.update({
         where: { id: entry.id, organizationId },
