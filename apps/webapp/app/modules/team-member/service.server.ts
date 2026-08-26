@@ -6,7 +6,11 @@ import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import type { ErrorLabel } from "~/utils/error";
-import { isNotFoundError, ShelfError } from "~/utils/error";
+import {
+  isNotFoundError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
@@ -868,6 +872,93 @@ export async function getTeamMember({
       // Suppress only true Prisma not-found (P2025); let DB / connectivity
       // failures bubble up to Sentry.
       shouldBeCaptured: !isNotFoundError(cause),
+    });
+  }
+}
+
+/**
+ * Soft-deletes one non-registered member, refusing while they still hold
+ * custody over any asset.
+ *
+ * The custody rule is not advisory. Deleting an NRM only sets `deletedAt`, so
+ * every `Custody` row keeps pointing at the member: the assets go on naming a
+ * custodian who is gone from the NRM index and from every custodian picker,
+ * and nothing short of opening assets one at a time can find what they hold.
+ *
+ * Both halves of the `where` are load-bearing, and both belong in the write
+ * rather than in a preceding read — the list page the caller is acting from was
+ * rendered earlier, and a member can be given custody in between:
+ *
+ * - `custodies: { none: {} }` enforces the rule at the moment of the write.
+ * - the NRM scope keeps the delete on a row this index actually lists. A bare
+ *   `{ id, organizationId }` also matches the TeamMember backing a registered
+ *   user, or one holding a pending invite, neither of which is deletable here.
+ *
+ * A miss is therefore ordinary, not exceptional: it is reported as a client
+ * error, with a second read only to say which of the two reasons applied.
+ *
+ * @param params.nrmId - The member to delete
+ * @param params.organizationId - The active organization
+ * @throws {ShelfError} 400 if the member still holds custody, 404 if the id is
+ *   not a deletable NRM in this organization, 500 if the write fails
+ */
+export async function deleteNRM({
+  nrmId,
+  organizationId,
+}: {
+  nrmId: TeamMember["id"];
+  organizationId: TeamMember["organizationId"];
+}) {
+  try {
+    const scope = getNrmSelectionWhere({ nrmIds: [nrmId], organizationId });
+
+    const { count } = await db.teamMember.updateMany({
+      where: { ...scope, custodies: { none: {} } },
+      data: { deletedAt: new Date() },
+    });
+
+    if (count > 0) {
+      return;
+    }
+
+    // Nothing matched. Read again purely to tell the two reasons apart so the
+    // caller gets an actionable message; the write above is what enforced.
+    const member = await db.teamMember.findFirst({
+      where: scope,
+      select: { _count: { select: { custodies: true } } },
+    });
+
+    if (member) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "This team member has custody over some assets. Please release custody or check-in those assets before deleting the user.",
+        additionalData: { nrmId, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    throw new ShelfError({
+      cause: null,
+      message:
+        "This team member could not be found in your workspace, or is not one that can be deleted here.",
+      additionalData: { nrmId, organizationId },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  } catch (cause) {
+    // The refusals above are deliberate 4xx answers; re-wrapping them would
+    // replace a message written for the user with "try again later".
+    rethrowIfClientError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: "Failed to delete team member",
+      additionalData: { nrmId, organizationId },
+      label,
     });
   }
 }

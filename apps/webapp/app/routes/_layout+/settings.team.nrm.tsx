@@ -18,9 +18,9 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { ImportNrmButton } from "~/components/workspace/import-nrm-button";
 import { TeamMembersActionsDropdown } from "~/components/workspace/nrm-actions-dropdown";
-import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getPaginatedAndFilterableSettingTeamMembers } from "~/modules/settings/service.server";
+import { deleteNRM } from "~/modules/team-member/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -132,24 +132,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           }
         );
 
-        await db.teamMember
-          .update({
-            where: {
-              id: teamMemberId,
-              organizationId,
-            },
-            data: {
-              deletedAt: new Date(),
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to delete team member",
-              additionalData: { teamMemberId, userId, organizationId },
-              label: "Team",
-            });
-          });
+        await deleteNRM({ nrmId: teamMemberId, organizationId });
 
         return redirect(`/settings/team/nrm`);
       }
