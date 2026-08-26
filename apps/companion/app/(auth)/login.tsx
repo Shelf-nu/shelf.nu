@@ -15,7 +15,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/lib/auth-context";
-import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { signInViaWeb } from "@/lib/web-auth";
@@ -257,6 +257,11 @@ export default function LoginScreen() {
                 <TouchableOpacity
                   testID="disconnect-server-button"
                   onPress={handleDisconnect}
+                  // The chip is deliberately small, so the label alone is a
+                  // ~13pt tap target — under both the 44pt HIG minimum and the
+                  // 24px WCAG 2.1 AA one. hitSlop buys the touch area back
+                  // without inflating the chip.
+                  hitSlop={hitSlop.lg}
                   disabled={isSubmitting || isSsoSubmitting || isResetting}
                   accessibilityLabel={`Disconnect from ${server.name} and return to Shelf Cloud`}
                   accessibilityRole="button"
