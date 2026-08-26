@@ -1044,8 +1044,11 @@ export async function bulkDeleteNRMs({
       throw new ShelfError({
         cause: null,
         message:
-          "Some team members has custody over some assets. Please release custody or check-in those assets before deleting the user.",
+          "Some team members have custody over some assets or kits. Please release custody or check-in those items before deleting the user.",
+        additionalData: { organizationId },
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -1069,14 +1072,14 @@ export async function bulkDeleteNRMs({
       data: { deletedAt: new Date() },
     });
   } catch (cause) {
-    const message =
-      cause instanceof ShelfError
-        ? cause.message
-        : "Something went wrong while bulk deleting non-registered members";
+    // The custody refusal above is a deliberate 4xx answer; re-wrapping it
+    // would turn a rule the user can act on into a server fault.
+    rethrowIfClientError(cause);
 
     throw new ShelfError({
       cause,
-      message,
+      message:
+        "Something went wrong while bulk deleting non-registered members",
       label,
     });
   }
