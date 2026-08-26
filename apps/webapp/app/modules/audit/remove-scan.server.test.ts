@@ -42,14 +42,12 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 // why: the note builder reaches into user/asset tables that are not part of
-// this contract; the assertion is only that a removal note is written inside
-// the same transaction.
-vi.mock("~/modules/audit/helpers.server", async () => {
-  const actual = await vi.importActual<object>(
-    "~/modules/audit/helpers.server"
-  );
-  return { ...actual, createAssetScanRemovedNote: vi.fn() };
-});
+// this contract, and loading the real helpers module pulls a dependency graph
+// this suite does not need. Only the export removeAuditScan touches is stubbed;
+// nothing else from the module runs here.
+vi.mock("~/modules/audit/helpers.server", () => ({
+  createAssetScanRemovedNote: vi.fn(),
+}));
 
 const session = {
   status: "ACTIVE",
@@ -140,6 +138,16 @@ describe("removeAuditScan", () => {
     expect(result.removed).toBe(false);
     expect(db.auditScan.delete).not.toHaveBeenCalled();
     expect(db.auditSession.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses removal from an audit that is no longer live", async () => {
+    vi.mocked(db.auditSession.findFirst).mockResolvedValue({
+      ...session,
+      status: "COMPLETED",
+    } as never);
+
+    await expect(removeAuditScan(ARGS)).rejects.toThrow(/no longer live/i);
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it("404s for a session outside the caller's organization", async () => {

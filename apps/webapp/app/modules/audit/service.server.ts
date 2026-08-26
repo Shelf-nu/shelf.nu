@@ -1704,8 +1704,10 @@ export interface RemoveAuditScanResult {
  * so the session's numbers can never drift from its rows, and a system note
  * records the removal.
  *
- * Status gating matches {@link recordAuditScan}: archived audits refuse all
- * mutation. Callers own authentication and assignee gating.
+ * Only a live audit (PENDING or ACTIVE) accepts removal: a COMPLETED or
+ * CANCELLED audit is a finished record whose numbers have been reported, and a
+ * removal would rewrite them after the fact. Callers own authentication and
+ * assignee gating.
  *
  * @param input - the scan to remove, org-proven by the session fetch
  * @returns whether a scan was removed, plus the recalculated counts
@@ -1737,7 +1739,17 @@ export async function removeAuditScan(
       });
     }
 
-    assertAuditNotArchived(session.status, { auditSessionId, organizationId });
+    if (session.status !== "PENDING" && session.status !== "ACTIVE") {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "This audit is no longer live, so its scans cannot be changed.",
+        additionalData: { auditSessionId, status: session.status },
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
 
     return await db.$transaction(async (tx) => {
       const existingScan = await tx.auditScan.findFirst({
@@ -1818,12 +1830,12 @@ export async function removeAuditScan(
       };
     });
   } catch (cause) {
+    // ShelfErrors carry their own status and message; rethrow untouched so a
+    // 400/404 reaches the caller as itself rather than as a generic 500.
+    if (cause instanceof ShelfError) throw cause;
     throw new ShelfError({
       cause,
-      message:
-        cause instanceof ShelfError
-          ? cause.message
-          : "Failed to remove the scan",
+      message: "Failed to remove the scan",
       additionalData: { auditSessionId, assetId, organizationId },
       label,
     });

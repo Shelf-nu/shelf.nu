@@ -11,6 +11,7 @@ import {
   removeAuditScan,
   requireAuditAssignee,
 } from "~/modules/audit/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -41,10 +42,14 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { canUseAudits, role } = await getMobileUserContext(
+    const { canUseAudits, roles } = await getMobileUserContext(
       user.id,
       organizationId
     );
+    // A membership can carry several roles in any order; gate on the most
+    // privileged one, or an actual admin ordered [SELF_SERVICE, ADMIN] would
+    // be treated as restricted.
+    const role = resolveMostPrivilegedRole(roles);
     if (!canUseAudits) {
       return data(
         {
