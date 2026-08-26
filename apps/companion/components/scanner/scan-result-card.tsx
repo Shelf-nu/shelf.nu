@@ -21,7 +21,7 @@ type ScanResultAction = {
 };
 
 export type ScanResult = {
-  type: "success" | "error" | "not_found";
+  type: "success" | "error" | "not_found" | "duplicate";
   title: string;
   message: string;
   /** Optional action button (e.g., "Link in Browser" for unlinked QR codes) */
@@ -32,6 +32,12 @@ export type ScanResult = {
    * Only meaningful when `action` is also set.
    */
   secondaryAction?: ScanResultAction;
+  /**
+   * Optional third action, rendered last (e.g. the unlinked-QR card keeps a
+   * "Link in Browser" exit under Create/Link for what the app cannot link
+   * natively yet, like kits). Only meaningful when `secondaryAction` is set.
+   */
+  tertiaryAction?: ScanResultAction;
 };
 
 type ScanResultCardProps = {
@@ -43,6 +49,9 @@ const ICON_MAP: Record<ScanResult["type"], IoniconName> = {
   success: "checkmark-circle",
   error: "alert-circle",
   not_found: "help-circle",
+  // A re-scan is routine, not a failure — copy icon, amber card (matching
+  // the audit scanner's duplicate treatment).
+  duplicate: "copy",
 };
 
 /**
@@ -60,6 +69,7 @@ export function ScanResultCard({ result, onDismiss }: ScanResultCardProps) {
         result.type === "success" && styles.resultCardSuccess,
         result.type === "error" && styles.resultCardError,
         result.type === "not_found" && styles.resultCardWarning,
+        result.type === "duplicate" && styles.resultCardDuplicate,
       ]}
     >
       <TouchableOpacity
@@ -118,6 +128,26 @@ export function ScanResultCard({ result, onDismiss }: ScanResultCardProps) {
           <Text style={styles.actionLabel}>{result.secondaryAction.label}</Text>
         </TouchableOpacity>
       )}
+
+      {result.tertiaryAction && (
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={result.tertiaryAction.onPress}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={result.tertiaryAction.label}
+        >
+          {result.tertiaryAction.icon && (
+            <Ionicons
+              name={result.tertiaryAction.icon}
+              size={16}
+              color="#fff"
+              style={styles.actionIcon}
+            />
+          )}
+          <Text style={styles.actionLabel}>{result.tertiaryAction.label}</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -145,6 +175,10 @@ const useStyles = createStyles(() => ({
   },
   resultCardWarning: {
     backgroundColor: "rgba(239,104,32,0.9)",
+  },
+  // Amber, matching the audit scanner's duplicate frame (#FFC107).
+  resultCardDuplicate: {
+    backgroundColor: "rgba(255,193,7,0.92)",
   },
   resultTextContainer: {
     flex: 1,

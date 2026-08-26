@@ -186,7 +186,7 @@ function ScannerContent() {
     bookingAction?: string;
   }>();
   const isFocused = useIsFocused();
-  const { currentOrg } = useOrg();
+  const { currentOrg, organizations, setCurrentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
   const [permission, requestPermission] = useCameraPermissions();
@@ -387,9 +387,13 @@ function ScannerContent() {
   const bookingBlockers = useMemo<BlockerGroup[]>(
     () =>
       isBookingAddMode && bookingCtx
-        ? computeBlockers("booking_add", bookingCheckinItems, bookingCtx)
+        ? computeBlockers(
+            isBookingFulfilMode ? "booking_fulfil" : "booking_add",
+            bookingCheckinItems,
+            bookingCtx
+          )
         : [],
-    [isBookingAddMode, bookingCtx, bookingCheckinItems]
+    [isBookingAddMode, isBookingFulfilMode, bookingCtx, bookingCheckinItems]
   );
 
   const resolveBookingBlocker = useCallback((group: BlockerGroup) => {
@@ -709,10 +713,10 @@ function ScannerContent() {
             isBatchAction(action) &&
             scannedItems.some((item) => item.qrId === qrLookupId)
           ) {
-            flashFrame("error");
+            flashFrame("duplicate");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             setScanResult({
-              type: "error",
+              type: "duplicate",
               title: "Already Scanned",
               message: "This item is already in your scan list.",
             });
@@ -880,15 +884,42 @@ function ScannerContent() {
 
         // ── Shared processing (QR and barcode paths converge here) ──
 
-        // Cross-org check
+        // Cross-org check. The resolver only returns a payload for codes in
+        // workspaces the user belongs to (foreign codes 403 server-side), so
+        // the owning workspace is in `organizations` and the card can offer
+        // the jump instead of describing it.
         if (currentOrg && codeOrgId && codeOrgId !== currentOrg.id) {
+          const ownerOrg = organizations.find((org) => org.id === codeOrgId);
+          const itemName = asset?.title ?? kit?.name ?? null;
+          const targetHref = asset
+            ? (`/(tabs)/assets/${asset.id}` as const)
+            : kit
+            ? (`/(tabs)/assets/kits/${kit.id}` as const)
+            : null;
           flashFrame("error");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           setScanResult({
             type: "error",
-            title: "Different Workspace",
-            message:
-              "This asset belongs to a different workspace. Switch workspaces to view it.",
+            title: itemName ?? "Different Workspace",
+            message: ownerOrg
+              ? `This ${asset ? "asset" : kit ? "kit" : "code"} lives in ${
+                  ownerOrg.name
+                }.`
+              : "This code belongs to a different workspace.",
+            action:
+              ownerOrg && targetHref
+                ? {
+                    label: "Switch & view",
+                    icon: "swap-horizontal",
+                    onPress: () => {
+                      setCurrentOrg(ownerOrg);
+                      setScanResult(null);
+                      // Anchored nav so "back" lands on the list, not the
+                      // scanner (see pushIntoTab).
+                      pushIntoTab("/(tabs)/assets", targetHref);
+                    },
+                  }
+                : undefined,
           });
           finalizeScan();
           return;
@@ -998,17 +1029,34 @@ function ScannerContent() {
 
           // BOOKING-ADD mode: dedupe by kit id, add to the booking list
           if (isBookingAddMode) {
-            if (
-              bookingCheckinItems.some(
-                (item) => item.type === "kit" && item.targetId === kit!.id
-              )
-            ) {
+            // Fulfil matches scans against the booking's model lines, and
+            // kits have no model line — a kit scan can never fulfil
+            // anything, so saying so beats a green card that goes nowhere.
+            if (isBookingFulfilMode) {
               flashFrame("error");
               Haptics.notificationAsync(
                 Haptics.NotificationFeedbackType.Warning
               );
               setScanResult({
                 type: "error",
+                title: kit.name,
+                message:
+                  "Kits aren't matched when fulfilling reservations. Scan the kit's individual assets.",
+              });
+              finalizeScan();
+              return;
+            }
+            if (
+              bookingCheckinItems.some(
+                (item) => item.type === "kit" && item.targetId === kit!.id
+              )
+            ) {
+              flashFrame("duplicate");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({
+                type: "duplicate",
                 title: "Already Scanned",
                 message: "This kit is already in your list.",
               });
@@ -1083,10 +1131,10 @@ function ScannerContent() {
               (item) => item.type === "kit" && item.targetId === kit!.id
             )
           ) {
-            flashFrame("error");
+            flashFrame("duplicate");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             setScanResult({
-              type: "error",
+              type: "duplicate",
               title: "Already Scanned",
               message: "This kit is already in your scan list.",
             });
@@ -1140,6 +1188,7 @@ function ScannerContent() {
           };
           let unlinkedQrAction: UnlinkedQrAction | undefined;
           let unlinkedQrSecondaryAction: UnlinkedQrAction | undefined;
+          let unlinkedQrTertiaryAction: UnlinkedQrAction | undefined;
 
           const canCreateAsset = userHasPermission({
             roles: currentOrg?.roles,
@@ -1200,8 +1249,23 @@ function ScannerContent() {
                   },
                 }
               : undefined;
-            unlinkedQrAction = createAction ?? linkAction;
-            unlinkedQrSecondaryAction = createAction ? linkAction : undefined;
+            // The web bridge stays on the card even when the in-app actions
+            // are available: linking this QR to a KIT has no native picker
+            // yet, so the browser is the only exit for a kit label.
+            const bridgeAction: UnlinkedQrAction = {
+              label: "Link in Browser",
+              icon: "open-outline",
+              onPress: () => {
+                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                dismissResult();
+              },
+            };
+            const offered = [createAction, linkAction, bridgeAction].filter(
+              (a): a is UnlinkedQrAction => a !== undefined
+            );
+            unlinkedQrAction = offered[0];
+            unlinkedQrSecondaryAction = offered[1];
+            unlinkedQrTertiaryAction = offered[2];
           } else if (qrId) {
             // Unclaimed (for roles without the native claim flow) or claimed
             // by this org while the caller can't act — bridge to web
@@ -1222,11 +1286,12 @@ function ScannerContent() {
               ? isKitLinked
                 ? "This QR code is linked to a kit, not an asset. Open the web app to view the kit."
                 : canActOnUnlinked
-                ? "This QR code is not linked to any asset. Create a new asset or link an existing one."
+                ? "This QR code is not linked to any asset. Create a new asset, link an existing one, or link it to a kit in the browser."
                 : "This QR code is not linked to any asset. Open the web app to link it."
               : "This code exists but is not linked to any asset.",
             action: unlinkedQrAction,
             secondaryAction: unlinkedQrSecondaryAction,
+            tertiaryAction: unlinkedQrTertiaryAction,
           });
           finalizeScan();
           return;
@@ -1236,10 +1301,10 @@ function ScannerContent() {
         if (isBookingMode) {
           // Check duplicate
           if (bookingCheckinItems.some((item) => item.targetId === asset.id)) {
-            flashFrame("error");
+            flashFrame("duplicate");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             setScanResult({
-              type: "error",
+              type: "duplicate",
               title: "Already Scanned",
               message: isBookingAddMode
                 ? "This asset is already in your list."
@@ -1392,10 +1457,10 @@ function ScannerContent() {
             (item) => item.type === "asset" && item.targetId === asset!.id
           )
         ) {
-          flashFrame("error");
+          flashFrame("duplicate");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           setScanResult({
-            type: "error",
+            type: "duplicate",
             title: "Already Scanned",
             message: "This asset is already in your scan list.",
           });

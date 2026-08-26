@@ -503,6 +503,7 @@ export default function AssetDetailScreen() {
             canUpdate={canUpdateAsset}
             canDelete={canDeleteAsset}
             canCustody={canCustody}
+            isSelfService={isSelfService}
             isQtyTracked={isQtyTracked}
             custodyAvailable={isQtyTracked ? assignMax : undefined}
           />

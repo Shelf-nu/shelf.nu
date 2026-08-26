@@ -30,7 +30,8 @@ export type BatchScanAction =
   | "assign_custody"
   | "release_custody"
   | "update_location"
-  | "booking_add";
+  | "booking_add"
+  | "booking_fulfil";
 
 /** The minimal item shape blocker rules need (assets and kits). */
 export type BlockableItem = {
@@ -185,7 +186,10 @@ export function computeBlockers(
       (n) =>
         `${countNoun(n, "kit")} not in custody, so there is nothing to release.`
     );
-  } else if (action === "booking_add" && bookingCtx) {
+  } else if (
+    (action === "booking_add" || action === "booking_fulfil") &&
+    bookingCtx
+  ) {
     // Mirrors the web add-assets-to-booking drawer exactly — including that
     // checked-out items only block when the booking itself is checked out
     // (ONGOING/OVERDUE), and that there is no kit-already-in-booking rule.
@@ -198,15 +202,21 @@ export function computeBlockers(
       assets.filter((i) => bookingCtx.bookedAssetIds.has(i.targetId)),
       (n) => `${countNoun(n, "asset")} already in this booking.`
     );
-    push(
-      "asset-part-of-kit",
-      assets.filter((i) => i.kitId !== null),
-      (n) =>
-        `${countNoun(
-          n,
-          "asset"
-        )} part of a kit. Scan the kit to add it as a whole.`
-    );
+    // Fulfil matches CONCRETE units against the booking's model lines, so an
+    // asset that lives in a kit is a perfectly good scan there — the
+    // scan-the-kit-instead rule applies only to plain adds (web parity: the
+    // fulfil drawer has no kit-membership rule at all).
+    if (action === "booking_add") {
+      push(
+        "asset-part-of-kit",
+        assets.filter((i) => i.kitId !== null),
+        (n) =>
+          `${countNoun(
+            n,
+            "asset"
+          )} part of a kit. Scan the kit to add it as a whole.`
+      );
+    }
     push(
       "asset-not-bookable",
       assets.filter((i) => i.availableToBook === false),

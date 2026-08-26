@@ -66,7 +66,36 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       },
     });
 
-    if (!barcode) {
+    // Not in the current workspace: try the user's OTHER memberships, the way
+    // QR resolution does. A barcode from a sibling workspace must say which
+    // workspace owns it (so the app can offer the jump), not claim the code
+    // does not exist. Codes outside every membership still 404 below — the
+    // response must not reveal other tenants' barcodes.
+    let foundOrganizationId = organizationId;
+    let foundBarcode = barcode;
+    if (!foundBarcode) {
+      const memberships = await db.userOrganization.findMany({
+        where: { userId: user.id, organizationId: { not: organizationId } },
+        select: { organizationId: true },
+      });
+      for (const membership of memberships) {
+        const candidate = await getBarcodeByValue({
+          value,
+          organizationId: membership.organizationId,
+          include: {
+            asset: { select: MOBILE_ASSET_SELECT },
+            kit: { select: MOBILE_KIT_SELECT },
+          },
+        });
+        if (candidate) {
+          foundOrganizationId = membership.organizationId;
+          foundBarcode = candidate;
+          break;
+        }
+      }
+    }
+
+    if (!foundBarcode) {
       return data(
         {
           error: {
@@ -77,7 +106,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    if (!barcode.assetId && !barcode.kitId) {
+    if (!foundBarcode.assetId && !foundBarcode.kitId) {
       return data(
         {
           error: {
@@ -90,20 +119,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     return data({
       barcode: {
-        id: barcode.id,
-        value: barcode.value,
-        type: barcode.type,
-        assetId: barcode.assetId,
-        kitId: barcode.kitId,
-        organizationId,
+        id: foundBarcode.id,
+        value: foundBarcode.value,
+        type: foundBarcode.type,
+        assetId: foundBarcode.assetId,
+        kitId: foundBarcode.kitId,
+        // The OWNING workspace — not necessarily the requesting one. The
+        // scanner compares this against its current workspace to drive the
+        // switch-and-view card.
+        organizationId: foundOrganizationId,
         // Flatten the Phase-4a/4b pivot rows (assetKits/assetLocations/custody)
         // back into the legacy flat shape the in-App-Store companion expects.
         // Mirrors qr.$qrId.ts. See MOBILE_ASSET_SELECT for the why.
-        asset: barcode.asset ? shapeMobileAssetResponse(barcode.asset) : null,
+        asset: foundBarcode.asset
+          ? shapeMobileAssetResponse(foundBarcode.asset)
+          : null,
         // Kit-linked barcodes return the kit so the scanner can batch-operate
         // on it (previously fetched but dropped from the response).
         // shapeMobileKitResponse handles null pass-through.
-        kit: shapeMobileKitResponse(barcode.kit ?? null),
+        kit: shapeMobileKitResponse(foundBarcode.kit ?? null),
       },
     });
   } catch (cause) {

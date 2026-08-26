@@ -5,7 +5,7 @@ const FRAME_SIZE = 240;
 
 type ScanFrameProps = {
   scanLineAnim: Animated.Value;
-  frameHighlight: "success" | "error" | null;
+  frameHighlight: "success" | "error" | "duplicate" | null;
   showScanLine: boolean;
 };
 
@@ -23,6 +23,9 @@ export function ScanFrame({
   const highlightColor = frameHighlight
     ? frameHighlight === "success"
       ? "#4CAF50"
+      : frameHighlight === "duplicate"
+      ? // Amber: a re-scan is routine, not a failure (audit-scanner parity).
+        "#FFC107"
       : "#F04438"
     : undefined;
 
