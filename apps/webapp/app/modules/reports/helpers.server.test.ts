@@ -390,3 +390,52 @@ describe("bookingComplianceReport — trend axis labels (timezone)", () => {
     expect(labels).toEqual(["Thu 16", "Fri 17"]);
   });
 });
+
+describe("bookingComplianceReport — rewritten `to` (overdue check-in)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.booking.count).mockResolvedValue(0 as any);
+    vi.mocked(db.$queryRaw).mockResolvedValue([] as any);
+  });
+
+  it("counts a late return checked in from OVERDUE as late (check-in rewrote `to`)", async () => {
+    // Checking in an OVERDUE booking rewrites `to` to the check-in moment and
+    // preserves the planned end in `originalTo`. The hero must measure such
+    // bookings against `originalTo`, or every resolved late return reads
+    // on-time and the rate inflates toward 100%.
+    const plannedEnd = new Date("2026-04-15T12:00:00Z");
+    const returnMoment = new Date("2026-04-18T12:00:00Z"); // 3 days late
+
+    const rewrittenBooking = {
+      id: "booking-rewritten",
+      name: "Late Return",
+      status: "COMPLETE",
+      from: new Date("2026-04-14T12:00:00Z"),
+      to: returnMoment,
+      originalTo: plannedEnd,
+      updatedAt: returnMoment,
+      custodianUser: null,
+      custodianTeamMember: null,
+      custodianUserId: null,
+      custodianTeamMemberId: null,
+      _count: { assets: 1 },
+    };
+
+    vi.mocked(db.booking.findMany).mockResolvedValue([rewrittenBooking] as any);
+
+    // Canonical check-in event at the rewritten `to` — exactly what the
+    // overdue check-in flow produces.
+    vi.mocked(db.activityEvent.findMany).mockResolvedValue([
+      { bookingId: "booking-rewritten", occurredAt: returnMoment },
+    ] as any);
+
+    const result = await bookingComplianceReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    expect(result.complianceData!.onTime).toBe(0);
+    expect(result.complianceData!.late).toBe(1);
+    expect(result.complianceData!.rate).toBe(0);
+  });
+});

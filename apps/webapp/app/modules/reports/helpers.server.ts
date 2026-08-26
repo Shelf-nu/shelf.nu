@@ -344,6 +344,7 @@ async function fetchBookingComplianceRows(
       // (legacy bookings, partial check-ins that recorded a custom note,
       // or rare event-write failures). See `resolveCheckInAt`.
       updatedAt: true,
+      originalTo: true,
       custodianUser: {
         select: {
           firstName: true,
@@ -388,11 +389,14 @@ async function fetchBookingComplianceRows(
 
     // Lateness via the canonical helper:
     // - OVERDUE → `now − to`
-    // - COMPLETE/ARCHIVED with a recorded check-in → `checkInAt − to`
+    // - COMPLETE/ARCHIVED with a recorded check-in →
+    //   `checkInAt − (originalTo ?? to)` (check-in can rewrite `to` to the
+    //   return moment; the planned end survives in `originalTo`)
     // - otherwise null (no measurable lateness)
     const latenessMs = getLatenessMs({
       status: b.status,
       to: b.to,
+      originalTo: b.originalTo,
       checkInAt,
       now,
     });
@@ -544,6 +548,7 @@ async function computeComplianceRate(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -580,6 +585,7 @@ async function computeComplianceRate(
       to: true,
       status: true,
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -628,6 +634,7 @@ function categorizeBookings(
   bookings: {
     id: string;
     to: Date | null;
+    originalTo: Date | null;
     status: BookingStatus;
     updatedAt: Date | null;
   }[],
@@ -645,6 +652,7 @@ function categorizeBookings(
     const latenessMs = getLatenessMs({
       status: booking.status,
       to: booking.to,
+      originalTo: booking.originalTo,
       checkInAt,
       now,
     });
@@ -742,6 +750,7 @@ async function computeComplianceTrend(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -787,6 +796,7 @@ async function computeComplianceTrend(
       const latenessMs = getLatenessMs({
         status: b.status,
         to: b.to,
+        originalTo: b.originalTo,
         checkInAt,
         now,
       });
@@ -914,6 +924,7 @@ async function computeCustodianPerformance(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
       custodianUserId: true,
       custodianUser: {
         select: {
@@ -979,6 +990,7 @@ async function computeCustodianPerformance(
     const latenessMs = getLatenessMs({
       status: booking.status,
       to: booking.to,
+      originalTo: booking.originalTo,
       checkInAt,
       now,
     });

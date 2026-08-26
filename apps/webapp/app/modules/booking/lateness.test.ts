@@ -24,6 +24,7 @@ describe("getLatenessMs", () => {
     const result = getLatenessMs({
       status: BookingStatus.OVERDUE,
       to,
+      originalTo: null,
       checkInAt,
       now,
     });
@@ -38,6 +39,7 @@ describe("getLatenessMs", () => {
     const result = getLatenessMs({
       status: BookingStatus.COMPLETE,
       to,
+      originalTo: null,
       checkInAt,
     });
 
@@ -51,6 +53,7 @@ describe("getLatenessMs", () => {
     const result = getLatenessMs({
       status: BookingStatus.ARCHIVED,
       to,
+      originalTo: null,
       checkInAt,
     });
 
@@ -62,6 +65,7 @@ describe("getLatenessMs", () => {
     const result = getLatenessMs({
       status: BookingStatus.COMPLETE,
       to: d("2026-04-01T12:00:00.000Z"),
+      originalTo: null,
       checkInAt: null,
     });
 
@@ -72,6 +76,7 @@ describe("getLatenessMs", () => {
     const result = getLatenessMs({
       status: BookingStatus.ARCHIVED,
       to: d("2026-04-01T12:00:00.000Z"),
+      originalTo: null,
       checkInAt: null,
     });
 
@@ -87,6 +92,7 @@ describe("getLatenessMs", () => {
     const result = getLatenessMs({
       status,
       to: d("2026-04-01T12:00:00.000Z"),
+      originalTo: null,
       checkInAt: d("2026-04-01T13:00:00.000Z"),
       now: d("2026-04-01T14:00:00.000Z"),
     });
@@ -98,6 +104,7 @@ describe("getLatenessMs", () => {
     const result = getLatenessMs({
       status: BookingStatus.OVERDUE,
       to: null,
+      originalTo: null,
       checkInAt: null,
       now: d("2026-04-01T14:00:00.000Z"),
     });
@@ -247,5 +254,73 @@ describe("resolveCheckInAt", () => {
         resolveCheckInAt({ status, updatedAt, fromEvent: null })
       ).toBeNull();
     }
+  });
+});
+
+describe("getLatenessMs — originalTo (planned end)", () => {
+  it("measures a COMPLETE booking against originalTo when check-in rewrote `to`", () => {
+    // Checking in an OVERDUE booking rewrites `to` to the check-in moment and
+    // preserves the planned end in `originalTo`. Lateness must be measured
+    // against the planned end, or every resolved late return reads on-time.
+    const plannedEnd = d("2026-04-15T12:00:00.000Z");
+    const returnMoment = d("2026-04-18T12:00:00.000Z"); // 3 days late
+
+    const result = getLatenessMs({
+      status: BookingStatus.COMPLETE,
+      to: returnMoment,
+      originalTo: plannedEnd,
+      checkInAt: returnMoment,
+    });
+
+    expect(result).toBe(3 * 24 * 60 * 60 * 1000);
+  });
+
+  it("reads an early-adjusted check-in as early, not exactly on time", () => {
+    // Early check-in with the adjust-date intent also rewrites `to` to the
+    // return moment. Against `originalTo` the return is early (negative).
+    const plannedEnd = d("2026-04-15T12:00:00.000Z");
+    const returnMoment = d("2026-04-14T10:00:00.000Z"); // 26h early
+
+    const result = getLatenessMs({
+      status: BookingStatus.ARCHIVED,
+      to: returnMoment,
+      originalTo: plannedEnd,
+      checkInAt: returnMoment,
+    });
+
+    expect(result).toBe(-26 * 60 * 60 * 1000);
+  });
+
+  it("falls back to `to` when originalTo is null (legacy rows)", () => {
+    const to = d("2026-04-15T12:00:00.000Z");
+    const checkInAt = d("2026-04-15T12:30:00.000Z");
+
+    const result = getLatenessMs({
+      status: BookingStatus.COMPLETE,
+      to,
+      originalTo: null,
+      checkInAt,
+    });
+
+    expect(result).toBe(30 * 60 * 1000);
+  });
+
+  it("ignores originalTo for OVERDUE bookings (the live deadline is `to`)", () => {
+    // Pre-check-in, `to` is the current agreed deadline (edits and extensions
+    // move it), so an OVERDUE booking is measured against `to` even when a
+    // stale `originalTo` is present on the row.
+    const to = d("2026-04-15T12:00:00.000Z");
+    const staleOriginal = d("2026-04-10T12:00:00.000Z");
+    const now = d("2026-04-15T14:00:00.000Z"); // 2h past `to`
+
+    const result = getLatenessMs({
+      status: BookingStatus.OVERDUE,
+      to,
+      originalTo: staleOriginal,
+      checkInAt: null,
+      now,
+    });
+
+    expect(result).toBe(2 * 60 * 60 * 1000);
   });
 });

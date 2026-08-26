@@ -44,6 +44,10 @@ export function TimeRemaining({
         getLatenessMs({
           status: BookingStatus.OVERDUE,
           to,
+          // OVERDUE is measured against the live `to`; `originalTo` only
+          // matters for completed bookings, which this component never
+          // renders (it returns null for COMPLETE/ARCHIVED above).
+          originalTo: null,
           checkInAt: null,
           now: currentDate,
         }) ?? 0;

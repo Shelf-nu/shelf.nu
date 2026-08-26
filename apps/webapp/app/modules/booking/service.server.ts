@@ -6249,6 +6249,27 @@ export async function partialCheckinBooking({
           },
         });
 
+        // Canonical status-transition event, atomic with the flip. The
+        // Booking Compliance report resolves each booking's check-in moment
+        // from `BOOKING_STATUS_CHANGED → COMPLETE` (see
+        // `resolveCheckInTimes`); without it, this completion path has no
+        // check-in signal and the booking falls back to `updatedAt`, which
+        // drifts on any later edit.
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_STATUS_CHANGED",
+            entityType: "BOOKING",
+            entityId: id,
+            bookingId: id,
+            field: "status",
+            fromValue: updatedBookingSnapshot.status,
+            toValue: BookingStatus.COMPLETE,
+          },
+          tx
+        );
+
         return {
           booking: completedBooking,
           previousStatus: updatedBookingSnapshot.status,
@@ -9423,6 +9444,15 @@ export async function extendBooking({
               ? BookingStatus.ONGOING
               : undefined,
           to: newEndDate,
+          /**
+           * `originalTo` tracks the agreed end date on every write path so
+           * check-in can preserve it when it rewrites `to` to the actual
+           * return moment. An extension renegotiates the deadline, so the
+           * planned end moves with it — otherwise lateness (Booking
+           * Compliance) would measure the booking against the
+           * pre-extension deadline.
+           */
+          originalTo: newEndDate,
         },
         include: BOOKING_INCLUDE_FOR_EMAIL,
       });

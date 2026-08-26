@@ -6716,6 +6716,54 @@ describe("extendBooking", () => {
     );
   });
 
+  it("keeps originalTo in step with the extended end date", async () => {
+    expect.assertions(1);
+
+    // `originalTo` tracks the agreed end date on every write path (create,
+    // edit, reserve) so check-in can preserve it when it rewrites `to` to the
+    // actual return moment. An extension renegotiates the deadline, so it
+    // must move `originalTo` too — otherwise a later check-in measures the
+    // booking against the pre-extension deadline.
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t130",
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...mockBooking, to: newEndDate });
+
+    await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          to: newEndDate,
+          originalTo: newEndDate,
+        }),
+      })
+    );
+  });
+
   it("should throw error when booking cannot be extended", async () => {
     expect.assertions(1);
 
@@ -8848,6 +8896,31 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       expect.objectContaining({
         data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
       })
+    );
+  });
+
+  it("records the canonical BOOKING_STATUS_CHANGED → COMPLETE event when qty dispositions complete the booking", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    // Full return of the only asset → the qty-disposition path completes the
+    // booking inside its own transaction (it does not delegate to
+    // `checkinBooking`). The Booking Compliance report resolves check-in
+    // moments from this event, so the completion must record it.
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    expect(activityEventService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "BOOKING_STATUS_CHANGED",
+        bookingId: mockQtyBookingId,
+        field: "status",
+        toValue: BookingStatus.COMPLETE,
+      }),
+      expect.anything()
     );
   });
 

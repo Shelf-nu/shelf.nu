@@ -54,6 +54,16 @@ export interface GetLatenessMsArgs {
   /** Scheduled return date (`booking.to`). May be null on legacy data. */
   to: Date | null;
   /**
+   * Planned end date (`booking.originalTo`). Check-in of an OVERDUE booking
+   * (and early check-in with the adjust-date intent) rewrites `to` to the
+   * actual return moment and preserves the agreed deadline here — so for
+   * COMPLETE/ARCHIVED bookings the planned end, not `to`, is the reference
+   * point. Callers must select and pass the column; passing `null` falls
+   * back to `to` (legacy rows predating the column). Ignored for OVERDUE,
+   * where `to` is still the live agreed deadline.
+   */
+  originalTo: Date | null;
+  /**
    * Resolved check-in timestamp for COMPLETE/ARCHIVED bookings. Not a column
    * on the `Booking` model — callers obtain it via {@link resolveCheckInAt}
    * (which prefers the canonical `BOOKING_STATUS_CHANGED → COMPLETE`
@@ -74,8 +84,10 @@ export interface GetLatenessMsArgs {
  *
  * - For `OVERDUE`: returns `now − to`. `checkInAt` is ignored (by definition
  *   the booking has not been checked in yet).
- * - For `COMPLETE` / `ARCHIVED` with a `checkInAt`: returns `checkInAt − to`.
- *   A negative result means the booking was returned early.
+ * - For `COMPLETE` / `ARCHIVED` with a `checkInAt`: returns
+ *   `checkInAt − (originalTo ?? to)`. Check-in can rewrite `to` to the actual
+ *   return moment, so the planned end preserved in `originalTo` is the
+ *   reference point. A negative result means the booking was returned early.
  * - For `COMPLETE` / `ARCHIVED` without a `checkInAt`: returns `null`. We
  *   deliberately do **not** fall back to `updatedAt` — many fields can move
  *   `updatedAt` after the actual check-in, leading to false "very late"
@@ -86,7 +98,7 @@ export interface GetLatenessMsArgs {
  * @returns Lateness in ms, or `null` if not measurable.
  */
 export function getLatenessMs(args: GetLatenessMsArgs): number | null {
-  const { status, to, checkInAt, now = new Date() } = args;
+  const { status, to, originalTo, checkInAt, now = new Date() } = args;
 
   // Without a scheduled return, there is no reference point.
   if (!to) {
@@ -95,6 +107,8 @@ export function getLatenessMs(args: GetLatenessMsArgs): number | null {
 
   if (status === BookingStatus.OVERDUE) {
     // The booking is currently overdue; lateness is measured against now.
+    // Pre-check-in, `to` is still the live agreed deadline, so `originalTo`
+    // is deliberately not consulted here.
     return now.getTime() - to.getTime();
   }
 
@@ -103,7 +117,11 @@ export function getLatenessMs(args: GetLatenessMsArgs): number | null {
     if (!checkInAt) {
       return null;
     }
-    return checkInAt.getTime() - to.getTime();
+    // Check-in may have rewritten `to` to the return moment; the planned end
+    // survives in `originalTo`. Measuring against `to` alone would read every
+    // resolved late return as on-time.
+    const scheduledEnd = originalTo ?? to;
+    return checkInAt.getTime() - scheduledEnd.getTime();
   }
 
   // DRAFT, RESERVED, ONGOING, CANCELLED — no meaningful lateness.
