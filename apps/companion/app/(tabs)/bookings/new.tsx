@@ -93,8 +93,11 @@ function defaultBookingWindow(
     // to. Without the clamp, opening the form from today's panel after 09:00
     // (or from a past day left on the back stack) seeds a start the server
     // rejects on an untouched form.
-    const earliest = new Date(Date.now() + 10 * 60 * 1000);
-    earliest.setSeconds(0, 0);
+    // Ceil to the next whole minute: flooring the seconds could land up to
+    // 59s inside the ten-minute minimum and fail an untouched form.
+    const earliest = new Date(
+      Math.ceil((Date.now() + 10 * 60 * 1000) / 60_000) * 60_000
+    );
     const from = at(9) < earliest ? earliest : at(9);
     // Keep the day's 17:00 end when it still leaves a window; once the clamp
     // passes it, fall back to the same eight-hour span 09:00–17:00 describes.
