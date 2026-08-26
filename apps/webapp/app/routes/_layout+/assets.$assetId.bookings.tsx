@@ -3,11 +3,11 @@ import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
-import { decorateBookingsWithStockConflicts } from "~/modules/booking/stock-conflicts.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
@@ -102,7 +102,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           orderDirection,
           custodianTeamMemberIds: teamMemberIds,
           tags: filterTags,
+          // PERF: the list renders booking-level fields plus an asset COUNT. The
+          // per-booking `bookingAssets` payload existed only for the assets
+          // drawer, which now fetches it from
+          // `/api/bookings/:bookingId/assets-sidebar` when a row is expanded.
+          includeAssets: false,
           extraInclude: {
+            // Asset count for the row's drawer trigger, now that the pivot rows
+            // themselves are no longer loaded.
+            _count: { select: { bookingAssets: true } },
             tags: TAG_WITH_COLOR_SELECT,
             /**
              * Needed for the amber "N units unassigned" pill.
@@ -147,7 +155,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * `.claude/rules/quantity-semantics-per-surface.md` / the module doc in
      * `~/modules/booking/stock-conflicts.server`).
      */
-    const decoratedBookings = await decorateBookingsWithStockConflicts({
+    const decoratedBookings = await decorateBookingsForList({
       bookings,
       organizationId,
     });

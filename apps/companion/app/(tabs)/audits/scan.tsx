@@ -514,11 +514,18 @@ function AuditScannerContent() {
         // 4. Optimistic update — instant feedback
         scannedAssetIdsRef.current.add(asset.id);
 
+        // why: an expected asset's full record is already in memory, so the
+        // row can show WHERE it belongs immediately. An unexpected asset has
+        // no such record — its location fills in on the next audit load.
+        const expectedRecord = expectedAssetMapRef.current.get(asset.id);
         const newItem = {
           assetId: asset.id,
           name: asset.title,
           isExpected,
           scannedAt: new Date().toISOString(),
+          locationName: expectedRecord?.locationName ?? null,
+          thumbnailImage:
+            expectedRecord?.thumbnailImage ?? expectedRecord?.mainImage ?? null,
         };
         setScannedItems((prev) => {
           const next = [newItem, ...prev];
@@ -578,6 +585,8 @@ function AuditScannerContent() {
       currentOrg,
       foundCount,
       expectedTotal,
+      // stable ref object; listed to satisfy exhaustive-deps, never changes
+      expectedAssetMapRef,
       flashFrame,
       showToast,
       resetInactivityTimer,
@@ -766,6 +775,38 @@ function AuditScannerContent() {
   // ── Remaining assets (expected but not yet scanned) ──
 
   const remainingCount = expectedTotal - foundCount;
+
+  /**
+   * Opt-in filter for the Scanned tab, toggled by the unexpected count badge.
+   *
+   * why NOT a sort: pinning unexpected items to the top permanently was tried
+   * and broke the scan feedback loop. The list is newest-first so the row you
+   * just scanned confirms the scan; with exceptions pinned above it, a fresh
+   * scan lands below them, and since the panel shows only a couple of rows,
+   * three exceptions would push it off-screen entirely. During rapid scanning
+   * that reads as "it didn't register" and people rescan.
+   *
+   * So scan order is left alone and the exception count becomes a filter the
+   * user asks for, at the moment they want it, instead of a reordering imposed
+   * on every scan.
+   */
+  const [showUnexpectedOnly, setShowUnexpectedOnly] = useState(false);
+
+  const visibleScannedItems = useMemo(
+    () =>
+      showUnexpectedOnly
+        ? scannedItems.filter((i) => !i.isExpected)
+        : scannedItems,
+    [scannedItems, showUnexpectedOnly]
+  );
+
+  // why: the filter must not strand the user on an empty list if the only
+  // unexpected item is removed or the audit reloads without one.
+  useEffect(() => {
+    if (showUnexpectedOnly && unexpectedCount === 0) {
+      setShowUnexpectedOnly(false);
+    }
+  }, [showUnexpectedOnly, unexpectedCount]);
 
   const remainingAssets = useMemo<RemainingAsset[]>(() => {
     if (activeTab !== "remaining") return []; // skip when hidden
@@ -1150,6 +1191,16 @@ function AuditScannerContent() {
             onTabChange={setActiveTab}
             scannedCount={scannedItems.length}
             remainingCount={remainingCount}
+            unexpectedCount={unexpectedCount}
+            unexpectedFilterActive={showUnexpectedOnly}
+            onUnexpectedPress={() => {
+              // The badge sits inside the Scanned tab button, and React Native
+              // gives the press to the inner touchable only, so the parent tab
+              // never fires. Switch the tab here: without it a press from the
+              // Not-scanned tab flips the filter while that list stays on screen.
+              setActiveTab("scanned");
+              setShowUnexpectedOnly((v) => !v);
+            }}
           />
 
           {/* why: the evidence sheet lives behind a row tap, so name it once
@@ -1164,7 +1215,7 @@ function AuditScannerContent() {
           {/* List content */}
           {activeTab === "scanned" ? (
             <ScannedItemsList
-              items={scannedItems}
+              items={visibleScannedItems}
               onItemPress={handleItemPress}
             />
           ) : (
@@ -1426,9 +1477,10 @@ const useStyles = createStyles((colors, shadows) => ({
     color: "rgba(255,255,255,0.8)",
   },
 
-  // Bottom panel (40%)
+  // Bottom panel (~45%) — the scanned list needs to show more than a row and
+  // a half, otherwise a fresh scan can land below the fold.
   bottomPanel: {
-    flex: 4,
+    flex: 5,
     backgroundColor: colors.backgroundSecondary,
     borderTopLeftRadius: borderRadius.xl,
     borderTopRightRadius: borderRadius.xl,

@@ -27,6 +27,19 @@ export type ScannedItem = {
    * server. Surfaced in the UI and blocks audit completion until re-synced.
    */
   syncFailed?: boolean;
+  /**
+   * Where the asset is supposed to be. Shown on the scanned row so the tab
+   * carries the same orienting detail the Not-scanned tab already does —
+   * standing in a room, "which shelf" is more useful than re-reading that a
+   * scan was scanned. Null when the asset has no location, or (for an
+   * unexpected asset scanned live) until the server round-trip fills it in.
+   */
+  locationName?: string | null;
+  /**
+   * Thumbnail for the same reason: the Not-scanned tab shows one, so an eye
+   * moving between tabs should not have to switch modes. Null when absent.
+   */
+  thumbnailImage?: string | null;
 };
 
 export type ScanQueueEntry = {
@@ -131,6 +144,9 @@ export function useAuditInit({
       const restoredItems: ScannedItem[] = [];
       for (const scan of data.existingScans) {
         scannedIds.add(scan.assetId);
+        // why: an expected asset already has its full record client-side, so
+        // prefer it for the image; the scan payload only carries a location.
+        const expected = expectedMap.get(scan.assetId);
         restoredItems.push({
           assetId: scan.assetId,
           name: scan.assetTitle,
@@ -139,6 +155,10 @@ export function useAuditInit({
           auditAssetId: scan.auditAssetId ?? undefined,
           notesCount: scan.auditNotesCount,
           imagesCount: scan.auditImagesCount,
+          locationName:
+            scan.assetLocationName ?? expected?.locationName ?? null,
+          thumbnailImage:
+            expected?.thumbnailImage ?? expected?.mainImage ?? null,
         });
       }
       scannedAssetIdsRef.current = scannedIds;
@@ -236,6 +256,14 @@ export function useAuditInit({
                         "Scanned asset",
                       isExpected: e.isExpected,
                       scannedAt: new Date().toISOString(),
+                      locationName:
+                        expectedAssetMapRef.current.get(e.assetId)
+                          ?.locationName ?? null,
+                      thumbnailImage:
+                        expectedAssetMapRef.current.get(e.assetId)
+                          ?.thumbnailImage ??
+                        expectedAssetMapRef.current.get(e.assetId)?.mainImage ??
+                        null,
                     }));
                   const allRecovered = [...recoveredItems, ...queuedOnlyItems];
 
