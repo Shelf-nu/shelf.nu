@@ -28,6 +28,7 @@ import {
   type CustomerWithSubscriptions,
 } from "~/utils/stripe.server";
 
+import { resolveUserGreetingName } from "~/utils/user";
 import {
   isAddonSubscription,
   isHigherOrEqualTier,
@@ -35,7 +36,6 @@ import {
   sendAdminInvoiceEmail,
   type WebhookUser,
 } from "./helpers.server";
-import { resolveUserGreetingName } from "~/utils/user";
 
 const OK = () => new Response(null, { status: 200 });
 

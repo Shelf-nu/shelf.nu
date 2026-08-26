@@ -159,4 +159,39 @@ describe("app/routes/_layout+/assets.$assetId.activity[.csv] loader", () => {
     );
     expect(rows[2]).toBe('"01/01/2024, 9:30 AM","","UPDATE","System note"');
   });
+
+  it("names the author by displayName when they have one", async () => {
+    // The Author column is built by a hand-rolled join in `notesToCsv`, which
+    // the compiler cannot see — the row reaching it carries `displayName`, so
+    // the join is the only thing that can drop it.
+    dbMock.note.findMany.mockResolvedValue([
+      {
+        id: "note-3",
+        content: "Renamed author",
+        type: "COMMENT",
+        createdAt: new Date("2024-01-02T10:00:00.000Z"),
+        user: {
+          firstName: "Carlos",
+          lastName: "Virreira",
+          displayName: "Carlie Virreira",
+        },
+      },
+    ] as any);
+
+    const response = await loader(
+      createLoaderArgs({
+        context,
+        request: new Request(
+          "https://example.com/assets/asset-123/activity.csv"
+        ),
+        params: { assetId: "asset-123" },
+      })
+    );
+
+    const csv = await (response as unknown as Response).text();
+    const rows = csv.trim().split("\n");
+
+    expect(rows[1]).toContain('"Carlie Virreira"');
+    expect(rows[1]).not.toContain("Carlos Virreira");
+  });
 });

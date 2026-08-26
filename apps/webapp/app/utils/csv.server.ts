@@ -65,7 +65,7 @@ import { ALL_SELECTED_KEY } from "./list";
 import { cleanMarkdownFormatting } from "./markdown-cleaner";
 import { sanitizeNoteContent } from "./note-sanitizer.server";
 import type { UserNameFields } from "./user";
-import { resolveTeamMemberName } from "./user";
+import { resolveTeamMemberName, resolveUserDisplayName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
 
@@ -1072,12 +1072,10 @@ const sanitizeCsvValue = (value: string | null | undefined) =>
 
 const notesToCsv = (notes: ActivityNote[], prefs: ResolvedFormatPrefs) => {
   const rows = notes.map((note) => {
-    const author = note.user
-      ? [note.user.firstName, note.user.lastName]
-          .filter(Boolean)
-          .join(" ")
-          .trim()
-      : "";
+    // Resolved, not joined: `displayName` replaces the legal name for the
+    // users who set one, and a hand-rolled join here is invisible to the
+    // compiler no matter what the row carries.
+    const author = resolveUserDisplayName(note.user);
 
     return [
       sanitizeCsvValue(
