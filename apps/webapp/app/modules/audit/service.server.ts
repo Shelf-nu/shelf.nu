@@ -214,6 +214,8 @@ export type RecordAuditScanResult = {
  * Used when fetching existing scans to restore audit state.
  */
 export type AuditScanData = {
+  /** AuditScan row id — the identity that survives asset deletion */
+  id: string;
   /** The QR code or barcode that was scanned */
   code: string;
   /** The ID of the asset that was scanned */
@@ -1826,6 +1828,7 @@ export async function getAuditScans({
       const isExpected = auditAsset?.expected ?? scan.wasExpected ?? false;
 
       return {
+        id: scan.id,
         code: scan.code ?? "",
         assetId: scan.assetId ?? "",
         type: "asset" as const,

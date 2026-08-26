@@ -1022,6 +1022,9 @@ export type AuditExpectedAsset = {
 };
 
 export type AuditScanData = {
+  /** AuditScan row id — stable across asset deletion. Absent on older
+   * servers; consumers must keep a fallback. */
+  id?: string;
   code: string;
   assetId: string;
   assetTitle: string;

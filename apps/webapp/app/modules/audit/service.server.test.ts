@@ -2723,14 +2723,19 @@ describe("getAuditScans — a scan whose asset was deleted", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // why: getAuditScans org-scopes through the session lookup first; every
+    // test here needs it to resolve so the assertion lands on the scan
+    // mapping rather than a 404.
     mockDb.auditSession.findFirst.mockResolvedValue({ id: "audit-1" });
   });
 
   it("restores expectedness from the scan's own snapshot", async () => {
-    // The asset and its AuditAsset row are both gone — Cascade took the
-    // AuditAsset, SetNull emptied AuditScan.assetId. Only the snapshot is left.
+    // why: the asset and its AuditAsset row are both gone — Cascade took the
+    // AuditAsset, SetNull emptied AuditScan.assetId. Only the snapshot is
+    // left; this pins that the mapping still stands the row up from it.
     mockDb.auditScan.findMany.mockResolvedValue([
       {
+        id: "scan-1",
         code: "mg1be33uew",
         assetId: null,
         asset: null,
@@ -2743,6 +2748,9 @@ describe("getAuditScans — a scan whose asset was deleted", () => {
 
     const [scan] = await getAuditScans(ARGS);
 
+    // The row id is the identity that survives asset deletion; the client
+    // keys deleted rows on it.
+    expect(scan.id).toBe("scan-1");
     expect(scan.isExpected).toBe(true);
     expect(scan.assetDeleted).toBe(true);
     expect(scan.assetTitle).toBe("Arri Fresnel 650 Plus");
@@ -2752,6 +2760,7 @@ describe("getAuditScans — a scan whose asset was deleted", () => {
     // why the pair: without this, "always true" would pass the test above.
     mockDb.auditScan.findMany.mockResolvedValue([
       {
+        id: "scan-2",
         code: "zz9",
         assetId: null,
         asset: null,
@@ -2774,6 +2783,7 @@ describe("getAuditScans — a scan whose asset was deleted", () => {
     // scan was snapshotted as unexpected.
     mockDb.auditScan.findMany.mockResolvedValue([
       {
+        id: "scan-3",
         code: "abc",
         assetId: "asset-1",
         asset: { id: "asset-1", title: "Live title", assetLocations: [] },

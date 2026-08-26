@@ -551,10 +551,12 @@ function AuditDetailContent() {
         const snapshotTitle = scan.assetTitle?.trim();
         items.push({
           // why: every deleted-asset scan would otherwise share the id "",
-          // colliding in the list's keyExtractor. The scanned code is the
-          // stable identity that survives the asset.
+          // colliding in the list's keyExtractor. The scan ROW id is the
+          // identity that survives the asset — code is nullable and
+          // non-unique, and scannedAt can collide. Older servers don't send
+          // the id, so those keep the code/scannedAt fallback.
           id: isDeletedAsset
-            ? `deleted:${scan.code || scan.scannedAt}`
+            ? `deleted:${scan.id ?? scan.code ?? scan.scannedAt}`
             : scan.assetId,
           name: isDeletedAsset
             ? snapshotTitle

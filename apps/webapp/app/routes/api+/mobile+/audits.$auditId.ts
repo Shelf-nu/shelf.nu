@@ -133,6 +133,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodianName: a.custodianName ?? null,
       })),
       existingScans: scans.map((s) => ({
+        id: s.id,
         code: s.code,
         assetId: s.assetId,
         assetTitle: s.assetTitle,
