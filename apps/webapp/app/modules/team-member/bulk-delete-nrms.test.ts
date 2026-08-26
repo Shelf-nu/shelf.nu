@@ -67,8 +67,8 @@ describe("bulkDeleteNRMs", () => {
 
   it("soft-deletes only the rows the scoped query returned", async () => {
     dbMocks.findMany.mockResolvedValue([
-      { id: "a", _count: { custodies: 0 } },
-      { id: "b", _count: { custodies: 0 } },
+      { id: "a", _count: { custodies: 0, kitCustodies: 0 } },
+      { id: "b", _count: { custodies: 0, kitCustodies: 0 } },
     ]);
 
     await bulkDeleteNRMs({ nrmIds: [ALL_SELECTED_KEY], organizationId: ORG });
@@ -82,7 +82,9 @@ describe("bulkDeleteNRMs", () => {
   });
 
   it("re-asserts the NRM scope and custody guard in the write predicate", async () => {
-    dbMocks.findMany.mockResolvedValue([{ id: "a", _count: { custodies: 0 } }]);
+    dbMocks.findMany.mockResolvedValue([
+      { id: "a", _count: { custodies: 0, kitCustodies: 0 } },
+    ]);
 
     await bulkDeleteNRMs({ nrmIds: [ALL_SELECTED_KEY], organizationId: ORG });
 
@@ -94,11 +96,28 @@ describe("bulkDeleteNRMs", () => {
       ...NRM_BASE_SCOPE,
       id: { in: ["a"] },
       custodies: { none: {} },
+      kitCustodies: { none: {} },
     });
   });
 
+  it("refuses the batch for a kit-only custodian", async () => {
+    // Assigning a kit always writes `KitCustody`; the inherited per-asset
+    // rows only appear when the kit has assets. An empty kit's custodian
+    // therefore holds nothing an asset-only count would see.
+    dbMocks.findMany.mockResolvedValue([
+      { id: "a", _count: { custodies: 0, kitCustodies: 1 } },
+    ]);
+
+    await expect(
+      bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG })
+    ).rejects.toThrow(/custody/i);
+    expect(dbMocks.updateMany).not.toHaveBeenCalled();
+  });
+
   it("still refuses the batch when a selected member holds custody", async () => {
-    dbMocks.findMany.mockResolvedValue([{ id: "a", _count: { custodies: 2 } }]);
+    dbMocks.findMany.mockResolvedValue([
+      { id: "a", _count: { custodies: 2, kitCustodies: 0 } },
+    ]);
 
     await expect(
       bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG })
