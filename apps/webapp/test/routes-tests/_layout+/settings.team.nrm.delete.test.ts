@@ -80,8 +80,9 @@ describe("settings.team.nrm delete action", () => {
   it("routes the delete through the service that enforces the custody rule", async () => {
     await submitDelete("nrm-1");
 
-    // Writing the soft-delete inline here again is the regression: the route
-    // has no way to express the rule atomically, so it would drop it.
+    // The write has to stay in the service: the rule it carries is a predicate
+    // on the same statement, which a route issuing its own update cannot
+    // express.
     expect(deleteNRMMock).toHaveBeenCalledWith({
       nrmId: "nrm-1",
       organizationId: ORG,

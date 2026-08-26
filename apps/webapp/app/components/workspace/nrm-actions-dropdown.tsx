@@ -23,6 +23,7 @@ export function TeamMembersActionsDropdown({
       _count: {
         select: {
           custodies: true;
+          kitCustodies: true;
         };
       };
     };

@@ -7,16 +7,17 @@
  * from every list and every custodian picker, leaving no way to find what they
  * hold except asset by asset.
  *
- * The rule itself is not new — bulk delete and the confirmation dialog both
- * enforce it. These tests pin that the single delete enforces it too, in the
- * write predicate rather than in a preceding read, and that it can only ever
- * reach a row the NRM index actually lists.
+ * The rule lives in the write predicate rather than in a preceding read, so
+ * that custody assigned between the two cannot slip past it, and the delete can
+ * only ever reach a row the NRM index itself lists. Bulk delete and the
+ * confirmation dialog apply the same rule, and all three must agree.
  *
  * @see {@link file://./service.server.ts} deleteNRM
  * @see {@link file://./bulk-delete-nrms.test.ts} the same rule on the bulk path
  */
 import { InviteStatuses } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 
 const dbMocks = vi.hoisted(() => ({
   findFirst: vi.fn(),
@@ -72,16 +73,30 @@ describe("deleteNRM", () => {
     const { where } = dbMocks.updateMany.mock.calls[0][0];
     expect(where).toEqual({
       ...NRM_BASE_SCOPE,
-      id: { in: [NRM_ID] },
+      id: NRM_ID,
       custodies: { none: {} },
+      kitCustodies: { none: {} },
     });
+  });
+
+  it("treats the select-all sentinel as an ordinary id, not a wildcard", async () => {
+    // `ALL_SELECTED_KEY` is how the bulk endpoints spell "every row matching
+    // the current filters". Routing a single id through a helper that reads
+    // that sentinel would drop the id filter entirely, turning one member's
+    // delete into every custody-free NRM in the organization.
+    await deleteNRM({ nrmId: ALL_SELECTED_KEY, organizationId: ORG });
+
+    const { where } = dbMocks.updateMany.mock.calls[0][0];
+    expect(where.id).toBe(ALL_SELECTED_KEY);
   });
 
   it("refuses a member who holds custody, and says so", async () => {
     // No row matched the guarded write, and the member is still a listed NRM —
     // so custody is what held it back.
     dbMocks.updateMany.mockResolvedValue({ count: 0 });
-    dbMocks.findFirst.mockResolvedValue({ _count: { custodies: 3 } });
+    dbMocks.findFirst.mockResolvedValue({
+      _count: { custodies: 3, kitCustodies: 0 },
+    });
 
     await expect(
       deleteNRM({ nrmId: NRM_ID, organizationId: ORG })
@@ -92,11 +107,53 @@ describe("deleteNRM", () => {
     // A 5xx here would page someone and burn Sentry's error quota over a user
     // being told to check in their assets first.
     dbMocks.updateMany.mockResolvedValue({ count: 0 });
-    dbMocks.findFirst.mockResolvedValue({ _count: { custodies: 1 } });
+    dbMocks.findFirst.mockResolvedValue({
+      _count: { custodies: 1, kitCustodies: 0 },
+    });
 
     await expect(
       deleteNRM({ nrmId: NRM_ID, organizationId: ORG })
     ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+  });
+
+  it("refuses a kit-only custodian, who holds no asset custody at all", async () => {
+    // Assigning a kit always writes `KitCustody`, and only writes the
+    // inherited per-asset rows when the kit has assets — so the custodian of
+    // an empty kit is invisible to a guard that counts `custodies` alone.
+    dbMocks.updateMany.mockResolvedValue({ count: 0 });
+    dbMocks.findFirst.mockResolvedValue({
+      _count: { custodies: 0, kitCustodies: 2 },
+    });
+
+    await expect(
+      deleteNRM({ nrmId: NRM_ID, organizationId: ORG })
+    ).rejects.toThrow(/custody/i);
+  });
+
+  it("guards both custody shapes in the write predicate", async () => {
+    await deleteNRM({ nrmId: NRM_ID, organizationId: ORG });
+
+    const { where } = dbMocks.updateMany.mock.calls[0][0];
+    expect(where.custodies).toEqual({ none: {} });
+    expect(where.kitCustodies).toEqual({ none: {} });
+  });
+
+  it("does not blame custody that was released mid-delete", async () => {
+    // The guarded write passed the row by, but by the time we look it holds
+    // nothing: what blocked it was released between the two statements.
+    // Reporting "release custody" would name something that is already gone.
+    dbMocks.updateMany.mockResolvedValue({ count: 0 });
+    dbMocks.findFirst.mockResolvedValue({
+      _count: { custodies: 0, kitCustodies: 0 },
+    });
+
+    const error = await deleteNRM({
+      nrmId: NRM_ID,
+      organizationId: ORG,
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({ status: 409, shouldBeCaptured: false });
+    expect((error as Error).message).not.toMatch(/release custody/i);
   });
 
   it("reports an id that is not a deletable NRM as not found", async () => {

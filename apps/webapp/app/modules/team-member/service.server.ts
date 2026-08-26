@@ -15,7 +15,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { resolveUserDisplayName } from "~/utils/user";
-import { getNrmSelectionWhere } from "./nrm-scope";
+import { getNrmIndexWhere, getNrmSelectionWhere } from "./nrm-scope";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
@@ -910,10 +910,27 @@ export async function deleteNRM({
   organizationId: TeamMember["organizationId"];
 }) {
   try {
-    const scope = getNrmSelectionWhere({ nrmIds: [nrmId], organizationId });
+    // Built from the index scope plus this one id. NOT `getNrmSelectionWhere`:
+    // that helper reads `ALL_SELECTED_KEY` and drops the id filter entirely for
+    // it, so a request naming that sentinel as its member would match — and
+    // soft-delete — every unencumbered NRM in the organization.
+    const scope: Prisma.TeamMemberWhereInput = {
+      ...getNrmIndexWhere({ organizationId }),
+      id: nrmId,
+    };
+
+    // Custody comes in two independent shapes and either one is enough to make
+    // a member undeletable. Assigning a kit ALWAYS writes `KitCustody`, while
+    // the inherited per-asset `Custody` rows are only written when the kit has
+    // assets to inherit them — so the custodian of an empty kit holds no
+    // `custodies` at all and would pass an asset-only guard.
+    const holdsNothing = {
+      custodies: { none: {} },
+      kitCustodies: { none: {} },
+    };
 
     const { count } = await db.teamMember.updateMany({
-      where: { ...scope, custodies: { none: {} } },
+      where: { ...scope, ...holdsNothing },
       data: { deletedAt: new Date() },
     });
 
@@ -921,18 +938,30 @@ export async function deleteNRM({
       return;
     }
 
-    // Nothing matched. Read again purely to tell the two reasons apart so the
-    // caller gets an actionable message; the write above is what enforced.
+    // Nothing matched. Read again purely to say why, so the caller gets an
+    // actionable message; the write above is what enforced.
     const member = await db.teamMember.findFirst({
       where: scope,
-      select: { _count: { select: { custodies: true } } },
+      select: { _count: { select: { custodies: true, kitCustodies: true } } },
     });
 
-    if (member) {
+    if (!member) {
       throw new ShelfError({
         cause: null,
         message:
-          "This team member has custody over some assets. Please release custody or check-in those assets before deleting the user.",
+          "This team member could not be found in your workspace, or is not one that can be deleted here.",
+        additionalData: { nrmId, organizationId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (member._count.custodies + member._count.kitCustodies > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "This team member has custody over some assets or kits. Please release custody or check-in those items before deleting the user.",
         additionalData: { nrmId, organizationId },
         label,
         status: 400,
@@ -940,13 +969,16 @@ export async function deleteNRM({
       });
     }
 
+    // The row is here and holds nothing, yet the guarded write passed it by:
+    // whatever it held was released between the two statements. Telling the
+    // caller to release custody would name something that no longer exists.
     throw new ShelfError({
       cause: null,
       message:
-        "This team member could not be found in your workspace, or is not one that can be deleted here.",
+        "This team member changed while it was being deleted. Please try again.",
       additionalData: { nrmId, organizationId },
       label,
-      status: 404,
+      status: 409,
       shouldBeCaptured: false,
     });
   } catch (cause) {
@@ -992,12 +1024,20 @@ export async function bulkDeleteNRMs({
 
     const teamMembers = await db.teamMember.findMany({
       where,
-      select: { id: true, _count: { select: { custodies: true } } },
+      select: {
+        id: true,
+        _count: { select: { custodies: true, kitCustodies: true } },
+      },
     });
 
-    /** If some team members have custody, then delete is not allowed */
+    /**
+     * If some team members have custody, then delete is not allowed. Kit
+     * custody counts: assigning a kit always writes `KitCustody`, and only
+     * writes the inherited per-asset `Custody` rows when the kit has assets,
+     * so the custodian of an empty kit holds no `custodies` at all.
+     */
     const someTeamMemberHasCustodies = teamMembers.some(
-      (tm) => tm._count.custodies > 0
+      (tm) => tm._count.custodies + tm._count.kitCustodies > 0
     );
 
     if (someTeamMemberHasCustodies) {
@@ -1024,6 +1064,7 @@ export async function bulkDeleteNRMs({
           organizationId,
         }),
         custodies: { none: {} },
+        kitCustodies: { none: {} },
       },
       data: { deletedAt: new Date() },
     });

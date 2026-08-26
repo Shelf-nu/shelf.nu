@@ -20,6 +20,7 @@ import { ImportNrmButton } from "~/components/workspace/import-nrm-button";
 import { TeamMembersActionsDropdown } from "~/components/workspace/nrm-actions-dropdown";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getPaginatedAndFilterableSettingTeamMembers } from "~/modules/settings/service.server";
+import { getHeldCustodyCount } from "~/modules/team-member/custody-count";
 import { deleteNRM } from "~/modules/team-member/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -215,6 +216,7 @@ function TeamMemberRow({
       _count: {
         select: {
           custodies: true;
+          kitCustodies: true;
         };
       };
     };
@@ -228,9 +230,7 @@ function TeamMemberRow({
         </div>
       </Td>
       <Td className="w-full whitespace-normal">{item.name}</Td>
-      <Td className="text-right">
-        {item._count.custodies ? item._count.custodies : 0}
-      </Td>
+      <Td className="text-right">{getHeldCustodyCount(item._count)}</Td>
       <Td className="text-right">
         <TeamMembersActionsDropdown teamMember={item} />
       </Td>
