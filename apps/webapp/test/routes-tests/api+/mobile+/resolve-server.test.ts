@@ -28,6 +28,8 @@ const createDataMock = vi.hoisted(
     )
 );
 
+// why: swaps in the Response-returning `data()` built above, so the assertions
+// can read a status and a body instead of unwrapping a DataWithResponseInit.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual("react-router");
   return { ...actual, data: createDataMock() };

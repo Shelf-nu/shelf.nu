@@ -218,7 +218,13 @@ export default function LoginScreen() {
    */
   const handleDisconnect = async () => {
     setError(null);
-    await disconnectFromServer();
+    try {
+      await disconnectFromServer();
+    } catch {
+      // Rebuilding the client can throw. Say so rather than leaving the chip
+      // unchanged with an unhandled rejection behind it.
+      setError("Couldn't disconnect. Please try again.");
+    }
   };
 
   return (

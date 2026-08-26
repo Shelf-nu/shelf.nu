@@ -50,6 +50,24 @@ test("extractEmailDomain returns null for input without a usable domain", () => 
   }
 });
 
+test("isAppVersionSupported fails open on a version it cannot parse", () => {
+  // `getAppVersion()` returns "" when the build's version cannot be read, and
+  // depends on this: a placeholder like "0.0.0" would parse and compare as very
+  // old, showing a force-update prompt the user could never satisfy.
+  assert.equal(isAppVersionSupported("", "1.4.0"), true);
+  assert.equal(isAppVersionSupported("not-a-version", "1.4.0"), true);
+  // And the same for an unparseable MINIMUM, so a garbled server value cannot
+  // lock every app out.
+  assert.equal(isAppVersionSupported("1.4.0", "garbage"), true);
+});
+
+test("isAppVersionSupported still blocks a genuinely old build", () => {
+  // The fail-open above must not swallow the real case.
+  assert.equal(isAppVersionSupported("0.0.0", "1.4.0"), false);
+  assert.equal(isAppVersionSupported("1.3.9", "1.4.0"), false);
+  assert.equal(isAppVersionSupported("1.4.0", "1.4.0"), true);
+});
+
 // ── normalizeDomainInput ─────────────────────────────────
 
 test("normalizeDomainInput accepts a bare domain", () => {

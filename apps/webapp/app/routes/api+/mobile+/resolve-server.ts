@@ -58,6 +58,9 @@ export async function action({ request }: ActionFunctionArgs) {
   const body = await request.json().catch(() => null);
   const parsed = ResolveServerSchema.safeParse(body);
   if (!parsed.success) {
+    // Not "use Shelf Cloud": the app reports an unrecognised domain and does
+    // NOT switch. Same answer an unregistered domain gets, deliberately — a
+    // malformed request must not be able to tell the two apart.
     return data({ baseUrl: null, disablePasswordLogin: false });
   }
 

@@ -187,6 +187,9 @@ describe("redeemMobileAuthCode", () => {
     // the first's token, and the first verifyOtp loses. A retry mints a NEW
     // token, so the very thing that failed is what the retry replaces.
     mockSuccessfulMint("sso@acme.com", TEST_CHALLENGE);
+    // why: Supabase is the boundary this test exists to characterise — a real
+    // generateLink/verifyOtp round trip would need a live project, and the
+    // collision being reproduced is a timing race we could not stage there.
     supabaseMocks.generateLink.mockResolvedValue({
       data: { properties: { hashed_token: "hash_123" } },
       error: null,
@@ -224,6 +227,9 @@ describe("redeemMobileAuthCode", () => {
   it("recognises a superseded token from its message alone", async () => {
     // Supabase releases predating the error-code vocabulary send no `code`.
     mockSuccessfulMint("sso@acme.com", TEST_CHALLENGE);
+    // why: same boundary as above, with the `code` omitted — that is what
+    // Supabase releases predating the error-code vocabulary actually send, and
+    // it is the only way to exercise the message fallback.
     supabaseMocks.generateLink.mockResolvedValue({
       data: { properties: { hashed_token: "hash_123" } },
       error: null,
@@ -258,6 +264,9 @@ describe("redeemMobileAuthCode", () => {
     // The exception is narrow on purpose: a retry cannot change a user that
     // does not exist, and hammering the endpoint would only add latency.
     mockSuccessfulMint("sso@acme.com", TEST_CHALLENGE);
+    // why: a deterministic 4xx from Supabase, staged to prove the retry
+    // exception stays narrow — no live project can be made to answer
+    // `user_not_found` on demand for a user we control.
     supabaseMocks.generateLink.mockResolvedValue({
       data: null,
       error: {

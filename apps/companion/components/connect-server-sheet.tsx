@@ -177,6 +177,16 @@ export default function ConnectServerSheet({
         message: outcome.message,
         updateRequired: outcome.reason === "update_required",
       });
+    } catch {
+      // `resolveServerForDomain` returns its refusals, but the switch it
+      // commits can still throw — rebuilding the Supabase client, for one.
+      // Without this the sheet keeps its spinner and its close button stays
+      // disabled, which is a dead end rather than an error.
+      dispatch({
+        type: "connect_failed",
+        message: "Couldn't connect to that server. Please try again.",
+        updateRequired: false,
+      });
     } finally {
       connectPendingRef.current = false;
     }

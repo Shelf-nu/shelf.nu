@@ -33,15 +33,17 @@ const ANDROID_PACKAGE = "com.shelf.companion";
  * Mirrors the resolution order used on the Settings screen: `expoConfig` is
  * present in normal builds, `manifest2` covers an OTA-updated install.
  *
- * @returns The semver-ish version, or `"0.0.0"` when it cannot be determined —
- *   which reads as "very old" and would trip a force-update prompt, so callers
- *   rely on `isAppVersionSupported` failing open on unparseable input instead.
+ * @returns The semver-ish version, or `""` when it cannot be determined.
+ *   Empty on purpose: `isAppVersionSupported` fails OPEN on a version it cannot
+ *   parse, whereas a placeholder like `"0.0.0"` parses perfectly and compares
+ *   as very old — which would show a force-update prompt the user can never
+ *   satisfy, on a build whose only fault is that we could not read its version.
  */
 export function getAppVersion(): string {
   return (
     Constants.expoConfig?.version ??
     Constants.manifest2?.extra?.expoClient?.version ??
-    "0.0.0"
+    ""
   );
 }
 
