@@ -203,7 +203,10 @@ describe("per-server options", () => {
 
   it("drops an object entry whose url is not https", () => {
     registry({
-      "globex.com": { url: "http://globex.i.shelf.nu", disablePasswordLogin: true },
+      "globex.com": {
+        url: "http://globex.i.shelf.nu",
+        disablePasswordLogin: true,
+      },
     });
     expect(resolveCompanionServer("globex.com")).toBeNull();
     expect(isPasswordLoginDisabledFor("globex.com")).toBe(false);

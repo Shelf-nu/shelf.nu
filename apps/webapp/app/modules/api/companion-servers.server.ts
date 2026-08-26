@@ -96,7 +96,9 @@ function getRegistry(): Record<string, CompanionServerEntry> | null {
       // reads as a second domain, and dropping it silently costs an afternoon.
       Logger.warn(
         `[companion-servers] ignoring "${domain}": expected a URL string or ` +
-          `{ url, ... }, got ${Array.isArray(value) ? "an array" : typeof value}`
+          `{ url, ... }, got ${
+            Array.isArray(value) ? "an array" : typeof value
+          }`
       );
       continue;
     }

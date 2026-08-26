@@ -254,7 +254,7 @@ All scripts can be run from the **monorepo root**:
 | --------------------------------- | ------------------------------------------------------- |
 | `pnpm companion:dev`              | Start Metro dev server (connects to existing build)     |
 | `pnpm companion:dev:clear`        | Same but clears Metro cache (use after env var changes) |
-| `pnpm companion:sim:env`          | Generate `.env.local` for a chosen server                |
+| `pnpm companion:sim:env`          | Generate `.env.local` for a chosen server               |
 | `pnpm companion:dev:tunnel`       | Start via Expo tunnel (when LAN connectivity fails)     |
 | `pnpm companion:build:ios`        | Build native iOS + run on Simulator                     |
 | `pnpm companion:build:ios:device` | Build native iOS + run on physical iPhone via USB       |

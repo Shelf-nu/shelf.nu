@@ -141,9 +141,10 @@ function isRateLimitError(cause: unknown): boolean {
  * @returns `true` when a fresh token would plausibly succeed.
  */
 function isSupersededTokenError(cause: unknown): boolean {
+  if (!isAuthApiError(cause)) return false;
   if (errorCode(cause) === "otp_expired") return true;
   // Releases before the error-code vocabulary answer with the message alone.
-  return isAuthApiError(cause) && /invalid or has expired/i.test(cause.message);
+  return /invalid or has expired/i.test(cause.message);
 }
 
 /**
@@ -276,7 +277,9 @@ async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
  * @param userId - The authenticated user the code authorizes a session for
  * @param codeChallenge - Optional PKCE (S256) challenge. When present, the code
  *   can only be redeemed with a matching verifier (see
- *   {@link redeemMobileAuthCode}). Omitted by legacy (pre-PKCE) app builds.
+ *   {@link redeemMobileAuthCode}). Always present in practice: `/sso-login`
+ *   refuses to start a mobile flow without one, and a code carrying none is
+ *   unredeemable — see the poison note on the guard below.
  * @returns The plaintext authorization code to embed in the deeplink
  * @throws {ShelfError} If the row cannot be created
  */

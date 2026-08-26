@@ -123,7 +123,12 @@ export async function hydrateActiveServer(): Promise<void> {
     if (
       typeof parsed?.baseUrl !== "string" ||
       typeof parsed?.supabaseUrl !== "string" ||
-      typeof parsed?.supabaseAnonKey !== "string"
+      typeof parsed?.supabaseAnonKey !== "string" ||
+      // Non-empty, not merely a string: `parseServerConfigResponse` requires
+      // this at connect time, and `createClient` throws without it — which
+      // would strand the record naming this server while the live client is
+      // still Shelf Cloud's.
+      parsed.supabaseAnonKey.length === 0
     ) {
       return;
     }
@@ -157,7 +162,16 @@ export async function hydrateActiveServer(): Promise<void> {
       ssoEnabled: parsed.ssoEnabled !== false,
       passwordLoginEnabled: parsed.passwordLoginEnabled !== false,
     };
-    rebuildSupabase(activeServer);
+    try {
+      rebuildSupabase(activeServer);
+    } catch (e) {
+      // The record named a server the client cannot be built for. Falling back
+      // keeps the two agreeing: the alternative is an app that says "Connected
+      // to Acme" while every request carries Shelf Cloud's session.
+      if (__DEV__) console.error("[Server] rebuild failed; using Cloud:", e);
+      activeServer = CLOUD_SERVER;
+      return;
+    }
     // Notify so `api/client.ts` rearms its auth listener against the client we
     // just built. No consumer has read a token yet at this point, but the
     // subscription must still point at the live client.

@@ -25,10 +25,14 @@ const MOBILE_DIR = path.resolve(__dirname, "../../../app/routes/api+/mobile+");
  * - `resolve-server.ts`: multi-server discovery. Pre-session by definition — it
  *   answers "which server should I authenticate against?", so requiring a token
  *   would be circular. Reads nothing per-user: the only input is a domain the
- *   user typed and the only output is a public base URL from a static registry.
+ *   user typed; the output is that domain's public base URL plus whether the
+ *   app should hide password sign-in for it, both from a static registry.
  * - `config.ts`: the instance's own self-description (name, public Supabase URL
  *   + anon key, API version). Pre-session for the same reason, and every field
- *   it returns already ships publicly in the web client's `window.env`.
+ *   it returns is already public: the Supabase URL and anon key ship in the web
+ *   client's `window.env`, and the rest — the instance name, the versions it
+ *   supports, the sign-in methods it offers — is non-secret metadata with no
+ *   per-user content.
  *
  * All three are read-only, take no user-identifying input, and are covered by
  * the per-IP rate limit on `/api/mobile/*` in `server/index.ts`.

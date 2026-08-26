@@ -203,12 +203,21 @@ export default function LoginScreen() {
     }
   };
 
-  // Sign-in methods this server actually offers. A server advertising NEITHER
-  // is misconfigured, and a screen with no way in is a worse failure than a
-  // control that turns out not to work — so that case shows both.
-  const offersNeither = !server.ssoEnabled && !server.passwordLoginEnabled;
-  const showPassword = server.passwordLoginEnabled || offersNeither;
-  const showSso = server.ssoEnabled || offersNeither;
+  // Sign-in methods this server offers. Shown exactly as advertised — a hidden
+  // method stays hidden, including when that leaves nothing.
+  //
+  // An earlier version restored both controls when neither was offered, on the
+  // reasoning that a dead screen is worse than a control that fails. That
+  // reasoning inverts here: `passwordLoginEnabled` is false either because the
+  // server said so or because Shelf hid it centrally for this customer, and
+  // "neither" is reachable precisely by combining the two — a registry entry
+  // with `disablePasswordLogin` against an instance running DISABLE_SSO. The
+  // fallback would then undo Shelf's decision in the one configuration that
+  // produces it. A server offering no way in is misconfigured, and saying so is
+  // more use than a form that cannot work.
+  const showPassword = server.passwordLoginEnabled;
+  const showSso = server.ssoEnabled;
+  const offersNothing = !showPassword && !showSso;
 
   /**
    * Returns the app to Shelf Cloud.
@@ -335,6 +344,14 @@ export default function LoginScreen() {
                 accessibilityLiveRegion="assertive"
               >
                 {error}
+              </Text>
+            )}
+
+            {offersNothing && (
+              <Text style={styles.noMethodsText}>
+                {server.name} has no sign-in method available in the app.
+                Contact your administrator, or connect to a different server
+                below.
               </Text>
             )}
 
@@ -498,6 +515,13 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     color: colors.gray700,
     fontWeight: "500",
+  },
+  noMethodsText: {
+    fontSize: fontSize.base,
+    color: colors.foregroundSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+    marginVertical: spacing.md,
   },
   connectLink: {
     alignSelf: "center",

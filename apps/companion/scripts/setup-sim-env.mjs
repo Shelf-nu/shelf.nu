@@ -121,7 +121,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // and a device cannot reach the Mac's loopback any more than it can reach
 // localhost:3000.
 if (supabaseUrl && useLan) {
-  supabaseUrl = supabaseUrl.replace(/\/\/(localhost|127\.0\.0\.1)/, `//${host}`);
+  supabaseUrl = supabaseUrl.replace(
+    /\/\/(localhost|127\.0\.0\.1)/,
+    `//${host}`
+  );
 }
 
 if (!supabaseUrl || !supabaseAnonKey) {
