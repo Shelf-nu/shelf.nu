@@ -212,7 +212,21 @@ type SidebarPayload = {
    * `PARTIALLY_CHECKED_OUT_QTY` precedence in this component.
    */
   checkedOutByAsset: Record<string, number>;
+  /**
+   * Always `null` on the success path — `payload()` stamps it onto every
+   * response it builds. Modelled explicitly so the discriminant below reads as
+   * the deliberate choice it is: this key is present either way, so it cannot
+   * tell success from failure.
+   */
+  error: null;
 };
+
+/**
+ * Either half of what the resource route can return: `payload()` on success,
+ * `error()` on a 404 / 403 / 500. Only the success half carries
+ * `bookingAssets`, which is what makes it a usable discriminant.
+ */
+type SidebarResponse = SidebarPayload | { error: { message: string } };
 
 interface BookingAssetsSidebarProps {
   /**
@@ -634,9 +648,16 @@ export function BookingAssetsSidebar({
    * closing, so a re-open renders the previous rows immediately while the
    * refetch is in flight rather than flashing a spinner.
    */
-  const fetcher = useFetcher<SidebarPayload | { error: unknown }>();
+  const fetcher = useFetcher<SidebarResponse>();
+  /**
+   * Discriminate on the presence of `bookingAssets`, NOT on the absence of an
+   * `error` key. The route's success path goes through `payload()`
+   * (`~/utils/http.server`), which returns `{ error: null, ...data }` — so
+   * `"error" in data` is true for a perfectly good response, and keying off it
+   * puts the drawer in its error state every single time.
+   */
   const settled =
-    fetcher.data && !("error" in fetcher.data) ? fetcher.data : undefined;
+    fetcher.data && "bookingAssets" in fetcher.data ? fetcher.data : undefined;
   const bookingAssets = settled?.bookingAssets;
   const dispositionedByAsset = settled?.dispositionedByAsset;
   const dispositionBreakdownByAsset = settled?.dispositionBreakdownByAsset;
@@ -647,11 +668,7 @@ export function BookingAssetsSidebar({
    * retried on a user action, so without this a failed load (booking deleted
    * or permission lost since the page rendered) would spin forever.
    */
-  const hasFetchError =
-    fetcher.state === "idle" &&
-    !!fetcher.data &&
-    "error" in fetcher.data &&
-    !bookingAssets;
+  const hasFetchError = fetcher.state === "idle" && !!fetcher.data && !settled;
   const isLoadingAssets = !bookingAssets && !hasFetchError;
 
   const loadSidebarAssets = () => {

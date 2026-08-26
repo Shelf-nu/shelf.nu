@@ -153,7 +153,15 @@ function makeBooking({
   } as unknown as Parameters<typeof BookingAssetsSidebar>[0]["booking"];
 }
 
-/** The settled resource-route payload for a single standalone QT row. */
+/**
+ * The settled resource-route payload for a single standalone QT row.
+ *
+ * `error: null` is NOT decoration — the route wraps its response in `payload()`
+ * (`~/utils/http.server`), which returns `{ error: null, ...data }`. A fixture
+ * without that key does not describe any response this route can produce, and a
+ * success/failure guard written against it can be wrong in production while
+ * every test here passes.
+ */
 function makePayload({
   asset,
   bookedQuantity,
@@ -162,6 +170,7 @@ function makePayload({
   bookedQuantity: number;
 }) {
   return {
+    error: null,
     bookingAssets: [
       { id: "ba-1", quantity: bookedQuantity, assetKitId: null, asset },
     ],
@@ -317,6 +326,28 @@ describe("BookingAssetsSidebar lazy loading", () => {
 
     expect(await screen.findByRole("status")).toBeInTheDocument();
     expect(screen.queryByTestId("asset-status-badge")).not.toBeInTheDocument();
+  });
+
+  it("treats a success envelope carrying `error: null` as success, not failure", async () => {
+    // Regression: the guard used to ask `!("error" in fetcher.data)`. Every
+    // successful response goes through `payload()`, which returns
+    // `{ error: null, ...data }`, so that test was false for good payloads and
+    // the drawer showed its retry state 100% of the time. The discriminant is
+    // the presence of `bookingAssets`.
+    const asset = makeQtAsset();
+    fetcher.data = makePayload({ asset, bookedQuantity: 3 });
+    expect(fetcher.data).toHaveProperty("error", null);
+
+    render(
+      <BookingAssetsSidebar booking={makeBooking({ status: "RESERVED" })} />
+    );
+    await openSidebar();
+
+    expect(await screen.findByTestId("asset-status-badge")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /try again/i })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("offers a retry instead of spinning forever when the fetch fails", async () => {

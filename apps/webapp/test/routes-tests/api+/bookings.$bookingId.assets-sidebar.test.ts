@@ -60,6 +60,8 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
+// why: the loader returns `data(...)`; swapping it for a plain Response factory
+// lets the handler be invoked directly, with no router runtime to stand up.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual("react-router");
   return { ...actual, data: createDataMock() };
@@ -189,6 +191,11 @@ describe("api/bookings/:bookingId/assets-sidebar — payload", () => {
     const response = (await loader(buildArgs())) as unknown as Response;
     const body = await response.json();
 
+    // The whole envelope, not just the rows: the success path runs through
+    // `payload()`, which stamps `error: null` onto every response. The drawer
+    // has to discriminate on `bookingAssets` because of it, so the shape is
+    // part of this route's contract rather than an implementation detail.
+    expect(body.error).toBeNull();
     expect(body.bookingAssets).toEqual([
       { id: "ba-1", quantity: 5, assetKitId: null },
     ]);
