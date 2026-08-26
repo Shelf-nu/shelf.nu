@@ -41,7 +41,12 @@ function formatCustomFieldValue(
       return val?.raw || val?.valueText || "\u2014";
     case "AMOUNT": {
       const amount = val?.raw ?? val?.valueText;
-      if (amount == null) return "\u2014";
+      // A blank string is a missing value, not zero — Number("") is 0.
+      if (
+        amount == null ||
+        (typeof amount === "string" && amount.trim() === "")
+      )
+        return "\u2014";
       const numeric = typeof amount === "number" ? amount : Number(amount);
       return Number.isFinite(numeric)
         ? formatCurrency(numeric, currency)

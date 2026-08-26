@@ -417,9 +417,6 @@ export default function KitDetailScreen() {
                             { color: assetBadge.text },
                           ]}
                         >
-                          {/* why raw enum, not getListRowStatusLabel: the
-                              kit payload's asset rows carry no custodyList,
-                              so partial-custody cannot be derived here. */}
                           {formatStatus(asset.status)}
                         </Text>
                       </View>

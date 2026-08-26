@@ -533,6 +533,9 @@ export default function CreateAssetScreen() {
           setImageMimeType("image/jpeg");
           setCustomFieldValues({});
           setQrId(undefined);
+          // The route still carries the old qrId; clear it too, or a screen
+          // remount would re-seed the state and resurrect the banner.
+          router.setParams({ qrId: undefined });
         },
       },
     ]);

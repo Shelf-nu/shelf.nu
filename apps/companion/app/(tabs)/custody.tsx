@@ -16,11 +16,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, type AssetListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import {
+  formatStatus,
   fontSize,
   spacing,
   borderRadius,
   hitSlop,
-  getListRowStatusLabel,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -164,7 +164,7 @@ function MyCustodyContent() {
             pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${item.id}`)
           }
           activeOpacity={0.6}
-          accessibilityLabel={`${item.title}, ${getListRowStatusLabel(item)}${
+          accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
             item.category ? `, ${item.category.name}` : ""
           }${item.location ? `, ${item.location.name}` : ""}`}
           accessibilityRole="button"
@@ -209,7 +209,7 @@ function MyCustodyContent() {
           <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
             <View style={[styles.statusDot, { backgroundColor: badge.text }]} />
             <Text style={[styles.statusText, { color: badge.text }]}>
-              {getListRowStatusLabel(item)}
+              {formatStatus(item.status)}
             </Text>
           </View>
         </TouchableOpacity>

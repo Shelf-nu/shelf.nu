@@ -14,7 +14,6 @@ import {
   AUDIT_STATUS_LABELS,
   BOOKING_STATUS_LABELS,
 } from "@shelf/labels";
-import type { AssetType } from "./api/types";
 
 // ── Deprecated re-exports (use useTheme() instead) ─────────────────────────
 export { lightColors as colors } from "./theme-colors";
@@ -185,40 +184,6 @@ export function getQuantityStatusLabel(
       : ASSET_QTY_STATUS_LABELS.PARTIALLY_RESERVED;
   }
   return ASSET_QTY_STATUS_LABELS.AVAILABLE;
-}
-
-/**
- * Status label for a LIST row, upgrading "In custody" to "Partial custody"
- * when a QUANTITY_TRACKED asset still has unheld units.
- *
- * List payloads carry only the custody side of the unit math (`custodyList`
- * quantities), not the full per-status breakdown the detail endpoint sends —
- * so this refines the IN_CUSTODY case only and leaves every other status to
- * the raw enum label. Use {@link getQuantityStatusLabel} wherever a full
- * breakdown is available.
- *
- * @param item - a list row: status enum plus the quantity fields the list sends
- * @returns the label to render for the row's status badge
- */
-export function getListRowStatusLabel(item: {
-  status: string;
-  type?: AssetType;
-  quantity?: number | null;
-  custodyList?: { quantity: number }[];
-}): string {
-  if (
-    item.status === "IN_CUSTODY" &&
-    item.type === "QUANTITY_TRACKED" &&
-    typeof item.quantity === "number" &&
-    item.custodyList &&
-    item.custodyList.length > 0
-  ) {
-    const held = item.custodyList.reduce((sum, c) => sum + c.quantity, 0);
-    return held < item.quantity
-      ? ASSET_QTY_STATUS_LABELS.PARTIAL_CUSTODY
-      : ASSET_QTY_STATUS_LABELS.IN_CUSTODY;
-  }
-  return formatStatus(item.status);
 }
 
 /**

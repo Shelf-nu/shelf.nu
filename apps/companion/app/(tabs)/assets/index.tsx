@@ -20,11 +20,11 @@ import { api, type AssetListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { userHasPermission } from "@/lib/permissions";
 import {
+  formatStatus,
   fontSize,
   spacing,
   borderRadius,
   hitSlop,
-  getListRowStatusLabel,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -259,7 +259,7 @@ function AssetsListContent() {
           style={styles.assetCard}
           onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
           activeOpacity={0.6}
-          accessibilityLabel={`${item.title}, ${getListRowStatusLabel(item)}${
+          accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
             item.sequentialId ? `, ${item.sequentialId}` : ""
           }${quantityLabel ? `, quantity ${quantityLabel}` : ""}${
             item.category ? `, ${item.category.name}` : ""
@@ -323,7 +323,7 @@ function AssetsListContent() {
           <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
             <View style={[styles.statusDot, { backgroundColor: badge.text }]} />
             <Text style={[styles.statusText, { color: badge.text }]}>
-              {getListRowStatusLabel(item)}
+              {formatStatus(item.status)}
             </Text>
           </View>
         </TouchableOpacity>
