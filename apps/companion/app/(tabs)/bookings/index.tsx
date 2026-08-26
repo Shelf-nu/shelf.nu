@@ -152,6 +152,8 @@ function BookingsListContent() {
   const router = useRouter();
   const {
     currentOrg,
+    organizations,
+    setCurrentOrg,
     isLoading: orgLoading,
     error: orgError,
     refresh: refreshOrg,
@@ -239,7 +241,9 @@ function BookingsListContent() {
 
   const fetchBookings = useCallback(
     async (pageNum: number, reset: boolean): Promise<boolean> => {
-      if (!currentOrg) return false;
+      // Personal workspaces have no bookings surface; the screen shows the
+      // switch-workspace state instead of firing a request that cannot succeed.
+      if (!currentOrg || currentOrg.type === "PERSONAL") return false;
       const { data, error: fetchErr } = await api.bookings(currentOrg.id, {
         status: STATUS_FILTERS[activeFilter].value,
         search: debouncedSearch || undefined,
@@ -577,6 +581,52 @@ function BookingsListContent() {
           <Ionicons name="refresh" size={16} color={colors.primaryForeground} />
           <Text style={styles.retryText}>Retry</Text>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Bookings belong to team workspaces. In a personal workspace, explain that
+  // and hand the user the shortest path to one instead of an empty list.
+  if (currentOrg?.type === "PERSONAL") {
+    const teamOrgs = organizations.filter((org) => org.type === "TEAM");
+    const onlyTeam = teamOrgs.length === 1 ? teamOrgs[0] : null;
+    return (
+      <View style={styles.centered}>
+        <Ionicons name="calendar-outline" size={48} color={colors.border} />
+        <Text style={styles.emptyTitle}>Bookings live in team workspaces</Text>
+        <Text style={styles.emptyText}>
+          {teamOrgs.length > 0
+            ? "Your personal workspace tracks your own gear. Switch to a team workspace to plan and reserve equipment."
+            : "Your personal workspace tracks your own gear. Create a team workspace on the web to plan and reserve equipment."}
+        </Text>
+        {teamOrgs.length > 0 ? (
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              if (onlyTeam) {
+                setCurrentOrg(onlyTeam);
+              } else {
+                // Several teams: the workspace picker lives in Settings.
+                router.push("/(tabs)/settings");
+              }
+            }}
+            activeOpacity={0.7}
+            accessibilityLabel={
+              onlyTeam ? `Switch to ${onlyTeam.name}` : "Switch workspace"
+            }
+            accessibilityRole="button"
+          >
+            <Ionicons
+              name="swap-horizontal"
+              size={16}
+              color={colors.primaryForeground}
+            />
+            <Text style={styles.retryText}>
+              {onlyTeam ? `Switch to ${onlyTeam.name}` : "Switch workspace"}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   }
