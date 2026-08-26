@@ -64,6 +64,7 @@ import {
 import { ALL_SELECTED_KEY } from "./list";
 import { cleanMarkdownFormatting } from "./markdown-cleaner";
 import { sanitizeNoteContent } from "./note-sanitizer.server";
+import type { UserNameFields } from "./user";
 import { resolveTeamMemberName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
@@ -1063,10 +1064,7 @@ export async function exportBookingsFromIndexToCsv({
 const ACTIVITY_HEADER = "Date,Author,Type,Content";
 
 type ActivityNote = Pick<Note, "content" | "createdAt" | "type"> & {
-  user: {
-    firstName: string | null;
-    lastName: string | null;
-  } | null;
+  user: UserNameFields | null;
 };
 
 const sanitizeCsvValue = (value: string | null | undefined) =>
@@ -1095,10 +1093,7 @@ const notesToCsv = (notes: ActivityNote[], prefs: ResolvedFormatPrefs) => {
 };
 
 type ActivityNoteRecord = {
-  user: {
-    firstName: string | null;
-    lastName: string | null;
-  } | null;
+  user: UserNameFields | null;
   content: string | null;
   createdAt: Date;
   type: string;
@@ -1161,12 +1156,7 @@ async function exportNotesToCsv<Where>({
     content: note.content ?? "",
     createdAt: note.createdAt,
     type: note.type as ActivityNote["type"],
-    user: note.user
-      ? {
-          firstName: note.user.firstName,
-          lastName: note.user.lastName,
-        }
-      : null,
+    user: note.user,
   }));
 
   return notesToCsv(activityNotes, prefs);
@@ -1540,13 +1530,7 @@ export const buildCsvExportDataFromBookings = (
           case "custodian": {
             const teamMember = {
               name: booking.custodianTeamMember?.name ?? "",
-              user: booking?.custodianUser
-                ? {
-                    firstName: booking.custodianUser?.firstName,
-                    lastName: booking.custodianUser?.lastName,
-                    email: booking.custodianUser?.email,
-                  }
-                : null,
+              user: booking?.custodianUser ?? null,
             };
 
             value = resolveTeamMemberName(teamMember, true);

@@ -13,6 +13,7 @@ import {
 } from "~/modules/booking/service.server";
 import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
+import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * GET /api/mobile/bookings
@@ -154,6 +155,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
@@ -199,9 +201,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         createdAt: b.createdAt,
         custodianName:
           b.custodianTeamMember?.name ||
-          [b.custodianUser?.firstName, b.custodianUser?.lastName]
-            .filter(Boolean)
-            .join(" ") ||
+          resolveUserDisplayName(b.custodianUser) ||
           null,
         custodianImage: b.custodianUser?.profilePicture || null,
         assetCount: b._count.bookingAssets,

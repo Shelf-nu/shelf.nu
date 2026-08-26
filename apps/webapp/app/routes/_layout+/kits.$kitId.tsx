@@ -442,17 +442,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         await emitAssetKitDetachmentNotes({
           impact: detachmentImpact,
-          actorUserId: userId,
-          actorFirstName: user.firstName,
-          actorLastName: user.lastName,
+          actor: { ...user, id: userId },
           organizationId,
         });
 
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user.firstName,
-          lastName: user.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         const kitLink = wrapLinkForNote(`/kits/${kitId}`, kit.name.trim());
 
         // Qty-tracked: name the per-row AssetKit.quantity actually

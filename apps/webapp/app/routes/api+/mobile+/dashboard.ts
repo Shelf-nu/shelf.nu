@@ -10,6 +10,7 @@ import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getBookings } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
+import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * GET /api/mobile/dashboard
@@ -145,6 +146,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
@@ -165,6 +167,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
@@ -185,6 +188,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
@@ -235,9 +239,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       from: b.from?.toISOString?.() ?? b.from,
       to: b.to?.toISOString?.() ?? b.to,
       custodianName: b.custodianUser
-        ? [b.custodianUser.firstName, b.custodianUser.lastName]
-            .filter(Boolean)
-            .join(" ") || null
+        ? resolveUserDisplayName(b.custodianUser) || null
         : b.custodianTeamMember?.name || null,
       assetCount: b._count?.assets ?? 0,
     });

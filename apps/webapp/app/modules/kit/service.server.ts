@@ -68,6 +68,8 @@ import {
   assertTeamMemberBelongsToOrg,
 } from "~/utils/org-validation.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import { computeKitClaimablePool } from "./picker-meta.server";
 import type { UpdateKitPayload } from "./types";
@@ -109,6 +111,7 @@ import {
 } from "../note/service.server";
 import { getQr } from "../qr/service.server";
 import { scopeCustodianFilterIds } from "../team-member/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -591,16 +594,14 @@ export async function removeKitSlicesFromPlanningBookings(
   // (see `user/service.server.ts`) — that would take a second pooled connection
   // while this interactive tx holds one, and add a round-trip to a tx budget
   // that has already produced P2028 on large bulk operations.
-  const actor: { firstName: string | null; lastName: string | null } | null =
-    await tx.user.findUnique({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `actorUserId` is the authenticated caller, not request input
-      where: { id: actorUserId },
-      select: { firstName: true, lastName: true },
-    });
+  const actor = await tx.user.findUnique({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `actorUserId` is the authenticated caller, not request input
+    where: { id: actorUserId },
+    select: { ...USER_NAME_SELECT },
+  });
   const actorLink = wrapUserLinkForNote({
+    ...(actor ?? { displayName: null }),
     id: actorUserId,
-    firstName: actor?.firstName,
-    lastName: actor?.lastName,
   });
 
   // One note per (booking, kit) pair — several assets leaving the same kit in
@@ -1016,23 +1017,19 @@ export async function preserveKitDrivenPlacements(
 
 export async function emitAssetKitDetachmentNotes({
   impact,
-  actorUserId,
-  actorFirstName,
-  actorLastName,
+  actor,
   organizationId,
 }: {
   impact: Awaited<ReturnType<typeof fetchAssetKitDetachmentImpact>>;
-  actorUserId: string;
-  actorFirstName: string | null;
-  actorLastName: string | null;
+  /**
+   * The acting user's row, passed through whole: the note links their id and
+   * renders whatever name they go by.
+   */
+  actor: UserNameFields & { id: string };
   organizationId: string;
 }) {
   if (impact.length === 0) return;
-  const actorLink = wrapUserLinkForNote({
-    id: actorUserId,
-    firstName: actorFirstName,
-    lastName: actorLastName,
-  });
+  const actorLink = wrapUserLinkForNote(actor);
   // One note per (booking, kit) pair. Multiple assets removed from the
   // same kit in the same delete are collapsed to a single note per
   // booking so we don't spam the booking activity feed.
@@ -2082,11 +2079,7 @@ async function performKitDeletion({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    actorLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: actor?.firstName,
-      lastName: actor?.lastName,
-    });
+    actorLink = wrapUserLinkForNote({ ...actor, id: userId });
   }
 
   // Per-asset units released by the kit-delete, sourced from the inherited
@@ -2487,11 +2480,7 @@ export async function releaseCustody({
       assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
     };
 
-    const actorLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: actor?.firstName,
-      lastName: actor?.lastName,
-    });
+    const actorLink = wrapUserLinkForNote({ ...actor, id: userId });
     const custodianDisplay = kit.custody?.custodian
       ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
       : "**Unknown Custodian**";
@@ -2685,14 +2674,11 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
           ...kit,
           custody: {
             custodian: {
-              name: `${custodianUser?.firstName || ""} ${
-                custodianUser?.lastName || ""
-              }`, // Concatenate firstName and lastName to form the name property with default values
-              user: {
-                firstName: custodianUser?.firstName || "",
-                lastName: custodianUser?.lastName || "",
-                profilePicture: custodianUser?.profilePicture || null,
-              },
+              // `user` goes through whole: a registered member is named from
+              // their user row, and a re-projection that drops `displayName`
+              // renames them everywhere this custodian is rendered.
+              name: resolveUserDisplayName(custodianUser),
+              user: custodianUser,
             },
           },
         });
@@ -2733,7 +2719,7 @@ type CurrentBookingType = {
   name: string;
   custodianUser: Pick<
     User,
-    "firstName" | "lastName" | "profilePicture" | "email"
+    "firstName" | "lastName" | "displayName" | "profilePicture" | "email"
   > | null;
   custodianTeamMember: TeamMember | null;
   status: BookingStatus;
@@ -3122,11 +3108,7 @@ export async function bulkAssignKitCustody({
       );
 
       /** Creating notes for all the assets of the kit */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
         : // Free-form fallback name, rendered as literal bold text.
@@ -3455,11 +3437,7 @@ export async function bulkReleaseKitCustody({
       );
 
       /** Creating notes for all the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const custodianDisplay = custodian
         ? wrapCustodianForNote({ teamMember: custodian })
         : "**Unknown Custodian**";
@@ -4603,11 +4581,7 @@ export async function bulkUpdateKitLocation({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: userForNote?.firstName,
-      lastName: userForNote?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...userForNote, id: userId });
 
     if (newLocationId && newLocationId.trim() !== "") {
       const location = await db.location.findFirst({
@@ -4741,11 +4715,7 @@ export async function updateKitAssets({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const actor = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: userId });
 
     const kitWithRelations = await db.kit
       .findUniqueOrThrow({
@@ -5442,9 +5412,7 @@ export async function updateKitAssets({
     // so the notes only land if the cascade actually committed.
     await emitAssetKitDetachmentNotes({
       impact: detachmentImpact,
-      actorUserId: userId,
-      actorFirstName: user?.firstName ?? null,
-      actorLastName: user?.lastName ?? null,
+      actor: { ...user, id: userId },
       organizationId,
     });
 
@@ -6076,11 +6044,7 @@ export async function bulkRemoveAssetsFromKits({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const actor = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: userId });
 
     // Resolve IDs (works for both simple and advanced mode).
     // Acting user's timezone: when "select all" is active the affected set is
@@ -6423,9 +6387,7 @@ export async function bulkRemoveAssetsFromKits({
     // slice has been converted to standalone.
     await emitAssetKitDetachmentNotes({
       impact: bulkDetachmentImpact,
-      actorUserId: userId,
-      actorFirstName: user?.firstName ?? null,
-      actorLastName: user?.lastName ?? null,
+      actor: { ...user, id: userId },
       organizationId,
     });
 
@@ -6825,12 +6787,12 @@ export async function moveAssetKitUnits(
         tx
       );
 
-      // Load the acting user once for the post-tx note write. Reads
-      //     are part of the tx so a rolled-back move never produces a
-      //     stale `firstName`/`lastName` for the note.
+      // Load the acting user once for the post-tx note write. The read is
+      //     part of the tx, so a rolled-back move never produces a stale
+      //     name for the note.
       const user = await tx.user.findUnique({
         where: { id: userId },
-        select: { firstName: true, lastName: true },
+        select: { ...USER_NAME_SELECT },
       });
 
       return {
@@ -6841,8 +6803,7 @@ export async function moveAssetKitUnits(
         // Carry forward the data the post-tx note writer needs so it
         // can land only if the tx actually committed.
         noteContext: {
-          firstName: user?.firstName ?? "",
-          lastName: user?.lastName ?? "",
+          user: user ?? { displayName: null },
           assetType: asset.type,
           unitOfMeasure: asset.unitOfMeasure,
           fromKit,
@@ -6857,8 +6818,7 @@ export async function moveAssetKitUnits(
     await createKitMoveNote({
       fromKit: txResult.noteContext.fromKit,
       toKit: txResult.noteContext.toKit,
-      firstName: txResult.noteContext.firstName,
-      lastName: txResult.noteContext.lastName,
+      user: txResult.noteContext.user,
       assetId,
       userId,
       organizationId,

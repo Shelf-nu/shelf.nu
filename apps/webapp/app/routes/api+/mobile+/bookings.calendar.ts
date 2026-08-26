@@ -18,6 +18,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { resolveUserDisplayName } from "~/utils/user";
 
 /** Hard ceiling on the window a single call may ask for. */
 const MAX_RANGE_DAYS = 366;
@@ -263,7 +264,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         status: true,
         from: true,
         to: true,
-        custodianUser: { select: { firstName: true, lastName: true } },
+        custodianUser: {
+          select: { firstName: true, lastName: true, displayName: true },
+        },
         custodianTeamMember: { select: { name: true } },
       },
       // Soonest first: a calendar is read forwards.
@@ -325,9 +328,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         to: b.to,
         custodianName:
           b.custodianTeamMember?.name ||
-          [b.custodianUser?.firstName, b.custodianUser?.lastName]
-            .filter(Boolean)
-            .join(" ") ||
+          resolveUserDisplayName(b.custodianUser) ||
           null,
       })),
       /**

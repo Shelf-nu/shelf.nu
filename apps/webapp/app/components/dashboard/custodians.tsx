@@ -8,6 +8,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { ClickableTr } from "./clickable-tr";
 import { DashboardEmptyState } from "./empty-state";
@@ -125,11 +126,7 @@ function Row({
   custodian: {
     name: string;
     userId?: string | null;
-    user?: {
-      firstName?: string | null;
-      lastName?: string | null;
-      profilePicture?: string | null;
-    } | null;
+    user?: (UserNameFields & { profilePicture?: string | null }) | null;
   };
   count: number;
   /** Does the current user have permissions to acess this teamMember page */

@@ -132,6 +132,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                     mode: Prisma.QueryMode.insensitive,
                   },
                 },
+                // `displayName` replaces first/last name in the UI for users
+                // who set one, so it is the name a searcher can actually see.
+                {
+                  displayName: {
+                    contains: term,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
                 {
                   email: {
                     contains: term,

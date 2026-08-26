@@ -16,6 +16,7 @@ import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
 } from "~/modules/note/service.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
 import type { ClientHint } from "~/utils/client-hints";
 import type { RawFormatPrefs } from "~/utils/date-format";
 import type { ErrorLabel } from "~/utils/error";
@@ -27,6 +28,7 @@ import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { removePublicFile } from "~/utils/storage.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
 import type { AuditFilterType } from "./audit-filter-utils";
@@ -150,19 +152,14 @@ export type CreateAuditSessionResult = {
 export type GetAuditSessionResult = {
   session: AuditSession & {
     assignments: (AuditAssignment & {
-      user: {
+      user: UserNameFields & {
         id: string;
-        firstName: string | null;
-        lastName: string | null;
         email: string;
         profilePicture: string | null;
       };
     })[];
-    createdBy: {
+    createdBy: UserNameFields & {
       id: string;
-      firstName: string | null;
-      lastName: string | null;
-      displayName: string | null;
       email: string;
       profilePicture: string | null;
     };
@@ -2524,9 +2521,8 @@ export async function cancelAuditSession({
     await db.auditNote.create({
       data: {
         content: `${wrapUserLinkForNote({
+          ...(actingUser ?? { displayName: null }),
           id: userId,
-          firstName: actingUser?.firstName,
-          lastName: actingUser?.lastName,
         })} cancelled the audit`,
         type: "UPDATE",
         userId,
@@ -2554,12 +2550,7 @@ export async function cancelAuditSession({
       userId: string;
       // Raw format-preference columns travel on each recipient row so the email
       // helper resolves prefs from the loaded row (no per-recipient DB fetch).
-      user: {
-        email: string;
-        firstName: string | null;
-        lastName: string | null;
-        displayName?: string | null;
-      } & RawFormatPrefs;
+      user: UserNameFields & { email: string } & RawFormatPrefs;
     }> = auditSession.assignments
       .filter(
         (assignment) => assignment.userId !== userId && assignment.user.email
@@ -3168,9 +3159,8 @@ export async function archiveAuditSession({
       await tx.auditNote.create({
         data: {
           content: `${wrapUserLinkForNote({
+            ...(user ?? { displayName: null }),
             id: userId,
-            firstName: user?.firstName,
-            lastName: user?.lastName,
           })} archived the audit`,
           type: "UPDATE",
           userId,
@@ -3352,7 +3342,7 @@ export async function bulkArchiveAudits({
     // avoid holding a DB connection while reading unrelated data.
     const user = await db.user.findFirst({
       where: { id: userId },
-      select: { firstName: true, lastName: true },
+      select: { ...USER_NAME_SELECT },
     });
 
     await db.$transaction(async (tx) => {
@@ -3390,9 +3380,8 @@ export async function bulkArchiveAudits({
       await tx.auditNote.createMany({
         data: audits.map((a) => ({
           content: `${wrapUserLinkForNote({
+            ...(user ?? { displayName: null }),
             id: userId,
-            firstName: user?.firstName,
-            lastName: user?.lastName,
           })} archived the audit`,
           type: "UPDATE" as const,
           userId,

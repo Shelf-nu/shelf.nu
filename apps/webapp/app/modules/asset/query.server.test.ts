@@ -1485,3 +1485,75 @@ describe("buildAdvancedAssetsQuery", () => {
     });
   });
 });
+
+describe("custodian display name", () => {
+  /**
+   * `displayName` replaces the legal name for users who set one. The advanced
+   * index builds its custodian payload in raw SQL, which typecheck cannot read
+   * — and a missing column here is invisible at runtime, because the row still
+   * renders a perfectly plausible name: the user's legal one. Asserting the SQL
+   * text is the only guard.
+   */
+  function fragmentSql() {
+    return assetQueryFragment().strings.join("?");
+  }
+
+  it("selects displayName on the booking-derived custodian", () => {
+    // `bu` is the custodian of the ONGOING/OVERDUE booking a CHECKED_OUT asset
+    // is on — projected unconditionally, so it needs no options.
+    expect(fragmentSql()).toContain(`'displayName', bu."displayName"`);
+  });
+
+  it("selects displayName on every booking custodian and creator", () => {
+    // These three only exist in the bookings projection: the booking's
+    // custodian team member's user, its custodian user, and its creator.
+    const sql = assetQueryFragment({ withBookings: true }).strings.join("?");
+
+    for (const alias of ["ctmu", "cu", "cr"]) {
+      expect(sql).toContain(`'displayName', ${alias}."displayName"`);
+    }
+  });
+
+  it("selects displayName on the direct-custody custodian", () => {
+    // The per-asset custody lateral lives in the joins, not the fragment.
+    expect(assetQueryJoins.strings.join("?")).toContain(
+      `'displayName', u."displayName"`
+    );
+  });
+
+  it("resolves the booking custodian name from displayName first", () => {
+    const sql = fragmentSql();
+
+    // NULLIF(TRIM(...)) so a blank display name falls through to the legal
+    // name rather than rendering an empty chip.
+    expect(sql).toContain(
+      `COALESCE(NULLIF(TRIM(bu."displayName"), ''), TRIM(CONCAT(bu."firstName", ' ', bu."lastName")))`
+    );
+  });
+
+  it("keeps the NRM guard on bu.id rather than on the name expression", () => {
+    const sql = fragmentSql();
+
+    // CONCAT ignores NULLs and yields '' for an NRM, so the name can never be
+    // NULL — only `bu.id` distinguishes a registered user from an NRM.
+    expect(sql).toContain("WHEN bu.id IS NOT NULL");
+  });
+
+  it("groups by displayName so the custodian columns stay aggregatable", () => {
+    // Selecting a column without adding it to GROUP BY is a runtime Postgres
+    // error, not a type error — so the two have to be asserted together.
+    const { orderByInner } = parseSortingOptions([]);
+    const sql = buildAdvancedAssetsQuery({
+      whereClause: generateWhereClause("org-1", null, []),
+      orderByInner,
+      customFieldSortings: [],
+      sortBy: [],
+      parsedFilters: [],
+      withBookings: false,
+      withBarcodes: false,
+      paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
+    }).strings.join("?");
+
+    expect(sql).toContain('bu."displayName"');
+  });
+});

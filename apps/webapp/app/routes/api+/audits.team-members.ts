@@ -50,10 +50,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         user: { isNot: null }, // Only users, no NRMs
       },
+      // Order by the name the list actually renders: `displayName` when the
+      // user has one, otherwise their first name. Prisma cannot order by a
+      // coalesce, so `displayName` leads and the rest are tie-breakers —
+      // Postgres sorts NULLs last on ASC, so users without one keep their
+      // existing relative order among themselves.
       orderBy: [
-        // Users first
+        { user: { displayName: "asc" } },
         { user: { firstName: "asc" } },
-        // Then by name for any edge cases
         { name: "asc" },
       ],
       include: TEAM_MEMBER_INCLUDE,

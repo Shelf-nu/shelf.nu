@@ -52,6 +52,7 @@ describe("getCustomerNotificationData", () => {
   const baseUser = {
     email: "user@example.com",
     firstName: "John",
+    displayName: null,
   };
 
   beforeEach(() => {
@@ -169,10 +170,28 @@ describe("getCustomerNotificationData", () => {
 
     const result = await getCustomerNotificationData({
       customerId: "cus_123",
-      user: { email: "user@example.com", firstName: null },
+      user: { email: "user@example.com", firstName: null, displayName: null },
     });
 
     expect(result.customerName).toBeNull();
+  });
+
+  it("greets by displayName in preference to the Stripe customer name", async () => {
+    // `customerName` is a salutation, so the name the user chose wins over the
+    // legal name we registered with Stripe for invoicing.
+    mockCustomersRetrieve.mockResolvedValue({
+      id: "cus_123",
+      deleted: false,
+      email: "user@example.com",
+      name: "Jonathan Legalname",
+    } as unknown as Stripe.Customer);
+
+    const result = await getCustomerNotificationData({
+      customerId: "cus_123",
+      user: { ...baseUser, displayName: "Jo" },
+    });
+
+    expect(result.customerName).toBe("Jo");
   });
 });
 
@@ -180,6 +199,7 @@ describe("getInvoiceNotificationData", () => {
   const baseUser = {
     email: "user@example.com",
     firstName: "John",
+    displayName: null,
   };
 
   const baseInvoice = {

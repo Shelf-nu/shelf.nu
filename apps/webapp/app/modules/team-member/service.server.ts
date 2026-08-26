@@ -1257,7 +1257,16 @@ export async function getTeamMembersForNotify({
           },
         },
       },
-      orderBy: [{ user: { firstName: "asc" } }, { name: "asc" }],
+      // Order by the name the picker actually renders: `displayName` when the
+      // user has one, otherwise their first name. Prisma cannot order by a
+      // coalesce, so `displayName` leads and the rest are tie-breakers —
+      // Postgres sorts NULLs last on ASC, so users without one keep their
+      // existing relative order among themselves.
+      orderBy: [
+        { user: { displayName: "asc" } },
+        { user: { firstName: "asc" } },
+        { name: "asc" },
+      ],
     });
 
     return {

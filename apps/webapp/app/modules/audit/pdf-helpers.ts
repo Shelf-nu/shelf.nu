@@ -11,6 +11,7 @@ import type {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
 import { getPrimaryLocation } from "../asset/utils";
 import { getQrCodeMaps } from "../qr/service.server";
 
@@ -91,20 +92,12 @@ export interface AuditPdfDbResult {
    * the photos of the same asset.
    */
   conditionNotes: (AuditNote & {
-    user: {
-      firstName: string | null;
-      lastName: string | null;
-      email: string;
-    } | null;
+    user: (UserNameFields & { email: string }) | null;
     auditAsset: { asset: { id: string; title: string } | null } | null;
   })[];
   // Recent system activity (UPDATE rows only, limited to 15)
   activityNotes: (AuditNote & {
-    user: {
-      firstName: string | null;
-      lastName: string | null;
-      email: string;
-    } | null;
+    user: (UserNameFields & { email: string }) | null;
   })[];
   // Formatted created date string (user's local timezone)
   from?: string;
