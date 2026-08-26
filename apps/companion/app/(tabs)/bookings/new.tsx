@@ -55,7 +55,9 @@ import { TeamMemberPicker } from "@/components/team-member-picker";
  * when one is given and on tomorrow otherwise.
  *
  * Both are real instants. The day and the hours are resolved in `timeZone`, so
- * the window means the same wall clock regardless of where the device is.
+ * the window means the same wall clock regardless of where the device is. The
+ * start never seeds in the past: it is clamped to ten minutes from now, the
+ * earliest start the server accepts.
  *
  * @param timeZone - the acting user's preference zone
  * @param day - a `YYYY-MM-DD` calendar date, as the calendar lens keys its days
@@ -86,7 +88,19 @@ function defaultBookingWindow(
         { year: onDay[0], month: onDay[1], day: onDay[2], hour, minute: 0 },
         timeZone
       );
-    return { from: at(9), to: at(17) };
+    // A booking can only start in the future, so the seed is clamped to ten
+    // minutes from now — the same earliest-start the server holds submissions
+    // to. Without the clamp, opening the form from today's panel after 09:00
+    // (or from a past day left on the back stack) seeds a start the server
+    // rejects on an untouched form.
+    const earliest = new Date(Date.now() + 10 * 60 * 1000);
+    earliest.setSeconds(0, 0);
+    const from = at(9) < earliest ? earliest : at(9);
+    // Keep the day's 17:00 end when it still leaves a window; once the clamp
+    // passes it, fall back to the same eight-hour span 09:00–17:00 describes.
+    const to =
+      at(17) > from ? at(17) : new Date(from.getTime() + 8 * 60 * 60 * 1000);
+    return { from, to };
   }
   const now = new Date();
   return {
