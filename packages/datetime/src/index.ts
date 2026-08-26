@@ -938,7 +938,14 @@ export function formatDate(
     const rendered = {
       year: n.yearStyle === "2-digit" ? numeric.year.slice(-2) : numeric.year,
       month: isNameMonth
-        ? partsFor(date, timeZone, { month: effectiveMonthStyle }).month // name
+        ? // The `day` is discarded; it is here because Hermes only emits typed
+          // parts for a MULTI-field format. Asked for `{ month }` alone it
+          // returns no part of type "month", so the name resolves to undefined
+          // and `join` renders it as an empty string.
+          partsFor(date, timeZone, {
+            month: effectiveMonthStyle,
+            day: "numeric",
+          }).month // name
         : effectiveMonthStyle === "2-digit"
         ? pad2(numeric.month)
         : numeric.month,

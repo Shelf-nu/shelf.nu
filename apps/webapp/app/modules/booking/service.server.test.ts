@@ -264,6 +264,11 @@ vitest.mock("~/database/db.server", () => ({
     // been materialised into concrete BookingAsset rows yet.
     bookingModelRequest: {
       findMany: vitest.fn().mockResolvedValue([]),
+      // why: removeAssets reads each affected request to decrement
+      // `fulfilledQuantity` and clear `fulfilledAt`, then emits the
+      // reversal event off the before-state it read here.
+      findUnique: vitest.fn().mockResolvedValue(null),
+      update: vitest.fn().mockResolvedValue({}),
       // why: reserveBooking's eligibility probe falls back to counting model
       // reservations when a booking holds no concrete assets.
       count: vitest.fn().mockResolvedValue(0),
@@ -7658,6 +7663,221 @@ describe("removeAssets", () => {
     });
   });
 
+  // why: removing an assigned asset is the one path that reopens a fulfilled
+  // model reservation without any operator edit. `fulfilledAt IS NULL` is the
+  // outstanding-work predicate, so a consumer replaying the event stream
+  // without this reversal reconstructs the reservation as still closed.
+  describe("model-request fulfilledAt reversal", () => {
+    // why: `clearAllMocks` resets call history but NOT implementations, so the
+    // per-test overrides below would otherwise leak into every later describe
+    // in this file. `db.asset.findMany` in particular carries an echo-the-ids
+    // `mockImplementation` that the cross-org guard depends on; clobbering it
+    // persistently broke the partial-checkin qty tests. Restore both.
+    afterEach(() => {
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { id?: { in?: string[] } } }) => {
+          const ids = args?.where?.id?.in;
+          return Promise.resolve(
+            Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+          );
+        }
+      );
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([]);
+      (
+        db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(null);
+    });
+
+    /**
+     * Booking + asset fixture whose removed asset carries an AssetModel.
+     *
+     * `deletedRows` is the set of `BookingAsset` rows that were actually on
+     * the booking and so actually got deleted. It defaults to "the asset was
+     * there"; pass `[]` to model the caller REQUESTING an asset that never
+     * had a row on this booking.
+     */
+    function arrangeModelRemoval(
+      request: {
+        quantity: number;
+        fulfilledQuantity: number;
+        fulfilledAt: Date | null;
+      },
+      deletedRows?: Array<{
+        assetId: string;
+        quantity: number;
+        bookingModelRequestId: string | null;
+      }>
+    ) {
+      const mockBooking = { id: "booking-1", assetIds: ["asset-1"] };
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+        {
+          id: "asset-1",
+          assetModelId: "model-1",
+          title: "Laptop #1",
+          type: AssetType.INDIVIDUAL,
+          unitOfMeasure: null,
+        },
+      ]);
+      // Rows actually on the booking and therefore actually deleted. Default
+      // to the asset being present; `deletedRows: []` models the caller
+      // requesting an asset that was never on this booking.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(
+        deletedRows ?? [
+          {
+            assetId: "asset-1",
+            quantity: 1,
+            // The rollback counts rows that actually discharged THIS request,
+            // read from the row's own provenance rather than a shared model.
+            bookingModelRequestId: "req-1",
+          },
+        ]
+      );
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.deleteMany.mockResolvedValue({
+        count: (deletedRows ?? [{}]).length,
+      });
+      (
+        db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue({
+        ...request,
+        // Ownership guard: the loop refuses a request on another booking.
+        bookingId: "booking-1",
+        assetModelId: "model-1",
+        assetModel: { name: "Dell Latitude 5550" },
+      });
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue({
+        ...mockBooking,
+        name: "Test Booking",
+        status: BookingStatus.DRAFT,
+      });
+      return mockBooking;
+    }
+
+    /** Every BOOKING_MODEL_REQUEST_CHANGED payload recorded this test. */
+    function modelRequestChangedEvents() {
+      return (
+        activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .flatMap((call) => call[0] as Array<Record<string, unknown>>)
+        .filter((event) => event?.action === "BOOKING_MODEL_REQUEST_CHANGED");
+    }
+
+    it("records the fulfilledAt reversal when a removal reopens a fulfilled request", async () => {
+      expect.assertions(1);
+      const fulfilledAt = new Date("2026-05-02T10:00:00Z");
+      // 3 of 3 units assigned, so the request is closed. Removing one
+      // reopens it.
+      const mockBooking = arrangeModelRemoval({
+        quantity: 3,
+        fulfilledQuantity: 3,
+        fulfilledAt,
+      });
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(modelRequestChangedEvents()).toEqual([
+        expect.objectContaining({
+          action: "BOOKING_MODEL_REQUEST_CHANGED",
+          entityType: "BOOKING",
+          entityId: "booking-1",
+          bookingId: "booking-1",
+          field: "fulfilledAt",
+          fromValue: fulfilledAt.toISOString(),
+          toValue: null,
+          meta: {
+            assetModelId: "model-1",
+            assetModelName: "Dell Latitude 5550",
+          },
+        }),
+      ]);
+    });
+
+    it("leaves the reservation closed when the removed asset discharged nothing", async () => {
+      expect.assertions(2);
+      // Reserve 3, all satisfied. A fourth asset of the same model was added
+      // directly — it shares `assetModelId` but answered no promise, so its
+      // row carries no `bookingModelRequestId`. Counting by model reopened the
+      // reservation here and hard-blocked check-out while all three
+      // discharging assets were still on the booking.
+      const mockBooking = arrangeModelRemoval(
+        {
+          quantity: 3,
+          fulfilledQuantity: 3,
+          fulfilledAt: new Date("2026-05-02T10:00:00Z"),
+        },
+        [{ assetId: "asset-4", quantity: 1, bookingModelRequestId: null }]
+      );
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(modelRequestChangedEvents()).toEqual([]);
+      expect(db.bookingModelRequest.update).not.toHaveBeenCalled();
+    });
+
+    it("touches nothing when the requested asset had no row on this booking", async () => {
+      expect.assertions(2);
+      // `assetIds` is the caller's REQUEST, not the outcome: the bulk-remove
+      // handler passes every member of a selected kit, including members
+      // added to the kit after the booking was created and therefore never
+      // on it. Counting those would decrement a reservation and forge a
+      // reopening event for units that never left.
+      const mockBooking = arrangeModelRemoval(
+        { quantity: 3, fulfilledQuantity: 3, fulfilledAt: new Date() },
+        []
+      );
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(db.bookingModelRequest.update).not.toHaveBeenCalled();
+      expect(modelRequestChangedEvents()).toEqual([]);
+    });
+
+    it("records nothing when the request was never fulfilled", async () => {
+      expect.assertions(1);
+      // 2 of 3 assigned: already outstanding, so `fulfilledAt` was already
+      // null and the removal changes nothing about it. Gating on the
+      // computed next value alone would emit a spurious null → null event.
+      const mockBooking = arrangeModelRemoval({
+        quantity: 3,
+        fulfilledQuantity: 2,
+        fulfilledAt: null,
+      });
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(modelRequestChangedEvents()).toEqual([]);
+    });
+  });
+
   // why: bug #99 — removeAssets on an ONGOING/OVERDUE booking used to
   // blanket-flip every removed asset to AVAILABLE, even when another active
   // booking still held it or it was in custody. The reconciliation helper now
@@ -10032,6 +10252,142 @@ describe("addScannedAssetsToBooking", () => {
 
     // The booking must be untouched — the guard runs before any write.
     expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  describe("QUANTITY_TRACKED pool", () => {
+    const QT_ID = "asset-qty-scan";
+    const from = new Date("2026-07-01T09:00:00Z");
+    const to = new Date("2026-07-01T17:00:00Z");
+
+    /**
+     * One quantity-tracked asset with a fixed pool, answering every
+     * `asset.findMany` this path drives (the org-scope check, the conflict
+     * candidates, the scanned-asset metadata and the availability read — one
+     * mock, different `select` shapes, which the stub does not project).
+     */
+    /**
+     * Order of the two steps that matter, appended as they happen.
+     *
+     * No delegate belongs to the pool read alone — `asset.findMany` serves the
+     * org-scope check, the conflict candidates, the scanned metadata and the
+     * note builder as well — so invocation counters cannot separate them.
+     * The pool read is identifiable by its projection instead: `id` and
+     * `quantity` and nothing else.
+     */
+    let sequence: string[] = [];
+
+    function mockPool(
+      total: number,
+      type: AssetType = AssetType.QUANTITY_TRACKED
+    ) {
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: {
+          where?: { id?: { in?: string[] } };
+          select?: Record<string, boolean>;
+        }) => {
+          const select = args?.select ?? {};
+          const keys = Object.keys(select).sort();
+          if (keys.length === 2 && keys[0] === "id" && keys[1] === "quantity") {
+            sequence.push("measure");
+          }
+          return Promise.resolve(
+            (args?.where?.id?.in ?? []).map((id) => ({
+              id,
+              type,
+              title: "Folding Chairs",
+              unitOfMeasure: "chairs",
+              quantity: total,
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+            }))
+          );
+        }
+      );
+    }
+
+    beforeEach(() => {
+      sequence = [];
+      // why: the lock is a module mock, so it records its own turn in the
+      // sequence and still resolves the minimal asset stub its callers expect.
+      (
+        quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+      ).mockImplementation(() => {
+        sequence.push("lock");
+        return Promise.resolve({
+          id: QT_ID,
+          title: "Folding Chairs",
+          quantity: 2,
+        });
+      });
+      mockPool(2);
+      // No rows anywhere: nothing already on this booking, nothing reserved
+      // elsewhere, nothing checked out.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([]);
+      (db.booking.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+        from,
+        to,
+      });
+    });
+
+    it("refuses to scan more units than the pool can cover", async () => {
+      // The conflict guard above this one is INDIVIDUAL semantics — one asset,
+      // one booking at a time. A quantity-tracked asset legitimately sits in
+      // many bookings at once, so nothing there measures the pool and the
+      // units could be promised twice.
+      await expect(
+        addScannedAssetsToBooking({
+          assetIds: [QT_ID],
+          kitIds: [],
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          quantities: { [QT_ID]: 5 },
+        })
+      ).rejects.toThrow(ShelfError);
+
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+
+    it("locks each quantity-tracked asset before measuring the pool", async () => {
+      await addScannedAssetsToBooking({
+        assetIds: [QT_ID],
+        kitIds: [],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        quantities: { [QT_ID]: 1 },
+      }).catch(() => undefined);
+
+      // Measuring an unclaimed pool is the race: a plain SELECT takes no lock
+      // under READ COMMITTED, so two scans read the same free count.
+      expect(quantityLock.lockAssetForQuantityUpdate).toHaveBeenCalledWith(
+        expect.anything(),
+        QT_ID,
+        "org-1"
+      );
+
+      // Taking the lock is only half of it — taking it AFTER the measurement
+      // leaves the race exactly as it was.
+      expect(sequence).toEqual(["lock", "measure"]);
+    });
+
+    it("leaves INDIVIDUAL assets to the conflict guard", async () => {
+      mockPool(2, AssetType.INDIVIDUAL);
+
+      await addScannedAssetsToBooking({
+        assetIds: ["asset-individual"],
+        kitIds: [],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      }).catch(() => undefined);
+
+      // An INDIVIDUAL asset has no pool to draw on — locking it here would
+      // serialize scans that never compete.
+      expect(quantityLock.lockAssetForQuantityUpdate).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects when a scanned asset is reserved for an overlapping booking", async () => {

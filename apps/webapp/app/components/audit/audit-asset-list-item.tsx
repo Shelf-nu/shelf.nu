@@ -13,6 +13,7 @@
  */
 
 import { isAuditCompleted } from "@shelf/labels";
+import { ImageIcon, MessageSquare } from "lucide-react";
 import { useLoaderData } from "react-router";
 
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
@@ -56,6 +57,32 @@ type AuditAssetItem = LoaderData["data"]["items"][number];
  */
 export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
   const { session, canRemoveAssets } = useLoaderData<typeof loader>();
+  /**
+   * What a person recorded against this asset, kept as TWO numbers.
+   *
+   * why not one summed number: it would not be comparable between rows. Two
+   * photos uploaded with a caption store one COMMENT plus two images; the
+   * same two photos with no caption store an UPDATE plus two images, and
+   * UPDATE rows are not evidence and are not counted (helpers.server.ts,
+   * createAuditImageEvidenceNote). A single digit would therefore read 3 or 2
+   * for identical evidence, tracking how the upload happened to be stored
+   * rather than what was found. Every destination keeps them apart too — the
+   * panel this links to has a Notes badge and an Images badge, and the phone
+   * sheet has a notes section and a photo grid.
+   */
+  const noteCount = item.auditData?.auditNotesCount ?? 0;
+  const photoCount = item.auditData?.auditImagesCount ?? 0;
+  const hasEvidence = noteCount > 0 || photoCount > 0;
+
+  /** Reads the way a person would say it, for screen readers and the tooltip. */
+  const evidenceLabel = [
+    noteCount > 0 ? `${noteCount} ${noteCount === 1 ? "note" : "notes"}` : null,
+    photoCount > 0
+      ? `${photoCount} ${photoCount === 1 ? "photo" : "photos"}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
   const { category, location, custody: custodyArray } = item;
   // `custody` is an array on the quantities data model — surface the primary
   // custody row so the existing single-custodian badge keeps working.
@@ -133,9 +160,48 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
                 column). Keeps composition consistent across surfaces per
                 `.claude/rules/code-bearing-entity-list-consistency.md`.
               */}
-              {displayCode ? (
+              {displayCode || hasEvidence ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <AssetCodeBadge {...displayCode} />
+                  {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
+                  {/*
+                    why: the row is the only place someone looks when asking
+                    "which of these did we find something on?". The notes and
+                    photos were always reachable — through the Activity feed,
+                    or by opening a row on spec — but nothing here said which
+                    rows were worth opening, so on a large audit the one
+                    damaged item read exactly like the clean ones.
+
+                    Links into the existing notes-and-images panel rather than
+                    introducing a second place to read evidence. That panel has
+                    no status gate, so this works on a completed audit, which
+                    is when the record actually gets consulted.
+                  */}
+                  {hasEvidence && item.auditData?.auditAssetId ? (
+                    <Button
+                      to={`/audits/${session.id}/scan/${item.auditData.auditAssetId}/details`}
+                      variant="link"
+                      className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[12px] font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                      title={`${evidenceLabel} on ${item.title}`}
+                      aria-label={`${evidenceLabel} on ${item.title}`}
+                    >
+                      {/* why these two glyphs: they are the ones the
+                          destination panel already heads its Notes and Images
+                          sections with, so the row and the panel teach one
+                          vocabulary instead of two. */}
+                      {noteCount > 0 ? (
+                        <span className="flex items-center gap-1">
+                          <MessageSquare className="size-3" aria-hidden />
+                          <span className="tabular-nums">{noteCount}</span>
+                        </span>
+                      ) : null}
+                      {photoCount > 0 ? (
+                        <span className="flex items-center gap-1">
+                          <ImageIcon className="size-3" aria-hidden />
+                          <span className="tabular-nums">{photoCount}</span>
+                        </span>
+                      ) : null}
+                    </Button>
+                  ) : null}
                 </div>
               ) : null}
             </div>

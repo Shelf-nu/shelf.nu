@@ -14,6 +14,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 
+import { getHeldCustodyCount } from "~/modules/team-member/custody-count";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { Form } from "../custom-form";
@@ -27,13 +28,14 @@ export const DeleteMember = ({
       _count: {
         select: {
           custodies: true;
+          kitCustodies: true;
         };
       };
     };
   }>;
 }) => {
-  const hasCustodies = useMemo(
-    () => teamMember?._count.custodies > 0,
+  const custodiesCount = useMemo(
+    () => getHeldCustodyCount(teamMember._count),
     [teamMember]
   );
   return (
@@ -54,10 +56,8 @@ export const DeleteMember = ({
           </Button>
         </AlertDialogTrigger>
 
-        {hasCustodies ? (
-          <UnableToDeleteMemberContent
-            custodiesCount={teamMember?._count.custodies}
-          />
+        {custodiesCount > 0 ? (
+          <UnableToDeleteMemberContent custodiesCount={custodiesCount} />
         ) : (
           <DeleteMemberContent id={teamMember.id} />
         )}
@@ -118,8 +118,8 @@ const UnableToDeleteMemberContent = ({
       <AlertDialogTitle>Unable to delete team member</AlertDialogTitle>
       <AlertDialogDescription>
         The team member you are trying to delete has custody over{" "}
-        {custodiesCount} assets. Please release custody or check-in those assets
-        before deleting the user.
+        {custodiesCount} assets or kits. Please release custody or check-in
+        those items before deleting the user.
       </AlertDialogDescription>
       <AlertDialogCancel
         asChild

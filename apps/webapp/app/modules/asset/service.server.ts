@@ -655,8 +655,8 @@ export async function getAssets(params: {
         // Resolve the search to a set of matching asset ids via the shared
         // org-scoped UNION (resolveAssetSearchIds → buildAssetSearchUnion) —
         // index-driven, org-scoped branches, ~165ms vs the old multi-table OR's
-        // cross-org seq scans. The helper is retry-wrapped (a raw $queryRaw
-        // bypasses the client's auto-retry extension) and guards the id set
+        // cross-org seq scans. The helper is retry-wrapped (to claim the read
+        // semantics the client extension cannot infer) and guards the id set
         // against Postgres' ~65k bind-param ceiling, throwing a friendly 400
         // rather than letting an extreme org + very broad term hard-fail.
         // Setting where.OR here — BEFORE the category/tag/location/team-member
@@ -1080,14 +1080,17 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       paginationClause,
     });
 
-    // Retry the raw read on transient DB failures. The auto-applied client
-    // retry extension covers model operations but NOT raw escapes like
-    // `$queryRaw`, so wrap it explicitly. This heavy query trips Postgres
-    // shared-lock-table exhaustion (SQLSTATE 53200) under the per-request fan-out
-    // on large workspaces (SHELF-WEBAPP-227); the pressure is momentary, so a
-    // short backed-off retry usually succeeds. `operationIsRead: true` — this is
-    // a pure read, safe to re-run. On exhausted retries it rethrows to the catch
-    // below, which surfaces as the friendly retryable 503 (see makeShelfError).
+    // Retry the raw read on transient DB failures. The client extension retries
+    // raw SQL too, but only where the connection never opened — it cannot read
+    // a raw statement to tell a pure read from one that consumes a sequence or
+    // takes locks, so it assumes the worst. This one IS a pure read, which
+    // `operationIsRead: true` declares: safe to re-run mid-flight. That matters
+    // because this heavy query trips Postgres shared-lock-table exhaustion
+    // (SQLSTATE 53200) under the per-request fan-out on large workspaces
+    // (SHELF-WEBAPP-227), where the pressure is momentary and a short backed-off
+    // retry usually succeeds. The extension steps aside while this runs, so the
+    // attempts below are the only ones. On exhausted retries it rethrows to the
+    // catch below, which surfaces as the friendly retryable 503 (makeShelfError).
     const result = await withPrismaRetry(
       () => db.$queryRaw<AdvancedIndexQueryResult>(query),
       { operationIsRead: true }
@@ -4496,6 +4499,9 @@ export async function fetchAssetsForExport({
         assetModel: { select: { name: true } },
         notes: true,
         custody: {
+          // Ordered so `getPrimaryCustody` picks the same row every time — the
+          // custodian it returns is written into the exported file.
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           include: {
             custodian: true,
           },
@@ -6337,6 +6343,11 @@ export async function bulkCheckInAssets({
           title: true,
           type: true,
           custody: {
+            // Ordered so `getPrimaryCustody` picks the same row every time:
+            // the custodian it returns is written into the release note and
+            // the CUSTODY_RELEASED event, so an arbitrary pick puts the wrong
+            // name in the audit trail.
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
             select: { id: true, custodian: { include: { user: true } } },
           },
         },

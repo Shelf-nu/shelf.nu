@@ -14,7 +14,7 @@
 import { InviteStatuses, OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { updateInviteStatus } from "./service.server";
+import { createInvite, updateInviteStatus } from "./service.server";
 import { createUserOrAttachOrg } from "../user/service.server";
 
 // @vitest-environment node
@@ -39,6 +39,15 @@ vi.mock("../user/service.server", () => ({
 
 // why: acceptance sends a welcome email
 vi.mock("~/emails/mail.server", () => ({ sendEmail: vi.fn() }));
+
+const ssoMock = vi.hoisted(() => ({
+  checkDomainSSOStatus: vi.fn(),
+  doesSSOUserExist: vi.fn(),
+}));
+// why: the SSO lookups are two database round trips against the auth schema.
+// Stubbing them lets each case state a domain-ownership situation directly,
+// which is the input the invite guard branches on.
+vi.mock("~/utils/sso.server", () => ssoMock);
 
 /** Builds a PENDING invite row as `db.invite.findFirst` would return it */
 function pendingInvite(roles: OrganizationRoles[]) {
@@ -111,6 +120,59 @@ describe("updateInviteStatus — stored role validation", () => {
 
     expect(createUserOrAttachOrg).toHaveBeenCalledWith(
       expect.objectContaining({ roles: [OrganizationRoles.ADMIN] })
+    );
+  });
+});
+
+describe("createInvite — SCIM-managed domains", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** The minimum payload `createInvite` needs to reach its SSO guard. */
+  function invitePayload(organizationId: string) {
+    return {
+      organizationId,
+      inviteeEmail: "jane@acme.com",
+      inviterId: "user-1",
+      roles: [OrganizationRoles.BASE],
+      teamMemberName: "Jane",
+      userId: "user-1",
+    };
+  }
+
+  it("refuses an invite into an organization that co-owns the domain", async () => {
+    // Two organizations claim acme.com and the invite targets the second.
+    // Reading a single owner answers for org-acme-eu, leaves org-acme-us
+    // looking like Pure SSO, and the invite goes through — the governance
+    // bypass this guard exists to close.
+    ssoMock.checkDomainSSOStatus.mockResolvedValue({
+      isConfiguredForSSO: true,
+      linkedOrganizations: [{ id: "org-acme-eu" }, { id: "org-acme-us" }],
+      ssoProviderId: "provider-1",
+    });
+
+    await expect(createInvite(invitePayload("org-acme-us"))).rejects.toThrow(
+      "This email domain uses SCIM SSO for this workspace"
+    );
+
+    // Refused on ownership alone — whether the invitee happens to have an SSO
+    // account is the Pure SSO question, and must not be reached.
+    expect(ssoMock.doesSSOUserExist).not.toHaveBeenCalled();
+    expect(dbMock.invite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("still applies the Pure SSO rule when no organization owns the domain", async () => {
+    // Federated but unclaimed: the invitee must already have signed in.
+    ssoMock.checkDomainSSOStatus.mockResolvedValue({
+      isConfiguredForSSO: true,
+      linkedOrganizations: [],
+      ssoProviderId: "provider-1",
+    });
+    ssoMock.doesSSOUserExist.mockResolvedValue(false);
+
+    await expect(createInvite(invitePayload("org-other"))).rejects.toThrow(
+      "The user needs to sign up via SSO"
     );
   });
 });

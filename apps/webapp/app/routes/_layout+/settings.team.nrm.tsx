@@ -18,9 +18,10 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { ImportNrmButton } from "~/components/workspace/import-nrm-button";
 import { TeamMembersActionsDropdown } from "~/components/workspace/nrm-actions-dropdown";
-import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getPaginatedAndFilterableSettingTeamMembers } from "~/modules/settings/service.server";
+import { getHeldCustodyCount } from "~/modules/team-member/custody-count";
+import { deleteNRM } from "~/modules/team-member/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -132,24 +133,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           }
         );
 
-        await db.teamMember
-          .update({
-            where: {
-              id: teamMemberId,
-              organizationId,
-            },
-            data: {
-              deletedAt: new Date(),
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to delete team member",
-              additionalData: { teamMemberId, userId, organizationId },
-              label: "Team",
-            });
-          });
+        await deleteNRM({ nrmId: teamMemberId, organizationId });
 
         return redirect(`/settings/team/nrm`);
       }
@@ -202,8 +186,8 @@ export default function NrmSettings() {
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={TeamMemberRow}
           customEmptyStateContent={{
-            title: "No team members on database",
-            text: "What are you waiting for? Add your first team member now!",
+            title: "No non-registered members yet",
+            text: "Non-registered members are name-only records for assigning custody. They can't log in.",
             newButtonRoute: "add-member",
             newButtonContent: "Add NRM",
           }}
@@ -232,6 +216,7 @@ function TeamMemberRow({
       _count: {
         select: {
           custodies: true;
+          kitCustodies: true;
         };
       };
     };
@@ -245,9 +230,7 @@ function TeamMemberRow({
         </div>
       </Td>
       <Td className="w-full whitespace-normal">{item.name}</Td>
-      <Td className="text-right">
-        {item._count.custodies ? item._count.custodies : 0}
-      </Td>
+      <Td className="text-right">{getHeldCustodyCount(item._count)}</Td>
       <Td className="text-right">
         <TeamMembersActionsDropdown teamMember={item} />
       </Td>
