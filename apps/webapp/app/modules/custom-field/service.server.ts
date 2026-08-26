@@ -27,6 +27,18 @@ import {
 
 const label: ErrorLabel = "Custom fields";
 
+/**
+ * Creates a custom field and gives it a column on the asset index.
+ *
+ * An active field gets a column in every settings row in the organization —
+ * one per user — so it is visible to everyone from the moment it exists. An
+ * inactive one gets none; activating it later adds the columns.
+ *
+ * @param args - The field's definition, its organization, and its author
+ * @returns The created CustomField
+ * @throws {ShelfError} 409 if the organization already has a field with this
+ *   name, or on any other write failure
+ */
 export async function createCustomField({
   name,
   helpText,
@@ -650,6 +662,23 @@ export async function countActiveCustomFields({
   }
 }
 
+/**
+ * Activates or deactivates several custom fields at once, keeping the asset
+ * index in step.
+ *
+ * Every settings row in the organization is reconciled for every field in the
+ * batch, so the columns follow whichever way the fields move: activating adds
+ * the ones a row is missing and leaves the rest as the user arranged them,
+ * deactivating takes them away.
+ *
+ * @param args.customFields - The fields to move; their `name` and `type` are
+ *   read for the columns
+ * @param args.organizationId - The active organization
+ * @param args.userId - The acting user, recorded on failure
+ * @param args.active - The state to move every field in the batch to
+ * @returns The Prisma batch payload for the field update
+ * @throws {ShelfError} If the field update or any settings write fails
+ */
 export async function bulkActivateOrDeactivateCustomFields({
   customFields,
   organizationId,
