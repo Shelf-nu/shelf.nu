@@ -153,6 +153,28 @@ describe("topBookedAssetsReport", () => {
     expect(result.topBookedAsset?.assetId).toBe("asset-1");
   });
 
+  it("clamps a booking's days to the report window", async () => {
+    // A booking spanning far beyond the window (which the overlap predicate
+    // now includes) contributes only its overlap with the window: March 15
+    // to May 15 viewed in April counts April's days, not 61.
+    vi.mocked(db.booking.findMany).mockResolvedValueOnce([
+      rowsBooking("2026-03-15T00:00:00Z", "2026-05-15T00:00:00Z", [
+        { id: "asset-1", title: "Spanning Asset" },
+      ]),
+    ] as any);
+    vi.mocked(db.booking.findMany).mockResolvedValueOnce([
+      kpiBooking([{ id: "asset-1", title: "Spanning Asset" }]),
+    ] as any);
+
+    const result = await topBookedAssetsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    // Window = April (30 days). Unclamped this would read 61.
+    expect(result.rows[0].totalDaysBooked).toBe(30);
+  });
+
   it("counts only bookings holding at least one matching asset in the Total Bookings hero", async () => {
     await topBookedAssetsReport({
       organizationId: "org-1",

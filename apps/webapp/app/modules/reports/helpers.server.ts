@@ -2322,13 +2322,17 @@ async function fetchTopBookedAssetRows(
   >();
 
   for (const booking of bookings) {
-    // Clamp to at least 1 day - handles edge case where to < from (inverted dates)
+    // Days are measured on the booking's overlap with the report window —
+    // the overlap predicate admits bookings that extend far beyond it, and
+    // an unclamped duration would credit days outside the period. Floors at
+    // 1 day (also covering inverted dates).
     const bookingDays =
       booking.from && booking.to
         ? Math.max(
             1,
             Math.ceil(
-              (booking.to.getTime() - booking.from.getTime()) /
+              (Math.min(booking.to.getTime(), timeframe.to.getTime()) -
+                Math.max(booking.from.getTime(), timeframe.from.getTime())) /
                 (1000 * 60 * 60 * 24)
             )
           )
