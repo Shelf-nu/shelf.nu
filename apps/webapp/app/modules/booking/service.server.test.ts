@@ -6740,8 +6740,12 @@ describe("extendBooking", () => {
       partialCheckins: [],
     };
 
+    // why: extendBooking loads the booking (status guard + conflict window)
+    // before writing; an ONGOING booking with checked-out assets passes both.
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: the assertion targets the update's `data` payload; the resolved
+    // value only feeds the post-update note and email path.
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ ...mockBooking, to: newEndDate });
 

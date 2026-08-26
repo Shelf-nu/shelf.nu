@@ -130,6 +130,25 @@ interface BookingComplianceArgs {
  * @param args - Report parameters
  * @returns Complete report payload
  */
+/**
+ * Timeframe predicate on the PLANNED end of a booking.
+ *
+ * Check-in of an overdue booking (and early check-in with the adjust-date
+ * intent) rewrites `to` to the actual return moment and preserves the agreed
+ * deadline in `originalTo`. "Due in window" must therefore read the planned
+ * end — filtering on `to` alone lets a booking due inside the window escape
+ * its own period when it is returned after the window's edge. `originalTo`
+ * is null only on legacy rows, where `to` still is the planned end.
+ */
+function plannedEndInWindow(from: Date, to: Date): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { originalTo: { gte: from, lte: to } },
+      { originalTo: null, to: { gte: from, lte: to } },
+    ],
+  };
+}
+
 export async function bookingComplianceReport(
   args: BookingComplianceArgs
 ): Promise<ReportPayload<BookingComplianceRow>> {
@@ -159,7 +178,8 @@ export async function bookingComplianceReport(
     //    so they belong in the table just like COMPLETE rows.
     const where: Prisma.BookingWhereInput = {
       organizationId,
-      to: { gte: timeframe.from, lte: timeframe.to }, // Due date in timeframe
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
       status: {
         in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[],
       },
@@ -417,7 +437,8 @@ async function fetchBookingComplianceRows(
         : null,
       assetCount: b._count.bookingAssets,
       scheduledStart: b.from!,
-      scheduledEnd: b.to!,
+      // Planned end survives the check-in rewrite in `originalTo`.
+      scheduledEnd: (b.originalTo ?? b.to)!,
       actualCheckout: null,
       actualCheckin: checkInAt,
       isOnTime: isOnTime({ status: b.status, latenessMs }),
@@ -538,8 +559,8 @@ async function computeComplianceRate(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
       archivedWithoutCheckin: false,
-      // Bookings scheduled to end within the timeframe
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -576,8 +597,8 @@ async function computeComplianceRate(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
       archivedWithoutCheckin: false,
-      // Filter by scheduled end date for consistency with main query
-      to: { gte: priorFrom, lte: priorTo },
+      // Planned end (originalTo ?? to), consistent with the main query.
+      ...plannedEndInWindow(priorFrom, priorTo),
     },
     select: {
       id: true,
@@ -742,7 +763,8 @@ async function computeComplianceTrend(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from the trend.
       archivedWithoutCheckin: false,
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -778,7 +800,8 @@ async function computeComplianceTrend(
 
     // Filter bookings with due date in this bucket
     const bucketBookings = measurableBookings.filter((b) => {
-      const dueDate = b.to?.getTime() || 0;
+      // Bucket by the planned end — `to` may be the rewritten return moment.
+      const dueDate = (b.originalTo ?? b.to)?.getTime() || 0;
       return dueDate >= bucketStart.getTime() && dueDate <= bucketEnd.getTime();
     });
 
@@ -915,8 +938,8 @@ async function computeCustodianPerformance(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
       archivedWithoutCheckin: false,
-      // Filter by scheduled end date for consistency with main compliance query
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Planned end (originalTo ?? to), consistent with the main compliance query.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,

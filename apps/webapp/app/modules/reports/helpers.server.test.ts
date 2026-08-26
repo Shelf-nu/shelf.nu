@@ -394,7 +394,11 @@ describe("bookingComplianceReport — trend axis labels (timezone)", () => {
 describe("bookingComplianceReport — rewritten `to` (overdue check-in)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // why: the KPI block runs two `booking.count` calls that are irrelevant
+    // to these scenarios; zero keeps the hero math driven by findMany alone.
     vi.mocked(db.booking.count).mockResolvedValue(0 as any);
+    // why: `bookingStatusTransitionCounts` issues `db.$queryRaw` for the
+    // chart series; an empty array decouples these tests from chart math.
     vi.mocked(db.$queryRaw).mockResolvedValue([] as any);
   });
 
@@ -437,5 +441,66 @@ describe("bookingComplianceReport — rewritten `to` (overdue check-in)", () => 
     expect(result.complianceData!.onTime).toBe(0);
     expect(result.complianceData!.late).toBe(1);
     expect(result.complianceData!.rate).toBe(0);
+  });
+
+  it("keeps a booking in its own period and shows the planned end after the rewrite", async () => {
+    // Due April 28, returned May 2: the rewrite moves `to` outside April.
+    // The window filter must read the planned end (originalTo ?? to) or the
+    // booking escapes the April report, and the row must display the planned
+    // end, not the return moment.
+    const plannedEnd = new Date("2026-04-28T12:00:00Z");
+    const returnMoment = new Date("2026-05-02T09:00:00Z");
+
+    const escapedBooking = {
+      id: "booking-escaped",
+      name: "Returned After Window",
+      status: "COMPLETE",
+      from: new Date("2026-04-20T12:00:00Z"),
+      to: returnMoment,
+      originalTo: plannedEnd,
+      updatedAt: returnMoment,
+      custodianUser: null,
+      custodianTeamMember: null,
+      custodianUserId: null,
+      custodianTeamMemberId: null,
+      _count: { bookingAssets: 1 },
+    };
+
+    vi.mocked(db.booking.findMany).mockResolvedValue([escapedBooking] as any);
+    vi.mocked(db.activityEvent.findMany).mockResolvedValue([
+      { bookingId: "booking-escaped", occurredAt: returnMoment },
+    ] as any);
+
+    const result = await bookingComplianceReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    // Every booking query in the flow filters on the planned end: the
+    // OR-fragment replaces a bare `to` range so rewritten bookings stay in
+    // their own period (legacy rows with null originalTo fall back to `to`).
+    // The prior-period query uses its own shifted window, so the shape is
+    // asserted for every call and the exact dates for the main window only.
+    const findManyCalls = vi.mocked(db.booking.findMany).mock.calls;
+    expect(findManyCalls.length).toBeGreaterThan(0);
+    for (const [args] of findManyCalls) {
+      const where = (args as any).where;
+      expect(where.to).toBeUndefined();
+      expect(where.OR).toEqual([
+        { originalTo: { gte: expect.any(Date), lte: expect.any(Date) } },
+        {
+          originalTo: null,
+          to: { gte: expect.any(Date), lte: expect.any(Date) },
+        },
+      ]);
+    }
+    expect((findManyCalls[0][0] as any).where.OR).toEqual([
+      { originalTo: { gte: TIMEFRAME.from, lte: TIMEFRAME.to } },
+      { originalTo: null, to: { gte: TIMEFRAME.from, lte: TIMEFRAME.to } },
+    ]);
+
+    // 4 days late against the planned end; the row shows the planned end.
+    expect(result.complianceData!.late).toBe(1);
+    expect(result.rows[0].scheduledEnd).toEqual(plannedEnd);
   });
 });
