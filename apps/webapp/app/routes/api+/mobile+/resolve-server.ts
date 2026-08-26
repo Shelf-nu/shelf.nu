@@ -15,6 +15,10 @@
  * inherits the per-IP rate limit applied to `/api/mobile/*` in
  * `server/index.ts`, which caps domain probing.
  *
+ * The answer carries the base URL and, alongside it, whether the app should
+ * hide password sign-in for that server. Nothing secret belongs in this
+ * payload: it is unauthenticated, so treat every field added here as public.
+ *
  * Bad input resolves to `{ baseUrl: null }` rather than an error status. That
  * is the same answer an unregistered domain gets, and the app treats it as
  * "this domain has no private server" — it reports that to the user and does
@@ -26,7 +30,10 @@
  */
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
-import { resolveCompanionServer } from "~/modules/api/companion-servers.server";
+import {
+  isPasswordLoginDisabledFor,
+  resolveCompanionServer,
+} from "~/modules/api/companion-servers.server";
 import { getActionMethod } from "~/utils/http.server";
 
 /** 253 is the maximum length of a fully-qualified domain name (RFC 1035). */
@@ -51,8 +58,17 @@ export async function action({ request }: ActionFunctionArgs) {
   const body = await request.json().catch(() => null);
   const parsed = ResolveServerSchema.safeParse(body);
   if (!parsed.success) {
-    return data({ baseUrl: null });
+    return data({ baseUrl: null, disablePasswordLogin: false });
   }
 
-  return data({ baseUrl: resolveCompanionServer(parsed.data.domain) });
+  const { domain } = parsed.data;
+
+  return data({
+    baseUrl: resolveCompanionServer(domain),
+    // Per-server presentation for the companion app, set centrally by Shelf.
+    // Not a security control: it hides the app's password fields, and the app
+    // authenticates against the target's Supabase directly, so nothing here
+    // could refuse a sign-in. The web login form is unaffected.
+    disablePasswordLogin: isPasswordLoginDisabledFor(domain),
+  });
 }

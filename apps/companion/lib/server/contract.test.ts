@@ -488,9 +488,15 @@ test("classifyServerChange reports switch when moving to or from cloud", () => {
 // runner (it pulls Expo and AsyncStorage transitively), which is exactly why
 // every verdict lives here instead.
 
+/** A registry answer for a plain, option-free entry. */
+const REGISTERED = {
+  baseUrl: "https://acme.i.shelf.nu",
+  disablePasswordLogin: false,
+};
+
 test("decideServerCandidate refuses input that cannot be a domain", () => {
   for (const input of ["", "   ", "acme", "localhost"]) {
-    const decision = decideServerCandidate(input, "https://acme.i.shelf.nu");
+    const decision = decideServerCandidate(input, REGISTERED);
     assert.equal(decision.ok, false, JSON.stringify(input));
     assert.equal(!decision.ok && decision.reason, "invalid_domain");
   }
@@ -519,13 +525,34 @@ test("decideServerCandidate names the domain in the not-registered message", () 
 test("decideServerCandidate refuses a plaintext base URL from the registry", () => {
   // Defence in depth: the server already rejects these, so this makes the
   // invariant hold at both ends rather than only one.
-  const decision = decideServerCandidate("acme.com", "http://acme.i.shelf.nu");
+  const decision = decideServerCandidate("acme.com", {
+    baseUrl: "http://acme.i.shelf.nu",
+    disablePasswordLogin: false,
+  });
   assert.equal(!decision.ok && decision.reason, "incompatible");
 });
 
 test("decideServerCandidate passes a registered https base URL through", () => {
-  const decision = decideServerCandidate("acme.com", "https://acme.i.shelf.nu");
-  assert.deepEqual(decision, { ok: true, baseUrl: "https://acme.i.shelf.nu" });
+  const decision = decideServerCandidate("acme.com", REGISTERED);
+  assert.deepEqual(decision, {
+    ok: true,
+    baseUrl: "https://acme.i.shelf.nu",
+    disablePasswordLogin: false,
+  });
+});
+
+test("decideServerCandidate carries the registry's password-login flag", () => {
+  // Set centrally by Shelf for customers whose instance it does not
+  // administer, so it has to survive the hop to the caller that applies it.
+  const decision = decideServerCandidate("globex.com", {
+    baseUrl: "https://globex.i.shelf.nu",
+    disablePasswordLogin: true,
+  });
+  assert.deepEqual(decision, {
+    ok: true,
+    baseUrl: "https://globex.i.shelf.nu",
+    disablePasswordLogin: true,
+  });
 });
 
 // ── decideServerConnection ───────────────────────────────

@@ -214,6 +214,18 @@ INSTANCE_NAME="Shelf Local"
 COMPANION_SERVERS={"acme.test":"https://testapp.shelf.nu"}
 ```
 
+An entry can also be an object, to carry per-server options:
+
+```bash
+COMPANION_SERVERS={"acme.test":{"url":"https://testapp.shelf.nu","disablePasswordLogin":true}}
+```
+
+`disablePasswordLogin` hides the app's email/password fields once connected to
+that server, leaving SSO. It is presentation only — the app signs in against
+that server's Supabase directly, so nothing here refuses a sign-in — and it
+never touches the web login form, which administrators use. Set centrally by
+Shelf, so it works for customers whose instance Shelf does not administer.
+
 Then:
 
 ```bash

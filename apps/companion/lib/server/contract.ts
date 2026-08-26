@@ -254,8 +254,31 @@ export type ConnectOutcome =
   | { ok: true; server: ServerConfig }
   | ConnectRefusal;
 
+/**
+ * What Shelf Cloud's registry says about a domain.
+ *
+ * `null` and `undefined` are deliberately different: one means "no such
+ * customer", the other means "the lookup itself failed, ask again later".
+ */
+export type RegistryAnswer =
+  | { baseUrl: string; disablePasswordLogin: boolean }
+  | null
+  | undefined;
+
 /** Either a base URL worth fetching a config from, or a refusal. */
-export type CandidateDecision = { ok: true; baseUrl: string } | ConnectRefusal;
+export type CandidateDecision =
+  | {
+      ok: true;
+      baseUrl: string;
+      /**
+       * Whether the registry says to hide password sign-in for this server.
+       * It can only ever HIDE: a server that advertises password login is
+       * still hidden if the registry says so, but the registry cannot show a
+       * method the server does not offer.
+       */
+      disablePasswordLogin: boolean;
+    }
+  | ConnectRefusal;
 
 /**
  * Decides whether the registry's answer for a domain is worth pursuing.
@@ -264,15 +287,13 @@ export type CandidateDecision = { ok: true; baseUrl: string } | ConnectRefusal;
  * lookup is the caller's job, its answer is this function's input.
  *
  * @param input - Raw contents of the connect field.
- * @param registryAnswer - The registry's reply: a base URL, `null` when the
- *   domain is not registered to an instance, or `undefined` when the lookup
- *   itself failed. The last two are deliberately distinct — one means "no such
- *   customer", the other means "ask again later".
- * @returns The base URL to fetch a config from, or a refusal to show.
+ * @param registryAnswer - The registry's reply. See {@link RegistryAnswer}.
+ * @returns The base URL to fetch a config from plus its per-server options, or
+ *   a refusal to show.
  */
 export function decideServerCandidate(
   input: string,
-  registryAnswer: string | null | undefined
+  registryAnswer: RegistryAnswer
 ): CandidateDecision {
   const domain = normalizeDomainInput(input);
   if (!domain) {
@@ -304,7 +325,7 @@ export function decideServerCandidate(
   // first moment the app holds a URL it did not construct, and by the time
   // `parseServerConfigResponse` repeats the check the request has already left
   // the device.
-  if (!registryAnswer.startsWith("https://")) {
+  if (!registryAnswer.baseUrl.startsWith("https://")) {
     return {
       ok: false,
       reason: "incompatible",
@@ -312,7 +333,11 @@ export function decideServerCandidate(
     };
   }
 
-  return { ok: true, baseUrl: registryAnswer };
+  return {
+    ok: true,
+    baseUrl: registryAnswer.baseUrl,
+    disablePasswordLogin: registryAnswer.disablePasswordLogin,
+  };
 }
 
 /**

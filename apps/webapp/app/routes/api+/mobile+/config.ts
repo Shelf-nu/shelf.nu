@@ -56,10 +56,9 @@ export function loader(_args: LoaderFunctionArgs) {
     // independent because neither side can update the other.
     minCompanionVersion: MIN_COMPANION_VERSION || null,
     ssoEnabled: !config.disableSSO,
-    // An affordance, not a gate: the app signs in against Supabase directly,
-    // so this instance never sees the attempt and cannot refuse it. Setting
-    // DISABLE_PASSWORD_LOGIN hides the app's password fields; disabling the
-    // email provider in Supabase is what actually forecloses the method.
-    passwordLoginEnabled: !config.disablePasswordLogin,
+    // Password login is an organisation-level concern (SSO orgs disable it per
+    // organisation), not an instance-level one, so this is always true today.
+    // It exists so the app can hide the password fields when that changes.
+    passwordLoginEnabled: true,
   });
 }

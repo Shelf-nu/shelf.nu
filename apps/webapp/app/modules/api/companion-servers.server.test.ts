@@ -19,7 +19,9 @@ vi.mock("~/utils/env", () => ({
   },
 }));
 
-const { resolveCompanionServer } = await import("./companion-servers.server");
+const { isPasswordLoginDisabledFor, resolveCompanionServer } = await import(
+  "./companion-servers.server"
+);
 
 describe("resolveCompanionServer", () => {
   beforeEach(() => {
@@ -149,5 +151,78 @@ describe("resolveCompanionServer", () => {
     });
     expect(resolveCompanionServer("bad.edu")).toBeNull();
     expect(resolveCompanionServer("good.edu")).toBe("https://good.i.shelf.nu");
+  });
+});
+
+describe("per-server options", () => {
+  /** Sets the registry for one test. */
+  function registry(value: unknown) {
+    mockEnv.COMPANION_SERVERS = JSON.stringify(value);
+  }
+
+  it("accepts the object form and reads its flag", () => {
+    registry({
+      "globex.com": {
+        url: "https://globex.i.shelf.nu",
+        disablePasswordLogin: true,
+      },
+    });
+    expect(resolveCompanionServer("globex.com")).toBe(
+      "https://globex.i.shelf.nu"
+    );
+    expect(isPasswordLoginDisabledFor("globex.com")).toBe(true);
+  });
+
+  it("leaves the flag off for the bare string form", () => {
+    // Every registry in the wild uses this form; it must keep meaning
+    // "password login as usual".
+    registry({ "acme.edu": "https://acme.i.shelf.nu" });
+    expect(resolveCompanionServer("acme.edu")).toBe("https://acme.i.shelf.nu");
+    expect(isPasswordLoginDisabledFor("acme.edu")).toBe(false);
+  });
+
+  it("only an explicit true disables it", () => {
+    // A truthy-but-not-true value is a typo, and guessing at intent here would
+    // hide a sign-in method the customer never asked to hide.
+    for (const value of ["true", 1, {}, null]) {
+      registry({
+        "globex.com": {
+          url: "https://globex.i.shelf.nu",
+          disablePasswordLogin: value,
+        },
+      });
+      expect(isPasswordLoginDisabledFor("globex.com")).toBe(false);
+    }
+  });
+
+  it("drops an object entry with no usable url", () => {
+    registry({ "globex.com": { disablePasswordLogin: true } });
+    expect(resolveCompanionServer("globex.com")).toBeNull();
+    expect(isPasswordLoginDisabledFor("globex.com")).toBe(false);
+  });
+
+  it("drops an object entry whose url is not https", () => {
+    registry({
+      "globex.com": { url: "http://globex.i.shelf.nu", disablePasswordLogin: true },
+    });
+    expect(resolveCompanionServer("globex.com")).toBeNull();
+    expect(isPasswordLoginDisabledFor("globex.com")).toBe(false);
+  });
+
+  it("reports false for an unregistered domain", () => {
+    registry({ "acme.edu": "https://acme.i.shelf.nu" });
+    expect(isPasswordLoginDisabledFor("nope.example")).toBe(false);
+  });
+
+  it("mixes both forms in one registry", () => {
+    registry({
+      "acme.edu": "https://acme.i.shelf.nu",
+      "globex.com": {
+        url: "https://globex.i.shelf.nu",
+        disablePasswordLogin: true,
+      },
+    });
+    expect(isPasswordLoginDisabledFor("acme.edu")).toBe(false);
+    expect(isPasswordLoginDisabledFor("globex.com")).toBe(true);
   });
 });

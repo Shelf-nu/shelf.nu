@@ -41,7 +41,14 @@ vi.mock("react-router", async () => {
 // route pulls `~/utils/http.server`, which reads SERVER_URL / URL_SHORTENER
 // from this module at import time.
 const mockEnv = {
-  COMPANION_SERVERS: JSON.stringify({ "acme.edu": "https://acme.i.shelf.nu" }),
+  COMPANION_SERVERS: JSON.stringify({
+    "acme.edu": "https://acme.i.shelf.nu",
+    // Object form: same target, plus the app-only presentation flag.
+    "globex.com": {
+      url: "https://globex.i.shelf.nu",
+      disablePasswordLogin: true,
+    },
+  }),
 };
 vi.mock("~/utils/env", async () => ({
   ...(await vi.importActual<typeof import("~/utils/env")>("~/utils/env")),
@@ -79,18 +86,41 @@ describe("POST /api/mobile/resolve-server", () => {
     const response = await invoke(request({ domain: "acme.edu" }));
     await expect(response.json()).resolves.toEqual({
       baseUrl: "https://acme.i.shelf.nu",
+      disablePasswordLogin: false,
     });
+  });
+
+  it("reports the app-only password flag for a server that sets it", async () => {
+    const response = await invoke(request({ domain: "globex.com" }));
+    await expect(response.json()).resolves.toEqual({
+      baseUrl: "https://globex.i.shelf.nu",
+      disablePasswordLogin: true,
+    });
+  });
+
+  it("defaults the flag off for a plain string entry", async () => {
+    // The bare-URL form must keep working untouched — it is what every
+    // existing registry uses.
+    const response = await invoke(request({ domain: "acme.edu" }));
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.disablePasswordLogin).toBe(false);
   });
 
   it("returns null for an unregistered domain", async () => {
     const response = await invoke(request({ domain: "unknown.org" }));
-    await expect(response.json()).resolves.toEqual({ baseUrl: null });
+    await expect(response.json()).resolves.toEqual({
+      baseUrl: null,
+      disablePasswordLogin: false,
+    });
   });
 
   it("returns null for a missing domain rather than erroring", async () => {
     const response = await invoke(request({}));
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ baseUrl: null });
+    await expect(response.json()).resolves.toEqual({
+      baseUrl: null,
+      disablePasswordLogin: false,
+    });
   });
 
   it("returns null for a non-JSON body rather than erroring", async () => {
@@ -102,7 +132,10 @@ describe("POST /api/mobile/resolve-server", () => {
       })
     );
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ baseUrl: null });
+    await expect(response.json()).resolves.toEqual({
+      baseUrl: null,
+      disablePasswordLogin: false,
+    });
   });
 
   it("rejects non-POST methods", async () => {
@@ -113,6 +146,11 @@ describe("POST /api/mobile/resolve-server", () => {
   it("never returns anything beyond the single answer", async () => {
     const response = await invoke(request({ domain: "acme.edu" }));
     const body = (await response.json()) as Record<string, unknown>;
-    expect(Object.keys(body)).toEqual(["baseUrl"]);
+    // This endpoint is unauthenticated, so every key here is public. Widening
+    // it is a deliberate act — update this list only alongside that decision.
+    expect(Object.keys(body).sort()).toEqual([
+      "baseUrl",
+      "disablePasswordLogin",
+    ]);
   });
 });

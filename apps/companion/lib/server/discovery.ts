@@ -42,6 +42,7 @@ import {
   parseServerConfigResponse,
   type ConfigParseResult,
   type ConnectOutcome,
+  type RegistryAnswer,
 } from "./contract";
 
 /**
@@ -98,10 +99,10 @@ async function fetchWithTimeout<T>(
  * user connects somewhere new.
  *
  * @param domain - A normalised domain, from `normalizeDomainInput`.
- * @returns The base URL, `null` when the domain is not registered to an
- *   instance, or `undefined` when the lookup itself failed.
+ * @returns The entry, `null` when the domain is not registered to an instance,
+ *   or `undefined` when the lookup itself failed.
  */
-async function askRegistry(domain: string): Promise<string | null | undefined> {
+async function askRegistry(domain: string): Promise<RegistryAnswer> {
   try {
     return await fetchWithTimeout(
       `${CLOUD_SERVER.baseUrl}/api/mobile/resolve-server`,
@@ -113,8 +114,18 @@ async function askRegistry(domain: string): Promise<string | null | undefined> {
       RESOLVE_TIMEOUT_MS,
       async (response) => {
         if (!response.ok) return undefined;
-        const body = (await response.json()) as { baseUrl?: unknown };
-        return typeof body?.baseUrl === "string" ? body.baseUrl : null;
+        const body = (await response.json()) as {
+          baseUrl?: unknown;
+          disablePasswordLogin?: unknown;
+        };
+        if (typeof body?.baseUrl !== "string") return null;
+        return {
+          baseUrl: body.baseUrl,
+          // Only an explicit `true` hides a sign-in method. An older Cloud that
+          // predates this field simply omits it, and guessing at intent would
+          // hide a method the customer never asked to hide.
+          disablePasswordLogin: body.disablePasswordLogin === true,
+        };
       }
     );
   } catch {
@@ -185,8 +196,16 @@ export async function resolveServerForDomain(
   );
   if (!outcome.ok) return outcome;
 
-  await setActiveServer(outcome.server);
-  return outcome;
+  // Applied after the server has described itself, and only ever to subtract:
+  // Shelf sets this centrally for customers whose instance it does not
+  // administer, so it must override what that instance advertises. It cannot
+  // add a method the server does not offer.
+  const server = candidate.disablePasswordLogin
+    ? { ...outcome.server, passwordLoginEnabled: false }
+    : outcome.server;
+
+  await setActiveServer(server);
+  return { ok: true, server };
 }
 
 /**
@@ -230,10 +249,18 @@ export async function refreshActiveServerConfig(): Promise<void> {
     return;
   }
 
+  // The registry is not re-queried here — nothing persists which domain the
+  // user typed — so a server hidden by it stays hidden until the next connect,
+  // which reads the registry again. Carrying the current state forward is what
+  // stops a refresh quietly restoring a password form Shelf chose to hide.
+  const server = active.passwordLoginEnabled
+    ? outcome.server
+    : { ...outcome.server, passwordLoginEnabled: false };
+
   // `setActiveServer` classifies this itself: a rotated project or anon key is
   // a credentials refresh (no teardown, no sign-out of unrelated state), and an
   // unchanged config is a no-op.
-  await setActiveServer(outcome.server);
+  await setActiveServer(server);
 }
 
 /**
