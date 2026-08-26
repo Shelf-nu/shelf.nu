@@ -485,19 +485,31 @@ model BookingModelRequest {
   quantity Int
 
   /// Units already assigned to concrete `BookingAsset` rows via
-  /// `materializeModelRequestForAsset`. Monotonically increases as
-  /// scans match the request. Never decreases on its own — to undo
-  /// a scan the operator removes the corresponding `BookingAsset`,
-  /// which does NOT roll this back (by design; the scan happened,
-  /// that's a historical fact).
+  /// `materializeModelRequestForAsset`. Scans increment it.
+  ///
+  /// It DOES decrease: `removeAssets` (booking service) decrements it by the
+  /// number of removed `BookingAsset` rows whose `bookingModelRequestId`
+  /// points at this request, floored at 0, and clears `fulfilledAt` when the
+  /// result drops below `quantity`.
+  ///
+  /// Counted from that column, never from a shared `assetModelId`: an asset
+  /// added directly alongside a reservation shares the model without having
+  /// discharged anything, so grouping by model re-opened reservations that
+  /// were still correctly satisfied.
   fulfilledQuantity Int @default(0)
 
-  /// Timestamp of the scan that fulfilled the final unit — set when
-  /// `fulfilledQuantity` catches up to `quantity`. Cleared back to
-  /// null if the operator later edits `quantity` upwards (re-opens
-  /// outstanding units). Used as the primary "is this outstanding?"
-  /// filter: `fulfilledAt IS NULL` means there are still units to
-  /// materialise.
+  /// Timestamp of the moment the reservation became fully fulfilled — set
+  /// when `fulfilledQuantity` catches up to `quantity`, and preserved (not
+  /// re-stamped) if an unchanged quantity is saved again. Cleared back to
+  /// null when outstanding units reappear: the operator edits `quantity`
+  /// upwards, or `removeAssets` drops `fulfilledQuantity` below it.
+  ///
+  /// The invariant that makes this the primary "is this outstanding?" filter:
+  /// non-null IFF `fulfilledQuantity === quantity`, so `fulfilledAt IS NULL`
+  /// means units remain to materialise. `fulfilledQuantity` can never exceed
+  /// `quantity` (the claim in `materializeModelRequestForAsset` is a single
+  /// statement guarded by `WHERE "fulfilledQuantity" < "quantity"`; upsert
+  /// rejects a shrink below it), so any decrement re-opens the row.
   fulfilledAt DateTime?
 
   createdAt DateTime @default(now())
@@ -2508,6 +2520,16 @@ enum ActivityAction {
   BOOKING_PARTIAL_CHECKOUT
   BOOKING_CANCELLED
   BOOKING_ARCHIVED
+
+  // Booking — model-level reservations (Book-by-Model). The reserved
+  // `AssetModel` travels in `meta.assetModelId` because ActivityEvent has no
+  // assetModelId cross-ref column. `BOOKING_MODEL_REQUEST_FULFILLED` is
+  // emitted once PER UNIT assigned by a scan (carries the concrete `assetId`),
+  // not once per completed reservation.
+  BOOKING_MODEL_REQUESTED
+  BOOKING_MODEL_REQUEST_CHANGED
+  BOOKING_MODEL_REQUEST_REMOVED
+  BOOKING_MODEL_REQUEST_FULFILLED
 
   // Audit
   AUDIT_CREATED

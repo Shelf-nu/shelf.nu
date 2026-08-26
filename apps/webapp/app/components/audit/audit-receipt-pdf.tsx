@@ -168,6 +168,7 @@ const AuditPDFContent = ({
     assetIdToQrCodeMap,
     generalImages,
     assetImages,
+    conditionNotes,
     activityNotes,
   } = pdfMeta;
 
@@ -196,23 +197,59 @@ const AuditPDFContent = ({
           .join(", ")
       : "Not assigned";
 
-  // Group asset-specific images by their associated asset
-  const assetImageGroups = assetImages.reduce(
-    (acc, img) => {
-      const assetId = img.auditAsset?.asset?.id;
-      if (!assetId) return acc;
+  /**
+   * One entry per asset somebody recorded something about, holding BOTH what
+   * they wrote and what they photographed.
+   *
+   * why merged: a note about the Laerdal and a photo of the Laerdal are one
+   * observation. Printing them in two separate sections made the reader join
+   * them up by asset name across pages, which is work the receipt should have
+   * done. Notes led that split badly — they had no section of their own at
+   * all, and arrived mixed into a fifteen-row "Activity Log".
+   */
+  type Finding = {
+    assetName: string;
+    images: typeof assetImages;
+    notes: typeof conditionNotes;
+  };
 
-      if (!acc[assetId]) {
-        acc[assetId] = {
-          assetName: img.auditAsset?.asset?.title || "Unknown",
-          images: [],
-        };
-      }
-      acc[assetId].images.push(img);
-      return acc;
-    },
-    {} as Record<string, { assetName: string; images: typeof assetImages }>
+  const findingGroups: Record<string, Finding> = {};
+
+  const findingFor = (assetId: string, assetName: string) => {
+    if (!findingGroups[assetId]) {
+      findingGroups[assetId] = { assetName, images: [], notes: [] };
+    }
+    return findingGroups[assetId];
+  };
+
+  for (const img of assetImages) {
+    const assetId = img.auditAsset?.asset?.id;
+    if (!assetId) continue;
+    findingFor(assetId, img.auditAsset?.asset?.title || "Unknown").images.push(
+      img
+    );
+  }
+
+  for (const note of conditionNotes) {
+    const assetId = note.auditAsset?.asset?.id;
+    // Audit-wide notes have no asset; they print above, with the general images.
+    if (!assetId) continue;
+    findingFor(assetId, note.auditAsset?.asset?.title || "Unknown").notes.push(
+      note
+    );
+  }
+
+  /** Notes about the audit as a whole — the completion note lives here. */
+  const generalNotes = conditionNotes.filter((n) => !n.auditAsset?.asset?.id);
+
+  const findingEntries = Object.entries(findingGroups).sort((a, b) =>
+    a[1].assetName.localeCompare(b[1].assetName)
   );
+
+  const hasFindings =
+    findingEntries.length > 0 ||
+    generalNotes.length > 0 ||
+    generalImages.length > 0;
 
   return (
     <div
@@ -373,72 +410,110 @@ const AuditPDFContent = ({
         </div>
       </section>
 
-      {/* Images Section - General and asset-specific images */}
-      <When truthy={generalImages.length > 0 || assetImages.length > 0}>
+      {/*
+        Findings — what people RECORDED, grouped by the asset they recorded it
+        about, notes and photographs together.
+
+        why this replaced the old "Images" section: a note and a photo of the
+        same asset are one observation, and printing them apart made the reader
+        rejoin them by name. Notes had it worse — no section at all, folded
+        into a fifteen-row "Activity Log" that the system trail crowded out.
+      */}
+      <When truthy={hasFindings}>
         <section className="mb-5">
-          <h2 className="mb-2 text-lg font-medium">Images</h2>
+          <h2 className="mb-2 text-lg font-medium">Findings</h2>
 
-          {/* General Audit Images - Not linked to specific assets */}
-          <When truthy={generalImages.length > 0}>
+          {/* About the audit as a whole — completion note and its photos. */}
+          <When truthy={generalNotes.length > 0 || generalImages.length > 0}>
             <div className="mb-4">
-              <h3 className="mb-2 text-sm font-medium">
-                General Audit Images ({generalImages.length})
-              </h3>
-              <div className="grid grid-cols-4 gap-2">
-                {generalImages.map((img) => (
-                  <div key={img.id} className="border border-gray-300 p-1">
-                    <img
-                      src={img.thumbnailUrl || img.imageUrl}
-                      alt={img.description || "Audit image"}
-                      className="h-24 w-full object-cover"
-                    />
-                    {img.description && (
-                      <p className="mt-1 text-xs text-gray-600">
-                        {img.description}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <h3 className="mb-2 text-sm font-medium">About this audit</h3>
+
+              {generalNotes.map((note) => (
+                <div key={note.id} className="mb-2 border border-gray-300 p-2">
+                  {/* why whitespace-pre-wrap: a condition note is typed in a
+                      textarea, so line breaks are part of what the person
+                      wrote. Without this the receipt runs a multi-line
+                      observation together into one paragraph — the Activity
+                      Log above already sets it for the same reason. */}
+                  <p className="whitespace-pre-wrap text-xs text-gray-900">
+                    {note.content}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {note.user
+                      ? resolveUserDisplayName(note.user) || note.user.email
+                      : "System"}{" "}
+                    &middot; <DateS date={note.createdAt} includeTime />
+                  </p>
+                </div>
+              ))}
+
+              <When truthy={generalImages.length > 0}>
+                <div className="grid grid-cols-4 gap-2">
+                  {generalImages.map((img) => (
+                    <div key={img.id} className="border border-gray-300 p-1">
+                      <img
+                        src={img.thumbnailUrl || img.imageUrl}
+                        alt={img.description || "Audit image"}
+                        className="h-24 w-full object-cover"
+                      />
+                      {img.description && (
+                        <p className="mt-1 text-xs text-gray-600">
+                          {img.description}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </When>
             </div>
           </When>
 
-          {/* Asset-Specific Images - Grouped by asset */}
-          <When truthy={assetImages.length > 0}>
-            <div>
-              <h3 className="mb-2 text-sm font-medium">
-                Asset-Specific Images ({assetImages.length})
-              </h3>
-              {Object.entries(assetImageGroups).map(
-                ([assetId, { assetName, images }]) => (
-                  <div key={assetId} className="mb-3">
-                    <h4 className="mb-1 text-xs font-medium text-gray-700">
-                      {assetName}
-                    </h4>
-                    <div className="grid grid-cols-4 gap-2">
-                      {images.map((img) => (
-                        <div
-                          key={img.id}
-                          className="border border-gray-300 p-1"
-                        >
-                          <img
-                            src={img.thumbnailUrl || img.imageUrl}
-                            alt={img.description || "Asset image"}
-                            className="h-24 w-full object-cover"
-                          />
-                          {img.description && (
-                            <p className="mt-1 text-xs text-gray-600">
-                              {img.description}
-                            </p>
-                          )}
-                        </div>
-                      ))}
+          {/* One block per asset somebody recorded something about. */}
+          {findingEntries.map(([assetId, { assetName, images, notes }]) => (
+            <div key={assetId} className="mb-3">
+              <h4 className="mb-1 text-xs font-medium text-gray-700">
+                {assetName}
+              </h4>
+
+              {notes.map((note) => (
+                <div key={note.id} className="mb-2 border border-gray-300 p-2">
+                  {/* why whitespace-pre-wrap: a condition note is typed in a
+                      textarea, so line breaks are part of what the person
+                      wrote. Without this the receipt runs a multi-line
+                      observation together into one paragraph — the Activity
+                      Log above already sets it for the same reason. */}
+                  <p className="whitespace-pre-wrap text-xs text-gray-900">
+                    {note.content}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {note.user
+                      ? resolveUserDisplayName(note.user) || note.user.email
+                      : "System"}{" "}
+                    &middot; <DateS date={note.createdAt} includeTime />
+                  </p>
+                </div>
+              ))}
+
+              <When truthy={images.length > 0}>
+                <div className="grid grid-cols-4 gap-2">
+                  {images.map((img) => (
+                    <div key={img.id} className="border border-gray-300 p-1">
+                      <img
+                        src={img.thumbnailUrl || img.imageUrl}
+                        alt={img.description || `Photo of ${assetName}`}
+                        className="h-24 w-full object-cover"
+                      />
+                      {img.description && (
+                        <p className="mt-1 text-xs text-gray-600">
+                          {img.description}
+                        </p>
+                      )}
                     </div>
-                  </div>
-                )
-              )}
+                  ))}
+                </div>
+              </When>
             </div>
-          </When>
+          ))}
         </section>
       </When>
 

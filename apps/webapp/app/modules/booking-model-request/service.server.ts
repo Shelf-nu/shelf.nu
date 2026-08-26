@@ -40,6 +40,8 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { recordEvent } from "../activity-event/service.server";
+import type { ActorSnapshot } from "../activity-event/types";
 import { createSystemBookingNote } from "../booking-note/service.server";
 import { getUserByID } from "../user/service.server";
 
@@ -75,6 +77,58 @@ type GetAssetModelAvailabilityArgs = {
    */
   from?: Date | null;
   to?: Date | null;
+  /**
+   * Prisma client or active transaction; defaults to the global `db`.
+   *
+   * A caller deciding whether a reservation fits MUST pass its own `tx`.
+   * Reading through the global client runs the counts outside the caller's
+   * transaction, so they neither see its uncommitted writes nor participate
+   * in the locks it holds, and two concurrent reservations both measure the
+   * same free pool and both commit.
+   */
+  db?: AssetModelAvailabilityClient;
+};
+
+/**
+ * The tagged-template `$queryRaw` an interactive transaction exposes. Declared
+ * structurally so the transaction client satisfies it without a cast.
+ */
+type RawQueryClient = {
+  $queryRaw<T = unknown>(
+    query: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<T>;
+};
+
+/**
+ * The exact reads {@link getAssetModelAvailability} issues. Structural rather
+ * than Prisma's own client type so an interactive transaction client
+ * satisfies it without casting.
+ */
+export type AssetModelAvailabilityClient = {
+  asset: {
+    count: (args: { where: Prisma.AssetWhereInput }) => Promise<number>;
+  };
+  custody: {
+    aggregate: (args: {
+      where: Prisma.CustodyWhereInput;
+      _sum: { quantity: true };
+    }) => Promise<{ _sum: { quantity: number | null } }>;
+  };
+  bookingAsset: {
+    aggregate: (args: {
+      where: Prisma.BookingAssetWhereInput;
+      _sum: { quantity: true };
+    }) => Promise<{ _sum: { quantity: number | null } }>;
+  };
+  bookingModelRequest: {
+    aggregate: (args: {
+      where: Prisma.BookingModelRequestWhereInput;
+      _sum: { quantity: true; fulfilledQuantity: true };
+    }) => Promise<{
+      _sum: { quantity: number | null; fulfilledQuantity: number | null };
+    }>;
+  };
 };
 
 export type AssetModelAvailability = {
@@ -90,6 +144,48 @@ export type AssetModelAvailability = {
 };
 
 /**
+ * Serializes reservations competing for one `AssetModel`'s pool.
+ *
+ * Availability is a read-then-decide: count what is free, then write a row
+ * claiming some of it. Under READ COMMITTED a plain `SELECT` inside a
+ * transaction takes no lock, so two concurrent reservations both read the
+ * same free pool and both commit — the sum then exceeds what exists. Taking
+ * `FOR UPDATE` on the model row first makes the second caller wait for the
+ * first to commit and re-read the pool it actually left behind.
+ *
+ * The model row is the right grain: contention is exactly "requests for this
+ * model", and every writer of a `BookingModelRequest` passes through here.
+ *
+ * Scoped by `organizationId` as well as `id`, so a caller supplying another
+ * workspace's model id takes no lock at all rather than contending on a row
+ * it cannot see — the same rule as `lockAssetForQuantityUpdate`.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param assetModelId - Model whose pool is being claimed
+ * @param organizationId - The caller's authenticated organization id
+ * @throws {ShelfError} 404 if the model is not in the caller's workspace
+ */
+async function lockAssetModelForReservation(
+  tx: RawQueryClient,
+  assetModelId: string,
+  organizationId: string
+): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "AssetModel" WHERE id = ${assetModelId} AND "organizationId" = ${organizationId} FOR UPDATE
+  `;
+
+  if (!rows || rows.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      status: 404,
+      message: "Asset model not found in current workspace.",
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Compute availability for an `AssetModel` over a booking window.
  *
  * Safe to call from any loader/action path. Does not mutate. Excludes
@@ -101,7 +197,10 @@ export async function getAssetModelAvailability({
   bookingId,
   from,
   to,
+  db: dbClient,
 }: GetAssetModelAvailabilityArgs): Promise<AssetModelAvailability> {
+  const client = dbClient ?? db;
+
   try {
     const dateOverlap =
       from && to
@@ -118,7 +217,7 @@ export async function getAssetModelAvailability({
         // Total INDIVIDUAL assets of this model in the org. QUANTITY_TRACKED
         // assets aren't part of the model-request flow (they have their own
         // quantity booking path from Phase 3b).
-        db.asset.count({
+        client.asset.count({
           where: {
             organizationId,
             assetModelId,
@@ -126,7 +225,7 @@ export async function getAssetModelAvailability({
           },
         }),
         // Units currently held by team members / users.
-        db.custody.aggregate({
+        client.custody.aggregate({
           where: {
             asset: {
               organizationId,
@@ -138,7 +237,7 @@ export async function getAssetModelAvailability({
         }),
         // Concrete BookingAsset rows for assets of this model, in OTHER
         // active-status bookings whose window overlaps.
-        db.bookingAsset.aggregate({
+        client.bookingAsset.aggregate({
           where: {
             asset: {
               organizationId,
@@ -160,7 +259,7 @@ export async function getAssetModelAvailability({
         // `reservedConcrete` above. Summing both `quantity` and
         // `fulfilledQuantity` lets us compute outstanding-only as
         // `SUM(quantity) - SUM(fulfilledQuantity)` in a single query.
-        db.bookingModelRequest.aggregate({
+        client.bookingModelRequest.aggregate({
           where: {
             assetModelId,
             bookingId: { not: bookingId },
@@ -472,10 +571,16 @@ type UpsertBookingModelRequestArgs = {
  * current availability inside a transaction so two concurrent upserts
  * can't both pass the guard and oversubscribe the pool.
  *
- * Writes a system booking note on success. Rejected when the booking
- * isn't in a state that accepts edits (we only allow DRAFT / RESERVED
- * here — ONGOING bookings must reconcile by scanning, not by editing
- * the intent).
+ * Writes a system booking note on success, plus a structured
+ * `ActivityEvent` per field that actually changed — `BOOKING_MODEL_REQUESTED`
+ * on create, `BOOKING_MODEL_REQUEST_CHANGED` for `quantity` and (separately)
+ * for `fulfilledAt`. Events go inside the transaction so a rollback can't
+ * leave a phantom entry in the audit trail; the note stays outside it,
+ * matching the concrete-asset add path in `updateBookingAssets`.
+ *
+ * Rejected when the booking isn't in a state that accepts edits (we only
+ * allow DRAFT / RESERVED here — ONGOING bookings must reconcile by scanning,
+ * not by editing the intent).
  */
 export async function upsertBookingModelRequest({
   bookingId,
@@ -494,6 +599,12 @@ export async function upsertBookingModelRequest({
         shouldBeCaptured: false,
       });
     }
+
+    // Loaded before the transaction opens: the actor read is a plain User
+    // lookup with nothing to serialise against the reservation write, and
+    // hoisting it keeps the interactive-tx window to the rows that matter.
+    // Serves both the in-tx event and the post-tx note.
+    const actor = await loadActorBestEffort(userId);
 
     const result = await db.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
@@ -551,10 +662,18 @@ export async function upsertBookingModelRequest({
         where: {
           bookingId_assetModelId: { bookingId, assetModelId },
         },
-        select: { quantity: true, fulfilledQuantity: true },
+        // `fulfilledAt` is selected purely for the audit trail: it is the
+        // second field this upsert can change, and the payload-shapes rule
+        // wants its own event rather than one umbrella row.
+        select: {
+          quantity: true,
+          fulfilledQuantity: true,
+          fulfilledAt: true,
+        },
       });
       const previousQuantity = existing?.quantity ?? null;
       const existingFulfilled = existing?.fulfilledQuantity ?? 0;
+      const previousFulfilledAt = existing?.fulfilledAt ?? null;
 
       if (quantity < existingFulfilled) {
         throw new ShelfError({
@@ -566,12 +685,18 @@ export async function upsertBookingModelRequest({
         });
       }
 
+      // Claim the pool before measuring it. Both statements have to be in
+      // this transaction: the lock serializes competing reservations, and
+      // `db: tx` is what makes the counts observe it.
+      await lockAssetModelForReservation(tx, assetModelId, organizationId);
+
       const availability = await getAssetModelAvailability({
         assetModelId,
         organizationId,
         bookingId,
         from: booking.from,
         to: booking.to,
+        db: tx,
       });
 
       // We only need fresh pool availability for the NEW outstanding
@@ -595,8 +720,12 @@ export async function upsertBookingModelRequest({
       //   - update with newQuantity === fulfilledQuantity: mark complete
       //   - update with newQuantity > fulfilledQuantity: re-open (null)
       //   - update with newQuantity < fulfilledQuantity: rejected above
-      const justCompleted = quantity === existingFulfilled && quantity > 0;
-      const fulfilledAt = justCompleted ? new Date() : null;
+      const isComplete = quantity === existingFulfilled && quantity > 0;
+      // Keep the ORIGINAL stamp when the request was already complete. Saving
+      // an unchanged quantity is not a new fulfilment, and stamping `now()`
+      // again silently rewrites when the reservation actually completed — the
+      // one timestamp the audit trail has for it.
+      const fulfilledAt = isComplete ? previousFulfilledAt ?? new Date() : null;
 
       const request = await tx.bookingModelRequest.upsert({
         where: {
@@ -613,7 +742,86 @@ export async function upsertBookingModelRequest({
         },
       });
 
-      return { request, booking, assetModel, previousQuantity };
+      /**
+       * Activity events — inside the tx, so a later failure can't leave an
+       * event describing a reservation that never committed.
+       *
+       * One event per field that actually changed (see the
+       * record-event-payload-shapes rule), never one umbrella "request
+       * updated" row: `quantity` and `fulfilledAt` move independently and
+       * reports need to count them independently.
+       *
+       * `assetModelId` goes in `meta` because `ActivityEvent` has no
+       * assetModelId cross-ref column; `assetModelName` rides along as a
+       * point-in-time snapshot so a later model rename doesn't rewrite
+       * history (same reasoning as `actorSnapshot`).
+       */
+      const modelMeta = {
+        assetModelId: assetModel.id,
+        assetModelName: assetModel.name,
+      };
+      const eventBase = {
+        organizationId,
+        actorUserId: userId,
+        actorSnapshot: actor?.snapshot ?? null,
+        entityType: "BOOKING" as const,
+        entityId: bookingId,
+        bookingId,
+      };
+
+      // `previousQuantity` comes from the pre-upsert read, so a concurrent
+      // create can make it stale: the second transaction serializes on the
+      // unique constraint, sees `existing === null`, but its upsert runs the
+      // UPDATE branch. The returned row settles which branch actually ran —
+      // Prisma stamps createdAt === updatedAt only on the create path.
+      const wasCreated =
+        request.createdAt.getTime() === request.updatedAt.getTime();
+      if (wasCreated) {
+        await recordEvent(
+          {
+            ...eventBase,
+            action: "BOOKING_MODEL_REQUESTED",
+            meta: { ...modelMeta, quantity },
+          },
+          tx
+        );
+      } else if (quantity !== previousQuantity) {
+        await recordEvent(
+          {
+            ...eventBase,
+            action: "BOOKING_MODEL_REQUEST_CHANGED",
+            field: "quantity",
+            fromValue: previousQuantity,
+            toValue: quantity,
+            meta: modelMeta,
+          },
+          tx
+        );
+      }
+
+      /**
+       * `fulfilledAt` gets its own event, and only when it genuinely flips
+       * set ⇄ unset. Comparing timestamps instead would fire on a no-op
+       * re-save of an already-complete request, which rewrites the stored
+       * `fulfilledAt` to `now()` without any real state change.
+       */
+      const wasFulfilled = previousFulfilledAt != null;
+      const isFulfilled = fulfilledAt != null;
+      if (existing && wasFulfilled !== isFulfilled) {
+        await recordEvent(
+          {
+            ...eventBase,
+            action: "BOOKING_MODEL_REQUEST_CHANGED",
+            field: "fulfilledAt",
+            fromValue: previousFulfilledAt?.toISOString() ?? null,
+            toValue: fulfilledAt?.toISOString() ?? null,
+            meta: modelMeta,
+          },
+          tx
+        );
+      }
+
+      return { request, booking, assetModel, previousQuantity, wasCreated };
     });
 
     // Activity note — best-effort, outside the tx so a markdoc hiccup
@@ -623,25 +831,31 @@ export async function upsertBookingModelRequest({
     //   - increase : "increased the **Model** reservation from **M** to **N**."
     //   - decrease : "decreased the **Model** reservation from **M** to **N**."
     //   - no-op    : skip the note entirely (nothing actually changed)
-    const { assetModel, previousQuantity } = result;
+    const { assetModel, previousQuantity, wasCreated } = result;
     // Model names are user-supplied and render as literal text in the note.
     const modelName = stripMarkdocDelimiters(assetModel.name);
     let content: string | null = null;
-    if (previousQuantity == null) {
+    // Same race-safe discriminator as the event above: the upsert result,
+    // not the stale pre-read. In the lost-race case (wasCreated false but
+    // previousQuantity null) the quantity comparisons are unknowable, so
+    // the note is skipped — the event trail still records the change.
+    if (wasCreated) {
       content = `{actor} reserved **${quantity} × ${modelName}** for this booking.`;
-    } else if (quantity > previousQuantity) {
+    } else if (previousQuantity != null && quantity > previousQuantity) {
       content = `{actor} increased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
-    } else if (quantity < previousQuantity) {
+    } else if (previousQuantity != null && quantity < previousQuantity) {
       content = `{actor} decreased the **${modelName}** reservation from **${previousQuantity}** to **${quantity}**.`;
     }
 
-    if (content != null) {
+    // `actor.link` is null only when the actor lookup failed, in which case
+    // there is no name to attribute the note to — the event already carries
+    // `actorUserId`, so nothing about who acted is lost.
+    if (content != null && actor.link) {
       try {
-        const actor = await loadActor(userId);
         await createSystemBookingNote({
           bookingId,
           organizationId,
-          content: content.replace("{actor}", actor),
+          content: content.replace("{actor}", actor.link),
         });
       } catch {
         // note failure is non-fatal — the reservation itself committed
@@ -675,6 +889,10 @@ type RemoveBookingModelRequestArgs = {
  * Delete a model-level request. Only allowed on DRAFT / RESERVED
  * bookings — ONGOING / OVERDUE must drain requests via scan-to-assign,
  * not manual cancellation (preserves intent audit).
+ *
+ * Emits `BOOKING_MODEL_REQUEST_REMOVED` inside the deleting transaction. The
+ * cancelled `quantity` rides in `meta` because the row itself is gone — after
+ * the delete this event is the only record that the commitment ever existed.
  */
 export async function removeBookingModelRequest({
   bookingId,
@@ -683,7 +901,20 @@ export async function removeBookingModelRequest({
   userId,
 }: RemoveBookingModelRequestArgs) {
   try {
-    const assetModelName = await db.$transaction(async (tx) => {
+    // Hoisted out of the tx for the same reason as in the upsert path, and
+    // reused by both the in-tx event and the post-tx note.
+    const actor = await loadActorBestEffort(userId);
+
+    /**
+     * The cancelled reservation, or `null` on the idempotent no-op path.
+     *
+     * Returns the `quantity` alongside the name because the note is written
+     * after the tx and the row is gone by then. Every sibling note in this
+     * file states the count ("reserved **3 × Model**", "decreased … from **5**
+     * to **2**"), and `updateBookingAssets` was reworked for exactly this on
+     * the concrete-asset side — cancellation was the one outlier.
+     */
+    const cancelled = await db.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: bookingId, organizationId },
         select: { id: true, status: true },
@@ -742,18 +973,48 @@ export async function removeBookingModelRequest({
         where: { bookingId_assetModelId: { bookingId, assetModelId } },
       });
 
-      return existing.assetModel.name;
+      // In the same tx as the delete — a rolled-back cancellation must not
+      // leave an event claiming the reservation was cancelled.
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          actorSnapshot: actor?.snapshot ?? null,
+          action: "BOOKING_MODEL_REQUEST_REMOVED",
+          entityType: "BOOKING",
+          entityId: bookingId,
+          bookingId,
+          meta: {
+            assetModelId,
+            assetModelName: existing.assetModel.name,
+            // The commitment being withdrawn. `fulfilledQuantity` is always 0
+            // here (the guard above rejects anything else), so the whole
+            // reservation is what's lost.
+            quantity: existing.quantity,
+          },
+        },
+        tx
+      );
+
+      return {
+        assetModelName: existing.assetModel.name,
+        quantity: existing.quantity,
+      };
     });
 
-    if (assetModelName) {
+    if (cancelled && actor.link) {
       try {
-        const actor = await loadActor(userId);
+        // Mirrors the create path's shape ("reserved **3 × Model** for this
+        // booking") so the pair reads symmetrically in the activity feed.
+        // Model names are user-supplied and render as literal text here.
         await createSystemBookingNote({
           bookingId,
           organizationId,
-          content: `${actor} cancelled the model-level reservation for **${stripMarkdocDelimiters(
-            assetModelName
-          )}**.`,
+          content: `${actor.link} cancelled the **${
+            cancelled.quantity
+          } × ${stripMarkdocDelimiters(
+            cancelled.assetModelName
+          )}** reservation for this booking.`,
         });
       } catch {
         // non-fatal
@@ -828,6 +1089,7 @@ type MaterializeArgs = {
 export async function materializeModelRequestForAsset({
   bookingId,
   asset,
+  organizationId,
   userId,
   tx,
 }: MaterializeArgs): Promise<
@@ -904,7 +1166,11 @@ export async function materializeModelRequestForAsset({
      * @see {@link file://./../../../../../.claude/rules/raw-sql-respects-prisma-map.md}
      */
     const claimed = await tx.$queryRaw<
-      Array<{ fulfilledQuantity: number; quantity: number }>
+      Array<{
+        fulfilledQuantity: number;
+        quantity: number;
+        fulfilledAt: Date | null;
+      }>
     >`
       UPDATE "BookingModelRequest"
       SET "fulfilledQuantity" = "fulfilledQuantity" + 1,
@@ -915,7 +1181,7 @@ export async function materializeModelRequestForAsset({
           END
       WHERE "id" = ${existing.id}
         AND "fulfilledQuantity" < "quantity"
-      RETURNING "fulfilledQuantity", "quantity"
+      RETURNING "fulfilledQuantity", "quantity", "fulfilledAt"
     `;
 
     if (claimed.length === 0) {
@@ -926,12 +1192,27 @@ export async function materializeModelRequestForAsset({
       return { matched: false };
     }
 
-    // Remaining is derived from what the database actually committed, not from
-    // the pre-write snapshot, so a concurrent claim is reflected in the note.
+    // Everything below reports what the database actually committed, not the
+    // pre-write snapshot, so a concurrent claim is reflected in the note and
+    // in the events.
+    const committed = claimed[0];
     const remaining = Math.max(
       0,
-      claimed[0].quantity - claimed[0].fulfilledQuantity
+      committed.quantity - committed.fulfilledQuantity
     );
+
+    /**
+     * This claim is what completed the request, so its stamp is a genuine
+     * null → set transition: the `WHERE "fulfilledQuantity" < "quantity"`
+     * guard means the row was still outstanding when we claimed, and the
+     * invariant (`fulfilledAt` non-null IFF fully fulfilled) means it carried
+     * no stamp to preserve. Read from the row rather than a local `new Date()`
+     * so the column and the event reporting it cannot disagree.
+     */
+    const completedNow =
+      committed.fulfilledQuantity >= committed.quantity
+        ? committed.fulfilledAt
+        : null;
 
     // Activity note — IN the tx so the note rolls back with the
     // materialization if anything later in the pipeline fails.
@@ -940,8 +1221,8 @@ export async function materializeModelRequestForAsset({
     const modelNameForNote = stripMarkdocDelimiters(existing.assetModel.name);
     // Same sentence either way; only the subject changes, so the feed reads
     // consistently whether or not the caller threaded an actor through.
-    const content = actor
-      ? `${actor} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`
+    const content = actor?.link
+      ? `${actor.link} assigned ${assetLink} (${modelNameForNote}) to this booking — ${remaining} × ${modelNameForNote} remaining.`
       : `${assetLink} (${modelNameForNote}) was assigned to this booking — ${remaining} × ${modelNameForNote} remaining.`;
     await tx.bookingNote.create({
       data: {
@@ -950,6 +1231,62 @@ export async function materializeModelRequestForAsset({
         booking: { connect: { id: bookingId } },
       },
     });
+
+    /**
+     * One `BOOKING_MODEL_REQUEST_FULFILLED` per UNIT, carrying the concrete
+     * `assetId` — that is the join from "3 × Dell were promised" back to the
+     * specific serial numbers that satisfied the promise. Emitting one event
+     * per completed reservation instead would lose it.
+     *
+     * Same tx as the decrement above, and the actor snapshot is passed
+     * explicitly so `recordEvent` doesn't issue its own user lookup on every
+     * iteration of the caller's per-scanned-asset loop.
+     */
+    const modelMeta = {
+      assetModelId: asset.assetModelId,
+      assetModelName: existing.assetModel.name,
+    };
+    const eventBase = {
+      organizationId,
+      actorUserId: userId,
+      actorSnapshot: actor?.snapshot ?? null,
+      entityType: "BOOKING" as const,
+      entityId: bookingId,
+      bookingId,
+    };
+
+    await recordEvent(
+      {
+        ...eventBase,
+        action: "BOOKING_MODEL_REQUEST_FULFILLED",
+        assetId: asset.id,
+        meta: {
+          ...modelMeta,
+          quantity: committed.quantity,
+          fulfilledQuantity: committed.fulfilledQuantity,
+          remaining,
+        },
+      },
+      tx
+    );
+
+    // `fulfilledAt` flipping null → set is its own field change, and it gets
+    // the same event here as it does when an operator closes a request out by
+    // editing the quantity down — the field's history reads the same whichever
+    // path caused it.
+    if (completedNow) {
+      await recordEvent(
+        {
+          ...eventBase,
+          action: "BOOKING_MODEL_REQUEST_CHANGED",
+          field: "fulfilledAt",
+          fromValue: null,
+          toValue: completedNow.toISOString(),
+          meta: modelMeta,
+        },
+        tx
+      );
+    }
 
     return {
       matched: true,
@@ -1083,8 +1420,45 @@ export async function fulfilModelRequestsForAssets({
 /*                                  helpers                                   */
 /* -------------------------------------------------------------------------- */
 
-/** Load the actor for an activity note and return the markdoc user link. */
-async function loadActor(userId: string): Promise<string> {
+/**
+ * The actor, in both forms this module needs: a markdoc link for the
+ * human-readable note and a snapshot for the structured activity event.
+ */
+type NoteActor = {
+  /** Markdoc user link spliced into note content. */
+  link: string;
+  /**
+   * Pre-computed snapshot handed to `recordEvent`. Without it `recordEvent`
+   * issues its own `user.findUnique` — inside a transaction, and once per
+   * event. `materializeModelRequestForAsset` runs in a per-scanned-asset loop
+   * inside the caller's tx, so that adds up against the interactive-tx budget
+   * (see the P2028 note on `recordEvents`). One read here serves both writes.
+   */
+  snapshot: ActorSnapshot;
+};
+
+/**
+ * Best-effort {@link loadActor}, for the paths that annotate a mutation which
+ * has to succeed regardless.
+ *
+ * `getUserByID` uses `findUniqueOrThrow`, so before the actor load was hoisted
+ * out of the note's own try/catch a vanished user only cost the note. Keep
+ * that: on failure the note is skipped and the event still records WHO acted
+ * via `actorUserId` — only the display snapshot is lost. Passing an explicit
+ * `null` snapshot also stops `recordEvent` retrying the same doomed lookup.
+ */
+async function loadActorBestEffort(
+  userId: string
+): Promise<{ link: string | null; snapshot: ActorSnapshot | null }> {
+  try {
+    return await loadActor(userId);
+  } catch {
+    return { link: null, snapshot: null };
+  }
+}
+
+/** Load the actor once, for both the activity note and the activity event. */
+async function loadActor(userId: string): Promise<NoteActor> {
   const user = await getUserByID(userId, {
     select: {
       id: true,
@@ -1093,9 +1467,18 @@ async function loadActor(userId: string): Promise<string> {
       displayName: true,
     } satisfies Prisma.UserSelect,
   });
-  return wrapUserLinkForNote({
-    id: userId,
-    firstName: user?.firstName,
-    lastName: user?.lastName,
-  });
+  return {
+    // `displayName` is deliberately not passed: `wrapUserLinkForNote` prefers
+    // it over first/last, and these notes have always rendered the real name.
+    link: wrapUserLinkForNote({
+      id: userId,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+    }),
+    snapshot: {
+      firstName: user?.firstName ?? null,
+      lastName: user?.lastName ?? null,
+      displayName: user?.displayName ?? null,
+    },
+  };
 }

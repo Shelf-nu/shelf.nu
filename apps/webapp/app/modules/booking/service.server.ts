@@ -10528,6 +10528,13 @@ export async function removeAssets({
        * `fulfilModelRequestsForAssets` makes it routine, so the column this PR
        * adds has to be read here, not just written.
        */
+      /**
+       * `fulfilledAt` reversals to report, one per request this loop reopens.
+       * Batched and flushed after the loop so N affected requests cost one
+       * insert rather than N — same reasoning as the `recordEvents` docs.
+       */
+      const modelRequestReopenEvents: ActivityEventInput[] = [];
+
       const removalsByRequest = new Map<string, number>();
       for (const row of rowsBeingDeleted) {
         if (!row.bookingModelRequestId) continue;
@@ -10541,7 +10548,16 @@ export async function removeAssets({
         const request = await tx.bookingModelRequest.findUnique({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `requestId` comes from BookingAsset rows on this booking, which was org-checked above
           where: { id: requestId },
-          select: { quantity: true, fulfilledQuantity: true, bookingId: true },
+          // `fulfilledAt`, the model id and its name feed the reopen event
+          // below; without the before-state we cannot report what changed.
+          select: {
+            quantity: true,
+            fulfilledQuantity: true,
+            bookingId: true,
+            fulfilledAt: true,
+            assetModelId: true,
+            assetModel: { select: { name: true } },
+          },
         });
         // Belt and braces: the FK guarantees it, but never touch a request
         // belonging to another booking.
@@ -10566,7 +10582,41 @@ export async function removeAssets({
             ...(nextFulfilledAt === null ? { fulfilledAt: null } : {}),
           },
         });
+
+        /**
+         * Report the reversal, but only on a genuine set → unset flip.
+         * `nextFulfilledAt === null` is also true for a request that was
+         * never complete, so gating on it alone would emit spurious
+         * null → null events on every removal from an outstanding request.
+         *
+         * This is the mirror of the null → timestamp events emitted in
+         * `booking-model-request/service.server.ts`. Without it the stream
+         * records reservations closing and never reopening, and
+         * `fulfilledAt IS NULL` consumers reconstruct this one as still
+         * fulfilled after the removal reopened it.
+         */
+        if (request.fulfilledAt != null && nextFulfilledAt === null) {
+          modelRequestReopenEvents.push({
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_MODEL_REQUEST_CHANGED",
+            entityType: "BOOKING",
+            entityId: id,
+            bookingId: id,
+            field: "fulfilledAt",
+            fromValue: request.fulfilledAt.toISOString(),
+            toValue: null,
+            meta: {
+              assetModelId: request.assetModelId,
+              assetModelName: request.assetModel.name,
+            },
+          });
+        }
       }
+
+      // Same tx as the decrement above — a rolled-back removal must not
+      // leave an event claiming the reservation reopened.
+      await recordEvents(modelRequestReopenEvents, tx);
 
       /** When removing an asset from an ONGOING/OVERDUE booking we need to
        * reconcile each asset's terminal status — NOT blanket-flip to
@@ -12748,20 +12798,89 @@ async function addScannedAssetsToBookingWithinTx(
    * `bookings.add-scanned-assets` endpoint reaches this same code, so it was
    * reachable from the app too.
    */
-  const preExistingStandaloneScannedIds = new Set<string>(
+  const preExistingStandaloneRows: { assetId: string; quantity: number }[] =
     allScannedAssetIds.length > 0
-      ? (
-          await tx.bookingAsset.findMany({
-            where: {
-              bookingId,
-              assetId: { in: allScannedAssetIds },
-              assetKitId: null,
-            },
-            select: { assetId: true },
-          })
-        ).map((row: { assetId: string }) => row.assetId)
-      : []
+      ? await tx.bookingAsset.findMany({
+          where: {
+            bookingId,
+            assetId: { in: allScannedAssetIds },
+            assetKitId: null,
+          },
+          // `quantity` feeds the availability guard below: what this booking
+          // will hold after the scan is what competes for the pool, and its
+          // own existing rows are excluded from `bookable`.
+          select: { assetId: true, quantity: true },
+        })
+      : [];
+
+  const preExistingStandaloneScannedIds = new Set<string>(
+    preExistingStandaloneRows.map((row) => row.assetId)
   );
+
+  /**
+   * Quantity-tracked standalone scans draw on the shared pool, and nothing
+   * above measures it: the conflict guard is INDIVIDUAL semantics — one asset
+   * can be in one booking at a time — whereas a quantity-tracked asset
+   * legitimately sits in many at once, bounded only by the sum of their
+   * quantities. Without this the same units can be promised twice.
+   *
+   * Kit slices are deliberately excluded, matching `updateBookingAssets`: a
+   * kit-driven row is committed to its kit and bounded on the separate kit
+   * axis, not the loose pool.
+   */
+  const qtScannedAssetIds = [
+    ...new Set(
+      assetIds.filter(
+        (assetId) =>
+          scannedAssetsMetaById.get(assetId)?.type ===
+          AssetType.QUANTITY_TRACKED
+      )
+    ),
+  ];
+
+  if (qtScannedAssetIds.length > 0) {
+    const bookingWindow = await tx.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { from: true, to: true },
+    });
+
+    const preExistingQtyByAssetId = new Map<string, number>(
+      preExistingStandaloneRows.map((row) => [row.assetId, row.quantity])
+    );
+
+    // Sorted so two transactions touching the same assets acquire them in
+    // one global order and cannot deadlock by taking them in opposite ones.
+    // Mirrors `updateBookingAssets` and the checkout guard.
+    for (const assetId of [...qtScannedAssetIds].sort()) {
+      await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+    }
+
+    await assertAssetQuantitiesAvailable(
+      qtScannedAssetIds.map((assetId) => {
+        const meta = scannedAssetsMetaById.get(assetId);
+        return {
+          assetId,
+          // `bookable` excludes this booking, so the figure measured against
+          // it is everything this booking will hold once the scan lands —
+          // the units already on it plus the ones being added now.
+          requestedQuantity:
+            (preExistingQtyByAssetId.get(assetId) ?? 0) +
+            (quantities[assetId] ?? 1),
+          assetTitle: meta?.title ?? "",
+          unitOfMeasure: meta?.unitOfMeasure,
+        };
+      }),
+      {
+        organizationId,
+        tx,
+        window:
+          bookingWindow?.from && bookingWindow?.to
+            ? { from: bookingWindow.from, to: bookingWindow.to }
+            : null,
+        excludeBookingId: bookingId,
+      }
+    );
+  }
 
   /**
    * Provenance for the rows created below: which reservation each asset

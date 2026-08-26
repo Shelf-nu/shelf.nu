@@ -8,27 +8,16 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import {
-  getServerVersion,
-  resolveServerForEmail,
-  subscribeToServerChange,
-} from "./server";
-import { getSupabase } from "./supabase";
+import { supabase } from "./supabase";
 
 type AuthState = {
   session: Session | null;
   user: User | null;
   isLoading: boolean;
-  /**
-   * Signs in with a password, resolving the correct server first.
-   *
-   * `updateRequired` marks the one failure a retry cannot fix — this build is
-   * too old for the target server — so the caller can offer a store link.
-   */
   signIn: (
     email: string,
     password: string
-  ) => Promise<{ error: string | null; updateRequired?: boolean }>;
+  ) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 };
 
@@ -38,20 +27,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Changes whenever the app switches servers. The session effect below keys
-  // off it so it re-reads and re-subscribes against the REBUILT Supabase
-  // client — a `[]` dep array would leave it bound to the discarded one.
-  const [serverVersion, setServerVersion] = useState(getServerVersion());
-
-  useEffect(
-    () => subscribeToServerChange(() => setServerVersion(getServerVersion())),
-    []
-  );
-
   useEffect(() => {
-    const client = getSupabase();
-
-    client.auth
+    supabase.auth
       .getSession()
       .then(({ data: { session } }) => {
         setSession(session);
@@ -65,36 +42,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = client.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
 
     return () => subscription.unsubscribe();
-  }, [serverVersion]);
+  }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    // Point the app at the right server BEFORE authenticating: the credentials
-    // must go to that server's Supabase project, not whichever was last active.
-    const discovery = await resolveServerForEmail(email);
-    if (!discovery.ok) {
-      return {
-        error: discovery.message,
-        updateRequired: discovery.updateRequired,
-      };
-    }
-
-    const { error } = await getSupabase().auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
     return { error: error?.message ?? null };
   }, []);
 
-  // Signing out deliberately KEEPS the active server: the user almost always
-  // signs back into the same instance. Typing a cloud email re-resolves back to
-  // Shelf Cloud, so there is no dead end and no escape-hatch UI needed.
   const signOut = useCallback(async () => {
-    await getSupabase().auth.signOut();
+    await supabase.auth.signOut();
   }, []);
 
   const value = useMemo(

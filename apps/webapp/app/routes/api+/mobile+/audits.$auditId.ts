@@ -115,6 +115,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         id: a.id,
         name: a.name,
         auditAssetId: a.auditAssetId,
+        // Evidence can exist WITHOUT a scan: an auditor photographs an empty
+        // shelf from the web scan screen, which attaches the note or photo to
+        // the expected `AuditAsset` directly. Serving these only on the scan
+        // shape below left those rows looking empty on the phone. The service
+        // already counts them per expected asset, so this costs no query.
+        auditNotesCount: a.auditNotesCount ?? 0,
+        auditImagesCount: a.auditImagesCount ?? 0,
         mainImage: a.mainImage ?? null,
         thumbnailImage: a.thumbnailImage ?? null,
         // why: surface where the asset should be, what category it
