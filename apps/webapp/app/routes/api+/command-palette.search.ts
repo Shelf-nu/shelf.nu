@@ -19,6 +19,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
 const querySchema = z.object({
@@ -367,10 +368,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               Record<string, unknown> & {
                 custodian?: {
                   name?: string;
-                  user?: {
-                    firstName?: string | null;
-                    lastName?: string | null;
-                  } | null;
+                  // `displayName` is required, not optional: `assetIndexFields`
+                  // selects it, and a cast that omits it silently narrows the
+                  // row back to the legal name.
+                  user?: UserNameFields | null;
                 };
               }
             >
@@ -422,7 +423,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             tagNames: asset.tags?.map((tag) => tag.name) ?? [],
             custodianName: primaryCustody?.custodian?.name ?? null,
             custodianUserName: primaryCustody?.custodian?.user
-              ? `${primaryCustody.custodian.user.firstName} ${primaryCustody.custodian.user.lastName}`.trim()
+              ? resolveUserDisplayName(primaryCustody.custodian.user)
               : null,
             barcodes: asset.barcodes?.map((barcode) => barcode.value) ?? [],
             customFieldValues:
@@ -473,6 +474,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           email: member.user?.email || null,
           firstName: member.user?.firstName || null,
           lastName: member.user?.lastName || null,
+          displayName: member.user?.displayName ?? null,
           userId: member.userId,
         })),
       })

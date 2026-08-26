@@ -55,9 +55,17 @@ Never widen a type back to `displayName?:` to clear an error. Fix the source.
 2. **String joins.** `` `${u.firstName} ${u.lastName}` `` — use
    `resolveUserDisplayName(u)`.
 3. **Search and sort.** A name you can see but cannot search for is still a bug.
-   Add a `displayName` branch beside every `firstName` predicate, and lead
-   name ordering with `{ user: { displayName: "asc" } }` (NULLs sort last, so
-   un-renamed users keep their existing grouping).
+   Add a `displayName` branch beside every `firstName` predicate.
+
+   For **ordering**, do NOT lead with `{ user: { displayName: "asc" } }`: Prisma
+   emits no NULLS clause, so Postgres sorts NULLs last and the list splits into
+   two alphabetical blocks — every renamed user above every un-renamed one, with
+   a display-name "Zoe" ahead of a fallback "Aaron". Order team members by
+   `{ name: "asc" }` instead. `TeamMember.name` is NOT NULL and `updateUser`
+   keeps it equal to `displayName` when set and `"firstName lastName"`
+   otherwise, so it is already the materialised COALESCE that `orderBy` cannot
+   express — and it matches the search path in `api+/model-filters`, so the list
+   does not re-sort the moment someone types.
 
 ## Which resolver
 

@@ -50,16 +50,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         user: { isNot: null }, // Only users, no NRMs
       },
-      // Order by the name the list actually renders: `displayName` when the
-      // user has one, otherwise their first name. Prisma cannot order by a
-      // coalesce, so `displayName` leads and the rest are tie-breakers —
-      // Postgres sorts NULLs last on ASC, so users without one keep their
-      // existing relative order among themselves.
-      orderBy: [
-        { user: { displayName: "asc" } },
-        { user: { firstName: "asc" } },
-        { name: "asc" },
-      ],
+      /**
+       * Order by the label the picker actually renders. `TeamMember.name` is
+       * NOT NULL and `updateUser` keeps it equal to `displayName` when set and
+       * `"firstName lastName"` otherwise — the same chain
+       * `resolveTeamMemberName` resolves — so it is already a materialised
+       * COALESCE, which Prisma's `orderBy` cannot express directly.
+       *
+       * Leading with `user.displayName` instead splits the list in two:
+       * Postgres sorts NULLs last on ASC, so every renamed user is hoisted
+       * above every un-renamed one and a display-name "Zoe" precedes a
+       * fallback "Aaron". Ordering by `name` also matches the search path in
+       * `api+/model-filters`, so the list does not re-sort as the user types.
+       */
+      orderBy: [{ name: "asc" }, { id: "asc" }],
       include: TEAM_MEMBER_INCLUDE,
     });
 

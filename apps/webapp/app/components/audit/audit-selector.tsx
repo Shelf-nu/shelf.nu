@@ -189,9 +189,13 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
                 const creatorName =
                   resolveUserDisplayName(audit.createdBy) || "Unknown";
 
+                // "Unassigned" and "Unknown" mean different things: nobody is
+                // assigned, versus someone is but has no name on record — an
+                // SSO account whose IdP sent no name claims resolves to "".
                 const assigneeName =
                   audit.assignments.length > 0
-                    ? resolveUserDisplayName(audit.assignments[0].user)
+                    ? resolveUserDisplayName(audit.assignments[0].user) ||
+                      "Unknown"
                     : "Unassigned";
 
                 return (

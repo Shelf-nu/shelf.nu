@@ -1554,6 +1554,12 @@ describe("custodian display name", () => {
       paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
     }).strings.join("?");
 
-    expect(sql).toContain('bu."displayName"');
+    // Slice the clause out before asserting: `bu."displayName"` also appears in
+    // the custody JSON projection and inside BOOKING_CUSTODIAN_NAME's COALESCE,
+    // so a bare `toContain` over the whole query stays green even when the
+    // grouping column is removed — which is the only thing this guards.
+    const groupBy = sql.match(/GROUP BY [^\n]*/)?.[0] ?? "";
+
+    expect(groupBy).toContain('bu."displayName"');
   });
 });
