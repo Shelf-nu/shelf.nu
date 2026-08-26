@@ -91,9 +91,11 @@ describe("deleteNRM", () => {
   });
 
   it("refuses a member who holds custody, and says so", async () => {
-    // No row matched the guarded write, and the member is still a listed NRM —
-    // so custody is what held it back.
+    // why: zero rows written is how the guarded statement reports that the
+    // custody predicate excluded the member.
     dbMocks.updateMany.mockResolvedValue({ count: 0 });
+    // why: the member is still a listed NRM, which is what narrows the reason
+    // for that miss down to custody.
     dbMocks.findFirst.mockResolvedValue({
       _count: { custodies: 3, kitCustodies: 0 },
     });
@@ -106,6 +108,8 @@ describe("deleteNRM", () => {
   it("treats a refused delete as a client error, not a server fault", async () => {
     // A 5xx here would page someone and burn Sentry's error quota over a user
     // being told to check in their assets first.
+    // why: the smallest state that reaches the refusal — one row excluded by
+    // the guard, holding one custody.
     dbMocks.updateMany.mockResolvedValue({ count: 0 });
     dbMocks.findFirst.mockResolvedValue({
       _count: { custodies: 1, kitCustodies: 0 },
@@ -120,6 +124,8 @@ describe("deleteNRM", () => {
     // Assigning a kit always writes `KitCustody`, and only writes the
     // inherited per-asset rows when the kit has assets — so the custodian of
     // an empty kit is invisible to a guard that counts `custodies` alone.
+    // why: zero asset custody with kit custody present IS that member, and it
+    // is a shape no database is needed to produce.
     dbMocks.updateMany.mockResolvedValue({ count: 0 });
     dbMocks.findFirst.mockResolvedValue({
       _count: { custodies: 0, kitCustodies: 2 },
@@ -142,6 +148,8 @@ describe("deleteNRM", () => {
     // The guarded write passed the row by, but by the time we look it holds
     // nothing: what blocked it was released between the two statements.
     // Reporting "release custody" would name something that is already gone.
+    // why: the two responses disagree on purpose. Only stubbing them can put
+    // the pair in a state a real database holds for microseconds.
     dbMocks.updateMany.mockResolvedValue({ count: 0 });
     dbMocks.findFirst.mockResolvedValue({
       _count: { custodies: 0, kitCustodies: 0 },
@@ -160,6 +168,8 @@ describe("deleteNRM", () => {
     // Nothing matched and nothing is there to match: the id belongs to another
     // organization, to a registered user, to a pending invite, or to a row
     // someone else already deleted.
+    // why: a null diagnostic read stands in for all of those at once — the
+    // scope predicate excludes them identically.
     dbMocks.updateMany.mockResolvedValue({ count: 0 });
     dbMocks.findFirst.mockResolvedValue(null);
 
