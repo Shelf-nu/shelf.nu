@@ -226,3 +226,53 @@ describe("per-server options", () => {
     expect(isPasswordLoginDisabledFor("globex.com")).toBe(true);
   });
 });
+
+describe("matching by the instance's own hostname", () => {
+  /** Sets the registry for one test. */
+  function registry(value: unknown) {
+    mockEnv.COMPANION_SERVERS = JSON.stringify(value);
+  }
+
+  it("resolves the customer domain and the server address alike", () => {
+    // A customer knows both names for themselves, and only one is the key.
+    registry({ "kent.edu": "https://kent.i.shelf.nu" });
+    expect(resolveCompanionServer("kent.edu")).toBe("https://kent.i.shelf.nu");
+    expect(resolveCompanionServer("kent.i.shelf.nu")).toBe(
+      "https://kent.i.shelf.nu"
+    );
+  });
+
+  it("matches the hostname case-insensitively", () => {
+    registry({ "kent.edu": "https://kent.i.shelf.nu" });
+    expect(resolveCompanionServer("KENT.I.SHELF.NU")).toBe(
+      "https://kent.i.shelf.nu"
+    );
+  });
+
+  it("carries per-server options through a hostname match", () => {
+    registry({
+      "kent.edu": {
+        url: "https://kent.i.shelf.nu",
+        disablePasswordLogin: true,
+      },
+    });
+    expect(isPasswordLoginDisabledFor("kent.i.shelf.nu")).toBe(true);
+  });
+
+  it("prefers an exact domain key over a hostname match", () => {
+    // Two entries where one's key is another's host: the key wins, because it
+    // is the answer someone deliberately configured.
+    registry({
+      "kent.i.shelf.nu": "https://other.i.shelf.nu",
+      "kent.edu": "https://kent.i.shelf.nu",
+    });
+    expect(resolveCompanionServer("kent.i.shelf.nu")).toBe(
+      "https://other.i.shelf.nu"
+    );
+  });
+
+  it("still reports nothing for an unrelated host", () => {
+    registry({ "kent.edu": "https://kent.i.shelf.nu" });
+    expect(resolveCompanionServer("evil.example")).toBeNull();
+  });
+});

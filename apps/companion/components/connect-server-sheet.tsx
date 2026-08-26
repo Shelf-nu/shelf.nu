@@ -210,11 +210,11 @@ export default function ConnectServerSheet({
 
         <View style={styles.body}>
           <Text style={styles.subtitle}>
-            If your organization runs its own Shelf server, enter its domain to
-            connect this app to it.
+            If your organization runs its own Shelf server, tell us who you are
+            and we&apos;ll connect this app to it.
           </Text>
 
-          <Text style={styles.label}>Organization domain</Text>
+          <Text style={styles.label}>Your organization</Text>
           <TextInput
             testID="connect-domain-input"
             ref={inputRef}
@@ -231,9 +231,14 @@ export default function ConnectServerSheet({
             returnKeyType="go"
             onSubmitEditing={canConnect ? handleConnect : undefined}
             editable={!isConnecting}
-            accessibilityLabel="Organization domain"
+            accessibilityLabel="Your organization"
           />
-          <Text style={styles.hint}>Your work email address works too.</Text>
+          {/* All three resolve, so name all three: someone who knows only their
+              server address should not have to guess at their email domain. */}
+          <Text style={styles.hint}>
+            Your work email, your company&apos;s domain, or your Shelf server
+            address.
+          </Text>
 
           {error && (
             <Text

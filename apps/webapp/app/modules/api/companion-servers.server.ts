@@ -29,6 +29,7 @@
  * @see {@link file://./../../routes/api+/mobile+/resolve-server.ts}
  */
 import { COMPANION_SERVERS } from "~/utils/env";
+import { Logger } from "~/utils/logger";
 
 /** One registered instance, after parsing and validation. */
 type CompanionServerEntry = {
@@ -89,7 +90,16 @@ function getRegistry(): Record<string, CompanionServerEntry> | null {
       (value as { disablePasswordLogin?: unknown }).disablePasswordLogin ===
         true;
 
-    if (typeof url !== "string") continue;
+    if (typeof url !== "string") {
+      // Said out loud, because the shape is easy to get wrong in a one-line env
+      // var — putting an option beside the domain instead of inside its entry
+      // reads as a second domain, and dropping it silently costs an afternoon.
+      Logger.warn(
+        `[companion-servers] ignoring "${domain}": expected a URL string or ` +
+          `{ url, ... }, got ${Array.isArray(value) ? "an array" : typeof value}`
+      );
+      continue;
+    }
     // https only — the companion app refuses plaintext, so an http entry is
     // dead config. Dropping it here keeps the failure at "unknown domain"
     // rather than a confusing client-side error.
@@ -98,7 +108,12 @@ function getRegistry(): Record<string, CompanionServerEntry> | null {
     // scheme-relative forms for special schemes, so `https:acme.example.com`
     // parses to a perfectly good https URL with a hostname. Parsing ALONE
     // would therefore widen what we accept, not narrow it.
-    if (!url.startsWith("https://")) continue;
+    if (!url.startsWith("https://")) {
+      Logger.warn(
+        `[companion-servers] ignoring "${domain}": ${url} is not https`
+      );
+      continue;
+    }
 
     let parsedUrl: URL;
     try {
@@ -129,10 +144,40 @@ function getRegistry(): Record<string, CompanionServerEntry> | null {
  * @returns The instance base URL without a trailing slash, or `null` when the
  *   domain is not registered — meaning the caller should use Shelf Cloud.
  */
-export function resolveCompanionServer(domain: string): string | null {
+/**
+ * Finds an entry by customer domain, or failing that by the instance's own
+ * hostname.
+ *
+ * A customer knows two names for themselves: the domain their email is on
+ * (`kent.edu`) and the address of their Shelf (`kent.shelf.nu`). Only the first
+ * is a registry key, but someone typing the second has given a perfectly
+ * unambiguous answer — matching it too costs one pass over a handful of entries
+ * and saves the "why doesn't my own server work" support round trip.
+ *
+ * @param domain - Normalised lookup value.
+ * @returns The entry, or `null` when nothing matches.
+ */
+function findEntry(domain: string): CompanionServerEntry | null {
   const registry = getRegistry();
   if (!registry) return null;
-  return registry[domain.trim().toLowerCase()]?.baseUrl ?? null;
+
+  const key = domain.trim().toLowerCase();
+  const direct = registry[key];
+  if (direct) return direct;
+
+  for (const entry of Object.values(registry)) {
+    try {
+      if (new URL(entry.baseUrl).hostname.toLowerCase() === key) return entry;
+    } catch {
+      // Unreachable: getRegistry only keeps entries it could parse.
+    }
+  }
+
+  return null;
+}
+
+export function resolveCompanionServer(domain: string): string | null {
+  return findEntry(domain)?.baseUrl ?? null;
 }
 
 /**
@@ -147,7 +192,5 @@ export function resolveCompanionServer(domain: string): string | null {
  *   and plain string entries are `false`.
  */
 export function isPasswordLoginDisabledFor(domain: string): boolean {
-  const registry = getRegistry();
-  if (!registry) return false;
-  return registry[domain.trim().toLowerCase()]?.disablePasswordLogin ?? false;
+  return findEntry(domain)?.disablePasswordLogin ?? false;
 }
