@@ -50,12 +50,22 @@ vitest.mock("~/database/db.server", () => ({
     asset: {
       findUnique: vitest.fn(),
     },
+    userOrganization: {
+      findMany: vitest.fn(),
+    },
   },
 }));
 
 // why: external service — we mock the barcode lookup
 vitest.mock("~/modules/barcode/service.server", () => ({
   getBarcodeByValue: vitest.fn(),
+}));
+
+// why: canUseBarcodes reads the premium env flag, which would make the
+// sibling-workspace entitlement cases flip with the test environment; pin it
+// to the premium behavior (the flag itself) so they are deterministic.
+vitest.mock("~/utils/subscription.server", () => ({
+  canUseBarcodes: (org: { barcodesEnabled: boolean }) => org.barcodesEnabled,
 }));
 
 vitest.mock("~/utils/error", () => ({
@@ -141,6 +151,10 @@ describe("GET /api/mobile/barcode/:value", () => {
     });
 
     (getBarcodeByValue as any).mockResolvedValue(mockBarcode);
+
+    // No sibling memberships unless a test sets them up — keeps the
+    // cross-workspace lookup out of every current-workspace case.
+    (db.userOrganization.findMany as any).mockResolvedValue([]);
   });
 
   it("should resolve a barcode to its linked asset", async () => {
@@ -195,6 +209,62 @@ describe("GET /api/mobile/barcode/:value", () => {
     expect((result as unknown as Response).status).toBe(404);
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("not found");
+  });
+
+  it("resolves a sibling workspace's barcode and names the owning workspace", async () => {
+    // Miss in the current workspace, unique hit in the one entitled sibling.
+    (getBarcodeByValue as any)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" });
+    (db.userOrganization.findMany as any).mockResolvedValue([
+      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+    ]);
+
+    const request = createBarcodeRequest("BC001234");
+    const result = await loader(
+      createLoaderArgs({ request, params: { value: "BC001234" } })
+    );
+
+    const body = await (result as unknown as Response).json();
+    // The OWNING workspace id drives the app's switch-and-view card.
+    expect(body.barcode.organizationId).toBe("org-2");
+    expect(body.barcode.asset.id).toBe("asset-1");
+  });
+
+  it("refuses an ambiguous barcode that exists in several sibling workspaces", async () => {
+    (getBarcodeByValue as any)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" })
+      .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-3" });
+    (db.userOrganization.findMany as any).mockResolvedValue([
+      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      { organizationId: "org-3", organization: { barcodesEnabled: true } },
+    ]);
+
+    const request = createBarcodeRequest("BC001234");
+    const result = await loader(
+      createLoaderArgs({ request, params: { value: "BC001234" } })
+    );
+
+    expect((result as unknown as Response).status).toBe(404);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toContain("more than one of your workspaces");
+  });
+
+  it("never resolves through a sibling workspace without the barcode capability", async () => {
+    (getBarcodeByValue as any).mockResolvedValue(null);
+    (db.userOrganization.findMany as any).mockResolvedValue([
+      { organizationId: "org-2", organization: { barcodesEnabled: false } },
+    ]);
+
+    const request = createBarcodeRequest("BC001234");
+    const result = await loader(
+      createLoaderArgs({ request, params: { value: "BC001234" } })
+    );
+
+    expect((result as unknown as Response).status).toBe(404);
+    // The lookup must not even run against the unentitled sibling.
+    expect(getBarcodeByValue as any).toHaveBeenCalledTimes(1);
   });
 
   it("should return 422 when barcode is not linked to any asset or kit", async () => {

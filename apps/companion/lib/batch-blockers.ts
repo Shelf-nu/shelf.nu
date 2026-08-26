@@ -16,10 +16,11 @@
  * - release custody — assets: not in custody / part of a kit; kits: not in
  *   custody
  * - update location — no eligibility blockers
- * - add to booking — assets: already in this booking / part of a kit / not
- *   available to book / checked out (only when the booking is
- *   ONGOING/OVERDUE); kits: contains unavailable assets / checked out
- *   (only when the booking is ONGOING/OVERDUE)
+ * - add to booking / fulfil — assets: already in this booking / part of a
+ *   kit (add only: fulfil matches concrete units, so kit membership is no
+ *   blocker there) / not available to book / checked out (only when the
+ *   booking is ONGOING/OVERDUE); kits: contains unavailable assets /
+ *   checked out (only when the booking is ONGOING/OVERDUE)
  *
  * @see {@link file://./../components/scanner/batch-blockers.tsx} UI renderer
  * @see {@link file://./../app/(tabs)/scanner.tsx} integration
@@ -51,7 +52,7 @@ export type BlockableItem = {
   hasUnavailableAssets?: boolean;
 };
 
-/** Booking context for the `booking_add` action's rules. */
+/** Booking context for the `booking_add` / `booking_fulfil` rules. */
 export type BookingBlockerContext = {
   /** Asset ids already in the target booking. */
   bookedAssetIds: ReadonlySet<string>;
@@ -94,7 +95,8 @@ function countNoun(n: number, noun: "asset" | "kit") {
 export function computeBlockers(
   action: BatchScanAction,
   items: BlockableItem[],
-  /** Required for the `booking_add` action; ignored otherwise. */
+  /** Required for the `booking_add` and `booking_fulfil` actions; ignored
+   * otherwise. Without it those actions produce zero blockers. */
   bookingCtx?: BookingBlockerContext
 ): BlockerGroup[] {
   const groups: BlockerGroup[] = [];

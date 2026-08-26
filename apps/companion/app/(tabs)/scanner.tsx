@@ -21,6 +21,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
+import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
@@ -1592,18 +1593,13 @@ function ScannerContent() {
   const assignCustodyToSelf = async () => {
     if (!currentOrg) return;
     setIsSubmitting(true);
-    const { data, error } = await api.teamMembers(currentOrg.id);
+    const { member, error } = await resolveSelfTeamMember(currentOrg.id);
     setIsSubmitting(false);
-
-    const selfMember = data?.teamMembers?.[0];
-    if (error || !selfMember) {
-      Alert.alert(
-        "Error",
-        error || "Could not find your team member record for this workspace."
-      );
+    if (!member) {
+      Alert.alert("Error", error ?? "Something went wrong.");
       return;
     }
-    performBulkAssign(selfMember);
+    performBulkAssign(member);
   };
 
   const performBulkAssign = async (member: TeamMember) => {
