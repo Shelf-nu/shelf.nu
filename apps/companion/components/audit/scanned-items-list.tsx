@@ -8,18 +8,28 @@
  * explicit "Add photo/note" action, which becomes the evidence count once
  * something is attached.
  *
+ * Row anatomy, and why it is asymmetric:
+ * - EXPECTED rows carry NO "Found" label. The tab is already called Scanned
+ *   and the green tick already says it, so a third copy of the same fact
+ *   spent the row's best space on nothing. That space now shows the asset's
+ *   LOCATION, which is what a person standing in a room actually needs.
+ * - UNEXPECTED rows keep their word, because there it carries information:
+ *   this asset was not on the list. They are NOT reordered into the feed —
+ *   the scan list stays newest-first so a fresh scan confirms itself. The
+ *   exception count on the tab is the filter instead (see the scan screen).
+ *
  * @see {@link file://./evidence-modal.tsx} what a row opens
  * @see {@link file://./evidence-coachmark.tsx} the one-time hint above the list
  */
 import React, { useCallback } from "react";
-import { View, Text, FlatList, TouchableOpacity } from "react-native";
+import { View, Text, FlatList, TouchableOpacity, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import type { ScannedItem } from "@/hooks/use-audit-init";
 
-const SCANNED_ITEM_HEIGHT = 52;
+const SCANNED_ITEM_HEIGHT = 58;
 const keyExtractor = (item: ScannedItem) => item.assetId;
 
 type ScannedItemsListProps = {
@@ -37,8 +47,26 @@ export function ScannedItemsList({
 
   const renderItem = useCallback(
     ({ item }: { item: ScannedItem }) => {
-      const evidenceCount = (item.notesCount ?? 0) + (item.imagesCount ?? 0);
-      const hasEvidence = evidenceCount > 0;
+      // why two numbers and not their sum: the sum is not comparable between
+      // rows. Photos uploaded WITH a caption store a comment beside them;
+      // the same photos with no caption store a system row instead, which is
+      // not evidence and is not counted. So one digit read 3 or 2 for the
+      // same two photos — it tracked how the upload happened to be stored,
+      // not what the auditor found. The sheet this opens has always shown
+      // "1 note, 1 photo" as two counts; the row now says the same thing.
+      const noteCount = item.notesCount ?? 0;
+      const photoCount = item.imagesCount ?? 0;
+      const hasEvidence = noteCount > 0 || photoCount > 0;
+      const evidenceLabel = [
+        noteCount > 0
+          ? `${noteCount} ${noteCount === 1 ? "note" : "notes"}`
+          : null,
+        photoCount > 0
+          ? `${photoCount} ${photoCount === 1 ? "photo" : "photos"}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
       const syncFailed = item.syncFailed === true;
 
       return (
@@ -46,11 +74,14 @@ export function ScannedItemsList({
           style={styles.scannedItem}
           onPress={() => onItemPress?.(item)}
           activeOpacity={0.7}
-          accessibilityLabel={`${item.name}, ${
-            item.isExpected ? "found" : "unexpected"
-          }${hasEvidence ? `, ${evidenceCount} evidence items` : ""}${
-            syncFailed ? ", not synced" : ""
-          }. Tap to add notes or photos.`}
+          // why: the visible "Found" label was removed as redundant, but a
+          // screen reader has no tab context and no colour, so the state stays
+          // in the spoken label along with the location.
+          accessibilityLabel={`${item.name?.trim() || "Untitled asset"}, ${
+            item.isExpected ? "found" : "unexpected, not on this audit"
+          }${item.locationName ? `, at ${item.locationName}` : ""}${
+            hasEvidence ? `, ${evidenceLabel}` : ""
+          }${syncFailed ? ", not synced" : ""}. Tap to add notes or photos.`}
           accessibilityRole="button"
         >
           <Ionicons
@@ -58,9 +89,44 @@ export function ScannedItemsList({
             size={18}
             color={item.isExpected ? colors.success : colors.warning}
           />
-          <Text style={styles.scannedItemName} numberOfLines={1}>
-            {item.name}
-          </Text>
+          {item.thumbnailImage ? (
+            <Image
+              source={{ uri: item.thumbnailImage }}
+              style={styles.scannedItemThumb}
+              resizeMode="cover"
+            />
+          ) : null}
+          <View style={styles.scannedItemText}>
+            <Text style={styles.scannedItemName} numberOfLines={1}>
+              {/* why: an older scan can arrive with an empty title (deleted or
+                  never-titled asset). Falling through to a blank line loses the
+                  row entirely, so name the state instead. */}
+              {item.name?.trim() ? item.name : "Untitled asset"}
+            </Text>
+            {/* The second line is the row's new job: WHERE, not "was it
+                scanned". Unexpected assets say so here, because for them that
+                IS the useful fact; expected ones show their location. */}
+            {item.isExpected ? (
+              item.locationName ? (
+                <View style={styles.scannedItemMetaRow}>
+                  <Ionicons
+                    name="location-outline"
+                    size={11}
+                    color={colors.mutedLight}
+                  />
+                  <Text style={styles.scannedItemMeta} numberOfLines={1}>
+                    {item.locationName}
+                  </Text>
+                </View>
+              ) : null
+            ) : (
+              <Text style={styles.scannedItemUnexpected} numberOfLines={1}>
+                {item.locationName
+                  ? `Not on this audit \u00b7 ${item.locationName}`
+                  : "Not on this audit"}
+              </Text>
+            )}
+          </View>
           {syncFailed ? (
             <View style={styles.syncFailedBadge}>
               <Ionicons
@@ -70,17 +136,35 @@ export function ScannedItemsList({
               />
               <Text style={styles.syncFailedText}>Not synced</Text>
             </View>
-          ) : (
-            <Text style={styles.scannedItemBadge}>
-              {item.isExpected ? "Found" : "Unexpected"}
-            </Text>
-          )}
+          ) : null}
           {/* The row's whole point beyond "found": attach evidence. Say it in
               words until there is a count to show instead. */}
           {hasEvidence ? (
             <View style={styles.evidenceBadge}>
-              <Ionicons name="attach" size={12} color={colors.primaryText} />
-              <Text style={styles.evidenceCount}>{evidenceCount}</Text>
+              {/* why these glyphs: the web row and the audit detail panel use
+                  a speech bubble for a note and an image mark for a photo.
+                  A paperclip meant "images" on one surface and
+                  "notes and images" on another. */}
+              {noteCount > 0 ? (
+                <>
+                  <Ionicons
+                    name="chatbubble-outline"
+                    size={12}
+                    color={colors.primaryText}
+                  />
+                  <Text style={styles.evidenceCount}>{noteCount}</Text>
+                </>
+              ) : null}
+              {photoCount > 0 ? (
+                <>
+                  <Ionicons
+                    name="image-outline"
+                    size={12}
+                    color={colors.primaryText}
+                  />
+                  <Text style={styles.evidenceCount}>{photoCount}</Text>
+                </>
+              ) : null}
             </View>
           ) : (
             <View style={styles.addEvidenceChip}>
@@ -161,20 +245,46 @@ const useStyles = createStyles((colors) => ({
     gap: spacing.sm,
     height: SCANNED_ITEM_HEIGHT,
   },
-  scannedItemName: {
+  scannedItemThumb: {
+    width: 34,
+    height: 34,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.border,
+    flexShrink: 0,
+  },
+  scannedItemText: {
+    // why: the text column is the ONLY element allowed to give up width — a
+    // squeezed "Add photo/note" chip would wrap or clip and stop reading as
+    // an action.
     flex: 1,
-    // why: the name is the ONLY element allowed to give up width — a squeezed
-    // "Add photo/note" chip would wrap or clip and stop reading as an action
     flexShrink: 1,
+    gap: 1,
+  },
+  scannedItemName: {
     fontSize: fontSize.sm,
     fontWeight: "500",
     color: colors.foreground,
   },
-  scannedItemBadge: {
-    flexShrink: 0,
+  scannedItemMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  scannedItemMeta: {
+    flexShrink: 1,
     fontSize: fontSize.xs,
-    fontWeight: "500",
+    // why: `mutedLight` is the icon/large-text grey (4.35:1 light, 3.77:1
+    // dark) — it misses 4.5:1 at this 12px size. `muted` keeps the second
+    // line quieter than the name and still clears the bar in both themes.
     color: colors.muted,
+  },
+  scannedItemUnexpected: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    // why: NOT `warning` — that is the badge FILL token and reads 2.35:1 as
+    // text on the white row. `warningText` is the foreground twin (7.09:1
+    // light) and aliases `warning` in dark mode, so dark is unchanged.
+    color: colors.warningText,
   },
   addEvidenceChip: {
     flexDirection: "row",

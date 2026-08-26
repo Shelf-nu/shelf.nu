@@ -13,6 +13,8 @@
  * @see apps/webapp/app/database/db.server.ts — thin re-export consumed by the webapp.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { Prisma, PrismaClient } from "@prisma/client";
 
 export type ExtendedPrismaClient = ReturnType<typeof createDatabaseClient>;
@@ -84,6 +86,53 @@ const READ_OPERATIONS = new Set([
   "aggregate",
   "groupBy",
 ]);
+
+/**
+ * Classifies one intercepted Prisma operation, deciding which transient codes
+ * it may be retried on (see {@link withPrismaRetry}).
+ *
+ * Raw SQL — `$queryRaw`, `$executeRaw` and their `Unsafe` variants — carries no
+ * model, and is always classified as a WRITE however harmless the statement
+ * looks. The SQL is opaque at this layer, and a `SELECT` is not a promise of
+ * purity: `SELECT get_next_sequential_id(...)` consumes a Postgres sequence,
+ * and `SELECT ... FOR UPDATE` exists to take locks. Re-running either after an
+ * in-flight failure would spend a second sequence value or re-take a lock the
+ * caller has already lost, so raw SQL retries only on the
+ * {@link CONNECTION_ERROR_CODES}, where the statement provably never ran.
+ *
+ * @param params.model - The model the operation targets, or `undefined` for a
+ *   raw query — the only signal that separates the two.
+ * @param params.operation - The Prisma operation name (`findMany`,
+ *   `$queryRaw`, ...).
+ * @returns `true` only for a model operation in {@link READ_OPERATIONS}.
+ */
+export function isReadOperation({
+  model,
+  operation,
+}: {
+  model?: string;
+  operation: string;
+}): boolean {
+  if (model === undefined) {
+    return false;
+  }
+  return READ_OPERATIONS.has(operation);
+}
+
+/**
+ * Set while a caller-supplied {@link withPrismaRetry} is running, so the client
+ * extension can tell that this operation's retries are already someone else's
+ * job and pass it straight through.
+ *
+ * Without this the two layers compose multiplicatively — three extension
+ * attempts each running three caller attempts — turning a 1.5s failure during
+ * an outage into a ~6s one, on exactly the requests that should be giving up
+ * quickly. It is also the channel that makes a caller's read/write
+ * classification stick: `isReadOperation` cannot see inside a raw statement,
+ * so a caller that knows its SQL is a pure read keeps that judgement only by
+ * owning the retry outright.
+ */
+const CALLER_MANAGED_RETRY = new AsyncLocalStorage<true>();
 
 /** Maximum number of retry attempts for a transient Prisma error. */
 const MAX_RETRIES = 2;
@@ -228,9 +277,11 @@ export function isRetryablePrismaError(
  * codes `P1008`/`P1017` on a WRITE — rethrow immediately on the first failure,
  * exactly like a call with no wrapper.
  *
- * Extracted out of {@link createDatabaseClient}'s `$allOperations` extension
- * so the retry/backoff logic can be unit-tested without a real Prisma client
- * or database connection.
+ * Exported for callers that need a retry the client extension cannot give them
+ * on its own — in practice, a raw statement the caller knows is a pure read
+ * (see {@link isReadOperation}). While this runs, the extension passes its
+ * operations straight through, so the attempts you configure here are the only
+ * ones that happen.
  *
  * @param operation - The Prisma operation to execute (and retry on failure).
  * @param options - Optional overrides.
@@ -246,7 +297,30 @@ export function isRetryablePrismaError(
  * @returns The resolved value of `operation`.
  * @throws The final error, once retries are exhausted or the error isn't retryable.
  */
-export async function withPrismaRetry<T>(
+export function withPrismaRetry<T>(
+  operation: () => Promise<T>,
+  options?: {
+    operationIsRead?: boolean;
+    log?: (message: string) => void;
+    delay?: (ms: number) => Promise<void>;
+  }
+): Promise<T> {
+  return CALLER_MANAGED_RETRY.run(true, () => retryLoop(operation, options));
+}
+
+/**
+ * The retry loop itself, without the caller-managed marker.
+ *
+ * The client extension calls this directly: it IS the outermost retry for the
+ * operation, so marking it would only make every query pay for a marker no
+ * one reads.
+ *
+ * @param operation - The Prisma operation to execute (and retry on failure).
+ * @param options - Same as {@link withPrismaRetry}.
+ * @returns The resolved value of `operation`.
+ * @throws The final error, once retries are exhausted or the error isn't retryable.
+ */
+async function retryLoop<T>(
   operation: () => Promise<T>,
   options?: {
     operationIsRead?: boolean;
@@ -294,9 +368,11 @@ export async function withPrismaRetry<T>(
  * Extensions applied (in order):
  * 1. `dynamicFindMany` — allows calling `findMany` generically across models.
  * 2. Transient-error retry — retries connection-level failures (see
- *    {@link PRISMA_RETRYABLE_ERROR_CODES}) on all models. Reads additionally
- *    retry the ambiguous in-flight codes; writes do not, to avoid re-applying
- *    a mutation that may already have committed (see {@link withPrismaRetry}).
+ *    {@link PRISMA_RETRYABLE_ERROR_CODES}) on every operation the client
+ *    dispatches, model queries and raw SQL alike. Model reads additionally
+ *    retry the ambiguous in-flight codes; writes and all raw SQL do not, to
+ *    avoid re-applying a statement that may already have committed (see
+ *    {@link isReadOperation} and {@link withPrismaRetry}).
  */
 export function createDatabaseClient(url?: string) {
   const client = new PrismaClient(url ? { datasourceUrl: url } : undefined)
@@ -312,12 +388,20 @@ export function createDatabaseClient(url?: string) {
     })
     .$extends({
       query: {
-        $allModels: {
-          async $allOperations({ operation, args, query }) {
-            return withPrismaRetry(() => query(args), {
-              operationIsRead: READ_OPERATIONS.has(operation),
-            });
-          },
+        // Top-level `$allOperations`, NOT `$allModels.$allOperations`: Prisma
+        // dispatches raw queries with no model, and the `$allModels` form is
+        // skipped for exactly those. Nesting this under `$allModels` leaves
+        // every `$queryRaw`/`$executeRaw` in the codebase with no retry at all.
+        async $allOperations({ model, operation, args, query }) {
+          // A caller already retrying this operation owns the decision,
+          // including the read/write call that `isReadOperation` cannot make
+          // for raw SQL. Wrapping it again would just multiply the attempts.
+          if (CALLER_MANAGED_RETRY.getStore()) {
+            return query(args);
+          }
+          return retryLoop(() => query(args), {
+            operationIsRead: isReadOperation({ model, operation }),
+          });
         },
       },
     });

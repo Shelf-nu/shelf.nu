@@ -42,6 +42,13 @@ export type MeResponse = {
     timeZone?: string | null;
   };
   organizations: Organization[];
+  /**
+   * The workspace the user last chose, when they still belong to it — the
+   * server's explicit landing signal. `organizations[0]` already reflects it;
+   * this field lets the app distinguish "the server picked for me" from "I
+   * chose this on this device". Absent on older servers.
+   */
+  lastSelectedOrganizationId?: string | null;
 };
 
 /**
