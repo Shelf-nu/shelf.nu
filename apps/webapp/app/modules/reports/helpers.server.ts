@@ -2814,12 +2814,17 @@ export async function assetDistributionReport(
   const startTime = performance.now();
 
   try {
-    // Fetch all distribution data in parallel.
-    const [byCategory, byLocation, byStatus, kpis] = await Promise.all([
-      computeDistributionByCategory(organizationId),
-      computeDistributionByLocation(organizationId),
-      computeDistributionByStatus(organizationId),
+    // One asset read feeds all three breakdowns — each bucket builder is a
+    // pure reduction over the same rows, so a large inventory is scanned
+    // once instead of three times.
+    const [assets, kpis] = await Promise.all([
+      fetchDistributionAssets(organizationId),
       computeDistributionKpis(organizationId),
+    ]);
+    const [byCategory, byLocation, byStatus] = await Promise.all([
+      computeDistributionByCategory(assets, organizationId),
+      Promise.resolve(computeDistributionByLocation(assets)),
+      Promise.resolve(computeDistributionByStatus(assets)),
     ]);
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -2870,17 +2875,51 @@ export async function assetDistributionReport(
   }
 }
 
+/** The shared asset row every distribution breakdown reduces over. */
+type DistributionAsset = {
+  id: string;
+  categoryId: string | null;
+  status: string;
+  valuation: number | null;
+  quantity: number | null;
+  assetLocations: {
+    quantity: number;
+    location: { id: string; name: string };
+  }[];
+};
+
+/**
+ * One asset read shared by all three distribution breakdowns.
+ *
+ * Bucket values are per-unit valuation × the surface's quantity, matching
+ * the headline Total Value KPI, so the builders need raw rows rather than a
+ * database groupBy (which cannot multiply columns).
+ */
+async function fetchDistributionAssets(
+  organizationId: string
+): Promise<DistributionAsset[]> {
+  return db.asset.findMany({
+    where: { organizationId },
+    select: {
+      id: true,
+      categoryId: true,
+      status: true,
+      valuation: true,
+      quantity: true,
+      assetLocations: {
+        select: {
+          quantity: true,
+          location: { select: { id: true, name: true } },
+        },
+      },
+    },
+  });
+}
+
 async function computeDistributionByCategory(
+  assets: DistributionAsset[],
   organizationId: string
 ): Promise<AssetDistributionRow[]> {
-  // Per-asset read instead of a groupBy sum: bucket value is per-unit
-  // valuation × workspace stock, the same arithmetic as the headline Total
-  // Value KPI, and groupBy cannot multiply columns.
-  const assets = await db.asset.findMany({
-    where: { organizationId },
-    select: { categoryId: true, valuation: true, quantity: true },
-  });
-
   const totalAssets = assets.length;
 
   const buckets = new Map<
@@ -2892,13 +2931,14 @@ async function computeDistributionByCategory(
     const bucket = buckets.get(key) ?? { assetCount: 0, totalValue: null };
     bucket.assetCount += 1;
     if (a.valuation !== null) {
+      // Per-unit valuation × workspace stock, matching the headline KPI.
       bucket.totalValue =
         (bucket.totalValue ?? 0) + a.valuation * (a.quantity ?? 1);
     }
     buckets.set(key, bucket);
   }
 
-  // Fetch category names
+  // Resolve category names for the buckets that have one.
   const categoryIds = Array.from(buckets.keys()).filter(
     (id) => id !== "uncategorized"
   );
@@ -2923,49 +2963,30 @@ async function computeDistributionByCategory(
     .sort((a, b) => b.assetCount - a.assetCount);
 }
 
-async function computeDistributionByLocation(
-  organizationId: string
-): Promise<AssetDistributionRow[]> {
-  // Pull every asset with its AssetLocation pivot rows (+ location name).
+function computeDistributionByLocation(
+  assets: DistributionAsset[]
+): AssetDistributionRow[] {
   // A QUANTITY_TRACKED asset can span multiple locations, so it may
-  // contribute to several buckets. Bucket value weighs the per-unit
-  // valuation by the UNITS AT THAT LOCATION (`AssetLocation.quantity`);
-  // stock that is not placed anywhere belongs to "No Location", so the
-  // buckets sum to the same quantity-aware total as the headline KPI.
-  const assets = await db.asset.findMany({
-    where: { organizationId },
-    select: {
-      id: true,
-      valuation: true,
-      quantity: true,
-      assetLocations: {
-        select: {
-          quantity: true,
-          location: { select: { id: true, name: true } },
-        },
-      },
-    },
-  });
-
-  // bucketKey → { name, assetCount, totalValue }. Counts stay per
-  // (asset, location) pair; value carries the units at that location.
+  // contribute to several buckets; value weighs the per-unit valuation by
+  // the UNITS AT THAT LOCATION (`AssetLocation.quantity`).
+  //
+  // "No Location" holds only assets with no placement rows at all: the
+  // donut slice drills down to `/assets?location=without-location`, whose
+  // filter matches `assetLocations: { none: {} }`, so the bucket must
+  // describe exactly that population. Unplaced remainders of partially
+  // placed assets are deliberately not attributed here.
   const buckets = new Map<
     string,
     { name: string; assetCount: number; totalValue: number | null }
   >();
 
-  const addToBucket = (
-    key: string,
-    name: string,
-    value: number | null,
-    countAsset: boolean
-  ) => {
+  const addToBucket = (key: string, name: string, value: number | null) => {
     const existing = buckets.get(key) ?? {
       name,
       assetCount: 0,
       totalValue: null,
     };
-    if (countAsset) existing.assetCount += 1;
+    existing.assetCount += 1;
     if (value !== null) {
       existing.totalValue = (existing.totalValue ?? 0) + value;
     }
@@ -2973,40 +2994,21 @@ async function computeDistributionByLocation(
   };
 
   for (const asset of assets) {
-    const stock = asset.quantity ?? 1;
-    const placedUnits = asset.assetLocations.reduce(
-      (sum, pivot) => sum + pivot.quantity,
-      0
-    );
-
     if (asset.assetLocations.length === 0) {
       addToBucket(
         "without-location",
         "No Location",
-        asset.valuation === null ? null : asset.valuation * stock,
-        true
+        asset.valuation === null
+          ? null
+          : asset.valuation * (asset.quantity ?? 1)
       );
       continue;
     }
-
     for (const pivot of asset.assetLocations) {
       addToBucket(
         pivot.location.id,
         pivot.location.name,
-        asset.valuation === null ? null : asset.valuation * pivot.quantity,
-        true
-      );
-    }
-
-    // Unplaced remainder of a partially-placed asset: its value sits at no
-    // location, and the asset is counted there so the value has a row.
-    const remainder = stock - placedUnits;
-    if (remainder > 0) {
-      addToBucket(
-        "without-location",
-        "No Location",
-        asset.valuation === null ? null : asset.valuation * remainder,
-        true
+        asset.valuation === null ? null : asset.valuation * pivot.quantity
       );
     }
   }
@@ -3028,17 +3030,9 @@ async function computeDistributionByLocation(
     .sort((a, b) => b.assetCount - a.assetCount);
 }
 
-async function computeDistributionByStatus(
-  organizationId: string
-): Promise<AssetDistributionRow[]> {
-  // Per-asset read: bucket value is per-unit valuation × workspace stock,
-  // the same arithmetic as the headline Total Value KPI (a groupBy sum
-  // cannot multiply columns).
-  const assets = await db.asset.findMany({
-    where: { organizationId },
-    select: { status: true, valuation: true, quantity: true },
-  });
-
+function computeDistributionByStatus(
+  assets: DistributionAsset[]
+): AssetDistributionRow[] {
   const totalAssets = assets.length;
 
   const statusLabels: Record<string, string> = {
@@ -3058,6 +3052,7 @@ async function computeDistributionByStatus(
     };
     bucket.assetCount += 1;
     if (a.valuation !== null) {
+      // Per-unit valuation × workspace stock, matching the headline KPI.
       bucket.totalValue =
         (bucket.totalValue ?? 0) + a.valuation * (a.quantity ?? 1);
     }

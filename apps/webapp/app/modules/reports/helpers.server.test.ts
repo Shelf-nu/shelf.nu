@@ -496,9 +496,13 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     expect(statusBucket?.totalValue).toBe(57);
   });
 
-  it("weights location buckets by units placed there, remainder to No Location", async () => {
-    // 10 units at $5: 6 placed at Warehouse, 4 unplaced. Warehouse carries
-    // $30; the remaining $20 belongs to No Location, never double-counted.
+  it("weights location buckets by units placed there; No Location means no placements at all", async () => {
+    // 10 units at $5 with 6 placed at Warehouse: the bucket carries $30
+    // (units there × unit value). The asset has placement rows, so it must
+    // NOT appear under No Location — that slice drills down to the
+    // `assetLocations: none` filter and has to describe exactly that
+    // population. A second, fully unplaced asset lands there with its full
+    // stock value.
     vi.mocked(db.asset.findMany).mockResolvedValue([
       {
         id: "a-qt",
@@ -513,14 +517,30 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
           },
         ],
       },
+      {
+        id: "a-unplaced",
+        categoryId: null,
+        status: "AVAILABLE",
+        valuation: 4,
+        quantity: 3,
+        assetLocations: [],
+      },
     ] as any);
 
     const result = await assetDistributionReport({ organizationId: "org-1" });
 
     const byLocation = result.distributionBreakdown!.byLocation;
     expect(byLocation.find((b) => b.id === "loc-1")?.totalValue).toBe(30);
-    expect(
-      byLocation.find((b) => b.id === "without-location")?.totalValue
-    ).toBe(20);
+    const noLocation = byLocation.find((b) => b.id === "without-location");
+    expect(noLocation?.totalValue).toBe(12);
+    expect(noLocation?.assetCount).toBe(1);
+  });
+
+  it("reads the asset table once for all three breakdowns", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValue([] as any);
+
+    await assetDistributionReport({ organizationId: "org-1" });
+
+    expect(vi.mocked(db.asset.findMany)).toHaveBeenCalledTimes(1);
   });
 });
