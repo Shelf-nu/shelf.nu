@@ -1628,6 +1628,35 @@ model BookingAsset {
   // happened before this column existed, so no behaviour regresses.
   sourceKitId String?
 
+  // Whether THIS slice is currently checked out on THIS booking, and by whom.
+  // `checkedOutAt` NULL = never checked out here.
+  //
+  // This is the authoritative answer to "may this slice be checked in?", and
+  // nothing else can give it:
+  //   - `Asset.status` is global. An asset may be CHECKED_OUT by a DIFFERENT
+  //     active booking while never having been checked out on this one.
+  //   - `PartialBookingCheckout` records progressive scan SESSIONS only. The
+  //     all-at-once checkout writes none at all, so the absence of rows says
+  //     nothing about whether an asset went out — see the note on that model.
+  //
+  // Slice-grained rather than asset-grained because a QUANTITY_TRACKED asset is
+  // split across several bookings and several slices at once, so no single
+  // column on `Asset` could represent it.
+  //
+  // `checkedInAt` means FULLY reconciled, matching `PartialBookingCheckin`'s
+  // `assetIds` semantics: a partially-returned qty-tracked slice stays NULL and
+  // its flow back is tracked by `ConsumptionLog`.
+  //
+  // Same plain-column treatment as `assetKitId` / `sourceKitId` above — the
+  // user columns are deliberately NOT Prisma `@relation`s. Adding another
+  // relation to this model (whose grandparent `Booking` is a hub) pushes the
+  // extended client's generics past TS's recursion limit (TS2321). Services
+  // read the ids directly; no relation traversal is needed.
+  checkedOutAt   DateTime? @db.Timestamptz(3)
+  checkedOutById String?
+  checkedInAt    DateTime? @db.Timestamptz(3)
+  checkedInById  String?
+
   // The old `@@unique([bookingId, assetId])` is replaced by two partial
   // unique indexes in the migration SQL (Postgres-only feature Prisma
   // can't express in the schema):
@@ -1762,6 +1791,13 @@ model BookingSettings {
   @@index([organizationId])
 }
 
+/// A progressive check-in SESSION, mirroring PartialBookingCheckout.
+///
+/// `assetIds` lists only FULLY reconciled assets: INDIVIDUAL always, and
+/// QUANTITY_TRACKED only once its remaining units hit zero (partial returns
+/// live in `ConsumptionLog`). Completing a booking outright writes no row here,
+/// so the same warning applies — absence is not evidence of anything.
+/// `BookingAsset.checkedInAt` is the per-slice fact.
 model PartialBookingCheckin {
   id String @id @default(cuid())
 
@@ -1789,6 +1825,15 @@ model PartialBookingCheckin {
   @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
 }
 
+/// A progressive checkout SESSION: one scan batch, covering N assets via the
+/// positional `assetIds` / `quantities` / `bookingAssetIds` arrays.
+///
+/// Records sessions and the units they claimed — NOT whether an asset is out.
+/// The all-at-once checkout (`checkoutBooking`, the Check out button) flips
+/// statuses and writes NO row here, so **absence proves nothing** and must never
+/// be read as "was not checked out". Reading it that way is what let a single
+/// later scan mark every button-checked-out asset on a booking as
+/// "never checked out". `BookingAsset.checkedOutAt` answers that question.
 model PartialBookingCheckout {
   id String @id @default(cuid())
 
