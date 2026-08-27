@@ -25,7 +25,20 @@ Fill each one in from the store listing once that build is actually live.
 
 ## In flight
 
-**1.5.0 — cut, not yet submitted.**
+**1.5.0 — built; iOS in TestFlight, Android not submitted.**
+
+|         | Build | State                                                             |
+| ------- | ----- | ----------------------------------------------------------------- |
+| iOS     | 36    | Uploaded to App Store Connect, in TestFlight. Not sent to review. |
+| Android | 16    | Built, not submitted — needs `google-service-account.json`.       |
+
+Both from `27dbeeda7`. Private-server sign-in is verified on a device; the
+camera paths (scan-to-create, and "Create Another" after a scanned QR) are not
+— every other check was a simulator or manual code entry.
+
+Before sending iOS to review, App Review needs the demo domain
+`testapp.shelf.nu` and credentials on that server: see
+[apps/companion/STORE-RELEASE.md](./apps/companion/STORE-RELEASE.md) §5.
 
 Eight companion PRs merged since the 1.4.0 build (`0c85873e4`):
 
