@@ -1159,6 +1159,21 @@ export type RecordScanResponse = {
   unexpectedAssetCount: number;
 };
 
+/**
+ * Result of undoing a scan. The counts are recomputed server-side in the same
+ * transaction as the removal, so the screen adopts them rather than
+ * decrementing its own — an expected asset returns to "not scanned" while an
+ * unexpected one leaves the audit entirely, which move different counters.
+ */
+export type RemoveScanResponse = {
+  success: boolean;
+  /** False when the scan was already gone — the undo is idempotent. */
+  removed: boolean;
+  foundAssetCount: number;
+  missingAssetCount: number;
+  unexpectedAssetCount: number;
+};
+
 export type CompleteAuditResponse = {
   success: boolean;
 };
