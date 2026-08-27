@@ -400,24 +400,31 @@ function AuditScannerContent() {
    */
   const handleEvidenceCounts = useCallback(
     (assetId: string, counts: { notes: number; images: number }) => {
-      setScannedItems((prev) =>
-        prev.map((scanned) => {
-          if (scanned.assetId !== assetId) return scanned;
-          // Returning the same object when nothing moved keeps the list from
-          // re-rendering every time the sheet opens.
-          if (
-            (scanned.notesCount ?? 0) === counts.notes &&
-            (scanned.imagesCount ?? 0) === counts.images
-          ) {
-            return scanned;
-          }
-          return {
-            ...scanned,
-            notesCount: counts.notes,
-            imagesCount: counts.images,
-          };
-        })
-      );
+      // Computed from the ref, then written to both: the ref is what every
+      // persistence path saves and what recovery reads back, so leaving it
+      // behind would restore a row asserting evidence counts the audit no
+      // longer has. Returning the same objects when nothing moved keeps the
+      // list from re-rendering every time the sheet opens.
+      let changed = false;
+      const next = scannedItemsRef.current.map((scanned) => {
+        if (scanned.assetId !== assetId) return scanned;
+        if (
+          (scanned.notesCount ?? 0) === counts.notes &&
+          (scanned.imagesCount ?? 0) === counts.images
+        ) {
+          return scanned;
+        }
+        changed = true;
+        return {
+          ...scanned,
+          notesCount: counts.notes,
+          imagesCount: counts.images,
+        };
+      });
+      if (changed) {
+        scannedItemsRef.current = next;
+        setScannedItems(next);
+      }
       // The open sheet renders from its own snapshot of the row, so correcting
       // only the list would leave the badges above the very notes and photos
       // they are miscounting — and hide the line that says they survive an
@@ -437,7 +444,7 @@ function AuditScannerContent() {
         };
       });
     },
-    [setScannedItems]
+    [setScannedItems, scannedItemsRef]
   );
 
   const handleEvidenceAdded = useCallback(
