@@ -30,12 +30,12 @@ import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
 import { useAuditSessionInitialization } from "~/hooks/use-audit-session-initialization";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
-import { createAssetScanRemovedNote } from "~/modules/audit/helpers.server";
 import {
   getAuditSessionDetails,
   getAuditScans,
   requireAuditAssignee,
   requireAuditAssigneeForBaseSelfService,
+  removeAuditScan,
 } from "~/modules/audit/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -153,111 +153,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
-      await db.$transaction(async (tx) => {
-        const existingScan = await tx.auditScan.findFirst({
-          where: { auditSessionId: auditId, assetId },
-          include: {
-            auditAsset: {
-              select: { id: true, expected: true },
-            },
-          },
-        });
-
-        if (!existingScan) {
-          return;
-        }
-
-        // Keep audit asset state aligned with removal before recalculating counts.
-        // These operations target different tables and are independent, so run in parallel.
-        if (existingScan.auditAsset?.expected) {
-          await Promise.all([
-            tx.auditAsset.update({
-              where: { id: existingScan.auditAsset.id },
-              data: {
-                status: "MISSING",
-                scannedAt: null,
-                scannedById: null,
-              },
-            }),
-            tx.auditSession.update({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven to belong to organizationId at the findFirst guard above (lines 95-108, throws 404 otherwise); update() requires a unique where (no compound org filter possible)
-              where: { id: auditId },
-              data: {
-                foundAssetCount: { decrement: 1 },
-                missingAssetCount: { increment: 1 },
-              },
-            }),
-            tx.auditScan.delete({
-              where: { id: existingScan.id },
-            }),
-          ]);
-        } else if (existingScan.auditAsset?.id) {
-          await Promise.all([
-            tx.auditAsset.delete({
-              where: { id: existingScan.auditAsset.id },
-            }),
-            tx.auditSession.update({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven to belong to organizationId at the findFirst guard above (lines 95-108, throws 404 otherwise); update() requires a unique where (no compound org filter possible)
-              where: { id: auditId },
-              data: {
-                unexpectedAssetCount: { decrement: 1 },
-              },
-            }),
-            tx.auditScan.delete({
-              where: { id: existingScan.id },
-            }),
-          ]);
-        } else {
-          await tx.auditScan.delete({
-            where: { id: existingScan.id },
-          });
-        }
-
-        // Recalculate counts to ensure overview stats reflect current state.
-        const [foundCount, missingCount, unexpectedCount] = await Promise.all([
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: auditId,
-              expected: true,
-              status: "FOUND",
-            },
-          }),
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: auditId,
-              expected: true,
-              status: "MISSING",
-            },
-          }),
-          tx.auditAsset.count({
-            where: {
-              auditSessionId: auditId,
-              expected: false,
-              status: "UNEXPECTED",
-            },
-          }),
-        ]);
-
-        // Update aggregate counts and append the note in parallel — these touch
-        // different tables and are independent of each other.
-        await Promise.all([
-          tx.auditSession.update({
-            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven to belong to organizationId at the findFirst guard above (lines 95-108, throws 404 otherwise); update() requires a unique where (no compound org filter possible)
-            where: { id: auditId },
-            data: {
-              foundAssetCount: foundCount,
-              missingAssetCount: missingCount,
-              unexpectedAssetCount: unexpectedCount,
-            },
-          }),
-          createAssetScanRemovedNote({
-            auditSessionId: auditId,
-            assetId,
-            organizationId,
-            userId,
-            tx,
-          }),
-        ]);
+      await removeAuditScan({
+        auditSessionId: auditId,
+        assetId,
+        organizationId,
+        userId,
       });
 
       return payload({ success: true });

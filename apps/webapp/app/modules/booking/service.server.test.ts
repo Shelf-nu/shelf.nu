@@ -202,6 +202,7 @@ vitest.mock("~/database/db.server", () => ({
         email: "test@example.com",
         firstName: "Test",
         lastName: "User",
+        displayName: null,
       }),
       // why: updateBasicBooking now resolves the acting user's format prefs via
       // resolveUserFormatPrefsById (db.user.findFirst). Returning null makes the
@@ -331,6 +332,7 @@ vitest.mock("~/modules/user/service.server", () => ({
     email: "test@example.com",
     firstName: "Test",
     lastName: "User",
+    displayName: null,
   }),
 }));
 
@@ -420,6 +422,7 @@ vitest.mock("~/modules/organization/service.server", () => ({
       email: "admin@example.com",
       firstName: "Admin",
       lastName: "User",
+      displayName: null,
     },
   ]),
 }));
@@ -1204,6 +1207,7 @@ describe("getPartialCheckinHistory", () => {
         checkedInBy: {
           firstName: "John",
           lastName: "Doe",
+          displayName: null,
           email: "john@example.com",
         },
       },
@@ -1533,6 +1537,7 @@ describe("updateBasicBooking", () => {
         email: "custodian@example.com",
         firstName: "Custodian",
         lastName: "User",
+        displayName: null,
       },
       custodianTeamMember: null,
       tags: [],
@@ -1582,6 +1587,7 @@ describe("updateBasicBooking", () => {
         email: "custodian@example.com",
         firstName: "Custodian",
         lastName: "User",
+        displayName: null,
       },
       custodianTeamMember: null,
       tags: [],
@@ -1618,6 +1624,7 @@ describe("updateBasicBooking", () => {
         email: "custodian@example.com",
         firstName: "Custodian",
         lastName: "User",
+        displayName: null,
       },
       custodianTeamMember: { id: "team-member-2", name: "TM" },
       tags: [
@@ -1656,6 +1663,7 @@ describe("updateBasicBooking", () => {
         email: "old-custodian@example.com",
         firstName: "Old",
         lastName: "Custodian",
+        displayName: null,
       },
       custodianTeamMember: {
         id: "old-team-member-1",
@@ -1664,6 +1672,7 @@ describe("updateBasicBooking", () => {
           id: "old-custodian-1",
           firstName: "Old",
           lastName: "Custodian",
+          displayName: null,
         },
       },
       tags: [
@@ -7394,6 +7403,7 @@ describe("removeAssets", () => {
     const baseArgs = {
       firstName: "Test",
       lastName: "User",
+      displayName: null,
       userId: "user-1",
       organizationId: "org-1",
     };
@@ -7464,6 +7474,7 @@ describe("removeAssets", () => {
       booking: mockBooking,
       firstName: "Test",
       lastName: "User",
+      displayName: null,
       userId: "user-1",
       organizationId: "org-1",
     });
@@ -7518,6 +7529,7 @@ describe("removeAssets", () => {
       booking: mockBooking,
       firstName: "Test",
       lastName: "User",
+      displayName: null,
       userId: "user-1",
       organizationId: "org-1",
       kitIds: ["kit-1"],
@@ -7567,6 +7579,7 @@ describe("removeAssets", () => {
       booking: mockBooking,
       firstName: "Test",
       lastName: "User",
+      displayName: null,
       userId: "user-1",
       organizationId: "org-1",
       kitIds: ["kit-1"],
@@ -7614,6 +7627,7 @@ describe("removeAssets", () => {
         booking: mockBooking,
         firstName: "Test",
         lastName: "User",
+        displayName: null,
         userId: "user-1",
         organizationId: "org-1",
       })
@@ -7654,6 +7668,7 @@ describe("removeAssets", () => {
       booking: mockBooking,
       firstName: "Test",
       lastName: "User",
+      displayName: null,
       userId: "user-1",
       organizationId: "org-1",
     });
@@ -7698,6 +7713,7 @@ describe("removeAssets", () => {
       booking: mockBooking,
       firstName: "Test",
       lastName: "User",
+      displayName: null,
       userId: "user-1",
       organizationId: "org-1",
       kitIds: ["kit-1"],
@@ -7834,6 +7850,7 @@ describe("removeAssets", () => {
         booking: mockBooking,
         firstName: "Test",
         lastName: "User",
+        displayName: null,
         userId: "user-1",
         organizationId: "org-1",
       });
@@ -7875,6 +7892,7 @@ describe("removeAssets", () => {
         booking: mockBooking,
         firstName: "Test",
         lastName: "User",
+        displayName: null,
         userId: "user-1",
         organizationId: "org-1",
       });
@@ -7899,6 +7917,7 @@ describe("removeAssets", () => {
         booking: mockBooking,
         firstName: "Test",
         lastName: "User",
+        displayName: null,
         userId: "user-1",
         organizationId: "org-1",
       });
@@ -7922,6 +7941,7 @@ describe("removeAssets", () => {
         booking: mockBooking,
         firstName: "Test",
         lastName: "User",
+        displayName: null,
         userId: "user-1",
         organizationId: "org-1",
       });
@@ -7980,6 +8000,7 @@ describe("removeAssets", () => {
         booking: mockBooking,
         firstName: "Test",
         lastName: "User",
+        displayName: null,
         userId: "user-1",
         organizationId: "org-1",
       });
@@ -8019,6 +8040,7 @@ describe("removeAssets", () => {
         booking: mockBooking,
         firstName: "Test",
         lastName: "User",
+        displayName: null,
         userId: "user-1",
         organizationId: "org-1",
       });
@@ -8053,6 +8075,7 @@ describe("removeAssets", () => {
         booking: mockBooking,
         firstName: "Test",
         lastName: "User",
+        displayName: null,
         userId: "user-1",
         organizationId: "org-1",
       });
@@ -11189,6 +11212,7 @@ describe("booking notes + events — qty-tracked axis", () => {
       booking: mockBooking,
       firstName: "Test",
       lastName: "User",
+      displayName: null,
       userId: "user-1",
       organizationId: "org-1",
     });

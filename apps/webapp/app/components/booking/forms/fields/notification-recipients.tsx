@@ -20,6 +20,7 @@ import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import FormRow from "~/components/forms/form-row";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
+import type { TeamMemberNameFields, UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { NotificationPreview } from "../../notification-preview";
 
@@ -27,15 +28,9 @@ import { NotificationPreview } from "../../notification-preview";
  * Team member shape for pre-selected recipients (edit form).
  * Must include `name` and optional `user` for display name resolution.
  */
-export type NotificationRecipientTeamMember = {
+export type NotificationRecipientTeamMember = TeamMemberNameFields & {
   id: string;
-  name: string;
-  user?: {
-    id: string;
-    email: string;
-    firstName: string | null;
-    lastName: string | null;
-  } | null;
+  user?: (UserNameFields & { id: string; email: string }) | null;
 };
 
 type NotificationRecipientsFieldProps = {

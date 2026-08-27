@@ -37,6 +37,7 @@ import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -235,7 +236,7 @@ const ListUserContent = ({
             className="underline hover:text-gray-500"
             to={`/admin-dashboard/${item.user.id}`}
           >
-            {item.user.firstName} {item.user.lastName} ({item.user.email})
+            {resolveUserDisplayName(item.user)} ({item.user.email})
             <br /> ({item.user.id})
           </Link>
         ) : (
