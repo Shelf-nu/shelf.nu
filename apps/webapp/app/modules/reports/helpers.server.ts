@@ -26,6 +26,8 @@ import {
   getLatenessMs,
   isOnTime,
   resolveCheckInAt,
+  resolvePlannedEnd,
+  resolvePlannedStart,
 } from "~/modules/booking/lateness";
 import { getAssetTotalValue } from "~/utils/asset-value";
 import { ShelfError } from "~/utils/error";
@@ -121,6 +123,35 @@ interface BookingComplianceArgs {
 }
 
 /**
+ * Timeframe predicate on the PLANNED end of a booking.
+ *
+ * Extension and check-in both rewrite `to` — to the renegotiated deadline and
+ * to the actual return moment respectively — while the planned end stays in
+ * `originalTo`. Filtering on `to` alone therefore lets a booking due inside
+ * the window escape its own period, and moves it between periods over its
+ * lifetime. `originalTo` is null only on rows predating the column, where `to`
+ * still is the planned end.
+ *
+ * This is the SQL form of `resolvePlannedEnd` — the two must stay equivalent,
+ * so a row is filtered, displayed, and measured against one date.
+ *
+ * @param windowStart - Inclusive start of the timeframe.
+ * @param windowEnd - Inclusive end of the timeframe.
+ * @returns A `where` fragment matching bookings whose planned end is in range.
+ */
+function plannedEndInWindow(
+  windowStart: Date,
+  windowEnd: Date
+): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { originalTo: { gte: windowStart, lte: windowEnd } },
+      { originalTo: null, to: { gte: windowStart, lte: windowEnd } },
+    ],
+  };
+}
+
+/**
  * Generate the Booking Compliance report (R2).
  *
  * This report tracks booking lifecycle compliance:
@@ -128,30 +159,14 @@ interface BookingComplianceArgs {
  * - Late returns
  * - Currently overdue items
  *
- * KPIs are pre-aggregated via SQL. The chart shows status transition trends.
+ * Every axis of the report — which period a booking belongs to, the end date
+ * shown in its row, and how late it was — reads the PLANNED end
+ * (`resolvePlannedEnd`), so a booking's period membership and lateness do not
+ * change when it is extended or checked in.
  *
  * @param args - Report parameters
  * @returns Complete report payload
  */
-/**
- * Timeframe predicate on the PLANNED end of a booking.
- *
- * Check-in of an overdue booking (and early check-in with the adjust-date
- * intent) rewrites `to` to the actual return moment and preserves the agreed
- * deadline in `originalTo`. "Due in window" must therefore read the planned
- * end — filtering on `to` alone lets a booking due inside the window escape
- * its own period when it is returned after the window's edge. `originalTo`
- * is null only on legacy rows, where `to` still is the planned end.
- */
-function plannedEndInWindow(from: Date, to: Date): Prisma.BookingWhereInput {
-  return {
-    OR: [
-      { originalTo: { gte: from, lte: to } },
-      { originalTo: null, to: { gte: from, lte: to } },
-    ],
-  };
-}
-
 export async function bookingComplianceReport(
   args: BookingComplianceArgs
 ): Promise<ReportPayload<BookingComplianceRow>> {
@@ -175,7 +190,7 @@ export async function bookingComplianceReport(
   try {
     // Build the where clause for bookings
     // Compliance can only be measured on bookings that:
-    // 1. Had a due date (scheduledEnd/to) within the selected timeframe
+    // 1. Were planned to end within the selected timeframe
     // 2. Have a measurable outcome (COMPLETE, OVERDUE, or ARCHIVED). ARCHIVED
     //    bookings are returned bookings that have aged out of the active list,
     //    so they belong in the table just like COMPLETE rows.
@@ -300,8 +315,8 @@ export async function bookingComplianceReport(
  *
  * Remaining KPIs:
  * - `total_bookings` — count of measurable bookings (COMPLETE + OVERDUE +
- *   ARCHIVED) whose due date falls in the timeframe.
- * - `currently_overdue` — count of OVERDUE bookings with a due date in the
+ *   ARCHIVED) whose planned end falls in the timeframe.
+ * - `currently_overdue` — count of OVERDUE bookings with a planned end in the
  *   timeframe. Consumed by the PDF generator's hero overdue tile.
  */
 async function computeBookingComplianceKpis(
@@ -367,6 +382,9 @@ async function fetchBookingComplianceRows(
       // (legacy bookings, partial check-ins that recorded a custom note,
       // or rare event-write failures). See `resolveCheckInAt`.
       updatedAt: true,
+      // The planned period. `from`/`to` are rewritten by extension and by
+      // check-out/check-in with the adjust-date intent; these two are not.
+      originalFrom: true,
       originalTo: true,
       custodianUser: {
         select: USER_NAME_SELECT,
@@ -407,16 +425,15 @@ async function fetchBookingComplianceRows(
       fromEvent: checkInTimes.get(b.id) ?? null,
     });
 
-    // Lateness via the canonical helper:
-    // - OVERDUE → `now − to`
-    // - COMPLETE/ARCHIVED with a recorded check-in →
-    //   `checkInAt − (originalTo ?? to)` (check-in can rewrite `to` to the
-    //   return moment; the planned end survives in `originalTo`)
+    // Compliance asks whether the agreed plan was honoured, so every row is
+    // measured against the planned end — the same date `plannedEndInWindow`
+    // filtered on and the row displays as `scheduledEnd`.
+    // - OVERDUE → `now − plannedEnd`
+    // - COMPLETE/ARCHIVED with a recorded check-in → `checkInAt − plannedEnd`
     // - otherwise null (no measurable lateness)
     const latenessMs = getLatenessMs({
       status: b.status,
-      to: b.to,
-      originalTo: b.originalTo,
+      scheduledEnd: resolvePlannedEnd(b),
       checkInAt,
       now,
     });
@@ -432,9 +449,11 @@ async function fetchBookingComplianceRows(
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
       assetCount: b._count.bookingAssets,
-      scheduledStart: b.from!,
-      // Planned end survives the check-in rewrite in `originalTo`.
-      scheduledEnd: (b.originalTo ?? b.to)!,
+      // Both ends of the period the booking was PLANNED to run for — an early
+      // check-out rewrites `from` and a check-in rewrites `to`, so the raw
+      // columns would label a "scheduled" period with actual moments.
+      scheduledStart: resolvePlannedStart(b)!,
+      scheduledEnd: resolvePlannedEnd(b)!,
       actualCheckout: null,
       actualCheckin: checkInAt,
       isOnTime: isOnTime({ status: b.status, latenessMs }),
@@ -535,11 +554,17 @@ function formatStatusLabel(status: BookingStatus): string {
 // -----------------------------------------------------------------------------
 
 /**
- * Calculate compliance rate for completed bookings in the timeframe.
+ * Calculate the compliance rate for the timeframe, plus the prior period's
+ * rate for the trend comparison.
  *
- * A booking is "on-time" if it was marked COMPLETE and doesn't have OVERDUE
- * in its history. For now, we use a simplified heuristic based on whether
- * the booking ever had OVERDUE status.
+ * A booking counts as on-time when `getLatenessMs` — measured against its
+ * planned end — lands within `COMPLIANCE_GRACE_PERIOD_MS`. OVERDUE bookings
+ * are never on-time. The same helpers back the table, the trend chart and the
+ * custodian breakdown, so every number on the report agrees.
+ *
+ * @param organizationId - Workspace whose bookings are measured.
+ * @param timeframe - Resolved reporting window (planned end must fall inside).
+ * @returns On-time/late counts, the rate, and the prior-period comparison.
  */
 async function computeComplianceRate(
   organizationId: string,
@@ -641,8 +666,8 @@ async function computeComplianceRate(
  * are treated as on-time per `isOnTime`.
  *
  * @param bookings - Measurable bookings (COMPLETE / OVERDUE / ARCHIVED) with
- *   their `id`, scheduled return (`to`), `updatedAt`, and current `status`
- *   selected.
+ *   their `id`, planned end (`originalTo`), live end (`to`), `updatedAt`, and
+ *   current `status` selected.
  * @param checkInTimes - Map from `bookingId` to the canonical check-in moment
  *   produced by `resolveCheckInTimes`. Missing entries trigger the fallback.
  * @returns Counts of on-time and late bookings; the sum equals `bookings.length`.
@@ -668,8 +693,7 @@ function categorizeBookings(
     });
     const latenessMs = getLatenessMs({
       status: booking.status,
-      to: booking.to,
-      originalTo: booking.originalTo,
+      scheduledEnd: resolvePlannedEnd(booking),
       checkInAt,
       now,
     });
@@ -750,7 +774,7 @@ async function computeComplianceTrend(
     )
   );
 
-  // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with due date
+  // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with planned end
   // in the timeframe. ARCHIVED is included so finished-then-archived bookings
   // still count toward the trend.
   const measurableBookings = await db.booking.findMany({
@@ -794,10 +818,10 @@ async function computeComplianceTrend(
       Math.min(bucketStartAt(i + 1).toMillis() - 1, timeframe.to.getTime())
     );
 
-    // Filter bookings with due date in this bucket
+    // Filter bookings whose planned end falls in this bucket
     const bucketBookings = measurableBookings.filter((b) => {
-      // Bucket by the planned end — `to` may be the rewritten return moment.
-      const dueDate = (b.originalTo ?? b.to)?.getTime() || 0;
+      // Bucket by the planned end, matching the window filter and the table.
+      const dueDate = resolvePlannedEnd(b)?.getTime() || 0;
       return dueDate >= bucketStart.getTime() && dueDate <= bucketEnd.getTime();
     });
 
@@ -814,8 +838,7 @@ async function computeComplianceTrend(
       });
       const latenessMs = getLatenessMs({
         status: b.status,
-        to: b.to,
-        originalTo: b.originalTo,
+        scheduledEnd: resolvePlannedEnd(b),
         checkInAt,
         now,
       });
@@ -1001,8 +1024,7 @@ async function computeCustodianPerformance(
     });
     const latenessMs = getLatenessMs({
       status: booking.status,
-      to: booking.to,
-      originalTo: booking.originalTo,
+      scheduledEnd: resolvePlannedEnd(booking),
       checkInAt,
       now,
     });
@@ -1174,6 +1196,11 @@ async function fetchOverdueRows(
   });
 
   return bookings.map((b) => {
+    // why: this is a live operational list — "what is late right now, and by
+    // how much" — so it measures against the CURRENT deadline. An extension
+    // moves that date and this report must follow it. Booking Compliance asks
+    // whether the agreed plan was honoured and reads the planned end instead,
+    // so the two reports can legitimately disagree for an extended booking.
     const scheduledEnd = b.to!;
     const msOverdue = now.getTime() - scheduledEnd.getTime();
     const daysOverdue = Math.max(

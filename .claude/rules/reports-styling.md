@@ -218,18 +218,30 @@ const dayPickerStyles = {
 
 ## Data Fetching (helpers.server.ts)
 
-**Sorting should match filtering:**
+**Filter, display and sort on the same date:**
 
-- If filtering by due date (`to`), sort by due date
-- If filtering by start date (`from`), sort by start date
+A booking has two date pairs. `originalFrom`/`originalTo` are the **planned**
+period; `from`/`to` are the **live** one, which extension and check-in rewrite.
+Pick the one your report is about, then use it for the window predicate, the
+column you render, and the sort — mixing them puts a row in one period and
+labels it with another.
+
+Reports about whether a plan was honoured (Booking Compliance) read the planned
+end via `resolvePlannedEnd`; live operational lists (Overdue Items) read `to`.
 
 ```typescript
-// Booking Compliance: filter and sort by due date
-const where = { to: { gte: timeframe.from, lte: timeframe.to } };
+// Booking Compliance: planned end drives the window, the row and the sort.
+const where = {
+  OR: [
+    { originalTo: { gte: timeframe.from, lte: timeframe.to } },
+    { originalTo: null, to: { gte: timeframe.from, lte: timeframe.to } },
+  ],
+};
 const bookings = await db.booking.findMany({
   where,
-  orderBy: { to: "desc" }, // Sort matches filter field
+  select: { originalTo: true, to: true /* … */ },
 });
+const rows = bookings.map((b) => ({ scheduledEnd: resolvePlannedEnd(b)! }));
 ```
 
 ## Compliance Constants

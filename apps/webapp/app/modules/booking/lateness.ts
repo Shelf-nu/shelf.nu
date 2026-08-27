@@ -10,6 +10,23 @@
  * so it can be safely imported from both server (loaders, report helpers) and
  * client (React components) code.
  *
+ * ## The two date pairs on a booking
+ *
+ * `originalFrom` / `originalTo` hold the **planned** period — what was agreed
+ * when the booking was planned. `from` / `to` hold the **live** period, which
+ * later flows rewrite: extension moves `to` forward, and check-out/check-in
+ * with the adjust-date intent move `from`/`to` to the actual moment. The
+ * planned pair is frozen once the booking starts.
+ *
+ * Measuring lateness therefore requires the caller to say WHICH deadline it is
+ * asking about, which is why {@link getLatenessMs} takes a resolved
+ * `scheduledEnd` rather than the raw columns:
+ *
+ * - Compliance reporting asks "was the agreed plan honoured?" → pass
+ *   {@link resolvePlannedEnd}.
+ * - Live operational surfaces ask "how far past the current deadline is this
+ *   right now?" → pass `booking.to`.
+ *
  * @see {@link file://./../../components/booking/time-remaining.tsx}
  * @see {@link file://./../reports/helpers.server.ts}
  */
@@ -19,7 +36,7 @@ import { BookingStatus } from "@prisma/client";
 /**
  * Grace period (in ms) within which a return is still considered "on time".
  *
- * A booking returned up to 15 minutes after its scheduled `to` date counts as
+ * A booking returned up to 15 minutes after its scheduled end counts as
  * compliant. This absorbs realistic check-in delays (walking back to the
  * counter, scanning the QR code, etc.) without flagging users as late.
  */
@@ -29,9 +46,9 @@ export const COMPLIANCE_GRACE_PERIOD_MS = 15 * 60 * 1000;
  * Booking statuses for which a lateness measurement is meaningful.
  *
  * - `COMPLETE` and `ARCHIVED` represent finished bookings — we compare their
- *   actual check-in time against the scheduled `to` date.
- * - `OVERDUE` is in-flight but has already passed its `to` date — we compare
- *   "now" against the scheduled `to` date.
+ *   actual check-in time against the scheduled end.
+ * - `OVERDUE` is in-flight but has already passed its end date — we compare
+ *   "now" against the scheduled end.
  *
  * Statuses like `DRAFT`, `RESERVED`, `ONGOING`, and `CANCELLED` are excluded:
  * they either haven't run yet, are still within their window, or never
@@ -47,22 +64,71 @@ export const MEASURABLE_BOOKING_STATUSES = [
 export type MeasurableBookingStatus =
   (typeof MEASURABLE_BOOKING_STATUSES)[number];
 
+/** The planned/live date columns {@link resolvePlannedEnd} reads. */
+export interface BookingPlannedEndFields {
+  /** Planned end date (`Booking.originalTo`). Null on rows predating the column. */
+  originalTo: Date | null;
+  /** Live end date (`Booking.to`). */
+  to: Date | null;
+}
+
+/**
+ * Returns the end date the booking was **planned** to have.
+ *
+ * `originalTo` is written while the booking is being planned (create, DRAFT
+ * edit, reserve) and frozen once it starts, so it survives the rewrites that
+ * extension and check-in apply to `to`. It is null only on rows created before
+ * the column existed, where `to` is still the planned end.
+ *
+ * @param booking - A booking row with `originalTo` and `to` selected.
+ * @returns The planned end date, or `null` when neither column is set.
+ */
+export function resolvePlannedEnd(
+  booking: BookingPlannedEndFields
+): Date | null {
+  return booking.originalTo ?? booking.to;
+}
+
+/** The planned/live date columns {@link resolvePlannedStart} reads. */
+export interface BookingPlannedStartFields {
+  /** Planned start date (`Booking.originalFrom`). Null on rows predating the column. */
+  originalFrom: Date | null;
+  /** Live start date (`Booking.from`). */
+  from: Date | null;
+}
+
+/**
+ * Returns the start date the booking was **planned** to have.
+ *
+ * The mirror of {@link resolvePlannedEnd}: an early check-out with the
+ * adjust-date intent rewrites `from` to the actual check-out moment and leaves
+ * the planned start in `originalFrom`.
+ *
+ * @param booking - A booking row with `originalFrom` and `from` selected.
+ * @returns The planned start date, or `null` when neither column is set.
+ */
+export function resolvePlannedStart(
+  booking: BookingPlannedStartFields
+): Date | null {
+  return booking.originalFrom ?? booking.from;
+}
+
 /** Arguments for {@link getLatenessMs}. */
 export interface GetLatenessMsArgs {
   /** The booking's current status. */
   status: BookingStatus;
-  /** Scheduled return date (`booking.to`). May be null on legacy data. */
-  to: Date | null;
   /**
-   * Planned end date (`booking.originalTo`). Check-in of an OVERDUE booking
-   * (and early check-in with the adjust-date intent) rewrites `to` to the
-   * actual return moment and preserves the agreed deadline here — so for
-   * COMPLETE/ARCHIVED bookings the planned end, not `to`, is the reference
-   * point. Callers must select and pass the column; passing `null` falls
-   * back to `to` (legacy rows predating the column). Ignored for OVERDUE,
-   * where `to` is still the live agreed deadline.
+   * The deadline to measure against.
+   *
+   * Which date this should be is the caller's decision, because the two
+   * surfaces ask different questions: compliance reporting measures against
+   * the planned end ({@link resolvePlannedEnd}), while live operational
+   * surfaces measure against the current deadline (`booking.to`). Passing the
+   * raw columns and letting this helper choose would force one answer on both.
+   *
+   * `null` (no end date at all) makes the measurement unavailable.
    */
-  originalTo: Date | null;
+  scheduledEnd: Date | null;
   /**
    * Resolved check-in timestamp for COMPLETE/ARCHIVED bookings. Not a column
    * on the `Booking` model — callers obtain it via {@link resolveCheckInAt}
@@ -82,34 +148,32 @@ export interface GetLatenessMsArgs {
  * Returns how late a booking was, in milliseconds, or `null` when lateness
  * cannot be measured.
  *
- * - For `OVERDUE`: returns `now − to`. `checkInAt` is ignored (by definition
- *   the booking has not been checked in yet).
+ * - For `OVERDUE`: returns `now − scheduledEnd`. `checkInAt` is ignored (by
+ *   definition the booking has not been checked in yet).
  * - For `COMPLETE` / `ARCHIVED` with a `checkInAt`: returns
- *   `checkInAt − (originalTo ?? to)`. Check-in can rewrite `to` to the actual
- *   return moment, so the planned end preserved in `originalTo` is the
- *   reference point. A negative result means the booking was returned early.
+ *   `checkInAt − scheduledEnd`. A negative result means the booking was
+ *   returned early.
  * - For `COMPLETE` / `ARCHIVED` without a `checkInAt`: returns `null`. We
  *   deliberately do **not** fall back to `updatedAt` — many fields can move
  *   `updatedAt` after the actual check-in, leading to false "very late"
  *   readings.
- * - For any other status, or when `to` is missing: returns `null`.
+ * - For any other status, or when `scheduledEnd` is missing: returns `null`.
  *
- * @param args - Booking status, scheduled return, actual check-in, and optional now.
+ * @param args - Booking status, the deadline to measure against, actual
+ *   check-in, and optional now.
  * @returns Lateness in ms, or `null` if not measurable.
  */
 export function getLatenessMs(args: GetLatenessMsArgs): number | null {
-  const { status, to, originalTo, checkInAt, now = new Date() } = args;
+  const { status, scheduledEnd, checkInAt, now = new Date() } = args;
 
-  // Without a scheduled return, there is no reference point.
-  if (!to) {
+  // Without a deadline, there is no reference point.
+  if (!scheduledEnd) {
     return null;
   }
 
   if (status === BookingStatus.OVERDUE) {
     // The booking is currently overdue; lateness is measured against now.
-    // Pre-check-in, `to` is still the live agreed deadline, so `originalTo`
-    // is deliberately not consulted here.
-    return now.getTime() - to.getTime();
+    return now.getTime() - scheduledEnd.getTime();
   }
 
   if (status === BookingStatus.COMPLETE || status === BookingStatus.ARCHIVED) {
@@ -117,10 +181,6 @@ export function getLatenessMs(args: GetLatenessMsArgs): number | null {
     if (!checkInAt) {
       return null;
     }
-    // Check-in may have rewritten `to` to the return moment; the planned end
-    // survives in `originalTo`. Measuring against `to` alone would read every
-    // resolved late return as on-time.
-    const scheduledEnd = originalTo ?? to;
     return checkInAt.getTime() - scheduledEnd.getTime();
   }
 
@@ -143,9 +203,10 @@ export interface IsOnTimeArgs {
  * Rules, in order:
  * 1. `OVERDUE` bookings are never on time — by definition they have already
  *    blown past their scheduled return.
- * 2. `null` lateness (status was not measurable, or `to` / `checkInAt` was
- *    missing) is treated as on-time so absent data does not skew compliance
- *    rates downward. Callers that need a stricter view should pre-filter.
+ * 2. `null` lateness (status was not measurable, or the scheduled end /
+ *    `checkInAt` was missing) is treated as on-time so absent data does not
+ *    skew compliance rates downward. Callers that need a stricter view should
+ *    pre-filter.
  * 3. Otherwise: on-time iff `latenessMs <= COMPLIANCE_GRACE_PERIOD_MS`.
  *    Negative lateness (returned early) is on-time.
  *
@@ -218,12 +279,12 @@ export interface ResolveCheckInAtArgs {
  * fallback policy that compliance reports rely on:
  *
  * 1. Prefer the canonical `BOOKING_STATUS_CHANGED → COMPLETE` event timestamp
- *    when one exists. This is the most accurate signal — written inside the
- *    booking status mutation transaction.
+ *    when one exists. This is the most accurate signal — written as part of
+ *    the booking status mutation.
  * 2. For `COMPLETE` bookings without an event, fall back to `updatedAt`.
- *    This preserves backward compatibility with bookings completed before the
- *    `ActivityEvent` layer existed (pre-2026-04-21), and protects against
- *    rare event-write failures (the event is recorded best-effort).
+ *    This covers bookings completed before the `ActivityEvent` layer existed
+ *    (pre-2026-04-21), and the rare event-write failure (the event is
+ *    recorded best-effort).
  * 3. For `ARCHIVED` (or any other) status without an event, return `null`.
  *    `Booking.updatedAt` is unreliable for ARCHIVED — the auto-archive job
  *    shifts it well after the actual check-in moment.
