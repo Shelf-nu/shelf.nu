@@ -19,6 +19,7 @@ import {
   resolveBookingRowQtyState,
   resolveQtyStockBadgeVariant,
 } from "~/utils/booking-assets";
+import { canRoleRemoveBookingAssets } from "~/utils/bookings";
 import { tw } from "~/utils/tw";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import {
@@ -90,7 +91,7 @@ export default function ListAssetContent({
     >;
   }>();
   const currentOrganization = useCurrentOrganization();
-  const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, roles } = useUserRoleHelper();
 
   // Resolve the asset's display code (QR id, SAM id, or barcode value) per
   // the workspace preference and per-asset override. Cheap pure call; safe
@@ -102,9 +103,7 @@ export default function ListAssetContent({
         entityKind: "asset",
       })
     : null;
-  const { isReserved, isDraft, isFinished } = useBookingStatusHelpers(
-    booking.status
-  );
+  const { isFinished } = useBookingStatusHelpers(booking.status);
   const user = useUserData();
 
   /**
@@ -148,25 +147,15 @@ export default function ListAssetContent({
 
     // Check if user is the custodian of the item
     const isUserCustodian = booking?.custodianUser?.id === user?.id;
+    if (!isUserCustodian) return false;
 
-    // Base role: can see actions if booking is Draft AND user is custodian
-    if (isBase && isDraft && isUserCustodian) return true;
-
-    // SelfService role: can see actions if (Draft OR Reserved) AND user is custodian
-    if (isSelfService && (isDraft || isReserved) && isUserCustodian)
-      return true;
-
-    return false;
-  }, [
-    isPartOfKit,
-    booking?.custodianUser?.id,
-    user?.id,
-    isBase,
-    isDraft,
-    isSelfService,
-    isReserved,
-    isBaseOrSelfService,
-  ]);
+    /**
+     * BASE stops at DRAFT, SELF_SERVICE at RESERVED. Resolved through the
+     * shared helper rather than spelled out inline, so this menu, the bulk
+     * actions menu and the two server-side remove gates cannot drift apart.
+     */
+    return canRoleRemoveBookingAssets({ roles, booking });
+  }, [isPartOfKit, booking, user?.id, roles, isBaseOrSelfService]);
 
   /**
    * Qty-tracked partial dispositioning.

@@ -7,6 +7,7 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithStatus } from "~/utils/booking-assets";
 import {
@@ -15,6 +16,12 @@ import {
   isAssetCheckableOut,
   isAssetPartiallyCheckedIn,
 } from "~/utils/booking-assets";
+import { canRoleRemoveBookingAssets } from "~/utils/bookings";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import BulkPartialCheckinDialog from "./bulk-partial-checkin-dialog";
 import BulkPartialCheckoutDialog from "./bulk-partial-checkout-dialog";
@@ -62,16 +69,40 @@ function ConditionalDropdown() {
   );
   const actionsButtonDisabled = selectedItems.length === 0;
 
+  /**
+   * Role gating for this menu, one question per item.
+   *
+   * The column-level `canSeeActions` that renders this menu
+   * (`booking-assets-column.tsx`) asks only whether the user is the custodian,
+   * so it cannot stand in for these: a BASE custodian is a custodian at every
+   * status, and holds neither `booking:checkin` nor `booking:checkout` at any
+   * of them. Each item asks for itself, against the same rules the route
+   * action and the mobile remove endpoint enforce server-side.
+   */
+  const { roles } = useUserRoleHelper();
+  const canCheckin = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.checkin,
+  });
+  const canCheckout = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.checkout,
+  });
+  const canRemove = canRoleRemoveBookingAssets({ roles, booking });
+
   // Show partial check-in only for ONGOING/OVERDUE bookings.
   const showPartialCheckin =
-    bookingStatus?.isOngoing || bookingStatus?.isOverdue;
+    canCheckin && (bookingStatus?.isOngoing || bookingStatus?.isOverdue);
 
   // Show partial check-out for RESERVED/ONGOING/OVERDUE bookings. Unlike
   // check-in, checkout can START from a RESERVED booking.
   const showPartialCheckout =
-    bookingStatus?.isReserved ||
-    bookingStatus?.isOngoing ||
-    bookingStatus?.isOverdue;
+    canCheckout &&
+    (bookingStatus?.isReserved ||
+      bookingStatus?.isOngoing ||
+      bookingStatus?.isOverdue);
 
   // Finished = COMPLETE/ARCHIVED. Computed directly from status: the helper's
   // `isFinished` flag isn't present on its undefined-status return shape, and a
@@ -79,6 +110,14 @@ function ConditionalDropdown() {
   const isFinished =
     booking.status === BookingStatus.COMPLETE ||
     booking.status === BookingStatus.ARCHIVED;
+
+  /**
+   * Kept visible when STATUS alone is what blocks removal, so the existing
+   * explanatory disabled state survives for a role that may remove at other
+   * statuses. Hidden outright when the role may not remove here at all —
+   * a disabled row with a status reason would misstate why.
+   */
+  const showRemove = canRemove || isFinished;
 
   // Denormalised view of `booking.bookingAssets` (the QT pivot). Project the
   // pivot rows down to the plain asset shape the shared resolver
@@ -168,9 +207,9 @@ function ConditionalDropdown() {
       : false;
 
   // Mirror per-row Remove: can't remove items from a finished booking.
-  const removeDisabled = isFinished
-    ? { reason: "Can't remove items from a completed or archived booking." }
-    : false;
+  const removeDisabled = canRemove
+    ? false
+    : { reason: "Can't remove items from a completed or archived booking." };
 
   const {
     ref: dropdownRef,
@@ -188,6 +227,17 @@ function ConditionalDropdown() {
     useState(false);
   const [partialCheckoutDialogOpen, setPartialCheckoutDialogOpen] =
     useState(false);
+
+  /**
+   * Every item is now conditional, so the menu can be empty — a BASE custodian
+   * on their own RESERVED or ONGOING booking holds none of the three. Render
+   * nothing rather than an "Actions" button that opens a blank sheet. After
+   * the hooks above, deliberately: an early return before them would change
+   * hook order between renders.
+   */
+  if (!showPartialCheckout && !showPartialCheckin && !showRemove) {
+    return null;
+  }
 
   return (
     <>
@@ -296,19 +346,21 @@ function ConditionalDropdown() {
                 </Button>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem
-              className="px-4 py-1 md:p-0"
-              onSelect={(e) => {
-                e.preventDefault();
-              }}
-            >
-              <BulkUpdateDialogTrigger
-                type="trash"
-                label="Remove assets/kits"
-                onClick={closeMenu}
-                disabled={removeDisabled}
-              />
-            </DropdownMenuItem>
+            {showRemove && (
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                <BulkUpdateDialogTrigger
+                  type="trash"
+                  label="Remove assets/kits"
+                  onClick={closeMenu}
+                  disabled={removeDisabled}
+                />
+              </DropdownMenuItem>
+            )}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

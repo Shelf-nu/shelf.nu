@@ -1,15 +1,16 @@
 /**
  * Tests for the booking permission helpers in `./bookings`.
  *
- * These two helpers look interchangeable and are not. Adding items and
- * removing them have deliberately different rules, and the pair is easy to
- * mix up at a call site — so the difference is pinned here.
+ * These helpers look interchangeable and are not. Adding items and removing
+ * them have deliberately different rules, and role is a separate axis again —
+ * all three are easy to mix up at a call site, so the differences are pinned here.
  *
  * @see {@link file://./bookings.ts}
  */
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
+  canRoleRemoveBookingAssets,
   canUserManageBookingAssets,
   canUserRemoveBookingAssets,
 } from "./bookings";
@@ -72,5 +73,65 @@ describe("canUserManageBookingAssets", () => {
         false
       )
     ).toBe(true);
+  });
+});
+
+describe("canRoleRemoveBookingAssets", () => {
+  const removalsFor = (roles: OrganizationRoles[] | undefined) =>
+    [...OPEN_STATUSES, ...CLOSED_STATUSES].filter((status) =>
+      canRoleRemoveBookingAssets({ roles, booking: { status } })
+    );
+
+  it("lets ADMIN and OWNER remove in every open status", () => {
+    expect(removalsFor([OrganizationRoles.ADMIN])).toEqual(OPEN_STATUSES);
+    expect(removalsFor([OrganizationRoles.OWNER])).toEqual(OPEN_STATUSES);
+  });
+
+  /**
+   * The reported bug. A BASE custodian was offered — and served — "Remove"
+   * on their own ONGOING booking, which resets those assets to available:
+   * the check-in that BASE does not hold `booking:checkin` for.
+   */
+  it("stops BASE at DRAFT", () => {
+    expect(removalsFor([OrganizationRoles.BASE])).toEqual([
+      BookingStatus.DRAFT,
+    ]);
+  });
+
+  it("lets SELF_SERVICE remove from its own RESERVED booking, not a live one", () => {
+    expect(removalsFor([OrganizationRoles.SELF_SERVICE])).toEqual([
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED,
+    ]);
+  });
+
+  it("never allows removal from a closed booking, whatever the role", () => {
+    for (const status of CLOSED_STATUSES) {
+      for (const role of Object.values(OrganizationRoles)) {
+        expect(
+          canRoleRemoveBookingAssets({ roles: [role], booking: { status } })
+        ).toBe(false);
+      }
+    }
+  });
+
+  /**
+   * A membership carries a role ARRAY. Reading `roles[0]` for an
+   * authorization decision resolves `[SELF_SERVICE, ADMIN]` to the restricted
+   * answer and refuses an actual admin, so the resolution is by `.some()` —
+   * matching `roleHasPermission` in `@shelf/permissions`.
+   */
+  it("resolves a multi-role membership to its most permissive role", () => {
+    expect(
+      canRoleRemoveBookingAssets({
+        roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
+        booking: { status: BookingStatus.ONGOING },
+      })
+    ).toBe(true);
+  });
+
+  it("denies when roles are missing or empty", () => {
+    expect(removalsFor(undefined)).toEqual([]);
+    expect(removalsFor([])).toEqual([]);
   });
 });

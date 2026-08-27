@@ -12,7 +12,7 @@ import {
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { removeAssets } from "~/modules/booking/service.server";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
-import { canUserRemoveBookingAssets } from "~/utils/bookings";
+import { canRoleRemoveBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import {
@@ -34,11 +34,11 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * Adding assets/kits is handled by the existing `add-scanned-assets` endpoint;
  * this endpoint is the removal counterpart for the picker-based edit flow.
  *
- * Status gating uses `canUserRemoveBookingAssets` (COMPLETE / ARCHIVED /
- * CANCELLED reject), plus an explicit own-booking guard for self-service and
- * BASE users. Note this is intentionally looser than the ADD counterpart: a
- * custodian may remove items from their own booking in any non-finished
- * status, matching the web booking-overview remove actions.
+ * Gating is `canRoleRemoveBookingAssets` (role + status) plus an explicit
+ * own-booking guard for self-service and BASE users. Still looser than the ADD
+ * counterpart for SELF_SERVICE, which may remove from its own RESERVED
+ * booking; BASE stops at DRAFT on both. Matches the web booking-overview
+ * remove actions.
  *
  * Body: { bookingId: string, assetIds?: string[], kitIds?: string[] }
  * Query: ?orgId=...
@@ -135,18 +135,20 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // Status only. `canUserManageBookingAssets` (which the ADD counterpart
-    // uses) additionally pins self-service/BASE to DRAFT, which blocked a
-    // custodian from removing an item from their OWN reserved booking — the
-    // web allows exactly that, and the two surfaces must agree. Ownership is
-    // already enforced by the own-booking guard directly above.
-    if (!canUserRemoveBookingAssets(booking)) {
+    // Role + status. Looser than the ADD counterpart
+    // (`canUserManageBookingAssets`) for SELF_SERVICE, which pins to DRAFT and
+    // so blocked a custodian from removing an item from their OWN reserved
+    // booking — the web allows exactly that, and the two surfaces must agree.
+    // BASE stops at DRAFT here as it does on web: removing from a live booking
+    // resets the asset to available, which is the check-in BASE cannot run.
+    // Ownership is already enforced by the own-booking guard directly above.
+    if (!canRoleRemoveBookingAssets({ roles: [role], booking })) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
         message:
           "Assets cannot be removed from this booking in its current status.",
-        additionalData: { userId, bookingId, status: booking.status },
+        additionalData: { userId, bookingId, role, status: booking.status },
         label: "Booking",
         status: 403,
         shouldBeCaptured: false,
