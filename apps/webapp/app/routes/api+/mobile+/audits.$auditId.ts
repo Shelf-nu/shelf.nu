@@ -135,6 +135,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodianName: a.custodianName ?? null,
       })),
       existingScans: scans.map((s) => ({
+        id: s.id,
         code: s.code,
         assetId: s.assetId,
         assetTitle: s.assetTitle,
@@ -143,6 +144,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           s.scannedAt instanceof Date ? s.scannedAt.toISOString() : s.scannedAt,
         auditAssetId: s.auditAssetId,
         assetLocationName: s.assetLocationName,
+        // why: lets the app say "deleted" instead of inferring it from an
+        // empty title, which is also what a pre-snapshot row looks like.
+        assetDeleted: s.assetDeleted,
         auditNotesCount: s.auditNotesCount,
         auditImagesCount: s.auditImagesCount,
       })),
