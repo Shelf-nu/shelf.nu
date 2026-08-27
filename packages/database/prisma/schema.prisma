@@ -2393,6 +2393,20 @@ model AuditScan {
 
   code String?
 
+  /// What was scanned, recorded BY VALUE at scan time.
+  ///
+  /// `asset` and `auditAsset` are both SetNull/Cascade, so deleting an asset
+  /// leaves this row pointing at nothing: no name, and no way to tell whether
+  /// it had been expected. An audit is a historical record, and a record whose
+  /// entries can silently lose their meaning is not one — so the two
+  /// descriptive facts are snapshotted here rather than only referenced.
+  ///
+  /// Readers prefer the LIVE asset when it still exists (a rename should show
+  /// the current name) and fall back to these. Null on rows written before
+  /// this existed; those degrade to the scanned `code`, which also survives.
+  assetTitle  String?
+  wasExpected Boolean?
+
   metadata Json?
 
   scannedAt DateTime @default(now())

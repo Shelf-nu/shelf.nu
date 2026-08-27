@@ -111,6 +111,12 @@ type DisplayAsset = {
   isExpected: boolean;
   scannedAt: string | null;
   /**
+   * The code that was scanned. Kept for rows whose asset has been deleted:
+   * with the asset gone this and the snapshotted title are all that survive,
+   * and the code is what matches a physical label. Null for ordinary rows.
+   */
+  scannedCode: string | null;
+  /**
    * Context the field worker needs DURING the audit. All nullable —
    * server may omit when unknown (e.g. asset has no location set, asset
    * isn't in custody, older mobile client without these fields).
@@ -511,6 +517,7 @@ function AuditDetailContent() {
         status: scan ? "FOUND" : notFoundStatus,
         isExpected: true,
         scannedAt: scan?.scannedAt || null,
+        scannedCode: null,
         locationName: asset.locationName ?? null,
         categoryName: asset.categoryName ?? null,
         custodianName: asset.custodianName ?? null,
@@ -529,13 +536,47 @@ function AuditDetailContent() {
     const expectedIds = new Set(expectedAssets.map((a) => a.id));
     for (const scan of existingScans) {
       if (!expectedIds.has(scan.assetId)) {
+        /**
+         * A scan whose asset has since been DELETED, not an unexpected one.
+         *
+         * Deleting an asset cascades away its AuditAsset row and SetNulls the
+         * scan's asset, so the scan survives pointing at nothing. Read
+         * `assetDeleted` to tell the two apart: a deleted asset can never match
+         * the expected list, so treating an unmatched scan as unexpected would
+         * mislabel it. `assetTitle` is the name captured at scan time and names
+         * the row; the scanned code covers rows written before that column
+         * existed.
+         */
+        const isDeletedAsset = scan.assetDeleted || !scan.assetId;
+        const snapshotTitle = scan.assetTitle?.trim();
         items.push({
-          id: scan.assetId,
-          name: scan.assetTitle,
+          // why: every deleted-asset scan would otherwise share the id "",
+          // colliding in the list's keyExtractor. The scan ROW id is the
+          // identity that survives the asset — code is nullable and
+          // non-unique, and scannedAt can collide. Older servers don't send
+          // the id, so those keep the code/scannedAt fallback.
+          id: isDeletedAsset
+            ? `deleted:${scan.id ?? scan.code ?? scan.scannedAt}`
+            : scan.assetId,
+          name: isDeletedAsset
+            ? snapshotTitle
+              ? `${snapshotTitle} (deleted)`
+              : "Deleted asset"
+            : snapshotTitle || "Untitled asset",
           mainImage: null,
-          status: "UNEXPECTED",
-          isExpected: false,
+          // why NOT a hardcoded UNEXPECTED: this branch handles scans with no
+          // matching expected row, and a DELETED asset always lands here — its
+          // assetId is empty, so it can never match expectedIds. Hardcoding
+          // false threw away the very fact this PR added: the server restores
+          // expectedness from the scan's own snapshot
+          // (`auditAsset?.expected ?? scan.wasExpected`) and sends it as
+          // `isExpected`. Without this, a deleted asset that WAS expected still
+          // reads "Unexpected" on the phone — the exact mislabelling the
+          // snapshot exists to prevent, and it contradicts the activity feed.
+          status: scan.isExpected ? "FOUND" : "UNEXPECTED",
+          isExpected: scan.isExpected,
           scannedAt: scan.scannedAt,
+          scannedCode: isDeletedAsset ? scan.code || null : null,
           // why: the scan payload carries the asset's location
           // (getAuditScans selects asset.location.name). Category and
           // custody are not fetched for scan records, so they stay null —
@@ -595,6 +636,12 @@ function AuditDetailContent() {
           icon: "person-outline",
           text: `with ${item.custodianName}`,
         });
+      }
+      // why: a deleted asset has no location, category or custodian left. The
+      // scanned code is what matches a physical label or finds the row in the
+      // activity feed, so it takes the meta line those would have used.
+      if (item.scannedCode) {
+        metaParts.push({ icon: "qr-code-outline", text: item.scannedCode });
       }
 
       // why: evidence is the ONE thing on this card worth opening. Everything
