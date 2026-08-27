@@ -32,7 +32,10 @@ import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
 import { Spinner } from "~/components/shared/spinner";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
-import { resolveScannedExpectedness } from "~/utils/audit-scan-expectedness";
+import {
+  countDeletedExpectedScans,
+  resolveScannedExpectedness,
+} from "~/utils/audit-scan-expectedness";
 import { tw } from "~/utils/tw";
 
 const AuditSchema = z.object({
@@ -366,6 +369,27 @@ export default function AuditDrawer({
     [items]
   );
 
+  // A deleted asset the audit expected is gone from `expectedAssets` — its
+  // AuditAsset row was cascaded away — but it is still counted as found above,
+  // and the session's own expectedAssetCount still counts it. Leaving it out of
+  // the expected total is what makes the drawer read "1 of 0 found".
+  const deletedExpectedCount = useMemo(
+    () =>
+      countDeletedExpectedScans(
+        Object.values(items).map((item) =>
+          item && item.type === "asset"
+            ? (item.data as
+                | (AssetFromQr & {
+                    assetDeleted?: boolean;
+                    isExpected?: boolean;
+                  })
+                | undefined)
+            : undefined
+        )
+      ),
+    [items]
+  );
+
   const foundAssets = scannedAssets.filter(
     (asset) => asset.auditStatus === "found"
   );
@@ -378,13 +402,14 @@ export default function AuditDrawer({
 
   const stats: AuditDrawerStats = useMemo(
     () => ({
-      totalExpected: expectedAssets.length,
+      totalExpected: expectedAssets.length + deletedExpectedCount,
       foundCount: foundAssets.length,
       missingCount: missingAssets.length,
       unexpectedCount: unexpectedAssets.length,
     }),
     [
       expectedAssets.length,
+      deletedExpectedCount,
       foundAssets.length,
       missingAssets.length,
       unexpectedAssets.length,

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveScannedExpectedness } from "./audit-scan-expectedness";
+import {
+  countDeletedExpectedScans,
+  resolveScannedExpectedness,
+} from "./audit-scan-expectedness";
 
 /**
  * The rule this pins: a deleted asset's expectedness comes from the scan's own
@@ -83,5 +86,42 @@ describe("resolveScannedExpectedness", () => {
         expectedAssetIds: new Set([""]),
       })
     ).toBe(false);
+  });
+});
+
+/**
+ * The rule this pins: a deleted asset the audit expected still counts toward
+ * the expected total. Counting it as found without counting the expectation is
+ * what produces "1 of 0 found".
+ */
+describe("countDeletedExpectedScans", () => {
+  it("counts a deleted asset that was expected", () => {
+    expect(
+      countDeletedExpectedScans([{ assetDeleted: true, isExpected: true }])
+    ).toBe(1);
+  });
+
+  it("ignores a deleted asset that was never expected", () => {
+    // It is already counted as unexpected; adding it to the expected total
+    // would inflate the denominator.
+    expect(
+      countDeletedExpectedScans([{ assetDeleted: true, isExpected: false }])
+    ).toBe(0);
+  });
+
+  it("ignores a live asset, expected or not", () => {
+    // A live expected asset is already in the loader's expected list; counting
+    // it here would double it.
+    expect(
+      countDeletedExpectedScans([
+        { assetDeleted: false, isExpected: true },
+        { assetDeleted: false, isExpected: false },
+        {},
+      ])
+    ).toBe(0);
+  });
+
+  it("survives null and undefined rows", () => {
+    expect(countDeletedExpectedScans([null, undefined])).toBe(0);
   });
 });

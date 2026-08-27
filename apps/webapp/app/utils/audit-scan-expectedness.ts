@@ -37,3 +37,26 @@ export function resolveScannedExpectedness({
 
   return !!assetId && expectedAssetIds.has(assetId);
 }
+
+/**
+ * How many scanned rows are assets the audit expected but that have since been
+ * DELETED.
+ *
+ * These rows are missing from the loader's expected list — their `AuditAsset`
+ * row was cascaded away with the asset — while still counting as found, which
+ * would leave the scan drawer reporting more assets found than it ever
+ * expected. The audit still expected them, and the session's own
+ * `expectedAssetCount` still counts them, so the expected total has to as well.
+ *
+ * @param scans - the restored scan rows, in whatever shape the surface holds
+ * @returns the number to ADD to the expected total
+ */
+export function countDeletedExpectedScans(
+  scans: Array<
+    { assetDeleted?: boolean; isExpected?: boolean } | null | undefined
+  >
+): number {
+  return scans.filter(
+    (scan) => scan?.assetDeleted === true && scan?.isExpected === true
+  ).length;
+}
