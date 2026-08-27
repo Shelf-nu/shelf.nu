@@ -166,9 +166,12 @@ export type AdvancedAssetBooking = Pick<
   custodianTeamMember?: Pick<TeamMember, "id" | "name">;
   custodianUser?: Pick<
     User,
-    "id" | "firstName" | "lastName" | "profilePicture"
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
   >;
-  creator?: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
+  creator?: Pick<
+    User,
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
+  >;
   /** BookingAsset.assetKitId of THIS slice: null = standalone (free pool),
    * non-null = kit-driven (FK → AssetKit.id). Availability view only. */
   assetKitId?: string | null;
@@ -253,6 +256,7 @@ export type AdvancedIndexAsset = Pick<
             id: string;
             firstName: string | null;
             lastName: string | null;
+            displayName: string | null;
             profilePicture: string | null;
             email: string;
           } | null;

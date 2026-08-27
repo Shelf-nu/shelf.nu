@@ -1,10 +1,11 @@
 /**
  * Row renderer for the shared bookings list (`<List ItemComponent={...}>`).
  *
- * Used by BOTH the main bookings index (`bookings._index.tsx`) and the
- * asset's Bookings tab (`assets.$assetId.bookings.tsx`, which renders
- * `<BookingsIndexPage />` and therefore reuses this same row component) —
- * one render change here covers both surfaces.
+ * Used by all FIVE bookings-list surfaces — the main index
+ * (`bookings._index.tsx`) plus `me.bookings`, `assets.$assetId.bookings`,
+ * `kits.$kitId.bookings` and `settings.team.users.$userId.bookings`, each of
+ * which renders `<BookingsIndexPage />` and so reuses this same row. One
+ * render change here covers all of them.
  *
  * Kept in its own file (rather than inline in the route module) so it can be
  * unit-tested without pulling in the route's `loader` (real `db`) and its
@@ -14,10 +15,6 @@
  * @see {@link file://../../routes/_layout+/bookings._index.tsx}
  */
 import type { Prisma } from "@prisma/client";
-import { useLoaderData } from "react-router";
-import { isQuantityTracked } from "~/modules/asset/utils";
-import { hasCustody } from "~/modules/custody/utils";
-import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import {
   canAssignModelUnits,
@@ -96,66 +93,6 @@ function StockConflictPill() {
 type ListBookingsContentProps = {
   item: Prisma.BookingGetPayload<{
     include: {
-      bookingAssets: {
-        select: {
-          id: true;
-          quantity: true;
-          // Surfaces the kit-source discriminator the sidebar groups
-          // by. Without this field on the index loader's type, the
-          // sidebar's `BookingWithAssets` type check rejects the data.
-          assetKitId: true;
-          asset: {
-            select: {
-              id: true;
-              title: true;
-              type: true;
-              consumptionType: true;
-              availableToBook: true;
-              custody: true;
-              status: true;
-              mainImage: true;
-              thumbnailImage: true;
-              mainImageExpiration: true;
-              // Model cover image for assets with no image of their own. Type
-              // literal, so it mirrors ASSET_MODEL_IMAGE_SELECT by hand.
-              assetModel: { select: { image: true; thumbnailImage: true } };
-              // Code-resolution fields - mirror of getBookings' assets select
-              sequentialId: true;
-              preferredBarcodeId: true;
-              qrCodes: { take: 1; select: { id: true } };
-              barcodes: { select: { id: true; type: true; value: true } };
-              category: {
-                select: {
-                  id: true;
-                  name: true;
-                  color: true;
-                };
-              };
-              assetKits: {
-                select: {
-                  id: true;
-                  kitId: true;
-                  kit: {
-                    select: {
-                      id: true;
-                      name: true;
-                      image: true;
-                      imageExpiration: true;
-                      category: {
-                        select: {
-                          id: true;
-                          name: true;
-                          color: true;
-                        };
-                      };
-                    };
-                  };
-                };
-              };
-            };
-          };
-        };
-      };
       creator: {
         select: {
           id: true;
@@ -168,8 +105,9 @@ type ListBookingsContentProps = {
       custodianUser: true;
       custodianTeamMember: true;
       tags: { select: { id: true; name: true; color: true } };
-      // Included via `extraInclude` in the bookings-index loader so the
-      // assets-sidebar drawer can show outstanding model reservations.
+      // Included via `extraInclude` in every bookings-list loader so the
+      // assets-sidebar drawer can show outstanding model reservations, and so
+      // the drawer trigger opens for a pure book-by-model booking.
       modelRequests: {
         include: {
           assetModel: {
@@ -180,89 +118,43 @@ type ListBookingsContentProps = {
     };
   }> & {
     /**
-     * Set by both bookings-list loaders (`bookings._index.tsx` and
-     * `assets.$assetId.bookings.tsx`, which share this component) via
-     * `getStockConflictedBookingIds` — true when ≥1 of this booking's
-     * QUANTITY_TRACKED assets is over-committed in its window. Optional
-     * because it's computed, not a real Prisma column.
+     * Concrete `BookingAsset` rows on this booking. The rows themselves are
+     * NOT shipped with the list — the drawer fetches them on open — so the
+     * count is what the trigger renders.
+     */
+    _count: { bookingAssets: number };
+    /**
+     * Set by every bookings-list loader via `decorateBookingsForList` — true
+     * when ≥1 of this booking's QUANTITY_TRACKED assets is over-committed in
+     * its window. Optional because it is computed, not a real Prisma column.
      */
     hasStockConflict?: boolean;
+    /**
+     * Set by the same decorator — true when this booking holds an asset that
+     * is not bookable, or an INDIVIDUAL asset someone has custody of. This
+     * used to be derived in the browser from `bookingAssets`, which the list
+     * no longer ships; the type-aware rule now lives in
+     * `~/modules/booking/list-flags.server`.
+     */
+    hasUnavailableAssets?: boolean;
   };
 };
 
 /**
  * Renders one row of the shared bookings list.
  *
- * @param props.item - The booking row, plus the computed `hasStockConflict`
- *   flag. See {@link ListBookingsContentProps}.
+ * Every signal this row shows comes from the row itself. The two pills are
+ * resolved server-side by `decorateBookingsForList` and the drawer fetches its
+ * own payload, so there is nothing here to derive from an asset array — which
+ * is also why the SHELF-WEBAPP-1NW normalisation this function used to open
+ * with is gone: there is no `bookingAssets` left to be undefined.
+ *
+ * @param props.item - The booking row plus the two computed pill flags. See
+ *   {@link ListBookingsContentProps}.
  */
 export default function ListBookingsContent({
-  item: rawItem,
+  item,
 }: ListBookingsContentProps) {
-  // Defensive normalisation against a Sentry-observed crash
-  // (SHELF-WEBAPP-1NW): a single client-side render hit
-  // `item.bookingAssets` as undefined and tripped `.some(...)`, breaking
-  // the row through the error boundary. The component's prop type
-  // declares `bookingAssets` as required and the loader always selects
-  // it, so the undefined was either a stale-bundle / hydration mismatch
-  // in the deploy window or an as-yet unidentified loader edge case.
-  //
-  // Normalise once at the top so EVERY downstream reader gets a safe
-  // array — the badge calc below, `<BookingAssetsSidebar />` (which
-  // calls `groupAssets(booking.bookingAssets)` + reads
-  // `booking.bookingAssets.length` in multiple places), and any future
-  // additions. A scoped `?? []` on each reader would be brittle.
-  const item = {
-    ...rawItem,
-    bookingAssets: rawItem.bookingAssets ?? [],
-  };
-
-  /**
-   * `hasCustody` is a bare "does this asset have ANY custody row" test, which
-   * is the right question for an INDIVIDUAL asset (one custodian holds the
-   * one physical thing, so the booking really is compromised) and the WRONG
-   * one for `QUANTITY_TRACKED`. A QT asset is a pool: handing 20 of 29 units
-   * to a custodian leaves 9 bookable, and a booking drawing on those free
-   * units is perfectly valid. Flagging it "Includes unavailable assets"
-   * scared a customer off a booking that had already checked out cleanly.
-   *
-   * Every other surface already makes this distinction — `getBookingFlags`
-   * (`hasAssetsInCustody`), the per-asset booking row, and the three
-   * server-side checkout guards all exempt QT from custody blocking. This
-   * row was the last one keying off raw custody presence.
-   *
-   * The genuine QT signal is stock, not custody, and it has its own pill:
-   * `item.hasStockConflict` → `<StockConflictPill />` further down this row
-   * fires when booked quantity exceeds available quantity. `availableToBook`
-   * still applies to both types — that flag means "never bookable", which is
-   * true regardless of how the asset counts its units.
-   */
-  const hasUnavaiableAssets =
-    item.bookingAssets.some(
-      (ba) =>
-        !ba.asset.availableToBook ||
-        (!isQuantityTracked(ba.asset) && hasCustody(ba.asset.custody))
-    ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
-
-  /**
-   * Pull this booking's slice of the page-wide dispositioned-quantity
-   * map so the sidebar can render qty progress + partial-checkin badge.
-   * Reading from loader data here (instead of threading a prop through
-   * `<List ItemComponent=…>`) keeps the list plumbing unchanged.
-   */
-  const loaderData = useLoaderData<BookingsIndexLoaderData>();
-  const dispositionedByAsset =
-    loaderData?.dispositionedByBooking?.[item.id] ?? undefined;
-  const dispositionBreakdownByAsset =
-    loaderData?.dispositionBreakdownByBooking?.[item.id] ?? undefined;
-  /**
-   * Per-asset progressive-checkout totals for this booking. Drives the
-   * sidebar's new amber "partially checked out, no returns yet" badge
-   * + the `{checkedOut}/{booked}` qty display.
-   */
-  const checkedOutByAsset =
-    loaderData?.checkedOutByBooking?.[item.id] ?? undefined;
-
   return (
     <>
       {/* Item */}
@@ -297,7 +189,7 @@ export default function ListBookingsContent({
        * 3. Have other bookings with the same period - this I am not sure how to handle yet
        * */}
       <Td>
-        {hasUnavaiableAssets ? (
+        {item.hasUnavailableAssets ? (
           <AvailabilityBadge
             badgeText={"Includes unavailable assets"}
             tooltipTitle={"Booking includes unavailable assets"}
@@ -311,12 +203,7 @@ export default function ListBookingsContent({
       {/* Assets count */}
       <Td>
         <div className="flex items-center gap-2">
-          <BookingAssetsSidebar
-            booking={item}
-            dispositionedByAsset={dispositionedByAsset}
-            dispositionBreakdownByAsset={dispositionBreakdownByAsset}
-            checkedOutByAsset={checkedOutByAsset}
-          />
+          <BookingAssetsSidebar booking={item} />
           {/* The asset count above is concrete assets only. A booking can also
               hold model-level reservations with no physical asset behind them
               yet, which the count cannot express — so they get their own
@@ -378,27 +265,14 @@ export default function ListBookingsContent({
             name: item.custodianTeamMember
               ? item.custodianTeamMember.name
               : resolveUserDisplayName(item.custodianUser),
-            user: item?.custodianUser
-              ? {
-                  id: item?.custodianUser?.id,
-                  firstName: item?.custodianUser?.firstName,
-                  lastName: item?.custodianUser?.lastName,
-                  email: item?.custodianUser?.email,
-                  profilePicture: item?.custodianUser?.profilePicture,
-                }
-              : null,
+            user: item?.custodianUser ?? null,
           }}
         />
       </Td>
 
       {/* Created by */}
       <Td>
-        <UserBadge
-          img={
-            item?.creator?.profilePicture || "/static/images/default_pfp.jpg"
-          }
-          name={resolveUserDisplayName(item?.creator)}
-        />
+        <UserBadge user={item?.creator} />
       </Td>
     </>
   );

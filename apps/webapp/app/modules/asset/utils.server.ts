@@ -78,7 +78,7 @@ export function getLocationUpdateNoteContent({
 }) {
   const userLink = wrapUserLinkForNote({
     id: userId,
-    displayName,
+    displayName: displayName ?? null,
     firstName,
     lastName,
   });
@@ -182,6 +182,10 @@ export function getInitialPlacementNoteContent(asset: {
  * @param params.newValue - New value of the field (null if value was removed)
  * @param params.firstName - First name of the user making the change
  * @param params.lastName - Last name of the user making the change
+ * @param params.displayName - Acting user's `User.displayName`, when the caller
+ *   has it. `wrapUserLinkForNote` prefers it over first+last, so a caller
+ *   holding the full user row should pass it or the note names the person
+ *   differently from every other surface that renders them.
  * @param params.assetName - Name of the asset being updated
  * @param params.isFirstTimeSet - Whether this is the first time a value is being set
  * @returns Markdown-formatted note content string, or empty string if invalid scenario
@@ -216,6 +220,7 @@ export function getCustomFieldUpdateNoteContent({
   userId,
   firstName,
   lastName,
+  displayName,
   isFirstTimeSet,
 }: {
   customFieldName: string;
@@ -224,10 +229,13 @@ export function getCustomFieldUpdateNoteContent({
   userId: string;
   firstName: string;
   lastName: string;
+  /** Optional — see the `@param` note; callers that omit it keep first+last. */
+  displayName?: string | null;
   isFirstTimeSet: boolean;
 }) {
   const userLink = wrapUserLinkForNote({
     id: userId,
+    displayName: displayName ?? null,
     firstName,
     lastName,
   });

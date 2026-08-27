@@ -458,7 +458,7 @@ export default function SettingsScreen() {
                     style: "destructive",
                     onPress: () =>
                       WebBrowser.openBrowserAsync(
-                        `${getApiBaseUrl()}/settings/general`
+                        `${getApiBaseUrl()}/account-details/general`
                       ),
                   },
                 ]

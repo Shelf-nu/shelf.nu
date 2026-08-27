@@ -35,6 +35,7 @@ import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 import { useCommandPalette } from "./command-palette-context";
 
 const ASSET_RESULTS_LIMIT = 10;
@@ -107,6 +108,7 @@ export type TeamMemberSearchResult = {
   email: string | null;
   firstName: string | null;
   lastName: string | null;
+  displayName: string | null;
   userId: string | null;
 };
 
@@ -423,6 +425,10 @@ export function getTeamMemberCommandValue(member: TeamMemberSearchResult) {
     member.email ?? "",
     member.firstName ?? "",
     member.lastName ?? "",
+    // cmdk re-filters client-side against this value, so a row the server
+    // matched on `displayName` is scored out and never rendered unless the
+    // same field is searchable here too.
+    member.displayName ?? "",
     member.id,
   ].filter(Boolean);
 
@@ -830,7 +836,20 @@ export function CommandPalette() {
                 <UserIcon className="size-4 text-gray-500" />
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate font-medium text-gray-900">
-                    {member.name}
+                    {resolveTeamMemberName({
+                      name: member.name,
+                      // NRMs have no user account, so the stored name is the
+                      // only name there is; a registered member is named by
+                      // their account, where a display name outranks the
+                      // mirror `TeamMember.name` if the two disagree.
+                      user: member.userId
+                        ? {
+                            displayName: member.displayName,
+                            firstName: member.firstName,
+                            lastName: member.lastName,
+                          }
+                        : null,
+                    })}
                   </span>
                   <span className="truncate text-xs text-gray-500">
                     {member.email || "NRM"}
