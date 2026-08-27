@@ -7,6 +7,11 @@ interface UseCustodyActionsParams {
   asset: AssetDetail | null;
   currentOrg: { id: string } | null;
   fetchAsset: () => Promise<void>;
+  /**
+   * SELF_SERVICE users can only ever take custody for themselves, so their
+   * confirm says "Take" rather than naming a custodian to assign to.
+   */
+  isSelfService?: boolean;
 }
 
 interface UseCustodyActionsReturn {
@@ -43,6 +48,7 @@ export function useCustodyActions({
   asset,
   currentOrg,
   fetchAsset,
+  isSelfService = false,
 }: UseCustodyActionsParams): UseCustodyActionsReturn {
   const [isActionLoading, setIsActionLoading] = useState(false);
 
@@ -75,11 +81,16 @@ export function useCustodyActions({
       : member.name;
 
     Alert.alert(
-      "Assign Custody",
-      `Assign "${asset?.title}" to ${displayName}?`,
+      isSelfService ? "Take Custody" : "Assign Custody",
+      isSelfService
+        ? `Take custody of "${asset?.title}"?`
+        : `Assign "${asset?.title}" to ${displayName}?`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Assign", onPress: () => performAssign(member.id) },
+        {
+          text: isSelfService ? "Take" : "Assign",
+          onPress: () => performAssign(member.id),
+        },
       ]
     );
   };
