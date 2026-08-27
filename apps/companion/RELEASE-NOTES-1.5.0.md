@@ -77,6 +77,12 @@ workspaces may open the app somewhere they did not expect, once.
 resolves if Shelf has registered it, and only over HTTPS. Adding a customer is
 a server-side change and needs no new build.
 
+**One line here was already announced in 1.4.0 and never shipped.** The notes
+and photos count on audit scan rows was in the 1.4.0 store text, but the change
+landed two days before that build was cut and was not an ancestor of it. It
+ships for real now, so it belongs in these notes even though it reads as a
+repeat.
+
 **Two behaviours changed that people were trained on.** "Found" no longer
 appears on scanned audit rows (the location is there instead), and the audits
 "All" filter now returns archived audits, so existing lists get longer.
