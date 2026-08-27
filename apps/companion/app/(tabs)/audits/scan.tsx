@@ -260,6 +260,62 @@ function AuditScannerContent() {
     setSelectedItem(null);
   }, []);
 
+  /**
+   * Undo a scan: the asset returns to whatever it was before, which for an
+   * expected asset means "not scanned yet" and for an unexpected one means
+   * leaving the audit entirely.
+   *
+   * The server recomputes the session counts inside the same transaction as
+   * the removal, so those are adopted wholesale rather than decremented here
+   * — the two statuses move different counters and only the server knows
+   * which one this scan was.
+   */
+  const handleRemoveScan = useCallback(
+    async (item: ScannedItem) => {
+      if (!currentOrg || !auditId) return;
+
+      const { data, error } = await api.removeAuditScan(currentOrg.id, {
+        auditSessionId: auditId,
+        assetId: item.assetId,
+      });
+
+      if (error || !data) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert("Could not remove scan", error || "Something went wrong.");
+        return;
+      }
+
+      // Drop the row and let the asset be scannable again. The dedup set is
+      // what makes a re-scan register rather than reading as a duplicate.
+      setScannedItems((prev) =>
+        prev.filter((scanned) => scanned.assetId !== item.assetId)
+      );
+      scannedAssetIdsRef.current.delete(item.assetId);
+      setFoundCount(data.foundAssetCount);
+      setUnexpectedCount(data.unexpectedAssetCount);
+      animateProgress(data.foundAssetCount);
+
+      handleCloseEvidenceModal();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      showToast(
+        "duplicate",
+        "Scan removed",
+        item.name?.trim() || "Scan removed"
+      );
+    },
+    [
+      currentOrg,
+      auditId,
+      setScannedItems,
+      scannedAssetIdsRef,
+      setFoundCount,
+      setUnexpectedCount,
+      animateProgress,
+      handleCloseEvidenceModal,
+      showToast,
+    ]
+  );
+
   const handleEvidenceAdded = useCallback(
     (assetId: string, type: "note" | "image") => {
       // Optimistically update the local evidence count
@@ -1248,6 +1304,7 @@ function AuditScannerContent() {
         item={selectedItem}
         auditSessionId={auditId ?? ""}
         onEvidenceAdded={handleEvidenceAdded}
+        onRemoveScan={handleRemoveScan}
       />
     </View>
   );

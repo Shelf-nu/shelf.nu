@@ -91,6 +91,11 @@ type EvidenceModalProps = {
   auditSessionId: string;
   /** Callback when evidence is added, to update counts */
   onEvidenceAdded: (assetId: string, type: "note" | "image") => void;
+  /**
+   * Undo this scan. Omitted where the audit can no longer take changes, which
+   * is what hides the action — a completed audit is a reported record.
+   */
+  onRemoveScan?: (item: ScannedItem) => void;
 };
 
 export function EvidenceModal({
@@ -99,6 +104,7 @@ export function EvidenceModal({
   item,
   auditSessionId,
   onEvidenceAdded,
+  onRemoveScan,
 }: EvidenceModalProps) {
   const { currentOrg } = useOrg();
 
@@ -539,6 +545,52 @@ export function EvidenceModal({
                 </View>
               </>
             )}
+
+            {onRemoveScan && item ? (
+              <View style={styles.removeScanSection}>
+                <TouchableOpacity
+                  style={styles.removeScanButton}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    // The confirm lives here rather than in the caller so the
+                    // sheet can name the asset; the caller owns what happens
+                    // after, including closing this sheet.
+                    Alert.alert(
+                      "Remove this scan?",
+                      `"${
+                        item.name?.trim() || "This asset"
+                      }" goes back to how it was before you scanned it. You can scan it again.`,
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Remove",
+                          style: "destructive",
+                          onPress: () => onRemoveScan(item),
+                        },
+                      ]
+                    );
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove the scan of ${
+                    item.name?.trim() || "this asset"
+                  }`}
+                >
+                  <Ionicons
+                    name="arrow-undo-outline"
+                    size={18}
+                    color={colors.error}
+                  />
+                  <Text style={styles.removeScanText}>Remove scan</Text>
+                </TouchableOpacity>
+                {/* Evidence belongs to the scan, so the undo takes it too. Say
+                    so before the tap, not in an error afterwards. */}
+                {(item.notesCount ?? 0) > 0 || (item.imagesCount ?? 0) > 0 ? (
+                  <Text style={styles.removeScanHint}>
+                    The notes and photos on this scan go with it.
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
@@ -547,6 +599,34 @@ export function EvidenceModal({
 }
 
 const useStyles = createStyles((colors) => ({
+  // Sits under the evidence controls, past a divider: undoing a scan is the
+  // opposite of the sheet's main job, so it must not read as one of its
+  // primary actions.
+  removeScanSection: {
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: spacing.xs,
+  },
+  removeScanButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+  },
+  removeScanText: {
+    color: colors.error,
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+  },
+  removeScanHint: {
+    color: colors.mutedLight,
+    fontSize: fontSize.xs,
+    textAlign: "center",
+  },
   existingLoading: { marginBottom: spacing.md },
   existingImages: {
     flexDirection: "row",
