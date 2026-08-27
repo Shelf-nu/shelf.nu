@@ -316,6 +316,38 @@ function AuditScannerContent() {
     ]
   );
 
+  /**
+   * Adopt the evidence counts the sheet read from the server.
+   *
+   * A row starts with the counts its scan reported, which are zero — but
+   * evidence belongs to the audit's row for the asset, so an asset scanned
+   * again after an undo still carries what was recorded before, and the row
+   * would otherwise offer "Add photo/note" over evidence that exists.
+   */
+  const handleEvidenceCounts = useCallback(
+    (assetId: string, counts: { notes: number; images: number }) => {
+      setScannedItems((prev) =>
+        prev.map((scanned) => {
+          if (scanned.assetId !== assetId) return scanned;
+          // Returning the same object when nothing moved keeps the list from
+          // re-rendering every time the sheet opens.
+          if (
+            (scanned.notesCount ?? 0) === counts.notes &&
+            (scanned.imagesCount ?? 0) === counts.images
+          ) {
+            return scanned;
+          }
+          return {
+            ...scanned,
+            notesCount: counts.notes,
+            imagesCount: counts.images,
+          };
+        })
+      );
+    },
+    [setScannedItems]
+  );
+
   const handleEvidenceAdded = useCallback(
     (assetId: string, type: "note" | "image") => {
       // Optimistically update the local evidence count
@@ -1305,6 +1337,7 @@ function AuditScannerContent() {
         auditSessionId={auditId ?? ""}
         onEvidenceAdded={handleEvidenceAdded}
         onRemoveScan={handleRemoveScan}
+        onEvidenceCounts={handleEvidenceCounts}
       />
     </View>
   );

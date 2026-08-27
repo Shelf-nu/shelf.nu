@@ -96,6 +96,18 @@ type EvidenceModalProps = {
    * is what hides the action — a completed audit is a reported record.
    */
   onRemoveScan?: (item: ScannedItem) => void;
+  /**
+   * The evidence this scan actually carries, once the sheet has read it.
+   *
+   * A row's counts come from the scan that created it, so they start at zero —
+   * but evidence belongs to the audit's row for the asset and outlives any one
+   * scan, so an asset scanned again after an undo already has some. This is
+   * what corrects the row.
+   */
+  onEvidenceCounts?: (
+    assetId: string,
+    counts: { notes: number; images: number }
+  ) => void;
 };
 
 export function EvidenceModal({
@@ -105,6 +117,7 @@ export function EvidenceModal({
   auditSessionId,
   onEvidenceAdded,
   onRemoveScan,
+  onEvidenceCounts,
 }: EvidenceModalProps) {
   const { currentOrg } = useOrg();
 
@@ -147,14 +160,26 @@ export function EvidenceModal({
         auditAssetId
       );
       if (controller.signal.aborted) return;
-      setExisting(
-        data?.byAuditAsset?.[auditAssetId] ?? { notes: [], images: [] }
-      );
+      const evidence = data?.byAuditAsset?.[auditAssetId] ?? {
+        notes: [],
+        images: [],
+      };
+      setExisting(evidence);
       setExistingLoading(false);
+      if (item) {
+        onEvidenceCounts?.(item.assetId, {
+          notes: evidence.notes.length,
+          images: evidence.images.length,
+        });
+      }
     })();
     return () => controller.abort();
     // `savedCount` re-runs this after a note or photo is added, so what the
     // sheet shows includes what the person just recorded.
+    // `item` and `onEvidenceCounts` are deliberately absent: the effect keys on
+    // the auditAssetId that identifies the row, and listing either would re-run
+    // the fetch on every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, auditAssetId, currentOrg?.id, auditSessionId, savedCount]);
   const { colors } = useTheme();
   const styles = useStyles();
