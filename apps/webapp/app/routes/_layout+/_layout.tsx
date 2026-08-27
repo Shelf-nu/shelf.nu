@@ -141,7 +141,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     if (!user.onboarded) {
-      return redirect("onboarding");
+      // Absolute: a relative target resolves against the URL the user arrived
+      // at, so anyone landing deeper than the root — a QR link, a link from an
+      // email — is sent to `<their/path>/onboarding`, which does not exist.
+      return redirect("/onboarding");
     }
 
     // Org resolution runs after the onboarding guard — safe now since
