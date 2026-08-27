@@ -10,6 +10,8 @@ import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getBookings } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * GET /api/mobile/dashboard
@@ -140,15 +142,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
         userId: user.id,
         custodianScope,
         bookingFrom: new Date(),
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
           custodianTeamMember: { select: { name: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -160,15 +168,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
         statuses: ["ONGOING"],
         userId: user.id,
         custodianScope,
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
           custodianTeamMember: { select: { name: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -180,15 +194,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
         statuses: ["OVERDUE"],
         userId: user.id,
         custodianScope,
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
           custodianTeamMember: { select: { name: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -227,19 +247,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
       statusCounts[group.status] = group._count.id;
     }
 
+    /**
+     * The booking row shape the three `getBookings` calls above produce, as
+     * far as this projection reads it.
+     *
+     * Spelled out instead of `any` because the field it gets wrong is
+     * invisible at runtime: the previous `b._count?.assets` named a relation
+     * that does not exist on `Booking` (it is `bookingAssets`) and no `_count`
+     * was selected at all, so every booking reported `assetCount: 0` and the
+     * `any` kept the compiler quiet about it.
+     */
+    type MobileDashboardBooking = {
+      id: string;
+      name: string;
+      status: string;
+      from: Date | string | null;
+      to: Date | string | null;
+      /**
+       * `UserNameFields` rather than the name halves spelled out: it requires
+       * `displayName`, so this shape cannot drift back to naming the custodian
+       * by their legal name without failing to compile.
+       */
+      custodianUser?: UserNameFields | null;
+      custodianTeamMember?: { name: string } | null;
+      _count?: { bookingAssets: number };
+    };
+
     // Format booking results
-    const formatBooking = (b: any) => ({
+    const formatBooking = (b: MobileDashboardBooking) => ({
       id: b.id,
       name: b.name,
       status: b.status,
-      from: b.from?.toISOString?.() ?? b.from,
-      to: b.to?.toISOString?.() ?? b.to,
+      from: b.from instanceof Date ? b.from.toISOString() : b.from,
+      to: b.to instanceof Date ? b.to.toISOString() : b.to,
       custodianName: b.custodianUser
-        ? [b.custodianUser.firstName, b.custodianUser.lastName]
-            .filter(Boolean)
-            .join(" ") || null
+        ? resolveUserDisplayName(b.custodianUser) || null
         : b.custodianTeamMember?.name || null,
-      assetCount: b._count?.assets ?? 0,
+      assetCount: b._count?.bookingAssets ?? 0,
     });
 
     return data({

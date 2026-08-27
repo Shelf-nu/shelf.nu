@@ -356,7 +356,7 @@ export default function SettingsScreen() {
                     style: "destructive",
                     onPress: () =>
                       WebBrowser.openBrowserAsync(
-                        "https://app.shelf.nu/settings/general"
+                        "https://app.shelf.nu/account-details/general"
                       ),
                   },
                 ]

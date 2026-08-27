@@ -495,10 +495,10 @@ export default function AuditDrawer({
       showLocation,
     });
 
-  const shouldDisableSubmit =
-    hasBlockers ||
-    !auditSession ||
-    stats.foundCount + stats.unexpectedCount === 0;
+  // Completing with nothing scanned is legal — it marks every expected asset
+  // missing. The CompleteAuditDialog this drawer submits through states that
+  // outcome before anything is committed, so the button itself stays enabled.
+  const shouldDisableSubmit = hasBlockers || !auditSession;
 
   return (
     <ConfigurableDrawer

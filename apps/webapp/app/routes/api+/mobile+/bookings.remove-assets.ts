@@ -226,6 +226,7 @@ export async function action({ request }: ActionFunctionArgs) {
       standaloneAssetIds,
       firstName: user.firstName ?? "",
       lastName: user.lastName ?? "",
+      displayName: user.displayName ?? null,
       userId: user.id,
       assets: standaloneAssets,
       organizationId,

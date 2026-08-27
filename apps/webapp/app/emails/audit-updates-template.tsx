@@ -8,6 +8,7 @@ import {
 } from "@react-email/components";
 import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { SERVER_URL } from "~/utils/env";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import { CustomEmailFooter } from "./components/custom-footer";
 import { LogoForEmail } from "./logo";
@@ -33,11 +34,7 @@ export interface AuditForEmail {
   _count: {
     assets: number;
   };
-  createdBy: {
-    firstName: string | null;
-    lastName: string | null;
-    displayName?: string | null;
-  };
+  createdBy: UserNameFields;
 }
 
 interface Props {

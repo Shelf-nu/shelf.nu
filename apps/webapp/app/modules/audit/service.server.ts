@@ -16,6 +16,7 @@ import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
 } from "~/modules/note/service.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
 import type { ClientHint } from "~/utils/client-hints";
 import type { RawFormatPrefs } from "~/utils/date-format";
 import type { ErrorLabel } from "~/utils/error";
@@ -27,6 +28,7 @@ import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { removePublicFile } from "~/utils/storage.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
 import type { AuditFilterType } from "./audit-filter-utils";
@@ -47,6 +49,7 @@ import {
   createAssetsAddedToAuditNote,
   createAssetRemovedFromAuditNote,
   createAssetsRemovedFromAuditNote,
+  createAssetScanRemovedNote,
 } from "./helpers.server";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
@@ -150,19 +153,14 @@ export type CreateAuditSessionResult = {
 export type GetAuditSessionResult = {
   session: AuditSession & {
     assignments: (AuditAssignment & {
-      user: {
+      user: UserNameFields & {
         id: string;
-        firstName: string | null;
-        lastName: string | null;
         email: string;
         profilePicture: string | null;
       };
     })[];
-    createdBy: {
+    createdBy: UserNameFields & {
       id: string;
-      firstName: string | null;
-      lastName: string | null;
-      displayName: string | null;
       email: string;
       profilePicture: string | null;
     };
@@ -1677,6 +1675,197 @@ export async function recordAuditScan(
   }
 }
 
+/** Arguments for {@link removeAuditScan}. */
+export interface RemoveAuditScanInput {
+  auditSessionId: string;
+  assetId: string;
+  userId: string;
+  organizationId: string;
+}
+
+/** Result of {@link removeAuditScan}, with the recalculated aggregate counts. */
+export interface RemoveAuditScanResult {
+  /** False when no scan for this asset existed — nothing changed. */
+  removed: boolean;
+  foundAssetCount: number;
+  missingAssetCount: number;
+  unexpectedAssetCount: number;
+}
+
+/**
+ * Removes a recorded scan from a live audit — the undo for a mis-scan.
+ *
+ * An expected asset's row returns to MISSING with its scan fields cleared; an
+ * unexpected asset's row is deleted outright, since only the scan created it.
+ * Aggregate counts are recomputed from the rows inside the same transaction,
+ * so the session's numbers can never drift from its rows, and a system note
+ * records the removal.
+ *
+ * Only a live audit (PENDING or ACTIVE) accepts removal: a COMPLETED or
+ * CANCELLED audit is a finished record whose numbers have been reported, and a
+ * removal would rewrite them after the fact. Callers own authentication and
+ * assignee gating.
+ *
+ * @param input - the scan to remove, org-proven by the session fetch
+ * @returns whether a scan was removed, plus the recalculated counts
+ * @throws {ShelfError} 404 when the session is not in this organization
+ */
+export async function removeAuditScan(
+  input: RemoveAuditScanInput
+): Promise<RemoveAuditScanResult> {
+  const { auditSessionId, assetId, userId, organizationId } = input;
+
+  try {
+    return await db.$transaction(async (tx) => {
+      // Read the session INSIDE the transaction. Reading it outside left a
+      // window where an audit completed between the status check and the
+      // write, so a removal could rewrite the numbers of an audit that had
+      // already been reported.
+      const session = await tx.auditSession.findFirst({
+        where: { id: auditSessionId, organizationId },
+        select: {
+          status: true,
+          foundAssetCount: true,
+          missingAssetCount: true,
+          unexpectedAssetCount: true,
+        },
+      });
+
+      if (!session) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit session not found",
+          additionalData: { auditSessionId, organizationId },
+          status: 404,
+          label,
+        });
+      }
+
+      if (session.status !== "PENDING" && session.status !== "ACTIVE") {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "This audit is no longer live, so its scans cannot be changed.",
+          additionalData: { auditSessionId, status: session.status },
+          status: 400,
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
+      const existingScan = await tx.auditScan.findFirst({
+        where: {
+          auditSessionId,
+          assetId,
+          auditSession: { organizationId },
+        },
+        include: {
+          auditAsset: { select: { id: true, expected: true } },
+        },
+      });
+
+      if (!existingScan) {
+        return {
+          removed: false,
+          foundAssetCount: session.foundAssetCount,
+          missingAssetCount: session.missingAssetCount,
+          unexpectedAssetCount: session.unexpectedAssetCount,
+        };
+      }
+
+      if (existingScan.auditAsset?.expected) {
+        // Expected asset: the row predates the scan, so it stays and returns
+        // to MISSING with its scan facts cleared.
+        await Promise.all([
+          tx.auditAsset.update({
+            where: { id: existingScan.auditAsset.id },
+            data: { status: "MISSING", scannedAt: null, scannedById: null },
+          }),
+          tx.auditScan.delete({ where: { id: existingScan.id } }),
+        ]);
+      } else if (existingScan.auditAsset?.id) {
+        // Unexpected asset: only the scan created the row, so both go.
+        await Promise.all([
+          tx.auditAsset.delete({ where: { id: existingScan.auditAsset.id } }),
+          tx.auditScan.delete({ where: { id: existingScan.id } }),
+        ]);
+      } else {
+        await tx.auditScan.delete({ where: { id: existingScan.id } });
+      }
+
+      // Recompute aggregates from the rows rather than incrementing, so the
+      // session's numbers cannot drift from what its rows actually say.
+      const [foundAssetCount, missingAssetCount, unexpectedAssetCount] =
+        await Promise.all([
+          tx.auditAsset.count({
+            where: { auditSessionId, expected: true, status: "FOUND" },
+          }),
+          tx.auditAsset.count({
+            where: { auditSessionId, expected: true, status: "MISSING" },
+          }),
+          tx.auditAsset.count({
+            where: { auditSessionId, expected: false, status: "UNEXPECTED" },
+          }),
+        ]);
+
+      await Promise.all([
+        tx.auditSession.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven to belong to organizationId by the findFirst above (404 otherwise); update() requires a unique where
+          where: { id: auditSessionId },
+          data: { foundAssetCount, missingAssetCount, unexpectedAssetCount },
+        }),
+        createAssetScanRemovedNote({
+          auditSessionId,
+          assetId,
+          organizationId,
+          userId,
+          tx,
+        }),
+        // Activity event — AUDIT_ASSET_SCAN_REMOVED, the counterpart to the
+        // AUDIT_ASSET_SCANNED that `recordAuditScan` emits. Without it the
+        // stream shows scans going in and never coming out, so a report
+        // counting scans on a corrected audit overstates it.
+        //
+        // `auditAssetId` is carried even on the unexpected branch, where the
+        // row has just been deleted: it is a plain scalar with no FK, and
+        // keeping it is what lets a reader pair this event with the
+        // AUDIT_ASSET_SCANNED that created that row.
+        recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "AUDIT_ASSET_SCAN_REMOVED",
+            entityType: "AUDIT",
+            entityId: auditSessionId,
+            auditSessionId,
+            auditAssetId: existingScan.auditAsset?.id,
+            assetId,
+            meta: { isExpected: existingScan.auditAsset?.expected ?? false },
+          },
+          tx
+        ),
+      ]);
+
+      return {
+        removed: true,
+        foundAssetCount,
+        missingAssetCount,
+        unexpectedAssetCount,
+      };
+    });
+  } catch (cause) {
+    // ShelfErrors carry their own status and message; rethrow untouched so a
+    // 400/404 reaches the caller as itself rather than as a generic 500.
+    if (cause instanceof ShelfError) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to remove the scan",
+      additionalData: { auditSessionId, assetId, organizationId },
+      label,
+    });
+  }
+}
+
 /**
  * Retrieves all scans for a given audit session.
  * Used to restore the audit state when resuming an audit.
@@ -2524,9 +2713,8 @@ export async function cancelAuditSession({
     await db.auditNote.create({
       data: {
         content: `${wrapUserLinkForNote({
+          ...(actingUser ?? { displayName: null }),
           id: userId,
-          firstName: actingUser?.firstName,
-          lastName: actingUser?.lastName,
         })} cancelled the audit`,
         type: "UPDATE",
         userId,
@@ -2554,12 +2742,7 @@ export async function cancelAuditSession({
       userId: string;
       // Raw format-preference columns travel on each recipient row so the email
       // helper resolves prefs from the loaded row (no per-recipient DB fetch).
-      user: {
-        email: string;
-        firstName: string | null;
-        lastName: string | null;
-        displayName?: string | null;
-      } & RawFormatPrefs;
+      user: UserNameFields & { email: string } & RawFormatPrefs;
     }> = auditSession.assignments
       .filter(
         (assignment) => assignment.userId !== userId && assignment.user.email
@@ -3168,9 +3351,8 @@ export async function archiveAuditSession({
       await tx.auditNote.create({
         data: {
           content: `${wrapUserLinkForNote({
+            ...(user ?? { displayName: null }),
             id: userId,
-            firstName: user?.firstName,
-            lastName: user?.lastName,
           })} archived the audit`,
           type: "UPDATE",
           userId,
@@ -3352,7 +3534,7 @@ export async function bulkArchiveAudits({
     // avoid holding a DB connection while reading unrelated data.
     const user = await db.user.findFirst({
       where: { id: userId },
-      select: { firstName: true, lastName: true },
+      select: { ...USER_NAME_SELECT },
     });
 
     await db.$transaction(async (tx) => {
@@ -3390,9 +3572,8 @@ export async function bulkArchiveAudits({
       await tx.auditNote.createMany({
         data: audits.map((a) => ({
           content: `${wrapUserLinkForNote({
+            ...(user ?? { displayName: null }),
             id: userId,
-            firstName: user?.firstName,
-            lastName: user?.lastName,
           })} archived the audit`,
           type: "UPDATE" as const,
           userId,

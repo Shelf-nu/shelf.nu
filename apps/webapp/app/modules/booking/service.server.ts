@@ -119,6 +119,7 @@ import {
   BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
+  BOOKINGS_LIST_ASSETS_INCLUDE,
 } from "./constants";
 import type {
   ReservationEmailAsset,
@@ -314,11 +315,7 @@ export async function createStatusTransitionNote({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
     const actionText =
       action || getActionTextFromTransition(fromStatus, toStatus);
@@ -5053,11 +5050,7 @@ export async function checkinBooking({
             displayName: true,
           } satisfies Prisma.UserSelect,
         });
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: actorUser?.firstName,
-          lastName: actorUser?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...actorUser, id: userId });
 
         /**
          * Shared booking link — per-asset notes point back to the booking
@@ -5794,11 +5787,7 @@ export async function partialCheckinBooking({
       ) {
         // Don't create a PartialBookingCheckin row — the redirect to
         // `checkinBooking` handles completion itself.
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         await createNotes({
           content: `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`,
           type: "UPDATE",
@@ -6278,11 +6267,7 @@ export async function partialCheckinBooking({
      * captured server-side via `Logger.error`.
      */
     try {
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
 
       /**
        * Shared booking link used by every asset-side note below so the
@@ -7638,11 +7623,7 @@ export async function partialCheckoutBooking({
 
         // Create audit notes for INDIVIDUAL rows. Qty-tracked rows get their
         // own per-asset note written OUTSIDE the tx (with unit-aware phrasing).
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         if (individualToFlip.length > 0) {
           await createNotes(
             {
@@ -7976,11 +7957,7 @@ export async function partialCheckoutBooking({
      * committed checkout.
      */
     try {
-      const actorLink = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actorLink = wrapUserLinkForNote({ ...user, id: userId });
       const bookingLink = wrapLinkForNote(
         `/bookings/${result.booking.id}`,
         result.booking.name
@@ -9920,6 +9897,20 @@ export async function getBookings(params: {
    * `false`, so paginated callers are unaffected.
    */
   skipCount?: boolean;
+  /**
+   * Attach the `bookingAssets` payload — by far the heaviest part of this
+   * query. Callers that render no asset data (the calendar, the dashboard
+   * widgets, the bookings-list surfaces whose drawer fetches on open) pass
+   * `false`, which omits the key from the Prisma include entirely. Defaults
+   * to `true`, so existing callers are unaffected.
+   */
+  includeAssets?: boolean;
+  /**
+   * Hard row cap, bypassing the `perPage` ≤ 100 clamp below. For callers that
+   * fetch one bounded set in a single query rather than a page of it. Unlike
+   * `takeAll` the query stays bounded; ignored when `takeAll` is set.
+   */
+  takeCap?: number;
 }) {
   const {
     organizationId,
@@ -9942,6 +9933,8 @@ export async function getBookings(params: {
     kitId,
     tags,
     skipCount = false,
+    includeAssets = true,
+    takeCap,
   } = params;
 
   try {
@@ -9984,12 +9977,15 @@ export async function getBookings(params: {
               name: { contains: term, mode: "insensitive" },
             },
           },
-          // Search in custodian user names
+          // Search in custodian user names. `displayName` is one of them: it
+          // replaces first/last name in the UI for users who set one, so it is
+          // the name a searcher can actually see on the booking row.
           {
             custodianUser: {
               OR: [
                 { firstName: { contains: term, mode: "insensitive" } },
                 { lastName: { contains: term, mode: "insensitive" } },
+                { displayName: { contains: term, mode: "insensitive" } },
               ],
             },
           },
@@ -10120,88 +10116,26 @@ export async function getBookings(params: {
       db.booking.findMany({
         ...(!takeAll && {
           skip,
-          take,
+          take: takeCap ?? take,
         }),
         where,
         include: {
           ...BOOKING_COMMON_INCLUDE,
-          bookingAssets: {
-            // Explicit `select` (instead of `include`) so the inferred
-            // type surfaces `assetKitId` on each row — the bookings list
-            // sidebar (`BookingAssetsSidebar`) groups by it. Without an
-            // explicit select, Prisma's type inference for
-            // `include + nested include` doesn't expose the parent
-            // scalars in a form the local component types accept.
-            select: {
-              id: true,
-              quantity: true,
-              assetKitId: true,
-              asset: {
-                select: {
-                  title: true,
-                  id: true,
-                  type: true,
-                  quantity: true,
-                  custody: true,
-                  availableToBook: true,
-                  status: true,
-                  mainImage: true,
-                  thumbnailImage: true,
-                  // Model cover image for assets with no image of their own
-                  ...ASSET_MODEL_IMAGE_SELECT,
-                  mainImageExpiration: true,
-                  // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
-                  // Surfaced by the BookingAssetsSidebar so the chip matches the
-                  // simple-mode booking overview list and every other code-bearing
-                  // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
-                  sequentialId: true,
-                  preferredBarcodeId: true,
-                  qrCodes: { take: 1, select: { id: true } },
-                  barcodes: { select: { id: true, type: true, value: true } },
-                  category: {
-                    select: {
-                      id: true,
-                      name: true,
-                      color: true,
-                    },
-                  },
-                  // NOTE: deliberately NO `bookingAssets` here. A previous
-                  // version selected each asset's entire lifetime
-                  // `bookingAssets: { bookingId }` pivot history, which grows
-                  // without bound and had zero consumers (every reader of
-                  // `asset.bookingAssets` needs `ba.booking.{id,status}` from
-                  // asset-centric queries, which this shape cannot provide).
-                  // If a surface ever needs conflict info here, scope it with
-                  // a `where` on active statuses + date overlap like
-                  // getBookingFlags does.
-                  assetKits: {
-                    select: {
-                      // See the comment in `bookings.$bookingId.overview.tsx`
-                      // for why both `id` (the AssetKit row id) and `kitId`
-                      // are needed for kit-source grouping.
-                      id: true,
-                      kitId: true,
-                      kit: {
-                        select: {
-                          id: true,
-                          name: true,
-                          image: true,
-                          imageExpiration: true,
-                          category: {
-                            select: {
-                              id: true,
-                              name: true,
-                              color: true,
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          // NOTE: deliberately NO `bookingAssets` when `includeAssets` is
+          // false — the calendar, the dashboard widgets and the five
+          // bookings-list surfaces render no asset data. The cast keeps the
+          // inferred row type stable for default-true callers; opt-out
+          // callers must not read `bookingAssets` (the same runtime/static
+          // divergence `extraInclude` already has). A conditional generic
+          // would type this honestly, but this webapp sits at TypeScript's
+          // instantiation ceiling over the extended Prisma client, where a
+          // generic here surfaces as TS2321 somewhere unrelated.
+          //
+          // The include itself lives in `./constants` so the assets-sidebar
+          // resource route serves the byte-identical shape.
+          ...((includeAssets
+            ? BOOKINGS_LIST_ASSETS_INCLUDE
+            : {}) as typeof BOOKINGS_LIST_ASSETS_INCLUDE),
           creator: {
             select: {
               id: true,
@@ -10245,6 +10179,7 @@ export async function removeAssets({
   booking,
   firstName,
   lastName,
+  displayName,
   userId,
   kitIds = [],
   kits = [],
@@ -10257,6 +10192,12 @@ export async function removeAssets({
   };
   firstName: string;
   lastName: string;
+  /**
+   * The acting user's `User.displayName`. It wins over the legal-name halves
+   * when set, so it must travel with them — a caller that passes only
+   * `firstName`/`lastName` names the actor by a name they asked us not to use.
+   */
+  displayName: string | null;
   userId: string;
   kitIds?: Kit["id"][];
   kits?: Array<{ id: string; name: string }>;
@@ -10692,7 +10633,7 @@ export async function removeAssets({
       }
     }
 
-    const userForNotes = { firstName, lastName, id: userId };
+    const userForNotes = { firstName, lastName, displayName, id: userId };
 
     const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
 
@@ -11327,7 +11268,6 @@ export async function getBookingsForCalendar(params: {
     const { bookings } = await getBookings({
       organizationId,
       page: 1,
-      perPage: 1000,
       search,
       userId,
       ...(status && {
@@ -11339,9 +11279,26 @@ export async function getBookingsForCalendar(params: {
       custodianTeamMemberIds: teamMemberIds,
       ...selfServiceData,
       tags,
+      // Calendar events carry no asset data — the mapping below projects
+      // booking scalars, two names and the tags — so the per-booking asset
+      // subtree is pure transfer cost here.
+      includeAssets: false,
+      // Only `bookings` is read below; skip the COUNT companion query.
+      skipCount: true,
       extraInclude: {
-        custodianTeamMember: true,
-        custodianUser: true,
+        // Narrow selects: the mapping reads `name` off the team member and
+        // the display-name fields + picture off the two users. `true` pulled
+        // whole `User` rows (every column, per booking, per request).
+        custodianTeamMember: { select: { id: true, name: true } },
+        custodianUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            profilePicture: true,
+          },
+        },
         creator: {
           select: {
             id: true,
@@ -11353,6 +11310,8 @@ export async function getBookingsForCalendar(params: {
         },
         tags: TAG_WITH_COLOR_SELECT,
       },
+      // Every booking in the window, not a page of them. `takeAll` ignores
+      // `perPage`, which is why the old `perPage: 1000` was already dead.
       takeAll: true,
     });
 
@@ -11388,11 +11347,16 @@ export async function getBookingsForCalendar(params: {
             end: (booking.to as Date).toISOString(),
             custodian: {
               name: custodianName,
+              // Named field by field rather than spread: the loaded row is a
+              // full `User`, and this payload is serialized to the calendar
+              // client. `displayName` belongs on the list — it outranks the
+              // legal-name halves wherever this custodian is rendered.
               user: booking.custodianUser
                 ? {
                     id: booking.custodianUserId,
                     firstName: booking.custodianUser?.firstName,
                     lastName: booking.custodianUser?.lastName,
+                    displayName: booking.custodianUser?.displayName,
                     profilePicture: booking.custodianUser?.profilePicture,
                   }
                 : undefined,
@@ -11406,6 +11370,7 @@ export async function getBookingsForCalendar(params: {
                     id: booking.creator.id,
                     firstName: booking.creator.firstName,
                     lastName: booking.creator.lastName,
+                    displayName: booking.creator.displayName,
                     profilePicture: booking.creator.profilePicture,
                   }
                 : null,
@@ -12213,11 +12178,7 @@ export async function bulkCancelBookings({
       }
 
       /** Making notes for all the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const notesData = bookings
         .map((b) =>
           b.bookingAssets.map((ba) => ({
@@ -12405,11 +12366,7 @@ async function createNotesForScannedAssetsAndKits({
       displayName: true,
     } satisfies Prisma.UserSelect,
   });
-  const userForNotes = {
-    firstName: user?.firstName || "",
-    lastName: user?.lastName || "",
-    id: userId,
-  };
+  const userForNotes = { ...user, id: userId };
 
   // Create booking notes
   // why: out of this rule — multi-asset popover, per-asset qty deferred.
@@ -14306,6 +14263,7 @@ export async function getDetailedPartialCheckinData(bookingId: string) {
         id: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
       };
     }
@@ -14341,6 +14299,7 @@ export type PartialCheckinDetailsType = Record<
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       profilePicture: string | null;
     };
   }
@@ -14490,6 +14449,7 @@ export async function getDetailedPartialCheckoutData({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
           profilePicture: true,
         },
       },
@@ -14506,6 +14466,7 @@ export async function getDetailedPartialCheckoutData({
         id: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
       };
     }
@@ -14549,6 +14510,7 @@ export type PartialCheckoutDetailsType = Record<
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       profilePicture: string | null;
     };
   }

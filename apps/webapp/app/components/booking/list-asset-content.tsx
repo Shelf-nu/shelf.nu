@@ -20,7 +20,6 @@ import {
   resolveQtyStockBadgeVariant,
 } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
-import { resolveUserDisplayName } from "~/utils/user";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import {
   AvailabilityLabel,
@@ -603,10 +602,7 @@ export default function ListAssetContent({
           >
             {checkoutDetails ? (
               <span className="text-sm text-gray-600">
-                <UserBadge
-                  name={resolveUserDisplayName(checkoutDetails.checkedOutBy)}
-                  img={checkoutDetails.checkedOutBy.profilePicture}
-                />
+                <UserBadge user={checkoutDetails.checkedOutBy} />
               </span>
             ) : (
               <EmptyTableValue />
@@ -653,12 +649,7 @@ export default function ListAssetContent({
                 {(() => {
                   const details = partialCheckinDetails[item.id];
 
-                  return (
-                    <UserBadge
-                      name={resolveUserDisplayName(details.checkedInBy)}
-                      img={details.checkedInBy.profilePicture}
-                    />
-                  );
+                  return <UserBadge user={details.checkedInBy} />;
                 })()}
               </span>
             ) : (

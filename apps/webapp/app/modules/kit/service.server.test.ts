@@ -4666,7 +4666,7 @@ describe("removeKitSlicesFromPlanningBookings", () => {
 
     expect(db.user.findUnique).toHaveBeenCalledWith({
       where: { id: "user-1" },
-      select: { firstName: true, lastName: true },
+      select: { firstName: true, lastName: true, displayName: true },
     });
   });
 });

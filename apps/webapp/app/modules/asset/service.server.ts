@@ -2772,6 +2772,7 @@ export async function updateAsset({
         newLocation,
         firstName: user.firstName || "",
         lastName: user.lastName || "",
+        displayName: user.displayName,
         assetId: asset.id,
         userId,
         organizationId,
@@ -2802,11 +2803,7 @@ export async function updateAsset({
       });
 
       // Create location activity notes
-      const userLink = wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
+      const userLink = wrapUserLinkForNote({ ...user, id: userId });
       // Single-asset location-timeline note. `wrapAssetWithCountForNote`
       // prefixes the qty-tracked unit count ("50 units of {asset}");
       // INDIVIDUAL renders the bare link, so phrasing is unchanged.
@@ -3104,6 +3101,7 @@ export async function updateAsset({
               newValue: change.newValue,
               firstName: user?.firstName || "",
               lastName: user?.lastName || "",
+              displayName: user?.displayName,
               assetId: asset.id,
               userId,
               organizationId,
@@ -3665,11 +3663,7 @@ export async function replaceAssetPlacements({
         const fromCount = formatUnitCount(asset, existing.quantity);
         const toCount = formatUnitCount(asset, p.quantity);
         if (!fromCount || !toCount) return [];
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName,
-          lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         const locationLink = wrapLinkForNote(
           `/locations/${locationMeta.id}`,
           locationMeta.name.trim()
@@ -3694,6 +3688,7 @@ export async function replaceAssetPlacements({
             newLocation: location,
             firstName,
             lastName,
+            displayName: user?.displayName ?? null,
             assetId,
             userId,
             isRemoving: false,
@@ -3709,6 +3704,7 @@ export async function replaceAssetPlacements({
             newLocation: null,
             firstName,
             lastName,
+            displayName: user?.displayName ?? null,
             assetId,
             userId,
             isRemoving: true,
@@ -4431,6 +4427,7 @@ export async function createCustomFieldChangeNote({
   newValue,
   firstName,
   lastName,
+  displayName,
   assetId,
   userId,
   organizationId,
@@ -4441,6 +4438,12 @@ export async function createCustomFieldChangeNote({
   newValue?: string | null;
   firstName: string;
   lastName: string;
+  /**
+   * Acting user's `User.displayName`. It wins over first+last in the note's
+   * user link, so a caller holding the full user row must pass it or the note
+   * names the person differently from every other surface.
+   */
+  displayName?: string | null;
   assetId: Asset["id"];
   userId: User["id"];
   organizationId: Organization["id"];
@@ -4454,6 +4457,7 @@ export async function createCustomFieldChangeNote({
       userId,
       firstName,
       lastName,
+      displayName,
       isFirstTimeSet,
     });
 
@@ -6216,11 +6220,7 @@ export async function bulkCheckOutAssets({
       });
 
       /** Creating notes for the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
@@ -6713,6 +6713,7 @@ export async function bulkUpdateAssetLocation({
               userId,
               firstName: user?.firstName ?? "",
               lastName: user?.lastName ?? "",
+              displayName: user?.displayName,
               isRemoving,
             });
 
@@ -6747,11 +6748,7 @@ export async function bulkUpdateAssetLocation({
     });
 
     // Create location activity notes
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
     // Filter out assets already at the target location
     const actuallyChanged = assets.filter(
       (a) => getPrimaryLocation(a)?.id !== newLocation?.id
@@ -7567,9 +7564,8 @@ export async function relinkAssetQrCode({
         organizationId,
         type: "UPDATE",
         content: `${wrapUserLinkForNote({
+          ...user,
           id: userId,
-          firstName: user.firstName,
-          lastName: user.lastName,
         })} changed QR code ${
           oldQrCode ? `from **${oldQrCode.id}**` : ""
         } to **${qrId}**.`,
@@ -8986,6 +8982,7 @@ export async function moveAssetLocationUnits(
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.location.findFirst({
@@ -9001,6 +8998,7 @@ export async function moveAssetLocationUnits(
     if (user && fromLocation && toLocation) {
       const firstName = user.firstName ?? "";
       const lastName = user.lastName ?? "";
+      const displayName = user.displayName;
 
       // Asset-side bidirectional note. The helper recognises the
       // "current + new both set" shape and emits the "moved …" phrasing.
@@ -9009,6 +9007,7 @@ export async function moveAssetLocationUnits(
         newLocation: toLocation,
         firstName,
         lastName,
+        displayName,
         assetId,
         userId,
         isRemoving: false,
@@ -9022,6 +9021,7 @@ export async function moveAssetLocationUnits(
       // the single-location update path at ~line 2596.
       const userLink = wrapUserLinkForNote({
         id: userId,
+        displayName,
         firstName,
         lastName,
       });
@@ -9279,6 +9279,7 @@ export async function placeUnplacedUnits(
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.location.findFirst({
@@ -9290,12 +9291,14 @@ export async function placeUnplacedUnits(
     if (user && toLocation) {
       const firstName = user.firstName ?? "";
       const lastName = user.lastName ?? "";
+      const displayName = user.displayName;
 
       await createLocationChangeNote({
         currentLocation: null,
         newLocation: toLocation,
         firstName,
         lastName,
+        displayName,
         assetId,
         userId,
         isRemoving: false,
@@ -9307,6 +9310,7 @@ export async function placeUnplacedUnits(
 
       const userLink = wrapUserLinkForNote({
         id: userId,
+        displayName,
         firstName,
         lastName,
       });
