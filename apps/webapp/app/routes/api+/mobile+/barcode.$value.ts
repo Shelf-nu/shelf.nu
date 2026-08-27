@@ -24,6 +24,7 @@ import {
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import { readRawLastPathSegment } from "~/utils/raw-path-param";
 import { canUseBarcodes } from "~/utils/subscription.server";
 
 /**
@@ -74,13 +75,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    // React Router percent-decodes each path segment, but re-encodes any
-    // decoded `/` back to `%2F` so the decoded value cannot alter the path
-    // structure. Undo exactly that, and nothing else: a second full
-    // `decodeURIComponent` would eat a literal `%XX` belonging to the barcode
-    // (Code128 and DataMatrix both permit `%`) and would throw a URIError on a
-    // lone `%`, turning a scan into a 500.
-    const value = encodedValue.replace(/%2F/gi, "/");
+    // Read the segment from the URL rather than the route param. React Router
+    // re-encodes a decoded `/` back to `%2F`, which makes a barcode containing
+    // a slash and one whose literal text is `%2F` indistinguishable by the time
+    // a loader sees them; the URL still has the difference.
+    const value = readRawLastPathSegment(request, encodedValue);
 
     // Look up barcode within the organization, including asset details
     // in a single query. getBarcodeByValue handles case-insensitive
