@@ -264,6 +264,20 @@ function AuditDrawerEmptyState({
  * @param props.emptyStateContent - Overrides the default empty-state render.
  * @returns The audit scan drawer.
  */
+/**
+ * A scanned asset as the drawer reads it.
+ *
+ * `AssetFromQr` describes an asset fetched live by the scanner. A row restored
+ * from an audit's saved scans carries two extra facts that no live scan has —
+ * whether the asset has since been deleted, and the expectedness the server
+ * resolved from the scan's own snapshot — and a deleted row is the one case
+ * where the expected list cannot answer for it.
+ */
+type ScannedAssetData = AssetFromQr & {
+  assetDeleted?: boolean;
+  isExpected?: boolean;
+};
+
 export default function AuditDrawer({
   contextLabel,
   contextName,
@@ -336,10 +350,7 @@ export default function AuditDrawer({
       Object.values(items)
         .filter((item) => !!item && item.data && item.type === "asset")
         .map((item) => {
-          const assetData = item!.data as AssetFromQr & {
-            assetDeleted?: boolean;
-            isExpected?: boolean;
-          };
+          const assetData = item!.data as ScannedAssetData;
           const wasExpected = resolveScannedExpectedness({
             assetId: assetData.id,
             assetDeleted: assetData.assetDeleted,
@@ -378,12 +389,7 @@ export default function AuditDrawer({
       countDeletedExpectedScans(
         Object.values(items).map((item) =>
           item && item.type === "asset"
-            ? (item.data as
-                | (AssetFromQr & {
-                    assetDeleted?: boolean;
-                    isExpected?: boolean;
-                  })
-                | undefined)
+            ? (item.data as ScannedAssetData | undefined)
             : undefined
         )
       ),
