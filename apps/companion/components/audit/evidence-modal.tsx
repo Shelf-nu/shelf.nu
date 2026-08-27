@@ -571,7 +571,7 @@ export function EvidenceModal({
               </>
             )}
 
-            {onRemoveScan && item ? (
+            {onRemoveScan ? (
               <View style={styles.removeScanSection}>
                 <TouchableOpacity
                   style={styles.removeScanButton}
