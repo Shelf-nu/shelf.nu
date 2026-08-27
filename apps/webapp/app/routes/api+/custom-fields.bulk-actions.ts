@@ -57,10 +57,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
           BulkActivateCustomFieldSchema
         );
 
-        // `active: false` is what makes these NEWLY activating. The limit is
-        // checked as "currently active + these", so a field that is already
-        // active is counted on both sides — and a selection that would change
-        // nothing gets refused for exceeding the plan.
+        // Only fields whose state will actually change. The limit below is
+        // "currently active + these", so anything already active must stay out
+        // of this set — it is counted by the first term and consumes no further
+        // capacity.
         const newActivatingFields = await db.customField.findMany({
           where: customFieldIds.includes(ALL_SELECTED_KEY)
             ? { organizationId, deletedAt: null, active: false }
