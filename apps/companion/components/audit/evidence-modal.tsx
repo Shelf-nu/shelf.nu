@@ -582,11 +582,13 @@ export function EvidenceModal({
                   />
                   <Text style={styles.removeScanText}>Remove scan</Text>
                 </TouchableOpacity>
-                {/* Evidence belongs to the scan, so the undo takes it too. Say
-                    so before the tap, not in an error afterwards. */}
+                {/* Evidence hangs off the audit's row for the asset, not off
+                    the scan, so it survives the undo and is still there if the
+                    asset is scanned again. Worth saying: without it, undoing a
+                    mis-scan looks like it costs you the photos you took. */}
                 {(item.notesCount ?? 0) > 0 || (item.imagesCount ?? 0) > 0 ? (
                   <Text style={styles.removeScanHint}>
-                    The notes and photos on this scan go with it.
+                    Your notes and photos stay on the audit.
                   </Text>
                 ) : null}
               </View>
