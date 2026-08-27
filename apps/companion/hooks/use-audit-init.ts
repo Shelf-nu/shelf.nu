@@ -6,6 +6,7 @@ import {
   clearAuditScanState,
   createDebouncedSaver,
 } from "@/lib/audit-scan-persistence";
+import { auditDeletedAssetLabel } from "@shelf/labels";
 import { announce } from "@/lib/a11y";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 
@@ -16,6 +17,18 @@ export type ScannedItem = {
   name: string;
   isExpected: boolean;
   scannedAt: string;
+  /**
+   * The AuditScan row id. Carried only for restored scans whose asset has been
+   * DELETED: `assetId` is empty for those, so it is the only identity left to
+   * key the row on. Absent for live scans, which have a real `assetId`.
+   */
+  scanId?: string;
+  /**
+   * The scanned asset has since been deleted, so nothing behind this row can
+   * be opened or re-fetched. The name already says so; this is what the list
+   * reads to keep the row from being treated as an ordinary scan.
+   */
+  assetDeleted?: boolean;
   /** The audit-asset record ID, needed for adding notes/photos. Set after server confirms scan. */
   auditAssetId?: string;
   /** Local count of notes added during this session (optimistic). */
@@ -147,9 +160,19 @@ export function useAuditInit({
         // why: an expected asset already has its full record client-side, so
         // prefer it for the image; the scan payload only carries a location.
         const expected = expectedMap.get(scan.assetId);
+        // A scan whose asset was deleted keeps only the title captured at scan
+        // time. Naming it plainly would render it as an ordinary live asset,
+        // which is worse than the blank row it replaced — the auditor would go
+        // looking for something that no longer exists. Older servers omit the
+        // flag, so an empty `assetId` stands in for it.
+        const assetDeleted = scan.assetDeleted || !scan.assetId;
         restoredItems.push({
           assetId: scan.assetId,
-          name: scan.assetTitle,
+          scanId: scan.id,
+          assetDeleted,
+          name: assetDeleted
+            ? auditDeletedAssetLabel(scan.assetTitle)
+            : scan.assetTitle,
           isExpected: scan.isExpected,
           scannedAt: scan.scannedAt,
           auditAssetId: scan.auditAssetId ?? undefined,

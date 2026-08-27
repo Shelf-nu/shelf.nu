@@ -2589,6 +2589,57 @@ describe("audit service", () => {
       });
     });
 
+    it("snapshots the asset title onto the scan row at create", async () => {
+      // why this is pinned separately from `wasExpected`: the title is the half
+      // of the snapshot nothing else can reconstruct. Every other assertion in
+      // this file feeds `assetTitle` in as mock INPUT to the read path, so
+      // deleting the write leaves the whole suite green while the column it
+      // fills silently stays null — and the gap only becomes visible once an
+      // asset is deleted, which no test with live data can reach.
+      mockDb.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-1",
+        expected: true,
+        status: "PENDING",
+      });
+      mockDb.auditAsset.updateMany.mockResolvedValue({ count: 1 });
+
+      await recordAuditScan(scanInput);
+
+      expect(mockDb.auditScan.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ assetTitle: "Camera" }),
+        })
+      );
+    });
+
+    it("takes the snapshotted title from the org-verified asset, not the request", async () => {
+      // why: the title is written by value and outlives every check that could
+      // later contradict it, so it has to come from the row this scan already
+      // proved belongs to the caller's organization. `recordAuditScan` takes no
+      // title argument at all — this pins that it stays that way.
+      mockDb.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Arri Fresnel 650 Plus",
+        organizationId: "org-1",
+      });
+      mockDb.auditAsset.findUnique.mockResolvedValue({
+        id: "audit-asset-1",
+        expected: true,
+        status: "PENDING",
+      });
+      mockDb.auditAsset.updateMany.mockResolvedValue({ count: 1 });
+
+      await recordAuditScan(scanInput);
+
+      expect(mockDb.auditScan.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            assetTitle: "Arri Fresnel 650 Plus",
+          }),
+        })
+      );
+    });
+
     it("refreshes a surviving unexpected row and counts it when its status drifted", async () => {
       // why: removing a scan can leave the AuditAsset row behind. Re-scanning
       // must reuse that row (the unique constraint rules out a second one) and
@@ -2803,5 +2854,34 @@ describe("getAuditScans — a scan whose asset was deleted", () => {
     expect(scan.isExpected).toBe(true);
     expect(scan.assetTitle).toBe("Live title");
     expect(scan.assetDeleted).toBe(false);
+  });
+
+  it("does not resurrect an asset REMOVED from the audit as expected", async () => {
+    // why: `AuditScan.auditAsset` is SetNull, not Cascade, so removing an asset
+    // from a pending audit deletes the AuditAsset row and leaves the scan
+    // behind with its asset intact. A missing AuditAsset therefore does not
+    // mean "deleted" — it can equally mean "no longer part of this audit", and
+    // that row must not read as expected off a snapshot taken when it still
+    // was. The fallback keys on the asset being gone, which only deletion
+    // causes.
+    mockDb.auditScan.findMany.mockResolvedValue([
+      {
+        id: "scan-4",
+        code: "abc",
+        assetId: "asset-1",
+        asset: { id: "asset-1", title: "Still here", assetLocations: [] },
+        auditAsset: null,
+        assetTitle: "Still here",
+        wasExpected: true,
+        scannedAt: new Date("2026-08-19T10:00:00Z"),
+      },
+    ]);
+    // The AuditAsset row is gone, so the by-assetId rescue lookup finds nothing.
+    mockDb.auditAsset.findMany.mockResolvedValue([]);
+
+    const [scan] = await getAuditScans(ARGS);
+
+    expect(scan.assetDeleted).toBe(false);
+    expect(scan.isExpected).toBe(false);
   });
 });

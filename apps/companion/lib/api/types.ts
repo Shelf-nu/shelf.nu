@@ -1040,8 +1040,11 @@ export type AuditScanData = {
   /**
    * The scanned asset has since been DELETED. Distinct from an empty title,
    * which a scan recorded before the snapshot columns existed also has.
+   *
+   * Absent on older servers, like `id` above — consumers must keep the empty
+   * `assetId` fallback rather than trusting this alone.
    */
-  assetDeleted: boolean;
+  assetDeleted?: boolean;
 };
 
 export type AuditDetailResponse = {

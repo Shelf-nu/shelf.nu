@@ -70,6 +70,29 @@ export declare const AUDIT_ASSET_STATUS_LABELS: {
   readonly UNEXPECTED: "Unexpected";
 };
 
+/**
+ * Wording for an audit scan whose asset no longer exists.
+ *
+ * Deleting an asset leaves the scan row behind with nothing to name it but the
+ * title captured at scan time, so both apps must say it the same way. Prefer
+ * {@link auditDeletedAssetLabel} over indexing this map — only that helper
+ * applies the "keep the snapshotted title" rule.
+ */
+export declare const AUDIT_DELETED_ASSET_LABELS: {
+  readonly UNTITLED: "Deleted asset";
+};
+
+/**
+ * Names a scan whose asset has been deleted, keeping the title it had when it
+ * was scanned and marking it as gone.
+ *
+ * @param title - the snapshotted title, if any
+ * @returns the row's display name
+ */
+export declare function auditDeletedAssetLabel(
+  title: string | null | undefined
+): string;
+
 /** Enum keys of {@link AUDIT_ASSET_STATUS_LABELS} — the Prisma status values. */
 export type AuditAssetStatusKey = keyof typeof AUDIT_ASSET_STATUS_LABELS;
 

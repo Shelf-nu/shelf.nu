@@ -30,7 +30,11 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import type { ScannedItem } from "@/hooks/use-audit-init";
 
 const SCANNED_ITEM_HEIGHT = 58;
-const keyExtractor = (item: ScannedItem) => item.assetId;
+// A scan whose asset was deleted has an empty `assetId`, so every such row
+// would share one key. The scan row id is the identity that survives the
+// asset; `scannedAt` is a last resort for servers that do not send it.
+const keyExtractor = (item: ScannedItem) =>
+  item.assetId || item.scanId || item.scannedAt;
 
 type ScannedItemsListProps = {
   items: ScannedItem[];

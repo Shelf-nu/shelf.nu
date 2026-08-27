@@ -22,9 +22,11 @@ import { test } from "node:test";
 import {
   AUDIT_ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_TONES,
+  AUDIT_DELETED_ASSET_LABELS,
   AUDIT_STATUS_LABELS,
   AUDIT_STATUS_TONES,
   auditAssetStatusLabel,
+  auditDeletedAssetLabel,
   isAuditCompleted,
 } from "./index.js";
 
@@ -154,9 +156,33 @@ test("the exported maps cannot be mutated by a consumer", () => {
   for (const map of [
     AUDIT_STATUS_LABELS,
     AUDIT_ASSET_STATUS_LABELS,
+    AUDIT_DELETED_ASSET_LABELS,
     AUDIT_STATUS_TONES,
     AUDIT_ASSET_STATUS_TONES,
   ]) {
     assert.ok(Object.isFrozen(map));
   }
+});
+
+// ---------------------------------------------------------------------------
+// Deleted-asset wording
+// ---------------------------------------------------------------------------
+
+test("a deleted asset keeps the title it was scanned under", () => {
+  assert.equal(
+    auditDeletedAssetLabel("Arri Fresnel 650"),
+    "Arri Fresnel 650 (deleted)"
+  );
+});
+
+test("a deleted asset with no snapshotted title says only what it is", () => {
+  // A scan recorded before the title was captured by value has nothing left to
+  // qualify, so the row must not read " (deleted)" with an empty name.
+  for (const empty of [null, undefined, "", "   "]) {
+    assert.equal(auditDeletedAssetLabel(empty), "Deleted asset");
+  }
+});
+
+test("surrounding whitespace never reaches the rendered name", () => {
+  assert.equal(auditDeletedAssetLabel("  Tripod  "), "Tripod (deleted)");
 });

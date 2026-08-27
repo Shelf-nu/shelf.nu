@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -34,6 +34,7 @@ import {
   AUDIT_STATUS_LABELS,
   AUDIT_UNASSIGNED_LABELS,
   auditAssetStatusLabel,
+  auditDeletedAssetLabel,
   isAuditCompleted,
 } from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
@@ -108,7 +109,6 @@ type DisplayAsset = {
   name: string;
   mainImage: string | null;
   status: AuditAssetStatus;
-  isExpected: boolean;
   scannedAt: string | null;
   /**
    * The code that was scanned. Kept for rows whose asset has been deleted:
@@ -484,7 +484,10 @@ function AuditDetailContent() {
 
   // ── Build display assets list ─────────────────────────
 
-  const displayAssets = useCallback((): DisplayAsset[] => {
+  // Memoised rather than a callback: both the list and the header count read
+  // this every render, so a function would rebuild the whole expected+scan
+  // merge twice per keystroke, filter tap and refresh tick.
+  const displayAssets = useMemo((): DisplayAsset[] => {
     if (!audit) return [];
 
     // Build a map of scanned assets by assetId
@@ -515,7 +518,6 @@ function AuditDetailContent() {
         name: asset.name,
         mainImage: asset.thumbnailImage || asset.mainImage,
         status: scan ? "FOUND" : notFoundStatus,
-        isExpected: true,
         scannedAt: scan?.scannedAt || null,
         scannedCode: null,
         locationName: asset.locationName ?? null,
@@ -537,44 +539,39 @@ function AuditDetailContent() {
     for (const scan of existingScans) {
       if (!expectedIds.has(scan.assetId)) {
         /**
-         * A scan whose asset has since been DELETED, not an unexpected one.
+         * A scan with no matching expected row: either an asset that is not
+         * part of the audit, or one that has since been DELETED.
          *
          * Deleting an asset cascades away its AuditAsset row and SetNulls the
-         * scan's asset, so the scan survives pointing at nothing. Read
-         * `assetDeleted` to tell the two apart: a deleted asset can never match
-         * the expected list, so treating an unmatched scan as unexpected would
-         * mislabel it. `assetTitle` is the name captured at scan time and names
-         * the row; the scanned code covers rows written before that column
-         * existed.
+         * scan's asset, so the scan survives pointing at nothing and can never
+         * match the expected list. `assetDeleted` is what tells the two apart —
+         * an empty title cannot, because a scan recorded before the title was
+         * captured by value looks the same. Older servers omit the flag, so an
+         * empty `assetId` stands in for it.
          */
         const isDeletedAsset = scan.assetDeleted || !scan.assetId;
         const snapshotTitle = scan.assetTitle?.trim();
         items.push({
-          // why: every deleted-asset scan would otherwise share the id "",
-          // colliding in the list's keyExtractor. The scan ROW id is the
-          // identity that survives the asset — code is nullable and
-          // non-unique, and scannedAt can collide. Older servers don't send
-          // the id, so those keep the code/scannedAt fallback.
+          // A deleted asset's `assetId` is empty, so every such row would share
+          // one key and collide in the list's keyExtractor. The scan ROW id is
+          // the identity that survives the asset; `code` is nullable and
+          // non-unique and `scannedAt` can collide, so they are a last resort
+          // for servers that do not send the id. `||`, not `??`: the server
+          // flattens a null code to "", which is not nullish and would swallow
+          // the remaining fallback.
           id: isDeletedAsset
-            ? `deleted:${scan.id ?? scan.code ?? scan.scannedAt}`
+            ? `deleted:${scan.id || scan.code || scan.scannedAt}`
             : scan.assetId,
           name: isDeletedAsset
-            ? snapshotTitle
-              ? `${snapshotTitle} (deleted)`
-              : "Deleted asset"
+            ? auditDeletedAssetLabel(snapshotTitle)
             : snapshotTitle || "Untitled asset",
           mainImage: null,
-          // why NOT a hardcoded UNEXPECTED: this branch handles scans with no
-          // matching expected row, and a DELETED asset always lands here — its
-          // assetId is empty, so it can never match expectedIds. Hardcoding
-          // false threw away the very fact this PR added: the server restores
-          // expectedness from the scan's own snapshot
-          // (`auditAsset?.expected ?? scan.wasExpected`) and sends it as
-          // `isExpected`. Without this, a deleted asset that WAS expected still
-          // reads "Unexpected" on the phone — the exact mislabelling the
-          // snapshot exists to prevent, and it contradicts the activity feed.
+          // Expectedness comes from the server, never from membership of the
+          // expected list: a deleted asset always lands in this branch, and the
+          // server restores whether it belonged to the audit from the scan's
+          // own snapshot. Deciding it here would report every deleted asset as
+          // unexpected, contradicting the activity feed.
           status: scan.isExpected ? "FOUND" : "UNEXPECTED",
-          isExpected: scan.isExpected,
           scannedAt: scan.scannedAt,
           scannedCode: isDeletedAsset ? scan.code || null : null,
           // why: the scan payload carries the asset's location
@@ -594,13 +591,11 @@ function AuditDetailContent() {
     return items;
   }, [audit, expectedAssets, existingScans]);
 
-  const filteredAssets = useCallback((): DisplayAsset[] => {
-    const all = displayAssets();
-    if (effectiveFilter === "ALL") return all;
-    // Statuses are now computed correctly per audit state (PENDING while
-    // active, MISSING once completed), so a direct match is unambiguous —
-    // no more Pending/Missing aliasing.
-    return all.filter((a) => a.status === effectiveFilter);
+  const filteredAssets = useMemo((): DisplayAsset[] => {
+    if (effectiveFilter === "ALL") return displayAssets;
+    // Status encodes the audit state (PENDING while active, MISSING once
+    // completed), so a direct match is unambiguous.
+    return displayAssets.filter((a) => a.status === effectiveFilter);
   }, [displayAssets, effectiveFilter]);
 
   // ── Render functions ──────────────────────────────────
@@ -852,7 +847,7 @@ function AuditDetailContent() {
     AUDIT_STATUS_LABELS[audit.status as keyof typeof AUDIT_STATUS_LABELS] ??
     audit.status;
 
-  const assets = filteredAssets();
+  const assets = filteredAssets;
 
   // ── Render ────────────────────────────────────────────
 
@@ -1201,7 +1196,7 @@ function AuditDetailContent() {
             {/* Asset filter pills */}
             <View style={styles.assetFilterSection}>
               <Text style={styles.sectionTitle}>
-                Assets ({displayAssets().length})
+                Assets ({displayAssets.length})
               </Text>
               <View style={styles.filterRow} accessibilityRole="tablist">
                 {visibleFilters.map((f) => (

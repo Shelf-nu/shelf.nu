@@ -1598,9 +1598,9 @@ export async function recordAuditScan(
             auditAssetId,
             // why: recorded here rather than at create because expectedness is
             // derived from AuditAsset above, never trusted from the request.
-            // Snapshotting it means a deleted asset's row can still say
-            // whether it belonged to the audit — today that fact dies with
-            // the cascaded AuditAsset row and the scan gets mislabelled.
+            // Snapshotting it is what lets a deleted asset's row still say
+            // whether it belonged to the audit, once the cascade has taken the
+            // AuditAsset row that would otherwise answer that.
             wasExpected: isExpected,
           },
         });
@@ -2008,13 +2008,26 @@ export async function getAuditScans({
         scan.auditAsset ??
         (scan.assetId ? auditAssetsByAssetId.get(scan.assetId) : undefined);
 
-      // why the live row wins over the snapshot: a rename should show the
-      // CURRENT name, not the one from the day of the scan. The snapshot's job
-      // is to survive DELETION, not to freeze naming. Rows written before the
-      // snapshot columns existed have neither, and fall back to "" — the
-      // client then has the `code`, which also outlives the asset.
+      // The asset is gone precisely when `assetId` is null: `AuditScan.asset`
+      // is SetNull, so deletion is the only thing that empties it.
+      const assetDeleted = scan.assetId === null;
+
+      // The live row wins over the snapshot: a rename must show the CURRENT
+      // name. The snapshot's job is to survive deletion, not to freeze naming.
+      // A row written before the snapshot columns existed has neither and
+      // falls back to "", leaving the client the `code`, which also outlives
+      // the asset.
       const assetTitle = scan.asset?.title ?? scan.assetTitle ?? "";
-      const isExpected = auditAsset?.expected ?? scan.wasExpected ?? false;
+
+      // Expectedness falls back to the snapshot ONLY once the asset is gone.
+      // `AuditScan.auditAsset` is SetNull too, so a missing AuditAsset does not
+      // imply deletion — removing an asset from a pending audit leaves the scan
+      // behind with its asset intact, and that row is genuinely no longer part
+      // of the audit. Keying on deletion keeps the snapshot from resurrecting
+      // it as expected.
+      const isExpected = assetDeleted
+        ? scan.wasExpected ?? false
+        : auditAsset?.expected ?? false;
 
       return {
         id: scan.id,
@@ -2027,7 +2040,7 @@ export async function getAuditScans({
         // Distinguishes "the asset is gone" from "this scan predates the
         // snapshot columns", so the client can say which it is instead of
         // guessing from an empty title.
-        assetDeleted: scan.assetId === null,
+        assetDeleted,
         auditAssetId: auditAsset?.id ?? null,
         auditNotesCount: auditAsset?._count?.notes ?? 0,
         auditImagesCount: auditAsset?._count?.images ?? 0,
@@ -3108,7 +3121,10 @@ export async function removeAssetFromAudit({
         });
       }
 
-      // Delete the audit asset (cascade will delete related scans). Scoped
+      // Delete the audit asset. `AuditScan.auditAsset` is SetNull, so any scan
+      // of this asset SURVIVES with its `auditAssetId` emptied — the row stays
+      // in the audit's scan history while ceasing to be part of the audit.
+      // `getAuditScans` relies on that distinction. Scoped
       // again rather than by id alone: defence in depth, so the write cannot
       // outlive a future refactor of the check above.
       const removed = await tx.auditAsset.deleteMany({

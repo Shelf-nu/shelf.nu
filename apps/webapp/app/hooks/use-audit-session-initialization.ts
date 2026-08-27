@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { auditDeletedAssetLabel } from "@shelf/labels";
 import { useSetAtom } from "jotai";
 import {
   startAuditSessionAtom,
@@ -114,13 +115,29 @@ export function useAuditSessionInitialization({
     if (existingScans.length > 0) {
       const restoredItems: any = {};
       existingScans.forEach((scan) => {
+        // A scan whose asset was deleted keeps only the title captured at scan
+        // time, and its `assetId` is empty. Naming it plainly would render it
+        // as an ordinary live asset — worse than the blank row it replaced,
+        // because the auditor would go looking for something that no longer
+        // exists. The scan ROW id is the identity that survives the asset.
+        const assetDeleted = scan.assetDeleted || !scan.assetId;
+
+        // Keyed on the scan row for deleted assets: `code` is nullable and
+        // non-unique, so codeless rows would otherwise overwrite each other.
+        const itemKey = assetDeleted
+          ? `deleted:${scan.id || scan.code || scan.scannedAt}`
+          : scan.code;
+
         // Add QR codes to the atom with full data so GenericItemRow doesn't re-fetch
-        restoredItems[scan.code] = {
+        restoredItems[itemKey] = {
           codeType: "qr",
           type: "asset",
           data: {
             id: scan.assetId,
-            title: scan.assetTitle,
+            title: assetDeleted
+              ? auditDeletedAssetLabel(scan.assetTitle)
+              : scan.assetTitle,
+            assetDeleted,
             auditAssetId: scan.auditAssetId,
             auditNotesCount: scan.auditNotesCount,
             auditImagesCount: scan.auditImagesCount,
@@ -129,8 +146,13 @@ export function useAuditSessionInitialization({
               : null,
           },
         };
-        // Mark them as already persisted so we don't try to persist again
-        persistedItemsRef.current.add(scan.assetId);
+        // Mark them as already persisted so we don't try to persist again.
+        // A deleted asset has no id to dedupe on and can never be re-scanned,
+        // so it contributes nothing here — adding "" would collapse every such
+        // row onto one entry.
+        if (scan.assetId) {
+          persistedItemsRef.current.add(scan.assetId);
+        }
       });
       setScannedItems(restoredItems);
     }
