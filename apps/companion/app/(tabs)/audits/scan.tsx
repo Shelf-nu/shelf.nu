@@ -269,6 +269,10 @@ function AuditScannerContent() {
    * the removal, so those are adopted wholesale rather than decremented here
    * — the two statuses move different counters and only the server knows
    * which one this scan was.
+   *
+   * Idempotent, like the endpoint: a scan that was already gone leaves the same
+   * screen behind as one removed here, because the person asked for the same
+   * end state either way.
    */
   const handleRemoveScan = useCallback(
     async (item: ScannedItem) => {
@@ -285,17 +289,18 @@ function AuditScannerContent() {
         return;
       }
 
-      // removed:false means the server had no scan to remove — the sheet gates
-      // the action on a synced scan, so reaching here means one vanished under
-      // us. Keep the row rather than reporting a removal that did not happen.
-      if (!data.removed) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        Alert.alert(
-          "Nothing to remove",
-          "That scan has not reached the server yet. Try again in a moment."
-        );
-        return;
-      }
+      // `removed: false` means the server holds no scan for this asset, which
+      // is a different thing from "nothing happened". The sheet offers the undo
+      // only once a scan has synced, so the scan did reach the server and has
+      // since gone: removed from the web or another device, or by this call's
+      // own retry — a lost response on a weak signal re-sends the request, and
+      // the second one finds the row the first already deleted.
+      //
+      // Either way the end state is the one the person asked for, and the row
+      // on screen asserts a scan that no longer exists. So it is cleaned up
+      // exactly as a fresh removal; only the wording differs. Keeping it would
+      // strand the asset: it would still hold its place in the dedup set, so it
+      // could not even be scanned again.
 
       // Drop the row and let the asset be scannable again. The dedup set is
       // what makes a re-scan register rather than reading as a duplicate.
@@ -335,11 +340,12 @@ function AuditScannerContent() {
         debouncedSaverRef.current?.cancel();
         void clearAuditScanState(auditId);
       }
-      // The server counts rows it holds, and scans still waiting in the queue
-      // are not among them — adopting its totals raw would erase the progress
-      // those scans already earned on screen, and understate the walk until
-      // the audit is reopened. Add them back, deduped by asset so a requeued
-      // entry counts once.
+      // The totals describe rows the server holds — recomputed when it deleted
+      // a scan, the session's own counters when it had none left to delete —
+      // and scans still waiting in the queue are among neither. Adopting them
+      // raw would erase the progress those scans already earned on screen, and
+      // understate the walk until the audit is reopened. Add them back, deduped
+      // by asset so a requeued entry counts once.
       const outstanding = new Map<string, boolean>();
       for (const queued of [
         ...scanQueueRef.current,
@@ -362,8 +368,8 @@ function AuditScannerContent() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       showToast(
         "duplicate",
-        "Scan removed",
-        item.name?.trim() || "Scan removed"
+        data.removed ? "Scan removed" : "Scan already removed",
+        item.name?.trim() || "The asset can be scanned again."
       );
     },
     [

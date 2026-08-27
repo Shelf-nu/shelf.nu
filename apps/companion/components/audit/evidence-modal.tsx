@@ -92,10 +92,15 @@ type EvidenceModalProps = {
   /** Callback when evidence is added, to update counts */
   onEvidenceAdded: (assetId: string, type: "note" | "image") => void;
   /**
-   * Undo this scan. Omitted where the audit can no longer take changes, which
-   * is what hides the action — a completed audit is a reported record.
+   * Undo this scan. Optional so a caller with no undo to offer can leave it
+   * out; the audit scanner always passes it, and reaching that screen is
+   * itself the live-audit gate — its entry point renders only for a PENDING or
+   * ACTIVE audit. An audit completed while the scanner sits open is caught by
+   * the server, which refuses to change a reported record.
+   *
+   * Return a promise to keep the control busy for the round trip.
    */
-  onRemoveScan?: (item: ScannedItem) => void;
+  onRemoveScan?: (item: ScannedItem) => void | Promise<void>;
   /**
    * The evidence this scan actually carries, once the sheet has read it.
    *
@@ -211,6 +216,13 @@ export function EvidenceModal({
   const [noteText, setNoteText] = useState("");
   const [isSubmittingNote, setIsSubmittingNote] = useState(false);
   const [isSubmittingImage, setIsSubmittingImage] = useState(false);
+  /**
+   * The undo is a network round trip that leaves this sheet on screen until it
+   * answers, and the caller closes the sheet rather than this component — so
+   * without a busy state the control looks untouched for the whole wait, and a
+   * second tap fires a second removal.
+   */
+  const [isRemoving, setIsRemoving] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [imageMimeType, setImageMimeType] = useState("image/jpeg");
 
@@ -361,6 +373,23 @@ export function EvidenceModal({
     noteText,
     onEvidenceAdded,
   ]);
+
+  /**
+   * Run the undo and hold the control busy until it answers.
+   *
+   * The caller owns what happens next — including closing this sheet — so the
+   * busy state is cleared unconditionally: on the success path the sheet is
+   * already gone, and on every other one the control has to come back.
+   */
+  const handleRemoveScanPress = useCallback(async () => {
+    if (!item || !onRemoveScan) return;
+    setIsRemoving(true);
+    try {
+      await onRemoveScan(item);
+    } finally {
+      setIsRemoving(false);
+    }
+  }, [item, onRemoveScan]);
 
   if (!item) return null;
 
@@ -602,7 +631,11 @@ export function EvidenceModal({
             {onRemoveScan && !isPending ? (
               <View style={styles.removeScanSection}>
                 <TouchableOpacity
-                  style={styles.removeScanButton}
+                  style={[
+                    styles.removeScanButton,
+                    isRemoving && styles.removeScanButtonBusy,
+                  ]}
+                  disabled={isRemoving}
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     // The confirm lives here rather than in the caller so the
@@ -618,22 +651,32 @@ export function EvidenceModal({
                         {
                           text: "Remove",
                           style: "destructive",
-                          onPress: () => onRemoveScan(item),
+                          onPress: () => void handleRemoveScanPress(),
                         },
                       ]
                     );
                   }}
                   accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: isRemoving,
+                    busy: isRemoving,
+                  }}
                   accessibilityLabel={`Remove the scan of ${
                     item.name?.trim() || "this asset"
                   }`}
                 >
-                  <Ionicons
-                    name="arrow-undo-outline"
-                    size={18}
-                    color={colors.error}
-                  />
-                  <Text style={styles.removeScanText}>Remove scan</Text>
+                  {isRemoving ? (
+                    <ActivityIndicator size="small" color={colors.error} />
+                  ) : (
+                    <Ionicons
+                      name="arrow-undo-outline"
+                      size={18}
+                      color={colors.error}
+                    />
+                  )}
+                  <Text style={styles.removeScanText}>
+                    {isRemoving ? "Removing…" : "Remove scan"}
+                  </Text>
                 </TouchableOpacity>
                 {/* Evidence hangs off the audit's row for the asset, not off
                     the scan, so it survives the undo and is still there if the
@@ -671,6 +714,11 @@ const useStyles = createStyles((colors) => ({
     gap: spacing.xs,
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.md,
+  },
+  // Dimmed rather than hidden while the removal is in flight: the row it acts
+  // on is still on screen, so the control has to stay where the eye left it.
+  removeScanButtonBusy: {
+    opacity: 0.6,
   },
   removeScanText: {
     color: colors.error,
