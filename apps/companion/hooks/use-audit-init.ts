@@ -18,9 +18,12 @@ export type ScannedItem = {
   isExpected: boolean;
   scannedAt: string;
   /**
-   * The AuditScan row id. Carried only for restored scans whose asset has been
-   * DELETED: `assetId` is empty for those, so it is the only identity left to
-   * key the row on. Absent for live scans, which have a real `assetId`.
+   * The AuditScan row id, set on every scan restored from the server.
+   *
+   * A deleted asset's row REQUIRES it as its list key — `assetId` is empty for
+   * those, so nothing else identifies the row. Absent on scans made live in
+   * this session, which have not reached the server yet, and on servers too
+   * old to send it.
    */
   scanId?: string;
   /**

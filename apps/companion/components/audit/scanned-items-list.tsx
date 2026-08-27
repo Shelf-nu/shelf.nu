@@ -73,11 +73,28 @@ export function ScannedItemsList({
         .join(", ");
       const syncFailed = item.syncFailed === true;
 
+      // A scan whose asset was deleted has nothing left to attach evidence to:
+      // the AuditAsset row went with the asset, so the evidence sheet has no
+      // target and would sit on its pending spinner forever. The row is history
+      // now, so it renders inert rather than offering an action that cannot
+      // complete.
+      //
+      // Gated on `assetDeleted`, NOT on a missing `auditAssetId`: a scan still
+      // in the sync queue is also missing one, and for that row the pending
+      // state is correct and clears itself once the scan lands.
+      const isDeleted = item.assetDeleted === true;
+      const Row = isDeleted ? View : TouchableOpacity;
+
       return (
-        <TouchableOpacity
+        <Row
           style={styles.scannedItem}
-          onPress={() => onItemPress?.(item)}
-          activeOpacity={0.7}
+          {...(isDeleted
+            ? { accessible: true, accessibilityRole: "summary" as const }
+            : {
+                onPress: () => onItemPress?.(item),
+                activeOpacity: 0.7,
+                accessibilityRole: "button" as const,
+              })}
           // why: the visible "Found" label was removed as redundant, but a
           // screen reader has no tab context and no colour, so the state stays
           // in the spoken label along with the location.
@@ -85,8 +102,9 @@ export function ScannedItemsList({
             item.isExpected ? "found" : "unexpected, not on this audit"
           }${item.locationName ? `, at ${item.locationName}` : ""}${
             hasEvidence ? `, ${evidenceLabel}` : ""
-          }${syncFailed ? ", not synced" : ""}. Tap to add notes or photos.`}
-          accessibilityRole="button"
+          }${syncFailed ? ", not synced" : ""}${
+            isDeleted ? "." : ". Tap to add notes or photos."
+          }`}
         >
           <Ionicons
             name={item.isExpected ? "checkmark-circle" : "alert-circle"}
@@ -170,7 +188,7 @@ export function ScannedItemsList({
                 </>
               ) : null}
             </View>
-          ) : (
+          ) : isDeleted ? null : (
             <View style={styles.addEvidenceChip}>
               <Ionicons
                 name="camera-outline"
@@ -182,7 +200,7 @@ export function ScannedItemsList({
               </Text>
             </View>
           )}
-        </TouchableOpacity>
+        </Row>
       );
     },
     [colors, styles, onItemPress]

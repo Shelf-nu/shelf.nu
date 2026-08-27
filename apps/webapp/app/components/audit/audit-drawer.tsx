@@ -32,6 +32,7 @@ import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
 import { Spinner } from "~/components/shared/spinner";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
+import { resolveScannedExpectedness } from "~/utils/audit-scan-expectedness";
 import { tw } from "~/utils/tw";
 
 const AuditSchema = z.object({
@@ -332,12 +333,21 @@ export default function AuditDrawer({
       Object.values(items)
         .filter((item) => !!item && item.data && item.type === "asset")
         .map((item) => {
-          const assetData = item!.data as AssetFromQr;
+          const assetData = item!.data as AssetFromQr & {
+            assetDeleted?: boolean;
+            isExpected?: boolean;
+          };
+          const wasExpected = resolveScannedExpectedness({
+            assetId: assetData.id,
+            assetDeleted: assetData.assetDeleted,
+            isExpected: assetData.isExpected,
+            expectedAssetIds,
+          });
           return {
             id: assetData.id,
             name: assetData.title,
             type: "asset" as const,
-            auditStatus: expectedAssetIds.has(assetData.id)
+            auditStatus: wasExpected
               ? ("found" as const)
               : ("unexpected" as const),
           } satisfies AuditScannedItem;
