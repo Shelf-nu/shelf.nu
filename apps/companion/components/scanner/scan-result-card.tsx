@@ -178,8 +178,12 @@ const useStyles = createStyles(() => ({
   resultCardError: {
     backgroundColor: "rgba(240,68,56,0.9)",
   },
+  // Deep orange for the same reason as the amber cards below: this card is
+  // read, and white on the brighter orange lands under the 4.5:1 WCAG AA asks
+  // of body text. This ground holds white at ~8:1, and ~5:1 on the lighter
+  // action buttons the unlinked-QR card puts here.
   resultCardWarning: {
-    backgroundColor: "rgba(239,104,32,0.9)",
+    backgroundColor: "rgba(154,52,18,0.92)",
   },
   // Deep amber, following the audit scanner's duplicate toast: the bright
   // #FFC107 of the scan FRAME is a graphic and carries no text, while a card
