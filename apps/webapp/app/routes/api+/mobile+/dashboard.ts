@@ -141,6 +141,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         userId: user.id,
         custodianScope,
         bookingFrom: new Date(),
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
             select: {
@@ -151,6 +155,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
           },
           custodianTeamMember: { select: { name: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -162,6 +167,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         statuses: ["ONGOING"],
         userId: user.id,
         custodianScope,
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
             select: {
@@ -172,6 +181,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
           },
           custodianTeamMember: { select: { name: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -183,6 +193,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         statuses: ["OVERDUE"],
         userId: user.id,
         custodianScope,
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
             select: {
@@ -193,6 +207,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
           },
           custodianTeamMember: { select: { name: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -231,7 +246,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
       statusCounts[group.status] = group._count.id;
     }
 
+    /**
+     * The booking row shape the three `getBookings` calls above produce, as
+     * far as this projection reads it.
+     *
+     * Spelled out instead of `any` because the field it gets wrong is
+     * invisible at runtime: the previous `b._count?.assets` named a relation
+     * that does not exist on `Booking` (it is `bookingAssets`) and no `_count`
+     * was selected at all, so every booking reported `assetCount: 0` and the
+     * `any` kept the compiler quiet about it.
+     */
+    type MobileDashboardBooking = {
+      id: string;
+      name: string;
+      status: string;
+      from: Date | string | null;
+      to: Date | string | null;
+      custodianUser?: {
+        firstName: string | null;
+        lastName: string | null;
+      } | null;
+      custodianTeamMember?: { name: string } | null;
+      _count?: { bookingAssets: number };
+    };
+
     // Format booking results
+<<<<<<< HEAD
     // Inferred from the query rather than `any`: the custodian fields read
     // below are only type-checked if this parameter carries the projection.
     // All three `getBookings` calls above share one `extraInclude`, so the
@@ -239,17 +279,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const formatBooking = (
       b: (typeof upcomingBookingsResult.bookings)[number]
     ) => ({
+=======
+    const formatBooking = (b: MobileDashboardBooking) => ({
+>>>>>>> origin/main
       id: b.id,
       name: b.name,
       status: b.status,
-      from: b.from?.toISOString?.() ?? b.from,
-      to: b.to?.toISOString?.() ?? b.to,
+      from: b.from instanceof Date ? b.from.toISOString() : b.from,
+      to: b.to instanceof Date ? b.to.toISOString() : b.to,
       custodianName: b.custodianUser
         ? resolveUserDisplayName(b.custodianUser) || null
         : b.custodianTeamMember?.name || null,
+<<<<<<< HEAD
       // Counted via the explicit `BookingAsset` pivot. The implicit-M2M
       // `_count.assets` this replaced no longer exists, so it resolved to
       // `undefined` and every booking reported zero assets.
+=======
+>>>>>>> origin/main
       assetCount: b._count?.bookingAssets ?? 0,
     });
 
