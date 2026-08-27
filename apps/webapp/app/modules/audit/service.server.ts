@@ -1716,39 +1716,43 @@ export async function removeAuditScan(
   const { auditSessionId, assetId, userId, organizationId } = input;
 
   try {
-    const session = await db.auditSession.findFirst({
-      where: { id: auditSessionId, organizationId },
-      select: {
-        status: true,
-        foundAssetCount: true,
-        missingAssetCount: true,
-        unexpectedAssetCount: true,
-      },
-    });
-
-    if (!session) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit session not found",
-        additionalData: { auditSessionId, organizationId },
-        status: 404,
-        label,
-      });
-    }
-
-    if (session.status !== "PENDING" && session.status !== "ACTIVE") {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "This audit is no longer live, so its scans cannot be changed.",
-        additionalData: { auditSessionId, status: session.status },
-        status: 400,
-        label,
-        shouldBeCaptured: false,
-      });
-    }
-
     return await db.$transaction(async (tx) => {
+      // Read the session INSIDE the transaction. Reading it outside left a
+      // window where an audit completed between the status check and the
+      // write, so a removal could rewrite the numbers of an audit that had
+      // already been reported.
+      const session = await tx.auditSession.findFirst({
+        where: { id: auditSessionId, organizationId },
+        select: {
+          status: true,
+          foundAssetCount: true,
+          missingAssetCount: true,
+          unexpectedAssetCount: true,
+        },
+      });
+
+      if (!session) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit session not found",
+          additionalData: { auditSessionId, organizationId },
+          status: 404,
+          label,
+        });
+      }
+
+      if (session.status !== "PENDING" && session.status !== "ACTIVE") {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "This audit is no longer live, so its scans cannot be changed.",
+          additionalData: { auditSessionId, status: session.status },
+          status: 400,
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
       const existingScan = await tx.auditScan.findFirst({
         where: {
           auditSessionId,
@@ -1817,6 +1821,29 @@ export async function removeAuditScan(
           userId,
           tx,
         }),
+        // Activity event — AUDIT_ASSET_SCAN_REMOVED, the counterpart to the
+        // AUDIT_ASSET_SCANNED that `recordAuditScan` emits. Without it the
+        // stream shows scans going in and never coming out, so a report
+        // counting scans on a corrected audit overstates it.
+        //
+        // `auditAssetId` is carried even on the unexpected branch, where the
+        // row has just been deleted: it is a plain scalar with no FK, and
+        // keeping it is what lets a reader pair this event with the
+        // AUDIT_ASSET_SCANNED that created that row.
+        recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "AUDIT_ASSET_SCAN_REMOVED",
+            entityType: "AUDIT",
+            entityId: auditSessionId,
+            auditSessionId,
+            auditAssetId: existingScan.auditAsset?.id,
+            assetId,
+            meta: { isExpected: existingScan.auditAsset?.expected ?? false },
+          },
+          tx
+        ),
       ]);
 
       return {
