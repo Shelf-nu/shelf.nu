@@ -1,6 +1,8 @@
 # Shelf Companion 1.5.0 — store release notes
 
-Paste as-is. App Store Connect allows 4000 characters; Google Play allows 500.
+Paste **one section**: the App Store text into App Store Connect (4000
+characters allowed), the Google Play text into Play (500). The last section is
+internal and must not reach a store listing.
 
 ---
 
