@@ -219,21 +219,32 @@ describe("GET /api/mobile/barcode/:value", () => {
     expect(body.error.message).toContain("not linked");
   });
 
-  it("should correctly decode URL-encoded barcode values", async () => {
-    const specialValue = "ABC/DEF+GHI";
-    const request = createBarcodeRequest(specialValue);
+  /**
+   * What React Router hands a loader is NOT the URL segment. `decodePath`
+   * percent-decodes each segment and then re-encodes any decoded `/` back to
+   * `%2F`, so the value can never alter the path structure — everything else
+   * arrives decoded. These fixtures are that output rather than
+   * `encodeURIComponent` of the barcode, because `createLoaderArgs` sets
+   * `params` directly and so bypasses the router that would have produced it.
+   */
+  it.each([
+    // barcode as scanned     what React Router passes to the loader
+    ["ABC/DEF+GHI", "ABC%2FDEF+GHI"],
+    ["ABC%41", "ABC%41"],
+    ["50%", "50%"],
+    ["PLAIN123", "PLAIN123"],
+  ])("looks up %s from the route param", async (scanned, param) => {
     const result = await loader(
       createLoaderArgs({
-        request,
-        params: { value: encodeURIComponent(specialValue) },
+        request: createBarcodeRequest(scanned),
+        params: { value: param },
       })
     );
 
+    // A second `decodeURIComponent` would consume the literal `%41` and search
+    // for "ABCA", and would throw a URIError on the lone `%`.
     expect(getBarcodeByValue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        value: specialValue,
-        organizationId: "org-1",
-      })
+      expect.objectContaining({ value: scanned, organizationId: "org-1" })
     );
 
     expect(result instanceof Response).toBe(true);
