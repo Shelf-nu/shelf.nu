@@ -315,7 +315,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // checked out. The shared checkout service hard-blocks the RESERVED →
     // ONGOING transition until every `BookingModelRequest` is assigned to
     // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // `fulfilledAt: null` row remains). Fold that into `canCheckout` so the app
+    // `fulfilledAt: null` row remains). Fold that into the state flag so the app
     // never offers a "Check Out" the server would reject — the app instead
     // guides the operator to assign the reserved units first (see the
     // booking-detail "Assign to check out" CTA).
@@ -323,7 +323,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (mr) => mr.fulfilledAt === null
     );
 
-    const canCheckout =
+    const canCheckoutByState =
       booking.status === "RESERVED" &&
       totalAssets > 0 &&
       !hasOutstandingModelRequests;
@@ -340,7 +340,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
       return a.status === AssetStatus.CHECKED_OUT;
     });
-    const canCheckin =
+    const canCheckinByState =
       (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
       hasCheckinable;
 
@@ -366,37 +366,64 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const isBaseOrSelfService =
       role === OrganizationRoles.BASE ||
       role === OrganizationRoles.SELF_SERVICE;
-    const [canCancelPerm, canArchivePerm, canCreatePerm, canDeletePerm] =
-      await Promise.all([
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.cancel,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.archive,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.create,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.delete,
-        }),
-      ]);
+    const [
+      canCancelPerm,
+      canArchivePerm,
+      canCreatePerm,
+      canDeletePerm,
+      canCheckoutPerm,
+      canCheckinPerm,
+    ] = await Promise.all([
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles: [role],
+        entity: PermissionEntity.booking,
+        action: PermissionAction.cancel,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles: [role],
+        entity: PermissionEntity.booking,
+        action: PermissionAction.archive,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles: [role],
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles: [role],
+        entity: PermissionEntity.booking,
+        action: PermissionAction.delete,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles: [role],
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkout,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles: [role],
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkin,
+      }),
+    ]);
+    // State says the booking COULD be checked out or in; the role says whether
+    // this caller may. Both have to hold, or the app draws a button the server
+    // then refuses — the endpoints gate on these same permissions regardless,
+    // so without this the user meets the rule as a 403 instead of an absence.
+    const canCheckout = canCheckoutByState && canCheckoutPerm;
+    const canCheckin = canCheckinByState && canCheckinPerm;
+
     const bookingActions = {
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
       canCancel:
