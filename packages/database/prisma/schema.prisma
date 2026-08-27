@@ -1895,7 +1895,7 @@ model MobileAuthCode {
   // Single-use guard: set when redeemed. A non-null value rejects reuse.
   consumedAt DateTime?
 
-  // Short TTL (~60s). Rejected once `now > expiresAt`.
+  // Short TTL — see MOBILE_AUTH_CODE_TTL_MS. Rejected once `now > expiresAt`.
   expiresAt DateTime
 
   createdAt DateTime @default(now())
