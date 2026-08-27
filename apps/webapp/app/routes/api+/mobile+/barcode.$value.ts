@@ -1,3 +1,15 @@
+/**
+ * Mobile barcode resolution.
+ *
+ * Resolves an additional code (barcode) to the asset or kit it is linked to,
+ * for the companion scanner's fallback path when a scanned code is not a
+ * Shelf QR. A value the caller's current workspace does not hold is looked up
+ * across their other workspaces, and the response carries the OWNING
+ * `organizationId` so the app can offer to switch and open it there.
+ *
+ * @see {@link file://./qr.$qrId.ts} the QR twin of this route
+ * @see {@link file://./../../../modules/api/mobile-auth.server.ts} MOBILE_ASSET_SELECT and the shape helpers
+ */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -17,11 +29,17 @@ import { canUseBarcodes } from "~/utils/subscription.server";
 /**
  * GET /api/mobile/barcode/:value?orgId=<orgId>
  *
- * Resolves a barcode (additional code) to its linked asset.
- * Used by the mobile scanner as a fallback when a scanned code
- * is not a Shelf QR code.
+ * Resolves a barcode to its linked asset or kit, searching the caller's
+ * current workspace first and their remaining memberships after.
  *
- * Requires the organization to have `barcodesEnabled: true`.
+ * Requires the workspace to hold the barcode capability (`canUseBarcodes`),
+ * which every workspace holds on a self-hosted deployment — there is no
+ * billing there to gate on.
+ *
+ * @returns 200 with the barcode, its owning `organizationId`, and the linked
+ *   asset or kit; 403 when the workspace lacks the capability; 404 when the
+ *   value is in none of the caller's workspaces; 409 when it is in more than
+ *   one of them; 422 when it is linked to nothing.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -184,15 +202,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // scanner compares this against its current workspace to drive the
         // switch-and-view card.
         organizationId: foundOrganizationId,
-        // Flatten the Phase-4a/4b pivot rows (assetKits/assetLocations/custody)
-        // back into the legacy flat shape the in-App-Store companion expects.
-        // Mirrors qr.$qrId.ts. See MOBILE_ASSET_SELECT for the why.
+        // Flatten the pivot relations (assetKits/assetLocations/custody) into
+        // the flat `asset.kit` / `.location` / `.custody` shape the companion
+        // build in the App Store consumes. Mirrors qr.$qrId.ts; see
+        // MOBILE_ASSET_SELECT for the full shape.
         asset: foundBarcode.asset
           ? shapeMobileAssetResponse(foundBarcode.asset)
           : null,
         // Kit-linked barcodes return the kit so the scanner can batch-operate
-        // on it (previously fetched but dropped from the response).
-        // shapeMobileKitResponse handles null pass-through.
+        // on it. shapeMobileKitResponse handles null pass-through.
         kit: shapeMobileKitResponse(foundBarcode.kit ?? null),
       },
     });

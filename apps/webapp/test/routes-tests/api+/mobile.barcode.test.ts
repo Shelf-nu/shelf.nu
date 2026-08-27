@@ -64,11 +64,13 @@ vitest.mock("~/modules/barcode/service.server", () => ({
   getBarcodeByValue: vitest.fn(),
 }));
 
-// why: canUseBarcodes reads the premium env flag, which would make the
-// sibling-workspace entitlement cases flip with the test environment; pin it
-// to the premium behavior (the flag itself) so they are deterministic.
+// why: canUseBarcodes reads the premium env flag, so the entitlement cases
+// would otherwise track the test environment. It is a vitest.fn() pinned in
+// beforeEach to the premium behavior (the flag itself), which keeps the
+// sibling-workspace cases deterministic and lets one case model self-hosted,
+// where the helper grants the add-on with the flag off.
 vitest.mock("~/utils/subscription.server", () => ({
-  canUseBarcodes: (org: { barcodesEnabled: boolean }) => org.barcodesEnabled,
+  canUseBarcodes: vitest.fn(),
 }));
 
 vitest.mock("~/utils/error", () => ({
@@ -88,6 +90,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
 import { makeShelfError } from "~/utils/error";
 
 const mockUser = {
@@ -141,6 +144,12 @@ function createBarcodeRequest(value: string, orgId = "org-1") {
 describe("GET /api/mobile/barcode/:value", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+
+    // clearAllMocks drops calls, not implementations — re-pin the default or a
+    // per-test override leaks into every later case.
+    (canUseBarcodes as any).mockImplementation(
+      (org: { barcodesEnabled: boolean }) => org.barcodesEnabled
+    );
 
     (requireMobileAuth as any).mockResolvedValue({
       user: mockUser,
@@ -196,6 +205,26 @@ describe("GET /api/mobile/barcode/:value", () => {
     expect((result as unknown as Response).status).toBe(403);
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("not enabled");
+  });
+
+  it("resolves in the current workspace when the capability helper grants the add-on despite barcodesEnabled being false", async () => {
+    // Self-hosted: no billing to gate on, so canUseBarcodes grants the add-on.
+    // Reading org.barcodesEnabled directly here would 403 every such scan.
+    (db.organization.findUnique as any).mockResolvedValue({
+      barcodesEnabled: false,
+    });
+    (canUseBarcodes as any).mockReturnValue(true);
+
+    const request = createBarcodeRequest("BC001234");
+    const result = await loader(
+      createLoaderArgs({ request, params: { value: "BC001234" } })
+    );
+
+    expect((result as unknown as Response).status).toBe(200);
+    const body = await (result as unknown as Response).json();
+    expect(body.barcode.id).toBe("barcode-1");
+    // The current workspace answered — no sibling fallback needed.
+    expect(db.userOrganization.findMany).not.toHaveBeenCalled();
   });
 
   it("should return 404 when barcode is not found", async () => {

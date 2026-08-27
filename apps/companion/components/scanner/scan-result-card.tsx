@@ -21,7 +21,7 @@ type ScanResultAction = {
 };
 
 export type ScanResult = {
-  type: "success" | "error" | "not_found" | "duplicate";
+  type: "success" | "error" | "not_found" | "duplicate" | "advisory";
   title: string;
   message: string;
   /** Optional action button (e.g., "Link in Browser" for unlinked QR codes) */
@@ -52,6 +52,10 @@ const ICON_MAP: Record<ScanResult["type"], IoniconName> = {
   // A re-scan is routine, not a failure — copy icon, amber card (matching
   // the audit scanner's duplicate treatment).
   duplicate: "copy",
+  // Not a failure either: the scan resolved, it just resolved somewhere the
+  // viewer is not right now, and the card carries the step that fixes it.
+  // Distinct from `duplicate`, which names the already-scanned case.
+  advisory: "swap-horizontal",
 };
 
 /**
@@ -70,6 +74,7 @@ export function ScanResultCard({ result, onDismiss }: ScanResultCardProps) {
         result.type === "error" && styles.resultCardError,
         result.type === "not_found" && styles.resultCardWarning,
         result.type === "duplicate" && styles.resultCardDuplicate,
+        result.type === "advisory" && styles.resultCardAdvisory,
       ]}
     >
       <TouchableOpacity
@@ -178,6 +183,10 @@ const useStyles = createStyles(() => ({
   },
   // Amber, matching the audit scanner's duplicate frame (#FFC107).
   resultCardDuplicate: {
+    backgroundColor: "rgba(255,193,7,0.92)",
+  },
+  // Same amber: an advisory card and the advisory frame are one state.
+  resultCardAdvisory: {
     backgroundColor: "rgba(255,193,7,0.92)",
   },
   resultTextContainer: {

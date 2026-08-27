@@ -913,7 +913,9 @@ function ScannerContent() {
               : Haptics.NotificationFeedbackType.Error
           );
           setScanResult({
-            type: "error",
+            // Same `jump` test as the frame and the haptic above, so the card
+            // cannot say "failure" while the frame says "here is the fix".
+            type: jump ? "advisory" : "error",
             title: itemName ?? "Different Workspace",
             message: ownerOrg
               ? `This ${asset ? "asset" : kit ? "kit" : "code"} lives in ${
