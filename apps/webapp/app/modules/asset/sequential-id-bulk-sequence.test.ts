@@ -26,7 +26,6 @@ vi.mock("~/database/db.server", () => ({
   db: {
     $executeRaw: vi.fn(),
     $queryRaw: vi.fn(),
-    asset: { count: vi.fn(), findFirst: vi.fn() },
   },
 }));
 
@@ -46,30 +45,23 @@ function sqlOf(strings: unknown): string {
 /**
  * Stands the service up against an in-memory model of one organization.
  *
- * @param options.highestExisting - The highest number already assigned, which
- *   is what the sequence has to clear
- * @param options.numberedAssets - How many assets already carry an id. Lower
- *   than `highestExisting` is the ordinary state of any org that has ever
- *   deleted a numbered asset.
+ * @param options.highestExisting - The highest number already issued, which is
+ *   what the sequence has to clear. How many assets still CARRY one is not a
+ *   parameter, because it is not something the service reads — which is the
+ *   whole point: only the maximum bounds what is safe to issue next.
  * @param options.unnumbered - How many assets the backfill has to number
  * @returns The value handed to `setval`, and the `is_called` flag beside it
  */
 function runBackfill({
   highestExisting,
-  numberedAssets,
   unnumbered,
 }: {
   highestExisting: number;
-  numberedAssets: number;
   unnumbered: number;
 }) {
   const state = { max: highestExisting };
   let setvalArgs: unknown[] = [];
   let setvalSql = "";
-
-  vi.mocked(db.asset.count).mockResolvedValue(
-    (numberedAssets + unnumbered) as never
-  );
 
   vi.mocked(db.$queryRaw).mockImplementation(((strings: unknown) => {
     const sql = sqlOf(strings);
@@ -123,7 +115,6 @@ describe("generateBulkSequentialIdsEfficient — where the sequence resumes", ()
   it("resumes above the highest id when numbering has no gaps", async () => {
     const { value, finalMax } = await runBackfill({
       highestExisting: 10,
-      numberedAssets: 10,
       unnumbered: 5,
     });
 
@@ -132,13 +123,12 @@ describe("generateBulkSequentialIdsEfficient — where the sequence resumes", ()
   });
 
   it("resumes above the highest id even when assets have been deleted", async () => {
-    // 20 numbers issued, 12 assets still carrying one: eight were deleted. The
-    // count is 12 and the maximum is 20, and only one of those is safe to
-    // resume from. Resuming at the count would re-issue ids 13 through 20,
-    // every one of which is still taken.
+    // 20 numbers have been issued, and some of those assets have since been
+    // deleted — so fewer than 20 assets carry an id, while ids up to 20 are
+    // still spoken for. Anything derived from how many assets remain lands
+    // below 20 and re-issues ids that exist; only the maximum bounds it.
     const { value, finalMax } = await runBackfill({
       highestExisting: 20,
-      numberedAssets: 12,
       unnumbered: 3,
     });
 
@@ -150,7 +140,6 @@ describe("generateBulkSequentialIdsEfficient — where the sequence resumes", ()
     // The property the unique index cares about, stated directly.
     const { value, finalMax } = await runBackfill({
       highestExisting: 500,
-      numberedAssets: 4,
       unnumbered: 0,
     });
 
@@ -163,7 +152,6 @@ describe("generateBulkSequentialIdsEfficient — where the sequence resumes", ()
     // silently burns the first id — the third argument is what avoids it.
     const { value, isCalled } = await runBackfill({
       highestExisting: 0,
-      numberedAssets: 0,
       unnumbered: 0,
     });
 

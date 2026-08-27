@@ -71,7 +71,7 @@ export async function getNextSequentialId(
  *
  * @param organizationId - The organization to look within
  * @param prefix - The id prefix to measure, e.g. `SAM`
- * @returns The highest number issued, or `0` when none has been
+ * @returns The highest number issued, or `0` when none has been issued
  */
 async function getHighestIssuedNumber(
   organizationId: string,
