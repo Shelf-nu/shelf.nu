@@ -146,6 +146,9 @@ vitest.mock("~/database/db.server", () => {
         // qty tests override.
         findUnique: vitest.fn().mockResolvedValue({ quantity: 1 }),
         count: vitest.fn().mockResolvedValue(0),
+        // why: the progressive checkout stamps `checkedOutAt` on the slices it
+        // sends out, beside the PartialBookingCheckout session row.
+        updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
         deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       },
       // why: checkoutBooking's defence-in-depth guard reads

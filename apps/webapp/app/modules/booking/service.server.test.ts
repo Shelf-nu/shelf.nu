@@ -248,6 +248,9 @@ vitest.mock("~/database/db.server", () => ({
     },
     bookingAsset: {
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      // why: checkout/check-in stamp `checkedOutAt`/`checkedInAt` on the
+      // slices they move, which is what the check-in eligibility guard reads.
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       findMany: vitest.fn().mockResolvedValue([]),
       findUnique: vitest.fn().mockResolvedValue(null),
       update: vitest.fn().mockResolvedValue({}),
@@ -467,18 +470,27 @@ const mockBookingData = {
       assetId: "asset-1",
       quantity: 1,
       id: "ba-1",
+      // Fixture default: this slice went out with the booking.
+      checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+      checkedInAt: null,
     },
     {
       asset: { id: "asset-2", assetKits: [] },
       assetId: "asset-2",
       quantity: 1,
       id: "ba-2",
+      // Fixture default: this slice went out with the booking.
+      checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+      checkedInAt: null,
     },
     {
       asset: { id: "asset-3", assetKits: [{ kitId: "kit-1" }] },
       assetId: "asset-3",
       quantity: 1,
       id: "ba-3",
+      // Fixture default: this slice went out with the booking.
+      checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+      checkedInAt: null,
     },
   ],
   tags: [{ id: "tag-1", name: "Tag 1", color: "#123456" }],
@@ -771,18 +783,27 @@ describe("partialCheckinBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-1",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-2", assetKits: [], type: AssetType.INDIVIDUAL },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-2",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-3", assetKits: [], type: AssetType.INDIVIDUAL },
           assetId: "asset-3",
           quantity: 1,
           id: "ba-3",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -877,13 +898,32 @@ describe("partialCheckinBooking", () => {
     expect.assertions(1);
 
     // Booking holds both assets; asset-2 is still Booked (AVAILABLE) — it was
-    // never scanned out under progressive checkout, so it cannot be checked in.
+    // never scanned out under progressive checkout, so it carries no
+    // `checkedOutAt` and cannot be checked in.
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue({
       ...mockBookingData,
       assets: [
         { id: "asset-1", kitId: null },
         { id: "asset-2", kitId: null },
+      ],
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+        {
+          asset: { id: "asset-2", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-2",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
       ],
     });
 
@@ -902,6 +942,134 @@ describe("partialCheckinBooking", () => {
     await expect(
       partialCheckinBooking(mockPartialCheckinParams)
     ).rejects.toThrow(/never checked out/i);
+  });
+
+  it("checks in an all-at-once asset after a later scan recorded a checkout session", async () => {
+    // The reported production failure. A booking checked out with the button
+    // writes no PartialBookingCheckout rows; adding one asset later and
+    // scanning only that one writes the booking's FIRST row. A booking-level
+    // "does this booking have any rows?" test then declares every asset that
+    // went out with the button to have never been checked out.
+    //
+    // `BookingAsset.checkedOutAt` is what makes this answerable: asset-1 was
+    // flipped by the button (marker set), asset-2 was scanned later (marker
+    // set, and a session row exists for it alone).
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-1",
+          checkedOutAt: new Date("2026-08-26T14:45:00.000Z"),
+          checkedInAt: null,
+        },
+        {
+          asset: { id: "asset-2", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-2",
+          checkedOutAt: new Date("2026-08-26T17:08:29.000Z"),
+          checkedInAt: null,
+        },
+      ],
+    });
+
+    // The booking's only session row — asset-2's later scan. Under the old
+    // booking-level test this single row is what made asset-1 ineligible.
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ assetIds: ["asset-2"] }]);
+
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", title: "Asset 1" }]);
+
+    await expect(
+      partialCheckinBooking({
+        ...mockPartialCheckinParams,
+        assetIds: ["asset-1"],
+      })
+    ).resolves.not.toThrow();
+  });
+
+  it("still refuses an asset added to an ONGOING booking but never checked out", async () => {
+    // The guard must keep working. `updateBookingAssets` deliberately does not
+    // auto-check-out onto an ONGOING booking, so a newly added slice carries no
+    // `checkedOutAt` and genuinely cannot be checked in.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-1",
+          checkedOutAt: new Date("2026-08-26T14:45:00.000Z"),
+          checkedInAt: null,
+        },
+        {
+          asset: { id: "asset-2", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-2",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    });
+
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([{ assetIds: ["asset-1"] }]);
+
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-2", title: "Asset 2" }]);
+
+    await expect(
+      partialCheckinBooking({
+        ...mockPartialCheckinParams,
+        assetIds: ["asset-2"],
+      })
+    ).rejects.toThrow(/never checked out/i);
+  });
+
+  it("reports an already checked-in asset as such, not as never checked out", async () => {
+    // Refusing is right — it is a duplicate operation — but "never checked
+    // out" is the wrong reason and sends the reader hunting the wrong bug.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-1",
+          checkedOutAt: new Date("2026-08-26T14:45:00.000Z"),
+          checkedInAt: new Date("2026-08-26T20:00:00.000Z"),
+        },
+      ],
+    });
+
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", title: "Asset 1" }]);
+
+    await expect(
+      partialCheckinBooking({
+        ...mockPartialCheckinParams,
+        assetIds: ["asset-1"],
+      })
+    ).rejects.toThrow(/already checked in/i);
   });
 
   it("should redirect to complete check-in when all assets are being checked in", async () => {
@@ -929,12 +1097,18 @@ describe("partialCheckinBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-1",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-2", assetKits: [] },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-2",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     });
@@ -1060,6 +1234,9 @@ describe("partialCheckinBooking", () => {
           assetId: "asset-3",
           quantity: 1,
           id: "ba-t1",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     });
@@ -1095,6 +1272,9 @@ describe("partialCheckinBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t2",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -1105,12 +1285,18 @@ describe("partialCheckinBooking", () => {
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t3",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-3", assetKits: [], type: AssetType.INDIVIDUAL },
           assetId: "asset-3",
           quantity: 1,
           id: "ba-t4",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -1123,6 +1309,9 @@ describe("partialCheckinBooking", () => {
           assetId: "asset-3",
           quantity: 1,
           id: "ba-t5",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -2751,6 +2940,9 @@ describe("reserveBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-1",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -2869,6 +3061,9 @@ describe("reserveBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t101",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -2881,6 +3076,9 @@ describe("reserveBooking", () => {
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t102",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -2936,6 +3134,9 @@ describe("reserveBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t103",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -3014,6 +3215,9 @@ describe("reserveBooking", () => {
             assetId: QT_ASSET_ID,
             quantity,
             id: "ba-qty-1",
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
           },
         ],
       };
@@ -3320,6 +3524,9 @@ describe("checkoutBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t104",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -3332,6 +3539,9 @@ describe("checkoutBooking", () => {
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t105",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -3385,6 +3595,9 @@ describe("checkoutBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t106",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -3527,6 +3740,9 @@ describe("checkoutBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t900",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -3927,6 +4143,8 @@ describe("fulfilModelRequestsAndCheckout", () => {
       assetId: string;
       quantity: number;
       id: string;
+      checkedOutAt?: Date | null;
+      checkedInAt?: Date | null;
     }>;
   }) {
     return {
@@ -3954,6 +4172,9 @@ describe("fulfilModelRequestsAndCheckout", () => {
           assetId: "hp-1",
           quantity: 1,
           id: "ba-hp",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     });
@@ -4144,6 +4365,9 @@ describe("fulfilModelRequestsAndCheckout", () => {
           assetId: "hp-1",
           quantity: 1,
           id: "ba-hp",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     });
@@ -4213,6 +4437,9 @@ describe("fulfilModelRequestsAndCheckout", () => {
           assetId: "hp-1",
           quantity: 1,
           id: "ba-hp",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     });
@@ -4345,6 +4572,9 @@ describe("checkinBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t107",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -4358,6 +4588,9 @@ describe("checkinBooking", () => {
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t108",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -4411,6 +4644,9 @@ describe("checkinBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t201",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -4424,6 +4660,9 @@ describe("checkinBooking", () => {
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t202",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [
@@ -4474,6 +4713,9 @@ describe("checkinBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t203",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [
@@ -4525,6 +4767,9 @@ describe("checkinBooking", () => {
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t109",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -4538,6 +4783,9 @@ describe("checkinBooking", () => {
           assetId: "asset-3",
           quantity: 1,
           id: "ba-t110",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [], // No partial check-ins for Booking B
@@ -4598,6 +4846,9 @@ describe("checkinBooking", () => {
           assetId: "kit-asset-1",
           quantity: 1,
           id: "ba-t111",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -4611,6 +4862,9 @@ describe("checkinBooking", () => {
           assetId: "kit-asset-2",
           quantity: 1,
           id: "ba-t112",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -4624,6 +4878,9 @@ describe("checkinBooking", () => {
           assetId: "kit-asset-3",
           quantity: 1,
           id: "ba-t113",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -4637,6 +4894,9 @@ describe("checkinBooking", () => {
           assetId: "singular-asset",
           quantity: 1,
           id: "ba-t114",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [
@@ -4732,6 +4992,9 @@ describe("checkinBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t115",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -4780,6 +5043,9 @@ describe("checkinBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t204",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -4827,6 +5093,9 @@ describe("checkinBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t205",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -4880,6 +5149,9 @@ describe("checkinBooking", () => {
           assetId: "asset-pens",
           quantity: 10,
           id: "ba-q1",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -5087,6 +5359,9 @@ describe("cancelBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t116",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -5185,6 +5460,9 @@ describe("cancelBooking", () => {
             assetId: "asset-1",
             quantity: 3,
             id: "ba-cancel-1",
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
           },
         ],
       };
@@ -5235,6 +5513,9 @@ describe("cancelBooking", () => {
             assetId: "asset-1",
             quantity: 1,
             id: "ba-cancel-2",
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
           },
         ],
       };
@@ -5284,6 +5565,9 @@ describe("cancelBooking", () => {
             assetId: "asset-1",
             quantity: 1,
             id: "ba-cancel-3",
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
           },
         ],
       };
@@ -5374,6 +5658,9 @@ describe("deleteBooking", () => {
             assetId: "asset-1",
             quantity: 1,
             id: "ba-delete-1",
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
           },
         ],
       };
@@ -5423,6 +5710,9 @@ describe("deleteBooking", () => {
             assetId: "asset-1",
             quantity: 1,
             id: "ba-delete-2",
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
           },
         ],
       };
@@ -5467,6 +5757,9 @@ describe("deleteBooking", () => {
             assetId: "asset-1",
             quantity: 1,
             id: "ba-delete-3",
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
           },
         ],
       };
@@ -5567,12 +5860,18 @@ describe("duplicateBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t117",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-2", assetKits: [] },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t118",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       tags: [{ id: "tag-1" }],
@@ -5669,6 +5968,9 @@ describe("duplicateBooking", () => {
           assetKitId: null,
           sourceKitId: null,
           id: "ba-standalone",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -5684,6 +5986,9 @@ describe("duplicateBooking", () => {
           // `asset.assetKits`.
           sourceKitId: "kit-1",
           id: "ba-kit",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       tags: [],
@@ -5710,6 +6015,9 @@ describe("duplicateBooking", () => {
             id: "ak-x",
             assetId: "asset-shared",
             quantity: 3,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
@@ -5790,6 +6098,9 @@ describe("duplicateBooking", () => {
           assetKitId: null,
           sourceKitId: null,
           id: "ba-standalone",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         // Three kit-driven slices from the SAME kit (`kit-1`), one per
         // INDIVIDUAL member. The source snapshot pre-dates the QT addition.
@@ -5805,6 +6116,9 @@ describe("duplicateBooking", () => {
           assetKitId: "ak-a",
           sourceKitId: "kit-1",
           id: "ba-k-a",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -5818,6 +6132,9 @@ describe("duplicateBooking", () => {
           assetKitId: "ak-b",
           sourceKitId: "kit-1",
           id: "ba-k-b",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: {
@@ -5831,6 +6148,9 @@ describe("duplicateBooking", () => {
           assetKitId: "ak-c",
           sourceKitId: "kit-1",
           id: "ba-k-c",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       tags: [],
@@ -5856,6 +6176,9 @@ describe("duplicateBooking", () => {
             id: "ak-a",
             assetId: "kit-asset-a",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
@@ -5863,6 +6186,9 @@ describe("duplicateBooking", () => {
             id: "ak-b",
             assetId: "kit-asset-b",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
@@ -5870,6 +6196,9 @@ describe("duplicateBooking", () => {
             id: "ak-c",
             assetId: "kit-asset-c",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
@@ -5877,6 +6206,9 @@ describe("duplicateBooking", () => {
             id: "ak-qt",
             assetId: "qt-gloves",
             quantity: 5,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             kitId: "kit-1",
             asset: {
               type: AssetType.QUANTITY_TRACKED,
@@ -5971,6 +6303,9 @@ describe("duplicateBooking", () => {
           assetKitId: null,
           sourceKitId: null,
           id: "ba-loose",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         // Still in the kit — re-resolved from current membership.
         {
@@ -5985,6 +6320,9 @@ describe("duplicateBooking", () => {
           assetKitId: "ak-b",
           sourceKitId: "kit-1",
           id: "ba-b",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         // Detached residue: was in kit-1, swapped out. The DB SET NULL'd
         // `assetKitId`; only `sourceKitId` remembers where it came from.
@@ -6001,6 +6339,9 @@ describe("duplicateBooking", () => {
           assetKitId: null,
           sourceKitId: "kit-1",
           id: "ba-a",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       tags: [],
@@ -6025,6 +6366,9 @@ describe("duplicateBooking", () => {
             id: "ak-b",
             assetId: "switch-b",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
@@ -6088,6 +6432,9 @@ describe("duplicateBooking", () => {
           assetKitId: null,
           sourceKitId: "kit-1",
           id: "ba-a",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       tags: [],
@@ -6111,6 +6458,9 @@ describe("duplicateBooking", () => {
             id: "ak-new",
             assetId: "switch-replacement",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
@@ -6181,6 +6531,9 @@ describe("duplicateBooking", () => {
           // Written before the column existed / by a pre-deploy instance.
           sourceKitId: null,
           id: "ba-legacy",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       tags: [],
@@ -6203,6 +6556,9 @@ describe("duplicateBooking", () => {
             id: "ak-1",
             assetId: "legacy-member",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             kitId: "kit-1",
             asset: { type: AssetType.INDIVIDUAL, unitOfMeasure: null },
           },
@@ -6285,6 +6641,9 @@ describe("computeBookingKitDrift", () => {
       {
         assetId: "switch-b",
         quantity: 1,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         sourceKitId: "kit-1",
         assetKitId: "ak-b",
         asset: {
@@ -6298,6 +6657,9 @@ describe("computeBookingKitDrift", () => {
         // `sourceKitId` still points at the kit it arrived with.
         assetId: "switch-a",
         quantity: 1,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         sourceKitId: "kit-1",
         assetKitId: null,
         asset: {
@@ -6316,6 +6678,9 @@ describe("computeBookingKitDrift", () => {
           {
             assetId: "switch-b",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             asset: {
               id: "switch-b",
               title: "Switch B",
@@ -6353,6 +6718,9 @@ describe("computeBookingKitDrift", () => {
       {
         assetId: "switch-b",
         quantity: 1,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         sourceKitId: "kit-1",
         assetKitId: "ak-b",
         asset: {
@@ -6371,6 +6739,9 @@ describe("computeBookingKitDrift", () => {
           {
             assetId: "switch-b",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             asset: {
               id: "switch-b",
               title: "Switch B",
@@ -6380,6 +6751,9 @@ describe("computeBookingKitDrift", () => {
           {
             assetId: "switch-c",
             quantity: 5,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             asset: {
               id: "switch-c",
               title: "Switch C",
@@ -6419,6 +6793,9 @@ describe("computeBookingKitDrift", () => {
       {
         assetId: "switch-a",
         quantity: 1,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         sourceKitId: "kit-1",
         assetKitId: null,
         asset: {
@@ -6430,6 +6807,9 @@ describe("computeBookingKitDrift", () => {
       {
         assetId: "switch-b",
         quantity: 1,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         sourceKitId: "kit-1",
         assetKitId: "ak-b",
         asset: {
@@ -6448,6 +6828,9 @@ describe("computeBookingKitDrift", () => {
           {
             assetId: "switch-b",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             asset: {
               id: "switch-b",
               title: "Switch B",
@@ -6457,6 +6840,9 @@ describe("computeBookingKitDrift", () => {
           {
             assetId: "switch-c",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             asset: {
               id: "switch-c",
               title: "Switch C",
@@ -6488,6 +6874,9 @@ describe("computeBookingKitDrift", () => {
       {
         assetId: "switch-b",
         quantity: 1,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         sourceKitId: "kit-1",
         assetKitId: "ak-b",
         asset: {
@@ -6506,6 +6895,9 @@ describe("computeBookingKitDrift", () => {
           {
             assetId: "switch-b",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             asset: {
               id: "switch-b",
               title: "Switch B",
@@ -6548,6 +6940,9 @@ describe("computeBookingKitDrift", () => {
       {
         assetId: "switch-b",
         quantity: 1,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         sourceKitId: null,
         assetKitId: "ak-b",
         asset: {
@@ -6573,6 +6968,9 @@ describe("computeBookingKitDrift", () => {
           {
             assetId: "switch-c",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             asset: {
               id: "switch-c",
               title: "Switch C",
@@ -6623,6 +7021,9 @@ describe("revertBookingToDraft", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t119",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
     };
@@ -6675,12 +7076,18 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t120",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t121",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -6758,6 +7165,9 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t122",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -6845,6 +7255,9 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t123",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -6886,6 +7299,9 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t124",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -6927,6 +7343,9 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t125",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -6967,12 +7386,18 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t126",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t127",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -7014,6 +7439,9 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t128",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -7054,6 +7482,9 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t129",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -7118,18 +7549,27 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t130",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t131",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-3", status: AssetStatus.CHECKED_OUT },
           assetId: "asset-3",
           quantity: 1,
           id: "ba-t132",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [{ assetIds: ["asset-1"] }],
@@ -7182,12 +7622,18 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t133",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t134",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [{ assetIds: ["asset-1"] }],
@@ -7233,12 +7679,18 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t135",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-2", status: AssetStatus.CHECKED_OUT },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t136",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [{ assetIds: ["asset-1"] }],
@@ -7282,18 +7734,27 @@ describe("extendBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t137",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-2", status: AssetStatus.AVAILABLE },
           assetId: "asset-2",
           quantity: 1,
           id: "ba-t138",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
         {
           asset: { id: "asset-3", status: AssetStatus.AVAILABLE },
           assetId: "asset-3",
           quantity: 1,
           id: "ba-t139",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [{ assetIds: ["asset-1", "asset-2", "asset-3"] }],
@@ -7746,6 +8207,9 @@ describe("removeAssets", () => {
           {
             assetId: "asset-1",
             quantity: 1,
+            // Fixture default: this slice went out with the booking.
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
             // The rollback counts rows that actually discharged THIS request,
             // read from the row's own provenance rather than a shared model.
             bookingModelRequestId: "req-1",
@@ -8613,11 +9077,17 @@ describe("isBookingFullyCheckedIn", () => {
         {
           assetId: "asset-1",
           quantity: 1,
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
           asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
         },
         {
           assetId: "asset-2",
           quantity: 10,
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
           asset: { id: "asset-2", type: AssetType.QUANTITY_TRACKED },
         },
       ])
@@ -8644,11 +9114,17 @@ describe("isBookingFullyCheckedIn", () => {
       {
         assetId: "asset-1",
         quantity: 1,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
       },
       {
         assetId: "asset-2",
         quantity: 1,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         asset: { id: "asset-2", type: AssetType.INDIVIDUAL },
       },
     ]);
@@ -8673,6 +9149,9 @@ describe("isBookingFullyCheckedIn", () => {
         {
           assetId: "asset-qty",
           quantity: 10,
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
           asset: { id: "asset-qty", type: AssetType.QUANTITY_TRACKED },
         },
       ])
@@ -8715,6 +9194,20 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue(null);
+    // `asset.findMany` is the check-in guard's title lookup. Nothing in this
+    // block set it, so it inherited whatever an earlier describe left behind —
+    // assets that are not on this booking at all. Echo the requested ids so the
+    // lookup always describes the batch under test.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockImplementation((args: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((assetId) => ({
+            id: assetId,
+            title: assetId,
+          }))
+        )
+      );
     (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({ _sum: { quantity: 0 } });
@@ -8758,6 +9251,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       {
         assetId: mockQtyAssetId,
         quantity: 10,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         asset: {
           id: mockQtyAssetId,
           type: AssetType.QUANTITY_TRACKED,
@@ -8892,6 +9388,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         {
           assetId: mockQtyAssetId,
           quantity: 10,
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
           asset: {
             id: mockQtyAssetId,
             type: AssetType.QUANTITY_TRACKED,
@@ -8901,6 +9400,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         {
           assetId: "asset-individual-2",
           quantity: 1,
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
           asset: {
             id: "asset-individual-2",
             type: AssetType.INDIVIDUAL,
@@ -8958,6 +9460,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         {
           assetId: mockQtyAssetId,
           quantity: 10,
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
           asset: {
             id: mockQtyAssetId,
             type: AssetType.QUANTITY_TRACKED,
@@ -8967,6 +9472,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         {
           assetId: "asset-individual-2",
           quantity: 1,
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
           asset: {
             id: "asset-individual-2",
             type: AssetType.INDIVIDUAL,
@@ -9014,6 +9522,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         {
           assetId: mockQtyAssetId,
           quantity: 10,
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
           asset: {
             id: mockQtyAssetId,
             type: AssetType.QUANTITY_TRACKED,
@@ -9023,6 +9534,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         {
           assetId: "asset-individual-2",
           quantity: 1,
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
           asset: {
             id: "asset-individual-2",
             type: AssetType.INDIVIDUAL,
@@ -9149,6 +9663,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       {
         assetId: mockQtyAssetId,
         quantity: 10,
+        // Fixture default: this slice went out with the booking.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
         asset: { id: mockQtyAssetId, type: AssetType.QUANTITY_TRACKED },
       },
     ]);
@@ -9475,6 +9992,9 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       bookingAssets: [
         {
           id: "ba-pens-standalone",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
           assetId: mockQtyAssetId,
           assetKitId: null,
           quantity: 10,

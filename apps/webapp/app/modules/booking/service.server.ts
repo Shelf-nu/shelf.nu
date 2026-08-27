@@ -2173,10 +2173,17 @@ async function checkoutBookingWritesWithinTx(
     hasKits,
     from,
     to,
+    checkedOutById,
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
     bookingAssetIds: Asset["id"][];
+    /**
+     * Acting user, stamped onto each slice's checkout marker. Nullable because
+     * `checkoutBooking`'s `userId` is optional (scheduler-driven checkouts have
+     * no acting user) and the column is nullable to match.
+     */
+    checkedOutById: string | null;
     qtyTrackedBookingAssets: Array<{
       quantity: number;
       asset: Pick<Asset, "id" | "title">;
@@ -2383,6 +2390,26 @@ async function checkoutBookingWritesWithinTx(
       organizationId,
     },
     data: { status: AssetStatus.CHECKED_OUT },
+  });
+
+  /**
+   * Record the checkout on each slice. This is the ONLY thing that marks an
+   * all-at-once checkout — this path writes no `PartialBookingCheckout` row —
+   * and it is what the check-in guard reads to decide eligibility.
+   *
+   * Scoped to slices not already out so a progressive batch that ran earlier
+   * keeps its own (earlier, more accurate) timestamp. Any stale check-in marker
+   * is cleared: a full checkout sends the whole booking back out.
+   */
+  await tx.bookingAsset.updateMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: { bookingId, checkedOutAt: null },
+    data: {
+      checkedOutAt: new Date(),
+      checkedOutById,
+      checkedInAt: null,
+      checkedInById: null,
+    },
   });
 
   await tx.booking.update({
@@ -2767,6 +2794,7 @@ export async function checkoutBooking({
           // guard (see the doc comment on `checkoutBookingWritesWithinTx`).
           from: bookingFound.from,
           to: bookingFound.to,
+          checkedOutById: userId ?? null,
         });
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
@@ -3132,6 +3160,7 @@ export async function fulfilModelRequestsAndCheckout({
           // guard (see the doc comment on `checkoutBookingWritesWithinTx`).
           from: bookingFound.from,
           to: bookingFound.to,
+          checkedOutById: userId ?? null,
         });
 
         /**
@@ -4871,6 +4900,24 @@ export async function checkinBooking({
           );
         }
 
+        /**
+         * Mark every outstanding slice as returned. This path writes no
+         * `PartialBookingCheckin` row, so without this a completed booking
+         * leaves its slices looking permanently checked out.
+         *
+         * Scoped to slices that actually went out: one never checked out has
+         * nothing to reconcile, and stamping it would claim it came back.
+         */
+        await tx.bookingAsset.updateMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}})
+          where: {
+            bookingId: bookingFound.id,
+            checkedOutAt: { not: null },
+            checkedInAt: null,
+          },
+          data: { checkedInAt: new Date(), checkedInById: userId },
+        });
+
         /** Finally update the booking */
         return tx.booking.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1552; this is the write on that same proven id
@@ -5628,6 +5675,8 @@ export async function partialCheckinBooking({
         where: { id, organizationId },
         include: {
           bookingAssets: {
+            // `checkedOutAt`/`checkedInAt` drive the per-slice check-in
+            // eligibility guard below.
             include: {
               asset: {
                 select: {
@@ -5713,41 +5762,77 @@ export async function partialCheckinBooking({
     // to check those in is invalid and must be rejected before the
     // "covers all remaining" early-exit (which would otherwise complete the
     // booking and flip never-checked-out assets to AVAILABLE no-ops).
-    // Eligibility is per-booking, NOT global asset status. An asset can be
-    // CHECKED_OUT by a different active booking yet never checked out here, so
-    // keying on global status would wrongly accept it. The per-booking checkout
-    // history is the PartialBookingCheckout records (progressive checkouts,
-    // including the final batch). An all-at-once checkout leaves no records, so
-    // fall back to "every booking asset is eligible".
-    const checkedOutForThisBooking = new Set(
-      await getPartiallyCheckedOutAssetIds({ bookingId: id, organizationId })
+    // Eligibility is per SLICE, read from `BookingAsset.checkedOutAt`, and
+    // neither of the two obvious stand-ins can replace it:
+    //   - global `Asset.status`: an asset may be CHECKED_OUT by a DIFFERENT
+    //     active booking while never having gone out on this one.
+    //   - "does this booking have any PartialBookingCheckout rows?": those
+    //     record progressive scan SESSIONS, and the all-at-once checkout writes
+    //     none. A booking checked out with the button that later gains ONE
+    //     scanned asset gets its first row, and a booking-level test then
+    //     reports every button-checked-out asset as never checked out.
+    const checkedOutSliceAssetIds = new Set(
+      bookingFound.bookingAssets
+        .filter((ba) => Boolean(ba.checkedOutAt))
+        .map((ba) => ba.assetId)
     );
-    const eligibleCheckinAssetIds =
-      checkedOutForThisBooking.size > 0
-        ? checkedOutForThisBooking
-        : new Set(bookingFoundAssets.map((asset) => asset.id));
+    /** Slices already fully reconciled — refused, but for a different reason. */
+    const checkedInSliceAssetIds = new Set(
+      bookingFound.bookingAssets
+        .filter((ba) => Boolean(ba.checkedInAt))
+        .map((ba) => ba.assetId)
+    );
 
     const scannedAssets = await db.asset.findMany({
       where: { id: { in: effectiveAssetIds }, organizationId },
       select: { id: true, title: true },
     });
-    const notCheckedOut = scannedAssets.filter(
-      (a) => !eligibleCheckinAssetIds.has(a.id)
-    );
-    if (notCheckedOut.length > 0) {
-      // why: with progressive checkout a booking can hold still-Booked
-      // (AVAILABLE) assets that were never checked out — they cannot be checked in.
-      const names = notCheckedOut
+
+    /** Formats up to three titles, then "and N more". */
+    const nameList = (assets: { title: string }[]) =>
+      `${assets
         .slice(0, 3)
         .map((a) => a.title)
-        .join(", ");
-      const more =
-        notCheckedOut.length > 3 ? ` and ${notCheckedOut.length - 3} more` : "";
+        .join(", ")}${
+        assets.length > 3 ? ` and ${assets.length - 3} more` : ""
+      }`;
+
+    // Checked in already: a duplicate request, not an invalid one. Tested
+    // FIRST, and independently of `checkedOutAt` — a reconciled slice carries
+    // both markers, and "never checked out" would be the wrong reason to give.
+    const alreadyCheckedIn = scannedAssets.filter((a) =>
+      checkedInSliceAssetIds.has(a.id)
+    );
+    if (alreadyCheckedIn.length > 0) {
       throw new ShelfError({
         cause: null,
         status: 400,
         label,
-        message: `Cannot check in assets that were never checked out: ${names}${more}.`,
+        message: `These assets are already checked in: ${nameList(
+          alreadyCheckedIn
+        )}.`,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const notCheckedOut = scannedAssets.filter(
+      (a) =>
+        !checkedOutSliceAssetIds.has(a.id) && !checkedInSliceAssetIds.has(a.id)
+    );
+    if (notCheckedOut.length > 0) {
+      // A booking can hold still-Booked (AVAILABLE) assets that were added
+      // after checkout — `updateBookingAssets` deliberately does not
+      // auto-check-out onto an ONGOING booking — and those cannot be checked in.
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: `Cannot check in assets that were never checked out: ${nameList(
+          notCheckedOut
+        )}.`,
+        // User-input validation, like the sibling guards above. Without this it
+        // defaulted to captured and filled Sentry with a working guard.
+        shouldBeCaptured: false,
       });
     }
 
@@ -5776,7 +5861,7 @@ export async function partialCheckinBooking({
       // booking asset: a progressive booking can hold never-checked-out items,
       // and counting those as outstanding would keep it stuck ONGOING forever
       // after the actually checked-out items are all returned.
-      const outstandingAssetIds = [...eligibleCheckinAssetIds].filter(
+      const outstandingAssetIds = [...checkedOutSliceAssetIds].filter(
         (assetId) => !recordedAssetIdSet.has(assetId)
       );
 
@@ -6180,6 +6265,19 @@ export async function partialCheckinBooking({
           checkinCount: sessionReconciledAssetIds.length,
         },
       });
+
+      /**
+       * Mark the slices this session fully reconciled. Same ids as the session
+       * row above, so a partially-returned qty-tracked slice stays unmarked and
+       * remains checkinable — `checkedInAt` means FULLY reconciled.
+       */
+      if (sessionReconciledAssetIds.length > 0) {
+        await tx.bookingAsset.updateMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
+          where: { bookingId: id, assetId: { in: sessionReconciledAssetIds } },
+          data: { checkedInAt: new Date(), checkedInById: userId },
+        });
+      }
 
       // Activity events — one BOOKING_PARTIAL_CHECKIN per asset that had
       // activity in this session (qty disposition or individual flip).
@@ -7612,6 +7710,23 @@ export async function partialCheckoutBooking({
             checkoutCount: sessionAssetIds.length,
           },
           select: { id: true },
+        });
+
+        /**
+         * Mark the slices this session sent out. The session row above owns
+         * per-slice QUANTITY attribution; this marker owns the boolean "is it
+         * out", which is what the check-in guard reads. Both are needed: the
+         * row cannot answer it for assets the all-at-once flow sent out.
+         */
+        await tx.bookingAsset.updateMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
+          where: { bookingId: id, assetId: { in: sessionAssetIds } },
+          data: {
+            checkedOutAt: new Date(),
+            checkedOutById: userId,
+            checkedInAt: null,
+            checkedInById: null,
+          },
         });
 
         // Layer 3: the per-asset fold that previously collapsed both slices of an
