@@ -449,19 +449,27 @@ function AuditScannerContent() {
 
   const handleEvidenceAdded = useCallback(
     (assetId: string, type: "note" | "image") => {
-      // Optimistically update the local evidence count
-      setScannedItems((prev) =>
-        prev.map((item) => {
-          if (item.assetId !== assetId) return item;
-          return {
-            ...item,
-            notesCount:
-              type === "note" ? (item.notesCount ?? 0) + 1 : item.notesCount,
-            imagesCount:
-              type === "image" ? (item.imagesCount ?? 0) + 1 : item.imagesCount,
-          };
-        })
-      );
+      // Optimistically update the local evidence count, computed from the ref
+      // and written to both. The list and the ref are two stores of one thing,
+      // and the ref is the one a removal rebuilds the list from and every
+      // persistence path saves — an increment that lands only in React state
+      // is reverted the moment any other row is undone.
+      let changed = false;
+      const next = scannedItemsRef.current.map((item) => {
+        if (item.assetId !== assetId) return item;
+        changed = true;
+        return {
+          ...item,
+          notesCount:
+            type === "note" ? (item.notesCount ?? 0) + 1 : item.notesCount,
+          imagesCount:
+            type === "image" ? (item.imagesCount ?? 0) + 1 : item.imagesCount,
+        };
+      });
+      if (changed) {
+        scannedItemsRef.current = next;
+        setScannedItems(next);
+      }
       // Also update the selected item in the modal
       setSelectedItem((prev) => {
         if (!prev || prev.assetId !== assetId) return prev;
@@ -474,7 +482,7 @@ function AuditScannerContent() {
         };
       });
     },
-    [setScannedItems]
+    [setScannedItems, scannedItemsRef]
   );
 
   // ── Inactivity timer (shared hook) ──────────────────
