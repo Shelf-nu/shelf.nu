@@ -1,3 +1,30 @@
+/**
+ * Booking Service
+ *
+ * The booking domain's server-side business logic — every mutation and read a
+ * booking goes through, from DRAFT to ARCHIVED.
+ *
+ * Responsibilities:
+ * - Lifecycle transitions: create, edit, reserve, check out, check in, extend,
+ *   cancel, revert to draft, archive, duplicate, and their bulk counterparts.
+ * - Partial check-out / check-in, including per-asset quantity dispositions for
+ *   `QUANTITY_TRACKED` assets and the "how much is left" computations.
+ * - Membership: standalone assets and kit-driven slices on the `BookingAsset`
+ *   pivot (see `.claude/rules/kit-members-via-kit-slices.md`).
+ * - The audit trail every transition leaves: system notes, `ActivityEvent`
+ *   records, notification emails, and the expiry/reminder scheduler jobs.
+ *
+ * Two invariants worth knowing before editing:
+ * - `originalFrom`/`originalTo` are the PLANNED period and are frozen once a
+ *   booking starts; `from`/`to` are the live one. See
+ *   `.claude/rules/booking-planned-period-is-frozen.md`.
+ * - Any id that arrives from request input is org-scoped before use, per
+ *   `.claude/rules/org-scope-user-supplied-ids.md`.
+ *
+ * @see {@link file://./lateness.ts}
+ * @see {@link file://./../reports/helpers.server.ts}
+ */
+
 import {
   BookingStatus,
   AssetStatus,
@@ -274,6 +301,98 @@ async function cancelScheduler(
 }
 
 /**
+ * The value to write to `originalTo` when a flow is about to rewrite `to`.
+ *
+ * A booking's planned period (`originalFrom`/`originalTo`) is written while it
+ * is still being planned — create, DRAFT edit, reserve — and frozen once it
+ * starts. `from`/`to` are what move afterwards: extension pushes `to` out, and
+ * check-in rewrites it to the actual return moment. So this only ever SEEDS
+ * the column for rows created before it existed; on every other row it returns
+ * `undefined`, which Prisma reads as "leave unchanged".
+ *
+ * Overwriting instead would discard the deadline the custodian agreed to
+ * whenever a booking was extended before check-in, and Booking Compliance
+ * would then measure the return against the extension rather than the plan.
+ *
+ * @param booking - The booking as it is BEFORE the rewrite.
+ * @returns The date to seed, or `undefined` to leave `originalTo` alone.
+ */
+function plannedEndToPreserve(booking: {
+  to: Date | null;
+  originalTo: Date | null;
+}): Date | undefined {
+  return booking.originalTo ? undefined : booking.to ?? undefined;
+}
+
+/**
+ * The value to write to `originalFrom` when a flow is about to rewrite `from`.
+ *
+ * The mirror of {@link plannedEndToPreserve}, for the early-check-out
+ * adjust-date path. Same rule: seed only, never overwrite.
+ *
+ * @param booking - The booking as it is BEFORE the rewrite.
+ * @returns The date to seed, or `undefined` to leave `originalFrom` alone.
+ */
+function plannedStartToPreserve(booking: {
+  from: Date | null;
+  originalFrom: Date | null;
+}): Date | undefined {
+  return booking.originalFrom ? undefined : booking.from ?? undefined;
+}
+
+/**
+ * Records the canonical `BOOKING_STATUS_CHANGED` activity event.
+ *
+ * Best-effort by design, and the single implementation for every caller: the
+ * status change is already committed by the time this runs, so a failed
+ * analytics insert can never roll back a check-out or check-in that physically
+ * happened. `resolveCheckInAt` carries the matching fallback for the rare miss
+ * (COMPLETE bookings fall back to `updatedAt`).
+ *
+ * @param args.organizationId - Workspace the booking belongs to.
+ * @param args.bookingId - Booking whose status changed.
+ * @param args.userId - Actor, or null/undefined for system transitions.
+ * @param args.fromStatus - Status before the change.
+ * @param args.toStatus - Status after the change.
+ */
+async function recordBookingStatusChangedEvent({
+  organizationId,
+  bookingId,
+  userId,
+  fromStatus,
+  toStatus,
+}: {
+  organizationId: string;
+  bookingId: string;
+  userId?: string | null;
+  fromStatus: BookingStatus;
+  toStatus: BookingStatus;
+}): Promise<void> {
+  try {
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_STATUS_CHANGED",
+      entityType: "BOOKING",
+      entityId: bookingId,
+      bookingId,
+      field: "status",
+      fromValue: fromStatus,
+      toValue: toStatus,
+    });
+  } catch (err) {
+    Logger.error(
+      new ShelfError({
+        cause: err,
+        message: "Failed to record BOOKING_STATUS_CHANGED event",
+        additionalData: { bookingId, fromStatus, toStatus },
+        label,
+      })
+    );
+  }
+}
+
+/**
  * Creates a consistent status transition note for booking activity logs
  *
  * @param bookingId - The booking ID to add the note to
@@ -334,29 +453,13 @@ export async function createStatusTransitionNote({
   });
 
   // Activity event — records the canonical status transition for reports.
-  // Best-effort: don't fail the note creation if event recording fails.
-  try {
-    await recordEvent({
-      organizationId,
-      actorUserId: userId ?? null,
-      action: "BOOKING_STATUS_CHANGED",
-      entityType: "BOOKING",
-      entityId: bookingId,
-      bookingId,
-      field: "status",
-      fromValue: fromStatus,
-      toValue: toStatus,
-    });
-  } catch (err) {
-    Logger.error(
-      new ShelfError({
-        cause: err,
-        message: "Failed to record BOOKING_STATUS_CHANGED event",
-        additionalData: { bookingId, fromStatus, toStatus },
-        label,
-      })
-    );
-  }
+  await recordBookingStatusChangedEvent({
+    organizationId,
+    bookingId,
+    userId,
+    fromStatus,
+    toStatus,
+  });
 }
 
 /**
@@ -2720,8 +2823,8 @@ export async function checkoutBooking({
       isEarlyCheckout &&
       intentChoice === CheckoutIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalFrom to old `from` date of booking
-      dataToUpdate.originalFrom = bookingFound.from;
+      // Keep the planned start intact; only seeds rows predating the column.
+      dataToUpdate.originalFrom = plannedStartToPreserve(bookingFound);
 
       // Update `from` date to current date
       const fromDateStr = DateTime.fromJSDate(new Date(), {
@@ -3069,8 +3172,8 @@ export async function fulfilModelRequestsAndCheckout({
       isEarlyCheckout &&
       checkoutIntentChoice === CheckoutIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalFrom to old `from` date of booking
-      dataToUpdate.originalFrom = bookingFound.from;
+      // Keep the planned start intact; only seeds rows predating the column.
+      dataToUpdate.originalFrom = plannedStartToPreserve(bookingFound);
 
       // Update `from` date to current date (timezone-aware, matching
       // `checkoutBooking`)
@@ -4362,8 +4465,8 @@ export async function checkinBooking({
       isEarlyCheckin &&
       intentChoice === CheckinIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalTo to booking's to date
-      dataToUpdate.originalTo = bookingFound.to;
+      // Keep the planned end intact; only seeds rows predating the column.
+      dataToUpdate.originalTo = plannedEndToPreserve(bookingFound);
 
       // Update the `to` date to current date
       const toDateStr = DateTime.fromJSDate(new Date(), {
@@ -4379,8 +4482,8 @@ export async function checkinBooking({
      * If booking was overdue then we have to adjust the endDate of booking
      * */
     if (bookingFound.status === BookingStatus.OVERDUE) {
-      // Update originalTo to booking's to date
-      dataToUpdate.originalTo = bookingFound.to;
+      // Keep the planned end intact; only seeds rows predating the column.
+      dataToUpdate.originalTo = plannedEndToPreserve(bookingFound);
 
       const toDateStr = DateTime.fromJSDate(new Date(), {
         zone: hints.timeZone,
@@ -5056,35 +5159,14 @@ export async function checkinBooking({
         // The custom system note above replaces the standard transition note,
         // but downstream consumers (Booking Compliance report) still need the
         // BOOKING_STATUS_CHANGED → COMPLETE ActivityEvent to know when the
-        // booking was actually checked in. Best-effort, mirroring the pattern
-        // inside createStatusTransitionNote.
-        try {
-          await recordEvent({
-            organizationId,
-            // We're inside `if (userId)` — `userId` is a string here.
-            actorUserId: userId,
-            action: "BOOKING_STATUS_CHANGED",
-            entityType: "BOOKING",
-            entityId: updatedBooking.id,
-            bookingId: updatedBooking.id,
-            field: "status",
-            fromValue: bookingFound.status,
-            toValue: BookingStatus.COMPLETE,
-          });
-        } catch (err) {
-          Logger.error(
-            new ShelfError({
-              cause: err,
-              message:
-                "Failed to record BOOKING_STATUS_CHANGED event for partial check-in completion",
-              additionalData: {
-                bookingId: updatedBooking.id,
-                fromStatus: bookingFound.status,
-              },
-              label,
-            })
-          );
-        }
+        // booking was actually checked in.
+        await recordBookingStatusChangedEvent({
+          organizationId,
+          bookingId: updatedBooking.id,
+          userId,
+          fromStatus: bookingFound.status,
+          toStatus: BookingStatus.COMPLETE,
+        });
       } else {
         // Standard status transition note
         await createStatusTransitionNote({
@@ -6414,10 +6496,41 @@ export async function partialCheckinBooking({
       });
 
       if (bookingIsComplete) {
+        const dataToComplete: Prisma.BookingUpdateInput = {
+          status: BookingStatus.COMPLETE,
+        };
+
+        /**
+         * Same end-date rewrite `checkinBooking` performs, so a booking's
+         * period does not depend on which check-in route completed it: `to`
+         * becomes the actual return moment when the booking is being returned
+         * late, or early with the operator's consent. The planned end stays in
+         * `originalTo` (seeded only for rows predating that column).
+         */
+        const shouldAdjustEndDate =
+          updatedBookingSnapshot.status === BookingStatus.OVERDUE ||
+          (!!updatedBookingSnapshot.to &&
+            isBookingEarlyCheckin(updatedBookingSnapshot.to) &&
+            intentChoice === CheckinIntentEnum["with-adjusted-date"]);
+
+        if (shouldAdjustEndDate) {
+          dataToComplete.originalTo = plannedEndToPreserve(
+            updatedBookingSnapshot
+          );
+
+          const toDateStr = DateTime.fromJSDate(new Date(), {
+            zone: hints.timeZone,
+          }).toFormat(DATE_TIME_FORMAT);
+
+          dataToComplete.to = DateTime.fromFormat(toDateStr, DATE_TIME_FORMAT, {
+            zone: hints.timeZone,
+          }).toJSDate();
+        }
+
         const completedBooking = await tx.booking.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking `id` already org-checked via findUniqueOrThrow({where:{id,organizationId}}) in partialCheckinBooking
           where: { id },
-          data: { status: BookingStatus.COMPLETE },
+          data: dataToComplete,
           include: {
             bookingAssets: true,
             custodianUser: true,
@@ -6445,6 +6558,24 @@ export async function partialCheckinBooking({
         completeKitIds,
       };
     });
+
+    /**
+     * Canonical status-transition event for the completion. This path writes
+     * its own system note instead of calling `createStatusTransitionNote`, so
+     * the event it would normally emit has to be recorded here — the Booking
+     * Compliance report reads a booking's check-in moment from
+     * `BOOKING_STATUS_CHANGED → COMPLETE` (see `resolveCheckInTimes`) and
+     * otherwise falls back to `updatedAt`, which drifts on any later edit.
+     */
+    if (txResult.isComplete) {
+      await recordBookingStatusChangedEvent({
+        organizationId,
+        bookingId: id,
+        userId,
+        fromStatus: txResult.previousStatus,
+        toStatus: BookingStatus.COMPLETE,
+      });
+    }
 
     /**
      * Activity notes — best-effort, OUTSIDE the transaction.
@@ -8026,7 +8157,7 @@ export async function partialCheckoutBooking({
             isBookingEarlyCheckout(bookingFound.from) &&
             intentChoice === CheckoutIntentEnum["with-adjusted-date"]
           ) {
-            transitionData.originalFrom = bookingFound.from;
+            transitionData.originalFrom = plannedStartToPreserve(bookingFound);
             const fromDateStr = DateTime.fromJSDate(new Date(), {
               zone: hints.timeZone,
             }).toFormat(DATE_TIME_FORMAT);
@@ -9728,6 +9859,14 @@ export async function extendBooking({
             booking.status === BookingStatus.OVERDUE
               ? BookingStatus.ONGOING
               : undefined,
+          /**
+           * Only the LIVE end date moves. `originalTo` holds the end date the
+           * booking was planned for, and extension is allowed only once the
+           * booking has started (ONGOING/OVERDUE), so the plan is already
+           * fixed: moving it here would erase the deadline the custodian
+           * actually agreed to, and with it every late return from Booking
+           * Compliance.
+           */
           to: newEndDate,
         },
         include: BOOKING_INCLUDE_FOR_EMAIL,

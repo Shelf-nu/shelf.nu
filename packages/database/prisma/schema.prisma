@@ -1709,8 +1709,14 @@ model Booking {
   from      DateTime @db.Timestamptz(3)
   to        DateTime @db.Timestamptz(3)
 
-  // When a booking is early check-in or early check-out, we store the original from and to
-  // dates here and updated the from and to dates to current date (if users agrees to change)
+  // The period the booking was PLANNED for, as opposed to `from`/`to` above,
+  // which hold the live period. Written while the booking is still being
+  // planned (create, DRAFT edit, reserve) and frozen once it starts — every
+  // later flow moves `from`/`to` and leaves these alone: extension pushes `to`
+  // out, and early check-out / late or early-with-consent check-in rewrite the
+  // dates to the actual moment. Booking Compliance measures returns against
+  // these, so overwriting one after the booking starts erases the deadline the
+  // custodian agreed to. Null only on rows created before the columns existed.
   originalFrom DateTime? @db.Timestamptz(3)
   originalTo   DateTime? @db.Timestamptz(3)
 

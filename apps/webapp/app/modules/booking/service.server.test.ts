@@ -1,3 +1,14 @@
+/**
+ * Booking Service — Unit Tests
+ *
+ * Covers the booking lifecycle mutations against a mocked Prisma client: the
+ * status transitions and their audit trail, partial check-out / check-in
+ * (including quantity dispositions), kit-slice membership, and the date
+ * rewrites that check-out, check-in and extension apply.
+ *
+ * @see {@link file://./service.server.ts}
+ */
+
 import Markdoc from "@markdoc/markdoc";
 import {
   BookingStatus,
@@ -4625,6 +4636,59 @@ describe("checkinBooking", () => {
     expect(result).toEqual(checkedInBooking);
   });
 
+  it("keeps the planned end of an extended booking when checking it in late", async () => {
+    expect.assertions(2);
+
+    // An extended booking carries the deadline it was planned for in
+    // `originalTo` and the renegotiated one in `to`. Checking it in overdue
+    // rewrites `to` to the return moment — the planned end must survive, or
+    // Booking Compliance measures the return against the extension.
+    const plannedEnd = new Date("2026-04-10T17:00:00Z");
+    const extendedTo = new Date("2026-04-20T17:00:00Z");
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.OVERDUE,
+      to: extendedTo,
+      originalTo: plannedEnd,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.OVERDUE } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t107b",
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    await checkinBooking(mockCheckinParams);
+
+    const updateCall = vitest.mocked(db.booking.update).mock.calls[0]?.[0] as
+      | { data?: Record<string, unknown> }
+      | undefined;
+
+    // `to` moves to the return moment, so it is neither of the planned dates.
+    expect(updateCall?.data?.to).not.toEqual(extendedTo);
+    // `originalTo` is left untouched — the column already holds the plan.
+    expect(updateCall?.data?.originalTo).toBeUndefined();
+  });
+
   it("should reset checked out assets even when partial check-in history exists", async () => {
     expect.assertions(1);
 
@@ -7132,6 +7196,58 @@ describe("extendBooking", () => {
     );
   });
 
+  it("leaves originalTo on the deadline the booking was planned for", async () => {
+    expect.assertions(2);
+
+    // Extension is only allowed once a booking has started, so the plan is
+    // already fixed: only the live `to` moves. Moving `originalTo` too would
+    // let anyone clear a late return from Booking Compliance by extending it.
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-t130",
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    // why: extendBooking loads the booking (status guard + conflict window)
+    // before writing; an ONGOING booking with checked-out assets passes both.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: the assertion targets the update's `data` payload; the resolved
+    // value only feeds the post-update note and email path.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...mockBooking, to: newEndDate });
+
+    await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ to: newEndDate }),
+      })
+    );
+
+    const updateCall = vitest.mocked(db.booking.update).mock.calls[0]?.[0] as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    expect(updateCall?.data).not.toHaveProperty("originalTo");
+  });
+
   it("should throw error when booking cannot be extended", async () => {
     expect.assertions(1);
 
@@ -9368,6 +9484,65 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
       })
     );
+  });
+
+  it("records the canonical BOOKING_STATUS_CHANGED → COMPLETE event when qty dispositions complete the booking", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+
+    // Full return of the only asset → the qty-disposition path completes the
+    // booking itself (it does not delegate to `checkinBooking`). The Booking
+    // Compliance report resolves check-in moments from this event, so the
+    // completion must record it. Recorded after the transaction commits, like
+    // every other BOOKING_STATUS_CHANGED write, so a failed analytics insert
+    // cannot roll back a check-in the user already performed.
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    expect(activityEventService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "BOOKING_STATUS_CHANGED",
+        bookingId: mockQtyBookingId,
+        field: "status",
+        toValue: BookingStatus.COMPLETE,
+      })
+    );
+  });
+
+  it("rewrites `to` to the return moment when an OVERDUE booking completes, keeping the planned end", async () => {
+    expect.assertions(2);
+
+    setupQtyMocks();
+
+    // why: the completion path reads the booking's own row for its pre-flip
+    // status and dates. An OVERDUE booking is the case that rewrites `to`, and
+    // this asserts the qty path matches `checkinBooking` instead of leaving
+    // the booking sitting on its blown deadline.
+    const plannedEnd = new Date("2026-04-10T17:00:00Z");
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...makeQtyBooking(),
+      status: BookingStatus.OVERDUE,
+      from: new Date("2026-04-01T09:00:00Z"),
+      to: plannedEnd,
+      originalTo: plannedEnd,
+    });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    const completeCall = vitest
+      .mocked(db.booking.update)
+      .mock.calls.map((call) => call[0] as { data?: Record<string, unknown> })
+      .find((call) => call.data?.status === BookingStatus.COMPLETE);
+
+    expect(completeCall?.data?.to).toBeInstanceOf(Date);
+    expect(completeCall?.data?.originalTo).toBeUndefined();
   });
 
   it("bare scan (no disposition) of a TWO_WAY QT asset in a partial batch defaults to RETURN of ALL remaining units", async () => {
