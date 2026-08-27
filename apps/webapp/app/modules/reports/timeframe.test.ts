@@ -94,3 +94,57 @@ describe("toZonedBoundaryISO", () => {
     );
   });
 });
+
+describe("resolveTimeframe — unreadable custom boundaries", () => {
+  /**
+   * `from` and `to` arrive from the query string, so anything can be in them.
+   * `new Date("garbage")` answers with an Invalid Date rather than throwing,
+   * and that value is an object — truthy, and indistinguishable from a real
+   * boundary until something tries to format it.
+   */
+  it("falls back to the default range when a boundary cannot be read", () => {
+    const result = resolveTimeframe(
+      "custom",
+      new Date("not-a-date"),
+      new Date("2026-08-01")
+    );
+
+    expect(result.preset).toBe("last_30d");
+    expect(Number.isNaN(result.from.getTime())).toBe(false);
+    expect(Number.isNaN(result.to.getTime())).toBe(false);
+  });
+
+  it("falls back when the second boundary is the unreadable one", () => {
+    const result = resolveTimeframe(
+      "custom",
+      new Date("2026-08-01"),
+      new Date("also-not-a-date")
+    );
+
+    expect(result.preset).toBe("last_30d");
+    expect(Number.isNaN(result.to.getTime())).toBe(false);
+  });
+
+  it("produces a label that can actually be rendered", () => {
+    // The PDF route hands `from`/`to` to `Intl.DateTimeFormat.format`, which
+    // throws a RangeError on an invalid date — so a bad query string became a
+    // 500 rather than a report over the default range.
+    const result = resolveTimeframe("custom", new Date("x"), new Date("y"));
+
+    expect(() =>
+      new Intl.DateTimeFormat("en").format(result.from)
+    ).not.toThrow();
+    expect(() => new Intl.DateTimeFormat("en").format(result.to)).not.toThrow();
+  });
+
+  it("still honours two readable boundaries", () => {
+    const from = new Date("2026-08-01T00:00:00.000Z");
+    const to = new Date("2026-08-10T00:00:00.000Z");
+
+    const result = resolveTimeframe("custom", from, to);
+
+    expect(result.preset).toBe("custom");
+    expect(result.from).toEqual(from);
+    expect(result.to).toEqual(to);
+  });
+});
