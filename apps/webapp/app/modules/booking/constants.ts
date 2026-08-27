@@ -1,6 +1,7 @@
 import { BookingStatus, type Prisma } from "@prisma/client";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
+import { USER_NAME_SELECT } from "../user/fields";
 
 /**
  * Booking statuses an asset or kit can still be added to.
@@ -74,8 +75,7 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
     select: {
       id: true,
       email: true,
-      firstName: true,
-      lastName: true,
+      ...USER_NAME_SELECT,
       dateFormat: true,
       timeFormat: true,
       weekStart: true,
@@ -93,8 +93,7 @@ export const BOOKING_INCLUDE_FOR_EMAIL = {
         select: {
           id: true,
           email: true,
-          firstName: true,
-          lastName: true,
+          ...USER_NAME_SELECT,
           dateFormat: true,
           timeFormat: true,
           weekStart: true,

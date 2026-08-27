@@ -123,6 +123,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                   select: {
                     firstName: true,
                     lastName: true,
+                    displayName: true,
                     email: true,
                     profilePicture: true,
                   },
@@ -146,7 +147,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             type: true,
             createdAt: true,
             user: {
-              select: { firstName: true, lastName: true },
+              select: { firstName: true, lastName: true, displayName: true },
             },
           },
           orderBy: { createdAt: "desc" as const },

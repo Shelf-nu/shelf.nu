@@ -81,6 +81,7 @@ export async function requireMobileAuth(request: Request) {
       email: true,
       firstName: true,
       lastName: true,
+      displayName: true,
       profilePicture: true,
       onboarded: true,
       // Date/time format preferences (raw, nullable). Surfaced on

@@ -265,27 +265,14 @@ export default function ListBookingsContent({
             name: item.custodianTeamMember
               ? item.custodianTeamMember.name
               : resolveUserDisplayName(item.custodianUser),
-            user: item?.custodianUser
-              ? {
-                  id: item?.custodianUser?.id,
-                  firstName: item?.custodianUser?.firstName,
-                  lastName: item?.custodianUser?.lastName,
-                  email: item?.custodianUser?.email,
-                  profilePicture: item?.custodianUser?.profilePicture,
-                }
-              : null,
+            user: item?.custodianUser ?? null,
           }}
         />
       </Td>
 
       {/* Created by */}
       <Td>
-        <UserBadge
-          img={
-            item?.creator?.profilePicture || "/static/images/default_pfp.jpg"
-          }
-          name={resolveUserDisplayName(item?.creator)}
-        />
+        <UserBadge user={item?.creator} />
       </Td>
     </>
   );

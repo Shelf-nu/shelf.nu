@@ -10,6 +10,8 @@ import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getBookings } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * GET /api/mobile/dashboard
@@ -149,6 +151,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
@@ -174,6 +177,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
@@ -199,6 +203,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
@@ -258,10 +263,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: string;
       from: Date | string | null;
       to: Date | string | null;
-      custodianUser?: {
-        firstName: string | null;
-        lastName: string | null;
-      } | null;
+      /**
+       * `UserNameFields` rather than the name halves spelled out: it requires
+       * `displayName`, so this shape cannot drift back to naming the custodian
+       * by their legal name without failing to compile.
+       */
+      custodianUser?: UserNameFields | null;
       custodianTeamMember?: { name: string } | null;
       _count?: { bookingAssets: number };
     };
@@ -274,9 +281,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       from: b.from instanceof Date ? b.from.toISOString() : b.from,
       to: b.to instanceof Date ? b.to.toISOString() : b.to,
       custodianName: b.custodianUser
-        ? [b.custodianUser.firstName, b.custodianUser.lastName]
-            .filter(Boolean)
-            .join(" ") || null
+        ? resolveUserDisplayName(b.custodianUser) || null
         : b.custodianTeamMember?.name || null,
       assetCount: b._count?.bookingAssets ?? 0,
     });

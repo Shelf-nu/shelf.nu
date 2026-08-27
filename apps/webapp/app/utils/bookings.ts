@@ -2,6 +2,7 @@ import type { Booking, Currency } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
+import type { UserNameFields } from "./user";
 import { resolveTeamMemberName } from "./user";
 
 export function canUserManageBookingAssets(
@@ -83,10 +84,7 @@ export const bookingStatusColorMap: {
 /** Resolve custodian display name from booking data */
 export function getBookingCustodianName(booking: {
   custodianTeamMember?: { name: string } | null;
-  custodianUser?: {
-    firstName?: string | null;
-    lastName?: string | null;
-  } | null;
+  custodianUser?: UserNameFields | null;
 }): string | null {
   if (booking.custodianTeamMember) {
     return resolveTeamMemberName({

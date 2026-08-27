@@ -6,6 +6,7 @@ import {
 import { db } from "~/database/db.server";
 import { defaultUserCategories } from "~/modules/user/service.server";
 import { ShelfError } from "./error";
+import type { UserNameFields } from "./user";
 
 // ---------------------------------------------------------------------------
 // buildAssetsByStatusChart — converts Prisma groupBy result to chart shape
@@ -90,12 +91,9 @@ interface DirectCustodian {
   id: string;
   name: string;
   userId: string | null;
-  user: {
-    firstName: string | null;
-    lastName: string | null;
-    profilePicture: string | null;
-    email: string;
-  } | null;
+  user:
+    | (UserNameFields & { profilePicture: string | null; email: string })
+    | null;
   _count: { custodies: number };
 }
 
@@ -107,12 +105,9 @@ interface BookingForCustodians {
     name: string;
     userId: string | null;
   } | null;
-  custodianUser: {
-    firstName: string | null;
-    lastName: string | null;
-    profilePicture: string | null;
-    email: string;
-  } | null;
+  custodianUser:
+    | (UserNameFields & { profilePicture: string | null; email: string })
+    | null;
   /**
    * Count of assets on this booking via the explicit `BookingAsset` pivot.
    * Pre-Phase-3a this field was `_count.assets` (from the implicit M2M);
@@ -139,11 +134,7 @@ export function getCustodiansOrderedByTotalCustodies({
         id: string;
         name: string;
         userId: string | null;
-        user: {
-          firstName: string | null;
-          lastName: string | null;
-          profilePicture: string | null;
-        } | null;
+        user: (UserNameFields & { profilePicture: string | null }) | null;
       };
     }
   >();
@@ -161,13 +152,7 @@ export function getCustodiansOrderedByTotalCustodies({
           id: tm.id,
           name: tm.name,
           userId: tm.userId,
-          user: tm.user
-            ? {
-                firstName: tm.user.firstName,
-                lastName: tm.user.lastName,
-                profilePicture: tm.user.profilePicture,
-              }
-            : null,
+          user: tm.user,
         },
       });
     }
@@ -207,11 +192,7 @@ export function getCustodiansOrderedByTotalCustodies({
             id: booking.custodianUserId,
             name: "",
             userId: booking.custodianUserId,
-            user: {
-              firstName: booking.custodianUser.firstName,
-              lastName: booking.custodianUser.lastName,
-              profilePicture: booking.custodianUser.profilePicture,
-            },
+            user: booking.custodianUser,
           },
         });
       }

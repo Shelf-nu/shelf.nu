@@ -366,22 +366,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
     /** Once the asset is updated, we create the note */
-    const actor = wrapUserLinkForNote({
-      id: userId,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    });
+    const actor = wrapUserLinkForNote(user);
 
     const custodianDisplay = wrapCustodianForNote({
       teamMember: {
         name: custodianDisplayName,
-        user: custodianTeamMember.user
-          ? {
-              id: custodianTeamMember.user.id,
-              firstName: custodianTeamMember.user.firstName,
-              lastName: custodianTeamMember.user.lastName,
-            }
-          : null,
+        user: custodianTeamMember.user,
       },
     });
 

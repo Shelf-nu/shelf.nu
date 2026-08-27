@@ -29,6 +29,8 @@ import {
 } from "~/modules/booking/lateness";
 import { getAssetTotalValue } from "~/utils/asset-value";
 import { ShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 
 import { resolveCheckInTimes } from "./check-in-time.server";
 
@@ -61,6 +63,7 @@ import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
 import { refreshExpiredKitImages } from "../kit/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 
 // Re-export timeframe utilities for server use
 export { resolveTimeframe } from "./timeframe";
@@ -345,10 +348,7 @@ async function fetchBookingComplianceRows(
       // or rare event-write failures). See `resolveCheckInAt`.
       updatedAt: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMember: {
         select: {
@@ -403,11 +403,7 @@ async function fetchBookingComplianceRows(
       bookingName: b.name || `Booking ${b.id.slice(0, 8)}`,
       status: b.status,
       custodian: b.custodianUser
-        ? stripNameSuffix(
-            `${b.custodianUser.firstName || ""} ${
-              b.custodianUser.lastName || ""
-            }`.trim()
-          )
+        ? stripNameSuffix(resolveUserDisplayName(b.custodianUser))
         : b.custodianTeamMember
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
@@ -916,10 +912,7 @@ async function computeCustodianPerformance(
       updatedAt: true,
       custodianUserId: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMemberId: true,
       custodianTeamMember: {
@@ -952,11 +945,7 @@ async function computeCustodianPerformance(
     const key =
       booking.custodianUserId || booking.custodianTeamMemberId || "__none__";
     const name = booking.custodianUser
-      ? stripNameSuffix(
-          `${booking.custodianUser.firstName || ""} ${
-            booking.custodianUser.lastName || ""
-          }`.trim()
-        )
+      ? stripNameSuffix(resolveUserDisplayName(booking.custodianUser))
       : booking.custodianTeamMember
       ? stripNameSuffix(booking.custodianTeamMember.name)
       : "No Custodian";
@@ -1119,10 +1108,7 @@ async function fetchOverdueRows(
       to: true,
       custodianUserId: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMember: {
         select: {
@@ -1189,11 +1175,7 @@ async function fetchOverdueRows(
       bookingId: b.id,
       bookingName: b.name || `Booking ${b.id.slice(0, 8)}`,
       custodian: b.custodianUser
-        ? stripNameSuffix(
-            `${b.custodianUser.firstName || ""} ${
-              b.custodianUser.lastName || ""
-            }`.trim()
-          )
+        ? stripNameSuffix(resolveUserDisplayName(b.custodianUser))
         : b.custodianTeamMember
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
@@ -3984,11 +3966,7 @@ export async function assetActivityReport(
     // Map events to rows
     const rows: AssetActivityRow[] = events.map((event) => {
       const asset = event.assetId ? assetMap.get(event.assetId) : null;
-      const actorSnapshot = event.actorSnapshot as {
-        firstName?: string;
-        lastName?: string;
-        displayName?: string;
-      } | null;
+      const actorSnapshot = event.actorSnapshot as UserNameFields | null;
 
       return {
         id: event.id,
@@ -4001,12 +3979,7 @@ export async function assetActivityReport(
         description: buildActivityDescription(event),
         occurredAt: event.occurredAt,
         performedBy: actorSnapshot
-          ? stripNameSuffix(
-              actorSnapshot.displayName ||
-                `${actorSnapshot.firstName || ""} ${
-                  actorSnapshot.lastName || ""
-                }`.trim()
-            )
+          ? stripNameSuffix(resolveUserDisplayName(actorSnapshot))
           : null,
         context: null,
       };

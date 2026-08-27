@@ -315,11 +315,7 @@ export async function createStatusTransitionNote({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
     const actionText =
       action || getActionTextFromTransition(fromStatus, toStatus);
@@ -5054,11 +5050,7 @@ export async function checkinBooking({
             displayName: true,
           } satisfies Prisma.UserSelect,
         });
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: actorUser?.firstName,
-          lastName: actorUser?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...actorUser, id: userId });
 
         /**
          * Shared booking link — per-asset notes point back to the booking
@@ -5795,11 +5787,7 @@ export async function partialCheckinBooking({
       ) {
         // Don't create a PartialBookingCheckin row — the redirect to
         // `checkinBooking` handles completion itself.
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         await createNotes({
           content: `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`,
           type: "UPDATE",
@@ -6279,11 +6267,7 @@ export async function partialCheckinBooking({
      * captured server-side via `Logger.error`.
      */
     try {
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
 
       /**
        * Shared booking link used by every asset-side note below so the
@@ -7639,11 +7623,7 @@ export async function partialCheckoutBooking({
 
         // Create audit notes for INDIVIDUAL rows. Qty-tracked rows get their
         // own per-asset note written OUTSIDE the tx (with unit-aware phrasing).
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         if (individualToFlip.length > 0) {
           await createNotes(
             {
@@ -7977,11 +7957,7 @@ export async function partialCheckoutBooking({
      * committed checkout.
      */
     try {
-      const actorLink = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actorLink = wrapUserLinkForNote({ ...user, id: userId });
       const bookingLink = wrapLinkForNote(
         `/bookings/${result.booking.id}`,
         result.booking.name
@@ -10001,12 +9977,15 @@ export async function getBookings(params: {
               name: { contains: term, mode: "insensitive" },
             },
           },
-          // Search in custodian user names
+          // Search in custodian user names. `displayName` is one of them: it
+          // replaces first/last name in the UI for users who set one, so it is
+          // the name a searcher can actually see on the booking row.
           {
             custodianUser: {
               OR: [
                 { firstName: { contains: term, mode: "insensitive" } },
                 { lastName: { contains: term, mode: "insensitive" } },
+                { displayName: { contains: term, mode: "insensitive" } },
               ],
             },
           },
@@ -10200,6 +10179,7 @@ export async function removeAssets({
   booking,
   firstName,
   lastName,
+  displayName,
   userId,
   kitIds = [],
   kits = [],
@@ -10212,6 +10192,12 @@ export async function removeAssets({
   };
   firstName: string;
   lastName: string;
+  /**
+   * The acting user's `User.displayName`. It wins over the legal-name halves
+   * when set, so it must travel with them — a caller that passes only
+   * `firstName`/`lastName` names the actor by a name they asked us not to use.
+   */
+  displayName: string | null;
   userId: string;
   kitIds?: Kit["id"][];
   kits?: Array<{ id: string; name: string }>;
@@ -10647,7 +10633,7 @@ export async function removeAssets({
       }
     }
 
-    const userForNotes = { firstName, lastName, id: userId };
+    const userForNotes = { firstName, lastName, displayName, id: userId };
 
     const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
 
@@ -11361,11 +11347,16 @@ export async function getBookingsForCalendar(params: {
             end: (booking.to as Date).toISOString(),
             custodian: {
               name: custodianName,
+              // Named field by field rather than spread: the loaded row is a
+              // full `User`, and this payload is serialized to the calendar
+              // client. `displayName` belongs on the list — it outranks the
+              // legal-name halves wherever this custodian is rendered.
               user: booking.custodianUser
                 ? {
                     id: booking.custodianUserId,
                     firstName: booking.custodianUser?.firstName,
                     lastName: booking.custodianUser?.lastName,
+                    displayName: booking.custodianUser?.displayName,
                     profilePicture: booking.custodianUser?.profilePicture,
                   }
                 : undefined,
@@ -11379,6 +11370,7 @@ export async function getBookingsForCalendar(params: {
                     id: booking.creator.id,
                     firstName: booking.creator.firstName,
                     lastName: booking.creator.lastName,
+                    displayName: booking.creator.displayName,
                     profilePicture: booking.creator.profilePicture,
                   }
                 : null,
@@ -12186,11 +12178,7 @@ export async function bulkCancelBookings({
       }
 
       /** Making notes for all the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const notesData = bookings
         .map((b) =>
           b.bookingAssets.map((ba) => ({
@@ -12378,11 +12366,7 @@ async function createNotesForScannedAssetsAndKits({
       displayName: true,
     } satisfies Prisma.UserSelect,
   });
-  const userForNotes = {
-    firstName: user?.firstName || "",
-    lastName: user?.lastName || "",
-    id: userId,
-  };
+  const userForNotes = { ...user, id: userId };
 
   // Create booking notes
   // why: out of this rule — multi-asset popover, per-asset qty deferred.
@@ -14279,6 +14263,7 @@ export async function getDetailedPartialCheckinData(bookingId: string) {
         id: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
       };
     }
@@ -14314,6 +14299,7 @@ export type PartialCheckinDetailsType = Record<
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       profilePicture: string | null;
     };
   }
@@ -14463,6 +14449,7 @@ export async function getDetailedPartialCheckoutData({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
           profilePicture: true,
         },
       },
@@ -14479,6 +14466,7 @@ export async function getDetailedPartialCheckoutData({
         id: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
       };
     }
@@ -14522,6 +14510,7 @@ export type PartialCheckoutDetailsType = Record<
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       profilePicture: string | null;
     };
   }

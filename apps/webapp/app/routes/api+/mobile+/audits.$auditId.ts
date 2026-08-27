@@ -101,12 +101,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         createdBy: {
           firstName: session.createdBy?.firstName ?? null,
           lastName: session.createdBy?.lastName ?? null,
+          displayName: session.createdBy?.displayName ?? null,
           profilePicture: session.createdBy?.profilePicture ?? null,
         },
         assignments: session.assignments.map((a) => ({
           userId: a.user.id,
-          firstName: a.user.firstName,
-          lastName: a.user.lastName,
+          firstName: a.user.firstName ?? null,
+          lastName: a.user.lastName ?? null,
+          displayName: a.user.displayName,
           profilePicture: a.user.profilePicture,
           role: a.role,
         })),
