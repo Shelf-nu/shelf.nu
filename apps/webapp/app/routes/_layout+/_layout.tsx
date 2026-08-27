@@ -86,6 +86,27 @@ export type LayoutLoaderResponse = typeof loader;
  */
 export const shouldRevalidate = skipRevalidationOnClientViewChange;
 
+/**
+ * Gate for every authenticated route beneath this layout, and the source of the
+ * data its chrome renders.
+ *
+ * The gates run in a fixed order and the order is load-bearing: subscription
+ * validity, then onboarding, then organization resolution. Onboarding has to
+ * clear before org resolution because `getSelectedOrganization` throws for a
+ * user with no membership, which is exactly the state a non-onboarded user is
+ * in — resolving first turns "finish signing up" into an error page.
+ *
+ * Because the gate covers routes at every depth, its redirects are absolute. A
+ * relative target resolves against the URL the user arrived at, so anyone
+ * following a QR or email link into a nested route would be sent somewhere
+ * that does not exist.
+ *
+ * @param args.context - Carries the auth session the gates run against
+ * @param args.request - Read for the per-page cookie and the current URL
+ * @returns The user, their organizations, subscription state and layout prefs
+ * @throws {Response} A redirect to `/onboarding` for a user who has not
+ *   finished signing up, or an error response when a gate refuses
+ */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
