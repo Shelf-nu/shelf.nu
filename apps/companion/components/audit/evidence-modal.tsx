@@ -110,6 +110,22 @@ type EvidenceModalProps = {
   ) => void;
 };
 
+/**
+ * The bottom sheet a scanned row opens: the condition notes and photos
+ * recorded against that scan, and the controls to add more.
+ *
+ * It is also where a scan is undone. That sits at the foot of the sheet, past
+ * a divider and only once the scan has reached the server — a scan still in
+ * the retry queue has no server row to remove, and removing it locally would
+ * leave a retry free to record it again.
+ *
+ * Evidence belongs to the audit's row for the asset rather than to any one
+ * scan, so it outlives an undo. The sheet reads the real counts and reports
+ * them back through `onEvidenceCounts`, which is what stops a row scanned
+ * again after an undo from claiming it has none.
+ *
+ * @param props - See {@link EvidenceModalProps}.
+ */
 export function EvidenceModal({
   visible,
   onClose,
