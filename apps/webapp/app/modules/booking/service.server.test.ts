@@ -1083,6 +1083,144 @@ describe("partialCheckinBooking", () => {
     ).rejects.toThrow(/already checked in/i);
   });
 
+  it("lets an untagged claim through while a sibling slice is still out", async () => {
+    expect.assertions(1);
+
+    // A qty-tracked asset holds a standalone slice plus one per kit, so it can
+    // be half reconciled and half still out. An untagged claim names no slice,
+    // so it is a claim on whatever is left — refusing it as "already checked
+    // in" would strand the outstanding slice with no operator workaround.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            type: AssetType.QUANTITY_TRACKED,
+          },
+          assetId: "asset-1",
+          quantity: 5,
+          id: "ba-standalone",
+          checkedOutAt: new Date("2026-08-26T10:00:00.000Z"),
+          checkedInAt: new Date("2026-08-26T18:00:00.000Z"),
+        },
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            type: AssetType.QUANTITY_TRACKED,
+          },
+          assetId: "asset-1",
+          quantity: 3,
+          id: "ba-kit",
+          assetKitId: "ak-1",
+          checkedOutAt: new Date("2026-08-26T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+    });
+
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([{ id: "asset-1", title: "Asset 1" }]);
+
+    // Asserted on the message rather than on success: this covers the
+    // eligibility guard, which runs before the quantity machinery, and that
+    // machinery needs fixtures of its own. Passing whenever the guard stays
+    // quiet keeps the test about the guard.
+    const outcome = await partialCheckinBooking({
+      ...mockPartialCheckinParams,
+      assetIds: ["asset-1"],
+    }).catch((cause: unknown) => cause);
+
+    expect(String(outcome)).not.toMatch(/already checked in/i);
+  });
+
+  it("does not stamp a return on a slice that never went out", async () => {
+    expect.assertions(2);
+
+    // `sessionReconciledAssetIds` is asset-level while the marker is per
+    // slice, and an asset's remaining sums across all of its slices — so a
+    // slice added after checkout sits inside an asset a session can drive to
+    // zero. Stamping it would record a return for units that never left.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-went-out",
+          checkedOutAt: new Date("2026-08-26T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+        {
+          // Still out and NOT scanned here, so this stays on the progressive
+          // path instead of delegating to the full check-in.
+          asset: { id: "asset-2", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-still-out",
+          checkedOutAt: new Date("2026-08-26T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+        {
+          asset: { id: "asset-3", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-3",
+          quantity: 1,
+          id: "ba-added-later",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    });
+
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      { assetId: "asset-1", asset: { type: AssetType.INDIVIDUAL } },
+      { assetId: "asset-2", asset: { type: AssetType.INDIVIDUAL } },
+      { assetId: "asset-3", asset: { type: AssetType.INDIVIDUAL } },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    await partialCheckinBooking({
+      ...mockPartialCheckinParams,
+      assetIds: ["asset-1"],
+    });
+
+    // The progressive write is the one scoped by `assetId`; the full check-in
+    // delegate writes booking-wide, and matching that instead would test a
+    // guard this code path does not own.
+    const markerCall = vitest
+      .mocked(db.bookingAsset.updateMany)
+      .mock.calls.find(
+        ([args]) =>
+          "checkedInAt" in (args?.data ?? {}) &&
+          "assetId" in (args?.where ?? {})
+      )?.[0];
+
+    expect(markerCall).toBeDefined();
+    expect(markerCall?.where).toEqual(
+      expect.objectContaining({ checkedOutAt: { not: null } })
+    );
+  });
+
   it("should redirect to complete check-in when all assets are being checked in", async () => {
     expect.assertions(1);
 
@@ -4637,7 +4775,7 @@ describe("checkinBooking", () => {
   });
 
   it("keeps the planned end of an extended booking when checking it in late", async () => {
-    expect.assertions(2);
+    expect.assertions(3);
 
     // An extended booking carries the deadline it was planned for in
     // `originalTo` and the renegotiated one in `to`. Checking it in overdue
@@ -4664,6 +4802,8 @@ describe("checkinBooking", () => {
           assetId: "asset-1",
           quantity: 1,
           id: "ba-t107b",
+          checkedOutAt: new Date("2026-04-01T09:00:00Z"),
+          checkedInAt: null,
         },
       ],
       partialCheckins: [],
@@ -4683,6 +4823,10 @@ describe("checkinBooking", () => {
       | { data?: Record<string, unknown> }
       | undefined;
 
+    // Assert the write happened before reading anything off it: `?.` on an
+    // absent call yields `undefined`, which satisfies both assertions below
+    // and would let a check-in that never ran pass as a check-in that did.
+    expect(updateCall?.data?.to).toBeInstanceOf(Date);
     // `to` moves to the return moment, so it is neither of the planned dates.
     expect(updateCall?.data?.to).not.toEqual(extendedTo);
     // `originalTo` is left untouched — the column already holds the plan.

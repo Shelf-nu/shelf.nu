@@ -5899,6 +5899,17 @@ export async function partialCheckinBooking({
         .filter((ba) => Boolean(ba.checkedInAt))
         .map((ba) => ba.assetId)
     );
+    /**
+     * Slices still out: gone out and not yet reconciled. An asset can hold a
+     * reconciled slice AND an outstanding one at the same time — a qty-tracked
+     * asset carries a standalone slice plus one per kit — so a reconciled slice
+     * alone does not mean the asset is finished with.
+     */
+    const assetIdsWithAnOutstandingSlice = new Set(
+      bookingFound.bookingAssets
+        .filter((ba) => Boolean(ba.checkedOutAt) && !ba.checkedInAt)
+        .map((ba) => ba.assetId)
+    );
 
     /**
      * Tagged dispositions are judged against their EXACT slice. A
@@ -5968,10 +5979,16 @@ export async function partialCheckinBooking({
     // Checked in already: a duplicate request, not an invalid one. Tested
     // FIRST, and independently of `checkedOutAt` — a reconciled slice carries
     // both markers, and "never checked out" would be the wrong reason to give.
+    //
+    // "Already" has to mean the whole asset, not one of its slices. An untagged
+    // claim names no slice, so it is a claim on whatever the asset still has
+    // out; while any slice is outstanding there is something left to check in,
+    // and refusing would strand it with no way for the operator around it.
     const alreadyCheckedIn = scannedAssets.filter(
       (a) =>
         !assetIdsCoveredBySliceCheck.has(a.id) &&
-        assetIdsWithAReconciledSlice.has(a.id)
+        assetIdsWithAReconciledSlice.has(a.id) &&
+        !assetIdsWithAnOutstandingSlice.has(a.id)
     );
     if (alreadyCheckedIn.length > 0) {
       throw new ShelfError({
@@ -6442,11 +6459,27 @@ export async function partialCheckinBooking({
        * Mark the slices this session fully reconciled. Same ids as the session
        * row above, so a partially-returned qty-tracked slice stays unmarked and
        * remains checkinable — `checkedInAt` means FULLY reconciled.
+       *
+       * Scoped to slices that actually went out, because these ids are
+       * asset-level while the marker is not: an asset's remaining is summed
+       * across ALL its slices, so a slice added after checkout — still
+       * AVAILABLE, never out — sits inside an asset the session can drive to
+       * zero. Stamping it would leave `checkedOutAt` NULL beside a
+       * `checkedInAt`, claiming a return for units that never left.
+       *
+       * `checkedInAt: null` keeps the first reconciliation: where one slice was
+       * settled in an earlier session and a sibling in this one, each keeps the
+       * moment it was actually reconciled.
        */
       if (sessionReconciledAssetIds.length > 0) {
         await tx.bookingAsset.updateMany({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
-          where: { bookingId: id, assetId: { in: sessionReconciledAssetIds } },
+          where: {
+            bookingId: id,
+            assetId: { in: sessionReconciledAssetIds },
+            checkedOutAt: { not: null },
+            checkedInAt: null,
+          },
           data: { checkedInAt: new Date(), checkedInById: userId },
         });
       }
