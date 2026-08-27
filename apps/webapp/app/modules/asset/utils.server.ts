@@ -18,6 +18,7 @@ import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
+import { splitFilterParam } from "./filter-param";
 import { parseFiltersWithHierarchy } from "./query.server";
 import type { ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
@@ -807,10 +808,14 @@ export function getAssetsWhereInput({
  */
 export const advancedFilterFormatSchema = z.string().refine(
   (value) => {
-    const parts = value.split(":");
-    if (parts.length !== 2) return false;
+    // Only the first colon separates; the rest belong to the value. Counting
+    // fields instead would reject any value containing a colon — legal in
+    // Code128, DataMatrix and ExternalQR, and unavoidable in a URL — and
+    // `validateAdvancedFilterParams` drops what fails here, so the filter
+    // would vanish from the URL rather than merely mismatch.
+    const [operator, filterValue] = splitFilterParam(value);
+    if (filterValue === undefined) return false;
 
-    const [operator] = parts;
     return filterOperatorSchema.safeParse(operator).success;
   },
   {
