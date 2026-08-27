@@ -51,8 +51,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    // Decode the URL-encoded barcode value
-    const value = decodeURIComponent(encodedValue);
+    // React Router has already percent-decoded the route param, so this value
+    // is the barcode as scanned. Decoding again would consume a literal `%XX`
+    // that belongs to the code — Code128 and DataMatrix both permit `%` — and
+    // a lone `%` would throw a URIError, turning a scan into a 500.
+    const value = encodedValue;
 
     // Look up barcode within the organization, including asset details
     // in a single query. getBarcodeByValue handles case-insensitive
