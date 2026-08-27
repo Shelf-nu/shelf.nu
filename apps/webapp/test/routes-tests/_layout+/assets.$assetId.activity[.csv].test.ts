@@ -161,9 +161,9 @@ describe("app/routes/_layout+/assets.$assetId.activity[.csv] loader", () => {
   });
 
   it("names the author by displayName when they have one", async () => {
-    // The Author column is built by a hand-rolled join in `notesToCsv`, which
-    // the compiler cannot see — the row reaching it carries `displayName`, so
-    // the join is the only thing that can drop it.
+    // `displayName` replaces the legal name in the Author column. The row
+    // reaching `notesToCsv` carries all three name fields, so only the column
+    // it builds decides which one is exported.
     dbMock.note.findMany.mockResolvedValue([
       {
         id: "note-3",
@@ -176,7 +176,7 @@ describe("app/routes/_layout+/assets.$assetId.activity[.csv] loader", () => {
           displayName: "Carlie Virreira",
         },
       },
-    ] as any);
+    ]);
 
     const response = await loader(
       createLoaderArgs({
