@@ -181,13 +181,16 @@ const useStyles = createStyles(() => ({
   resultCardWarning: {
     backgroundColor: "rgba(239,104,32,0.9)",
   },
-  // Amber, matching the audit scanner's duplicate frame (#FFC107).
+  // Deep amber, following the audit scanner's duplicate toast: the bright
+  // #FFC107 of the scan FRAME is a graphic and carries no text, while a card
+  // is read, and white on bright amber lands near 1.9:1 — far under the 4.5:1
+  // WCAG AA asks of body text. This ground holds white at ~5.8:1.
   resultCardDuplicate: {
-    backgroundColor: "rgba(255,193,7,0.92)",
+    backgroundColor: "rgba(161,98,7,0.92)",
   },
-  // Same amber: an advisory card and the advisory frame are one state.
+  // Same ground: an advisory card and a duplicate card are one visual state.
   resultCardAdvisory: {
-    backgroundColor: "rgba(255,193,7,0.92)",
+    backgroundColor: "rgba(161,98,7,0.92)",
   },
   resultTextContainer: {
     flex: 1,

@@ -490,19 +490,28 @@ function ScannerContent() {
    * no unclaim) while the card copy promises "this workspace". Clearing the
    * card and the scan-dedup memory on org change means every action the user
    * can see always targets the workspace they see.
+   *
+   * The batch and booking lists go for the same reason, and their failure is
+   * quieter: their rows were resolved under the previous org while every
+   * submit handler reads `currentOrg.id` live, and the bulk endpoints narrow
+   * to `{ id: { in: ids }, organizationId }` — so a batch carried across a
+   * switch matches no rows, commits nothing, and still answers success, which
+   * the app would report as "Assigned 3 assets" before clearing the evidence.
    */
   useEffect(() => {
     setScanResult(null);
     lastScanRef.current = "";
+    setScannedItems([]);
+    setBookingCheckinItems([]);
     // Also invalidates any in-flight claim continuation: claimQrAndProceed
     // compares its originating org against this ref after its awaits and
     // drops the follow-up navigation when they differ (the claim itself may
     // have landed in the old org — irreversible — but we must not open the
     // create/link flow under the newly active workspace).
     activeOrgIdRef.current = currentOrg?.id;
-    // setScanResult / lastScanRef are stable identities (setState / ref), so
+    // setScanResult / lastScanRef / the two setState identities are stable, so
     // this effectively runs only when the active org changes (the mount run
-    // is a no-op — the card starts null and the dedup memory empty).
+    // is a no-op — the card starts null and both lists empty).
   }, [currentOrg?.id, setScanResult, lastScanRef]);
 
   // Animation for scan line (shared hook)
@@ -1523,12 +1532,18 @@ function ScannerContent() {
     },
     // why: finalizeScan, isProcessingRef, lastScanRef, setIsProcessing, setScanResult,
     // and shouldSkipScan are stable across renders (refs and setState identities) or
-    // would cause render storms if listed; intentionally excluded
+    // would cause render storms if listed; intentionally excluded. setCurrentOrg is
+    // likewise stable (a useCallback with no deps in OrgProvider). `organizations`
+    // IS listed: refreshing the org list hands over a new array without changing
+    // currentOrg, and a callback holding the old one cannot find the workspace a
+    // freshly-joined code belongs to — the cross-workspace card would then lose its
+    // Switch & view action.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       router,
       action,
       currentOrg,
+      organizations,
       canManageQrCodes,
       claimQrAndProceed,
       scannedItems,
