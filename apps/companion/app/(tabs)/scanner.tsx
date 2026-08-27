@@ -1625,54 +1625,64 @@ function ScannerContent() {
       : member.name;
 
     const confirmLabel = batchLabel();
-    Alert.alert("Assign Custody", `Assign ${confirmLabel} to ${displayName}?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Assign",
-        onPress: async () => {
-          setIsSubmitting(true);
-          // Fan out per entity type — assets and kits have separate bulk
-          // endpoints wrapping their respective services (web parity).
-          const { assetIds, kitIds } = splitScannedIds();
-          const [assetResult, kitResult] = await Promise.all([
-            assetIds.length > 0
-              ? api.bulkAssignCustody(currentOrg.id, assetIds, member.id)
-              : Promise.resolve({ data: null, error: null }),
-            kitIds.length > 0
-              ? api.bulkAssignKitCustody(currentOrg.id, kitIds, member.id)
-              : Promise.resolve({ error: null }),
-          ]);
-          setIsSubmitting(false);
+    Alert.alert(
+      isSelfService ? "Take Custody" : "Assign Custody",
+      isSelfService
+        ? `Take custody of ${confirmLabel}?`
+        : `Assign ${confirmLabel} to ${displayName}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: isSelfService ? "Take" : "Assign",
+          onPress: async () => {
+            setIsSubmitting(true);
+            // Fan out per entity type — assets and kits have separate bulk
+            // endpoints wrapping their respective services (web parity).
+            const { assetIds, kitIds } = splitScannedIds();
+            const [assetResult, kitResult] = await Promise.all([
+              assetIds.length > 0
+                ? api.bulkAssignCustody(currentOrg.id, assetIds, member.id)
+                : Promise.resolve({ data: null, error: null }),
+              kitIds.length > 0
+                ? api.bulkAssignKitCustody(currentOrg.id, kitIds, member.id)
+                : Promise.resolve({ error: null }),
+            ]);
+            setIsSubmitting(false);
 
-          const error = assetResult.error || kitResult.error;
-          if (error) {
-            Alert.alert("Error", error);
-          } else {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            playScanSound();
-            // Honest partial success: mixed batches skip QUANTITY_TRACKED
-            // assets server-side (their custody is per-unit), so say both
-            // numbers instead of implying everything was assigned. Absent
-            // field (older server) or all-INDIVIDUAL batches read 0 and the
-            // alert body is unchanged. All-QT batches error out server-side
-            // and never reach this branch.
-            const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
-            const skippedNote =
-              skipped > 0
-                ? `\n\n${skipped} quantity-tracked asset${
-                    skipped === 1 ? "" : "s"
-                  } skipped. Assign quantities from the asset's detail screen.`
-                : "";
-            Alert.alert(
-              "Done",
-              `Assigned ${confirmLabel} to ${displayName}.${skippedNote}`
-            );
-            setScannedItems([]);
-            lastScanRef.current = "";
-          }
+            const error = assetResult.error || kitResult.error;
+            if (error) {
+              Alert.alert("Error", error);
+            } else {
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Success
+              );
+              playScanSound();
+              // Honest partial success: mixed batches skip QUANTITY_TRACKED
+              // assets server-side (their custody is per-unit), so say both
+              // numbers instead of implying everything was assigned. Absent
+              // field (older server) or all-INDIVIDUAL batches read 0 and the
+              // alert body is unchanged. All-QT batches error out server-side
+              // and never reach this branch.
+              const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
+              const skippedNote =
+                skipped > 0
+                  ? `\n\n${skipped} quantity-tracked asset${
+                      skipped === 1 ? "" : "s"
+                    } skipped. Assign quantities from the asset's detail screen.`
+                  : "";
+              Alert.alert(
+                "Done",
+                isSelfService
+                  ? `You have custody of ${confirmLabel}.${skippedNote}`
+                  : `Assigned ${confirmLabel} to ${displayName}.${skippedNote}`
+              );
+              setScannedItems([]);
+              lastScanRef.current = "";
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const performBulkRelease = async () => {

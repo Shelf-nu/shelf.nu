@@ -122,7 +122,7 @@ export default function AssetDetailScreen() {
     handleReleaseCustody,
     performAssignQuantity,
     performReleaseQuantity,
-  } = useCustodyActions({ asset, currentOrg, fetchAsset });
+  } = useCustodyActions({ asset, currentOrg, fetchAsset, isSelfService });
 
   // Image upload
   const { isUploadingImage, handleImagePress } = useImageUpload({
