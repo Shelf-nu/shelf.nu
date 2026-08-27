@@ -285,15 +285,78 @@ function AuditScannerContent() {
         return;
       }
 
+      // removed:false means the server had no scan to remove — the sheet gates
+      // the action on a synced scan, so reaching here means one vanished under
+      // us. Keep the row rather than reporting a removal that did not happen.
+      if (!data.removed) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert(
+          "Nothing to remove",
+          "That scan has not reached the server yet. Try again in a moment."
+        );
+        return;
+      }
+
       // Drop the row and let the asset be scannable again. The dedup set is
       // what makes a re-scan register rather than reading as a duplicate.
-      setScannedItems((prev) =>
-        prev.filter((scanned) => scanned.assetId !== item.assetId)
+      //
+      // The ref moves with the list, and the snapshot on disk with both: every
+      // persistence path reads the ref, and recovery on next launch trusts
+      // what it finds there. Leaving either behind would offer the removed
+      // scan back as an unsynced one, and its asset would then read as
+      // already scanned.
+      const remaining = scannedItemsRef.current.filter(
+        (scanned) => scanned.assetId !== item.assetId
       );
+      scannedItemsRef.current = remaining;
+      setScannedItems(remaining);
       scannedAssetIdsRef.current.delete(item.assetId);
-      setFoundCount(data.foundAssetCount);
-      setUnexpectedCount(data.unexpectedAssetCount);
-      animateProgress(data.foundAssetCount);
+
+      // Splice rather than reassign: the debounced saver holds these array
+      // references. A queued entry for this asset would re-record the scan
+      // that was just undone.
+      for (const queue of [scanQueueRef.current, failedQueueRef.current]) {
+        for (let i = queue.length - 1; i >= 0; i--) {
+          if (queue[i].assetId === item.assetId) queue.splice(i, 1);
+        }
+      }
+
+      // Same policy the exit path uses: keep a snapshot while anything is
+      // still unsynced, otherwise there is nothing worth recovering.
+      const hasUnsyncedScans =
+        scanQueueRef.current.length > 0 || failedQueueRef.current.length > 0;
+      if (hasUnsyncedScans) {
+        debouncedSaverRef.current?.flush(
+          remaining,
+          scanQueueRef.current,
+          failedQueueRef.current
+        );
+      } else {
+        debouncedSaverRef.current?.cancel();
+        void clearAuditScanState(auditId);
+      }
+      // The server counts rows it holds, and scans still waiting in the queue
+      // are not among them — adopting its totals raw would erase the progress
+      // those scans already earned on screen, and understate the walk until
+      // the audit is reopened. Add them back, deduped by asset so a requeued
+      // entry counts once.
+      const outstanding = new Map<string, boolean>();
+      for (const queued of [
+        ...scanQueueRef.current,
+        ...failedQueueRef.current,
+      ]) {
+        outstanding.set(queued.assetId, queued.isExpected);
+      }
+      let pendingFound = 0;
+      let pendingUnexpected = 0;
+      for (const isExpected of outstanding.values()) {
+        if (isExpected) pendingFound += 1;
+        else pendingUnexpected += 1;
+      }
+
+      setFoundCount(data.foundAssetCount + pendingFound);
+      setUnexpectedCount(data.unexpectedAssetCount + pendingUnexpected);
+      animateProgress(data.foundAssetCount + pendingFound);
 
       handleCloseEvidenceModal();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -307,7 +370,11 @@ function AuditScannerContent() {
       currentOrg,
       auditId,
       setScannedItems,
+      scannedItemsRef,
       scannedAssetIdsRef,
+      scanQueueRef,
+      failedQueueRef,
+      debouncedSaverRef,
       setFoundCount,
       setUnexpectedCount,
       animateProgress,
@@ -344,6 +411,24 @@ function AuditScannerContent() {
           };
         })
       );
+      // The open sheet renders from its own snapshot of the row, so correcting
+      // only the list would leave the badges above the very notes and photos
+      // they are miscounting — and hide the line that says they survive an
+      // undo, which is the case this exists for.
+      setSelectedItem((prev) => {
+        if (!prev || prev.assetId !== assetId) return prev;
+        if (
+          (prev.notesCount ?? 0) === counts.notes &&
+          (prev.imagesCount ?? 0) === counts.images
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          notesCount: counts.notes,
+          imagesCount: counts.images,
+        };
+      });
     },
     [setScannedItems]
   );

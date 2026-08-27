@@ -153,13 +153,21 @@ export function EvidenceModal({
     void (async () => {
       // Narrowed to this asset: the sheet shows one row, and the audit-wide
       // response carries every note and photo in the audit.
-      const { data } = await api.auditEvidence(
+      const { data, error } = await api.auditEvidence(
         auditSessionId,
         currentOrg.id,
         controller.signal,
         auditAssetId
       );
       if (controller.signal.aborted) return;
+      // A failed read knows nothing. Publishing its empty shape would tell the
+      // list this scan has no evidence and overwrite counts that are right —
+      // opening a row offline would erase them. (An abort returns no error and
+      // is already handled above.)
+      if (error) {
+        setExistingLoading(false);
+        return;
+      }
       const evidence = data?.byAuditAsset?.[auditAssetId] ?? {
         notes: [],
         images: [],
@@ -571,7 +579,11 @@ export function EvidenceModal({
               </>
             )}
 
-            {onRemoveScan ? (
+            {/* A scan that has not reached the server has nothing to remove:
+                the endpoint would answer removed:false while its entry sits in
+                the retry queue, and a later retry would record the scan the
+                person was just told was gone. */}
+            {onRemoveScan && !isPending ? (
               <View style={styles.removeScanSection}>
                 <TouchableOpacity
                   style={styles.removeScanButton}
