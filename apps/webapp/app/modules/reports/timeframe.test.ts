@@ -1,3 +1,15 @@
+/**
+ * Report timeframes: how a preset or a pair of custom boundaries becomes the
+ * range a report is run over, and the label shown for it.
+ *
+ * Two things are pinned here. The label must render in the acting user's own
+ * date format, so the assertions use fixed UTC instants with explicit prefs
+ * and never read the machine clock. And a boundary that cannot be read must
+ * not reach a formatter — the query string is user-supplied, and an
+ * unparseable date is an object rather than a throw.
+ *
+ * @see {@link file://./timeframe.ts}
+ */
 import { DateTime } from "luxon";
 import { describe, expect, it } from "vitest";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
@@ -10,8 +22,10 @@ import { resolveTimeframe, toZonedBoundaryISO } from "./timeframe";
  * custom range is fully pref-driven.
  *
  * All custom-range assertions use FIXED UTC instants + explicit prefs so they
- * are machine-timezone independent (the resolver anchors boundaries in
- * `prefs.timeZone`, not the machine tz).
+ * are machine-timezone independent. The resolver does NOT anchor the custom
+ * boundaries — it passes them through as given, and `toZonedBoundaryISO`
+ * performs that conversion once, when the picker serializes them into the URL.
+ * What follows the prefs here is the LABEL.
  */
 describe("resolveTimeframe labels", () => {
   const ddmmyyyy: ResolvedFormatPrefs = {
