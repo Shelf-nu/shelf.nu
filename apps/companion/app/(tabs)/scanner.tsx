@@ -18,7 +18,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "@/lib/api";
+import { api, getApiBaseUrl } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
 import { resolveSelfTeamMember } from "@/lib/self-team-member";
@@ -33,7 +33,8 @@ import type {
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
-import { extractQrId } from "@/lib/qr-utils";
+import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
+import { getActiveServer } from "@/lib/server";
 import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
 import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
@@ -690,6 +691,23 @@ function ScannerContent() {
       const isStaleScan = () => activeOrgIdRef.current !== originOrgId;
 
       try {
+        // A Shelf URL from ANOTHER server would otherwise be resolved against
+        // this one and reported as "not found" — a baffling error for a code
+        // that is perfectly valid on the instance that minted it.
+        if (
+          classifyScannedCode(data, getActiveServer().baseUrl).kind ===
+          "foreign"
+        ) {
+          setScanResult({
+            type: "error",
+            title: "Different Shelf Server",
+            message:
+              "This code belongs to a different Shelf server. Sign in to that server to use it.",
+          });
+          finalizeScan();
+          return;
+        }
+
         const qrId = extractQrId(data);
         // SAM / sequential ids (e.g. SAM-0001) aren't QR ids — they resolve
         // via the QR route's sequentialId branch, scoped to the current
@@ -835,7 +853,7 @@ function ScannerContent() {
                   icon: "open-outline",
                   onPress: () => {
                     void openShelfWebUrl(
-                      `https://app.shelf.nu/qr/${unclaimedQrId}`
+                      `${getApiBaseUrl()}/qr/${unclaimedQrId}`
                     );
                     dismissResult();
                   },
@@ -1268,7 +1286,7 @@ function ScannerContent() {
               label: "Open in Browser",
               icon: "open-outline",
               onPress: () => {
-                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
                 dismissResult();
               },
             };
@@ -1325,7 +1343,7 @@ function ScannerContent() {
               label: "Link in Browser",
               icon: "open-outline",
               onPress: () => {
-                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
                 dismissResult();
               },
             };
