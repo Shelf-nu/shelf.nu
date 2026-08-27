@@ -24,6 +24,7 @@
         "backgroundColor": "#FF7809"
       },
       "package": "com.shelf.companion",
+      "allowBackup": false,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.ACCESS_COARSE_LOCATION",

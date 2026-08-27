@@ -44,6 +44,7 @@ import {
   Tr,
 } from "~/components/scanner/drawer/generic-item-row";
 import { Button } from "~/components/shared/button";
+import { resolveScannedExpectedness } from "~/utils/audit-scan-expectedness";
 import { tw } from "~/utils/tw";
 
 /**
@@ -126,9 +127,17 @@ export function AuditItemRow({
       )}
       renderItem={(data: any) => {
         const isAsset = itemType === "asset";
-        const isExpected = isAsset && data?.id && expectedAssetIds.has(data.id);
-        const isUnexpected =
-          isAsset && data?.id && !expectedAssetIds.has(data.id);
+        // An asset row is one or the other; a non-asset row is neither.
+        const wasExpected =
+          isAsset &&
+          resolveScannedExpectedness({
+            assetId: data?.id,
+            assetDeleted: data?.assetDeleted,
+            isExpected: data?.isExpected,
+            expectedAssetIds,
+          });
+        const isExpected = wasExpected;
+        const isUnexpected = isAsset && !wasExpected;
         const auditAssetId =
           typeof data?.auditAssetId === "string"
             ? data.auditAssetId

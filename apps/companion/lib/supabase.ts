@@ -1,10 +1,11 @@
 /**
- * Supabase client for the companion app.
+ * Supabase client for the ACTIVE server.
  *
- * One module-scope client, built from `EXPO_PUBLIC_SUPABASE_URL` and
- * `EXPO_PUBLIC_SUPABASE_ANON_PUBLIC`. Those are inlined at bundle time, so the
- * project this points at is fixed for the life of a build and cannot change at
- * runtime. Import `supabase` directly; there is nothing to resolve first.
+ * The app can be connected to Shelf Cloud or to a customer's self-hosted
+ * instance, each of which is a different Supabase project. The client is
+ * therefore rebuildable at runtime rather than a module singleton — consumers
+ * must call `getSupabase()` at use time and never capture the result in a
+ * module-scope binding, or they will keep talking to the previous server.
  *
  * Sessions persist through {@link secureStoreAdapter} rather than
  * AsyncStorage, because a refresh token belongs in the keychain. SecureStore
@@ -13,13 +14,13 @@
  * {@link CHUNK_SIZE} characters across numbered chunk keys and reassembles it
  * on read. Deleting a key must clear every chunk, or a stale tail corrupts the
  * next read.
+ *
+ * @see ./server/active-server.ts — owns when the rebuild happens
  */
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_PUBLIC!;
+import type { ServerConfig } from "./server/contract";
 
 /**
  * Maximum bytes per SecureStore item on iOS.
@@ -130,11 +131,109 @@ async function cleanupChunks(key: string): Promise<void> {
   } catch {}
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    storage: secureStoreAdapter,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-});
+/**
+ * The live client. Replaced wholesale on every server switch, which is why
+ * nothing outside this module may hold a reference to it.
+ */
+let client: SupabaseClient | null = null;
+
+/**
+ * URL the live client was built with. Tracked because `SupabaseClient` does not
+ * expose it, and `apiFetch` asserts against it that the session it is about to
+ * send belongs to the active server.
+ */
+let clientUrl: string | null = null;
+
+/**
+ * Creates a client for one server, with the shared secure-storage adapter.
+ *
+ * @param supabaseUrl - The server's Supabase project URL.
+ * @param supabaseAnonKey - That project's public anon key.
+ * @returns A configured Supabase client.
+ */
+function createForServer(
+  supabaseUrl: string,
+  supabaseAnonKey: string
+): SupabaseClient {
+  const created = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      storage: secureStoreAdapter,
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false,
+    },
+  });
+
+  // Recorded only once construction has succeeded. `createClient` validates the
+  // URL and throws on a malformed one; setting this first would leave
+  // `clientUrl` naming a server the live client is not connected to, and
+  // `guardSessionServerMatch` — which compares exactly these two values — would
+  // then agree with itself and wave the previous server's token through.
+  clientUrl = supabaseUrl;
+  return created;
+}
+
+/**
+ * Returns the Supabase client for the active server, creating it on first use
+ * from the bundled Shelf Cloud credentials.
+ *
+ * Supabase namespaces its own session storage as `sb-<project-ref>-auth-token`,
+ * derived from the URL, so sessions for two different servers cannot collide in
+ * SecureStore.
+ *
+ * @returns The live client.
+ */
+export function getSupabase(): SupabaseClient {
+  if (!client) {
+    // why: the cloud credentials are read from process.env here AND in
+    // `CLOUD_SERVER` (server/active-server.ts). That duplication is deliberate
+    // — importing CLOUD_SERVER would make this module depend on
+    // active-server.ts, which already depends on this one. Do not "fix" it.
+    client = createForServer(
+      process.env.EXPO_PUBLIC_SUPABASE_URL!,
+      process.env.EXPO_PUBLIC_SUPABASE_ANON_PUBLIC!
+    );
+  }
+  return client;
+}
+
+/**
+ * The URL the live Supabase client was built with.
+ *
+ * @returns The URL, or `null` when no client has been created yet.
+ * @see ./server/contract.ts — `isSessionServerMismatched`, which consumes this
+ */
+export function getSupabaseClientUrl(): string | null {
+  return clientUrl;
+}
+
+/**
+ * Replaces the live client with one pointed at `config`'s Supabase project, and
+ * stops the outgoing client's token auto-refresh.
+ *
+ * Callers are responsible for signing out of the previous client BEFORE calling
+ * this, and for rearming anything subscribed to the old client's auth events —
+ * see `setActiveServer`.
+ *
+ * @param config - The server being switched to.
+ * @returns The newly created client.
+ */
+export function rebuildSupabase(config: ServerConfig): SupabaseClient {
+  const previous = client;
+  // A throw from `createForServer` leaves BOTH `client` and `clientUrl` on the
+  // previous server, which is the safe pairing: the two still agree, so the
+  // request chokepoint keeps working rather than silently matching a client
+  // that was never built.
+  client = createForServer(config.supabaseUrl, config.supabaseAnonKey);
+
+  // why: with `autoRefreshToken: true` and no `document` (React Native),
+  // GoTrueClient unconditionally starts a setInterval ticker that ONLY
+  // stopAutoRefresh() clears. Dropping the reference alone strands it for the
+  // process lifetime, still refreshing the previous server's session every 30s.
+  // Fire-and-forget: clearInterval happens synchronously inside, and a
+  // rejection must never block the switch. (`dispose()` does not exist in the
+  // pinned auth-js version.)
+  void previous?.auth.stopAutoRefresh().catch(() => {});
+
+  return client;
+}
