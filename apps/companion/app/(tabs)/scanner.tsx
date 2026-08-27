@@ -360,8 +360,11 @@ function ScannerContent() {
   // closure and its state setter belong to a single booking's mount.
   const fetchBookingCtx = useCallback(() => {
     if (!isBookingMode || !bookingId || !currentOrg) return;
+    const originOrgId = currentOrg.id;
     api.booking(bookingId, currentOrg.id).then(({ data }) => {
-      if (!data) return;
+      // A failed fetch leaves the previous context in place, so an answer that
+      // outlived its workspace must not be the one that replaces it.
+      if (!data || activeOrgIdRef.current !== originOrgId) return;
       setBookingCtx({
         bookedAssetIds: new Set(data.booking.assets.map((a) => a.id)),
         bookingStatus: data.booking.status,
@@ -503,6 +506,9 @@ function ScannerContent() {
     lastScanRef.current = "";
     setScannedItems([]);
     setBookingCheckinItems([]);
+    // The booking belongs to the workspace that was open. Its refetch bails
+    // on failure, so without this a stale context would survive the switch.
+    setBookingCtx(null);
     // Also invalidates any in-flight claim continuation: claimQrAndProceed
     // compares its originating org against this ref after its awaits and
     // drops the follow-up navigation when they differ (the claim itself may
@@ -675,6 +681,14 @@ function ScannerContent() {
       resetInactivityTimer();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
+      // The workspace this scan belongs to. Lookups run against a 20s timeout
+      // and the tab keeps its state while the user is elsewhere, so a resolve
+      // can land after they have switched — and everything below appends to
+      // lists and cards the switch has already emptied. `claimQrAndProceed`
+      // pins its origin the same way.
+      const originOrgId = currentOrg?.id;
+      const isStaleScan = () => activeOrgIdRef.current !== originOrgId;
+
       try {
         const qrId = extractQrId(data);
         // SAM / sequential ids (e.g. SAM-0001) aren't QR ids — they resolve
@@ -748,6 +762,13 @@ function ScannerContent() {
             error,
             errorDetails,
           } = await api.qr(qrLookupId, currentOrg?.id, coordinates);
+
+          // Landed after a workspace switch: this answer describes a workspace
+          // the user has left, so it may not touch their lists or their card.
+          if (isStaleScan()) {
+            finalizeScan();
+            return;
+          }
 
           if (error || !qrData) {
             flashFrame("error");
@@ -870,6 +891,13 @@ function ScannerContent() {
             data,
             currentOrg.id
           );
+
+          // Same rule as the QR path: a resolve that outlived the workspace it
+          // was made in is dropped rather than rendered.
+          if (isStaleScan()) {
+            finalizeScan();
+            return;
+          }
 
           if (barcodeError || !barcodeData) {
             flashFrame("error");
