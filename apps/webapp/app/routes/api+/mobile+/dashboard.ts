@@ -10,6 +10,7 @@ import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getBookings } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
 /**
@@ -262,26 +263,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: string;
       from: Date | string | null;
       to: Date | string | null;
-      custodianUser?: {
-        firstName: string | null;
-        lastName: string | null;
-      } | null;
+      /**
+       * `UserNameFields` rather than the name halves spelled out: it requires
+       * `displayName`, so this shape cannot drift back to naming the custodian
+       * by their legal name without failing to compile.
+       */
+      custodianUser?: UserNameFields | null;
       custodianTeamMember?: { name: string } | null;
       _count?: { bookingAssets: number };
     };
 
     // Format booking results
-<<<<<<< HEAD
-    // Inferred from the query rather than `any`: the custodian fields read
-    // below are only type-checked if this parameter carries the projection.
-    // All three `getBookings` calls above share one `extraInclude`, so the
-    // upcoming element type describes the overdue rows too.
-    const formatBooking = (
-      b: (typeof upcomingBookingsResult.bookings)[number]
-    ) => ({
-=======
     const formatBooking = (b: MobileDashboardBooking) => ({
->>>>>>> origin/main
       id: b.id,
       name: b.name,
       status: b.status,
@@ -290,12 +283,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       custodianName: b.custodianUser
         ? resolveUserDisplayName(b.custodianUser) || null
         : b.custodianTeamMember?.name || null,
-<<<<<<< HEAD
-      // Counted via the explicit `BookingAsset` pivot. The implicit-M2M
-      // `_count.assets` this replaced no longer exists, so it resolved to
-      // `undefined` and every booking reported zero assets.
-=======
->>>>>>> origin/main
       assetCount: b._count?.bookingAssets ?? 0,
     });
 
