@@ -152,6 +152,31 @@ export function checkoutSessionsToLogsByAsset(
  *   tag or `null` for the legacy greedy pool, plus `quantity`).
  * @returns Map keyed by every input row `id` → attributed quantity.
  */
+/**
+ * Order in which an untagged claim consumes an asset's slices on a booking.
+ *
+ * Standalone first (loose items are scanned and returned individually, whereas
+ * a kit is handled as a whole, so an untagged claim is more likely the flexible
+ * standalone pool than a kit's fixed allocation), then kit-driven. Within each
+ * bucket by `id` ascending — `BookingAsset.id` is a cuid, whose creation-time
+ * prefix sorts chronologically, standing in for a `createdAt` the model does
+ * not carry.
+ *
+ * Exported because two things must agree on it: the quantity attribution below
+ * and the `checkedOutAt` marker the checkout writer stamps. If they picked
+ * different slices, a slice could hold checked-out units with no marker — which
+ * the check-in guard reads as "never checked out" and refuses.
+ */
+export function compareSlicesForGreedyFill(
+  a: { id: string; assetKitId: string | null },
+  b: { id: string; assetKitId: string | null }
+): number {
+  const aIsKit = a.assetKitId != null;
+  const bIsKit = b.assetKitId != null;
+  if (aIsKit !== bIsKit) return aIsKit ? 1 : -1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
 export function attributeDispositionsByBookingAsset(args: {
   bookingAssetRows: Array<{
     id: string;
@@ -181,17 +206,7 @@ export function attributeDispositionsByBookingAsset(args: {
 
   if (legacyPool === 0) return out;
 
-  // Greedy fill: standalone-first (loose items are scanned individually;
-  // kits are handled as a whole), then kit-driven. Within each bucket,
-  // sort by `id` ascending — BookingAsset.id is a cuid, which is
-  // chronologically sortable (creation-time prefix), so this stands in
-  // for "by createdAt" without needing the column on the model.
-  const ordered = [...bookingAssetRows].sort((a, b) => {
-    const aIsKit = a.assetKitId != null;
-    const bIsKit = b.assetKitId != null;
-    if (aIsKit !== bIsKit) return aIsKit ? 1 : -1;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
+  const ordered = [...bookingAssetRows].sort(compareSlicesForGreedyFill);
   for (const row of ordered) {
     if (legacyPool === 0) break;
     const already = out.get(row.id) ?? 0;

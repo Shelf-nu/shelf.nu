@@ -97,9 +97,18 @@ WHERE ba."bookingId" = src."bookingId"
   AND ba."checkedOutAt" IS NULL;
 
 -- Backfill 2b — bookings predating the ActivityEvent model, which have no
--- per-asset trail to reconstruct from. Restricted to bookings carrying NO
--- session rows, so it cannot disturb a mixed booking 2a already repaired.
--- `Booking.updatedAt` is the only remaining stand-in for the checkout moment.
+-- per-asset trail to reconstruct from. `Booking.updatedAt` is the only
+-- remaining stand-in for the checkout moment, and it is a blunt one: it moves
+-- on any later edit and says nothing about which slices left. So it is fenced
+-- to bookings that carry NEITHER a session row NOR a checkout event — the only
+-- population 1 and 2a cannot reach.
+--
+-- Both fences are load-bearing. Without the event fence this also claims a
+-- MODERN button-checkout booking that was never scanned, and on those a slice
+-- added afterwards is still AVAILABLE and never went out: it would be handed a
+-- fabricated departure. With the fence, any booking holding those events is
+-- left entirely to 2a, which matches per asset and so already covers every
+-- slice that left.
 --
 -- Reservations archived straight from RESERVED never went out, so they get no
 -- checkout marker: `archivedWithoutCheckin` is the flag that says so, and the
@@ -115,6 +124,10 @@ WHERE ba."bookingId" = b.id
   AND b."archivedWithoutCheckin" = false
   AND NOT EXISTS (
     SELECT 1 FROM "PartialBookingCheckout" p WHERE p."bookingId" = b.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM "ActivityEvent" ae
+    WHERE ae."bookingId" = b.id AND ae.action = 'BOOKING_CHECKED_OUT'
   );
 
 -- Backfill 3 — progressive check-ins, mirroring backfill 1.

@@ -111,6 +111,7 @@ import type { MergeInclude } from "~/utils/utils";
 import {
   attributeDispositionsByBookingAsset,
   checkoutSessionsToLogsByAsset,
+  compareSlicesForGreedyFill,
 } from "./checkout-attribution";
 import {
   ADDABLE_BOOKING_STATUSES,
@@ -7464,12 +7465,31 @@ export async function partialCheckoutBooking({
               .map((d) => d.bookingAssetId!)
           ),
         ];
+        /**
+         * Assets claimed WITHOUT a slice tag. The mobile route accepts
+         * `{ assetId, quantity }` and the companion sends exactly that, so a
+         * qty-tracked asset can be claimed with no slice named. The
+         * `checkedOutAt` marker still has to name specific slices, so their
+         * remainings are read in the same batch — widening this call rather
+         * than adding a second round-trip inside the transaction.
+         */
+        const untaggedQtyAssetIds = new Set(
+          dispositions
+            .filter(
+              (d) =>
+                !d.bookingAssetId &&
+                assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED
+            )
+            .map((d) => d.assetId)
+        );
+        const untaggedQtySliceIds = bookingFound.bookingAssets
+          .filter((ba) => untaggedQtyAssetIds.has(ba.asset.id))
+          .map((ba) => ba.id);
         const sliceCommittedRemainingBySlice =
-          await computeBookingAssetsSliceRemainingToCheckOut(
-            tx,
-            id,
-            sliceTaggedBookingAssetIds
-          );
+          await computeBookingAssetsSliceRemainingToCheckOut(tx, id, [
+            ...sliceTaggedBookingAssetIds,
+            ...untaggedQtySliceIds,
+          ]);
 
         for (const disp of dispositions) {
           if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
@@ -7811,22 +7831,86 @@ export async function partialCheckoutBooking({
          * Scoped to the slices this batch actually claimed. `assetId`-wide
          * would stamp every sibling slice of a multi-slice qty-tracked asset —
          * standalone plus N kit-driven rows can coexist for one (booking,
-         * asset) — recording units that never left as out.
+         * asset) — recording units that never left as out, which the check-in
+         * guard then reads as permission to reconcile them.
          *
-         * Untagged (`""`) entries are INDIVIDUAL / legacy dispositions, which
-         * hold a single slice per booking, so asset-wide IS exact for them.
+         * Asset-wide is exact only when the claim covers every outstanding unit
+         * of the asset. That holds for INDIVIDUAL entries (one slice per
+         * booking) and for a bare scan, whose `defaultAllRemaining` resolves to
+         * the whole asset-level remaining. A PARTIAL untagged qty-tracked claim
+         * is neither: the mobile route accepts `{ assetId, quantity }` with no
+         * slice tag and the companion sends exactly that, so those are resolved
+         * to a greedy slice prefix below.
          */
         const taggedSliceIds = sessionBookingAssetIds.filter(Boolean);
         const untaggedAssetIds = sessionAssetIds.filter(
           (_, i) => !sessionBookingAssetIds[i]
         );
+
+        /** Untagged claim per asset, summed across this batch's entries. */
+        const untaggedClaimByAsset = new Map<string, number>();
+        sessionAssetIds.forEach((assetId, i) => {
+          if (sessionBookingAssetIds[i]) return;
+          untaggedClaimByAsset.set(
+            assetId,
+            (untaggedClaimByAsset.get(assetId) ?? 0) +
+              (sessionQuantities[i] ?? 0)
+          );
+        });
+
+        /**
+         * Resolve an untagged qty-tracked claim to the slices it actually
+         * takes: walk that asset's slices in the shared greedy order and
+         * consume each one's remaining until the claim is covered.
+         *
+         * Capacity is the slice's REMAINING, not its booked quantity, which is
+         * where this parts company with the quantity attribution in
+         * {@link attributeDispositionsByBookingAsset}. A slice already fully
+         * out has room in the booked sense and would swallow the claim, so the
+         * slice the units are really leaving from would go unmarked — and an
+         * unmarked slice reads as "never checked out" at check-in.
+         *
+         * An asset is left to the asset-wide branch when the claim covers
+         * everything outstanding, and also when the walk cannot cover it (the
+         * claim disagrees with what we read as remaining). Under-marking is the
+         * worse failure of the two: it refuses a check-in outright, with no way
+         * for the operator around it.
+         */
+        const greedySliceIds: string[] = [];
+        const resolvedUntaggedAssetIds = new Set<string>();
+        for (const [assetId, claimed] of untaggedClaimByAsset) {
+          if (assetTypeById.get(assetId) !== AssetType.QUANTITY_TRACKED) {
+            continue;
+          }
+          if (claimed >= (committedRemainingByAsset.get(assetId) ?? 0)) {
+            continue;
+          }
+          let toCover = claimed;
+          const picked: string[] = [];
+          const slices = bookingFound.bookingAssets
+            .filter((ba) => ba.asset.id === assetId)
+            .sort(compareSlicesForGreedyFill);
+          for (const slice of slices) {
+            if (toCover <= 0) break;
+            const capacity = sliceCommittedRemainingBySlice.get(slice.id) ?? 0;
+            if (capacity <= 0) continue;
+            picked.push(slice.id);
+            toCover -= capacity;
+          }
+          if (toCover > 0) continue;
+          greedySliceIds.push(...picked);
+          resolvedUntaggedAssetIds.add(assetId);
+        }
+
+        const assetWideIds = untaggedAssetIds.filter(
+          (assetId) => !resolvedUntaggedAssetIds.has(assetId)
+        );
+        const exactSliceIds = [...taggedSliceIds, ...greedySliceIds];
         const sliceScope = {
           bookingId: id,
           OR: [
-            ...(taggedSliceIds.length ? [{ id: { in: taggedSliceIds } }] : []),
-            ...(untaggedAssetIds.length
-              ? [{ assetId: { in: untaggedAssetIds } }]
-              : []),
+            ...(exactSliceIds.length ? [{ id: { in: exactSliceIds } }] : []),
+            ...(assetWideIds.length ? [{ assetId: { in: assetWideIds } }] : []),
           ],
         };
 

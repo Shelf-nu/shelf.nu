@@ -54,6 +54,14 @@ check-in) and a new one is easy to miss:
 - `checkedInAt` means **fully reconciled**. A partially-returned `QUANTITY_TRACKED` slice
   stays NULL and is tracked by `ConsumptionLog`.
 
+A claim does not always name the slice it takes: the mobile route accepts
+`{ assetId, quantity }` with no tag, so a qty-tracked asset can be claimed untagged while its
+units sit across a standalone slice and N kit-driven ones. Scoping the marker by `assetId`
+then reports every sibling as out. Resolve the claim to slices first — `compareSlicesForGreedyFill`
+(`~/modules/booking/checkout-attribution`) is the order both the marker and the quantity
+attribution must agree on — and cap each slice by its **remaining**, not its booked quantity: a
+slice already fully out would otherwise absorb the claim and leave the departing one unmarked.
+
 Keep writing the `PartialBookingCheckout` session row alongside — it still owns per-slice
 **quantity** attribution, which the boolean marker cannot express.
 

@@ -9919,9 +9919,14 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     // units — so units that never left could be returned, consumed, lost or
     // damaged, permanently decrementing the pool.
     setupQtyMocks();
+    // why: `computeBookingAssetSliceRemaining` reads the slice's booked
+    // quantity for the per-slice cap. Giving it ample headroom proves the
+    // rejection comes from the eligibility guard and not from the cap.
     (
       db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({ quantity: 50 });
+    // why: eligibility is judged per slice, so the booking must actually hold
+    // the slice the disposition names.
     (
       db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({
