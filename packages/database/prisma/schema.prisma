@@ -2402,8 +2402,12 @@ model AuditScan {
   /// descriptive facts are snapshotted here rather than only referenced.
   ///
   /// Readers prefer the LIVE asset when it still exists (a rename should show
-  /// the current name) and fall back to these. Null on rows written before
-  /// this existed; those degrade to the scanned `code`, which also survives.
+  /// the current name) and fall back to these.
+  ///
+  /// Null means the snapshot could not be taken: scans whose asset had already
+  /// been deleted before these columns were backfilled. Nothing can recover
+  /// those, and they degrade to the scanned `code`, which also survives. Every
+  /// other row carries a snapshot, so null is never merely "old".
   assetTitle  String?
   wasExpected Boolean?
 
