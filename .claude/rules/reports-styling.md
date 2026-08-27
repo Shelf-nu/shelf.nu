@@ -229,6 +229,12 @@ labels it with another.
 Reports about whether a plan was honoured (Booking Compliance) read the planned
 end via `resolvePlannedEnd`; live operational lists (Overdue Items) read `to`.
 
+The planned end is a COALESCE across two columns, and Prisma's `orderBy` cannot
+express one. So a report keyed on it has to sort in memory — fetch the matching
+rows, resolve, sort, then paginate. That is why `bookingComplianceReport` reads
+the full result set while `overdueItemsReport`, keyed on the single `to` column,
+sorts in SQL and pages in the query.
+
 ```typescript
 // Booking Compliance: planned end drives the window, the row and the sort.
 const where = {
@@ -237,11 +243,14 @@ const where = {
     { originalTo: null, to: { gte: timeframe.from, lte: timeframe.to } },
   ],
 };
+// No `orderBy` — see above; the sort happens over the resolved value.
 const bookings = await db.booking.findMany({
   where,
   select: { originalTo: true, to: true /* … */ },
 });
-const rows = bookings.map((b) => ({ scheduledEnd: resolvePlannedEnd(b)! }));
+const rows = bookings
+  .map((b) => ({ scheduledEnd: resolvePlannedEnd(b)! /* … */ }))
+  .sort((a, b) => b.scheduledEnd.getTime() - a.scheduledEnd.getTime());
 ```
 
 ## Compliance Constants
