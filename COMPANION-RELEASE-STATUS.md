@@ -8,14 +8,20 @@ Cutting a build: [apps/companion/STORE-RELEASE.md](./apps/companion/STORE-RELEAS
 
 ## Live in the stores
 
-|             | Version | Build | Notes                                                      |
-| ----------- | ------- | ----- | ---------------------------------------------------------- |
-| App Store   | 1.4.0   | —     | Confirm with `eas build:list --platform ios --limit 1`     |
-| Google Play | 1.4.0   | —     | Confirm with `eas build:list --platform android --limit 1` |
+|             | Version | Build | Notes                       |
+| ----------- | ------- | ----- | --------------------------- |
+| App Store   | 1.4.0   | —     | Read from App Store Connect |
+| Google Play | 1.4.0   | —     | Read from the Play Console  |
 
-Build numbers are deliberately blank rather than guessed: `eas.json` sets
-`appVersionSource: "remote"`, so EAS holds them and the repo never sees them.
-Fill them in from `eas build:list` when a build ships.
+Take these from the stores themselves, not from EAS. `eas build:list` reports
+the most recent BUILD, which is a different thing from what customers have: a
+build can be waiting in review, rejected, or superseded, and Play can hold a
+release as a draft. App Store Connect and the Play Console are the only places
+that say what is live.
+
+Build numbers are blank rather than guessed because `eas.json` sets
+`appVersionSource: "remote"` — EAS assigns them and the repo never sees them.
+Fill each one in from the store listing once that build is actually live.
 
 ## In flight
 
