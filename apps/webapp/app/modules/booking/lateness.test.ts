@@ -1,3 +1,14 @@
+/**
+ * Booking Lateness Helper — Unit Tests
+ *
+ * Pins the pure lateness contract shared by the booking detail page and the
+ * Booking Compliance report: which statuses are measurable, how lateness is
+ * computed against a caller-resolved deadline, where the grace period falls,
+ * and which end/start date `resolvePlannedEnd`/`resolvePlannedStart` pick.
+ *
+ * @see {@link file://./lateness.ts}
+ */
+
 import { BookingStatus } from "@prisma/client";
 import { describe, it, expect } from "vitest";
 import {

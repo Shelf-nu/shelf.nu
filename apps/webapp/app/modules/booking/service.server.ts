@@ -1,3 +1,30 @@
+/**
+ * Booking Service
+ *
+ * The booking domain's server-side business logic — every mutation and read a
+ * booking goes through, from DRAFT to ARCHIVED.
+ *
+ * Responsibilities:
+ * - Lifecycle transitions: create, edit, reserve, check out, check in, extend,
+ *   cancel, revert to draft, archive, duplicate, and their bulk counterparts.
+ * - Partial check-out / check-in, including per-asset quantity dispositions for
+ *   `QUANTITY_TRACKED` assets and the "how much is left" computations.
+ * - Membership: standalone assets and kit-driven slices on the `BookingAsset`
+ *   pivot (see `.claude/rules/kit-members-via-kit-slices.md`).
+ * - The audit trail every transition leaves: system notes, `ActivityEvent`
+ *   records, notification emails, and the expiry/reminder scheduler jobs.
+ *
+ * Two invariants worth knowing before editing:
+ * - `originalFrom`/`originalTo` are the PLANNED period and are frozen once a
+ *   booking starts; `from`/`to` are the live one. See
+ *   `.claude/rules/booking-planned-period-is-frozen.md`.
+ * - Any id that arrives from request input is org-scoped before use, per
+ *   `.claude/rules/org-scope-user-supplied-ids.md`.
+ *
+ * @see {@link file://./lateness.ts}
+ * @see {@link file://./../reports/helpers.server.ts}
+ */
+
 import {
   BookingStatus,
   AssetStatus,

@@ -1,3 +1,14 @@
+/**
+ * Booking Service — Unit Tests
+ *
+ * Covers the booking lifecycle mutations against a mocked Prisma client: the
+ * status transitions and their audit trail, partial check-out / check-in
+ * (including quantity dispositions), kit-slice membership, and the date
+ * rewrites that check-out, check-in and extension apply.
+ *
+ * @see {@link file://./service.server.ts}
+ */
+
 import Markdoc from "@markdoc/markdoc";
 import {
   BookingStatus,
