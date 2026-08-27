@@ -2412,6 +2412,22 @@ async function checkoutBookingWritesWithinTx(
     },
   });
 
+  /**
+   * Slices that were already out AND reconciled return to outstanding. The
+   * statement above cannot reach them — it only matches unmarked slices — and
+   * leaving `checkedInAt` set would make physically-out units read as fully
+   * returned, which the check-in guard then refuses.
+   */
+  await tx.bookingAsset.updateMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      checkedOutAt: { not: null },
+      checkedInAt: { not: null },
+    },
+    data: { checkedInAt: null, checkedInById: null },
+  });
+
   await tx.booking.update({
     // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId already org-checked by the caller via findUniqueOrThrow({where:{id,organizationId}}); this is the write on that same proven id
     where: { id: bookingId },
@@ -5771,16 +5787,85 @@ export async function partialCheckinBooking({
     //     none. A booking checked out with the button that later gains ONE
     //     scanned asset gets its first row, and a booking-level test then
     //     reports every button-checked-out asset as never checked out.
-    const checkedOutSliceAssetIds = new Set(
+    /**
+     * Slices by id, for the per-disposition checks below. Built from the
+     * booking's own rows, which `findUniqueOrThrow({ id, organizationId })`
+     * already org-scoped — so a `bookingAssetId` naming a foreign or unrelated
+     * slice is ineligible by construction rather than by a separate lookup.
+     */
+    const sliceById = new Map(
+      bookingFound.bookingAssets.map((ba) => [ba.id, ba])
+    );
+
+    /**
+     * Asset-level view of the same markers, for UNTAGGED callers only: the
+     * mobile endpoint and legacy `assetIds`-only scans send no
+     * `bookingAssetId`, and an INDIVIDUAL asset has a single slice per booking,
+     * so asset-level and slice-level coincide for them.
+     *
+     * A tagged disposition must NOT be judged through this — one slice's marker
+     * would authorise a sibling that never went out.
+     */
+    const assetIdsWithACheckedOutSlice = new Set(
       bookingFound.bookingAssets
         .filter((ba) => Boolean(ba.checkedOutAt))
         .map((ba) => ba.assetId)
     );
-    /** Slices already fully reconciled — refused, but for a different reason. */
-    const checkedInSliceAssetIds = new Set(
+    const assetIdsWithAReconciledSlice = new Set(
       bookingFound.bookingAssets
         .filter((ba) => Boolean(ba.checkedInAt))
         .map((ba) => ba.assetId)
+    );
+
+    /**
+     * Tagged dispositions are judged against their EXACT slice. A
+     * `QUANTITY_TRACKED` asset can hold a standalone slice plus N kit-driven
+     * slices on one booking (see the partial uniques on `BookingAsset`), and a
+     * slice added to an already-ONGOING booking carries no checkout marker —
+     * so "some slice of this asset is out" is not permission to reconcile
+     * units of a different one.
+     */
+    for (const d of dispositions) {
+      if (!d.bookingAssetId) continue;
+      const slice = sliceById.get(d.bookingAssetId);
+      if (!slice || slice.assetId !== d.assetId) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message:
+            "One of the submitted items does not belong to this booking.",
+          shouldBeCaptured: false,
+        });
+      }
+      if (slice.checkedInAt) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message: "These assets are already checked in.",
+          shouldBeCaptured: false,
+        });
+      }
+      if (!slice.checkedOutAt) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message: "Cannot check in assets that were never checked out.",
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    /**
+     * Assets whose eligibility the asset-level path still decides: everything
+     * scanned that no TAGGED disposition already covered. Derived by exclusion
+     * rather than from the untagged dispositions, because a bare `assetIds`
+     * scan carries no disposition entry at all and must still be judged.
+     */
+    const assetIdsCoveredBySliceCheck = new Set(
+      dispositions.filter((d) => d.bookingAssetId).map((d) => d.assetId)
     );
 
     const scannedAssets = await db.asset.findMany({
@@ -5800,8 +5885,10 @@ export async function partialCheckinBooking({
     // Checked in already: a duplicate request, not an invalid one. Tested
     // FIRST, and independently of `checkedOutAt` — a reconciled slice carries
     // both markers, and "never checked out" would be the wrong reason to give.
-    const alreadyCheckedIn = scannedAssets.filter((a) =>
-      checkedInSliceAssetIds.has(a.id)
+    const alreadyCheckedIn = scannedAssets.filter(
+      (a) =>
+        !assetIdsCoveredBySliceCheck.has(a.id) &&
+        assetIdsWithAReconciledSlice.has(a.id)
     );
     if (alreadyCheckedIn.length > 0) {
       throw new ShelfError({
@@ -5817,7 +5904,9 @@ export async function partialCheckinBooking({
 
     const notCheckedOut = scannedAssets.filter(
       (a) =>
-        !checkedOutSliceAssetIds.has(a.id) && !checkedInSliceAssetIds.has(a.id)
+        !assetIdsCoveredBySliceCheck.has(a.id) &&
+        !assetIdsWithACheckedOutSlice.has(a.id) &&
+        !assetIdsWithAReconciledSlice.has(a.id)
     );
     if (notCheckedOut.length > 0) {
       // A booking can hold still-Booked (AVAILABLE) assets that were added
@@ -5861,7 +5950,7 @@ export async function partialCheckinBooking({
       // booking asset: a progressive booking can hold never-checked-out items,
       // and counting those as outstanding would keep it stuck ONGOING forever
       // after the actually checked-out items are all returned.
-      const outstandingAssetIds = [...checkedOutSliceAssetIds].filter(
+      const outstandingAssetIds = [...assetIdsWithACheckedOutSlice].filter(
         (assetId) => !recordedAssetIdSet.has(assetId)
       );
 
@@ -7718,16 +7807,57 @@ export async function partialCheckoutBooking({
          * out", which is what the check-in guard reads. Both are needed: the
          * row cannot answer it for assets the all-at-once flow sent out.
          */
-        await tx.bookingAsset.updateMany({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
-          where: { bookingId: id, assetId: { in: sessionAssetIds } },
-          data: {
-            checkedOutAt: new Date(),
-            checkedOutById: userId,
-            checkedInAt: null,
-            checkedInById: null,
-          },
-        });
+        /**
+         * Scoped to the slices this batch actually claimed. `assetId`-wide
+         * would stamp every sibling slice of a multi-slice qty-tracked asset —
+         * standalone plus N kit-driven rows can coexist for one (booking,
+         * asset) — recording units that never left as out.
+         *
+         * Untagged (`""`) entries are INDIVIDUAL / legacy dispositions, which
+         * hold a single slice per booking, so asset-wide IS exact for them.
+         */
+        const taggedSliceIds = sessionBookingAssetIds.filter(Boolean);
+        const untaggedAssetIds = sessionAssetIds.filter(
+          (_, i) => !sessionBookingAssetIds[i]
+        );
+        const sliceScope = {
+          bookingId: id,
+          OR: [
+            ...(taggedSliceIds.length ? [{ id: { in: taggedSliceIds } }] : []),
+            ...(untaggedAssetIds.length
+              ? [{ assetId: { in: untaggedAssetIds } }]
+              : []),
+          ],
+        };
+
+        if (sliceScope.OR.length > 0) {
+          // First marker wins: a slice a previous batch sent out keeps its
+          // original "out since / out by", matching the full-checkout writer.
+          await tx.bookingAsset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
+            where: { ...sliceScope, checkedOutAt: null },
+            data: {
+              checkedOutAt: new Date(),
+              checkedOutById: userId,
+              checkedInAt: null,
+              checkedInById: null,
+            },
+          });
+
+          // A slice that was reconciled and is going out again returns to
+          // outstanding without losing its original checkout marker. The
+          // statement above cannot reach it, and leaving `checkedInAt` set
+          // makes physically-out units read as fully returned.
+          await tx.bookingAsset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
+            where: {
+              ...sliceScope,
+              checkedOutAt: { not: null },
+              checkedInAt: { not: null },
+            },
+            data: { checkedInAt: null, checkedInById: null },
+          });
+        }
 
         // Layer 3: the per-asset fold that previously collapsed both slices of an
         // asset into one summary is gone — the checkout note pipeline now renders

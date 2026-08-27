@@ -24,33 +24,95 @@ ALTER TABLE "BookingAsset"
   ADD COLUMN IF NOT EXISTS "checkedInAt"    TIMESTAMPTZ(3),
   ADD COLUMN IF NOT EXISTS "checkedInById"  TEXT;
 
--- Backfill 1 — progressive checkouts. Earliest session wins, matching
--- `getDetailedPartialCheckoutData`, which takes the first check-out per asset.
+-- Backfill 1a — progressive checkouts that name their exact slice.
+-- `assetIds` / `bookingAssetIds` are positionally aligned, so zipping them
+-- recovers which slice each claim belonged to. Slice-exact matters because one
+-- (booking, asset) can hold a standalone row plus N kit-driven rows: matching
+-- on `assetId` alone would stamp siblings the session never touched, which is
+-- the same over-stamping the runtime writer avoids.
+-- Earliest session wins, matching `getDetailedPartialCheckoutData`.
 UPDATE "BookingAsset" ba
 SET "checkedOutAt"   = src."checkoutTimestamp",
     "checkedOutById" = src."checkedOutById"
 FROM (
-  SELECT DISTINCT ON (pco."bookingId", x)
-         pco."bookingId", x AS "assetId",
+  SELECT DISTINCT ON (t."bookingAssetId")
+         t."bookingAssetId", pco."checkoutTimestamp", pco."checkedOutById"
+  FROM "PartialBookingCheckout" pco,
+       unnest(pco."assetIds", pco."bookingAssetIds") AS t("assetId", "bookingAssetId")
+  WHERE t."bookingAssetId" IS NOT NULL
+    AND t."bookingAssetId" <> ''
+  ORDER BY t."bookingAssetId", pco."checkoutTimestamp" ASC
+) src
+WHERE ba.id = src."bookingAssetId"
+  AND ba."checkedOutAt" IS NULL;
+
+-- Backfill 1b — untagged claims: sessions written before `bookingAssetIds`
+-- existed, and INDIVIDUAL / legacy dispositions which carry `''`. These name
+-- no slice, so asset-level greedy attribution is all the data supports — the
+-- same fallback the runtime writer applies to untagged entries. Runs second so
+-- it only fills slices 1a could not resolve exactly.
+UPDATE "BookingAsset" ba
+SET "checkedOutAt"   = src."checkoutTimestamp",
+    "checkedOutById" = src."checkedOutById"
+FROM (
+  SELECT DISTINCT ON (pco."bookingId", t."assetId")
+         pco."bookingId", t."assetId",
          pco."checkoutTimestamp", pco."checkedOutById"
-  FROM "PartialBookingCheckout" pco, unnest(pco."assetIds") AS x
-  ORDER BY pco."bookingId", x, pco."checkoutTimestamp" ASC
+  FROM "PartialBookingCheckout" pco,
+       unnest(pco."assetIds", pco."bookingAssetIds") AS t("assetId", "bookingAssetId")
+  WHERE t."bookingAssetId" IS NULL
+     OR t."bookingAssetId" = ''
+  ORDER BY pco."bookingId", t."assetId", pco."checkoutTimestamp" ASC
 ) src
 WHERE ba."bookingId" = src."bookingId"
-  AND ba."assetId"   = src."assetId";
+  AND ba."assetId"   = src."assetId"
+  AND ba."checkedOutAt" IS NULL;
 
--- Backfill 2 — all-at-once checkouts: bookings past RESERVED carrying NO
--- session rows at all. This is exactly the population the old
--- "no rows => everything is eligible" fallback covered, so it preserves current
--- behaviour rather than changing it. `Booking.updatedAt` is the closest
--- available stand-in for the checkout moment; the precise instant was never
--- recorded, which is the gap this column closes going forward.
+-- Backfill 2a — all-at-once checkouts, reconstructed per asset from the
+-- activity trail. `checkoutBooking` emits one BOOKING_CHECKED_OUT event per
+-- asset while the progressive path emits BOOKING_PARTIAL_CHECKOUT, so these
+-- rows name exactly the population that left no session row — and they carry a
+-- truer instant than `Booking.updatedAt`, which any later edit moves.
+--
+-- This is what repairs a MIXED booking: one checked out with the button and
+-- later given an asset that was scanned out. Backfill 1 stamps only the scanned
+-- asset, and a booking-wide "has no session rows" test would skip the rest
+-- entirely, leaving them refused by the very guard this migration exists to
+-- feed. Matching per asset instead cannot over-stamp a progressive-only
+-- booking, because those emit a different action.
+UPDATE "BookingAsset" ba
+SET "checkedOutAt"   = src."occurredAt",
+    "checkedOutById" = src."actorUserId"
+FROM (
+  SELECT DISTINCT ON (ae."bookingId", ae."assetId")
+         ae."bookingId", ae."assetId", ae."occurredAt", ae."actorUserId"
+  FROM "ActivityEvent" ae
+  WHERE ae.action = 'BOOKING_CHECKED_OUT'
+    AND ae."bookingId" IS NOT NULL
+    AND ae."assetId" IS NOT NULL
+  ORDER BY ae."bookingId", ae."assetId", ae."occurredAt" ASC
+) src
+WHERE ba."bookingId" = src."bookingId"
+  AND ba."assetId"   = src."assetId"
+  AND ba."checkedOutAt" IS NULL;
+
+-- Backfill 2b — bookings predating the ActivityEvent model, which have no
+-- per-asset trail to reconstruct from. Restricted to bookings carrying NO
+-- session rows, so it cannot disturb a mixed booking 2a already repaired.
+-- `Booking.updatedAt` is the only remaining stand-in for the checkout moment.
+--
+-- Reservations archived straight from RESERVED never went out, so they get no
+-- checkout marker: `archivedWithoutCheckin` is the flag that says so, and the
+-- reports already exclude those bookings from return behaviour for the same
+-- reason. Stamping them here would fabricate an entire movement history, since
+-- Backfill 4 would then mark them returned as well.
 UPDATE "BookingAsset" ba
 SET "checkedOutAt" = b."updatedAt"
 FROM "Booking" b
 WHERE ba."bookingId" = b.id
   AND ba."checkedOutAt" IS NULL
   AND b.status IN ('ONGOING', 'OVERDUE', 'COMPLETE', 'ARCHIVED')
+  AND b."archivedWithoutCheckin" = false
   AND NOT EXISTS (
     SELECT 1 FROM "PartialBookingCheckout" p WHERE p."bookingId" = b.id
   );
@@ -82,8 +144,16 @@ WHERE ba."bookingId" = b.id
     SELECT 1 FROM "PartialBookingCheckin" p WHERE p."bookingId" = b.id
   );
 
--- Partial index: the check-in guard reads the outstanding slices of one
--- booking, which is a small slice of a large table.
+-- Partial index: the check-in guard reads one booking's outstanding slices, and
+-- the WHERE clause keeps the index to those rows rather than every slice ever
+-- booked.
+--
+-- Built in-transaction with the statements above, deliberately. The four
+-- backfill UPDATEs already take row locks across this table for the length of
+-- the migration, so a CONCURRENTLY build in a separate file would not shorten
+-- the write-blocking window — it would only add a second migration that can
+-- fail independently and leave an INVALID index behind. If this deploy window
+-- ever needs shrinking, the backfills are what to attack, not the index.
 CREATE INDEX IF NOT EXISTS "BookingAsset_bookingId_checkedOutAt_idx"
   ON "BookingAsset" ("bookingId")
   WHERE "checkedOutAt" IS NOT NULL AND "checkedInAt" IS NULL;

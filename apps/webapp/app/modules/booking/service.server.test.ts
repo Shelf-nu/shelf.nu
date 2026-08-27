@@ -9866,6 +9866,25 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     (
       db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({ quantity: 50 });
+    // why: eligibility is judged per slice, so the booking has to actually
+    // hold the two slices these dispositions name. Both are out.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: ["ba-A", "ba-B"].map((sliceId) => ({
+        id: sliceId,
+        assetId: mockQtyAssetId,
+        quantity: 50,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        asset: {
+          id: mockQtyAssetId,
+          type: AssetType.QUANTITY_TRACKED,
+          assetKits: [],
+        },
+      })),
+    });
 
     await partialCheckinBooking({
       ...baseParams,
@@ -9891,6 +9910,81 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
         bookingAssetId: "ba-B",
       })
     );
+  });
+
+  it("refuses a disposition tagged with a slice that never went out", async () => {
+    // The multi-slice hole: slice A is out, slice B was added to the ONGOING
+    // booking afterwards and never scanned. Judging eligibility per ASSET lets
+    // A's marker authorise B, and the per-slice cap starts from B's booked
+    // units — so units that never left could be returned, consumed, lost or
+    // damaged, permanently decrementing the pool.
+    setupQtyMocks();
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 50 });
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          id: "ba-out",
+          assetId: mockQtyAssetId,
+          quantity: 50,
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          id: "ba-never-out",
+          assetId: mockQtyAssetId,
+          quantity: 50,
+          checkedOutAt: null,
+          checkedInAt: null,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        checkins: [
+          {
+            assetId: mockQtyAssetId,
+            bookingAssetId: "ba-never-out",
+            returned: 5,
+          },
+        ],
+      })
+    ).rejects.toThrow(/never checked out/i);
+  });
+
+  it("refuses a bookingAssetId that is not on this booking", async () => {
+    // The slice id is request-supplied. Judging it against the booking's own
+    // rows means a foreign or invented id is ineligible by construction.
+    setupQtyMocks();
+
+    await expect(
+      partialCheckinBooking({
+        ...baseParams,
+        checkins: [
+          {
+            assetId: mockQtyAssetId,
+            bookingAssetId: "ba-from-another-booking",
+            returned: 1,
+          },
+        ],
+      })
+    ).rejects.toThrow(/does not belong to this booking/i);
   });
 
   it("rejects an over-claim against a single slice even when the asset has free units (per-slice cap)", async () => {
