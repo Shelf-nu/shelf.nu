@@ -40,7 +40,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       select: { barcodesEnabled: true },
     });
 
-    if (!org?.barcodesEnabled) {
+    // Same capability helper the sibling-workspace lookup below uses. Reading
+    // `barcodesEnabled` directly here would 403 a self-hosted deployment, where
+    // `canUseBarcodes` grants every add-on because there is no billing to gate
+    // on — and would leave the two checks in this one function disagreeing.
+    if (!org || !canUseBarcodes(org)) {
       return data(
         {
           error: {
@@ -85,40 +89,65 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           organization: { select: { barcodesEnabled: true } },
         },
       });
-      const matches: { organizationId: string; barcode: typeof barcode }[] = [];
-      for (const membership of memberships) {
-        if (!canUseBarcodes(membership.organization)) continue;
-        const candidate = await getBarcodeByValue({
-          value,
-          organizationId: membership.organizationId,
-          include: {
-            asset: { select: MOBILE_ASSET_SELECT },
-            kit: { select: MOBILE_KIT_SELECT },
+      const eligibleOrgIds = memberships
+        .filter((membership) => canUseBarcodes(membership.organization))
+        .map((membership) => membership.organizationId);
+
+      if (eligibleOrgIds.length > 0) {
+        // Two phases, mirroring the QR resolver's "authorize first, fetch the
+        // heavy payload once" shape. Asking each workspace in turn would issue
+        // one query per membership — sequentially, each dragging the full
+        // asset+kit payload — on every scan that misses locally, and the
+        // ambiguity check means it could never stop early.
+        //
+        // Phase 1: which of the caller's workspaces hold this value at all.
+        // `@@unique([organizationId, value])` is case-SENSITIVE, so one
+        // workspace can hold both "abc" and "ABC" as separate rows; `distinct`
+        // keeps that from reading as two workspaces and faking an ambiguity.
+        const owningOrgIds = await db.barcode.findMany({
+          where: {
+            OR: [{ value }, { value: value.toUpperCase() }],
+            organizationId: { in: eligibleOrgIds },
           },
+          select: { organizationId: true },
+          distinct: ["organizationId"],
         });
-        if (candidate) {
-          matches.push({
-            organizationId: membership.organizationId,
-            barcode: candidate,
-          });
-        }
-      }
-      // Barcode uniqueness is per-workspace, so the same value can exist in
-      // several sibling workspaces. Only a UNIQUE match may drive the jump —
-      // picking one arbitrarily would open the wrong asset.
-      if (matches.length === 1) {
-        foundOrganizationId = matches[0].organizationId;
-        foundBarcode = matches[0].barcode;
-      } else if (matches.length > 1) {
-        return data(
-          {
-            error: {
-              message:
-                "This barcode exists in more than one of your workspaces. Switch to the right workspace to scan it there.",
+
+        // Barcode uniqueness is per-workspace, so the same value can exist in
+        // several sibling workspaces. Only a UNIQUE match may drive the jump —
+        // picking one arbitrarily would open the wrong asset.
+        if (owningOrgIds.length > 1) {
+          return data(
+            {
+              error: {
+                message:
+                  "This barcode exists in more than one of your workspaces. Switch to the right workspace to scan it there.",
+              },
             },
-          },
-          { status: 404 }
-        );
+            // 409, not 404: the code exists and the caller may see it — what
+            // fails is choosing between workspaces.
+            { status: 409 }
+          );
+        }
+
+        if (owningOrgIds.length === 1) {
+          // Phase 2: the full payload, once, for the winner. Routed back
+          // through `getBarcodeByValue` so the original-case-then-uppercase
+          // preference stays identical to the current-workspace path.
+          const candidate = await getBarcodeByValue({
+            value,
+            organizationId: owningOrgIds[0].organizationId,
+            include: {
+              asset: { select: MOBILE_ASSET_SELECT },
+              kit: { select: MOBILE_KIT_SELECT },
+            },
+          });
+
+          if (candidate) {
+            foundOrganizationId = owningOrgIds[0].organizationId;
+            foundBarcode = candidate;
+          }
+        }
       }
     }
 

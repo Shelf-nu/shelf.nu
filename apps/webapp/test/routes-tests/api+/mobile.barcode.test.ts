@@ -53,6 +53,9 @@ vitest.mock("~/database/db.server", () => ({
     userOrganization: {
       findMany: vitest.fn(),
     },
+    barcode: {
+      findMany: vitest.fn(),
+    },
   },
 }));
 
@@ -155,6 +158,7 @@ describe("GET /api/mobile/barcode/:value", () => {
     // No sibling memberships unless a test sets them up — keeps the
     // cross-workspace lookup out of every current-workspace case.
     (db.userOrganization.findMany as any).mockResolvedValue([]);
+    (db.barcode.findMany as any).mockResolvedValue([]);
   });
 
   it("should resolve a barcode to its linked asset", async () => {
@@ -219,6 +223,10 @@ describe("GET /api/mobile/barcode/:value", () => {
     (db.userOrganization.findMany as any).mockResolvedValue([
       { organizationId: "org-2", organization: { barcodesEnabled: true } },
     ]);
+    // Phase 1 answers "which of my workspaces hold this value" in one query.
+    (db.barcode.findMany as any).mockResolvedValue([
+      { organizationId: "org-2" },
+    ]);
 
     const request = createBarcodeRequest("BC001234");
     const result = await loader(
@@ -229,17 +237,50 @@ describe("GET /api/mobile/barcode/:value", () => {
     // The OWNING workspace id drives the app's switch-and-view card.
     expect(body.barcode.organizationId).toBe("org-2");
     expect(body.barcode.asset.id).toBe("asset-1");
+
+    // One query to locate the workspace, then ONE heavy fetch for the winner —
+    // not one per membership. `getBarcodeByValue` runs twice in total: the
+    // current workspace, then the resolved sibling.
+    expect(db.barcode.findMany).toHaveBeenCalledTimes(1);
+    expect(getBarcodeByValue).toHaveBeenCalledTimes(2);
   });
 
   it("refuses an ambiguous barcode that exists in several sibling workspaces", async () => {
-    (getBarcodeByValue as any)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-2" })
-      .mockResolvedValueOnce({ ...mockBarcode, organizationId: "org-3" });
+    (getBarcodeByValue as any).mockResolvedValueOnce(null);
     (db.userOrganization.findMany as any).mockResolvedValue([
       { organizationId: "org-2", organization: { barcodesEnabled: true } },
       { organizationId: "org-3", organization: { barcodesEnabled: true } },
     ]);
+    (db.barcode.findMany as any).mockResolvedValue([
+      { organizationId: "org-2" },
+      { organizationId: "org-3" },
+    ]);
+
+    const request = createBarcodeRequest("BC001234");
+    const result = await loader(
+      createLoaderArgs({ request, params: { value: "BC001234" } })
+    );
+
+    // 409, not 404: the code exists and the caller may see it — what fails is
+    // choosing between workspaces.
+    expect((result as unknown as Response).status).toBe(409);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toContain("more than one of your workspaces");
+    // Ambiguity is decided before any heavy payload is built.
+    expect(getBarcodeByValue).toHaveBeenCalledTimes(1);
+  });
+
+  it("never reaches beyond the caller's own memberships", async () => {
+    // The property the cross-workspace lookup rests on. A barcode living in a
+    // workspace the caller does not belong to must be indistinguishable from a
+    // barcode that does not exist — no name, no workspace, no 4xx that differs.
+    (getBarcodeByValue as any).mockResolvedValue(null);
+    (db.userOrganization.findMany as any).mockResolvedValue([
+      { organizationId: "org-2", organization: { barcodesEnabled: true } },
+    ]);
+    // Phase 1 is scoped to the membership list, so a stranger workspace holding
+    // this value can never match.
+    (db.barcode.findMany as any).mockResolvedValue([]);
 
     const request = createBarcodeRequest("BC001234");
     const result = await loader(
@@ -248,7 +289,23 @@ describe("GET /api/mobile/barcode/:value", () => {
 
     expect((result as unknown as Response).status).toBe(404);
     const body = await (result as unknown as Response).json();
-    expect(body.error.message).toContain("more than one of your workspaces");
+    expect(body.error.message).toContain("not found");
+
+    // The membership query is what bounds the blast radius: scoped to THIS
+    // user, and excluding the workspace already searched.
+    expect(db.userOrganization.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: "user-1", organizationId: { not: "org-1" } },
+      })
+    );
+    // …and the candidate scan may only ever look inside that list.
+    expect(db.barcode.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: { in: ["org-2"] },
+        }),
+      })
+    );
   });
 
   it("never resolves through a sibling workspace without the barcode capability", async () => {
@@ -265,6 +322,7 @@ describe("GET /api/mobile/barcode/:value", () => {
     expect((result as unknown as Response).status).toBe(404);
     // The lookup must not even run against the unentitled sibling.
     expect(getBarcodeByValue as any).toHaveBeenCalledTimes(1);
+    expect(db.barcode.findMany).not.toHaveBeenCalled();
   });
 
   it("should return 422 when barcode is not linked to any asset or kit", async () => {
