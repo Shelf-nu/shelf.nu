@@ -897,8 +897,21 @@ function ScannerContent() {
             : kit
             ? (`/(tabs)/assets/kits/${kit.id}` as const)
             : null;
-          flashFrame("error");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          // Paired in one object so the "can we offer the jump?" test and the
+          // values the jump needs cannot drift apart — and so both narrow.
+          const jump =
+            ownerOrg && targetHref ? { org: ownerOrg, href: targetHref } : null;
+          // Amber, not red: a code that lives in another of the user's own
+          // workspaces is a routine hit with a one-tap resolution below, not a
+          // failed scan. Red is reserved for scans that cannot go anywhere.
+          // Where the jump is NOT on offer — an unknown workspace, or a code
+          // with nothing to open — there is no next step, so it stays red.
+          flashFrame(jump ? "advisory" : "error");
+          Haptics.notificationAsync(
+            jump
+              ? Haptics.NotificationFeedbackType.Warning
+              : Haptics.NotificationFeedbackType.Error
+          );
           setScanResult({
             type: "error",
             title: itemName ?? "Different Workspace",
@@ -907,20 +920,19 @@ function ScannerContent() {
                   ownerOrg.name
                 }.`
               : "This code belongs to a different workspace.",
-            action:
-              ownerOrg && targetHref
-                ? {
-                    label: "Switch & view",
-                    icon: "swap-horizontal",
-                    onPress: () => {
-                      setCurrentOrg(ownerOrg);
-                      setScanResult(null);
-                      // Anchored nav so "back" lands on the list, not the
-                      // scanner (see pushIntoTab).
-                      pushIntoTab("/(tabs)/assets", targetHref);
-                    },
-                  }
-                : undefined,
+            action: jump
+              ? {
+                  label: "Switch & view",
+                  icon: "swap-horizontal",
+                  onPress: () => {
+                    setCurrentOrg(jump.org);
+                    setScanResult(null);
+                    // Anchored nav so "back" lands on the list, not the
+                    // scanner (see pushIntoTab).
+                    pushIntoTab("/(tabs)/assets", jump.href);
+                  },
+                }
+              : undefined,
           });
           finalizeScan();
           return;
