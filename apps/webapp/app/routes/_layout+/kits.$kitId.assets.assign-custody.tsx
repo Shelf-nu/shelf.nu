@@ -382,11 +382,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     // Create notes for all assets using markdoc wrappers (not critical for atomicity)
-    const actor = wrapUserLinkForNote({
-      id: userId,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: userId });
 
     const custodianDisplay = wrapCustodianForNote({
       teamMember: custodianTeamMember,

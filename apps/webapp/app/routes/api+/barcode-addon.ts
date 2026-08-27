@@ -31,6 +31,7 @@ import {
   getDomainUrl,
   getOrCreateCustomerId,
 } from "~/utils/stripe.server";
+import { resolveUserGreetingName } from "~/utils/user";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -174,7 +175,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
 
       void sendBarcodeTrialWelcomeEmail({
-        firstName: user.firstName,
+        firstName: resolveUserGreetingName(user),
         email,
         hasPaymentMethod,
       });

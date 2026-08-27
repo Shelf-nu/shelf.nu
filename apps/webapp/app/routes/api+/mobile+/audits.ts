@@ -127,6 +127,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         createdBy: {
           firstName: a.createdBy?.firstName ?? null,
           lastName: a.createdBy?.lastName ?? null,
+          displayName: a.createdBy?.displayName ?? null,
         },
         assigneeCount: a._count?.assignments ?? 0,
         // why: surface "this one's mine" per row so the companion can

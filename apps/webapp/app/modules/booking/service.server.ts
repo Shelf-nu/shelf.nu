@@ -1,3 +1,30 @@
+/**
+ * Booking Service
+ *
+ * The booking domain's server-side business logic — every mutation and read a
+ * booking goes through, from DRAFT to ARCHIVED.
+ *
+ * Responsibilities:
+ * - Lifecycle transitions: create, edit, reserve, check out, check in, extend,
+ *   cancel, revert to draft, archive, duplicate, and their bulk counterparts.
+ * - Partial check-out / check-in, including per-asset quantity dispositions for
+ *   `QUANTITY_TRACKED` assets and the "how much is left" computations.
+ * - Membership: standalone assets and kit-driven slices on the `BookingAsset`
+ *   pivot (see `.claude/rules/kit-members-via-kit-slices.md`).
+ * - The audit trail every transition leaves: system notes, `ActivityEvent`
+ *   records, notification emails, and the expiry/reminder scheduler jobs.
+ *
+ * Two invariants worth knowing before editing:
+ * - `originalFrom`/`originalTo` are the PLANNED period and are frozen once a
+ *   booking starts; `from`/`to` are the live one. See
+ *   `.claude/rules/booking-planned-period-is-frozen.md`.
+ * - Any id that arrives from request input is org-scoped before use, per
+ *   `.claude/rules/org-scope-user-supplied-ids.md`.
+ *
+ * @see {@link file://./lateness.ts}
+ * @see {@link file://./../reports/helpers.server.ts}
+ */
+
 import {
   BookingStatus,
   AssetStatus,
@@ -119,6 +146,7 @@ import {
   BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
+  BOOKINGS_LIST_ASSETS_INCLUDE,
 } from "./constants";
 import type {
   ReservationEmailAsset,
@@ -272,6 +300,98 @@ async function cancelScheduler(
 }
 
 /**
+ * The value to write to `originalTo` when a flow is about to rewrite `to`.
+ *
+ * A booking's planned period (`originalFrom`/`originalTo`) is written while it
+ * is still being planned — create, DRAFT edit, reserve — and frozen once it
+ * starts. `from`/`to` are what move afterwards: extension pushes `to` out, and
+ * check-in rewrites it to the actual return moment. So this only ever SEEDS
+ * the column for rows created before it existed; on every other row it returns
+ * `undefined`, which Prisma reads as "leave unchanged".
+ *
+ * Overwriting instead would discard the deadline the custodian agreed to
+ * whenever a booking was extended before check-in, and Booking Compliance
+ * would then measure the return against the extension rather than the plan.
+ *
+ * @param booking - The booking as it is BEFORE the rewrite.
+ * @returns The date to seed, or `undefined` to leave `originalTo` alone.
+ */
+function plannedEndToPreserve(booking: {
+  to: Date | null;
+  originalTo: Date | null;
+}): Date | undefined {
+  return booking.originalTo ? undefined : booking.to ?? undefined;
+}
+
+/**
+ * The value to write to `originalFrom` when a flow is about to rewrite `from`.
+ *
+ * The mirror of {@link plannedEndToPreserve}, for the early-check-out
+ * adjust-date path. Same rule: seed only, never overwrite.
+ *
+ * @param booking - The booking as it is BEFORE the rewrite.
+ * @returns The date to seed, or `undefined` to leave `originalFrom` alone.
+ */
+function plannedStartToPreserve(booking: {
+  from: Date | null;
+  originalFrom: Date | null;
+}): Date | undefined {
+  return booking.originalFrom ? undefined : booking.from ?? undefined;
+}
+
+/**
+ * Records the canonical `BOOKING_STATUS_CHANGED` activity event.
+ *
+ * Best-effort by design, and the single implementation for every caller: the
+ * status change is already committed by the time this runs, so a failed
+ * analytics insert can never roll back a check-out or check-in that physically
+ * happened. `resolveCheckInAt` carries the matching fallback for the rare miss
+ * (COMPLETE bookings fall back to `updatedAt`).
+ *
+ * @param args.organizationId - Workspace the booking belongs to.
+ * @param args.bookingId - Booking whose status changed.
+ * @param args.userId - Actor, or null/undefined for system transitions.
+ * @param args.fromStatus - Status before the change.
+ * @param args.toStatus - Status after the change.
+ */
+async function recordBookingStatusChangedEvent({
+  organizationId,
+  bookingId,
+  userId,
+  fromStatus,
+  toStatus,
+}: {
+  organizationId: string;
+  bookingId: string;
+  userId?: string | null;
+  fromStatus: BookingStatus;
+  toStatus: BookingStatus;
+}): Promise<void> {
+  try {
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_STATUS_CHANGED",
+      entityType: "BOOKING",
+      entityId: bookingId,
+      bookingId,
+      field: "status",
+      fromValue: fromStatus,
+      toValue: toStatus,
+    });
+  } catch (err) {
+    Logger.error(
+      new ShelfError({
+        cause: err,
+        message: "Failed to record BOOKING_STATUS_CHANGED event",
+        additionalData: { bookingId, fromStatus, toStatus },
+        label,
+      })
+    );
+  }
+}
+
+/**
  * Creates a consistent status transition note for booking activity logs
  *
  * @param bookingId - The booking ID to add the note to
@@ -314,11 +434,7 @@ export async function createStatusTransitionNote({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
     const actionText =
       action || getActionTextFromTransition(fromStatus, toStatus);
@@ -336,29 +452,13 @@ export async function createStatusTransitionNote({
   });
 
   // Activity event — records the canonical status transition for reports.
-  // Best-effort: don't fail the note creation if event recording fails.
-  try {
-    await recordEvent({
-      organizationId,
-      actorUserId: userId ?? null,
-      action: "BOOKING_STATUS_CHANGED",
-      entityType: "BOOKING",
-      entityId: bookingId,
-      bookingId,
-      field: "status",
-      fromValue: fromStatus,
-      toValue: toStatus,
-    });
-  } catch (err) {
-    Logger.error(
-      new ShelfError({
-        cause: err,
-        message: "Failed to record BOOKING_STATUS_CHANGED event",
-        additionalData: { bookingId, fromStatus, toStatus },
-        label,
-      })
-    );
-  }
+  await recordBookingStatusChangedEvent({
+    organizationId,
+    bookingId,
+    userId,
+    fromStatus,
+    toStatus,
+  });
 }
 
 /**
@@ -2679,8 +2779,8 @@ export async function checkoutBooking({
       isEarlyCheckout &&
       intentChoice === CheckoutIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalFrom to old `from` date of booking
-      dataToUpdate.originalFrom = bookingFound.from;
+      // Keep the planned start intact; only seeds rows predating the column.
+      dataToUpdate.originalFrom = plannedStartToPreserve(bookingFound);
 
       // Update `from` date to current date
       const fromDateStr = DateTime.fromJSDate(new Date(), {
@@ -3027,8 +3127,8 @@ export async function fulfilModelRequestsAndCheckout({
       isEarlyCheckout &&
       checkoutIntentChoice === CheckoutIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalFrom to old `from` date of booking
-      dataToUpdate.originalFrom = bookingFound.from;
+      // Keep the planned start intact; only seeds rows predating the column.
+      dataToUpdate.originalFrom = plannedStartToPreserve(bookingFound);
 
       // Update `from` date to current date (timezone-aware, matching
       // `checkoutBooking`)
@@ -4319,8 +4419,8 @@ export async function checkinBooking({
       isEarlyCheckin &&
       intentChoice === CheckinIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalTo to booking's to date
-      dataToUpdate.originalTo = bookingFound.to;
+      // Keep the planned end intact; only seeds rows predating the column.
+      dataToUpdate.originalTo = plannedEndToPreserve(bookingFound);
 
       // Update the `to` date to current date
       const toDateStr = DateTime.fromJSDate(new Date(), {
@@ -4336,8 +4436,8 @@ export async function checkinBooking({
      * If booking was overdue then we have to adjust the endDate of booking
      * */
     if (bookingFound.status === BookingStatus.OVERDUE) {
-      // Update originalTo to booking's to date
-      dataToUpdate.originalTo = bookingFound.to;
+      // Keep the planned end intact; only seeds rows predating the column.
+      dataToUpdate.originalTo = plannedEndToPreserve(bookingFound);
 
       const toDateStr = DateTime.fromJSDate(new Date(), {
         zone: hints.timeZone,
@@ -4995,35 +5095,14 @@ export async function checkinBooking({
         // The custom system note above replaces the standard transition note,
         // but downstream consumers (Booking Compliance report) still need the
         // BOOKING_STATUS_CHANGED → COMPLETE ActivityEvent to know when the
-        // booking was actually checked in. Best-effort, mirroring the pattern
-        // inside createStatusTransitionNote.
-        try {
-          await recordEvent({
-            organizationId,
-            // We're inside `if (userId)` — `userId` is a string here.
-            actorUserId: userId,
-            action: "BOOKING_STATUS_CHANGED",
-            entityType: "BOOKING",
-            entityId: updatedBooking.id,
-            bookingId: updatedBooking.id,
-            field: "status",
-            fromValue: bookingFound.status,
-            toValue: BookingStatus.COMPLETE,
-          });
-        } catch (err) {
-          Logger.error(
-            new ShelfError({
-              cause: err,
-              message:
-                "Failed to record BOOKING_STATUS_CHANGED event for partial check-in completion",
-              additionalData: {
-                bookingId: updatedBooking.id,
-                fromStatus: bookingFound.status,
-              },
-              label,
-            })
-          );
-        }
+        // booking was actually checked in.
+        await recordBookingStatusChangedEvent({
+          organizationId,
+          bookingId: updatedBooking.id,
+          userId,
+          fromStatus: bookingFound.status,
+          toStatus: BookingStatus.COMPLETE,
+        });
       } else {
         // Standard status transition note
         await createStatusTransitionNote({
@@ -5053,11 +5132,7 @@ export async function checkinBooking({
             displayName: true,
           } satisfies Prisma.UserSelect,
         });
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: actorUser?.firstName,
-          lastName: actorUser?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...actorUser, id: userId });
 
         /**
          * Shared booking link — per-asset notes point back to the booking
@@ -5794,11 +5869,7 @@ export async function partialCheckinBooking({
       ) {
         // Don't create a PartialBookingCheckin row — the redirect to
         // `checkinBooking` handles completion itself.
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         await createNotes({
           content: `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`,
           type: "UPDATE",
@@ -6237,10 +6308,41 @@ export async function partialCheckinBooking({
       });
 
       if (bookingIsComplete) {
+        const dataToComplete: Prisma.BookingUpdateInput = {
+          status: BookingStatus.COMPLETE,
+        };
+
+        /**
+         * Same end-date rewrite `checkinBooking` performs, so a booking's
+         * period does not depend on which check-in route completed it: `to`
+         * becomes the actual return moment when the booking is being returned
+         * late, or early with the operator's consent. The planned end stays in
+         * `originalTo` (seeded only for rows predating that column).
+         */
+        const shouldAdjustEndDate =
+          updatedBookingSnapshot.status === BookingStatus.OVERDUE ||
+          (!!updatedBookingSnapshot.to &&
+            isBookingEarlyCheckin(updatedBookingSnapshot.to) &&
+            intentChoice === CheckinIntentEnum["with-adjusted-date"]);
+
+        if (shouldAdjustEndDate) {
+          dataToComplete.originalTo = plannedEndToPreserve(
+            updatedBookingSnapshot
+          );
+
+          const toDateStr = DateTime.fromJSDate(new Date(), {
+            zone: hints.timeZone,
+          }).toFormat(DATE_TIME_FORMAT);
+
+          dataToComplete.to = DateTime.fromFormat(toDateStr, DATE_TIME_FORMAT, {
+            zone: hints.timeZone,
+          }).toJSDate();
+        }
+
         const completedBooking = await tx.booking.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking `id` already org-checked via findUniqueOrThrow({where:{id,organizationId}}) in partialCheckinBooking
           where: { id },
-          data: { status: BookingStatus.COMPLETE },
+          data: dataToComplete,
           include: {
             bookingAssets: true,
             custodianUser: true,
@@ -6270,6 +6372,24 @@ export async function partialCheckinBooking({
     });
 
     /**
+     * Canonical status-transition event for the completion. This path writes
+     * its own system note instead of calling `createStatusTransitionNote`, so
+     * the event it would normally emit has to be recorded here — the Booking
+     * Compliance report reads a booking's check-in moment from
+     * `BOOKING_STATUS_CHANGED → COMPLETE` (see `resolveCheckInTimes`) and
+     * otherwise falls back to `updatedAt`, which drifts on any later edit.
+     */
+    if (txResult.isComplete) {
+      await recordBookingStatusChangedEvent({
+        organizationId,
+        bookingId: id,
+        userId,
+        fromStatus: txResult.previousStatus,
+        toStatus: BookingStatus.COMPLETE,
+      });
+    }
+
+    /**
      * Activity notes — best-effort, OUTSIDE the transaction.
      *
      * Wrapped in try/catch matching the pattern from manage-assets:
@@ -6278,11 +6398,7 @@ export async function partialCheckinBooking({
      * captured server-side via `Logger.error`.
      */
     try {
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
 
       /**
        * Shared booking link used by every asset-side note below so the
@@ -7638,11 +7754,7 @@ export async function partialCheckoutBooking({
 
         // Create audit notes for INDIVIDUAL rows. Qty-tracked rows get their
         // own per-asset note written OUTSIDE the tx (with unit-aware phrasing).
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         if (individualToFlip.length > 0) {
           await createNotes(
             {
@@ -7716,7 +7828,7 @@ export async function partialCheckoutBooking({
             isBookingEarlyCheckout(bookingFound.from) &&
             intentChoice === CheckoutIntentEnum["with-adjusted-date"]
           ) {
-            transitionData.originalFrom = bookingFound.from;
+            transitionData.originalFrom = plannedStartToPreserve(bookingFound);
             const fromDateStr = DateTime.fromJSDate(new Date(), {
               zone: hints.timeZone,
             }).toFormat(DATE_TIME_FORMAT);
@@ -7976,11 +8088,7 @@ export async function partialCheckoutBooking({
      * committed checkout.
      */
     try {
-      const actorLink = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actorLink = wrapUserLinkForNote({ ...user, id: userId });
       const bookingLink = wrapLinkForNote(
         `/bookings/${result.booking.id}`,
         result.booking.name
@@ -9422,6 +9530,14 @@ export async function extendBooking({
             booking.status === BookingStatus.OVERDUE
               ? BookingStatus.ONGOING
               : undefined,
+          /**
+           * Only the LIVE end date moves. `originalTo` holds the end date the
+           * booking was planned for, and extension is allowed only once the
+           * booking has started (ONGOING/OVERDUE), so the plan is already
+           * fixed: moving it here would erase the deadline the custodian
+           * actually agreed to, and with it every late return from Booking
+           * Compliance.
+           */
           to: newEndDate,
         },
         include: BOOKING_INCLUDE_FOR_EMAIL,
@@ -9920,6 +10036,20 @@ export async function getBookings(params: {
    * `false`, so paginated callers are unaffected.
    */
   skipCount?: boolean;
+  /**
+   * Attach the `bookingAssets` payload — by far the heaviest part of this
+   * query. Callers that render no asset data (the calendar, the dashboard
+   * widgets, the bookings-list surfaces whose drawer fetches on open) pass
+   * `false`, which omits the key from the Prisma include entirely. Defaults
+   * to `true`, so existing callers are unaffected.
+   */
+  includeAssets?: boolean;
+  /**
+   * Hard row cap, bypassing the `perPage` ≤ 100 clamp below. For callers that
+   * fetch one bounded set in a single query rather than a page of it. Unlike
+   * `takeAll` the query stays bounded; ignored when `takeAll` is set.
+   */
+  takeCap?: number;
 }) {
   const {
     organizationId,
@@ -9942,6 +10072,8 @@ export async function getBookings(params: {
     kitId,
     tags,
     skipCount = false,
+    includeAssets = true,
+    takeCap,
   } = params;
 
   try {
@@ -9984,12 +10116,15 @@ export async function getBookings(params: {
               name: { contains: term, mode: "insensitive" },
             },
           },
-          // Search in custodian user names
+          // Search in custodian user names. `displayName` is one of them: it
+          // replaces first/last name in the UI for users who set one, so it is
+          // the name a searcher can actually see on the booking row.
           {
             custodianUser: {
               OR: [
                 { firstName: { contains: term, mode: "insensitive" } },
                 { lastName: { contains: term, mode: "insensitive" } },
+                { displayName: { contains: term, mode: "insensitive" } },
               ],
             },
           },
@@ -10120,88 +10255,26 @@ export async function getBookings(params: {
       db.booking.findMany({
         ...(!takeAll && {
           skip,
-          take,
+          take: takeCap ?? take,
         }),
         where,
         include: {
           ...BOOKING_COMMON_INCLUDE,
-          bookingAssets: {
-            // Explicit `select` (instead of `include`) so the inferred
-            // type surfaces `assetKitId` on each row — the bookings list
-            // sidebar (`BookingAssetsSidebar`) groups by it. Without an
-            // explicit select, Prisma's type inference for
-            // `include + nested include` doesn't expose the parent
-            // scalars in a form the local component types accept.
-            select: {
-              id: true,
-              quantity: true,
-              assetKitId: true,
-              asset: {
-                select: {
-                  title: true,
-                  id: true,
-                  type: true,
-                  quantity: true,
-                  custody: true,
-                  availableToBook: true,
-                  status: true,
-                  mainImage: true,
-                  thumbnailImage: true,
-                  // Model cover image for assets with no image of their own
-                  ...ASSET_MODEL_IMAGE_SELECT,
-                  mainImageExpiration: true,
-                  // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
-                  // Surfaced by the BookingAssetsSidebar so the chip matches the
-                  // simple-mode booking overview list and every other code-bearing
-                  // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
-                  sequentialId: true,
-                  preferredBarcodeId: true,
-                  qrCodes: { take: 1, select: { id: true } },
-                  barcodes: { select: { id: true, type: true, value: true } },
-                  category: {
-                    select: {
-                      id: true,
-                      name: true,
-                      color: true,
-                    },
-                  },
-                  // NOTE: deliberately NO `bookingAssets` here. A previous
-                  // version selected each asset's entire lifetime
-                  // `bookingAssets: { bookingId }` pivot history, which grows
-                  // without bound and had zero consumers (every reader of
-                  // `asset.bookingAssets` needs `ba.booking.{id,status}` from
-                  // asset-centric queries, which this shape cannot provide).
-                  // If a surface ever needs conflict info here, scope it with
-                  // a `where` on active statuses + date overlap like
-                  // getBookingFlags does.
-                  assetKits: {
-                    select: {
-                      // See the comment in `bookings.$bookingId.overview.tsx`
-                      // for why both `id` (the AssetKit row id) and `kitId`
-                      // are needed for kit-source grouping.
-                      id: true,
-                      kitId: true,
-                      kit: {
-                        select: {
-                          id: true,
-                          name: true,
-                          image: true,
-                          imageExpiration: true,
-                          category: {
-                            select: {
-                              id: true,
-                              name: true,
-                              color: true,
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          // NOTE: deliberately NO `bookingAssets` when `includeAssets` is
+          // false — the calendar, the dashboard widgets and the five
+          // bookings-list surfaces render no asset data. The cast keeps the
+          // inferred row type stable for default-true callers; opt-out
+          // callers must not read `bookingAssets` (the same runtime/static
+          // divergence `extraInclude` already has). A conditional generic
+          // would type this honestly, but this webapp sits at TypeScript's
+          // instantiation ceiling over the extended Prisma client, where a
+          // generic here surfaces as TS2321 somewhere unrelated.
+          //
+          // The include itself lives in `./constants` so the assets-sidebar
+          // resource route serves the byte-identical shape.
+          ...((includeAssets
+            ? BOOKINGS_LIST_ASSETS_INCLUDE
+            : {}) as typeof BOOKINGS_LIST_ASSETS_INCLUDE),
           creator: {
             select: {
               id: true,
@@ -10245,6 +10318,7 @@ export async function removeAssets({
   booking,
   firstName,
   lastName,
+  displayName,
   userId,
   kitIds = [],
   kits = [],
@@ -10257,6 +10331,12 @@ export async function removeAssets({
   };
   firstName: string;
   lastName: string;
+  /**
+   * The acting user's `User.displayName`. It wins over the legal-name halves
+   * when set, so it must travel with them — a caller that passes only
+   * `firstName`/`lastName` names the actor by a name they asked us not to use.
+   */
+  displayName: string | null;
   userId: string;
   kitIds?: Kit["id"][];
   kits?: Array<{ id: string; name: string }>;
@@ -10692,7 +10772,7 @@ export async function removeAssets({
       }
     }
 
-    const userForNotes = { firstName, lastName, id: userId };
+    const userForNotes = { firstName, lastName, displayName, id: userId };
 
     const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
 
@@ -11327,7 +11407,6 @@ export async function getBookingsForCalendar(params: {
     const { bookings } = await getBookings({
       organizationId,
       page: 1,
-      perPage: 1000,
       search,
       userId,
       ...(status && {
@@ -11339,9 +11418,26 @@ export async function getBookingsForCalendar(params: {
       custodianTeamMemberIds: teamMemberIds,
       ...selfServiceData,
       tags,
+      // Calendar events carry no asset data — the mapping below projects
+      // booking scalars, two names and the tags — so the per-booking asset
+      // subtree is pure transfer cost here.
+      includeAssets: false,
+      // Only `bookings` is read below; skip the COUNT companion query.
+      skipCount: true,
       extraInclude: {
-        custodianTeamMember: true,
-        custodianUser: true,
+        // Narrow selects: the mapping reads `name` off the team member and
+        // the display-name fields + picture off the two users. `true` pulled
+        // whole `User` rows (every column, per booking, per request).
+        custodianTeamMember: { select: { id: true, name: true } },
+        custodianUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            profilePicture: true,
+          },
+        },
         creator: {
           select: {
             id: true,
@@ -11353,6 +11449,8 @@ export async function getBookingsForCalendar(params: {
         },
         tags: TAG_WITH_COLOR_SELECT,
       },
+      // Every booking in the window, not a page of them. `takeAll` ignores
+      // `perPage`, which is why the old `perPage: 1000` was already dead.
       takeAll: true,
     });
 
@@ -11388,11 +11486,16 @@ export async function getBookingsForCalendar(params: {
             end: (booking.to as Date).toISOString(),
             custodian: {
               name: custodianName,
+              // Named field by field rather than spread: the loaded row is a
+              // full `User`, and this payload is serialized to the calendar
+              // client. `displayName` belongs on the list — it outranks the
+              // legal-name halves wherever this custodian is rendered.
               user: booking.custodianUser
                 ? {
                     id: booking.custodianUserId,
                     firstName: booking.custodianUser?.firstName,
                     lastName: booking.custodianUser?.lastName,
+                    displayName: booking.custodianUser?.displayName,
                     profilePicture: booking.custodianUser?.profilePicture,
                   }
                 : undefined,
@@ -11406,6 +11509,7 @@ export async function getBookingsForCalendar(params: {
                     id: booking.creator.id,
                     firstName: booking.creator.firstName,
                     lastName: booking.creator.lastName,
+                    displayName: booking.creator.displayName,
                     profilePicture: booking.creator.profilePicture,
                   }
                 : null,
@@ -12213,11 +12317,7 @@ export async function bulkCancelBookings({
       }
 
       /** Making notes for all the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const notesData = bookings
         .map((b) =>
           b.bookingAssets.map((ba) => ({
@@ -12405,11 +12505,7 @@ async function createNotesForScannedAssetsAndKits({
       displayName: true,
     } satisfies Prisma.UserSelect,
   });
-  const userForNotes = {
-    firstName: user?.firstName || "",
-    lastName: user?.lastName || "",
-    id: userId,
-  };
+  const userForNotes = { ...user, id: userId };
 
   // Create booking notes
   // why: out of this rule — multi-asset popover, per-asset qty deferred.
@@ -14306,6 +14402,7 @@ export async function getDetailedPartialCheckinData(bookingId: string) {
         id: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
       };
     }
@@ -14341,6 +14438,7 @@ export type PartialCheckinDetailsType = Record<
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       profilePicture: string | null;
     };
   }
@@ -14490,6 +14588,7 @@ export async function getDetailedPartialCheckoutData({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
           profilePicture: true,
         },
       },
@@ -14506,6 +14605,7 @@ export async function getDetailedPartialCheckoutData({
         id: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
       };
     }
@@ -14549,6 +14649,7 @@ export type PartialCheckoutDetailsType = Record<
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       profilePicture: string | null;
     };
   }

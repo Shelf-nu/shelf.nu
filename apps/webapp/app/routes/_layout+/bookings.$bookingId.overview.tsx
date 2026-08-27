@@ -78,6 +78,7 @@ import {
   getTeamMembersForNotify,
 } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import bookingPageCss from "~/styles/booking.css?url";
@@ -186,8 +187,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                       select: {
                         id: true,
                         email: true,
-                        firstName: true,
-                        lastName: true,
+                        ...USER_NAME_SELECT,
                       },
                     },
                   },
@@ -1463,11 +1463,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         userId
       );
 
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const deletedBookingLink = wrapLinkForNote(
         `/bookings/${deletedBooking.id}`,
         deletedBooking.name.trim()
@@ -1706,11 +1702,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: user.id,
         });
 
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         const bookingLink = wrapLinkForNote(
           `/bookings/${booking.id}`,
           booking.name
@@ -1813,11 +1805,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // un-checked-out assets at check-in time — those shouldn't get a
         // "checked in" note. Falls back to no-op when nothing was out.
         if (checkedOutAssetIdsBeforeCheckin.length > 0) {
-          const actor = wrapUserLinkForNote({
-            id: userId,
-            firstName: user?.firstName,
-            lastName: user?.lastName,
-          });
+          const actor = wrapUserLinkForNote({ ...user, id: userId });
           const bookingLink = wrapLinkForNote(
             `/bookings/${booking.id}`,
             booking.name
@@ -1883,6 +1871,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           booking: { id, assetIds: [assetId as string] },
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
+          displayName: user?.displayName ?? null,
           userId,
           organizationId,
           assets: asset ? [asset] : [],
@@ -1937,11 +1926,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           cancellationReason,
         });
 
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         const cancelledBookingLink = wrapLinkForNote(
           `/bookings/${cancelledBooking.id}`,
           cancelledBooking.name.trim()
@@ -1994,6 +1979,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           },
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
+          displayName: user?.displayName ?? null,
           userId,
           kitIds: [kitId],
           kits: [{ id: kit.id, name: kit.name }],
@@ -2187,6 +2173,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           })),
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
+          displayName: user?.displayName ?? null,
           userId,
           organizationId,
         });
