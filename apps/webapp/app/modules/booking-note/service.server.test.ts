@@ -293,35 +293,63 @@ describe("BookingNote Service", () => {
       expect(result).toEqual({ count: 1 });
     });
 
-    it("returns 0 deletions when the note's booking is not in the organization (no-op)", async () => {
+    /**
+     * The predicate carries the authorization, so zero rows is a refusal — the
+     * note is someone else's, on another booking, or in another workspace. It
+     * has to be reported: the caller cannot tell the difference, and the
+     * activity route showed "deleted successfully" on the strength of the call
+     * returning at all. Matches `deleteTeamMemberNote`, `deleteNote` and
+     * `deleteLocationNote`, which all refuse here.
+     */
+    it("refuses when the note's booking is not in the organization", async () => {
       //@ts-expect-error missing vitest type
       mockDb.db.bookingNote.deleteMany.mockResolvedValue({ count: 0 });
 
-      const result = await deleteBookingNote({
-        id: "cross-org-note",
-        bookingId: "booking-1",
-        userId: "user-1",
-        organizationId: "org-1",
-      });
-
-      expect(result).toEqual({ count: 0 });
+      await expect(
+        deleteBookingNote({
+          id: "cross-org-note",
+          bookingId: "booking-1",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toThrow(
+        "Note not found or you don't have permission to delete it."
+      );
     });
 
-    it("returns 0 deletions when noteId belongs to a different booking in the same org (no-op)", async () => {
+    it("refuses when the note belongs to a different booking in the same org", async () => {
       // The relational where { booking: { id: bookingId, organizationId } }
       // means a note on booking B cannot be deleted via a handler bound to
       // booking A, even when both bookings sit in the same workspace.
       //@ts-expect-error missing vitest type
       mockDb.db.bookingNote.deleteMany.mockResolvedValue({ count: 0 });
 
-      const result = await deleteBookingNote({
-        id: "note-on-booking-B",
-        bookingId: "booking-A",
-        userId: "user-1",
-        organizationId: "org-1",
-      });
+      await expect(
+        deleteBookingNote({
+          id: "note-on-booking-B",
+          bookingId: "booking-A",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toThrow(
+        "Note not found or you don't have permission to delete it."
+      );
+    });
 
-      expect(result).toEqual({ count: 0 });
+    it("refuses as a client error rather than a server fault", async () => {
+      // A 5xx would page someone over a user trying to delete a note that is
+      // not theirs.
+      //@ts-expect-error missing vitest type
+      mockDb.db.bookingNote.deleteMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        deleteBookingNote({
+          id: "not-mine",
+          bookingId: "booking-1",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toMatchObject({ status: 403, shouldBeCaptured: false });
     });
   });
 
