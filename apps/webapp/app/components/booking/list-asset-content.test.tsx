@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { OrganizationRoles } from "@prisma/client";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -103,13 +104,13 @@ vi.mock("~/hooks/use-booking-status", () => ({
     mockUseBookingStatusHelpers(status),
 }));
 
-// why: providing test user role context without auth dependencies
+const mockUseUserRoleHelper = vi.fn();
+
+// why: providing test user role context without auth dependencies, and letting
+// a test choose the roles — the row's checkbox is gated on what those roles may
+// actually do with a selection.
 vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({
-    isBase: false,
-    isSelfService: false,
-    isBaseOrSelfService: false,
-  }),
+  useUserRoleHelper: () => mockUseUserRoleHelper(),
 }));
 
 // why: providing test user data without session/auth lookups
@@ -164,6 +165,15 @@ describe("ListAssetContent", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Default: no roles, matching what every test here assumed before the
+    // checkbox became role-dependent. Tests that care set their own.
+    mockUseUserRoleHelper.mockReturnValue({
+      isBase: false,
+      isSelfService: false,
+      isBaseOrSelfService: false,
+      roles: undefined,
+    });
 
     mockUseBookingStatusHelpers.mockImplementation((status: string) => ({
       isCompleted: status === "COMPLETE",
@@ -916,6 +926,93 @@ describe("ListAssetContent", () => {
       } as unknown as AssetWithBooking);
 
       expect(screen.queryByText("Removed from kit")).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The row's checkbox exists to feed the bulk actions menu, so it is offered
+   * only when those roles have an action to take at this status. A checkbox
+   * that can only ever feed an empty menu is dead UI.
+   *
+   * These assert the WIRING, which the hook's own tests cannot: they prove this
+   * row reads `hasAny` at all. Without them the gate could be deleted outright
+   * and every test here would still pass.
+   */
+  describe("bulk-selection checkbox", () => {
+    const bookingAt = (status: string) => ({
+      booking: {
+        id: "booking-1",
+        status,
+        assets: [],
+        custodianUser: { id: "user-1" },
+      },
+    });
+
+    const renderAs = (
+      status: string,
+      roles: OrganizationRoles[] = [OrganizationRoles.BASE]
+    ) => {
+      const restricted =
+        roles.includes(OrganizationRoles.BASE) ||
+        roles.includes(OrganizationRoles.SELF_SERVICE);
+      mockUseUserRoleHelper.mockReturnValue({
+        isBase: roles.includes(OrganizationRoles.BASE),
+        isSelfService: roles.includes(OrganizationRoles.SELF_SERVICE),
+        isBaseOrSelfService: restricted,
+        roles,
+      });
+      mockUseLoaderData.mockReturnValue(bookingAt(status));
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={baseAsset}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+    };
+
+    it("offers a checkbox to a BASE custodian on a DRAFT booking", () => {
+      renderAs("DRAFT");
+
+      expect(screen.getByTestId("bulk-checkbox")).toBeInTheDocument();
+    });
+
+    /**
+     * The reported bug's surface: BASE may not remove past DRAFT and holds
+     * neither check-in nor check-out, so there is nothing a selection could do.
+     */
+    it("withholds it from a BASE custodian once the booking is reserved", () => {
+      renderAs("RESERVED");
+
+      expect(screen.queryByTestId("bulk-checkbox")).not.toBeInTheDocument();
+    });
+
+    /**
+     * Status is held constant and only the role varies, so the checkbox is the
+     * single difference between the two renders — this row's other columns come
+     * and go with status, which would otherwise swamp the comparison.
+     */
+    it("keeps the column aligned when the checkbox is withheld", () => {
+      renderAs("RESERVED", [OrganizationRoles.ADMIN]);
+      const withCheckbox = screen.getAllByRole("cell").length;
+
+      cleanup();
+
+      renderAs("RESERVED", [OrganizationRoles.BASE]);
+      const withoutCheckbox = screen.getAllByRole("cell").length;
+
+      // The fallback is an empty cell, not a missing one — dropping it would
+      // shift every column in the table by one for exactly these roles.
+      expect(withoutCheckbox).toBe(withCheckbox);
     });
   });
 });
