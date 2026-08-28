@@ -31,6 +31,11 @@ export type ReportRowHandlers = {
   /** Navigate to a kit detail page. Accepts any row that exposes
    *  a `kitId`. */
   onKitRowClick: (row: { kitId: string }) => void;
+  /** Navigate to an audit session detail page. Audit rows carry the
+   *  session id as their row `id`, so any row shape qualifies
+   *  structurally — only wire this to rows whose `id` IS an audit
+   *  session id. */
+  onAuditRowClick: (row: { id: string }) => void;
 };
 
 /**
@@ -61,5 +66,12 @@ export function useReportRowHandlers(): ReportRowHandlers {
     [navigate]
   );
 
-  return { onBookingRowClick, onAssetRowClick, onKitRowClick };
+  const onAuditRowClick = useCallback(
+    (row: { id: string }) => {
+      void navigate(`/audits/${row.id}`);
+    },
+    [navigate]
+  );
+
+  return { onBookingRowClick, onAssetRowClick, onKitRowClick, onAuditRowClick };
 }

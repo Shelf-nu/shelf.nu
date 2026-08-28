@@ -7,8 +7,10 @@
  * @see {@link file://../../modules/reports/helpers.server.ts}
  */
 
+import { AUDIT_STATUS_LABELS } from "@shelf/labels";
 import { data, type LoaderFunctionArgs } from "react-router";
 
+import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import { formatDateForCsv } from "~/modules/reports/csv-format";
 import {
   resolveTimeframe,
@@ -25,6 +27,7 @@ import {
   monthlyBookingTrendsReport,
 } from "~/modules/reports/helpers.server";
 import { getReportById } from "~/modules/reports/registry";
+import type { AuditCompletionRow } from "~/modules/reports/types";
 import type {
   TimeframePreset,
   BookingComplianceRow,
@@ -265,6 +268,20 @@ export const loader = async ({
         });
         csvString = generateMonthlyBookingTrendsCsv(
           reportData.rows as MonthlyBookingTrendRow[]
+        );
+        break;
+      }
+
+      case "audit-completion": {
+        const reportData = await auditCompletionReport({
+          organizationId,
+          timeframe,
+          page: 1,
+          pageSize: 10000,
+        });
+        csvString = generateAuditCompletionCsv(
+          reportData.rows as AuditCompletionRow[],
+          formatPrefs
         );
         break;
       }
@@ -744,6 +761,58 @@ function generateDistributionCsv(breakdown: DistributionBreakdown): string {
   ];
 
   return buildCsv(headers, allRows);
+}
+
+/**
+ * Generate CSV for the Audit Completion report.
+ *
+ * Columns match the UI table: raw counters, accuracy, and the lifecycle
+ * dates. Status uses the shared `AUDIT_STATUS_LABELS` words so the export
+ * reads the same as every badge in the app.
+ */
+function generateAuditCompletionCsv(
+  rows: AuditCompletionRow[],
+  prefs: ResolvedFormatPrefs
+): string {
+  const headers = [
+    "Audit ID",
+    "Name",
+    "Status",
+    "Expected",
+    "Found",
+    "Missing",
+    "Unexpected",
+    "Accuracy",
+    "Created By",
+    "Started",
+    "Due Date",
+    "Completed",
+  ];
+
+  const csvRows = rows.map((row) => [
+    row.id,
+    row.name,
+    AUDIT_STATUS_LABELS[row.status] || row.status,
+    row.expectedAssetCount.toString(),
+    row.foundAssetCount.toString(),
+    row.missingAssetCount.toString(),
+    row.unexpectedAssetCount.toString(),
+    // Null accuracy (0 expected assets) exports as an empty cell, not "0%".
+    row.accuracy !== null ? `${row.accuracy}%` : "",
+    row.createdByName,
+    // Datetime columns: include the time part; empty when unset.
+    row.startedAt
+      ? formatDateForCsv(row.startedAt, prefs, { includeTime: true })
+      : "",
+    row.dueDate
+      ? formatDateForCsv(row.dueDate, prefs, { includeTime: true })
+      : "",
+    row.completedAt
+      ? formatDateForCsv(row.completedAt, prefs, { includeTime: true })
+      : "",
+  ]);
+
+  return buildCsv(headers, csvRows);
 }
 
 /**
