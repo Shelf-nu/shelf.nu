@@ -231,7 +231,7 @@ describe("roleHasPermission — reports entity", () => {
     // Reports aggregate org-wide custody, booking and value data. The
     // sidebar never offers them below ADMIN, and the server matrix must
     // agree — an empty action list, not a missing entry.
-    for (const role of ["BASE", "SELF_SERVICE"]) {
+    for (const role of ["BASE", "SELF_SERVICE"] as const) {
       assert.deepEqual(
         Role2PermissionMap[role]?.[PermissionEntity.reports],
         []
@@ -250,7 +250,7 @@ describe("roleHasPermission — reports entity", () => {
   });
 
   test("grants ADMIN and OWNER read and export", () => {
-    for (const role of ["ADMIN", "OWNER"]) {
+    for (const role of ["ADMIN", "OWNER"] as const) {
       // The resolver grants these roles everything via the short-circuit, so
       // assert the matrix rows directly too — the role-matrix contract must
       // hold even for readers that consult the map without the resolver.
