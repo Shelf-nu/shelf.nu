@@ -314,6 +314,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // the matching row: the same "two answers to who has this?" state the
         // release path refuses. Scoping the delete keeps the row alive so the
         // assert below can see it and reject the whole assignment.
+        // why: these two must stay sequential — react-doctor/async-parallel
+        // flags them, and combining them into a `Promise.all` would be wrong
+        // twice: the delete-then-assert ORDER is the guarantee (the assert may
+        // only read once the operator rows are gone), and concurrent queries on
+        // one interactive-transaction client are not safe in Prisma.
         await tx.custody.deleteMany({
           where: { assetId, asset: { organizationId }, kitCustodyId: null },
         });
