@@ -18,9 +18,10 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "@/lib/api";
+import { api, getApiBaseUrl } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
+import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
@@ -32,7 +33,8 @@ import type {
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
-import { extractQrId } from "@/lib/qr-utils";
+import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
+import { getActiveServer } from "@/lib/server";
 import { primeScanLocation, getScanCoordinates } from "@/lib/scan-location";
 import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
@@ -186,7 +188,7 @@ function ScannerContent() {
     bookingAction?: string;
   }>();
   const isFocused = useIsFocused();
-  const { currentOrg } = useOrg();
+  const { currentOrg, organizations, setCurrentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
   const [permission, requestPermission] = useCameraPermissions();
@@ -359,8 +361,11 @@ function ScannerContent() {
   // closure and its state setter belong to a single booking's mount.
   const fetchBookingCtx = useCallback(() => {
     if (!isBookingMode || !bookingId || !currentOrg) return;
+    const originOrgId = currentOrg.id;
     api.booking(bookingId, currentOrg.id).then(({ data }) => {
-      if (!data) return;
+      // A failed fetch leaves the previous context in place, so an answer that
+      // outlived its workspace must not be the one that replaces it.
+      if (!data || activeOrgIdRef.current !== originOrgId) return;
       setBookingCtx({
         bookedAssetIds: new Set(data.booking.assets.map((a) => a.id)),
         bookingStatus: data.booking.status,
@@ -387,9 +392,13 @@ function ScannerContent() {
   const bookingBlockers = useMemo<BlockerGroup[]>(
     () =>
       isBookingAddMode && bookingCtx
-        ? computeBlockers("booking_add", bookingCheckinItems, bookingCtx)
+        ? computeBlockers(
+            isBookingFulfilMode ? "booking_fulfil" : "booking_add",
+            bookingCheckinItems,
+            bookingCtx
+          )
         : [],
-    [isBookingAddMode, bookingCtx, bookingCheckinItems]
+    [isBookingAddMode, isBookingFulfilMode, bookingCtx, bookingCheckinItems]
   );
 
   const resolveBookingBlocker = useCallback((group: BlockerGroup) => {
@@ -485,19 +494,31 @@ function ScannerContent() {
    * no unclaim) while the card copy promises "this workspace". Clearing the
    * card and the scan-dedup memory on org change means every action the user
    * can see always targets the workspace they see.
+   *
+   * The batch and booking lists go for the same reason, and their failure is
+   * quieter: their rows were resolved under the previous org while every
+   * submit handler reads `currentOrg.id` live, and the bulk endpoints narrow
+   * to `{ id: { in: ids }, organizationId }` — so a batch carried across a
+   * switch matches no rows, commits nothing, and still answers success, which
+   * the app would report as "Assigned 3 assets" before clearing the evidence.
    */
   useEffect(() => {
     setScanResult(null);
     lastScanRef.current = "";
+    setScannedItems([]);
+    setBookingCheckinItems([]);
+    // The booking belongs to the workspace that was open. Its refetch bails
+    // on failure, so without this a stale context would survive the switch.
+    setBookingCtx(null);
     // Also invalidates any in-flight claim continuation: claimQrAndProceed
     // compares its originating org against this ref after its awaits and
     // drops the follow-up navigation when they differ (the claim itself may
     // have landed in the old org — irreversible — but we must not open the
     // create/link flow under the newly active workspace).
     activeOrgIdRef.current = currentOrg?.id;
-    // setScanResult / lastScanRef are stable identities (setState / ref), so
+    // setScanResult / lastScanRef / the two setState identities are stable, so
     // this effectively runs only when the active org changes (the mount run
-    // is a no-op — the card starts null and the dedup memory empty).
+    // is a no-op — the card starts null and both lists empty).
   }, [currentOrg?.id, setScanResult, lastScanRef]);
 
   // Animation for scan line (shared hook)
@@ -661,7 +682,32 @@ function ScannerContent() {
       resetInactivityTimer();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
+      // The workspace this scan belongs to. Lookups run against a 20s timeout
+      // and the tab keeps its state while the user is elsewhere, so a resolve
+      // can land after they have switched — and everything below appends to
+      // lists and cards the switch has already emptied. `claimQrAndProceed`
+      // pins its origin the same way.
+      const originOrgId = currentOrg?.id;
+      const isStaleScan = () => activeOrgIdRef.current !== originOrgId;
+
       try {
+        // A Shelf URL from ANOTHER server would otherwise be resolved against
+        // this one and reported as "not found" — a baffling error for a code
+        // that is perfectly valid on the instance that minted it.
+        if (
+          classifyScannedCode(data, getActiveServer().baseUrl).kind ===
+          "foreign"
+        ) {
+          setScanResult({
+            type: "error",
+            title: "Different Shelf Server",
+            message:
+              "This code belongs to a different Shelf server. Sign in to that server to use it.",
+          });
+          finalizeScan();
+          return;
+        }
+
         const qrId = extractQrId(data);
         // SAM / sequential ids (e.g. SAM-0001) aren't QR ids — they resolve
         // via the QR route's sequentialId branch, scoped to the current
@@ -709,10 +755,10 @@ function ScannerContent() {
             isBatchAction(action) &&
             scannedItems.some((item) => item.qrId === qrLookupId)
           ) {
-            flashFrame("error");
+            flashFrame("duplicate");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             setScanResult({
-              type: "error",
+              type: "duplicate",
               title: "Already Scanned",
               message: "This item is already in your scan list.",
             });
@@ -734,6 +780,13 @@ function ScannerContent() {
             error,
             errorDetails,
           } = await api.qr(qrLookupId, currentOrg?.id, coordinates);
+
+          // Landed after a workspace switch: this answer describes a workspace
+          // the user has left, so it may not touch their lists or their card.
+          if (isStaleScan()) {
+            finalizeScan();
+            return;
+          }
 
           if (error || !qrData) {
             flashFrame("error");
@@ -800,7 +853,7 @@ function ScannerContent() {
                   icon: "open-outline",
                   onPress: () => {
                     void openShelfWebUrl(
-                      `https://app.shelf.nu/qr/${unclaimedQrId}`
+                      `${getApiBaseUrl()}/qr/${unclaimedQrId}`
                     );
                     dismissResult();
                   },
@@ -857,6 +910,13 @@ function ScannerContent() {
             currentOrg.id
           );
 
+          // Same rule as the QR path: a resolve that outlived the workspace it
+          // was made in is dropped rather than rendered.
+          if (isStaleScan()) {
+            finalizeScan();
+            return;
+          }
+
           if (barcodeError || !barcodeData) {
             flashFrame("error");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -880,15 +940,56 @@ function ScannerContent() {
 
         // ── Shared processing (QR and barcode paths converge here) ──
 
-        // Cross-org check
+        // Cross-org check. The resolver only returns a payload for codes in
+        // workspaces the user belongs to (foreign codes 403 server-side), so
+        // the owning workspace is in `organizations` and the card can offer
+        // the jump instead of describing it.
         if (currentOrg && codeOrgId && codeOrgId !== currentOrg.id) {
-          flashFrame("error");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          const ownerOrg = organizations.find((org) => org.id === codeOrgId);
+          const itemName = asset?.title ?? kit?.name ?? null;
+          const targetHref = asset
+            ? (`/(tabs)/assets/${asset.id}` as const)
+            : kit
+            ? (`/(tabs)/assets/kits/${kit.id}` as const)
+            : null;
+          // Paired in one object so the "can we offer the jump?" test and the
+          // values the jump needs cannot drift apart — and so both narrow.
+          const jump =
+            ownerOrg && targetHref ? { org: ownerOrg, href: targetHref } : null;
+          // Amber, not red: a code that lives in another of the user's own
+          // workspaces is a routine hit with a one-tap resolution below, not a
+          // failed scan. Red is reserved for scans that cannot go anywhere.
+          // Where the jump is NOT on offer — an unknown workspace, or a code
+          // with nothing to open — there is no next step, so it stays red.
+          flashFrame(jump ? "advisory" : "error");
+          Haptics.notificationAsync(
+            jump
+              ? Haptics.NotificationFeedbackType.Warning
+              : Haptics.NotificationFeedbackType.Error
+          );
           setScanResult({
-            type: "error",
-            title: "Different Workspace",
-            message:
-              "This asset belongs to a different workspace. Switch workspaces to view it.",
+            // Same `jump` test as the frame and the haptic above, so the card
+            // cannot say "failure" while the frame says "here is the fix".
+            type: jump ? "advisory" : "error",
+            title: itemName ?? "Different Workspace",
+            message: ownerOrg
+              ? `This ${asset ? "asset" : kit ? "kit" : "code"} lives in ${
+                  ownerOrg.name
+                }.`
+              : "This code belongs to a different workspace.",
+            action: jump
+              ? {
+                  label: "Switch & view",
+                  icon: "swap-horizontal",
+                  onPress: () => {
+                    setCurrentOrg(jump.org);
+                    setScanResult(null);
+                    // Anchored nav so "back" lands on the list, not the
+                    // scanner (see pushIntoTab).
+                    pushIntoTab("/(tabs)/assets", jump.href);
+                  },
+                }
+              : undefined,
           });
           finalizeScan();
           return;
@@ -998,17 +1099,34 @@ function ScannerContent() {
 
           // BOOKING-ADD mode: dedupe by kit id, add to the booking list
           if (isBookingAddMode) {
-            if (
-              bookingCheckinItems.some(
-                (item) => item.type === "kit" && item.targetId === kit!.id
-              )
-            ) {
+            // Fulfil matches scans against the booking's model lines, and
+            // kits have no model line — a kit scan can never fulfil
+            // anything, so saying so beats a green card that goes nowhere.
+            if (isBookingFulfilMode) {
               flashFrame("error");
               Haptics.notificationAsync(
                 Haptics.NotificationFeedbackType.Warning
               );
               setScanResult({
                 type: "error",
+                title: kit.name,
+                message:
+                  "Kits aren't matched when fulfilling reservations. Scan the kit's individual assets.",
+              });
+              finalizeScan();
+              return;
+            }
+            if (
+              bookingCheckinItems.some(
+                (item) => item.type === "kit" && item.targetId === kit!.id
+              )
+            ) {
+              flashFrame("duplicate");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({
+                type: "duplicate",
                 title: "Already Scanned",
                 message: "This kit is already in your list.",
               });
@@ -1083,10 +1201,10 @@ function ScannerContent() {
               (item) => item.type === "kit" && item.targetId === kit!.id
             )
           ) {
-            flashFrame("error");
+            flashFrame("duplicate");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             setScanResult({
-              type: "error",
+              type: "duplicate",
               title: "Already Scanned",
               message: "This kit is already in your scan list.",
             });
@@ -1140,6 +1258,7 @@ function ScannerContent() {
           };
           let unlinkedQrAction: UnlinkedQrAction | undefined;
           let unlinkedQrSecondaryAction: UnlinkedQrAction | undefined;
+          let unlinkedQrTertiaryAction: UnlinkedQrAction | undefined;
 
           const canCreateAsset = userHasPermission({
             roles: currentOrg?.roles,
@@ -1167,7 +1286,7 @@ function ScannerContent() {
               label: "Open in Browser",
               icon: "open-outline",
               onPress: () => {
-                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
                 dismissResult();
               },
             };
@@ -1200,8 +1319,23 @@ function ScannerContent() {
                   },
                 }
               : undefined;
-            unlinkedQrAction = createAction ?? linkAction;
-            unlinkedQrSecondaryAction = createAction ? linkAction : undefined;
+            // The web bridge stays on the card even when the in-app actions
+            // are available: linking this QR to a KIT has no native picker
+            // yet, so the browser is the only exit for a kit label.
+            const bridgeAction: UnlinkedQrAction = {
+              label: "Link in Browser",
+              icon: "open-outline",
+              onPress: () => {
+                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                dismissResult();
+              },
+            };
+            const offered = [createAction, linkAction, bridgeAction].filter(
+              (a): a is UnlinkedQrAction => a !== undefined
+            );
+            unlinkedQrAction = offered[0];
+            unlinkedQrSecondaryAction = offered[1];
+            unlinkedQrTertiaryAction = offered[2];
           } else if (qrId) {
             // Unclaimed (for roles without the native claim flow) or claimed
             // by this org while the caller can't act — bridge to web
@@ -1209,7 +1343,7 @@ function ScannerContent() {
               label: "Link in Browser",
               icon: "open-outline",
               onPress: () => {
-                void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+                void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
                 dismissResult();
               },
             };
@@ -1222,11 +1356,12 @@ function ScannerContent() {
               ? isKitLinked
                 ? "This QR code is linked to a kit, not an asset. Open the web app to view the kit."
                 : canActOnUnlinked
-                ? "This QR code is not linked to any asset. Create a new asset or link an existing one."
+                ? "This QR code is not linked to any asset. Create a new asset, link an existing one, or link it to a kit in the browser."
                 : "This QR code is not linked to any asset. Open the web app to link it."
               : "This code exists but is not linked to any asset.",
             action: unlinkedQrAction,
             secondaryAction: unlinkedQrSecondaryAction,
+            tertiaryAction: unlinkedQrTertiaryAction,
           });
           finalizeScan();
           return;
@@ -1236,10 +1371,10 @@ function ScannerContent() {
         if (isBookingMode) {
           // Check duplicate
           if (bookingCheckinItems.some((item) => item.targetId === asset.id)) {
-            flashFrame("error");
+            flashFrame("duplicate");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             setScanResult({
-              type: "error",
+              type: "duplicate",
               title: "Already Scanned",
               message: isBookingAddMode
                 ? "This asset is already in your list."
@@ -1392,10 +1527,10 @@ function ScannerContent() {
             (item) => item.type === "asset" && item.targetId === asset!.id
           )
         ) {
-          flashFrame("error");
+          flashFrame("duplicate");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           setScanResult({
-            type: "error",
+            type: "duplicate",
             title: "Already Scanned",
             message: "This asset is already in your scan list.",
           });
@@ -1443,12 +1578,18 @@ function ScannerContent() {
     },
     // why: finalizeScan, isProcessingRef, lastScanRef, setIsProcessing, setScanResult,
     // and shouldSkipScan are stable across renders (refs and setState identities) or
-    // would cause render storms if listed; intentionally excluded
+    // would cause render storms if listed; intentionally excluded. setCurrentOrg is
+    // likewise stable (a useCallback with no deps in OrgProvider). `organizations`
+    // IS listed: refreshing the org list hands over a new array without changing
+    // currentOrg, and a callback holding the old one cannot find the workspace a
+    // freshly-joined code belongs to — the cross-workspace card would then lose its
+    // Switch & view action.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       router,
       action,
       currentOrg,
+      organizations,
       canManageQrCodes,
       claimQrAndProceed,
       scannedItems,
@@ -1527,18 +1668,13 @@ function ScannerContent() {
   const assignCustodyToSelf = async () => {
     if (!currentOrg) return;
     setIsSubmitting(true);
-    const { data, error } = await api.teamMembers(currentOrg.id);
+    const { member, error } = await resolveSelfTeamMember(currentOrg.id);
     setIsSubmitting(false);
-
-    const selfMember = data?.teamMembers?.[0];
-    if (error || !selfMember) {
-      Alert.alert(
-        "Error",
-        error || "Could not find your team member record for this workspace."
-      );
+    if (!member) {
+      Alert.alert("Error", error ?? "Something went wrong.");
       return;
     }
-    performBulkAssign(selfMember);
+    performBulkAssign(member);
   };
 
   const performBulkAssign = async (member: TeamMember) => {
@@ -1552,54 +1688,64 @@ function ScannerContent() {
       : member.name;
 
     const confirmLabel = batchLabel();
-    Alert.alert("Assign Custody", `Assign ${confirmLabel} to ${displayName}?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Assign",
-        onPress: async () => {
-          setIsSubmitting(true);
-          // Fan out per entity type — assets and kits have separate bulk
-          // endpoints wrapping their respective services (web parity).
-          const { assetIds, kitIds } = splitScannedIds();
-          const [assetResult, kitResult] = await Promise.all([
-            assetIds.length > 0
-              ? api.bulkAssignCustody(currentOrg.id, assetIds, member.id)
-              : Promise.resolve({ data: null, error: null }),
-            kitIds.length > 0
-              ? api.bulkAssignKitCustody(currentOrg.id, kitIds, member.id)
-              : Promise.resolve({ error: null }),
-          ]);
-          setIsSubmitting(false);
+    Alert.alert(
+      isSelfService ? "Take Custody" : "Assign Custody",
+      isSelfService
+        ? `Take custody of ${confirmLabel}?`
+        : `Assign ${confirmLabel} to ${displayName}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: isSelfService ? "Take" : "Assign",
+          onPress: async () => {
+            setIsSubmitting(true);
+            // Fan out per entity type — assets and kits have separate bulk
+            // endpoints wrapping their respective services (web parity).
+            const { assetIds, kitIds } = splitScannedIds();
+            const [assetResult, kitResult] = await Promise.all([
+              assetIds.length > 0
+                ? api.bulkAssignCustody(currentOrg.id, assetIds, member.id)
+                : Promise.resolve({ data: null, error: null }),
+              kitIds.length > 0
+                ? api.bulkAssignKitCustody(currentOrg.id, kitIds, member.id)
+                : Promise.resolve({ error: null }),
+            ]);
+            setIsSubmitting(false);
 
-          const error = assetResult.error || kitResult.error;
-          if (error) {
-            Alert.alert("Error", error);
-          } else {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            playScanSound();
-            // Honest partial success: mixed batches skip QUANTITY_TRACKED
-            // assets server-side (their custody is per-unit), so say both
-            // numbers instead of implying everything was assigned. Absent
-            // field (older server) or all-INDIVIDUAL batches read 0 and the
-            // alert body is unchanged. All-QT batches error out server-side
-            // and never reach this branch.
-            const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
-            const skippedNote =
-              skipped > 0
-                ? `\n\n${skipped} quantity-tracked asset${
-                    skipped === 1 ? "" : "s"
-                  } skipped. Assign quantities from the asset's detail screen.`
-                : "";
-            Alert.alert(
-              "Done",
-              `Assigned ${confirmLabel} to ${displayName}.${skippedNote}`
-            );
-            setScannedItems([]);
-            lastScanRef.current = "";
-          }
+            const error = assetResult.error || kitResult.error;
+            if (error) {
+              Alert.alert("Error", error);
+            } else {
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Success
+              );
+              playScanSound();
+              // Honest partial success: mixed batches skip QUANTITY_TRACKED
+              // assets server-side (their custody is per-unit), so say both
+              // numbers instead of implying everything was assigned. Absent
+              // field (older server) or all-INDIVIDUAL batches read 0 and the
+              // alert body is unchanged. All-QT batches error out server-side
+              // and never reach this branch.
+              const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
+              const skippedNote =
+                skipped > 0
+                  ? `\n\n${skipped} quantity-tracked asset${
+                      skipped === 1 ? "" : "s"
+                    } skipped. Assign quantities from the asset's detail screen.`
+                  : "";
+              Alert.alert(
+                "Done",
+                isSelfService
+                  ? `You have custody of ${confirmLabel}.${skippedNote}`
+                  : `Assigned ${confirmLabel} to ${displayName}.${skippedNote}`
+              );
+              setScannedItems([]);
+              lastScanRef.current = "";
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const performBulkRelease = async () => {

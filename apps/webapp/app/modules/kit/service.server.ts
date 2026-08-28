@@ -26,6 +26,7 @@ import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { getPeakReservedUnitsByAsset } from "~/modules/asset/availability-primitives.server";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -67,7 +68,10 @@ import {
   assertTeamMemberBelongsToOrg,
 } from "~/utils/org-validation.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
+import { computeKitClaimablePool } from "./picker-meta.server";
 import type { UpdateKitPayload } from "./types";
 import {
   GET_KIT_STATIC_INCLUDES,
@@ -107,6 +111,7 @@ import {
 } from "../note/service.server";
 import { getQr } from "../qr/service.server";
 import { scopeCustodianFilterIds } from "../team-member/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -589,16 +594,14 @@ export async function removeKitSlicesFromPlanningBookings(
   // (see `user/service.server.ts`) — that would take a second pooled connection
   // while this interactive tx holds one, and add a round-trip to a tx budget
   // that has already produced P2028 on large bulk operations.
-  const actor: { firstName: string | null; lastName: string | null } | null =
-    await tx.user.findUnique({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `actorUserId` is the authenticated caller, not request input
-      where: { id: actorUserId },
-      select: { firstName: true, lastName: true },
-    });
+  const actor = await tx.user.findUnique({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `actorUserId` is the authenticated caller, not request input
+    where: { id: actorUserId },
+    select: { ...USER_NAME_SELECT },
+  });
   const actorLink = wrapUserLinkForNote({
+    ...(actor ?? { displayName: null }),
     id: actorUserId,
-    firstName: actor?.firstName,
-    lastName: actor?.lastName,
   });
 
   // One note per (booking, kit) pair — several assets leaving the same kit in
@@ -1014,23 +1017,19 @@ export async function preserveKitDrivenPlacements(
 
 export async function emitAssetKitDetachmentNotes({
   impact,
-  actorUserId,
-  actorFirstName,
-  actorLastName,
+  actor,
   organizationId,
 }: {
   impact: Awaited<ReturnType<typeof fetchAssetKitDetachmentImpact>>;
-  actorUserId: string;
-  actorFirstName: string | null;
-  actorLastName: string | null;
+  /**
+   * The acting user's row, passed through whole: the note links their id and
+   * renders whatever name they go by.
+   */
+  actor: UserNameFields & { id: string };
   organizationId: string;
 }) {
   if (impact.length === 0) return;
-  const actorLink = wrapUserLinkForNote({
-    id: actorUserId,
-    firstName: actorFirstName,
-    lastName: actorLastName,
-  });
+  const actorLink = wrapUserLinkForNote(actor);
   // One note per (booking, kit) pair. Multiple assets removed from the
   // same kit in the same delete are collapsed to a single note per
   // booking so we don't spam the booking activity feed.
@@ -2080,11 +2079,7 @@ async function performKitDeletion({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    actorLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: actor?.firstName,
-      lastName: actor?.lastName,
-    });
+    actorLink = wrapUserLinkForNote({ ...actor, id: userId });
   }
 
   // Per-asset units released by the kit-delete, sourced from the inherited
@@ -2485,11 +2480,7 @@ export async function releaseCustody({
       assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
     };
 
-    const actorLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: actor?.firstName,
-      lastName: actor?.lastName,
-    });
+    const actorLink = wrapUserLinkForNote({ ...actor, id: userId });
     const custodianDisplay = kit.custody?.custodian
       ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
       : "**Unknown Custodian**";
@@ -2683,14 +2674,11 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
           ...kit,
           custody: {
             custodian: {
-              name: `${custodianUser?.firstName || ""} ${
-                custodianUser?.lastName || ""
-              }`, // Concatenate firstName and lastName to form the name property with default values
-              user: {
-                firstName: custodianUser?.firstName || "",
-                lastName: custodianUser?.lastName || "",
-                profilePicture: custodianUser?.profilePicture || null,
-              },
+              // `user` goes through whole: a registered member is named from
+              // their user row, and a re-projection that drops `displayName`
+              // renames them everywhere this custodian is rendered.
+              name: resolveUserDisplayName(custodianUser),
+              user: custodianUser,
             },
           },
         });
@@ -2731,7 +2719,7 @@ type CurrentBookingType = {
   name: string;
   custodianUser: Pick<
     User,
-    "firstName" | "lastName" | "profilePicture" | "email"
+    "firstName" | "lastName" | "displayName" | "profilePicture" | "email"
   > | null;
   custodianTeamMember: TeamMember | null;
   status: BookingStatus;
@@ -3120,11 +3108,7 @@ export async function bulkAssignKitCustody({
       );
 
       /** Creating notes for all the assets of the kit */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
         : // Free-form fallback name, rendered as literal bold text.
@@ -3453,11 +3437,7 @@ export async function bulkReleaseKitCustody({
       );
 
       /** Creating notes for all the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const custodianDisplay = custodian
         ? wrapCustodianForNote({ teamMember: custodian })
         : "**Unknown Custodian**";
@@ -4601,11 +4581,7 @@ export async function bulkUpdateKitLocation({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: userForNote?.firstName,
-      lastName: userForNote?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...userForNote, id: userId });
 
     if (newLocationId && newLocationId.trim() !== "") {
       const location = await db.location.findFirst({
@@ -4739,11 +4715,7 @@ export async function updateKitAssets({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const actor = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: userId });
 
     const kitWithRelations = await db.kit
       .findUniqueOrThrow({
@@ -4895,19 +4867,6 @@ export async function updateKitAssets({
           //   - quantity (this kit's slice for qty-change diff)
           assetKits: { select: { kitId: true, quantity: true } },
           custody: true,
-          // Ongoing/overdue booking allocations subtract from the strict-
-          // available pool checked below — pull them here so the
-          // validation pass doesn't need a second round-trip.
-          bookingAssets: {
-            where: {
-              booking: {
-                status: {
-                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                },
-              },
-            },
-            select: { quantity: true },
-          },
           assetLocations: {
             select: { location: { select: { id: true, name: true } } },
           },
@@ -5005,20 +4964,13 @@ export async function updateKitAssets({
      * surface as a generic 500. Re-check the strict-available pool here
      * for any qty-tracked submission and return a clean 400.
      *
-     * Strict-available formula (matches the picker loader):
-     *   spaceWithoutMe = Asset.quantity
-     *                  − sum(other kits' AssetKit.quantity)
-     *                  − sum(operator-only Custody.quantity)
-     *                  − sum(ongoing/overdue BookingAsset.quantity)
-     *   max            = max(currentInThisKit, spaceWithoutMe)
+     * The formula itself lives in `computeKitClaimablePool`, shared with the
+     * picker: a guard that computed the pool differently would refuse what
+     * the picker offered, or accept what it did not.
      *
      * `operator-only` filters by `kitCustodyId IS NULL` — kit-allocated
      * Custody rows mirror the source kit's AssetKit slice and would
      * otherwise double-count against the multi-kit + in-custody case.
-     *
-     * `max(current, spaceWithoutMe)` lets the user keep their existing
-     * slice in the overcommitted edge case (operator / booking growth
-     * pushed the pool below the kit's current allocation).
      */
     const oversubscribed: Array<{
       assetId: string;
@@ -5026,6 +4978,17 @@ export async function updateKitAssets({
       submitted: number;
       max: number;
     }> = [];
+
+    // Same booking term the picker uses: peak concurrent standalone demand
+    // across the whole timeline, because a kit slice has no dates of its own.
+    const peakReservedByAsset = await getPeakReservedUnitsByAsset({
+      assetIds: allAssetsForKit
+        .filter((asset) => asset.type === AssetType.QUANTITY_TRACKED)
+        .map((asset) => asset.id),
+      organizationId,
+      tx: db,
+    });
+
     for (const asset of allAssetsForKit) {
       if (asset.type !== AssetType.QUANTITY_TRACKED) continue;
       const submitted = assetQuantities[asset.id];
@@ -5040,16 +5003,15 @@ export async function updateKitAssets({
       const operatorOnlyCustody = (asset.custody ?? [])
         .filter((c) => c.kitCustodyId == null)
         .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
-      const ongoingBookings = (asset.bookingAssets ?? []).reduce(
-        (sum, ba) => sum + (ba.quantity ?? 0),
-        0
-      );
+      const occupyingBooked = peakReservedByAsset.get(asset.id) ?? 0;
 
-      const spaceWithoutMe = Math.max(
-        0,
-        totalQty - otherKitsQty - operatorOnlyCustody - ongoingBookings
-      );
-      const max = Math.max(currentInThisKit, spaceWithoutMe);
+      const { maxAllowedForThisKit: max } = computeKitClaimablePool({
+        totalQuantity: totalQty,
+        currentInThisKit,
+        otherKitsQuantity: otherKitsQty,
+        operatorCustodyQuantity: operatorOnlyCustody,
+        occupyingBookedQuantity: occupyingBooked,
+      });
 
       if (submitted > max) {
         oversubscribed.push({
@@ -5450,9 +5412,7 @@ export async function updateKitAssets({
     // so the notes only land if the cascade actually committed.
     await emitAssetKitDetachmentNotes({
       impact: detachmentImpact,
-      actorUserId: userId,
-      actorFirstName: user?.firstName ?? null,
-      actorLastName: user?.lastName ?? null,
+      actor: { ...user, id: userId },
       organizationId,
     });
 
@@ -6084,11 +6044,7 @@ export async function bulkRemoveAssetsFromKits({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const actor = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: userId });
 
     // Resolve IDs (works for both simple and advanced mode).
     // Acting user's timezone: when "select all" is active the affected set is
@@ -6431,9 +6387,7 @@ export async function bulkRemoveAssetsFromKits({
     // slice has been converted to standalone.
     await emitAssetKitDetachmentNotes({
       impact: bulkDetachmentImpact,
-      actorUserId: userId,
-      actorFirstName: user?.firstName ?? null,
-      actorLastName: user?.lastName ?? null,
+      actor: { ...user, id: userId },
       organizationId,
     });
 
@@ -6833,12 +6787,12 @@ export async function moveAssetKitUnits(
         tx
       );
 
-      // Load the acting user once for the post-tx note write. Reads
-      //     are part of the tx so a rolled-back move never produces a
-      //     stale `firstName`/`lastName` for the note.
+      // Load the acting user once for the post-tx note write. The read is
+      //     part of the tx, so a rolled-back move never produces a stale
+      //     name for the note.
       const user = await tx.user.findUnique({
         where: { id: userId },
-        select: { firstName: true, lastName: true },
+        select: { ...USER_NAME_SELECT },
       });
 
       return {
@@ -6849,8 +6803,7 @@ export async function moveAssetKitUnits(
         // Carry forward the data the post-tx note writer needs so it
         // can land only if the tx actually committed.
         noteContext: {
-          firstName: user?.firstName ?? "",
-          lastName: user?.lastName ?? "",
+          user: user ?? { displayName: null },
           assetType: asset.type,
           unitOfMeasure: asset.unitOfMeasure,
           fromKit,
@@ -6865,8 +6818,7 @@ export async function moveAssetKitUnits(
     await createKitMoveNote({
       fromKit: txResult.noteContext.fromKit,
       toKit: txResult.noteContext.toKit,
-      firstName: txResult.noteContext.firstName,
-      lastName: txResult.noteContext.lastName,
+      user: txResult.noteContext.user,
       assetId,
       userId,
       organizationId,

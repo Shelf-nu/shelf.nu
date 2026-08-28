@@ -485,19 +485,31 @@ model BookingModelRequest {
   quantity Int
 
   /// Units already assigned to concrete `BookingAsset` rows via
-  /// `materializeModelRequestForAsset`. Monotonically increases as
-  /// scans match the request. Never decreases on its own — to undo
-  /// a scan the operator removes the corresponding `BookingAsset`,
-  /// which does NOT roll this back (by design; the scan happened,
-  /// that's a historical fact).
+  /// `materializeModelRequestForAsset`. Scans increment it.
+  ///
+  /// It DOES decrease: `removeAssets` (booking service) decrements it by the
+  /// number of removed `BookingAsset` rows whose `bookingModelRequestId`
+  /// points at this request, floored at 0, and clears `fulfilledAt` when the
+  /// result drops below `quantity`.
+  ///
+  /// Counted from that column, never from a shared `assetModelId`: an asset
+  /// added directly alongside a reservation shares the model without having
+  /// discharged anything, so grouping by model re-opened reservations that
+  /// were still correctly satisfied.
   fulfilledQuantity Int @default(0)
 
-  /// Timestamp of the scan that fulfilled the final unit — set when
-  /// `fulfilledQuantity` catches up to `quantity`. Cleared back to
-  /// null if the operator later edits `quantity` upwards (re-opens
-  /// outstanding units). Used as the primary "is this outstanding?"
-  /// filter: `fulfilledAt IS NULL` means there are still units to
-  /// materialise.
+  /// Timestamp of the moment the reservation became fully fulfilled — set
+  /// when `fulfilledQuantity` catches up to `quantity`, and preserved (not
+  /// re-stamped) if an unchanged quantity is saved again. Cleared back to
+  /// null when outstanding units reappear: the operator edits `quantity`
+  /// upwards, or `removeAssets` drops `fulfilledQuantity` below it.
+  ///
+  /// The invariant that makes this the primary "is this outstanding?" filter:
+  /// non-null IFF `fulfilledQuantity === quantity`, so `fulfilledAt IS NULL`
+  /// means units remain to materialise. `fulfilledQuantity` can never exceed
+  /// `quantity` (the claim in `materializeModelRequestForAsset` is a single
+  /// statement guarded by `WHERE "fulfilledQuantity" < "quantity"`; upsert
+  /// rejects a shrink below it), so any decrement re-opens the row.
   fulfilledAt DateTime?
 
   createdAt DateTime @default(now())
@@ -1616,6 +1628,35 @@ model BookingAsset {
   // happened before this column existed, so no behaviour regresses.
   sourceKitId String?
 
+  // Whether THIS slice is currently checked out on THIS booking, and by whom.
+  // `checkedOutAt` NULL = never checked out here.
+  //
+  // This is the authoritative answer to "may this slice be checked in?", and
+  // nothing else can give it:
+  //   - `Asset.status` is global. An asset may be CHECKED_OUT by a DIFFERENT
+  //     active booking while never having been checked out on this one.
+  //   - `PartialBookingCheckout` records progressive scan SESSIONS only. The
+  //     all-at-once checkout writes none at all, so the absence of rows says
+  //     nothing about whether an asset went out — see the note on that model.
+  //
+  // Slice-grained rather than asset-grained because a QUANTITY_TRACKED asset is
+  // split across several bookings and several slices at once, so no single
+  // column on `Asset` could represent it.
+  //
+  // `checkedInAt` means FULLY reconciled, matching `PartialBookingCheckin`'s
+  // `assetIds` semantics: a partially-returned qty-tracked slice stays NULL and
+  // its flow back is tracked by `ConsumptionLog`.
+  //
+  // Same plain-column treatment as `assetKitId` / `sourceKitId` above — the
+  // user columns are deliberately NOT Prisma `@relation`s. Adding another
+  // relation to this model (whose grandparent `Booking` is a hub) pushes the
+  // extended client's generics past TS's recursion limit (TS2321). Services
+  // read the ids directly; no relation traversal is needed.
+  checkedOutAt   DateTime? @db.Timestamptz(3)
+  checkedOutById String?
+  checkedInAt    DateTime? @db.Timestamptz(3)
+  checkedInById  String?
+
   // The old `@@unique([bookingId, assetId])` is replaced by two partial
   // unique indexes in the migration SQL (Postgres-only feature Prisma
   // can't express in the schema):
@@ -1668,8 +1709,14 @@ model Booking {
   from      DateTime @db.Timestamptz(3)
   to        DateTime @db.Timestamptz(3)
 
-  // When a booking is early check-in or early check-out, we store the original from and to
-  // dates here and updated the from and to dates to current date (if users agrees to change)
+  // The period the booking was PLANNED for, as opposed to `from`/`to` above,
+  // which hold the live period. Written while the booking is still being
+  // planned (create, DRAFT edit, reserve) and frozen once it starts — every
+  // later flow moves `from`/`to` and leaves these alone: extension pushes `to`
+  // out, and early check-out / late or early-with-consent check-in rewrite the
+  // dates to the actual moment. Booking Compliance measures returns against
+  // these, so overwriting one after the booking starts erases the deadline the
+  // custodian agreed to. Null only on rows created before the columns existed.
   originalFrom DateTime? @db.Timestamptz(3)
   originalTo   DateTime? @db.Timestamptz(3)
 
@@ -1744,6 +1791,13 @@ model BookingSettings {
   @@index([organizationId])
 }
 
+/// A progressive check-in SESSION, mirroring PartialBookingCheckout.
+///
+/// `assetIds` lists only FULLY reconciled assets: INDIVIDUAL always, and
+/// QUANTITY_TRACKED only once its remaining units hit zero (partial returns
+/// live in `ConsumptionLog`). Completing a booking outright writes no row here,
+/// so the same warning applies — absence is not evidence of anything.
+/// `BookingAsset.checkedInAt` is the per-slice fact.
 model PartialBookingCheckin {
   id String @id @default(cuid())
 
@@ -1771,6 +1825,15 @@ model PartialBookingCheckin {
   @@index([bookingId, checkinTimestamp]) // Composite for efficient booking history queries
 }
 
+/// A progressive checkout SESSION: one scan batch, covering N assets via the
+/// positional `assetIds` / `quantities` / `bookingAssetIds` arrays.
+///
+/// Records sessions and the units they claimed — NOT whether an asset is out.
+/// The all-at-once checkout (`checkoutBooking`, the Check out button) flips
+/// statuses and writes NO row here, so **absence proves nothing** and must never
+/// be read as "was not checked out". Reading it that way is what let a single
+/// later scan mark every button-checked-out asset on a booking as
+/// "never checked out". `BookingAsset.checkedOutAt` answers that question.
 model PartialBookingCheckout {
   id String @id @default(cuid())
 
@@ -1832,7 +1895,7 @@ model MobileAuthCode {
   // Single-use guard: set when redeemed. A non-null value rejects reuse.
   consumedAt DateTime?
 
-  // Short TTL (~60s). Rejected once `now > expiresAt`.
+  // Short TTL — see MOBILE_AUTH_CODE_TTL_MS. Rejected once `now > expiresAt`.
   expiresAt DateTime
 
   createdAt DateTime @default(now())
@@ -2330,6 +2393,24 @@ model AuditScan {
 
   code String?
 
+  /// What was scanned, recorded BY VALUE at scan time.
+  ///
+  /// `asset` and `auditAsset` are both SetNull/Cascade, so deleting an asset
+  /// leaves this row pointing at nothing: no name, and no way to tell whether
+  /// it had been expected. An audit is a historical record, and a record whose
+  /// entries can silently lose their meaning is not one — so the two
+  /// descriptive facts are snapshotted here rather than only referenced.
+  ///
+  /// Readers prefer the LIVE asset when it still exists (a rename should show
+  /// the current name) and fall back to these.
+  ///
+  /// Null means the snapshot could not be taken: scans whose asset had already
+  /// been deleted before these columns were backfilled. Nothing can recover
+  /// those, and they degrade to the scanned `code`, which also survives. Every
+  /// other row carries a snapshot, so null is never merely "old".
+  assetTitle  String?
+  wasExpected Boolean?
+
   metadata Json?
 
   scannedAt DateTime @default(now())
@@ -2494,6 +2575,16 @@ enum ActivityAction {
   BOOKING_PARTIAL_CHECKOUT
   BOOKING_CANCELLED
   BOOKING_ARCHIVED
+
+  // Booking — model-level reservations (Book-by-Model). The reserved
+  // `AssetModel` travels in `meta.assetModelId` because ActivityEvent has no
+  // assetModelId cross-ref column. `BOOKING_MODEL_REQUEST_FULFILLED` is
+  // emitted once PER UNIT assigned by a scan (carries the concrete `assetId`),
+  // not once per completed reservation.
+  BOOKING_MODEL_REQUESTED
+  BOOKING_MODEL_REQUEST_CHANGED
+  BOOKING_MODEL_REQUEST_REMOVED
+  BOOKING_MODEL_REQUEST_FULFILLED
 
   // Audit
   AUDIT_CREATED

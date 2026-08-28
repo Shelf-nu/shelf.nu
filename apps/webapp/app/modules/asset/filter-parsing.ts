@@ -5,6 +5,7 @@ import type {
 } from "~/components/assets/assets-index/advanced-filters/schema";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { getQueryFieldType } from "./field-type-mapping";
+import { splitFilterParam } from "./filter-param";
 import type { Column } from "../asset-index-settings/helpers";
 
 /**
@@ -36,7 +37,15 @@ export function parseFilters(
   searchParams.forEach((value, key) => {
     const column = columns.find((c) => c.name === key);
     if (column) {
-      const [operator, filterValue] = value.split(":");
+      const [operator, filterValue] = splitFilterParam(value);
+
+      // No separator means no value, which is not a filter. `parseFilterValue`
+      // takes a string and would read straight off `undefined`; the server's
+      // own `validateAdvancedFilterParams` drops these for the same reason.
+      if (filterValue === undefined) {
+        return;
+      }
+
       const dbKey = API_TO_DB_FIELD_MAP[key] || key;
 
       // Non-custom-field names are used in Prisma.raw() as SQL identifiers,

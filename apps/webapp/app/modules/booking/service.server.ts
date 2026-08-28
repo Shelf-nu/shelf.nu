@@ -1,3 +1,30 @@
+/**
+ * Booking Service
+ *
+ * The booking domain's server-side business logic — every mutation and read a
+ * booking goes through, from DRAFT to ARCHIVED.
+ *
+ * Responsibilities:
+ * - Lifecycle transitions: create, edit, reserve, check out, check in, extend,
+ *   cancel, revert to draft, archive, duplicate, and their bulk counterparts.
+ * - Partial check-out / check-in, including per-asset quantity dispositions for
+ *   `QUANTITY_TRACKED` assets and the "how much is left" computations.
+ * - Membership: standalone assets and kit-driven slices on the `BookingAsset`
+ *   pivot (see `.claude/rules/kit-members-via-kit-slices.md`).
+ * - The audit trail every transition leaves: system notes, `ActivityEvent`
+ *   records, notification emails, and the expiry/reminder scheduler jobs.
+ *
+ * Two invariants worth knowing before editing:
+ * - `originalFrom`/`originalTo` are the PLANNED period and are frozen once a
+ *   booking starts; `from`/`to` are the live one. See
+ *   `.claude/rules/booking-planned-period-is-frozen.md`.
+ * - Any id that arrives from request input is org-scoped before use, per
+ *   `.claude/rules/org-scope-user-supplied-ids.md`.
+ *
+ * @see {@link file://./lateness.ts}
+ * @see {@link file://./../reports/helpers.server.ts}
+ */
+
 import {
   BookingStatus,
   AssetStatus,
@@ -111,6 +138,7 @@ import type { MergeInclude } from "~/utils/utils";
 import {
   attributeDispositionsByBookingAsset,
   checkoutSessionsToLogsByAsset,
+  compareSlicesForGreedyFill,
 } from "./checkout-attribution";
 import {
   ADDABLE_BOOKING_STATUSES,
@@ -119,6 +147,7 @@ import {
   BOOKING_INCLUDE_FOR_RESERVATION_EMAIL,
   BOOKING_SCHEDULER_EVENTS_ENUM,
   BOOKING_WITH_ASSETS_INCLUDE,
+  BOOKINGS_LIST_ASSETS_INCLUDE,
 } from "./constants";
 import type {
   ReservationEmailAsset,
@@ -272,6 +301,98 @@ async function cancelScheduler(
 }
 
 /**
+ * The value to write to `originalTo` when a flow is about to rewrite `to`.
+ *
+ * A booking's planned period (`originalFrom`/`originalTo`) is written while it
+ * is still being planned — create, DRAFT edit, reserve — and frozen once it
+ * starts. `from`/`to` are what move afterwards: extension pushes `to` out, and
+ * check-in rewrites it to the actual return moment. So this only ever SEEDS
+ * the column for rows created before it existed; on every other row it returns
+ * `undefined`, which Prisma reads as "leave unchanged".
+ *
+ * Overwriting instead would discard the deadline the custodian agreed to
+ * whenever a booking was extended before check-in, and Booking Compliance
+ * would then measure the return against the extension rather than the plan.
+ *
+ * @param booking - The booking as it is BEFORE the rewrite.
+ * @returns The date to seed, or `undefined` to leave `originalTo` alone.
+ */
+function plannedEndToPreserve(booking: {
+  to: Date | null;
+  originalTo: Date | null;
+}): Date | undefined {
+  return booking.originalTo ? undefined : booking.to ?? undefined;
+}
+
+/**
+ * The value to write to `originalFrom` when a flow is about to rewrite `from`.
+ *
+ * The mirror of {@link plannedEndToPreserve}, for the early-check-out
+ * adjust-date path. Same rule: seed only, never overwrite.
+ *
+ * @param booking - The booking as it is BEFORE the rewrite.
+ * @returns The date to seed, or `undefined` to leave `originalFrom` alone.
+ */
+function plannedStartToPreserve(booking: {
+  from: Date | null;
+  originalFrom: Date | null;
+}): Date | undefined {
+  return booking.originalFrom ? undefined : booking.from ?? undefined;
+}
+
+/**
+ * Records the canonical `BOOKING_STATUS_CHANGED` activity event.
+ *
+ * Best-effort by design, and the single implementation for every caller: the
+ * status change is already committed by the time this runs, so a failed
+ * analytics insert can never roll back a check-out or check-in that physically
+ * happened. `resolveCheckInAt` carries the matching fallback for the rare miss
+ * (COMPLETE bookings fall back to `updatedAt`).
+ *
+ * @param args.organizationId - Workspace the booking belongs to.
+ * @param args.bookingId - Booking whose status changed.
+ * @param args.userId - Actor, or null/undefined for system transitions.
+ * @param args.fromStatus - Status before the change.
+ * @param args.toStatus - Status after the change.
+ */
+async function recordBookingStatusChangedEvent({
+  organizationId,
+  bookingId,
+  userId,
+  fromStatus,
+  toStatus,
+}: {
+  organizationId: string;
+  bookingId: string;
+  userId?: string | null;
+  fromStatus: BookingStatus;
+  toStatus: BookingStatus;
+}): Promise<void> {
+  try {
+    await recordEvent({
+      organizationId,
+      actorUserId: userId ?? null,
+      action: "BOOKING_STATUS_CHANGED",
+      entityType: "BOOKING",
+      entityId: bookingId,
+      bookingId,
+      field: "status",
+      fromValue: fromStatus,
+      toValue: toStatus,
+    });
+  } catch (err) {
+    Logger.error(
+      new ShelfError({
+        cause: err,
+        message: "Failed to record BOOKING_STATUS_CHANGED event",
+        additionalData: { bookingId, fromStatus, toStatus },
+        label,
+      })
+    );
+  }
+}
+
+/**
  * Creates a consistent status transition note for booking activity logs
  *
  * @param bookingId - The booking ID to add the note to
@@ -314,11 +435,7 @@ export async function createStatusTransitionNote({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
     const actionText =
       action || getActionTextFromTransition(fromStatus, toStatus);
@@ -336,29 +453,13 @@ export async function createStatusTransitionNote({
   });
 
   // Activity event — records the canonical status transition for reports.
-  // Best-effort: don't fail the note creation if event recording fails.
-  try {
-    await recordEvent({
-      organizationId,
-      actorUserId: userId ?? null,
-      action: "BOOKING_STATUS_CHANGED",
-      entityType: "BOOKING",
-      entityId: bookingId,
-      bookingId,
-      field: "status",
-      fromValue: fromStatus,
-      toValue: toStatus,
-    });
-  } catch (err) {
-    Logger.error(
-      new ShelfError({
-        cause: err,
-        message: "Failed to record BOOKING_STATUS_CHANGED event",
-        additionalData: { bookingId, fromStatus, toStatus },
-        label,
-      })
-    );
-  }
+  await recordBookingStatusChangedEvent({
+    organizationId,
+    bookingId,
+    userId,
+    fromStatus,
+    toStatus,
+  });
 }
 
 /**
@@ -2176,10 +2277,17 @@ async function checkoutBookingWritesWithinTx(
     hasKits,
     from,
     to,
+    checkedOutById,
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
     bookingAssetIds: Asset["id"][];
+    /**
+     * Acting user, stamped onto each slice's checkout marker. Nullable because
+     * `checkoutBooking`'s `userId` is optional (scheduler-driven checkouts have
+     * no acting user) and the column is nullable to match.
+     */
+    checkedOutById: string | null;
     qtyTrackedBookingAssets: Array<{
       quantity: number;
       asset: Pick<Asset, "id" | "title">;
@@ -2386,6 +2494,42 @@ async function checkoutBookingWritesWithinTx(
       organizationId,
     },
     data: { status: AssetStatus.CHECKED_OUT },
+  });
+
+  /**
+   * Record the checkout on each slice. This is the ONLY thing that marks an
+   * all-at-once checkout — this path writes no `PartialBookingCheckout` row —
+   * and it is what the check-in guard reads to decide eligibility.
+   *
+   * Scoped to slices not already out so a progressive batch that ran earlier
+   * keeps its own (earlier, more accurate) timestamp. Any stale check-in marker
+   * is cleared: a full checkout sends the whole booking back out.
+   */
+  await tx.bookingAsset.updateMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: { bookingId, checkedOutAt: null },
+    data: {
+      checkedOutAt: new Date(),
+      checkedOutById,
+      checkedInAt: null,
+      checkedInById: null,
+    },
+  });
+
+  /**
+   * Slices that were already out AND reconciled return to outstanding. The
+   * statement above cannot reach them — it only matches unmarked slices — and
+   * leaving `checkedInAt` set would make physically-out units read as fully
+   * returned, which the check-in guard then refuses.
+   */
+  await tx.bookingAsset.updateMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      checkedOutAt: { not: null },
+      checkedInAt: { not: null },
+    },
+    data: { checkedInAt: null, checkedInById: null },
   });
 
   await tx.booking.update({
@@ -2679,8 +2823,8 @@ export async function checkoutBooking({
       isEarlyCheckout &&
       intentChoice === CheckoutIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalFrom to old `from` date of booking
-      dataToUpdate.originalFrom = bookingFound.from;
+      // Keep the planned start intact; only seeds rows predating the column.
+      dataToUpdate.originalFrom = plannedStartToPreserve(bookingFound);
 
       // Update `from` date to current date
       const fromDateStr = DateTime.fromJSDate(new Date(), {
@@ -2770,6 +2914,7 @@ export async function checkoutBooking({
           // guard (see the doc comment on `checkoutBookingWritesWithinTx`).
           from: bookingFound.from,
           to: bookingFound.to,
+          checkedOutById: userId ?? null,
         });
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
@@ -3027,8 +3172,8 @@ export async function fulfilModelRequestsAndCheckout({
       isEarlyCheckout &&
       checkoutIntentChoice === CheckoutIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalFrom to old `from` date of booking
-      dataToUpdate.originalFrom = bookingFound.from;
+      // Keep the planned start intact; only seeds rows predating the column.
+      dataToUpdate.originalFrom = plannedStartToPreserve(bookingFound);
 
       // Update `from` date to current date (timezone-aware, matching
       // `checkoutBooking`)
@@ -3135,6 +3280,7 @@ export async function fulfilModelRequestsAndCheckout({
           // guard (see the doc comment on `checkoutBookingWritesWithinTx`).
           from: bookingFound.from,
           to: bookingFound.to,
+          checkedOutById: userId ?? null,
         });
 
         /**
@@ -4319,8 +4465,8 @@ export async function checkinBooking({
       isEarlyCheckin &&
       intentChoice === CheckinIntentEnum["with-adjusted-date"]
     ) {
-      // Update originalTo to booking's to date
-      dataToUpdate.originalTo = bookingFound.to;
+      // Keep the planned end intact; only seeds rows predating the column.
+      dataToUpdate.originalTo = plannedEndToPreserve(bookingFound);
 
       // Update the `to` date to current date
       const toDateStr = DateTime.fromJSDate(new Date(), {
@@ -4336,8 +4482,8 @@ export async function checkinBooking({
      * If booking was overdue then we have to adjust the endDate of booking
      * */
     if (bookingFound.status === BookingStatus.OVERDUE) {
-      // Update originalTo to booking's to date
-      dataToUpdate.originalTo = bookingFound.to;
+      // Keep the planned end intact; only seeds rows predating the column.
+      dataToUpdate.originalTo = plannedEndToPreserve(bookingFound);
 
       const toDateStr = DateTime.fromJSDate(new Date(), {
         zone: hints.timeZone,
@@ -4874,6 +5020,24 @@ export async function checkinBooking({
           );
         }
 
+        /**
+         * Mark every outstanding slice as returned. This path writes no
+         * `PartialBookingCheckin` row, so without this a completed booking
+         * leaves its slices looking permanently checked out.
+         *
+         * Scoped to slices that actually went out: one never checked out has
+         * nothing to reconcile, and stamping it would claim it came back.
+         */
+        await tx.bookingAsset.updateMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}})
+          where: {
+            bookingId: bookingFound.id,
+            checkedOutAt: { not: null },
+            checkedInAt: null,
+          },
+          data: { checkedInAt: new Date(), checkedInById: userId },
+        });
+
         /** Finally update the booking */
         return tx.booking.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1552; this is the write on that same proven id
@@ -4995,35 +5159,14 @@ export async function checkinBooking({
         // The custom system note above replaces the standard transition note,
         // but downstream consumers (Booking Compliance report) still need the
         // BOOKING_STATUS_CHANGED → COMPLETE ActivityEvent to know when the
-        // booking was actually checked in. Best-effort, mirroring the pattern
-        // inside createStatusTransitionNote.
-        try {
-          await recordEvent({
-            organizationId,
-            // We're inside `if (userId)` — `userId` is a string here.
-            actorUserId: userId,
-            action: "BOOKING_STATUS_CHANGED",
-            entityType: "BOOKING",
-            entityId: updatedBooking.id,
-            bookingId: updatedBooking.id,
-            field: "status",
-            fromValue: bookingFound.status,
-            toValue: BookingStatus.COMPLETE,
-          });
-        } catch (err) {
-          Logger.error(
-            new ShelfError({
-              cause: err,
-              message:
-                "Failed to record BOOKING_STATUS_CHANGED event for partial check-in completion",
-              additionalData: {
-                bookingId: updatedBooking.id,
-                fromStatus: bookingFound.status,
-              },
-              label,
-            })
-          );
-        }
+        // booking was actually checked in.
+        await recordBookingStatusChangedEvent({
+          organizationId,
+          bookingId: updatedBooking.id,
+          userId,
+          fromStatus: bookingFound.status,
+          toStatus: BookingStatus.COMPLETE,
+        });
       } else {
         // Standard status transition note
         await createStatusTransitionNote({
@@ -5053,11 +5196,7 @@ export async function checkinBooking({
             displayName: true,
           } satisfies Prisma.UserSelect,
         });
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: actorUser?.firstName,
-          lastName: actorUser?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...actorUser, id: userId });
 
         /**
          * Shared booking link — per-asset notes point back to the booking
@@ -5635,6 +5774,8 @@ export async function partialCheckinBooking({
         where: { id, organizationId },
         include: {
           bookingAssets: {
+            // `checkedOutAt`/`checkedInAt` drive the per-slice check-in
+            // eligibility guard below.
             include: {
               asset: {
                 select: {
@@ -5720,41 +5861,167 @@ export async function partialCheckinBooking({
     // to check those in is invalid and must be rejected before the
     // "covers all remaining" early-exit (which would otherwise complete the
     // booking and flip never-checked-out assets to AVAILABLE no-ops).
-    // Eligibility is per-booking, NOT global asset status. An asset can be
-    // CHECKED_OUT by a different active booking yet never checked out here, so
-    // keying on global status would wrongly accept it. The per-booking checkout
-    // history is the PartialBookingCheckout records (progressive checkouts,
-    // including the final batch). An all-at-once checkout leaves no records, so
-    // fall back to "every booking asset is eligible".
-    const checkedOutForThisBooking = new Set(
-      await getPartiallyCheckedOutAssetIds({ bookingId: id, organizationId })
+    // Eligibility is per SLICE, read from `BookingAsset.checkedOutAt`, and
+    // neither of the two obvious stand-ins can replace it:
+    //   - global `Asset.status`: an asset may be CHECKED_OUT by a DIFFERENT
+    //     active booking while never having gone out on this one.
+    //   - "does this booking have any PartialBookingCheckout rows?": those
+    //     record progressive scan SESSIONS, and the all-at-once checkout writes
+    //     none. A booking checked out with the button that later gains ONE
+    //     scanned asset gets its first row, and a booking-level test then
+    //     reports every button-checked-out asset as never checked out.
+    /**
+     * Slices by id, for the per-disposition checks below. Built from the
+     * booking's own rows, which `findUniqueOrThrow({ id, organizationId })`
+     * already org-scoped — so a `bookingAssetId` naming a foreign or unrelated
+     * slice is ineligible by construction rather than by a separate lookup.
+     */
+    const sliceById = new Map(
+      bookingFound.bookingAssets.map((ba) => [ba.id, ba])
     );
-    const eligibleCheckinAssetIds =
-      checkedOutForThisBooking.size > 0
-        ? checkedOutForThisBooking
-        : new Set(bookingFoundAssets.map((asset) => asset.id));
+
+    /**
+     * Asset-level view of the same markers, for UNTAGGED callers only: the
+     * mobile endpoint and legacy `assetIds`-only scans send no
+     * `bookingAssetId`, and an INDIVIDUAL asset has a single slice per booking,
+     * so asset-level and slice-level coincide for them.
+     *
+     * A tagged disposition must NOT be judged through this — one slice's marker
+     * would authorise a sibling that never went out.
+     */
+    const assetIdsWithACheckedOutSlice = new Set(
+      bookingFound.bookingAssets
+        .filter((ba) => Boolean(ba.checkedOutAt))
+        .map((ba) => ba.assetId)
+    );
+    const assetIdsWithAReconciledSlice = new Set(
+      bookingFound.bookingAssets
+        .filter((ba) => Boolean(ba.checkedInAt))
+        .map((ba) => ba.assetId)
+    );
+    /**
+     * Slices still out: gone out and not yet reconciled. An asset can hold a
+     * reconciled slice AND an outstanding one at the same time — a qty-tracked
+     * asset carries a standalone slice plus one per kit — so a reconciled slice
+     * alone does not mean the asset is finished with.
+     */
+    const assetIdsWithAnOutstandingSlice = new Set(
+      bookingFound.bookingAssets
+        .filter((ba) => Boolean(ba.checkedOutAt) && !ba.checkedInAt)
+        .map((ba) => ba.assetId)
+    );
+
+    /**
+     * Tagged dispositions are judged against their EXACT slice. A
+     * `QUANTITY_TRACKED` asset can hold a standalone slice plus N kit-driven
+     * slices on one booking (see the partial uniques on `BookingAsset`), and a
+     * slice added to an already-ONGOING booking carries no checkout marker —
+     * so "some slice of this asset is out" is not permission to reconcile
+     * units of a different one.
+     */
+    for (const d of dispositions) {
+      if (!d.bookingAssetId) continue;
+      const slice = sliceById.get(d.bookingAssetId);
+      if (!slice || slice.assetId !== d.assetId) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message:
+            "One of the submitted items does not belong to this booking.",
+          shouldBeCaptured: false,
+        });
+      }
+      if (slice.checkedInAt) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message: "These assets are already checked in.",
+          shouldBeCaptured: false,
+        });
+      }
+      if (!slice.checkedOutAt) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label,
+          message: "Cannot check in assets that were never checked out.",
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
+    /**
+     * Assets whose eligibility the asset-level path still decides: everything
+     * scanned that no TAGGED disposition already covered. Derived by exclusion
+     * rather than from the untagged dispositions, because a bare `assetIds`
+     * scan carries no disposition entry at all and must still be judged.
+     */
+    const assetIdsCoveredBySliceCheck = new Set(
+      dispositions.filter((d) => d.bookingAssetId).map((d) => d.assetId)
+    );
 
     const scannedAssets = await db.asset.findMany({
       where: { id: { in: effectiveAssetIds }, organizationId },
       select: { id: true, title: true },
     });
-    const notCheckedOut = scannedAssets.filter(
-      (a) => !eligibleCheckinAssetIds.has(a.id)
-    );
-    if (notCheckedOut.length > 0) {
-      // why: with progressive checkout a booking can hold still-Booked
-      // (AVAILABLE) assets that were never checked out — they cannot be checked in.
-      const names = notCheckedOut
+
+    /** Formats up to three titles, then "and N more". */
+    const nameList = (assets: { title: string }[]) =>
+      `${assets
         .slice(0, 3)
         .map((a) => a.title)
-        .join(", ");
-      const more =
-        notCheckedOut.length > 3 ? ` and ${notCheckedOut.length - 3} more` : "";
+        .join(", ")}${
+        assets.length > 3 ? ` and ${assets.length - 3} more` : ""
+      }`;
+
+    // Checked in already: a duplicate request, not an invalid one. Tested
+    // FIRST, and independently of `checkedOutAt` — a reconciled slice carries
+    // both markers, and "never checked out" would be the wrong reason to give.
+    //
+    // "Already" has to mean the whole asset, not one of its slices. An untagged
+    // claim names no slice, so it is a claim on whatever the asset still has
+    // out; while any slice is outstanding there is something left to check in,
+    // and refusing would strand it with no way for the operator around it.
+    const alreadyCheckedIn = scannedAssets.filter(
+      (a) =>
+        !assetIdsCoveredBySliceCheck.has(a.id) &&
+        assetIdsWithAReconciledSlice.has(a.id) &&
+        !assetIdsWithAnOutstandingSlice.has(a.id)
+    );
+    if (alreadyCheckedIn.length > 0) {
       throw new ShelfError({
         cause: null,
         status: 400,
         label,
-        message: `Cannot check in assets that were never checked out: ${names}${more}.`,
+        message: `These assets are already checked in: ${nameList(
+          alreadyCheckedIn
+        )}.`,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const notCheckedOut = scannedAssets.filter(
+      (a) =>
+        !assetIdsCoveredBySliceCheck.has(a.id) &&
+        !assetIdsWithACheckedOutSlice.has(a.id) &&
+        !assetIdsWithAReconciledSlice.has(a.id)
+    );
+    if (notCheckedOut.length > 0) {
+      // A booking can hold still-Booked (AVAILABLE) assets that were added
+      // after checkout — `updateBookingAssets` deliberately does not
+      // auto-check-out onto an ONGOING booking — and those cannot be checked in.
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: `Cannot check in assets that were never checked out: ${nameList(
+          notCheckedOut
+        )}.`,
+        // User-input validation, like the sibling guards above. Without this it
+        // defaulted to captured and filled Sentry with a working guard.
+        shouldBeCaptured: false,
       });
     }
 
@@ -5783,7 +6050,7 @@ export async function partialCheckinBooking({
       // booking asset: a progressive booking can hold never-checked-out items,
       // and counting those as outstanding would keep it stuck ONGOING forever
       // after the actually checked-out items are all returned.
-      const outstandingAssetIds = [...eligibleCheckinAssetIds].filter(
+      const outstandingAssetIds = [...assetIdsWithACheckedOutSlice].filter(
         (assetId) => !recordedAssetIdSet.has(assetId)
       );
 
@@ -5794,11 +6061,7 @@ export async function partialCheckinBooking({
       ) {
         // Don't create a PartialBookingCheckin row — the redirect to
         // `checkinBooking` handles completion itself.
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         await createNotes({
           content: `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`,
           type: "UPDATE",
@@ -6192,6 +6455,35 @@ export async function partialCheckinBooking({
         },
       });
 
+      /**
+       * Mark the slices this session fully reconciled. Same ids as the session
+       * row above, so a partially-returned qty-tracked slice stays unmarked and
+       * remains checkinable — `checkedInAt` means FULLY reconciled.
+       *
+       * Scoped to slices that actually went out, because these ids are
+       * asset-level while the marker is not: an asset's remaining is summed
+       * across ALL its slices, so a slice added after checkout — still
+       * AVAILABLE, never out — sits inside an asset the session can drive to
+       * zero. Stamping it would leave `checkedOutAt` NULL beside a
+       * `checkedInAt`, claiming a return for units that never left.
+       *
+       * `checkedInAt: null` keeps the first reconciliation: where one slice was
+       * settled in an earlier session and a sibling in this one, each keeps the
+       * moment it was actually reconciled.
+       */
+      if (sessionReconciledAssetIds.length > 0) {
+        await tx.bookingAsset.updateMany({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
+          where: {
+            bookingId: id,
+            assetId: { in: sessionReconciledAssetIds },
+            checkedOutAt: { not: null },
+            checkedInAt: null,
+          },
+          data: { checkedInAt: new Date(), checkedInById: userId },
+        });
+      }
+
       // Activity events — one BOOKING_PARTIAL_CHECKIN per asset that had
       // activity in this session (qty disposition or individual flip).
       // Inside the tx so audit-trail recording is atomic with the writes
@@ -6237,10 +6529,41 @@ export async function partialCheckinBooking({
       });
 
       if (bookingIsComplete) {
+        const dataToComplete: Prisma.BookingUpdateInput = {
+          status: BookingStatus.COMPLETE,
+        };
+
+        /**
+         * Same end-date rewrite `checkinBooking` performs, so a booking's
+         * period does not depend on which check-in route completed it: `to`
+         * becomes the actual return moment when the booking is being returned
+         * late, or early with the operator's consent. The planned end stays in
+         * `originalTo` (seeded only for rows predating that column).
+         */
+        const shouldAdjustEndDate =
+          updatedBookingSnapshot.status === BookingStatus.OVERDUE ||
+          (!!updatedBookingSnapshot.to &&
+            isBookingEarlyCheckin(updatedBookingSnapshot.to) &&
+            intentChoice === CheckinIntentEnum["with-adjusted-date"]);
+
+        if (shouldAdjustEndDate) {
+          dataToComplete.originalTo = plannedEndToPreserve(
+            updatedBookingSnapshot
+          );
+
+          const toDateStr = DateTime.fromJSDate(new Date(), {
+            zone: hints.timeZone,
+          }).toFormat(DATE_TIME_FORMAT);
+
+          dataToComplete.to = DateTime.fromFormat(toDateStr, DATE_TIME_FORMAT, {
+            zone: hints.timeZone,
+          }).toJSDate();
+        }
+
         const completedBooking = await tx.booking.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking `id` already org-checked via findUniqueOrThrow({where:{id,organizationId}}) in partialCheckinBooking
           where: { id },
-          data: { status: BookingStatus.COMPLETE },
+          data: dataToComplete,
           include: {
             bookingAssets: true,
             custodianUser: true,
@@ -6270,6 +6593,24 @@ export async function partialCheckinBooking({
     });
 
     /**
+     * Canonical status-transition event for the completion. This path writes
+     * its own system note instead of calling `createStatusTransitionNote`, so
+     * the event it would normally emit has to be recorded here — the Booking
+     * Compliance report reads a booking's check-in moment from
+     * `BOOKING_STATUS_CHANGED → COMPLETE` (see `resolveCheckInTimes`) and
+     * otherwise falls back to `updatedAt`, which drifts on any later edit.
+     */
+    if (txResult.isComplete) {
+      await recordBookingStatusChangedEvent({
+        organizationId,
+        bookingId: id,
+        userId,
+        fromStatus: txResult.previousStatus,
+        toStatus: BookingStatus.COMPLETE,
+      });
+    }
+
+    /**
      * Activity notes — best-effort, OUTSIDE the transaction.
      *
      * Wrapped in try/catch matching the pattern from manage-assets:
@@ -6278,11 +6619,7 @@ export async function partialCheckinBooking({
      * captured server-side via `Logger.error`.
      */
     try {
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
 
       /**
        * Shared booking link used by every asset-side note below so the
@@ -7292,12 +7629,31 @@ export async function partialCheckoutBooking({
               .map((d) => d.bookingAssetId!)
           ),
         ];
+        /**
+         * Assets claimed WITHOUT a slice tag. The mobile route accepts
+         * `{ assetId, quantity }` and the companion sends exactly that, so a
+         * qty-tracked asset can be claimed with no slice named. The
+         * `checkedOutAt` marker still has to name specific slices, so their
+         * remainings are read in the same batch — widening this call rather
+         * than adding a second round-trip inside the transaction.
+         */
+        const untaggedQtyAssetIds = new Set(
+          dispositions
+            .filter(
+              (d) =>
+                !d.bookingAssetId &&
+                assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED
+            )
+            .map((d) => d.assetId)
+        );
+        const untaggedQtySliceIds = bookingFound.bookingAssets
+          .filter((ba) => untaggedQtyAssetIds.has(ba.asset.id))
+          .map((ba) => ba.id);
         const sliceCommittedRemainingBySlice =
-          await computeBookingAssetsSliceRemainingToCheckOut(
-            tx,
-            id,
-            sliceTaggedBookingAssetIds
-          );
+          await computeBookingAssetsSliceRemainingToCheckOut(tx, id, [
+            ...sliceTaggedBookingAssetIds,
+            ...untaggedQtySliceIds,
+          ]);
 
         for (const disp of dispositions) {
           if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
@@ -7629,6 +7985,128 @@ export async function partialCheckoutBooking({
           select: { id: true },
         });
 
+        /**
+         * Mark the slices this session sent out. The session row above owns
+         * per-slice QUANTITY attribution; this marker owns the boolean "is it
+         * out", which is what the check-in guard reads. Both are needed: the
+         * row cannot answer it for assets the all-at-once flow sent out.
+         */
+        /**
+         * Scoped to the slices this batch actually claimed. `assetId`-wide
+         * would stamp every sibling slice of a multi-slice qty-tracked asset —
+         * standalone plus N kit-driven rows can coexist for one (booking,
+         * asset) — recording units that never left as out, which the check-in
+         * guard then reads as permission to reconcile them.
+         *
+         * Asset-wide is exact only when the claim covers every outstanding unit
+         * of the asset. That holds for INDIVIDUAL entries (one slice per
+         * booking) and for a bare scan, whose `defaultAllRemaining` resolves to
+         * the whole asset-level remaining. A PARTIAL untagged qty-tracked claim
+         * is neither: the mobile route accepts `{ assetId, quantity }` with no
+         * slice tag and the companion sends exactly that, so those are resolved
+         * to a greedy slice prefix below.
+         */
+        const taggedSliceIds = sessionBookingAssetIds.filter(Boolean);
+        const untaggedAssetIds = sessionAssetIds.filter(
+          (_, i) => !sessionBookingAssetIds[i]
+        );
+
+        /** Untagged claim per asset, summed across this batch's entries. */
+        const untaggedClaimByAsset = new Map<string, number>();
+        sessionAssetIds.forEach((assetId, i) => {
+          if (sessionBookingAssetIds[i]) return;
+          untaggedClaimByAsset.set(
+            assetId,
+            (untaggedClaimByAsset.get(assetId) ?? 0) +
+              (sessionQuantities[i] ?? 0)
+          );
+        });
+
+        /**
+         * Resolve an untagged qty-tracked claim to the slices it actually
+         * takes: walk that asset's slices in the shared greedy order and
+         * consume each one's remaining until the claim is covered.
+         *
+         * Capacity is the slice's REMAINING, not its booked quantity, which is
+         * where this parts company with the quantity attribution in
+         * {@link attributeDispositionsByBookingAsset}. A slice already fully
+         * out has room in the booked sense and would swallow the claim, so the
+         * slice the units are really leaving from would go unmarked — and an
+         * unmarked slice reads as "never checked out" at check-in.
+         *
+         * An asset is left to the asset-wide branch when the claim covers
+         * everything outstanding, and also when the walk cannot cover it (the
+         * claim disagrees with what we read as remaining). Under-marking is the
+         * worse failure of the two: it refuses a check-in outright, with no way
+         * for the operator around it.
+         */
+        const greedySliceIds: string[] = [];
+        const resolvedUntaggedAssetIds = new Set<string>();
+        for (const [assetId, claimed] of untaggedClaimByAsset) {
+          if (assetTypeById.get(assetId) !== AssetType.QUANTITY_TRACKED) {
+            continue;
+          }
+          if (claimed >= (committedRemainingByAsset.get(assetId) ?? 0)) {
+            continue;
+          }
+          let toCover = claimed;
+          const picked: string[] = [];
+          const slices = bookingFound.bookingAssets
+            .filter((ba) => ba.asset.id === assetId)
+            .sort(compareSlicesForGreedyFill);
+          for (const slice of slices) {
+            if (toCover <= 0) break;
+            const capacity = sliceCommittedRemainingBySlice.get(slice.id) ?? 0;
+            if (capacity <= 0) continue;
+            picked.push(slice.id);
+            toCover -= capacity;
+          }
+          if (toCover > 0) continue;
+          greedySliceIds.push(...picked);
+          resolvedUntaggedAssetIds.add(assetId);
+        }
+
+        const assetWideIds = untaggedAssetIds.filter(
+          (assetId) => !resolvedUntaggedAssetIds.has(assetId)
+        );
+        const exactSliceIds = [...taggedSliceIds, ...greedySliceIds];
+        const sliceScope = {
+          bookingId: id,
+          OR: [
+            ...(exactSliceIds.length ? [{ id: { in: exactSliceIds } }] : []),
+            ...(assetWideIds.length ? [{ assetId: { in: assetWideIds } }] : []),
+          ],
+        };
+
+        if (sliceScope.OR.length > 0) {
+          // First marker wins: a slice a previous batch sent out keeps its
+          // original "out since / out by", matching the full-checkout writer.
+          await tx.bookingAsset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
+            where: { ...sliceScope, checkedOutAt: null },
+            data: {
+              checkedOutAt: new Date(),
+              checkedOutById: userId,
+              checkedInAt: null,
+              checkedInById: null,
+            },
+          });
+
+          // A slice that was reconciled and is going out again returns to
+          // outstanding without losing its original checkout marker. The
+          // statement above cannot reach it, and leaving `checkedInAt` set
+          // makes physically-out units read as fully returned.
+          await tx.bookingAsset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `id` was org-checked by this action's booking lookup
+            where: {
+              ...sliceScope,
+              checkedOutAt: { not: null },
+              checkedInAt: { not: null },
+            },
+            data: { checkedInAt: null, checkedInById: null },
+          });
+        }
+
         // Layer 3: the per-asset fold that previously collapsed both slices of an
         // asset into one summary is gone — the checkout note pipeline now renders
         // one line PER SLICE so a slice-level action reports slice-level totals
@@ -7638,11 +8116,7 @@ export async function partialCheckoutBooking({
 
         // Create audit notes for INDIVIDUAL rows. Qty-tracked rows get their
         // own per-asset note written OUTSIDE the tx (with unit-aware phrasing).
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         if (individualToFlip.length > 0) {
           await createNotes(
             {
@@ -7716,7 +8190,7 @@ export async function partialCheckoutBooking({
             isBookingEarlyCheckout(bookingFound.from) &&
             intentChoice === CheckoutIntentEnum["with-adjusted-date"]
           ) {
-            transitionData.originalFrom = bookingFound.from;
+            transitionData.originalFrom = plannedStartToPreserve(bookingFound);
             const fromDateStr = DateTime.fromJSDate(new Date(), {
               zone: hints.timeZone,
             }).toFormat(DATE_TIME_FORMAT);
@@ -7976,11 +8450,7 @@ export async function partialCheckoutBooking({
      * committed checkout.
      */
     try {
-      const actorLink = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actorLink = wrapUserLinkForNote({ ...user, id: userId });
       const bookingLink = wrapLinkForNote(
         `/bookings/${result.booking.id}`,
         result.booking.name
@@ -9422,6 +9892,14 @@ export async function extendBooking({
             booking.status === BookingStatus.OVERDUE
               ? BookingStatus.ONGOING
               : undefined,
+          /**
+           * Only the LIVE end date moves. `originalTo` holds the end date the
+           * booking was planned for, and extension is allowed only once the
+           * booking has started (ONGOING/OVERDUE), so the plan is already
+           * fixed: moving it here would erase the deadline the custodian
+           * actually agreed to, and with it every late return from Booking
+           * Compliance.
+           */
           to: newEndDate,
         },
         include: BOOKING_INCLUDE_FOR_EMAIL,
@@ -9920,6 +10398,20 @@ export async function getBookings(params: {
    * `false`, so paginated callers are unaffected.
    */
   skipCount?: boolean;
+  /**
+   * Attach the `bookingAssets` payload — by far the heaviest part of this
+   * query. Callers that render no asset data (the calendar, the dashboard
+   * widgets, the bookings-list surfaces whose drawer fetches on open) pass
+   * `false`, which omits the key from the Prisma include entirely. Defaults
+   * to `true`, so existing callers are unaffected.
+   */
+  includeAssets?: boolean;
+  /**
+   * Hard row cap, bypassing the `perPage` ≤ 100 clamp below. For callers that
+   * fetch one bounded set in a single query rather than a page of it. Unlike
+   * `takeAll` the query stays bounded; ignored when `takeAll` is set.
+   */
+  takeCap?: number;
 }) {
   const {
     organizationId,
@@ -9942,6 +10434,8 @@ export async function getBookings(params: {
     kitId,
     tags,
     skipCount = false,
+    includeAssets = true,
+    takeCap,
   } = params;
 
   try {
@@ -9984,12 +10478,15 @@ export async function getBookings(params: {
               name: { contains: term, mode: "insensitive" },
             },
           },
-          // Search in custodian user names
+          // Search in custodian user names. `displayName` is one of them: it
+          // replaces first/last name in the UI for users who set one, so it is
+          // the name a searcher can actually see on the booking row.
           {
             custodianUser: {
               OR: [
                 { firstName: { contains: term, mode: "insensitive" } },
                 { lastName: { contains: term, mode: "insensitive" } },
+                { displayName: { contains: term, mode: "insensitive" } },
               ],
             },
           },
@@ -10120,88 +10617,26 @@ export async function getBookings(params: {
       db.booking.findMany({
         ...(!takeAll && {
           skip,
-          take,
+          take: takeCap ?? take,
         }),
         where,
         include: {
           ...BOOKING_COMMON_INCLUDE,
-          bookingAssets: {
-            // Explicit `select` (instead of `include`) so the inferred
-            // type surfaces `assetKitId` on each row — the bookings list
-            // sidebar (`BookingAssetsSidebar`) groups by it. Without an
-            // explicit select, Prisma's type inference for
-            // `include + nested include` doesn't expose the parent
-            // scalars in a form the local component types accept.
-            select: {
-              id: true,
-              quantity: true,
-              assetKitId: true,
-              asset: {
-                select: {
-                  title: true,
-                  id: true,
-                  type: true,
-                  quantity: true,
-                  custody: true,
-                  availableToBook: true,
-                  status: true,
-                  mainImage: true,
-                  thumbnailImage: true,
-                  // Model cover image for assets with no image of their own
-                  ...ASSET_MODEL_IMAGE_SELECT,
-                  mainImageExpiration: true,
-                  // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
-                  // Surfaced by the BookingAssetsSidebar so the chip matches the
-                  // simple-mode booking overview list and every other code-bearing
-                  // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
-                  sequentialId: true,
-                  preferredBarcodeId: true,
-                  qrCodes: { take: 1, select: { id: true } },
-                  barcodes: { select: { id: true, type: true, value: true } },
-                  category: {
-                    select: {
-                      id: true,
-                      name: true,
-                      color: true,
-                    },
-                  },
-                  // NOTE: deliberately NO `bookingAssets` here. A previous
-                  // version selected each asset's entire lifetime
-                  // `bookingAssets: { bookingId }` pivot history, which grows
-                  // without bound and had zero consumers (every reader of
-                  // `asset.bookingAssets` needs `ba.booking.{id,status}` from
-                  // asset-centric queries, which this shape cannot provide).
-                  // If a surface ever needs conflict info here, scope it with
-                  // a `where` on active statuses + date overlap like
-                  // getBookingFlags does.
-                  assetKits: {
-                    select: {
-                      // See the comment in `bookings.$bookingId.overview.tsx`
-                      // for why both `id` (the AssetKit row id) and `kitId`
-                      // are needed for kit-source grouping.
-                      id: true,
-                      kitId: true,
-                      kit: {
-                        select: {
-                          id: true,
-                          name: true,
-                          image: true,
-                          imageExpiration: true,
-                          category: {
-                            select: {
-                              id: true,
-                              name: true,
-                              color: true,
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          // NOTE: deliberately NO `bookingAssets` when `includeAssets` is
+          // false — the calendar, the dashboard widgets and the five
+          // bookings-list surfaces render no asset data. The cast keeps the
+          // inferred row type stable for default-true callers; opt-out
+          // callers must not read `bookingAssets` (the same runtime/static
+          // divergence `extraInclude` already has). A conditional generic
+          // would type this honestly, but this webapp sits at TypeScript's
+          // instantiation ceiling over the extended Prisma client, where a
+          // generic here surfaces as TS2321 somewhere unrelated.
+          //
+          // The include itself lives in `./constants` so the assets-sidebar
+          // resource route serves the byte-identical shape.
+          ...((includeAssets
+            ? BOOKINGS_LIST_ASSETS_INCLUDE
+            : {}) as typeof BOOKINGS_LIST_ASSETS_INCLUDE),
           creator: {
             select: {
               id: true,
@@ -10245,6 +10680,7 @@ export async function removeAssets({
   booking,
   firstName,
   lastName,
+  displayName,
   userId,
   kitIds = [],
   kits = [],
@@ -10257,6 +10693,12 @@ export async function removeAssets({
   };
   firstName: string;
   lastName: string;
+  /**
+   * The acting user's `User.displayName`. It wins over the legal-name halves
+   * when set, so it must travel with them — a caller that passes only
+   * `firstName`/`lastName` names the actor by a name they asked us not to use.
+   */
+  displayName: string | null;
   userId: string;
   kitIds?: Kit["id"][];
   kits?: Array<{ id: string; name: string }>;
@@ -10528,6 +10970,13 @@ export async function removeAssets({
        * `fulfilModelRequestsForAssets` makes it routine, so the column this PR
        * adds has to be read here, not just written.
        */
+      /**
+       * `fulfilledAt` reversals to report, one per request this loop reopens.
+       * Batched and flushed after the loop so N affected requests cost one
+       * insert rather than N — same reasoning as the `recordEvents` docs.
+       */
+      const modelRequestReopenEvents: ActivityEventInput[] = [];
+
       const removalsByRequest = new Map<string, number>();
       for (const row of rowsBeingDeleted) {
         if (!row.bookingModelRequestId) continue;
@@ -10541,7 +10990,16 @@ export async function removeAssets({
         const request = await tx.bookingModelRequest.findUnique({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `requestId` comes from BookingAsset rows on this booking, which was org-checked above
           where: { id: requestId },
-          select: { quantity: true, fulfilledQuantity: true, bookingId: true },
+          // `fulfilledAt`, the model id and its name feed the reopen event
+          // below; without the before-state we cannot report what changed.
+          select: {
+            quantity: true,
+            fulfilledQuantity: true,
+            bookingId: true,
+            fulfilledAt: true,
+            assetModelId: true,
+            assetModel: { select: { name: true } },
+          },
         });
         // Belt and braces: the FK guarantees it, but never touch a request
         // belonging to another booking.
@@ -10566,7 +11024,41 @@ export async function removeAssets({
             ...(nextFulfilledAt === null ? { fulfilledAt: null } : {}),
           },
         });
+
+        /**
+         * Report the reversal, but only on a genuine set → unset flip.
+         * `nextFulfilledAt === null` is also true for a request that was
+         * never complete, so gating on it alone would emit spurious
+         * null → null events on every removal from an outstanding request.
+         *
+         * This is the mirror of the null → timestamp events emitted in
+         * `booking-model-request/service.server.ts`. Without it the stream
+         * records reservations closing and never reopening, and
+         * `fulfilledAt IS NULL` consumers reconstruct this one as still
+         * fulfilled after the removal reopened it.
+         */
+        if (request.fulfilledAt != null && nextFulfilledAt === null) {
+          modelRequestReopenEvents.push({
+            organizationId,
+            actorUserId: userId,
+            action: "BOOKING_MODEL_REQUEST_CHANGED",
+            entityType: "BOOKING",
+            entityId: id,
+            bookingId: id,
+            field: "fulfilledAt",
+            fromValue: request.fulfilledAt.toISOString(),
+            toValue: null,
+            meta: {
+              assetModelId: request.assetModelId,
+              assetModelName: request.assetModel.name,
+            },
+          });
+        }
       }
+
+      // Same tx as the decrement above — a rolled-back removal must not
+      // leave an event claiming the reservation reopened.
+      await recordEvents(modelRequestReopenEvents, tx);
 
       /** When removing an asset from an ONGOING/OVERDUE booking we need to
        * reconcile each asset's terminal status — NOT blanket-flip to
@@ -10642,7 +11134,7 @@ export async function removeAssets({
       }
     }
 
-    const userForNotes = { firstName, lastName, id: userId };
+    const userForNotes = { firstName, lastName, displayName, id: userId };
 
     const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, b.name);
 
@@ -11277,7 +11769,6 @@ export async function getBookingsForCalendar(params: {
     const { bookings } = await getBookings({
       organizationId,
       page: 1,
-      perPage: 1000,
       search,
       userId,
       ...(status && {
@@ -11289,9 +11780,26 @@ export async function getBookingsForCalendar(params: {
       custodianTeamMemberIds: teamMemberIds,
       ...selfServiceData,
       tags,
+      // Calendar events carry no asset data — the mapping below projects
+      // booking scalars, two names and the tags — so the per-booking asset
+      // subtree is pure transfer cost here.
+      includeAssets: false,
+      // Only `bookings` is read below; skip the COUNT companion query.
+      skipCount: true,
       extraInclude: {
-        custodianTeamMember: true,
-        custodianUser: true,
+        // Narrow selects: the mapping reads `name` off the team member and
+        // the display-name fields + picture off the two users. `true` pulled
+        // whole `User` rows (every column, per booking, per request).
+        custodianTeamMember: { select: { id: true, name: true } },
+        custodianUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+            profilePicture: true,
+          },
+        },
         creator: {
           select: {
             id: true,
@@ -11303,6 +11811,8 @@ export async function getBookingsForCalendar(params: {
         },
         tags: TAG_WITH_COLOR_SELECT,
       },
+      // Every booking in the window, not a page of them. `takeAll` ignores
+      // `perPage`, which is why the old `perPage: 1000` was already dead.
       takeAll: true,
     });
 
@@ -11338,11 +11848,16 @@ export async function getBookingsForCalendar(params: {
             end: (booking.to as Date).toISOString(),
             custodian: {
               name: custodianName,
+              // Named field by field rather than spread: the loaded row is a
+              // full `User`, and this payload is serialized to the calendar
+              // client. `displayName` belongs on the list — it outranks the
+              // legal-name halves wherever this custodian is rendered.
               user: booking.custodianUser
                 ? {
                     id: booking.custodianUserId,
                     firstName: booking.custodianUser?.firstName,
                     lastName: booking.custodianUser?.lastName,
+                    displayName: booking.custodianUser?.displayName,
                     profilePicture: booking.custodianUser?.profilePicture,
                   }
                 : undefined,
@@ -11356,6 +11871,7 @@ export async function getBookingsForCalendar(params: {
                     id: booking.creator.id,
                     firstName: booking.creator.firstName,
                     lastName: booking.creator.lastName,
+                    displayName: booking.creator.displayName,
                     profilePicture: booking.creator.profilePicture,
                   }
                 : null,
@@ -12163,11 +12679,7 @@ export async function bulkCancelBookings({
       }
 
       /** Making notes for all the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const notesData = bookings
         .map((b) =>
           b.bookingAssets.map((ba) => ({
@@ -12355,11 +12867,7 @@ async function createNotesForScannedAssetsAndKits({
       displayName: true,
     } satisfies Prisma.UserSelect,
   });
-  const userForNotes = {
-    firstName: user?.firstName || "",
-    lastName: user?.lastName || "",
-    id: userId,
-  };
+  const userForNotes = { ...user, id: userId };
 
   // Create booking notes
   // why: out of this rule — multi-asset popover, per-asset qty deferred.
@@ -14256,6 +14764,7 @@ export async function getDetailedPartialCheckinData(bookingId: string) {
         id: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
       };
     }
@@ -14291,6 +14800,7 @@ export type PartialCheckinDetailsType = Record<
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       profilePicture: string | null;
     };
   }
@@ -14440,6 +14950,7 @@ export async function getDetailedPartialCheckoutData({
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
           profilePicture: true,
         },
       },
@@ -14456,6 +14967,7 @@ export async function getDetailedPartialCheckoutData({
         id: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
       };
     }
@@ -14499,6 +15011,7 @@ export type PartialCheckoutDetailsType = Record<
       id: string;
       firstName: string | null;
       lastName: string | null;
+      displayName: string | null;
       profilePicture: string | null;
     };
   }

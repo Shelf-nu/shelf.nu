@@ -60,6 +60,7 @@ import {
 } from "~/utils/http.server";
 import { createStripeCustomer } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
+import { resolveUserGreetingName } from "~/utils/user";
 import { passwordSchema } from "~/utils/zod";
 
 const trimString = (value: unknown) =>
@@ -467,7 +468,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         replyTo: "carlos@shelf.nu",
         to: user.email,
         subject: "🏷️ Welcome to Shelf - can I ask you a question?",
-        text: onboardingEmailText({ firstName: user.firstName as string }),
+        text: onboardingEmailText({ firstName: resolveUserGreetingName(user) }),
       });
     }
 

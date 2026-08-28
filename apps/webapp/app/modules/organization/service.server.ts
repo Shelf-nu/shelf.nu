@@ -28,6 +28,7 @@ import { recordEvent } from "../activity-event/service.server";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
 const label: ErrorLabel = "Organization";
@@ -531,8 +532,7 @@ export async function getOrganizationAdminsForNotification({
           select: {
             id: true,
             email: true,
-            firstName: true,
-            lastName: true,
+            ...USER_NAME_SELECT,
             // Format-preference columns so the booking notification resolver
             // can carry them onto each recipient and resolve recipient-specific
             // email date/time formatting from the loaded row (no per-recipient

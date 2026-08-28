@@ -15,6 +15,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
@@ -403,8 +404,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           booking.status === "ONGOING" ||
           booking.status === "OVERDUE") &&
         canCancelPerm,
-      // Archive: COMPLETE only + archive permission.
-      canArchive: booking.status === "COMPLETE" && canArchivePerm,
+      // Archive: shared web-parity rule (COMPLETE, or RESERVED already past
+      // its end date) + archive permission.
+      canArchive:
+        isBookingArchivable({ status: booking.status, to: booking.to }) &&
+        canArchivePerm,
       // Duplicate: any status; gated by create permission (web's duplicate
       // route enforces create — we hide it for those who lack it rather than
       // 403 on tap).

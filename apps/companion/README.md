@@ -175,6 +175,77 @@ pnpm companion:dev                # Start Metro, connect to existing build
 pnpm companion:dev:clear          # Same but clears cache (after env changes)
 ```
 
+### Pointing the app at a server
+
+`apps/companion/.env.local` decides which server the app talks to. The three
+values it needs are the ones a Shelf server already publishes on
+`/api/mobile/config`, so generate the file rather than copying credentials:
+
+```bash
+pnpm companion:sim:env                                  # local webapp, simulator
+pnpm --filter @shelf/companion sim:env -- --lan         # physical device (LAN IP)
+pnpm --filter @shelf/companion sim:env -- --api-url=https://testapp.shelf.nu
+```
+
+With no `--api-url` it targets `http://localhost:3000` and reads credentials
+from the monorepo root `.env`, because a local webapp has no config endpoint
+until it is running. Against a deployed server it reads them from that server.
+
+`EXPO_PUBLIC_*` values are inlined at **bundle** time, so after regenerating the
+file restart Metro with `pnpm companion:dev:clear` — a warm cache keeps serving
+the old ones.
+
+The script refuses an `https://localhost` URL: the app cannot verify a
+self-signed certificate, and the failure surfaces as a generic network error
+that names nothing. Run the webapp with `DISABLE_HTTPS=true` instead.
+
+### Testing multi-server on the Simulator
+
+Connecting to a private server needs two servers: one acting as Shelf Cloud
+(which owns the domain → instance registry) and one to connect to. The local
+webapp plays Cloud, because it runs your branch and therefore serves
+`/api/mobile/resolve-server`; staging is a real HTTPS target that serves
+`/api/mobile/config`.
+
+In the monorepo root `.env`:
+
+```bash
+INSTANCE_NAME="Shelf Local"
+COMPANION_SERVERS={"acme.test":"https://testapp.shelf.nu"}
+```
+
+An entry can also be an object, to carry per-server options:
+
+```bash
+COMPANION_SERVERS={"acme.test":{"url":"https://testapp.shelf.nu","disablePasswordLogin":true}}
+```
+
+`disablePasswordLogin` hides the app's email/password fields once connected to
+that server, leaving SSO. It is presentation only — the app signs in against
+that server's Supabase directly, so nothing here refuses a sign-in — and it
+never touches the web login form, which administrators use. Set centrally by
+Shelf, so it works for customers whose instance Shelf does not administer.
+
+Then:
+
+```bash
+DISABLE_HTTPS=true pnpm webapp:dev     # terminal 1 — plays Shelf Cloud
+pnpm companion:sim:env                 # terminal 2 — point the app at it
+pnpm companion:build:ios               # first run: builds + boots the Simulator
+```
+
+On the login screen tap **Connect to a private server** and enter `acme.test`.
+The app asks the local webapp for that domain, gets staging's URL back, reads
+staging's config, and switches — the chip should then read "Connected to Shelf
+Staging".
+
+Worth exercising the refusals too, since each renders differently: an
+unregistered domain (`nope.test`), a domain whose target is unreachable, and a
+value that is not a domain at all.
+
+> The registry is always queried at the server in `EXPO_PUBLIC_API_URL`, even
+> once the app is connected elsewhere — Shelf Cloud owns the mapping.
+
 ### Available Scripts
 
 All scripts can be run from the **monorepo root**:
@@ -183,6 +254,7 @@ All scripts can be run from the **monorepo root**:
 | --------------------------------- | ------------------------------------------------------- |
 | `pnpm companion:dev`              | Start Metro dev server (connects to existing build)     |
 | `pnpm companion:dev:clear`        | Same but clears Metro cache (use after env var changes) |
+| `pnpm companion:sim:env`          | Generate `.env.local` for a chosen server               |
 | `pnpm companion:dev:tunnel`       | Start via Expo tunnel (when LAN connectivity fails)     |
 | `pnpm companion:build:ios`        | Build native iOS + run on Simulator                     |
 | `pnpm companion:build:ios:device` | Build native iOS + run on physical iPhone via USB       |
