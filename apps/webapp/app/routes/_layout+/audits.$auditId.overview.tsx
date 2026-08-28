@@ -21,6 +21,7 @@ import { BulkRemoveAssetsFromAuditSchema } from "~/components/audit/bulk-remove-
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { DateS } from "~/components/shared/date";
@@ -118,9 +119,55 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
+    // Gate here, not at the end: this is the earliest point `session` exists,
+    // and every query below is work a caller about to be refused never sees.
+    requireAuditAssigneeForBaseSelfService({
+      audit: session,
+      userId,
+      isSelfServiceOrBase,
+      auditId,
+    });
+
     // Split images into general and asset-specific
     const generalImages = allImages.filter((img) => img.auditAssetId === null);
     const assetImages = allImages.filter((img) => img.auditAssetId !== null);
+
+    /**
+     * The condition notes people wrote during the audit.
+     *
+     * why this page had none: every photo taken during an audit was already
+     * on this page, grouped and labelled with its asset, while the words
+     * written beside those photos appeared nowhere. Reading them meant
+     * opening rows one at a time, or scrolling the Activity feed where they
+     * sit among system rows. The written observation is the half that says
+     * "already scratched when it went out", so it is the half worth surfacing.
+     *
+     * COMMENT only: UPDATE rows are the system trail, stored as Markdoc
+     * source, and belong to the Activity tab.
+     */
+    const conditionNotes = await db.auditNote.findMany({
+      where: { auditSessionId: auditId, type: "COMMENT" },
+      select: {
+        id: true,
+        content: true,
+        createdAt: true,
+        user: {
+          select: {
+            // `displayName` first: `resolveUserDisplayName` prefers it, and an
+            // SSO account often carries only that. Selecting just first/last
+            // renders those people as "Unknown" here while the PDF, which uses
+            // the same resolver over a fuller select, names them.
+            displayName: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        auditAsset: {
+          select: { asset: { select: { id: true, title: true } } },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    });
 
     const header = { title: `${session.name} · Overview` };
 
@@ -139,13 +186,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const canRemoveAssets =
       (isCreator || isAdminOrOwner) && session.status === "PENDING";
 
-    requireAuditAssigneeForBaseSelfService({
-      audit: session,
-      userId,
-      isSelfServiceOrBase,
-      auditId,
-    });
-
     return data(
       payload({
         session,
@@ -155,6 +195,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         generalImages,
         assetImages,
+        conditionNotes,
         ...assetsData,
         modelName: {
           singular: "asset",
@@ -185,16 +226,37 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const formData = await request.clone().formData();
     const intent = formData.get("intent");
 
-    if (intent === "complete-audit") {
-      // Assignee-gated: ADMIN/OWNER may complete any audit,
-      // BASE/SELF_SERVICE only when assigned.
+    /**
+     * Intents whose own authorization rule is BROADER than assignment, and so
+     * must not sit behind the assignment guard.
+     *
+     * `cancel-audit` is the only one today. `createAuditSession` does NOT
+     * auto-assign the creator, while `cancelAuditSession` guarantees the
+     * creator may always cancel — so gating it on assignment would lock a
+     * BASE creator out of an audit they made themselves. The narrower
+     * creator-or-admin rule inside the service is the correct gate there.
+     */
+    const INTENTS_WITH_THEIR_OWN_RULE = new Set(["cancel-audit"]);
+
+    // Assignee-gated by DEFAULT: ADMIN/OWNER may act on any audit,
+    // BASE/SELF_SERVICE only on audits assigned to them.
+    //
+    // Expressed as an exclusion rather than a list of guarded intents so the
+    // default is fail-closed — a newly added intent inherits the guard instead
+    // of silently escaping it. Only `complete-audit` used to carry a check, so
+    // `remove-asset` and `bulk-remove-assets` let an unassigned member strip
+    // assets out of anyone's audit by direct POST; the loader's
+    // `canRemoveAssets` is display-only. (detail.dev D101)
+    if (!INTENTS_WITH_THEIR_OWN_RULE.has(String(intent))) {
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,
         userId,
         isSelfServiceOrBase,
       });
+    }
 
+    if (intent === "complete-audit") {
       await completeAuditWithImages({
         request,
         auditSessionId: auditId,
@@ -292,8 +354,63 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export default function AuditOverview() {
-  const { session, totalItems, generalImages, assetImages, canRemoveAssets } =
-    useLoaderData<typeof loader>();
+  const {
+    session,
+    totalItems,
+    generalImages,
+    assetImages,
+    conditionNotes,
+    canRemoveAssets,
+  } = useLoaderData<typeof loader>();
+
+  /**
+   * One entry per asset somebody recorded something about, holding BOTH the
+   * words and the photographs.
+   *
+   * why merged: a note about the Laerdal and a photo of the Laerdal are one
+   * observation. Splitting them into a notes list and a photo wall makes the
+   * reader join them up by asset name, which is work this page should do.
+   */
+  const findings = (() => {
+    const groups = new Map<
+      string,
+      {
+        assetName: string;
+        images: typeof assetImages;
+        notes: typeof conditionNotes;
+      }
+    >();
+
+    const groupFor = (assetId: string, assetName: string) => {
+      if (!groups.has(assetId)) {
+        groups.set(assetId, { assetName, images: [], notes: [] });
+      }
+      return groups.get(assetId)!;
+    };
+
+    for (const img of assetImages) {
+      const asset = img.auditAsset?.asset;
+      if (!asset?.id) continue;
+      groupFor(asset.id, asset.title || "Unknown").images.push(img);
+    }
+    for (const note of conditionNotes) {
+      const asset = note.auditAsset?.asset;
+      if (!asset?.id) continue;
+      groupFor(asset.id, asset.title || "Unknown").notes.push(note);
+    }
+
+    return [...groups.entries()].sort((a, b) =>
+      a[1].assetName.localeCompare(b[1].assetName)
+    );
+  })();
+
+  /** Notes about the audit as a whole — the completion note lives here. */
+  const generalNotes = conditionNotes.filter(
+    (note) => !note.auditAsset?.asset?.id
+  );
+
+  const hasFindings =
+    findings.length > 0 || generalNotes.length > 0 || generalImages.length > 0;
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get(
     "auditStatus"
@@ -478,100 +595,145 @@ export default function AuditOverview() {
           </Card>
         </div>
 
-        {/* Right Column: Audit Images */}
+        {/*
+          Right column: FINDINGS — what people recorded, grouped by the asset
+          they recorded it about, words and photographs together.
+
+          why this replaced "Audit Images": every photo taken during an audit
+          was already here, grouped and labelled. The notes written beside
+          those photos were on no page at all — reachable only by opening rows
+          one at a time, or by scrolling the Activity feed where they sit among
+          system rows. The written observation is the half that answers "was it
+          already damaged when it went out", so leaving it off the audit's own
+          page was the real gap. A note and a photo of the same asset are one
+          observation and now print as one.
+        */}
         <div className="flex-1">
           <h2 className="mb-4 text-lg font-semibold">
-            Audit Images{" "}
+            Findings{" "}
             <InfoTooltip
               iconClassName="size-4"
               content={
                 <p className="mb-3 text-sm text-gray-600">
-                  Images captured during the audit. General images are
-                  associated with the audit itself, while asset images are
-                  linked to specific assets.
+                  The condition notes and photos people recorded while auditing,
+                  grouped by the asset they were recorded against. Notes about
+                  the audit itself, such as a completion note, appear first.
+                  System activity lives on the Activity tab.
                 </p>
               }
             />
           </h2>
 
-          {/* General Audit Images */}
-          {generalImages.length > 0 && (
+          {/* About the audit as a whole */}
+          {(generalNotes.length > 0 || generalImages.length > 0) && (
             <div className="mb-4">
-              <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
-                <span className="flex size-5 items-center justify-center rounded bg-primary-50 text-xs text-primary-600">
-                  {generalImages.length}
-                </span>
-                General Audit Images
+              <h3 className="mb-2 text-sm font-medium text-gray-700">
+                About this audit
               </h3>
               <Card className="mt-0 md:border">
-                <div className="flex flex-wrap gap-3">
-                  {generalImages.map((image) => (
-                    <ImageWithPreview
-                      key={image.id}
-                      imageUrl={image.imageUrl}
-                      thumbnailUrl={image.thumbnailUrl}
-                      alt={image.description || "General audit image"}
-                      withPreview
-                      className="size-24 rounded border"
-                      images={generalImages.map((img) => ({
-                        id: img.id,
-                        imageUrl: img.imageUrl,
-                        thumbnailUrl: img.thumbnailUrl,
-                        alt: img.description || "General audit image",
-                      }))}
-                      currentImageId={image.id}
-                    />
-                  ))}
-                </div>
+                {generalNotes.map((note) => (
+                  <div key={note.id} className="mb-3 last:mb-0">
+                    {/* Audit notes are Markdoc source, not plain text: the
+                        completion note carries `**bold**` stats, a receipt
+                        link, and an `{% audit_images %}` tag. Rendering the
+                        string directly prints that source to the reader.
+                        `allowExternalLinks` stays false here — this bucket is
+                        where the SYSTEM-composed completion note lands, and
+                        only notes a person authored through the editor may
+                        link off-origin. */}
+                    <div className="text-sm text-gray-900">
+                      <MarkdownViewer content={note.content} />
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {resolveUserDisplayName(note.user) || "Unknown"} &middot;{" "}
+                      <DateS date={note.createdAt} includeTime />
+                    </p>
+                  </div>
+                ))}
+
+                {generalImages.length > 0 && (
+                  <div className="flex flex-wrap gap-3">
+                    {generalImages.map((image) => (
+                      <ImageWithPreview
+                        key={image.id}
+                        imageUrl={image.imageUrl}
+                        thumbnailUrl={image.thumbnailUrl}
+                        alt={image.description || "General audit image"}
+                        withPreview
+                        className="size-24 rounded border"
+                        images={generalImages.map((img) => ({
+                          id: img.id,
+                          imageUrl: img.imageUrl,
+                          thumbnailUrl: img.thumbnailUrl,
+                          alt: img.description || "General audit image",
+                        }))}
+                        currentImageId={image.id}
+                      />
+                    ))}
+                  </div>
+                )}
               </Card>
             </div>
           )}
 
-          {/* Asset-Specific Images */}
-          {assetImages.length > 0 && (
-            <div className="mb-4">
-              <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
-                <span className="flex size-5 items-center justify-center rounded bg-blue-50 text-xs text-blue-600">
-                  {assetImages.length}
-                </span>
-                Asset-Specific Images
-              </h3>
-              <Card className="mt-0 md:border">
-                <div className="flex flex-wrap gap-3">
-                  {assetImages.map((image) => (
-                    <ImageWithPreview
-                      key={image.id}
-                      imageUrl={image.imageUrl}
-                      thumbnailUrl={image.thumbnailUrl}
-                      // Show asset title in the preview header for context.
-                      alt={
-                        image.auditAsset?.asset?.title
-                          ? `Asset: ${image.auditAsset.asset.title}`
-                          : image.description || "Asset image"
-                      }
-                      withPreview
-                      className="size-24 rounded border"
-                      images={assetImages.map((img) => ({
-                        id: img.id,
-                        imageUrl: img.imageUrl,
-                        thumbnailUrl: img.thumbnailUrl,
-                        alt: img.auditAsset?.asset?.title
-                          ? `Asset: ${img.auditAsset.asset.title}`
-                          : img.description || "Asset image",
-                      }))}
-                      currentImageId={image.id}
-                    />
+          {/* One block per asset somebody recorded something about */}
+          {findings.length > 0 && (
+            <div className="mb-4 flex flex-col gap-3">
+              {findings.map(([assetId, { assetName, images, notes }]) => (
+                <Card key={assetId} className="mt-0 md:border">
+                  <h3 className="mb-2 text-sm font-medium text-gray-900">
+                    {assetName}
+                  </h3>
+
+                  {notes.map((note) => (
+                    <div key={note.id} className="mb-3">
+                      {/* Condition notes are authored through the editor, so
+                          they may link out — same treatment the details panel
+                          gives these exact rows. */}
+                      <div className="text-sm text-gray-900">
+                        <MarkdownViewer
+                          content={note.content}
+                          allowExternalLinks
+                        />
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {resolveUserDisplayName(note.user) || "Unknown"}{" "}
+                        &middot; <DateS date={note.createdAt} includeTime />
+                      </p>
+                    </div>
                   ))}
-                </div>
-              </Card>
+
+                  {images.length > 0 && (
+                    <div className="flex flex-wrap gap-3">
+                      {images.map((image) => (
+                        <ImageWithPreview
+                          key={image.id}
+                          imageUrl={image.imageUrl}
+                          thumbnailUrl={image.thumbnailUrl}
+                          alt={`Photo of ${assetName}`}
+                          withPreview
+                          className="size-24 rounded border"
+                          images={images.map((img) => ({
+                            id: img.id,
+                            imageUrl: img.imageUrl,
+                            thumbnailUrl: img.thumbnailUrl,
+                            alt: `Photo of ${assetName}`,
+                          }))}
+                          currentImageId={image.id}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              ))}
             </div>
           )}
 
-          {/* No Images State */}
-          {generalImages.length === 0 && assetImages.length === 0 && (
+          {/* Nothing recorded */}
+          {!hasFindings && (
             <Card className="mt-0 md:border">
               <div className="px-4 py-6 text-center text-sm text-gray-500">
-                No images uploaded
+                Nothing was recorded during this audit
               </div>
             </Card>
           )}

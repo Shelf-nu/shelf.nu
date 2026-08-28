@@ -58,8 +58,13 @@ async function validateInvite(
     return;
   }
 
-  // Case 2: Check if the target organization is the one with SCIM. If it is, don't allow invite as the user needs to be managed via the IDP
-  if (domainStatus.linkedOrganization?.id === organizationId) {
+  // Case 2: the target organization claims this domain, so its membership is
+  // the IdP's to decide. Tested against every owner, not one of them — a
+  // domain can be claimed by several organizations, and matching only one
+  // exempts the rest from the rule.
+  if (
+    domainStatus.linkedOrganizations.some((org) => org.id === organizationId)
+  ) {
     throw new ShelfError({
       cause: null,
       message:
@@ -544,10 +549,13 @@ export async function getPaginatedAndFilterableSettingInvites({
           },
         },
         {
+          // `displayName` replaces first/last name in the UI for users who set
+          // one, so it is the name a searcher can actually see on the row.
           inviteeUser: {
             OR: [
               { firstName: { contains: search, mode: "insensitive" } },
               { lastName: { contains: search, mode: "insensitive" } },
+              { displayName: { contains: search, mode: "insensitive" } },
             ],
           },
         },

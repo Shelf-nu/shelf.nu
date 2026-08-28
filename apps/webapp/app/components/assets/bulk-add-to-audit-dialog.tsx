@@ -9,6 +9,7 @@ import {
 } from "~/atoms/list";
 import useApiQuery from "~/hooks/use-api-query";
 import { isSelectingAllItems } from "~/utils/list";
+import type { PendingAudit } from "../audit/audit-selector";
 import AuditSelector from "../audit/audit-selector";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import type { IndexResponse } from "../list";
@@ -18,23 +19,6 @@ export const BulkAddToAuditSchema = z.object({
   assetIds: z.string().array().min(1),
   auditId: z.string().min(1, "Please select an audit"),
 });
-
-type PendingAudit = {
-  id: string;
-  name: string;
-  createdAt: Date;
-  expectedAssetCount: number;
-  createdBy: {
-    firstName: string | null;
-    lastName: string | null;
-  };
-  assignments: Array<{
-    user: {
-      firstName: string | null;
-      lastName: string | null;
-    };
-  }>;
-};
 
 export default function BulkAddToAuditDialog() {
   const zo = useZorm("BulkAddToAudit", BulkAddToAuditSchema);

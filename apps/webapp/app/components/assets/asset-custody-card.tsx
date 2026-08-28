@@ -8,7 +8,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
+import type { UserNameFields } from "~/utils/user";
+import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { DateS } from "../shared/date";
@@ -25,9 +26,9 @@ export function CustodyCard({
 }: {
   booking:
     | (Pick<Booking, "id" | "name" | "from"> & {
-        custodianUser: Partial<
-          Pick<User, "firstName" | "lastName" | "profilePicture" | "email">
-        > | null;
+        custodianUser:
+          | (UserNameFields & Partial<Pick<User, "profilePicture" | "email">>)
+          | null;
         // Only `name` is read (see the branch below). Declaring the whole
         // `TeamMember` forced the loader selects to fetch the whole row, which
         // is how the entire record ended up in the payload.
@@ -43,9 +44,9 @@ export function CustodyCard({
           id: string;
           name: string;
           userId?: string | null;
-          user?: Partial<
-            Pick<User, "firstName" | "lastName" | "profilePicture" | "email">
-          > | null;
+          user?:
+            | (UserNameFields & Partial<Pick<User, "profilePicture" | "email">>)
+            | null;
         };
       }[]
     | null;
@@ -116,15 +117,7 @@ export function CustodyCard({
   if (booking) {
     let teamMemberName = "";
     if (booking.custodianUser) {
-      teamMemberName = resolveTeamMemberName({
-        name: `${booking.custodianUser?.firstName || ""} ${
-          booking.custodianUser?.lastName || ""
-        }`,
-        user: {
-          firstName: booking.custodianUser?.firstName || "",
-          lastName: booking.custodianUser?.lastName || "",
-        },
-      });
+      teamMemberName = resolveUserDisplayName(booking.custodianUser);
     } else if (booking.custodianTeamMember) {
       teamMemberName = resolveTeamMemberName({
         name: booking.custodianTeamMember.name,

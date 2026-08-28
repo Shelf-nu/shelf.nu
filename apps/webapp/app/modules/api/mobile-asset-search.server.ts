@@ -1,10 +1,5 @@
-import { Prisma } from "@prisma/client";
-import { withPrismaRetry } from "@shelf/database";
-import { db } from "~/database/db.server";
-import {
-  buildAssetSearchUnion,
-  type AssetSearchIdRow,
-} from "~/modules/asset/search-union.server";
+import type { Prisma } from "@prisma/client";
+import { resolveAssetSearchIds } from "~/modules/asset/search-ids.server";
 import { splitAssetSearchTerms } from "~/modules/asset/search.server";
 
 /**
@@ -27,11 +22,11 @@ import { splitAssetSearchTerms } from "~/modules/asset/search.server";
 /**
  * Resolves the mobile assets search to a Prisma where-fragment.
  *
- * Runs the shared org-scoped UNION for a non-empty term set and materializes
- * the matching asset ids into an `id: { in }` fragment. The route's
- * `baseWhere` has no top-level `OR` (status AVAILABLE rides in `AND`,
- * myCustody is `custody: { some }`), so this fragment is safe to spread
- * directly alongside it — it simply ANDs in.
+ * Runs the shared org-scoped UNION (via `resolveAssetSearchIds`) for a
+ * non-empty term set and materializes the matching asset ids into an
+ * `id: { in }` fragment. The route's `baseWhere` has no top-level `OR` (status
+ * AVAILABLE rides in `AND`, myCustody is `custody: { some }`), so this fragment
+ * is safe to spread directly alongside it — it simply ANDs in.
  *
  * @param organizationId - Tenant scope; every UNION branch is org-scoped.
  * @param search - Raw (already length-capped) search term from the request.
@@ -39,6 +34,8 @@ import { splitAssetSearchTerms } from "~/modules/asset/search.server";
  *   `{ id: { in: [] } }` for whitespace/bare-comma input (a debounced
  *   type-ahead space must not flash the full list) or a search with no
  *   matches; otherwise `{ id: { in: <matching ids> } }`.
+ * @throws {ShelfError} 400 when the search matches more ids than the bind-param
+ *   ceiling allows (see `resolveAssetSearchIds`) — only reachable by a mega-org.
  */
 export async function resolveMobileAssetSearchWhere({
   organizationId,
@@ -58,21 +55,14 @@ export async function resolveMobileAssetSearchWhere({
     return search.length > 0 ? { id: { in: [] } } : {};
   }
 
-  // Wrapped in withPrismaRetry (operationIsRead) like getAssets' and the
-  // advanced index's identical raw query — a raw $queryRaw bypasses the
-  // client's auto-retry extension, so a transient pool/connection blip on
-  // the id-resolution query would otherwise surface as a hard error instead
-  // of being retried.
-  const rows = await withPrismaRetry(
-    () =>
-      db.$queryRaw<AssetSearchIdRow[]>(
-        Prisma.sql`SELECT "id" FROM ${buildAssetSearchUnion({
-          organizationId,
-          terms: searchTerms,
-        })} AS "search_ids"`
-      ),
-    { operationIsRead: true }
-  );
+  // Shared with the web getAssets fetcher: resolveAssetSearchIds runs the
+  // org-scoped UNION (retry-wrapped, to claim the read semantics the client
+  // extension cannot infer) and guards the id set against Postgres'
+  // ~65k bind-param ceiling, throwing a friendly 400 rather than hard-failing.
+  const ids = await resolveAssetSearchIds({
+    organizationId,
+    terms: searchTerms,
+  });
 
-  return { id: { in: rows.map((row) => row.id) } };
+  return { id: { in: ids } };
 }

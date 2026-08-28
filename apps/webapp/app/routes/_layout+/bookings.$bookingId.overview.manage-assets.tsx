@@ -977,6 +977,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         booking: { id: bookingId, assetIds: removedAssetIds },
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
+        displayName: user?.displayName ?? null,
         userId: authSession.userId,
         organizationId,
         assets: removedAssets,
@@ -1612,6 +1613,7 @@ const RowComponent = ({
                     {...resolveDisplayCode({
                       entity: item,
                       organization: currentOrganization,
+                      entityKind: "asset",
                     })}
                   />
                 ) : null}

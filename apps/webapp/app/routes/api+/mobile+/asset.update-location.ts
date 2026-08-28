@@ -7,6 +7,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createNote } from "~/modules/note/service.server";
@@ -35,13 +36,14 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const body = await request.json();
-    const { assetId, locationId } = z
-      .object({
+    const { assetId, locationId } = await parseMobileBody(
+      z.object({
         assetId: z.string().min(1),
         locationId: z.string().min(1),
-      })
-      .parse(body);
+      }),
+      request,
+      "Assets"
+    );
 
     // Verify asset exists and belongs to org
     const asset = await db.asset.findUnique({
@@ -182,6 +184,7 @@ export async function action({ request }: ActionFunctionArgs) {
       id: user.id,
       firstName: user.firstName,
       lastName: user.lastName,
+      displayName: user.displayName,
     });
 
     const newLocationLink = wrapLinkForNote(

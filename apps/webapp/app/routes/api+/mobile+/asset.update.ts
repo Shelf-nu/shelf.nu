@@ -33,6 +33,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
   UNCATEGORIZED_SENTINEL,
   buildMobileCustomFieldPayload,
@@ -86,7 +87,6 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const body = await request.json();
     const {
       assetId,
       title,
@@ -97,8 +97,8 @@ export async function action({ request }: ActionFunctionArgs) {
       tags,
       valuation,
       customFields,
-    } = z
-      .object({
+    } = await parseMobileBody(
+      z.object({
         assetId: z.string().min(1, "Asset ID is required"),
         title: z
           .string()
@@ -120,8 +120,10 @@ export async function action({ request }: ActionFunctionArgs) {
             })
           )
           .optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Assets"
+    );
 
     // why: validate custom-field values against the org's active definitions.
     // Bypassing this lets a mobile client smuggle arbitrary JSON (or values

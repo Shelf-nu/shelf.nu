@@ -82,7 +82,11 @@ export default function KitRow({
   // optional fields tolerate that and fall back to QR when workspace pref
   // is SAM.
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: kit, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: kit,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
     : null;
 
   // Create booking asset IDs set for context-aware status calculation

@@ -20,11 +20,7 @@ export async function resolveUserLink({
   loadUserForNotes: LoadUserForNotesFn;
 }) {
   const user = await loadUserForNotes();
-  return wrapUserLinkForNote({
-    id: userId,
-    firstName: user.firstName ?? "",
-    lastName: user.lastName ?? "",
-  });
+  return wrapUserLinkForNote({ ...user, id: userId });
 }
 
 /**

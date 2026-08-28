@@ -7,6 +7,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { createNote } from "~/modules/note/service.server";
@@ -39,12 +40,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // self-restriction (only release custody of assets assigned to themselves).
     const { role } = await getMobileUserContext(user.id, organizationId);
 
-    const body = await request.json();
-    const { assetId } = z
-      .object({
+    const { assetId } = await parseMobileBody(
+      z.object({
         assetId: z.string().min(1),
-      })
-      .parse(body);
+      }),
+      request,
+      "Assets"
+    );
 
     // why: `releaseCustody` is INDIVIDUAL-only — its `deleteMany` releases
     // EVERY custodian on the asset, which for a QUANTITY_TRACKED asset means
@@ -114,6 +116,7 @@ export async function action({ request }: ActionFunctionArgs) {
       id: user.id,
       firstName: user.firstName,
       lastName: user.lastName,
+      displayName: user.displayName,
     });
 
     await createNote({

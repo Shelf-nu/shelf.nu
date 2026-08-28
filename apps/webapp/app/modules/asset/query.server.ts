@@ -23,6 +23,28 @@ import type { Column } from "../asset-index-settings/helpers";
 const ASSET_IS_CHECKED_OUT = Prisma.sql`a.status = 'CHECKED_OUT'`;
 
 /**
+ * SQL fragment: the name to show for the custodian of an ONGOING/OVERDUE
+ * booking, where the holder is `bu` (a registered user) or `btm` (an NRM).
+ *
+ * `displayName` wins over the legal name, matching `resolveUserDisplayName` —
+ * this projection is the ONLY name a checked-out row gets, so a bare
+ * first/last join here shows a user the name they asked us not to be called by.
+ *
+ * The `bu.id IS NOT NULL` guard is what distinguishes a user from an NRM, and
+ * it cannot be replaced by wrapping the whole thing in a COALESCE onto
+ * `btm.name`: `CONCAT` ignores NULLs and yields `''` rather than NULL for an
+ * NRM, so the fallback would never fire and the badge would render blank.
+ *
+ * Shared by the full projection and by {@link CUSTODY_SORT_CASE}, so the value
+ * sorted on is the same string the row displays.
+ */
+const BOOKING_CUSTODIAN_NAME = Prisma.sql`CASE
+                WHEN bu.id IS NOT NULL
+                  THEN COALESCE(NULLIF(TRIM(bu."displayName"), ''), TRIM(CONCAT(bu."firstName", ' ', bu."lastName")))
+                ELSE btm.name
+              END`;
+
+/**
  * Generates the SQL WHERE clause for asset filtering
  * @param organizationId - Organization ID to filter by
  * @param search - Optional search string
@@ -1956,6 +1978,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                         'id', ctmu.id,
                         'firstName', ctmu."firstName",
                         'lastName', ctmu."lastName",
+                        'displayName', ctmu."displayName",
                         'profilePicture', ctmu."profilePicture"
                       )
                     ELSE NULL
@@ -1969,6 +1992,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                   'id', cu.id,
                   'firstName', cu."firstName",
                   'lastName', cu."lastName",
+                  'displayName', cu."displayName",
                   'profilePicture', cu."profilePicture"
                 )
               ELSE NULL
@@ -1979,6 +2003,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                   'id', cr.id,
                   'firstName', cr."firstName",
                   'lastName', cr."lastName",
+                  'displayName', cr."displayName",
                   'profilePicture', cr."profilePicture"
                 )
               ELSE NULL
@@ -2011,9 +2036,22 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
     ) AS bookings`
     : Prisma.sql``;
 
+  // Everything between the backticks below is a template literal, so a stray
+  // backtick or dollar-brace anywhere in it — SQL comments included — ends the
+  // literal and reinterprets the rest of the query as JavaScript.
   const barcodesSelect = withBarcodes
     ? Prisma.sql`,
     (
+      -- The ORDER BY inside jsonb_agg is load-bearing, not cosmetic — same
+      -- reasoning as the custody aggregation below. BarcodeCell renders only
+      -- the first two elements as chips and collapses the rest into a "+N"
+      -- control that previews element 2, so the array's order decides which
+      -- codes a user actually sees. jsonb_agg without an explicit ORDER BY
+      -- has an undefined input order, so an asset with 3+ barcodes of one
+      -- type would otherwise show a different pair between page loads.
+      -- Oldest-first (createdAt, id) is the same key the per-type barcode
+      -- scalar columns below use, so element 0 of this array is the same
+      -- barcode those columns sort on.
       SELECT COALESCE(
         jsonb_agg(
           jsonb_build_object(
@@ -2021,6 +2059,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             'type', b.type,
             'value', b.value
           )
+          ORDER BY b."createdAt" ASC, b.id ASC
         ),
         '[]'::jsonb
       )
@@ -2151,29 +2190,16 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
           jsonb_build_array(
             jsonb_build_object(
-              -- why: when the booking custodian is an NRM (team member with no
-              -- user account), bu.* is NULL. We must NOT CONCAT the user columns
-              -- here: Postgres CONCAT ignores NULLs and returns ' ' (a space),
-              -- which is non-NULL, so a COALESCE(CONCAT(...), btm.name) would
-              -- never fall back to the NRM name and the badge renders blank.
-              -- Guard on bu.id (mirrors the 'user' sub-object branch below).
-              'name', CASE
-                WHEN bu.id IS NOT NULL
-                  THEN CONCAT(bu."firstName", ' ', bu."lastName")
-                ELSE btm.name
-              END,
+              'name', ${BOOKING_CUSTODIAN_NAME},
               'custodian', jsonb_build_object(
-                'name', CASE
-                  WHEN bu.id IS NOT NULL
-                    THEN CONCAT(bu."firstName", ' ', bu."lastName")
-                  ELSE btm.name
-                END,
+                'name', ${BOOKING_CUSTODIAN_NAME},
                 'user', CASE
                   WHEN bu.id IS NOT NULL THEN
                     jsonb_build_object(
                       'id', bu.id,
                       'firstName', bu."firstName",
                       'lastName', bu."lastName",
+                      'displayName', bu."displayName",
                       'profilePicture', bu."profilePicture"
                     )
                   ELSE NULL
@@ -2336,6 +2362,7 @@ export const assetQueryJoins = Prisma.sql`
                   'id', u.id,
                   'firstName', u."firstName",
                   'lastName', u."lastName",
+                  'displayName', u."displayName",
                   'profilePicture', u."profilePicture"
                 )
               ELSE NULL
@@ -2514,8 +2541,8 @@ const BARCODE_SORT_KEY_SELECTS = Prisma.sql`(
 /**
  * The custody CASE expression (direct custody wins; booking-derived synthetic
  * custody for CHECKED_OUT assets otherwise; NULL). Verbatim copy of the heavy
- * projection's custody CASE, including the NRM-name guard (CONCAT vs btm.name,
- * never COALESCE(CONCAT(...))). Emitted `AS custody` in the cheap phase only
+ * projection's custody CASE, sharing `BOOKING_CUSTODIAN_NAME` so the sorted
+ * value is exactly the string the row renders. Emitted `AS custody` in the cheap phase only
  * when a custody sort is active — the `custody->0->>'name'` sort term needs it.
  */
 const CUSTODY_SORT_CASE = Prisma.sql`CASE
@@ -2523,23 +2550,16 @@ const CUSTODY_SORT_CASE = Prisma.sql`CASE
         WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
           jsonb_build_array(
             jsonb_build_object(
-              'name', CASE
-                WHEN bu.id IS NOT NULL
-                  THEN CONCAT(bu."firstName", ' ', bu."lastName")
-                ELSE btm.name
-              END,
+              'name', ${BOOKING_CUSTODIAN_NAME},
               'custodian', jsonb_build_object(
-                'name', CASE
-                  WHEN bu.id IS NOT NULL
-                    THEN CONCAT(bu."firstName", ' ', bu."lastName")
-                  ELSE btm.name
-                END,
+                'name', ${BOOKING_CUSTODIAN_NAME},
                 'user', CASE
                   WHEN bu.id IS NOT NULL THEN
                     jsonb_build_object(
                       'id', bu.id,
                       'firstName', bu."firstName",
                       'lastName', bu."lastName",
+                      'displayName', bu."displayName",
                       'profilePicture', bu."profilePicture"
                     )
                   ELSE NULL
@@ -2611,6 +2631,7 @@ const CHEAP_CUSTODY_JOINS = Prisma.sql`
                     'id', u.id,
                     'firstName', u."firstName",
                     'lastName', u."lastName",
+                    'displayName', u."displayName",
                     'profilePicture', u."profilePicture"
                   )
                 ELSE NULL
@@ -2866,7 +2887,7 @@ export function buildAdvancedAssetsQuery({
         })}
         ${assetQueryJoins}
         WHERE a.id = saq."assetId"
-        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", btm.id, btm.name, am.id, am.name
+        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."displayName", bu."profilePicture", btm.id, btm.name, am.id, am.name
       ) aq ON TRUE;
     `;
 }

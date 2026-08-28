@@ -144,3 +144,22 @@ export function serializeAssetImage<T extends AssetWithResolvableImage>({
     imageSource: resolved.source,
   };
 }
+
+/**
+ * The `mainImageExpiration` to serialize next to a resolved image.
+ *
+ * Expiration describes the asset's OWN signed URL only — a model cover is a
+ * public URL that never expires, and the asset row's date can be stale
+ * residue from a removed own image. Any source but `"asset"` therefore
+ * yields `null`, so a client-side expiry check never discards a valid image.
+ *
+ * @param source - Which tier won the cascade for the URLs being serialized
+ * @param expiration - The asset row's raw expiration, in the caller's format
+ * @returns The expiration when the asset's own image won, otherwise null
+ */
+export function serializeImageExpiration<T>(
+  source: AssetImageSource,
+  expiration: T
+): T | null {
+  return source === "asset" ? expiration : null;
+}

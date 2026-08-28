@@ -5,7 +5,7 @@
  * The webapp vitest harness has no real DB, so these assert the generated SQL
  * STRING and bound params (the @map-column guard from
  * .claude/rules/raw-sql-respects-prisma-map.md), not row-level results.
- * Row-level parity (UNION id-set == the old buildFullAssetSearchOr id-set) is
+ * Row-level parity (UNION id-set == the old Prisma OR clause's id-set) is
  * verified out-of-harness against a staging copy of a large org, plus the
  * post-deploy EXPLAIN ANALYZE — see the PR's verification notes.
  */
@@ -64,6 +64,12 @@ describe("buildAssetSearchUnion", () => {
     );
     expect(text).toContain('b."value"'); // Barcode.value (not "barcode")
     expect(text).toContain('q."id"'); // Qr.id
+    // Custodian names: `User.displayName` carries no @map, so the SQL column is
+    // the field name verbatim. It sits alongside first/last name because it is
+    // what the custody chip renders for users who set one.
+    expect(text).toContain('u."firstName"');
+    expect(text).toContain('u."lastName"');
+    expect(text).toContain('u."displayName"');
     // custom-field jsonb paths
     for (const path of CUSTOM_FIELD_SEARCH_PATHS) {
       expect(text).toContain(`'{${path}}'`);

@@ -37,6 +37,7 @@ export const BOOKING_SETTINGS_SELECT = {
           email: true,
           firstName: true,
           lastName: true,
+          displayName: true,
           profilePicture: true,
         },
       },
@@ -63,6 +64,7 @@ export const BOOKING_NOTIFICATION_SETTINGS_SELECT = {
           email: true,
           firstName: true,
           lastName: true,
+          displayName: true,
           profilePicture: true,
           // Format-preference columns so the booking notification resolver can
           // carry them onto each recipient and resolve recipient-specific email
@@ -351,6 +353,7 @@ export async function updateAlwaysNotifyTeamMembers({
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
