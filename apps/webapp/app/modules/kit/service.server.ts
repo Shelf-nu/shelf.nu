@@ -5838,16 +5838,6 @@ export async function updateKitAssets({
     }
 
     /**
-     * Assets that this call actually placed onto a booking that is physically
-     * out (ONGOING / OVERDUE). Populated inside the propagation block below,
-     * consumed by the CHECKED_OUT stamp after it.
-     *
-     * Declared out here because the stamp sits outside
-     * `if (bookingsToUpdate?.length)` and cannot see that block's scope.
-     */
-    let assetIdsOnLiveBooking: string[] = [];
-
-    /**
      * If user is adding/removing an asset to a kit which is a part of DRAFT, RESERVED, ONGOING or OVERDUE booking,
      * then we have to add or remove these assets to booking also
      */
@@ -5978,22 +5968,57 @@ export async function updateKitAssets({
           if (propagatedEvents.length > 0) {
             await recordEvents(propagatedEvents, tx);
           }
-        });
 
-        /**
-         * Record which assets landed on a booking that is physically out, so
-         * the stamp below can key on that fact instead of on `Kit.status`.
-         *
-         * DRAFT and RESERVED are deliberately excluded: `bookingsToUpdate`
-         * includes them so the asset joins the booking, but nothing has left
-         * the building yet, so nothing should read CHECKED_OUT.
-         */
-        const liveBookings = bookingsToUpdate.filter(
-          (b) => b.status === "ONGOING" || b.status === "OVERDUE"
-        );
-        if (liveBookings.length > 0) {
-          assetIdsOnLiveBooking = newlyAddedAssets.map((a) => a.id);
-        }
+          /**
+           * Did THIS kit physically leave on one of those bookings?
+           *
+           * A booking's own status cannot answer that. Progressive checkout
+           * flips a booking to ONGOING on the first scan, so a booking can be
+           * live while this kit was never scanned out — partial checkout only
+           * stamps kits whose every slice went (`completeKitIds`).
+           * `BookingAsset.checkedOutAt` is the authoritative per-slice fact,
+           * so ask the slices instead.
+           *
+           * The rows created above carry a NULL `checkedOutAt`, so they are
+           * excluded by this predicate and cannot vouch for themselves.
+           *
+           * Read inside the same transaction as the writes, so a check-in
+           * completing concurrently cannot leave us stamping against a booking
+           * that has since finished.
+           */
+          const liveBookingIds = bookingsToUpdate
+            .filter((b) => b.status === "ONGOING" || b.status === "OVERDUE")
+            .map((b) => b.id);
+
+          if (liveBookingIds.length > 0) {
+            const checkedOutSlices = await tx.bookingAsset.count({
+              where: {
+                bookingId: { in: liveBookingIds },
+                sourceKitId: kit.id,
+                checkedOutAt: { not: null },
+                booking: {
+                  status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+                },
+              },
+            });
+
+            if (checkedOutSlices > 0) {
+              const assetIdsToStamp = newlyAddedAssets.map((a) => a.id);
+
+              /**
+               * Written in the SAME transaction as the count above and the
+               * rows below it, so the evidence the stamp rests on and the
+               * stamp itself commit together. Outside the tx they could
+               * disagree: a check-in committing in between would release the
+               * kit's other slices and leave this one stamped against nothing.
+               */
+              await tx.asset.updateMany({
+                where: { id: { in: assetIdsToStamp }, organizationId },
+                data: { status: AssetStatus.CHECKED_OUT },
+              });
+            }
+          }
+        });
       }
 
       // why: there is deliberately no delete counterpart here. Removing an
@@ -6010,30 +6035,6 @@ export async function updateKitAssets({
       //
       // Asset-bulk-remove (asset-side flow) is unaffected; it still goes
       // through `removeAssets`, which deletes the rows explicitly.
-    }
-
-    /**
-     * An asset joining a kit that is physically out inherits CHECKED_OUT.
-     *
-     * Keyed on the booking rows this call just wrote, never on `Kit.status`.
-     * That column is a denormalised flag and it can be stale: check-in
-     * resolves which kits to release from the assets' CURRENT membership
-     * (`getKitIdsByAssets`), so a kit whose assets were detached while a
-     * booking was live keeps reading CHECKED_OUT after that booking ends,
-     * with nothing out. Trusting the flag stamps CHECKED_OUT onto assets that
-     * hold no reservation, and nothing clears it again — every release path
-     * runs through `releaseAssetsToAvailableUnlessCheckedOut`, which skips
-     * CHECKED_OUT rows by design.
-     *
-     * DRAFT and RESERVED bookings are excluded on purpose: the asset joins
-     * them (see the propagation block above), but nothing has physically left,
-     * so its status must not move.
-     */
-    if (assetIdsOnLiveBooking.length > 0) {
-      await db.asset.updateMany({
-        where: { id: { in: assetIdsOnLiveBooking }, organizationId },
-        data: { status: AssetStatus.CHECKED_OUT },
-      });
     }
 
     return kit;

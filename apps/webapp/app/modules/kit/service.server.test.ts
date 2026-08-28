@@ -142,6 +142,10 @@ vitest.mock("~/database/db.server", () => ({
       // bookings that already hold this kit, one `createMany` per booking.
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      // why: `updateKitAssets` asks whether this kit's existing slices carry
+      // `checkedOutAt` before inheriting CHECKED_OUT onto a new member. Zero
+      // by default so a test must opt in to "the kit really did go out".
+      count: vitest.fn().mockResolvedValue(0),
     },
     // why: the same helper re-opens any `BookingModelRequest` the deleted
     // slice was fulfilling, mirroring `removeAssets`.
@@ -5662,8 +5666,23 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
    */
   function arrange(
     existingBookingStatus: BookingStatus,
-    kitStatus: KitStatus = KitStatus.CHECKED_OUT
+    kitStatus: KitStatus = KitStatus.CHECKED_OUT,
+    /**
+     * Whether this kit's existing slices carry `checkedOutAt` — i.e. whether
+     * the kit physically went out. A booking can be ONGOING because a
+     * different kit was scanned, so the two are independent.
+     */
+    kitSlicesWereCheckedOut = true
   ) {
+    // why: the service counts this kit's checked-out slices to decide whether
+    // a new member inherits CHECKED_OUT. This is the switch between "the kit
+    // really is out" and "the booking is live but this kit never left".
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockResolvedValue(kitSlicesWereCheckedOut ? 1 : 0);
+
+    // why: `updateKitAssets` reads the kit with its members and their booking
+    // rows in one go; this is the persisted state each case is arranged around
+    // (the kit's own flag, and the booking its sitting member sits on).
     //@ts-expect-error missing vitest type
     db.kit.findUniqueOrThrow.mockResolvedValue({
       id: "kit-1",
@@ -5698,7 +5717,9 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
       ],
     });
 
-    // Submitted membership: the sitting member plus the newcomer.
+    // why: the service re-reads the submitted asset ids to diff them against
+    // current membership. Returning both the sitting member and the newcomer
+    // is what makes `newlyAddedAssets` exactly `["newcomer"]`.
     //@ts-expect-error missing vitest type
     db.asset.findMany.mockResolvedValue([
       {
@@ -5725,8 +5746,9 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
       },
     ]);
 
-    // The AssetKit row the picker just created for the newcomer, read back by
-    // the propagation block to populate `assetKitId` / `sourceKitId`.
+    // why: the propagation block reads back the AssetKit row the membership
+    // write just created, to populate `assetKitId` / `sourceKitId` on the new
+    // BookingAsset row. Without it the newcomer never reaches the booking.
     //@ts-expect-error missing vitest type
     db.assetKit.findMany.mockResolvedValue([
       { id: "ak-newcomer", assetId: "newcomer", quantity: 1 },
@@ -5787,6 +5809,17 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
     await act();
 
     expect(checkedOutStamps()).toEqual([["newcomer"]]);
+  });
+
+  it("does NOT stamp when the booking is live but this kit was never scanned out", async () => {
+    // Progressive checkout flips a booking to ONGOING on the first scan, and
+    // only stamps kits whose every slice went. So a live booking is not proof
+    // that THIS kit left: its slices carry no `checkedOutAt`.
+    arrange(BookingStatus.ONGOING, KitStatus.CHECKED_OUT, false);
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
   });
 
   it("scopes the stamp to the caller's organization", async () => {
