@@ -3,7 +3,10 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
-import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import {
+  resolveAssetImage,
+  serializeImageExpiration,
+} from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssets } from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
@@ -16,6 +19,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
 const querySchema = z.object({
@@ -125,6 +129,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                 },
                 {
                   lastName: {
+                    contains: term,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
+                // `displayName` replaces first/last name in the UI for users
+                // who set one, so it is the name a searcher can actually see.
+                {
+                  displayName: {
                     contains: term,
                     mode: Prisma.QueryMode.insensitive,
                   },
@@ -356,10 +368,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               Record<string, unknown> & {
                 custodian?: {
                   name?: string;
-                  user?: {
-                    firstName?: string | null;
-                    lastName?: string | null;
-                  } | null;
+                  // `displayName` is required, not optional: `assetIndexFields`
+                  // selects it, and a cast that omits it silently narrows the
+                  // row back to the legal name.
+                  user?: UserNameFields | null;
                 };
               }
             >
@@ -388,10 +400,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               return {
                 mainImage: isPlaceholder ? null : image.fullUrl,
                 thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+                mainImageExpiration: serializeImageExpiration(
+                  image.source,
+                  asset.mainImageExpiration?.toISOString() ?? null
+                ),
               };
             })(),
-            mainImageExpiration:
-              asset.mainImageExpiration?.toISOString() ?? null,
             // `getAssets` widens its `extraInclude` arg to
             // `Prisma.AssetInclude`, so the return type can't narrow back
             // to the `assetLocations` shape we requested above. Cast at
@@ -409,7 +423,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             tagNames: asset.tags?.map((tag) => tag.name) ?? [],
             custodianName: primaryCustody?.custodian?.name ?? null,
             custodianUserName: primaryCustody?.custodian?.user
-              ? `${primaryCustody.custodian.user.firstName} ${primaryCustody.custodian.user.lastName}`.trim()
+              ? resolveUserDisplayName(primaryCustody.custodian.user)
               : null,
             barcodes: asset.barcodes?.map((barcode) => barcode.value) ?? [],
             customFieldValues:
@@ -460,6 +474,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           email: member.user?.email || null,
           firstName: member.user?.firstName || null,
           lastName: member.user?.lastName || null,
+          displayName: member.user?.displayName ?? null,
           userId: member.userId,
         })),
       })

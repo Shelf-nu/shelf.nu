@@ -33,6 +33,15 @@ export function useKitAvailabilityData(items: Items) {
         mainImage: item.image,
         thumbnailImage: item.imageExpiration,
         status: item.status,
+        // Passed through to `resourceLabelContent` so the calendar shows the
+        // same code chip as the list view. The kits loader already carries
+        // these (KITS_INCLUDE_FIELDS); they were simply not forwarded, which
+        // is why the calendar was the one kit surface with no chip despite
+        // having the data. Mirrors use-asset-availability-data.ts.
+        // Kit has no sequentialId / preferredBarcodeId — the resolver treats
+        // both as absent and falls back to the QR id.
+        qrCodes: item.qrCodes ?? [],
+        barcodes: item.barcodes ?? [],
         // why: match the list view's semantic in kits._index.tsx — a kit is
         // bookable only when ALL slices are bookable (booking reserves the
         // whole kit). Undefined assetKits is treated as not-bookable since we

@@ -331,6 +331,22 @@ describe("generateWhereClause - search fail-closed", () => {
   });
 });
 
+describe("generateWhereClause - search routes through the org-scoped UNION", () => {
+  const orgId = "org_1";
+
+  it("routes a search term through the org-scoped UNION (a.id IN (...))", () => {
+    const sql = getSqlString(generateWhereClause(orgId, "widget", []));
+    // search now narrows by matching-id set, not an inline multi-table OR
+    expect(sql).toContain('a."id" IN (');
+    expect(sql).toContain("UNION");
+    // org-scoped inside the union
+    expect(sql).toContain('"organizationId"');
+    // the old top-level category/location ILIKE against the outer row is gone
+    expect(sql).not.toContain("c.name ILIKE");
+    expect(sql).not.toContain("l.name ILIKE");
+  });
+});
+
 describe("generateWhereClause - special filter values", () => {
   const orgId = "test-org-id";
 
@@ -974,6 +990,56 @@ describe("assetQueryFragment", () => {
     });
   });
 
+  describe("barcodes aggregation ordering", () => {
+    /**
+     * Isolates the `barcodes` jsonb_agg block and collapses whitespace, so
+     * the assertions survive a re-indent by prettier. The per-type
+     * `barcode_<Type>` scalar columns further down carry the same ORDER BY,
+     * so a whole-SQL `toContain` would pass even with the aggregate
+     * unordered — the slice is what makes these tests meaningful.
+     */
+    function getBarcodesAggregateSql() {
+      const sql = getFragmentSqlString(
+        assetQueryFragment({ withBarcodes: true })
+      );
+      const start = sql.indexOf("jsonb_agg(");
+      const end = sql.indexOf("AS barcodes", start);
+
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+
+      return sql.slice(start, end).replace(/\s+/g, " ");
+    }
+
+    it("orders the barcodes aggregation deterministically", () => {
+      // BarcodeCell slices this array: barcodes.slice(0, 2) decides which
+      // chips a user sees, and hiddenBarcodes[0] decides which code the "+N"
+      // control previews. jsonb_agg has an undefined input order without an
+      // explicit ORDER BY, so without this the visible pair could differ
+      // between page loads for an asset with 3+ barcodes of one type.
+      expect(getBarcodesAggregateSql()).toContain(
+        `) ORDER BY b."createdAt" ASC, b.id ASC )`
+      );
+    });
+
+    it("uses the same sort key as the per-type barcode scalar columns", () => {
+      const sql = getFragmentSqlString(
+        assetQueryFragment({ withBarcodes: true })
+      );
+
+      // The scalar columns pick their value with ORDER BY createdAt, id
+      // LIMIT 1. Element 0 of the aggregated array has to be that same
+      // barcode, or the rendered chip and the sort key disagree.
+      expect(getBarcodesAggregateSql()).toContain(
+        `ORDER BY b."createdAt" ASC, b.id ASC`
+      );
+      expect(sql).toContain(
+        `WHERE b."assetId" = a.id AND b.type = 'Code128'
+      ORDER BY b."createdAt" ASC, b.id ASC`
+      );
+    });
+  });
+
   describe("withCustomFieldDefinitions option", () => {
     it("includes full definitions by default (matches AdvancedIndexAsset type)", () => {
       const fragment = assetQueryFragment();
@@ -1141,18 +1207,12 @@ describe("generateWhereClause - tag EXISTS-ification (slim-phase enabler)", () =
    * from the cheap phase, so any tag reference in the WHERE clause must be a
    * self-contained per-asset EXISTS (not a bare `t.name`/`t.id` against an
    * outer join alias). These tests lock that shape.
+   *
+   * (Free-text search's own tag matching moved into the org-scoped UNION —
+   * see the "search routes through the org-scoped UNION" describe below and
+   * `search-union.server.test.ts` — so only filter-driven tag EXISTS-ification
+   * remains here.)
    */
-  it("EXISTS-ifies the tag-name search (per-asset scoped, not a fanning join)", () => {
-    const sql = getSqlString(generateWhereClause(orgId, "widget", []));
-
-    // The tag search must be an EXISTS over _AssetToTag JOIN Tag scoped to the
-    // current asset — never a bare `t.name ILIKE` disjunct against an outer
-    // join that would force a GROUP BY.
-    expect(sql).toContain('SELECT 1 FROM public."_AssetToTag" att');
-    expect(sql).toContain('JOIN public."Tag" t ON att."B" = t.id');
-    expect(sql).toContain('WHERE att."A" = a.id AND t.name ILIKE');
-  });
-
   it("EXISTS-ifies a single-tag `contains` filter", () => {
     const filter: Filter = {
       name: "tags",
@@ -1242,7 +1302,6 @@ describe("buildAdvancedAssetsQuery", () => {
       withBookings: overrides?.withBookings ?? false,
       withBarcodes: overrides?.withBarcodes ?? false,
       paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
-      hasSearch: Boolean(search),
     });
   }
 
@@ -1296,16 +1355,27 @@ describe("buildAdvancedAssetsQuery", () => {
     );
   });
 
-  it("keeps Category/Location joins for text search even without a name sort", () => {
-    // The search predicate references c.name / l.name in the WHERE, so a search
-    // must resolve those joins (independent of any sort). `c.name ILIKE` only
-    // appears when a search is active, so it is the reliable signal.
-    expect(getQuerySqlString(build({ search: "widget" }))).toContain(
-      "c.name ILIKE"
+  it("omits the category/location joins when only search is active (default sort)", () => {
+    // Search now narrows via `a."id" IN (<UNION>)` in the WHERE clause (see
+    // generateWhereClause / buildAssetSearchUnion) instead of a top-level
+    // `c.name ILIKE` / `l.name ILIKE`, so the slim cheap phase no longer
+    // needs Category/Location joined just because a search is active.
+    // Isolate the cheap phase (everything before `sorted_asset_query`) the
+    // same way the name-sort gating test above does — the heavy per-row
+    // lateral projection always joins Category/Location for the final
+    // rendered row, so asserting on the full SQL would false-negative.
+    const sql = getQuerySqlString(build({ search: "widget" }));
+    const cheap = sql.slice(0, sql.indexOf("sorted_asset_query"));
+
+    // CHEAP_CATEGORY_JOIN / CHEAP_LOCATION_JOIN's emitted SQL (query.server.ts)
+    expect(cheap).not.toContain(
+      'LEFT JOIN public."Category" c ON a."categoryId" = c.id'
     );
-    expect(getQuerySqlString(build({ sortBy: [] }))).not.toContain(
-      "c.name ILIKE"
-    );
+    expect(cheap).not.toContain('SELECT l.id, l.name, l."parentId"');
+
+    // The search itself is still applied via the UNION in the WHERE clause.
+    expect(cheap).toContain('a."id" IN (');
+    expect(cheap).toContain("UNION");
   });
 
   it("injects the barcode sort-key selects only when a barcode sort is active", () => {
@@ -1413,5 +1483,83 @@ describe("buildAdvancedAssetsQuery", () => {
       expect(sql).toContain('a."createdAt" AS "assetCreatedAt"');
       expect(sql).not.toContain('to_char(a."createdAt"');
     });
+  });
+});
+
+describe("custodian display name", () => {
+  /**
+   * `displayName` replaces the legal name for users who set one. The advanced
+   * index builds its custodian payload in raw SQL, which typecheck cannot read
+   * — and a missing column here is invisible at runtime, because the row still
+   * renders a perfectly plausible name: the user's legal one. Asserting the SQL
+   * text is the only guard.
+   */
+  function fragmentSql() {
+    return assetQueryFragment().strings.join("?");
+  }
+
+  it("selects displayName on the booking-derived custodian", () => {
+    // `bu` is the custodian of the ONGOING/OVERDUE booking a CHECKED_OUT asset
+    // is on — projected unconditionally, so it needs no options.
+    expect(fragmentSql()).toContain(`'displayName', bu."displayName"`);
+  });
+
+  it("selects displayName on every booking custodian and creator", () => {
+    // These three only exist in the bookings projection: the booking's
+    // custodian team member's user, its custodian user, and its creator.
+    const sql = assetQueryFragment({ withBookings: true }).strings.join("?");
+
+    for (const alias of ["ctmu", "cu", "cr"]) {
+      expect(sql).toContain(`'displayName', ${alias}."displayName"`);
+    }
+  });
+
+  it("selects displayName on the direct-custody custodian", () => {
+    // The per-asset custody lateral lives in the joins, not the fragment.
+    expect(assetQueryJoins.strings.join("?")).toContain(
+      `'displayName', u."displayName"`
+    );
+  });
+
+  it("resolves the booking custodian name from displayName first", () => {
+    const sql = fragmentSql();
+
+    // NULLIF(TRIM(...)) so a blank display name falls through to the legal
+    // name rather than rendering an empty chip.
+    expect(sql).toContain(
+      `COALESCE(NULLIF(TRIM(bu."displayName"), ''), TRIM(CONCAT(bu."firstName", ' ', bu."lastName")))`
+    );
+  });
+
+  it("keeps the NRM guard on bu.id rather than on the name expression", () => {
+    const sql = fragmentSql();
+
+    // CONCAT ignores NULLs and yields '' for an NRM, so the name can never be
+    // NULL — only `bu.id` distinguishes a registered user from an NRM.
+    expect(sql).toContain("WHEN bu.id IS NOT NULL");
+  });
+
+  it("groups by displayName so the custodian columns stay aggregatable", () => {
+    // Selecting a column without adding it to GROUP BY is a runtime Postgres
+    // error, not a type error — so the two have to be asserted together.
+    const { orderByInner } = parseSortingOptions([]);
+    const sql = buildAdvancedAssetsQuery({
+      whereClause: generateWhereClause("org-1", null, []),
+      orderByInner,
+      customFieldSortings: [],
+      sortBy: [],
+      parsedFilters: [],
+      withBookings: false,
+      withBarcodes: false,
+      paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
+    }).strings.join("?");
+
+    // Slice the clause out before asserting: `bu."displayName"` also appears in
+    // the custody JSON projection and inside BOOKING_CUSTODIAN_NAME's COALESCE,
+    // so a bare `toContain` over the whole query stays green even when the
+    // grouping column is removed — which is the only thing this guards.
+    const groupBy = sql.match(/GROUP BY [^\n]*/)?.[0] ?? "";
+
+    expect(groupBy).toContain('bu."displayName"');
   });
 });

@@ -79,6 +79,18 @@ export type EntityForCodeResolution = {
 };
 
 /**
+ * Which kind of code-bearing entity a row is.
+ *
+ * Deliberately NOT part of {@link EntityForCodeResolution}: it is a fact the
+ * CALL SITE knows, not a column on the row, and no loader payload carries it.
+ * It is a required argument to {@link resolveDisplayCode} so a new surface
+ * cannot silently inherit the wrong one — the failure it guards against is
+ * invisible at runtime (wrong tooltip wording, right code) and so would never
+ * be caught by a test nobody thought to write.
+ */
+export type CodeEntityKind = "asset" | "kit";
+
+/**
  * Back-compat alias. New code should use `EntityForCodeResolution`.
  * @deprecated — use `EntityForCodeResolution` (kit-inclusive).
  */
@@ -123,6 +135,15 @@ export type ResolvedDisplayCode = {
   /** True when the workspace-preferred type was unavailable and we fell back to QR. */
   isFallback: boolean;
   /**
+   * Carried through so the badge can word the fallback honestly. A kit cannot
+   * be given a SAM ID, so it must not be told to add one.
+   *
+   * Always set here, because {@link resolveDisplayCode} requires it. The badge
+   * accepts it optionally, for preview chips that are hand-built rather than
+   * resolved — see `AssetCodeBadgeProps`.
+   */
+  entityKind: CodeEntityKind;
+  /**
    * What the workspace ASKED FOR — included so callers can craft good
    * help/tooltip copy when `isFallback` is true (so the badge can say
    * "workspace prefers Code 128 but this asset has none" instead of just
@@ -132,17 +153,26 @@ export type ResolvedDisplayCode = {
 };
 
 /**
- * Resolves the display code for one asset given its workspace's preference.
+ * Resolves the display code for one code-bearing entity given its workspace's
+ * preference.
  *
- * @param input - The asset + organization slices needed to resolve
- * @returns A `ResolvedDisplayCode` ready to pass into `<AssetCodeBadge>`
+ * @param input - The entity + organization slices needed to resolve, plus the
+ *   kind of entity being resolved
+ * @param input.entityKind - Required. Only ever affects the fallback HELP TEXT,
+ *   never which code is chosen — but getting it wrong tells a kit's reader to
+ *   "add a SAM ID", which kits cannot have. Required rather than defaulted
+ *   precisely because the wrong value is invisible: the badge still renders,
+ *   still shows the right code, and only the advice is impossible to follow.
+ * @returns A `ResolvedDisplayCode` ready to spread into `<AssetCodeBadge>`
  */
 export function resolveDisplayCode({
   entity,
   organization,
+  entityKind,
 }: {
   entity: EntityForCodeResolution;
   organization: OrganizationForCodeResolution;
+  entityKind: CodeEntityKind;
 }): ResolvedDisplayCode {
   // Defensive: if the loader didn't include these relations (e.g. older
   // call site, partial select, or a test fixture), treat them as empty.
@@ -159,6 +189,7 @@ export function resolveDisplayCode({
     type: "QR_ID",
     isFallback,
     workspacePreference: organization.qrIdDisplayPreference,
+    entityKind,
   });
 
   // 1. Per-entity override wins when present and resolvable — but ONLY if
@@ -175,6 +206,7 @@ export function resolveDisplayCode({
         type: preferred.type,
         isFallback: false,
         workspacePreference: organization.qrIdDisplayPreference,
+        entityKind,
       };
     }
     // Stale FK — fall through to workspace preference.
@@ -198,6 +230,7 @@ export function resolveDisplayCode({
             type: "SAM_ID",
             isFallback: false,
             workspacePreference: organization.qrIdDisplayPreference,
+            entityKind,
           }
         : qrFallback(true);
 
@@ -226,6 +259,7 @@ export function resolveDisplayCode({
             type: matching[0].type,
             isFallback: false,
             workspacePreference: organization.qrIdDisplayPreference,
+            entityKind,
           }
         : qrFallback(true);
     }

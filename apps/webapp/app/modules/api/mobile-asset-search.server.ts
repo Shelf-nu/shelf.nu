@@ -1,51 +1,49 @@
 import type { Prisma } from "@prisma/client";
-import {
-  buildFullAssetSearchOr,
-  buildNarrowAssetSearchOr,
-  isIdShapedSearch,
-  splitAssetSearchTerms,
-} from "~/modules/asset/search.server";
+import { resolveAssetSearchIds } from "~/modules/asset/search-ids.server";
+import { splitAssetSearchTerms } from "~/modules/asset/search.server";
 
 /**
- * Search clauses for the mobile assets list
+ * Search resolution for the mobile assets list
  * (routes/api+/mobile+/assets.ts).
  *
- * Thin composition over the SHARED simple-mode search module
- * (`modules/asset/search.server.ts`) — the same clause builders the web
- * `getAssets` fetcher uses. Mobile search therefore matches exactly the
- * fields web search matches (title, sequentialId, description, category,
- * location, tags, custodian names, QR/barcode, custom fields) and inherits
- * web's ID-shaped fast-path strategy: narrow indexed clause first, full
- * clause only when the narrow one finds nothing.
+ * Resolves the search term to a Prisma where-fragment via the shared
+ * org-scoped UNION (`buildAssetSearchUnion`) — the same index-driven,
+ * org-scoped path the web `getAssets` fetcher and the advanced index use,
+ * replacing the old Prisma multi-table OR + narrow/fallback two-query dance.
+ * Mobile search therefore matches exactly the same 10 sources web search
+ * does (title, sequentialId, description, category, location, tags,
+ * custodian names, QR/barcode, custom fields) in a single query. ID-shaped
+ * searches (which previously took a narrow indexed fast path with a
+ * full-clause fallback) now resolve directly to the full, more-correct
+ * result set — a superset of the old narrow match, matching the web indexes'
+ * behaviour.
  */
-
-/** The two-step where fragments the mobile assets route queries with. */
-export interface MobileAssetSearchClauses {
-  /** Fragment for the first query. `{}` when there is nothing to search. */
-  primary: Prisma.AssetWhereInput;
-  /**
-   * Full-clause fragment to re-query with when `primary` (the narrow
-   * ID-shaped fast path) returns zero rows. `null` when `primary` already IS
-   * the full clause — or when there is no search — meaning no second query
-   * is ever needed.
-   */
-  fallback: Prisma.AssetWhereInput | null;
-}
 
 /**
- * Builds the search fragments for the mobile assets list.
+ * Resolves the mobile assets search to a Prisma where-fragment.
  *
- * Mirrors `getAssets`' strategy exactly: ID-shaped terms (see
- * `looksLikeAssetId`) take the narrow indexed clause with the full clause as
- * a zero-row fallback; anything else goes straight to the full clause.
+ * Runs the shared org-scoped UNION (via `resolveAssetSearchIds`) for a
+ * non-empty term set and materializes the matching asset ids into an
+ * `id: { in }` fragment. The route's `baseWhere` has no top-level `OR` (status
+ * AVAILABLE rides in `AND`, myCustody is `custody: { some }`), so this fragment
+ * is safe to spread directly alongside it — it simply ANDs in.
  *
- * @param search - Raw (already length-capped) search term from the request
- * @returns Spreadable primary/fallback where fragments — see
- *   {@link MobileAssetSearchClauses}
+ * @param organizationId - Tenant scope; every UNION branch is org-scoped.
+ * @param search - Raw (already length-capped) search term from the request.
+ * @returns `{}` for a genuinely empty search (no filter); an always-false
+ *   `{ id: { in: [] } }` for whitespace/bare-comma input (a debounced
+ *   type-ahead space must not flash the full list) or a search with no
+ *   matches; otherwise `{ id: { in: <matching ids> } }`.
+ * @throws {ShelfError} 400 when the search matches more ids than the bind-param
+ *   ceiling allows (see `resolveAssetSearchIds`) — only reachable by a mega-org.
  */
-export function buildMobileAssetSearchWhere(
-  search: string
-): MobileAssetSearchClauses {
+export async function resolveMobileAssetSearchWhere({
+  organizationId,
+  search,
+}: {
+  organizationId: string;
+  search: string;
+}): Promise<Prisma.AssetWhereInput> {
   const searchTerms = splitAssetSearchTerms(search);
 
   if (searchTerms.length === 0) {
@@ -54,21 +52,17 @@ export function buildMobileAssetSearchWhere(
     // typed space would otherwise flash the full unfiltered list.
     // `id: { in: [] }` is the canonical always-false Prisma clause. Only a
     // genuinely empty search string means "no filter".
-    if (search.length > 0) {
-      return { primary: { id: { in: [] } }, fallback: null };
-    }
-    return { primary: {}, fallback: null };
+    return search.length > 0 ? { id: { in: [] } } : {};
   }
 
-  if (isIdShapedSearch(searchTerms)) {
-    return {
-      primary: { OR: buildNarrowAssetSearchOr(searchTerms) },
-      fallback: { OR: buildFullAssetSearchOr(searchTerms) },
-    };
-  }
+  // Shared with the web getAssets fetcher: resolveAssetSearchIds runs the
+  // org-scoped UNION (retry-wrapped, to claim the read semantics the client
+  // extension cannot infer) and guards the id set against Postgres'
+  // ~65k bind-param ceiling, throwing a friendly 400 rather than hard-failing.
+  const ids = await resolveAssetSearchIds({
+    organizationId,
+    terms: searchTerms,
+  });
 
-  return {
-    primary: { OR: buildFullAssetSearchOr(searchTerms) },
-    fallback: null,
-  };
+  return { id: { in: ids } };
 }

@@ -37,12 +37,15 @@ import { assertIsDataWithResponseInit } from "@helpers/assertions";
 // whole point is to inspect the `where` clause Prisma receives, so we mock
 // `db.asset.findMany` + `count` to a jest spy. (vi.mock calls hoist above the
 // imports above at runtime, so importing `db` doesn't load the real module.)
+// `$queryRaw` is mocked too — the search resolver now runs the shared
+// org-scoped UNION as a raw query instead of a Prisma multi-table OR.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: {
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -70,6 +73,7 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
 
 const findManyMock = vi.mocked(db.asset.findMany);
 const countMock = vi.mocked(db.asset.count);
+const queryRawMock = vi.mocked(db.$queryRaw);
 const requireMobileAuthMock = vi.mocked(requireMobileAuth);
 const requireOrganizationAccessMock = vi.mocked(requireOrganizationAccess);
 
@@ -87,6 +91,9 @@ beforeEach(() => {
 
   findManyMock.mockResolvedValue([]);
   countMock.mockResolvedValue(0);
+  // why: default to no search matches — tests that exercise search override
+  // this to a known id set.
+  queryRawMock.mockResolvedValue([]);
 });
 
 describe("GET /api/mobile/assets", () => {
@@ -200,6 +207,82 @@ describe("GET /api/mobile/assets", () => {
       custody: null,
     });
   });
+
+  it("sends mainImageExpiration only when the asset's own image won the cascade", async () => {
+    // why: expiration describes the asset's OWN signed URL only. A model
+    // cover is a public URL that never expires, and the row's date can be
+    // stale residue from a removed own image — a client-side expiry check
+    // fed that pairing discards a valid image. This pins the source gate.
+    findManyMock.mockResolvedValueOnce([
+      // Own image: the signed URL and its expiration travel together.
+      {
+        id: "asset-own",
+        title: "Own image",
+        status: "AVAILABLE",
+        mainImage: "https://supabase.test/sign/assets/own.png",
+        thumbnailImage: "https://supabase.test/sign/assets/own-thumbnail.png",
+        mainImageExpiration: "2026-08-01T00:00:00.000Z",
+        availableToBook: true,
+        category: null,
+        assetModel: null,
+        assetKits: [],
+        assetLocations: [],
+        custody: [],
+      },
+      // Inherited image: stale per-asset expiration residue must NOT ship
+      // next to the model's never-expiring public URL.
+      {
+        id: "asset-inherited",
+        title: "Inherited image",
+        status: "AVAILABLE",
+        mainImage: null,
+        thumbnailImage: null,
+        mainImageExpiration: "2026-08-01T00:00:00.000Z",
+        availableToBook: true,
+        category: null,
+        assetModel: {
+          image: "https://supabase.test/public/files/model.png",
+          thumbnailImage:
+            "https://supabase.test/public/files/model-thumbnail.png",
+        },
+        assetKits: [],
+        assetLocations: [],
+        custody: [],
+      },
+    ] as never);
+
+    // why: the loader runs findMany + count in parallel for the pagination
+    // envelope; the count must match the two mocked rows above.
+    countMock.mockResolvedValueOnce(2);
+
+    const args = createLoaderArgs({
+      request: new Request("http://localhost:3000/api/mobile/assets"),
+    });
+
+    const response = await loader(args);
+    assertIsDataWithResponseInit(response);
+    const body = response.data as {
+      assets: Array<{
+        id: string;
+        mainImage: string | null;
+        imageSource: string;
+        mainImageExpiration: string | null;
+      }>;
+    };
+
+    expect(body.assets[0]).toMatchObject({
+      id: "asset-own",
+      mainImage: "https://supabase.test/sign/assets/own.png",
+      imageSource: "asset",
+      mainImageExpiration: "2026-08-01T00:00:00.000Z",
+    });
+    expect(body.assets[1]).toMatchObject({
+      id: "asset-inherited",
+      mainImage: "https://supabase.test/public/files/model.png",
+      imageSource: "model",
+      mainImageExpiration: null,
+    });
+  });
 });
 
 describe("GET /api/mobile/assets — status filter", () => {
@@ -264,12 +347,37 @@ describe("GET /api/mobile/assets — status filter", () => {
 });
 
 describe("GET /api/mobile/assets — search", () => {
-  it("re-queries with the full clause when an ID-shaped search matches nothing", async () => {
-    // The only two-query sequence in this loader. A regression here is
-    // silent (users just get zero results — the exact complaint that
-    // opened this ticket), so pin the mechanism: narrow first, full on
-    // zero rows, mirroring getAssets' fallback.
-    countMock.mockResolvedValueOnce(0).mockResolvedValueOnce(2);
+  it("resolves a search via the shared UNION into a single query", async () => {
+    // The endpoint now runs one query: the org-scoped UNION resolves the
+    // matching asset ids (mocked via db.$queryRaw), and those ids are ANDed
+    // into the same findMany/count call — no narrow/fallback re-query.
+    queryRawMock.mockResolvedValueOnce([{ id: "asset-1" }, { id: "asset-2" }]);
+    countMock.mockResolvedValueOnce(2);
+
+    const args = createLoaderArgs({
+      request: new Request(
+        "http://localhost:3000/api/mobile/assets?search=tripod"
+      ),
+    });
+
+    await loader(args);
+
+    expect(queryRawMock).toHaveBeenCalledTimes(1);
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where).toMatchObject({
+      organizationId: FAKE_ORG_ID,
+      id: { in: ["asset-1", "asset-2"] },
+    });
+  });
+
+  it("id-shaped searches also resolve via the single UNION query (superset, pre-approved)", async () => {
+    // Previously ID-shaped terms took a narrow indexed fast path with a
+    // full-clause fallback on zero rows. The UNION always searches all 10
+    // sources in one query, so an ID-shaped search now returns the full
+    // (more correct) result set directly — no second query.
+    queryRawMock.mockResolvedValueOnce([{ id: "asset-9" }]);
+    countMock.mockResolvedValueOnce(1);
 
     const args = createLoaderArgs({
       request: new Request(
@@ -279,31 +387,23 @@ describe("GET /api/mobile/assets — search", () => {
 
     await loader(args);
 
-    expect(findManyMock).toHaveBeenCalledTimes(2);
-    const first = findManyMock.mock.calls[0]![0]!.where!;
-    const second = findManyMock.mock.calls[1]![0]!.where!;
-    // Narrow clause: flat OR over the 5 indexed columns.
-    expect(first.OR).toHaveLength(5);
-    expect(JSON.stringify(first)).not.toContain("customFields");
-    // Full clause: one 10-branch group per term, heavy branches included.
-    expect(second.OR).toHaveLength(1);
-    const fullGroup = (second.OR as Array<{ OR: unknown[] }>)[0]!;
-    expect(fullGroup.OR).toHaveLength(10);
-    expect(JSON.stringify(second)).toContain("customFields");
+    expect(queryRawMock).toHaveBeenCalledTimes(1);
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where).toMatchObject({ id: { in: ["asset-9"] } });
   });
 
-  it("does not re-query when the narrow ID search finds rows", async () => {
-    countMock.mockResolvedValueOnce(3);
-
+  it("does not run the UNION or filter by id for an empty search", async () => {
     const args = createLoaderArgs({
-      request: new Request(
-        "http://localhost:3000/api/mobile/assets?search=21035"
-      ),
+      request: new Request("http://localhost:3000/api/mobile/assets"),
     });
 
     await loader(args);
 
+    expect(queryRawMock).not.toHaveBeenCalled();
     expect(findManyMock).toHaveBeenCalledTimes(1);
+    const where = findManyMock.mock.calls[0]![0]!.where!;
+    expect(where).not.toHaveProperty("id");
   });
 
   it("matches nothing (not everything) for whitespace/comma-only search", async () => {
@@ -317,6 +417,7 @@ describe("GET /api/mobile/assets — search", () => {
 
     await loader(args);
 
+    expect(queryRawMock).not.toHaveBeenCalled();
     expect(findManyMock).toHaveBeenCalledTimes(1);
     const where = findManyMock.mock.calls[0]![0]!.where!;
     expect(where).toMatchObject({ id: { in: [] } });

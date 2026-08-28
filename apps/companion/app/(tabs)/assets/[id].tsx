@@ -1,3 +1,4 @@
+import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
 import { useState } from "react";
 import { useAssetBookings } from "@/hooks/use-asset-bookings";
 import type { AssetBookingRow } from "@/lib/api/types";
@@ -24,8 +25,10 @@ import {
   type AssetCustodyListEntry,
   type Location as LocationType,
   type TeamMember,
+  getApiBaseUrl,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { useOrg } from "@/lib/org-context";
 import { BOOKING_STATUS_LABELS } from "@shelf/labels";
 import { userHasPermission } from "@/lib/permissions";
@@ -155,7 +158,7 @@ export default function AssetDetailScreen() {
     handleReleaseCustody,
     performAssignQuantity,
     performReleaseQuantity,
-  } = useCustodyActions({ asset, currentOrg, fetchAsset });
+  } = useCustodyActions({ asset, currentOrg, fetchAsset, isSelfService });
 
   // Bookings this asset appears in — lazy, only once the section is opened.
   const assetBookings = useAssetBookings(asset?.id, currentOrg?.id);
@@ -176,6 +179,30 @@ export default function AssetDetailScreen() {
     orgId: currentOrg?.id,
     fetchAsset,
   });
+
+  /**
+   * Self-service custody: resolve the caller's own team-member record and go
+   * straight to the operation — the picker would hold exactly one row (their
+   * own; the team-members endpoint is self-scoped for that role). QT assets
+   * continue into the quantity sheet; INDIVIDUAL assets confirm directly.
+   */
+  const handleTakeCustodySelf = async () => {
+    if (!currentOrg) return;
+    setIsActionLoading(true);
+    const { member, error: resolveError } = await resolveSelfTeamMember(
+      currentOrg.id
+    );
+    setIsActionLoading(false);
+    if (!member) {
+      Alert.alert("Error", resolveError ?? "Something went wrong.");
+      return;
+    }
+    if (isQtyTracked) {
+      setAssignQtyMember(member);
+    } else {
+      handleAssignCustody(member);
+    }
+  };
 
   // UI states
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
@@ -505,22 +532,22 @@ export default function AssetDetailScreen() {
                 {availableUnits != null && (
                   <View style={styles.quantityBreakdownRow}>
                     <QuantityStat
-                      label="Available"
+                      label={ASSET_QTY_STATUS_LABELS.AVAILABLE}
                       value={`${availableUnits}${unitSuffix}`}
                       warning={isAvailableLowStock}
                     />
                     {breakdown && (
                       <>
                         <QuantityStat
-                          label="In custody"
+                          label={ASSET_QTY_STATUS_LABELS.IN_CUSTODY}
                           value={`${breakdown.inCustody}${unitSuffix}`}
                         />
                         <QuantityStat
-                          label="Reserved"
+                          label={ASSET_QTY_STATUS_LABELS.RESERVED}
                           value={`${breakdown.reserved}${unitSuffix}`}
                         />
                         <QuantityStat
-                          label="Checked out"
+                          label={ASSET_QTY_STATUS_LABELS.CHECKED_OUT}
                           value={`${breakdown.checkedOut}${unitSuffix}`}
                         />
                       </>
@@ -534,7 +561,13 @@ export default function AssetDetailScreen() {
           {/* ── Quick Actions ──────────────────────────── */}
           <QuickActions
             asset={asset}
-            onAssignCustody={() => setShowCustodyPicker(true)}
+            onAssignCustody={() => {
+              if (isSelfService) {
+                void handleTakeCustodySelf();
+              } else {
+                setShowCustodyPicker(true);
+              }
+            }}
             onReleaseCustody={handleReleaseCustody}
             onLocationPress={() => setShowLocationPicker(true)}
             onEditPress={() =>
@@ -550,6 +583,7 @@ export default function AssetDetailScreen() {
             canUpdate={canUpdateAsset}
             canDelete={canDeleteAsset}
             canCustody={canCustody}
+            isSelfService={isSelfService}
             isQtyTracked={isQtyTracked}
             custodyAvailable={isQtyTracked ? assignMax : undefined}
           />
@@ -615,8 +649,10 @@ export default function AssetDetailScreen() {
                     label={entry.custodian.name}
                     value={
                       kitHeldQty > 0
-                        ? `${qtyLabel ?? "In custody"} • ${kitHeldQty} via kit`
-                        : qtyLabel ?? "In custody"
+                        ? `${
+                            qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
+                          } • ${kitHeldQty} via kit`
+                        : qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
                     }
                     onPress={
                       canReleaseRow
@@ -690,6 +726,26 @@ export default function AssetDetailScreen() {
                 )}
               />
             )}
+            {asset.assetModel?.name ? (
+              <InfoRow
+                icon="cube-outline"
+                label="Asset Model"
+                value={asset.assetModel.name}
+              />
+            ) : null}
+            {asset.sequentialId ? (
+              // why: the scanner's manual entry accepts a SAM ID, so the app
+              // has to be able to tell you what an asset's SAM ID is. Web has
+              // always shown it as "Asset ID".
+              <InfoRow
+                // `barcode-outline` rather than `pricetag-outline`: the Category
+                // row above already owns the pricetag, and it also matches the
+                // scanner affordance this row exists for.
+                icon="barcode-outline"
+                label="Asset ID"
+                value={asset.sequentialId}
+              />
+            ) : null}
             <InfoRow
               icon="calendar-outline"
               label="Created"
@@ -839,10 +895,7 @@ export default function AssetDetailScreen() {
               <View style={styles.qrCard}>
                 {QRCode ? (
                   <QRCode
-                    value={`${
-                      process.env.EXPO_PUBLIC_QR_BASE_URL ||
-                      "https://app.shelf.nu"
-                    }/qr/${asset.qrCodes[0].id}`}
+                    value={`${getApiBaseUrl()}/qr/${asset.qrCodes[0].id}`}
                     size={160}
                     backgroundColor={colors.white}
                     color={colors.foreground}
@@ -993,16 +1046,18 @@ export default function AssetDetailScreen() {
               />
               <QuantityInputSheet
                 visible={assignQtyMember != null}
-                title="Assign Quantity"
+                title={isSelfService ? "Take Quantity" : "Assign Quantity"}
                 subtitle={
                   assignQtyMember
-                    ? `Assign to ${memberDisplayName(assignQtyMember)}`
+                    ? isSelfService
+                      ? "How many units are you taking?"
+                      : `Assign to ${memberDisplayName(assignQtyMember)}`
                     : undefined
                 }
                 max={assignMax}
                 defaultValue={1}
                 unitOfMeasure={asset.unitOfMeasure}
-                confirmLabel="Assign"
+                confirmLabel={isSelfService ? "Take" : "Assign"}
                 onSubmit={(quantity) => {
                   const member = assignQtyMember;
                   setAssignQtyMember(null);

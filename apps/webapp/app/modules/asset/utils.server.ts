@@ -5,6 +5,7 @@ import type {
   Location,
   Prisma,
   CustomFieldType,
+  User,
 } from "@prisma/client";
 import _ from "lodash";
 import { z } from "zod";
@@ -17,6 +18,7 @@ import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { getParamsValues } from "~/utils/list";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
+import { splitFilterParam } from "./filter-param";
 import { parseFiltersWithHierarchy } from "./query.server";
 import type { ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
@@ -35,6 +37,10 @@ import type { Column } from "../asset-index-settings/helpers";
  * @param userId - Acting user id (for the actor link)
  * @param firstName - Acting user's first name
  * @param lastName - Acting user's last name
+ * @param displayName - Acting user's `User.displayName`, when the caller has
+ *   it. `wrapUserLinkForNote` prefers it over first+last, so a caller holding
+ *   the full user row should pass it or the note names the person differently
+ *   from every other surface that renders them.
  * @param isRemoving - When true, render the removal phrasing
  * @param type - Asset type; only QUANTITY_TRACKED gets a unit count
  * @param unitOfMeasure - Optional unit label ("boxes", defaults to "units")
@@ -47,7 +53,7 @@ export function getLocationUpdateNoteContent({
   userId,
   firstName,
   lastName,
-
+  displayName,
   isRemoving,
   type,
   unitOfMeasure,
@@ -58,6 +64,8 @@ export function getLocationUpdateNoteContent({
   userId: string;
   firstName: string;
   lastName: string;
+  /** Optional — see the `@param` note; callers that omit it keep first+last. */
+  displayName?: string | null;
   isRemoving?: boolean;
   /** Asset type — only QUANTITY_TRACKED triggers the unit-count phrasing. */
   type?: AssetType;
@@ -71,6 +79,7 @@ export function getLocationUpdateNoteContent({
 }) {
   const userLink = wrapUserLinkForNote({
     id: userId,
+    displayName: displayName ?? null,
     firstName,
     lastName,
   });
@@ -118,6 +127,54 @@ export function getLocationUpdateNoteContent({
 }
 
 /**
+ * Builds the system-note text for the single primary placement an asset is
+ * created with, or `null` when it was created without a location.
+ *
+ * Both asset-create routes (web `assets.new` and mobile `asset.create`) need
+ * exactly this, and each used to re-derive it: pick `assetLocations[0]`, guard
+ * on its location, then map eight arguments into
+ * {@link getLocationUpdateNoteContent}. Two copies of that mapping is how the
+ * actor naming drifts — the `displayName` argument is optional, so one route
+ * could silently fall back to first+last and start naming users differently
+ * from the other, with nothing to catch it. Deriving it once removes that.
+ *
+ * `createAsset` writes at most ONE `AssetLocation` row at creation time. A
+ * quantity-tracked asset can accumulate more later, but only this row is the
+ * primary, and its `quantity` (units placed here) — NOT `Asset.quantity` — is
+ * the multiplier the phrasing uses.
+ *
+ * The parameter is typed structurally rather than as
+ * `Awaited<ReturnType<typeof createAsset>>`: `service.server.ts` already
+ * imports from this module, so naming it here would close a module cycle.
+ *
+ * @param asset - The just-created asset, with its `user` row and placement pivot
+ * @returns Markdoc-formatted note content, or `null` when the asset is unplaced
+ */
+export function getInitialPlacementNoteContent(asset: {
+  user: Pick<User, "id" | "firstName" | "lastName" | "displayName">;
+  type: AssetType;
+  unitOfMeasure: string | null;
+  assetLocations?: {
+    quantity: number;
+    location: Pick<Location, "id" | "name"> | null;
+  }[];
+}): string | null {
+  const primaryPlacement = asset.assetLocations?.[0] ?? null;
+  if (!primaryPlacement?.location) return null;
+
+  return getLocationUpdateNoteContent({
+    newLocation: primaryPlacement.location,
+    userId: asset.user.id,
+    firstName: asset.user.firstName ?? "",
+    lastName: asset.user.lastName ?? "",
+    displayName: asset.user.displayName,
+    type: asset.type,
+    unitOfMeasure: asset.unitOfMeasure,
+    quantity: primaryPlacement.quantity,
+  });
+}
+
+/**
  * Generates a markdown-formatted note content for custom field changes.
  *
  * @param params - The parameters for generating the note content
@@ -126,6 +183,10 @@ export function getLocationUpdateNoteContent({
  * @param params.newValue - New value of the field (null if value was removed)
  * @param params.firstName - First name of the user making the change
  * @param params.lastName - Last name of the user making the change
+ * @param params.displayName - Acting user's `User.displayName`, when the caller
+ *   has it. `wrapUserLinkForNote` prefers it over first+last, so a caller
+ *   holding the full user row should pass it or the note names the person
+ *   differently from every other surface that renders them.
  * @param params.assetName - Name of the asset being updated
  * @param params.isFirstTimeSet - Whether this is the first time a value is being set
  * @returns Markdown-formatted note content string, or empty string if invalid scenario
@@ -160,6 +221,7 @@ export function getCustomFieldUpdateNoteContent({
   userId,
   firstName,
   lastName,
+  displayName,
   isFirstTimeSet,
 }: {
   customFieldName: string;
@@ -168,10 +230,13 @@ export function getCustomFieldUpdateNoteContent({
   userId: string;
   firstName: string;
   lastName: string;
+  /** Optional — see the `@param` note; callers that omit it keep first+last. */
+  displayName?: string | null;
   isFirstTimeSet: boolean;
 }) {
   const userLink = wrapUserLinkForNote({
     id: userId,
+    displayName: displayName ?? null,
     firstName,
     lastName,
   });
@@ -743,10 +808,14 @@ export function getAssetsWhereInput({
  */
 export const advancedFilterFormatSchema = z.string().refine(
   (value) => {
-    const parts = value.split(":");
-    if (parts.length !== 2) return false;
+    // Only the first colon separates; the rest belong to the value. Counting
+    // fields instead would reject any value containing a colon — legal in
+    // Code128, DataMatrix and ExternalQR, and unavoidable in a URL — and
+    // `validateAdvancedFilterParams` drops what fails here, so the filter
+    // would vanish from the URL rather than merely mismatch.
+    const [operator, filterValue] = splitFilterParam(value);
+    if (filterValue === undefined) return false;
 
-    const [operator] = parts;
     return filterOperatorSchema.safeParse(operator).success;
   },
   {

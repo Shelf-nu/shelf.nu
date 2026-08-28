@@ -10,10 +10,8 @@ import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
-import {
-  CUSTOM_FIELD_SEARCH_PATHS,
-  splitAssetSearchTerms,
-} from "./search.server";
+import { buildAssetSearchUnion } from "./search-union.server";
+import { splitAssetSearchTerms } from "./search.server";
 import type { CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -23,6 +21,28 @@ import type { Column } from "../asset-index-settings/helpers";
  * assets are not incorrectly shown as "in custody".
  */
 const ASSET_IS_CHECKED_OUT = Prisma.sql`a.status = 'CHECKED_OUT'`;
+
+/**
+ * SQL fragment: the name to show for the custodian of an ONGOING/OVERDUE
+ * booking, where the holder is `bu` (a registered user) or `btm` (an NRM).
+ *
+ * `displayName` wins over the legal name, matching `resolveUserDisplayName` —
+ * this projection is the ONLY name a checked-out row gets, so a bare
+ * first/last join here shows a user the name they asked us not to be called by.
+ *
+ * The `bu.id IS NOT NULL` guard is what distinguishes a user from an NRM, and
+ * it cannot be replaced by wrapping the whole thing in a COALESCE onto
+ * `btm.name`: `CONCAT` ignores NULLs and yields `''` rather than NULL for an
+ * NRM, so the fallback would never fire and the badge would render blank.
+ *
+ * Shared by the full projection and by {@link CUSTODY_SORT_CASE}, so the value
+ * sorted on is the same string the row displays.
+ */
+const BOOKING_CUSTODIAN_NAME = Prisma.sql`CASE
+                WHEN bu.id IS NOT NULL
+                  THEN COALESCE(NULLIF(TRIM(bu."displayName"), ''), TRIM(CONCAT(bu."firstName", ' ', bu."lastName")))
+                ELSE btm.name
+              END`;
 
 /**
  * Generates the SQL WHERE clause for asset filtering
@@ -67,76 +87,20 @@ export function generateWhereClause(
   }
 
   if (search) {
-    // Shared bounded parser (lowercasing is neutral under ILIKE): caps the
-    // honored terms at MAX_ASSET_SEARCH_TERMS so a malformed comma paste
-    // cannot fan into unbounded OR groups in the generated SQL.
-    const words = splitAssetSearchTerms(search);
+    // Shared bounded parser (lowercasing matches buildAssetSearchUnion's
+    // precondition; ILIKE is case-insensitive anyway): caps the honored terms
+    // at MAX_ASSET_SEARCH_TERMS so a malformed comma paste cannot fan into
+    // unbounded UNION branches in the generated SQL.
+    const terms = splitAssetSearchTerms(search);
 
-    if (words.length > 0) {
-      // Create OR conditions for each search term, searching across multiple fields
-      const searchConditions = words.map(
-        (term) => Prisma.sql`(
-          a.title ILIKE ${`%${term}%`} OR
-          a.description ILIKE ${`%${term}%`} OR
-          a."sequentialId" ILIKE ${`%${term}%`} OR
-          c.name ILIKE ${`%${term}%`} OR
-          l.name ILIKE ${`%${term}%`} OR
-          EXISTS (
-            -- Tag-name search. Rewritten from the fanning join on
-            -- _AssetToTag + Tag with t.name ILIKE (which was the sole reason
-            -- the outer query needed a GROUP BY) to a per-asset EXISTS, so
-            -- the slim pagination phase can drop the tag joins and the GROUP
-            -- BY entirely. Any-tag-match semantics are preserved: the asset
-            -- matches iff at least one of its tags' names ILIKE the term
-            -- (EXISTS dedups the same way GROUP BY did).
-            SELECT 1 FROM public."_AssetToTag" att
-            JOIN public."Tag" t ON att."B" = t.id
-            WHERE att."A" = a.id AND t.name ILIKE ${`%${term}%`}
-          ) OR
-          EXISTS (
-            -- Custodian search. Custody moved to the custody_agg LATERAL
-            -- (multi-custodian), so there is no top-level tm/u join to
-            -- reference here — match against ALL of the asset's
-            -- custodians via a per-asset scoped subquery instead.
-            SELECT 1 FROM public."Custody" cust
-            LEFT JOIN public."TeamMember" ctm ON cust."teamMemberId" = ctm.id
-            LEFT JOIN public."User" cusr ON ctm."userId" = cusr.id
-            WHERE cust."assetId" = a.id AND (
-              ctm.name ILIKE ${`%${term}%`} OR
-              cusr."firstName" ILIKE ${`%${term}%`} OR
-              cusr."lastName" ILIKE ${`%${term}%`}
-            )
-          ) OR
-          EXISTS (
-            SELECT 1 FROM public."Qr" q
-            WHERE q."assetId" = a.id AND q.id ILIKE ${`%${term}%`}
-          ) OR
-          EXISTS (
-            SELECT 1 FROM public."Barcode" b 
-            WHERE b."assetId" = a.id AND b.value ILIKE ${`%${term}%`}
-          ) OR
-          EXISTS (
-            SELECT 1 FROM public."AssetCustomFieldValue" acfv 
-            WHERE acfv."assetId" = a.id AND (
-              ${Prisma.join(
-                CUSTOM_FIELD_SEARCH_PATHS.map(
-                  (jsonPath) =>
-                    Prisma.sql`acfv.value#>>${Prisma.raw(
-                      `'{${jsonPath}}'`
-                    )} ILIKE ${`%${term}%`}`
-                ),
-                " OR "
-              )}
-            )
-          )
-        )`
-      );
-
-      // Combine all search terms with OR
-      whereClause = Prisma.sql`${whereClause} AND (${Prisma.join(
-        searchConditions,
-        " OR "
-      )})`;
+    if (terms.length > 0) {
+      // Search = "asset id is in the org-scoped UNION of matching ids". Each
+      // of the 10 sources is its own index-driven, org-scoped branch inside
+      // the UNION (see buildAssetSearchUnion), replacing the old multi-table
+      // OR that forced cross-org seq scans.
+      whereClause = Prisma.sql`${whereClause} AND a."id" IN ${buildAssetSearchUnion(
+        { organizationId, terms }
+      )}`;
     } else {
       // Typed input yielding zero terms (whitespace / bare commas) matches
       // nothing — mirrors getAssets' fail-closed guard so the same search
@@ -2014,6 +1978,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                         'id', ctmu.id,
                         'firstName', ctmu."firstName",
                         'lastName', ctmu."lastName",
+                        'displayName', ctmu."displayName",
                         'profilePicture', ctmu."profilePicture"
                       )
                     ELSE NULL
@@ -2027,6 +1992,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                   'id', cu.id,
                   'firstName', cu."firstName",
                   'lastName', cu."lastName",
+                  'displayName', cu."displayName",
                   'profilePicture', cu."profilePicture"
                 )
               ELSE NULL
@@ -2037,6 +2003,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
                   'id', cr.id,
                   'firstName', cr."firstName",
                   'lastName', cr."lastName",
+                  'displayName', cr."displayName",
                   'profilePicture', cr."profilePicture"
                 )
               ELSE NULL
@@ -2069,9 +2036,22 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
     ) AS bookings`
     : Prisma.sql``;
 
+  // Everything between the backticks below is a template literal, so a stray
+  // backtick or dollar-brace anywhere in it — SQL comments included — ends the
+  // literal and reinterprets the rest of the query as JavaScript.
   const barcodesSelect = withBarcodes
     ? Prisma.sql`,
     (
+      -- The ORDER BY inside jsonb_agg is load-bearing, not cosmetic — same
+      -- reasoning as the custody aggregation below. BarcodeCell renders only
+      -- the first two elements as chips and collapses the rest into a "+N"
+      -- control that previews element 2, so the array's order decides which
+      -- codes a user actually sees. jsonb_agg without an explicit ORDER BY
+      -- has an undefined input order, so an asset with 3+ barcodes of one
+      -- type would otherwise show a different pair between page loads.
+      -- Oldest-first (createdAt, id) is the same key the per-type barcode
+      -- scalar columns below use, so element 0 of this array is the same
+      -- barcode those columns sort on.
       SELECT COALESCE(
         jsonb_agg(
           jsonb_build_object(
@@ -2079,6 +2059,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             'type', b.type,
             'value', b.value
           )
+          ORDER BY b."createdAt" ASC, b.id ASC
         ),
         '[]'::jsonb
       )
@@ -2209,29 +2190,16 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
         WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
           jsonb_build_array(
             jsonb_build_object(
-              -- why: when the booking custodian is an NRM (team member with no
-              -- user account), bu.* is NULL. We must NOT CONCAT the user columns
-              -- here: Postgres CONCAT ignores NULLs and returns ' ' (a space),
-              -- which is non-NULL, so a COALESCE(CONCAT(...), btm.name) would
-              -- never fall back to the NRM name and the badge renders blank.
-              -- Guard on bu.id (mirrors the 'user' sub-object branch below).
-              'name', CASE
-                WHEN bu.id IS NOT NULL
-                  THEN CONCAT(bu."firstName", ' ', bu."lastName")
-                ELSE btm.name
-              END,
+              'name', ${BOOKING_CUSTODIAN_NAME},
               'custodian', jsonb_build_object(
-                'name', CASE
-                  WHEN bu.id IS NOT NULL
-                    THEN CONCAT(bu."firstName", ' ', bu."lastName")
-                  ELSE btm.name
-                END,
+                'name', ${BOOKING_CUSTODIAN_NAME},
                 'user', CASE
                   WHEN bu.id IS NOT NULL THEN
                     jsonb_build_object(
                       'id', bu.id,
                       'firstName', bu."firstName",
                       'lastName', bu."lastName",
+                      'displayName', bu."displayName",
                       'profilePicture', bu."profilePicture"
                     )
                   ELSE NULL
@@ -2394,6 +2362,7 @@ export const assetQueryJoins = Prisma.sql`
                   'id', u.id,
                   'firstName', u."firstName",
                   'lastName', u."lastName",
+                  'displayName', u."displayName",
                   'profilePicture', u."profilePicture"
                 )
               ELSE NULL
@@ -2572,8 +2541,8 @@ const BARCODE_SORT_KEY_SELECTS = Prisma.sql`(
 /**
  * The custody CASE expression (direct custody wins; booking-derived synthetic
  * custody for CHECKED_OUT assets otherwise; NULL). Verbatim copy of the heavy
- * projection's custody CASE, including the NRM-name guard (CONCAT vs btm.name,
- * never COALESCE(CONCAT(...))). Emitted `AS custody` in the cheap phase only
+ * projection's custody CASE, sharing `BOOKING_CUSTODIAN_NAME` so the sorted
+ * value is exactly the string the row renders. Emitted `AS custody` in the cheap phase only
  * when a custody sort is active — the `custody->0->>'name'` sort term needs it.
  */
 const CUSTODY_SORT_CASE = Prisma.sql`CASE
@@ -2581,23 +2550,16 @@ const CUSTODY_SORT_CASE = Prisma.sql`CASE
         WHEN b.id IS NOT NULL AND ${ASSET_IS_CHECKED_OUT} THEN
           jsonb_build_array(
             jsonb_build_object(
-              'name', CASE
-                WHEN bu.id IS NOT NULL
-                  THEN CONCAT(bu."firstName", ' ', bu."lastName")
-                ELSE btm.name
-              END,
+              'name', ${BOOKING_CUSTODIAN_NAME},
               'custodian', jsonb_build_object(
-                'name', CASE
-                  WHEN bu.id IS NOT NULL
-                    THEN CONCAT(bu."firstName", ' ', bu."lastName")
-                  ELSE btm.name
-                END,
+                'name', ${BOOKING_CUSTODIAN_NAME},
                 'user', CASE
                   WHEN bu.id IS NOT NULL THEN
                     jsonb_build_object(
                       'id', bu.id,
                       'firstName', bu."firstName",
                       'lastName', bu."lastName",
+                      'displayName', bu."displayName",
                       'profilePicture', bu."profilePicture"
                     )
                   ELSE NULL
@@ -2613,11 +2575,12 @@ const CUSTODY_SORT_CASE = Prisma.sql`CASE
  * joins a given request actually needs. Each is a 1:1 join or LATERAL
  * primary-pick (no fan-out), a verbatim mirror of the corresponding join in
  * {@link assetQueryJoins}. Gated in {@link buildAdvancedAssetsQuery} on whether
- * the active sort references the joined name (kit/category/assetModel/location)
- * and — for category/location — whether a text search is active (the search
- * predicate references `c.name` / `l.name`). why: joining all four for every
- * matching asset even under the default `createdAt` sort was the residual O(N)
- * cost that kept the rewrite ~2× instead of ~10× faster.
+ * the active sort references the joined name (kit/category/assetModel/location).
+ * Search no longer needs Category/Location here — it narrows by
+ * `a."id" IN (<UNION>)` (see {@link generateWhereClause}), which never
+ * references `c.name` / `l.name` at this level. why: joining all four for
+ * every matching asset even under the default `createdAt` sort was the
+ * residual O(N) cost that kept the rewrite ~2× instead of ~10× faster.
  */
 const CHEAP_KIT_JOIN = Prisma.sql`
     LEFT JOIN LATERAL (
@@ -2668,6 +2631,7 @@ const CHEAP_CUSTODY_JOINS = Prisma.sql`
                     'id', u.id,
                     'firstName', u."firstName",
                     'lastName', u."lastName",
+                    'displayName', u."displayName",
                     'profilePicture', u."profilePicture"
                   )
                 ELSE NULL
@@ -2760,12 +2724,6 @@ export type BuildAdvancedAssetsQueryParams = {
   withBarcodes: boolean;
   /** `LIMIT/OFFSET` fragment, or `Prisma.empty` for takeAll (full export). */
   paginationClause: Prisma.Sql;
-  /**
-   * Whether a free-text search is active. The search predicate references
-   * `c.name` / `l.name`, so the cheap phase must join Category + Location even
-   * when no category/location sort is active.
-   */
-  hasSearch: boolean;
 };
 
 /**
@@ -2796,7 +2754,6 @@ export function buildAdvancedAssetsQuery({
   withBookings,
   withBarcodes,
   paginationClause,
-  hasSearch,
 }: BuildAdvancedAssetsQueryParams): Prisma.Sql {
   const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
 
@@ -2817,13 +2774,13 @@ export function buildAdvancedAssetsQuery({
   const custodyJoinsActive = custodyFilterActive || custodySort;
 
   // Base name-joins are gated so the slim phase stays O(1) joins under the
-  // common default sort. Category/Location are also needed for text search
-  // (its WHERE references c.name / l.name); the SELECT alias is only needed
-  // when the matching name sort is active (search reads c.name/l.name directly).
+  // common default sort. Search no longer references c.name / l.name at the
+  // top level (it goes through a.id IN (UNION)), so these joins are needed
+  // only when the matching name sort is active.
   const needKitJoin = kitNameSort;
-  const needCategoryJoin = categoryNameSort || hasSearch;
+  const needCategoryJoin = categoryNameSort;
   const needAssetModelJoin = assetModelNameSort;
-  const needLocationJoin = locationNameSort || hasSearch;
+  const needLocationJoin = locationNameSort;
 
   const kitNameSelect = kitNameSort
     ? Prisma.sql`,
@@ -2930,7 +2887,7 @@ export function buildAdvancedAssetsQuery({
         })}
         ${assetQueryJoins}
         WHERE a.id = saq."assetId"
-        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", btm.id, btm.name, am.id, am.name
+        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."displayName", bu."profilePicture", btm.id, btm.name, am.id, am.name
       ) aq ON TRUE;
     `;
 }

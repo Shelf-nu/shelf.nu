@@ -246,12 +246,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         0
       );
 
+      // Manual rows only (`assetKitId === null`). This is the sum
+      // `enforce_asset_location_sum_within_total` actually bounds — since
+      // `20260602100000_assetlocation_sum_exclude_kit_driven` the trigger
+      // ignores kit-driven rows, which are bounded on their own axis by
+      // `enforce_asset_kit_sum_within_total`. Deriving "over-placed" from the
+      // combined `inLocations` would flag a perfectly valid asset (80 manual +
+      // 50 kit-driven of 100) as over-allocated.
+      const inLocationsManual = (asset.assetLocations ?? []).reduce(
+        (sum: number, al) =>
+          sum + (al.assetKitId === null ? al.quantity ?? 0 : 0),
+        0
+      );
+
       const availability = await getAssetAvailability({
         assetId: asset.id,
         organizationId,
       });
 
-      quantityData = buildQuantityData({ availability, inLocations });
+      quantityData = buildQuantityData({
+        availability,
+        inLocations,
+        inLocationsManual,
+      });
     }
 
     /**
@@ -271,13 +288,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
-    const bookingAsset =
-      asset.bookingAssets.length > 0 ? asset.bookingAssets[0] : undefined;
-    const currentBooking: any = null;
-
-    if (bookingAsset && bookingAsset.booking.from) {
-      asset.bookingAssets = [currentBooking];
-    }
+    // `bookingAssets` is already the asset's current booking: the query
+    // filters to ONGOING/OVERDUE and excludes bookings this asset has been
+    // partially checked in from, so the first row is the one the page shows.
+    // Nothing further is derived from it here.
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
       ? asset.customFields.filter(
@@ -1766,6 +1780,7 @@ export default function AssetOverview() {
               inCustodyQuantity={quantityData?.inCustody}
               inKitsQuantity={quantityData?.inKits}
               inLocationsQuantity={quantityData?.inLocations}
+              inLocationsManualQuantity={quantityData?.inLocationsManual}
               reservedQuantity={quantityData?.reserved}
               reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}

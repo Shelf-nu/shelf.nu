@@ -71,6 +71,12 @@ vitest.mock("~/database/db.server", () => {
               (callbackOrArray as (tx: unknown) => unknown)(db as any)
             : Promise.all(callbackOrArray as Promise<unknown>[])
         ),
+      // why: `lockBookingForStatusCheck` takes its row lock through a raw
+      // `SELECT … FOR UPDATE`, which the model-shaped mocks below cannot
+      // express. ONGOING is the one status that satisfies both the open and
+      // the in-flight assertion, so a single default serves every path this
+      // suite exercises. String literal — this factory is hoisted.
+      $queryRaw: vitest.fn().mockResolvedValue([{ status: "ONGOING" }]),
       booking: {
         findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
         // why: computeBookingAssetRemainingToCheckOut's legacy-ONGOING
@@ -140,6 +146,9 @@ vitest.mock("~/database/db.server", () => {
         // qty tests override.
         findUnique: vitest.fn().mockResolvedValue({ quantity: 1 }),
         count: vitest.fn().mockResolvedValue(0),
+        // why: the progressive checkout stamps `checkedOutAt` on the slices it
+        // sends out, beside the PartialBookingCheckout session row.
+        updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
         deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       },
       // why: checkoutBooking's defence-in-depth guard reads
@@ -1225,6 +1234,90 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
 
     // 45 units still booked → batch is not complete.
     expect(result.isComplete).toBe(false);
+  });
+
+  it("marks only the slices an untagged partial qty claim actually takes", async () => {
+    expect.assertions(2);
+
+    // The mobile check-out route accepts `{ assetId, quantity }` with no slice
+    // tag, and the companion sends that shape from a screen that renders
+    // multi-slice assets. So a qty-tracked asset can be claimed untagged even
+    // though its units are split across a standalone slice and a kit-driven
+    // one, and the `checkedOutAt` marker still has to name specific slices.
+    const twoSliceBooking = {
+      ...qtyOnlyBooking,
+      status: BookingStatus.ONGOING,
+      _count: { bookingAssets: 2 },
+      bookingAssets: [
+        {
+          id: "ba-qty-1",
+          quantity: 30,
+          assetKitId: null,
+          asset: {
+            id: "asset-qty-1",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Pens",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+        {
+          id: "ba-qty-2",
+          quantity: 20,
+          assetKitId: "ak-1",
+          asset: {
+            id: "asset-qty-1",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Pens",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+      ],
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(twoSliceBooking);
+    // why: both batched remaining helpers read this; echo both slices so the
+    // asset-level total is 50 and each slice reports its own booked units.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "ba-qty-1",
+        assetId: "asset-qty-1",
+        quantity: 30,
+        assetKitId: null,
+      },
+      {
+        id: "ba-qty-2",
+        assetId: "asset-qty-1",
+        quantity: 20,
+        assetKitId: "ak-1",
+      },
+    ]);
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      checkouts: [{ assetId: "asset-qty-1", quantity: 5 }],
+    });
+
+    const markerCall = (
+      db.bookingAsset.updateMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.find(
+      ([args]) => args?.data?.checkedOutAt instanceof Date
+    )?.[0];
+
+    // 5 units fit inside the standalone slice, which fills first, so the
+    // kit-driven slice never leaves and must not be marked as out — the
+    // check-in guard reads this marker as permission to reconcile.
+    expect(markerCall?.where?.OR).toEqual([{ id: { in: ["ba-qty-1"] } }]);
+    // Asset-wide scoping is what would sweep the sibling slice in.
+    expect(markerCall?.where?.OR).not.toContainEqual(
+      expect.objectContaining({ assetId: expect.anything() })
+    );
   });
 
   it("full qty (50 of 50) flips Asset.status to CHECKED_OUT and records quantities[0]=50", async () => {

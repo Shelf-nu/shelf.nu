@@ -28,7 +28,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -38,63 +38,112 @@ import DateTimePicker, {
 import { api, type BookingTag, type TeamMember } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import {
+  instantFromWallClockInZone,
+  wallClockOnDayInZone,
+  wallClockWireInZone,
+} from "@shelf/datetime";
+import { keepEndAfterStart } from "@/lib/booking-dates";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 
-/** Device IANA time zone (falls back to UTC) — sent so the server resolves the
- * local wire dates correctly without a client-hint cookie. */
-function getTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
+/**
+ * The default booking window — 09:00-17:00 as `timeZone` reads it, on `day`
+ * when one is given and on tomorrow otherwise.
+ *
+ * Both are real instants. The day and the hours are resolved in `timeZone`, so
+ * the window means the same wall clock regardless of where the device is. The
+ * start never seeds in the past: it is clamped to ten minutes from now, the
+ * earliest start the server accepts.
+ *
+ * @param timeZone - the acting user's preference zone
+ * @param day - a `YYYY-MM-DD` calendar date, as the calendar lens keys its days
+ * @returns the start and end instants of the default window
+ */
+function defaultBookingWindow(
+  timeZone: string,
+  day?: string
+): { from: Date; to: Date } {
+  // The shape check is not enough on its own: it passes "2026-13-45", which
+  // `instantFromWallClockInZone` would silently roll forward into 2027. Round
+  // trip through a Date and keep the value only if every part survives.
+  const parts = /^\d{4}-\d{2}-\d{2}$/.test(day ?? "")
+    ? (day as string).split("-").map(Number)
+    : null;
+  const probe = parts ? new Date(parts[0], parts[1] - 1, parts[2]) : null;
+  const onDay =
+    parts &&
+    probe &&
+    probe.getFullYear() === parts[0] &&
+    probe.getMonth() === parts[1] - 1 &&
+    probe.getDate() === parts[2]
+      ? parts
+      : null;
+  if (onDay) {
+    const at = (hour: number) =>
+      instantFromWallClockInZone(
+        { year: onDay[0], month: onDay[1], day: onDay[2], hour, minute: 0 },
+        timeZone
+      );
+    // A booking can only start in the future, so the seed is clamped to ten
+    // minutes from now — the same earliest-start the server holds submissions
+    // to. Without the clamp, opening the form from today's panel after 09:00
+    // (or from a past day left on the back stack) seeds a start the server
+    // rejects on an untouched form.
+    // Ceil to the next whole minute: flooring the seconds could land up to
+    // 59s inside the ten-minute minimum and fail an untouched form.
+    const earliest = new Date(
+      Math.ceil((Date.now() + 10 * 60 * 1000) / 60_000) * 60_000
+    );
+    const from = at(9) < earliest ? earliest : at(9);
+    // Keep the day's 17:00 end when it still leaves a window; once the clamp
+    // passes it, fall back to the same eight-hour span 09:00–17:00 describes.
+    const to =
+      at(17) > from ? at(17) : new Date(from.getTime() + 8 * 60 * 60 * 1000);
+    return { from, to };
   }
-}
-
-/** Format a Date as the server's local wire string: `yyyy-MM-dd'T'HH:mm`. */
-function toLocalWire(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
-    d.getHours()
-  )}:${p(d.getMinutes())}`;
+  const now = new Date();
+  return {
+    from: wallClockOnDayInZone(now, 1, 9, 0, timeZone),
+    to: wallClockOnDayInZone(now, 1, 17, 0, timeZone),
+  };
 }
 
 export default function CreateBookingScreen() {
   const router = useRouter();
+  /**
+   * The calendar lens opens this screen from a day panel, so the booking
+   * defaults to the day the panel is showing rather than to tomorrow.
+   */
+  const { day } = useLocalSearchParams<{ day?: string }>();
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
-  // Picker button labels use the user's date/time FORMAT (order, 12/24h) but stay
-  // DEVICE-local (`localeOnly`) — the native picker and `toLocalWire` submission
-  // are device-local, so formatting them in the preferred timezone would show a
-  // different time than the one being edited and submitted (CodeRabbit, #2798).
-  const { formatDateTime } = useDateFormatter();
+  // `from`/`to` are real instants throughout. Both pickers are driven in the
+  // preference zone via `timeZoneName`, so what the user picks, what the labels
+  // render, and what the detail screen shows after saving are one wall clock.
+  const { formatDateTime, prefs } = useDateFormatter();
 
   // ── Form state ──────────────────────────────────
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [custodian, setCustodian] = useState<TeamMember | null>(null);
-  // Default to a sensible near-future window (tomorrow 9:00–17:00) so the form
-  // is one-tap usable; the user can still adjust either picker.
-  const [from, setFrom] = useState<Date | null>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    d.setHours(9, 0, 0, 0);
-    return d;
-  });
-  const [to, setTo] = useState<Date | null>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    d.setHours(17, 0, 0, 0);
-    return d;
-  });
-  // Capture the initial default window (refs init once) so a date-only change
-  // still counts as an unsaved edit in the discard guard below.
+  // Default to a sensible working window (9:00–17:00) so the form is one-tap
+  // usable; the user can still adjust either picker.
+  const [initialWindow] = useState(() =>
+    defaultBookingWindow(prefs.timeZone, day)
+  );
+  const [from, setFrom] = useState<Date | null>(initialWindow.from);
+  const [to, setTo] = useState<Date | null>(initialWindow.to);
+  // Capture the default window so a date-only change still counts as an unsaved
+  // edit in the discard guard below. Re-seeding keeps these in step.
   const initialFromRef = useRef(from?.getTime() ?? null);
   const initialToRef = useRef(to?.getTime() ?? null);
+  // Whether the user has picked a date themselves; gates the re-seed below.
+  const datesTouchedRef = useRef(false);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -155,17 +204,13 @@ export default function CreateBookingScreen() {
       if (Platform.OS === "android") setShowFromPicker(false);
       if (event.type === "dismissed") return;
       if (selected) {
+        datesTouchedRef.current = true;
         setFrom(selected);
-        // Keep `to` after `from`: if it's now invalid, push it to +1 day.
-        setTo((prev) =>
-          prev && prev <= selected
-            ? new Date(selected.getTime() + 24 * 60 * 60 * 1000)
-            : prev
-        );
+        setTo((prev) => keepEndAfterStart(prev, selected, prefs.timeZone));
         if (Platform.OS === "ios") setShowFromPicker(false);
       }
     },
-    []
+    [prefs.timeZone]
   );
 
   const onToChange = useCallback(
@@ -173,12 +218,27 @@ export default function CreateBookingScreen() {
       if (Platform.OS === "android") setShowToPicker(false);
       if (event.type === "dismissed") return;
       if (selected) {
+        datesTouchedRef.current = true;
         setTo(selected);
         if (Platform.OS === "ios") setShowToPicker(false);
       }
     },
     []
   );
+
+  // The preference zone arrives with the user profile, so on a cold start this
+  // screen can mount while `/me` is still in flight — at which point
+  // `formatPrefs` still holds the device-zone fallback and the seeded window
+  // means the wrong wall clock. Re-seed once the real zone lands, but never over
+  // a date the user has already picked.
+  useEffect(() => {
+    if (datesTouchedRef.current) return;
+    const seeded = defaultBookingWindow(prefs.timeZone, day);
+    setFrom(seeded.from);
+    setTo(seeded.to);
+    initialFromRef.current = seeded.from.getTime();
+    initialToRef.current = seeded.to.getTime();
+  }, [prefs.timeZone, day]);
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) => {
@@ -214,9 +274,11 @@ export default function CreateBookingScreen() {
       name: name.trim(),
       description: description.trim() || undefined,
       custodianTeamMemberId: custodian.id,
-      startDate: toLocalWire(from),
-      endDate: toLocalWire(to),
-      timeZone: getTimeZone(),
+      startDate: wallClockWireInZone(from, prefs.timeZone),
+      endDate: wallClockWireInZone(to, prefs.timeZone),
+      // The wire strings carry no offset, so the zone they were written in has
+      // to travel with them — that is the preference zone the pickers edit in.
+      timeZone: prefs.timeZone,
       tags: selectedTagIds.size > 0 ? Array.from(selectedTagIds) : undefined,
     });
     setIsSubmitting(false);
@@ -342,9 +404,7 @@ export default function CreateBookingScreen() {
             accessibilityRole="button"
             accessibilityLabel={
               from
-                ? `Starts ${formatDateTime(from, {
-                    localeOnly: true,
-                  })}, tap to change`
+                ? `Starts ${formatDateTime(from)}, tap to change`
                 : "Choose start"
             }
           >
@@ -353,9 +413,7 @@ export default function CreateBookingScreen() {
                 from ? styles.pickerSelectedText : styles.pickerPlaceholder
               }
             >
-              {from
-                ? formatDateTime(from, { localeOnly: true })
-                : "Choose start date & time..."}
+              {from ? formatDateTime(from) : "Choose start date & time..."}
             </Text>
             <Ionicons
               name="calendar-outline"
@@ -371,6 +429,7 @@ export default function CreateBookingScreen() {
                 value={from ?? new Date()}
                 mode="datetime"
                 display={Platform.OS === "ios" ? "inline" : "default"}
+                timeZoneName={prefs.timeZone}
                 onChange={onFromChange}
                 accentColor={colors.primary}
               />
@@ -390,19 +449,13 @@ export default function CreateBookingScreen() {
             }}
             accessibilityRole="button"
             accessibilityLabel={
-              to
-                ? `Ends ${formatDateTime(to, {
-                    localeOnly: true,
-                  })}, tap to change`
-                : "Choose end"
+              to ? `Ends ${formatDateTime(to)}, tap to change` : "Choose end"
             }
           >
             <Text
               style={to ? styles.pickerSelectedText : styles.pickerPlaceholder}
             >
-              {to
-                ? formatDateTime(to, { localeOnly: true })
-                : "Choose end date & time..."}
+              {to ? formatDateTime(to) : "Choose end date & time..."}
             </Text>
             <Ionicons
               name="calendar-outline"
@@ -418,6 +471,7 @@ export default function CreateBookingScreen() {
                 value={to ?? from ?? new Date()}
                 mode="datetime"
                 display={Platform.OS === "ios" ? "inline" : "default"}
+                timeZoneName={prefs.timeZone}
                 minimumDate={from ?? undefined}
                 onChange={onToChange}
                 accentColor={colors.primary}

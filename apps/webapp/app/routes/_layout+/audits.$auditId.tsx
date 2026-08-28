@@ -125,13 +125,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "complete-audit") {
-      // Only assignees can complete the audit
-      // Exception: if audit has no assignees, admins/owners can complete
+      // Assignee-gated: ADMIN/OWNER may complete any audit,
+      // BASE/SELF_SERVICE only when assigned.
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,
         userId,
-        request,
         isSelfServiceOrBase,
       });
 
@@ -363,9 +362,9 @@ export default function AuditDetailsPage() {
     (assignment) => assignment.userId === userId
   );
 
-  // Allow admin/owner to scan/complete if audit has no assignees
-  const hasNoAssignees = session.assignments.length === 0;
-  const canScanAndComplete = isAssignee || (isAdminOrOwner && hasNoAssignees);
+  // ADMIN/OWNER can scan/complete any audit;
+  // BASE/SELF_SERVICE only when assigned
+  const canScanAndComplete = isAssignee || isAdminOrOwner;
 
   // The activity loader requires `auditNote:read` and 403s without it, so the
   // tab follows the same gate rather than routing the user into an error.
@@ -427,11 +426,7 @@ export default function AuditDetailsPage() {
             !isCancelled &&
             !isArchived &&
             canScanAndComplete && (
-              <CompleteAuditDialog
-                disabled={!hasScans}
-                auditName={session.name}
-                stats={stats}
-              />
+              <CompleteAuditDialog auditName={session.name} stats={stats} />
             )}
         </div>
       </Header>

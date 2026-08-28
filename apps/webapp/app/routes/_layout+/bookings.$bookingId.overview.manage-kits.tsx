@@ -588,11 +588,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        * slice loop the BookingAsset insert uses, so the per-row
        * AssetKit.quantity is naturally what we name in the note.
        */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, booking.name);
       const assetKitToKit = new Map<string, { id: string; name: string }>();
       for (const kit of newlyAddedKits) {
@@ -646,6 +642,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         booking: { id: bookingId, assetIds: allRemovedAssetIds },
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
+        displayName: user?.displayName ?? null,
         userId,
         kitIds: removedKitIds,
         kits: removedKits.map((kit) => ({ id: kit.id, name: kit.name })),
@@ -996,7 +993,11 @@ function Row({ item: kit }: { item: KitForBooking }) {
   const { isCheckedOut } = getKitAvailabilityStatus(kit, booking.id);
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: kit, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: kit,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
     : null;
 
   // For Case 1: Check if kit is checked out in current booking

@@ -1,3 +1,4 @@
+import { AUDIT_STATUS_LABELS } from "@shelf/labels";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
@@ -15,7 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, type AuditListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
-import { formatDue } from "@/lib/audit-format";
+import { auditOwnership, formatDue } from "@/lib/audit-format";
 import { useFormatPrefs } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -28,10 +29,22 @@ import { userCanSeeOrgWideAudits } from "@/lib/permissions";
 const PAGE_SIZE = 20;
 const auditKeyExtractor = (item: AuditListItem) => item.id;
 
+/**
+ * Status filter pills.
+ *
+ * why: chips that name a single status read from `@shelf/labels`; "Active" and
+ * "All" group several statuses, so they stay prose. The COMPLETED label matched
+ * its literal already — wiring it anyway means a wording change in the package
+ * moves this chip and the audit badges together, which is the point of having
+ * the package at all.
+ */
 const STATUS_FILTERS: { label: string; value: string }[] = [
   { label: "Active", value: "PENDING,ACTIVE" },
-  { label: "Completed", value: "COMPLETED" },
-  { label: "All", value: "PENDING,ACTIVE,COMPLETED,CANCELLED" },
+  { label: AUDIT_STATUS_LABELS.COMPLETED, value: "COMPLETED" },
+  { label: AUDIT_STATUS_LABELS.ARCHIVED, value: "ARCHIVED" },
+  // "All" really means all: an empty filter takes the server's
+  // everything path, which is also the correctly paginated one.
+  { label: "All", value: "" },
 ];
 
 export default function AuditsListScreen() {
@@ -70,10 +83,9 @@ function AuditsListContent() {
   // landing on an empty "nothing assigned to you" screen — when in fact
   // there were active, unassigned audits anyone could pick up. The list
   // is server-sorted by due date (most urgent first) and every card now
-  // states its ownership ("Unassigned · anyone can scan" / "Assigned to
-  // you" / "N assigned"), so the urgency-first flat list is legible
-  // without forcing a scope filter. Admins can still narrow to their own
-  // work with the toggle below. BASE/SELF_SERVICE are server-scoped to
+  // states its ownership (see `auditOwnership` for the exact wording), so
+  // the urgency-first flat list is legible without forcing a scope filter.
+  // Admins can still narrow to their own work with the toggle below. BASE/SELF_SERVICE are server-scoped to
   // their assignments regardless, and the effect below keeps their
   // (hidden) toggle pinned to true so visible state matches the server.
   const [assignedToMe, setAssignedToMe] = useState(false);
@@ -286,12 +298,13 @@ function AuditsListContent() {
       // with zero assignees is open for anyone to pick up (the case the
       // user flagged as invisible); otherwise it's either theirs or
       // someone else's.
-      const ownership: "open" | "mine" | "others" =
-        item.assigneeCount === 0
-          ? "open"
-          : item.isAssignedToMe
-          ? "mine"
-          : "others";
+      // Shared with the Home dashboard's audit cards so the two screens can
+      // never word ownership differently.
+      const {
+        ownership,
+        label: ownershipLabel,
+        a11yLabel,
+      } = auditOwnership(item);
       // why: the urgency tier (red/amber) and "You" marker are visual-only
       // signals — without surfacing them through the accessibility label,
       // VoiceOver / TalkBack users miss two important pieces of context
@@ -299,18 +312,18 @@ function AuditsListContent() {
       // reads the visible state, not just the static fields.
       const cardA11yLabel = [
         `Audit: ${item.name}`,
-        item.status,
+        // why: the label, not the raw enum. The visible badge below reads
+        // AUDIT_STATUS_LABELS, so announcing `item.status` told screen-reader
+        // users "ARCHIVED" where everyone else saw "Archived".
+        AUDIT_STATUS_LABELS[item.status as keyof typeof AUDIT_STATUS_LABELS] ??
+          item.status,
         `${item.foundAssetCount} of ${item.expectedAssetCount} found`,
         due.tier === "overdue"
           ? "overdue"
           : due.tier === "soon"
           ? "due soon"
           : null,
-        ownership === "open"
-          ? "unassigned, anyone can scan"
-          : ownership === "mine"
-          ? "assigned to you"
-          : null,
+        a11yLabel,
       ]
         .filter(Boolean)
         .join(", ");
@@ -337,13 +350,12 @@ function AuditsListContent() {
                 style={[styles.statusDot, { backgroundColor: badge.text }]}
               />
               <Text style={[styles.statusText, { color: badge.text }]}>
-                {item.status === "PENDING"
-                  ? "Pending"
-                  : item.status === "ACTIVE"
-                  ? "Active"
-                  : item.status === "COMPLETED"
-                  ? "Completed"
-                  : "Cancelled"}
+                {/* why: the same chain on the detail screen fell through to
+                    "Cancelled", so an ARCHIVED audit was labelled cancelled.
+                    Read the shared map, which covers every status. */}
+                {AUDIT_STATUS_LABELS[
+                  item.status as keyof typeof AUDIT_STATUS_LABELS
+                ] ?? item.status}
               </Text>
             </View>
           </View>
@@ -408,42 +420,39 @@ function AuditsListContent() {
               </Text>
             </View>
 
-            <View style={styles.metaRow}>
-              <Ionicons
-                name={
-                  ownership === "open"
-                    ? "scan-circle-outline"
-                    : "people-outline"
-                }
-                size={13}
-                color={
-                  ownership === "open" ? colors.primary : colors.mutedLight
-                }
-              />
-              <Text
-                style={[
-                  styles.metaText,
-                  ownership === "open" && {
-                    // why: `primaryText` (deeper orange), not `primary` —
-                    // brand orange is too light for body text on white
-                    // (3.1:1). The icon above keeps the brighter `primary`
-                    // (icons only need 3:1).
-                    color: colors.primaryText,
-                    fontWeight: "500",
-                  },
-                ]}
-              >
-                {ownership === "open"
-                  ? "Unassigned · anyone can scan"
-                  : ownership === "mine"
-                  ? item.assigneeCount === 1
-                    ? "Assigned to you"
-                    : `You + ${item.assigneeCount - 1} other${
-                        item.assigneeCount - 1 === 1 ? "" : "s"
-                      }`
-                  : `${item.assigneeCount} assigned`}
-              </Text>
-            </View>
+            {/* why: guarded, like the Home card — a payload without the
+                assignee fields yields a null ownership, and an unguarded row
+                would render a lone icon beside empty text. */}
+            {ownership && (
+              <View style={styles.metaRow}>
+                <Ionicons
+                  name={
+                    ownership === "open"
+                      ? "scan-circle-outline"
+                      : "people-outline"
+                  }
+                  size={13}
+                  color={
+                    ownership === "open" ? colors.primary : colors.mutedLight
+                  }
+                />
+                <Text
+                  style={[
+                    styles.metaText,
+                    ownership === "open" && {
+                      // why: `primaryText` (deeper orange), not `primary` —
+                      // brand orange is too light for body text on white
+                      // (3.1:1). The icon above keeps the brighter `primary`
+                      // (icons only need 3:1).
+                      color: colors.primaryText,
+                      fontWeight: "500",
+                    },
+                  ]}
+                >
+                  {ownershipLabel}
+                </Text>
+              </View>
+            )}
           </View>
 
           {isActive && (
@@ -609,20 +618,20 @@ function AuditsListContent() {
                 color={colors.border}
               />
               <Text style={styles.emptyTitle}>
+                {/* why the label check: "All" would interpolate to the
+                    ungrammatical "No all audits". Keyed on the label so the
+                    chip list can grow without touching this. */}
                 {assignedToMe
                   ? activeFilter === 0
                     ? "No active audits assigned to you"
-                    : activeFilter === 2
-                    ? // why: STATUS_FILTERS[2] is "All", which would
-                      // interpolate to the ungrammatical "No all
-                      // audits assigned to you". Special-case it.
-                      "No audits assigned to you"
+                    : STATUS_FILTERS[activeFilter].label === "All"
+                    ? "No audits assigned to you"
                     : `No ${STATUS_FILTERS[
                         activeFilter
                       ].label.toLowerCase()} audits assigned to you`
                   : activeFilter === 0
                   ? "No active audits"
-                  : activeFilter === 2
+                  : STATUS_FILTERS[activeFilter].label === "All"
                   ? "No audits"
                   : `No ${STATUS_FILTERS[
                       activeFilter

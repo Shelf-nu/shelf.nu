@@ -3,6 +3,7 @@ import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import {
   getScannerPickerMeta,
@@ -21,6 +22,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { readRawLastPathSegment } from "~/utils/raw-path-param";
 import { requirePermission } from "~/utils/roles.server";
 import {
   sanitizeAssetExtraInclude,
@@ -75,8 +77,11 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       }
     );
 
-    // Decode the URL-encoded barcode value
-    const value = decodeURIComponent(encodedValue);
+    // Read the segment from the URL rather than the route param. React Router
+    // re-encodes a decoded `/` back to `%2F`, which makes a barcode containing
+    // a slash and one whose literal text is `%2F` indistinguishable by the time
+    // a loader sees them; the URL still has the difference.
+    const value = readRawLastPathSegment(request, encodedValue);
 
     const {
       assetExtraInclude,
@@ -233,7 +238,10 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
           type: barcode.asset ? "asset" : barcode.kit ? "kit" : undefined,
           asset: barcode.asset
             ? {
-                ...barcode.asset,
+                // Collapse the model-image cascade into the flat image
+                // fields the scanner drawers read; the nested relation is
+                // dropped so the row carries one source of truth.
+                ...serializeAssetImage(barcode.asset),
                 auditAssetId,
                 auditNotesCount,
                 auditImagesCount,

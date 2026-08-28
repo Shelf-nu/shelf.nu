@@ -28,6 +28,7 @@ import { recordEvent } from "../activity-event/service.server";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
 const label: ErrorLabel = "Organization";
@@ -116,6 +117,10 @@ export async function getOrganizationsBySsoDomain(emailDomain: string) {
             ssoDetails: {
               domain: {
                 contains: emailDomain,
+                // Stored casing is unconstrained, so a case-sensitive filter
+                // would drop "ACME.com" here and the exact-match filter below
+                // would never see it.
+                mode: "insensitive" as const,
               },
             },
           },
@@ -527,8 +532,7 @@ export async function getOrganizationAdminsForNotification({
           select: {
             id: true,
             email: true,
-            firstName: true,
-            lastName: true,
+            ...USER_NAME_SELECT,
             // Format-preference columns so the booking notification resolver
             // can carry them onto each recipient and resolve recipient-specific
             // email date/time formatting from the loaded row (no per-recipient
@@ -810,26 +814,37 @@ export async function transferOwnership({
       },
     });
 
+    /**
+     * The organization's CURRENT owner — i.e. the user losing ownership.
+     *
+     * This is deliberately NOT the requesting user: it is the record that gets
+     * demoted to ADMIN below, whose subscription is optionally transferred, and
+     * who receives the "you are no longer the owner" email. A Shelf platform
+     * admin can drive this flow without being a member of the organization at
+     * all, so the two identities must stay separate.
+     */
     const currentOwnerUserOrg = userOrganization.find((userOrg) =>
       userOrg.roles.includes(OrganizationRoles.OWNER)
     );
-    /** Validate if the current user is a member of the organization */
     if (!currentOwnerUserOrg) {
       throw new ShelfError({
         cause: null,
-        message: "Current user is not a member of the organization.",
+        message: "Organization does not have an owner.",
         label,
       });
     }
 
     /**
-     * Validate if the current user is the owner of organization
-     * or is a Shelf admin
+     * Validate that the REQUESTING user may transfer ownership: either they are
+     * the current owner, or they are a Shelf platform admin.
+     *
+     * Comparing identities is the entire check. A workspace ADMIN passes
+     * `requirePermission` on the settings route because ADMIN and OWNER share
+     * every permission, so this is the only place the two are distinguished —
+     * previously this compared the owner's role against itself, which is always
+     * true, and let any ADMIN take over the workspace.
      */
-    if (
-      !currentOwnerUserOrg.roles.includes(OrganizationRoles.OWNER) &&
-      !isCurrentUserShelfAdmin
-    ) {
+    if (currentOwnerUserOrg.user.id !== userId && !isCurrentUserShelfAdmin) {
       throw new ShelfError({
         cause: null,
         message: "Current user is not the owner of the organization.",

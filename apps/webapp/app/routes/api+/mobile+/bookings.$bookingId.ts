@@ -1,4 +1,9 @@
-import { AssetStatus, AssetType, OrganizationRoles } from "@prisma/client";
+import {
+  AssetStatus,
+  AssetType,
+  BookingStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -10,14 +15,17 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
   computeBookingAssetRemainingToCheckOut,
+  getBookingFlags,
   getPartiallyCheckedInAssetIds,
 } from "~/modules/booking/service.server";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -44,7 +52,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Self-service / base users may only read their OWN bookings. Scope the
     // lookup by custodian like the list endpoint (bookings.ts) does, so a
     // booking they don't own 404s instead of leaking across the workspace.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+    // `getMobileUserContext` also returns `role`, but that is `roles[0]` — a
+    // membership stored `[SELF_SERVICE, ADMIN]` reads as SELF_SERVICE and a
+    // real admin is treated as restricted. Every decision below resolves the
+    // most privileged role instead, matching what the mutation endpoints do.
+    const role = resolveMostPrivilegedRole(roles);
     const isSelfServiceOrBase =
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
@@ -81,6 +94,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         creator: {
           select: {
             id: true,
+            displayName: true,
             firstName: true,
             lastName: true,
           },
@@ -88,6 +102,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodianUser: {
           select: {
             id: true,
+            displayName: true,
             firstName: true,
             lastName: true,
             profilePicture: true,
@@ -100,7 +115,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           },
         },
         tags: {
-          select: { id: true, name: true },
+          select: { id: true, name: true, color: true },
         },
         // Walk the BookingAsset pivot to reach assets. `quantity` +
         // `assetKitId` per row let the loader below collapse multi-row
@@ -116,6 +131,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 id: true,
                 title: true,
                 status: true,
+                // why: lets the app grey out Reserve for the same reason web
+                // does, instead of offering a tap the server will refuse.
+                // It reaches the client through the `serializeAssetImage(rest)`
+                // spread that builds each row — there is no explicit mapping to
+                // grep for, so do not assume it is unused.
+                availableToBook: true,
                 // Quantity-tracked metadata so the app can render the
                 // check-in / check-out quantity + disposition pickers: `type`
                 // gates the picker to QT assets, `consumptionType` decides
@@ -300,7 +321,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // checked out. The shared checkout service hard-blocks the RESERVED →
     // ONGOING transition until every `BookingModelRequest` is assigned to
     // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // `fulfilledAt: null` row remains). Fold that into `canCheckout` so the app
+    // `fulfilledAt: null` row remains). Fold that into the state flag so the app
     // never offers a "Check Out" the server would reject — the app instead
     // guides the operator to assign the reserved units first (see the
     // booking-detail "Assign to check out" CTA).
@@ -308,7 +329,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (mr) => mr.fulfilledAt === null
     );
 
-    const canCheckout =
+    const canCheckoutByState =
       booking.status === "RESERVED" &&
       totalAssets > 0 &&
       !hasOutstandingModelRequests;
@@ -325,7 +346,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
       return a.status === AssetStatus.CHECKED_OUT;
     });
-    const canCheckin =
+    const canCheckinByState =
       (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
       hasCheckinable;
 
@@ -345,43 +366,68 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Per-booking lifecycle-action availability, mirroring the web
     // ActionsDropdown gating (actions-dropdown.tsx) so the app surfaces exactly
     // the actions this role/status can perform — never an option the web /
-    // role / status forbids. Passing `roles:[role]` keeps `hasPermission` a
-    // pure static-map lookup (no extra query). Server endpoints enforce these
+    // role / status forbids. Passing the membership's `roles` keeps
+    // `hasPermission` a pure static-map lookup (no extra query). Server
+    // endpoints enforce these
     // same gates regardless; this is the UI mirror.
-    const isBaseOrSelfService =
-      role === OrganizationRoles.BASE ||
-      role === OrganizationRoles.SELF_SERVICE;
-    const [canCancelPerm, canArchivePerm, canCreatePerm, canDeletePerm] =
-      await Promise.all([
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.cancel,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.archive,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.create,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.delete,
-        }),
-      ]);
+    const [
+      canCancelPerm,
+      canArchivePerm,
+      canCreatePerm,
+      canDeletePerm,
+      canCheckoutPerm,
+      canCheckinPerm,
+    ] = await Promise.all([
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.cancel,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.archive,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.delete,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkout,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkin,
+      }),
+    ]);
+    // State says the booking COULD be checked out or in; the role says whether
+    // this caller may. Both have to hold, or the app draws a button the server
+    // then refuses — the endpoints gate on these same permissions regardless,
+    // so without this the user meets the rule as a 403 instead of an absence.
+    const canCheckout = canCheckoutByState && canCheckoutPerm;
+    const canCheckin = canCheckinByState && canCheckinPerm;
+
     const bookingActions = {
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
       canCancel:
@@ -389,8 +435,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           booking.status === "ONGOING" ||
           booking.status === "OVERDUE") &&
         canCancelPerm,
-      // Archive: COMPLETE only + archive permission.
-      canArchive: booking.status === "COMPLETE" && canArchivePerm,
+      // Archive: shared web-parity rule (COMPLETE, or RESERVED already past
+      // its end date) + archive permission.
+      canArchive:
+        isBookingArchivable({ status: booking.status, to: booking.to }) &&
+        canArchivePerm,
       // Duplicate: any status; gated by create permission (web's duplicate
       // route enforces create — we hide it for those who lack it rather than
       // 403 on tap).
@@ -399,8 +448,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // self-service/base only on DRAFT). Mirrors the web client gate; the
       // server endpoint enforces ownership + the same BASE-only-DRAFT rule.
       canDelete:
-        ((isBaseOrSelfService && booking.status === "DRAFT") ||
-          !isBaseOrSelfService) &&
+        ((isSelfServiceOrBase && booking.status === "DRAFT") ||
+          !isSelfServiceOrBase) &&
         canDeletePerm,
     };
 
@@ -483,6 +532,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       countKitsAsSingleUnit: bookingSettings.countKitsAsSingleUnit ?? false,
     });
 
+    /**
+     * The third rule web's Reserve button disables on, which the companion had
+     * no way to evaluate: whether any asset is already booked for this window.
+     * Unlike "no assets" and "unavailable asset", it cannot be derived from the
+     * rows in this response — it needs the overlapping-booking query — so
+     * without this flag the phone showed an enabled Reserve, the user tapped,
+     * confirmed, and only then got a 400 from `reserveBooking`'s conflict check.
+     *
+     * Computed for DRAFT bookings only: Reserve is the sole consumer and it is
+     * the only status that renders it, so no other request pays for the query.
+     */
+    const hasAlreadyBookedAssets =
+      booking.status === BookingStatus.DRAFT && booking.from && booking.to
+        ? (
+            await getBookingFlags({
+              id: booking.id,
+              organizationId,
+              assetIds: assetsForResponse.map((a) => a.id),
+              modelRequestCount,
+              from: booking.from,
+              to: booking.to,
+            })
+          ).hasAlreadyBookedAssets
+        : false;
+
     return data({
       booking: {
         id: booking.id,
@@ -504,6 +578,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelRequestCount,
         outstandingModelUnitCount,
         lifecycleProgress,
+        hasAlreadyBookedAssets,
       },
       checkedInAssetIds,
       canCheckout,

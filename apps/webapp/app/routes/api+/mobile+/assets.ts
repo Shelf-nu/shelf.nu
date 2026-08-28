@@ -1,7 +1,7 @@
 import { AssetStatus, type Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
-import { buildMobileAssetSearchWhere } from "~/modules/api/mobile-asset-search.server";
+import { resolveMobileAssetSearchWhere } from "~/modules/api/mobile-asset-search.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
@@ -12,6 +12,7 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -24,15 +25,18 @@ import { makeShelfError, ShelfError } from "~/utils/error";
  *   - myCustody=true  → only assets in the current user's custody
  *   - status=X         → filter by asset status (e.g. AVAILABLE, IN_CUSTODY, CHECKED_OUT)
  *
- * Search matches the same fields as the web asset search — the clause comes
- * from the shared builder (modules/asset/search.server.ts via
- * modules/api/mobile-asset-search.server.ts), including web's ID-shaped
- * fast path + zero-row full-clause fallback.
+ * Search matches the same fields as the web asset search — resolved via the
+ * shared org-scoped UNION (modules/asset/search-union.server.ts through
+ * modules/api/mobile-asset-search.server.ts), the same index-driven path the
+ * web indexes use, in a single query.
  *
- * Image URLs are returned as-stored along with `mainImageExpiration`. Mobile
- * clients should call `/api/mobile/asset/refresh-image/:assetId` lazily when
- * they detect an expired URL — keeps this loader read-only and avoids fanning
- * out N writes per paginated read.
+ * Image URLs are returned with the model-image cascade already resolved
+ * (`shapeMobileAssetResponse`), not re-signed. `mainImageExpiration` is only
+ * sent when the asset's OWN signed URL won the cascade — model cover images
+ * are public and never expire. Mobile clients should call
+ * `/api/mobile/asset/refresh-image/:assetId` lazily when they detect an
+ * expired URL — keeps this loader read-only and avoids fanning out N writes
+ * per paginated read.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -115,7 +119,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : {}),
     };
 
-    const { primary, fallback } = buildMobileAssetSearchWhere(search);
+    const searchWhere = await resolveMobileAssetSearchWhere({
+      organizationId,
+      search,
+    });
 
     /** Fetches one page + total count for the given where clause. */
     const fetchPage = (where: Prisma.AssetWhereInput) =>
@@ -134,6 +141,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
             title: true,
             status: true,
             mainImage: true,
+            // The scanner invites you to "Enter QR, barcode, or SAM ID", and
+            // this list is where that search lands — so each row has to be able
+            // to show WHICH SAM ID matched. Without it the user gets hits
+            // identified by title only and has to open each one to find out.
+            sequentialId: true,
             // Model cover image; `shapeMobileAssetResponse` resolves the cascade
             // into the flat image fields the companion already reads.
             ...ASSET_MODEL_IMAGE_SELECT,
@@ -194,15 +206,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
         db.asset.count({ where }),
       ]);
 
-    let [assets, totalCount] = await fetchPage({ ...baseWhere, ...primary });
-
-    // An ID-shaped search ran the narrow clause but matched no assets. The
-    // term may be embedded in a title, description, or custom field rather
-    // than being a real identifier, so re-run with the full search clause
-    // before giving up — mirrors the fallback re-query in `getAssets`.
-    if (totalCount === 0 && fallback) {
-      [assets, totalCount] = await fetchPage({ ...baseWhere, ...fallback });
-    }
+    // Single query: the UNION already searches all 10 sources in one shot,
+    // so there is no narrow/fallback two-query dance to run any more.
+    const [assets, totalCount] = await fetchPage({
+      ...baseWhere,
+      ...searchWhere,
+    });
 
     // Flatten kit/location/custody pivots into the legacy flat shape via the
     // shared helper, then re-attach `mainImageExpiration` — a list-only extra
@@ -246,7 +255,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         custody: visibleCustody,
         custodyList,
         custodyListOthersCount,
-        mainImageExpiration,
+        mainImageExpiration: serializeImageExpiration(
+          shaped.imageSource,
+          mainImageExpiration
+        ),
       };
     });
 

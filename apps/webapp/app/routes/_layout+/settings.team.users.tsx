@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { Roles } from "@prisma/client";
 import type { InviteStatuses } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -14,14 +13,13 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import ImportUsersDialog from "~/components/settings/import-users-dialog/import-users-dialog";
 import InviteUserDialog from "~/components/settings/invite-user-dialog";
+import TransferOwnershipButton from "~/components/settings/transfer-ownership-button";
 import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 
 import { Td, Th } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
-import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -55,9 +53,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    /** Cannot manage users for PERSONAL organization */
+    /**
+     * Personal workspaces can't manage registered users. Send them to the Team
+     * page (which explains how to upgrade) instead of a contextless redirect.
+     */
     if (organization?.type === "PERSONAL") {
-      return redirect("/settings/general");
+      return redirect("/settings/team/nrm");
     }
 
     const searchParams = getCurrentSearchParams(request);
@@ -164,16 +165,20 @@ export default function UserTeamSetting() {
       </p>
 
       <ListContentWrapper>
-        <Filters>
-          <div className="flex items-center gap-1">
+        {/* innerWrapperClassName: the search wrapper defaults to w-full, which
+        squeezes the actions slot to leftovers. Content-size it on md+ so the
+        three action buttons get the actual free space. */}
+        <Filters innerWrapperClassName="md:w-auto">
+          {/* Three buttons don't always fit one row: stack them full-width on
+          mobile, and let the row wrap on tighter md screens. The container owns
+          the spacing and the stretch — children must NOT add their own `mt-*`
+          or `w-full`, or the gaps stop being uniform. */}
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:flex-wrap md:items-center md:justify-end">
+            <TransferOwnershipButton />
             <ImportUsersDialog />
             <InviteUserDialog
               trigger={
-                <Button
-                  type="button"
-                  className="mt-2 w-full md:mt-0 md:w-max"
-                  variant="primary"
-                >
+                <Button type="button" variant="primary">
                   <span className="whitespace-nowrap">Invite a user</span>
                 </Button>
               }
@@ -237,47 +242,9 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             role={item.role}
             roleEnum={item.roleEnum}
           />
-        ) : (
-          <OwnerRowActions ownerName={item.name} />
-        )}
+        ) : null}
       </Td>
     </>
-  );
-}
-
-/**
- * The one owner-level action that belongs with the member list is transferring
- * ownership, which lives on the general settings page. Surface it here so it
- * is discoverable where people manage their team.
- */
-function OwnerRowActions({ ownerName }: { ownerName: string }) {
-  const { isOwner } = useUserRoleHelper();
-  const user = useUserData();
-
-  /**
-   * Shelf staff admins can also run the transfer flow, so they get the same
-   * link as the owner (matches the isShelfAdmin check in TransferOwnershipCard)
-   */
-  const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
-
-  if (isOwner || isShelfAdmin) {
-    return (
-      <Button to="/settings/general#transfer-ownership" variant="secondary">
-        Transfer ownership
-      </Button>
-    );
-  }
-
-  return (
-    <Button
-      type="button"
-      variant="secondary"
-      disabled={{
-        reason: `Only the workspace owner (${ownerName}) can transfer ownership of this workspace.`,
-      }}
-    >
-      Transfer ownership
-    </Button>
   );
 }
 
