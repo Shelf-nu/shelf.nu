@@ -131,7 +131,7 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
 
     expect(requirePermissionMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        entity: PermissionEntity.asset,
+        entity: PermissionEntity.reports,
         action: PermissionAction.export,
       })
     );
