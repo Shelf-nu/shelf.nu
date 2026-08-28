@@ -21,6 +21,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
+import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
 import { hasCustody } from "~/modules/custody/utils";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
@@ -307,7 +308,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           });
         }
 
-        await tx.custody.deleteMany({ where: { assetId } });
+        // `kitCustodyId: null` — this assign owns only operator-assigned rows.
+        // A row a kit put here belongs to the kit, and deleting it would leave
+        // the KitCustody naming a custodian for an asset that no longer has
+        // the matching row: the same "two answers to who has this?" state the
+        // release path refuses. Scoping the delete keeps the row alive so the
+        // assert below can see it and reject the whole assignment.
+        // why: these two must stay sequential — react-doctor/async-parallel
+        // flags them, and combining them into a `Promise.all` would be wrong
+        // twice: the delete-then-assert ORDER is the guarantee (the assert may
+        // only read once the operator rows are gone), and concurrent queries on
+        // one interactive-transaction client are not safe in Prisma.
+        await tx.custody.deleteMany({
+          where: { assetId, asset: { organizationId }, kitCustodyId: null },
+        });
+
+        await assertNoKitDerivedCustody(tx, [assetId], organizationId);
 
         const updated = await tx.asset.update({
           where: {
