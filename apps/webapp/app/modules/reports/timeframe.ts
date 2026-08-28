@@ -31,6 +31,21 @@ import type { TimeframePreset, ResolvedTimeframe } from "./types";
  *   (UTC), which is acceptable for the internal error-path fallbacks below.
  * @returns Resolved timeframe with actual dates and label
  */
+/**
+ * Whether a date boundary can actually be read.
+ *
+ * `new Date()` answers a string it cannot parse with an Invalid Date rather
+ * than by throwing, and that value is an object — so it is truthy, passes a
+ * presence check, and only fails much later inside a formatter. Query strings
+ * are user-supplied, so this is reachable from any report URL.
+ *
+ * @param value - A boundary that may be absent, or present but unreadable
+ * @returns `true` only for a Date carrying a real instant
+ */
+function isUsableDate(value: Date | undefined): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
 export function resolveTimeframe(
   preset: TimeframePreset,
   customFrom?: Date,
@@ -142,9 +157,15 @@ export function resolveTimeframe(
     }
 
     case "custom": {
-      if (!customFrom || !customTo) {
-        // Return a default if custom dates not provided
-        return resolveTimeframe("last_30d");
+      // `new Date("garbage")` is an Invalid Date, which is TRUTHY — so a
+      // presence check alone lets one through, and it reaches `formatDateShort`
+      // here and `Intl.DateTimeFormat.format` in the PDF route, which throws a
+      // RangeError. A boundary that cannot be read is no boundary, so it is
+      // treated the same as one that was never given.
+      if (!isUsableDate(customFrom) || !isUsableDate(customTo)) {
+        // Carry `prefs` into the fallback: without it the default range is
+        // resolved in UTC rather than the caller's timezone.
+        return resolveTimeframe("last_30d", undefined, undefined, prefs);
       }
       // Pass the boundaries through unchanged. The naive-calendar-day →
       // pref-tz start/end-of-day conversion happens ONCE, at the picker's URL

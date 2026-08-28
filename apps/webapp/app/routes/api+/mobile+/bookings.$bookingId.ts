@@ -25,6 +25,7 @@ import {
 } from "~/modules/booking/service.server";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -51,7 +52,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Self-service / base users may only read their OWN bookings. Scope the
     // lookup by custodian like the list endpoint (bookings.ts) does, so a
     // booking they don't own 404s instead of leaking across the workspace.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+    // `getMobileUserContext` also returns `role`, but that is `roles[0]` — a
+    // membership stored `[SELF_SERVICE, ADMIN]` reads as SELF_SERVICE and a
+    // real admin is treated as restricted. Every decision below resolves the
+    // most privileged role instead, matching what the mutation endpoints do.
+    const role = resolveMostPrivilegedRole(roles);
     const isSelfServiceOrBase =
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
@@ -315,7 +321,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // checked out. The shared checkout service hard-blocks the RESERVED →
     // ONGOING transition until every `BookingModelRequest` is assigned to
     // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // `fulfilledAt: null` row remains). Fold that into `canCheckout` so the app
+    // `fulfilledAt: null` row remains). Fold that into the state flag so the app
     // never offers a "Check Out" the server would reject — the app instead
     // guides the operator to assign the reserved units first (see the
     // booking-detail "Assign to check out" CTA).
@@ -323,7 +329,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (mr) => mr.fulfilledAt === null
     );
 
-    const canCheckout =
+    const canCheckoutByState =
       booking.status === "RESERVED" &&
       totalAssets > 0 &&
       !hasOutstandingModelRequests;
@@ -340,7 +346,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
       return a.status === AssetStatus.CHECKED_OUT;
     });
-    const canCheckin =
+    const canCheckinByState =
       (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
       hasCheckinable;
 
@@ -360,43 +366,68 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Per-booking lifecycle-action availability, mirroring the web
     // ActionsDropdown gating (actions-dropdown.tsx) so the app surfaces exactly
     // the actions this role/status can perform — never an option the web /
-    // role / status forbids. Passing `roles:[role]` keeps `hasPermission` a
-    // pure static-map lookup (no extra query). Server endpoints enforce these
+    // role / status forbids. Passing the membership's `roles` keeps
+    // `hasPermission` a pure static-map lookup (no extra query). Server
+    // endpoints enforce these
     // same gates regardless; this is the UI mirror.
-    const isBaseOrSelfService =
-      role === OrganizationRoles.BASE ||
-      role === OrganizationRoles.SELF_SERVICE;
-    const [canCancelPerm, canArchivePerm, canCreatePerm, canDeletePerm] =
-      await Promise.all([
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.cancel,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.archive,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.create,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.delete,
-        }),
-      ]);
+    const [
+      canCancelPerm,
+      canArchivePerm,
+      canCreatePerm,
+      canDeletePerm,
+      canCheckoutPerm,
+      canCheckinPerm,
+    ] = await Promise.all([
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.cancel,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.archive,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.delete,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkout,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkin,
+      }),
+    ]);
+    // State says the booking COULD be checked out or in; the role says whether
+    // this caller may. Both have to hold, or the app draws a button the server
+    // then refuses — the endpoints gate on these same permissions regardless,
+    // so without this the user meets the rule as a 403 instead of an absence.
+    const canCheckout = canCheckoutByState && canCheckoutPerm;
+    const canCheckin = canCheckinByState && canCheckinPerm;
+
     const bookingActions = {
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
       canCancel:
@@ -417,8 +448,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // self-service/base only on DRAFT). Mirrors the web client gate; the
       // server endpoint enforces ownership + the same BASE-only-DRAFT rule.
       canDelete:
-        ((isBaseOrSelfService && booking.status === "DRAFT") ||
-          !isBaseOrSelfService) &&
+        ((isSelfServiceOrBase && booking.status === "DRAFT") ||
+          !isSelfServiceOrBase) &&
         canDeletePerm,
     };
 
