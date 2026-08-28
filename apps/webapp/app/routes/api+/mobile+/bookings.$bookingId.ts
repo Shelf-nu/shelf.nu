@@ -19,6 +19,8 @@ import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
+  custodianScopeClause,
+  resolveCustodianScope,
   computeBookingAssetRemainingToCheckOut,
   getBookingFlags,
   getPartiallyCheckedInAssetIds,
@@ -71,7 +73,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       where: {
         id: bookingId,
         organizationId,
-        ...(isSelfServiceOrBase && { custodianUserId: user.id }),
         /**
          * Draft privacy (web parity). A DRAFT booking is private to its
          * creator — web gates the detail route on the same shared clause, so
@@ -79,8 +80,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
          * even though the list would (now) hide it. The list fix alone is not
          * enough: booking ids are guessable-adjacent and the detail endpoint
          * is reachable directly.
+         *
+         * The custodian restriction joins the same AND rather than sitting
+         * beside it: custody lives on the user link OR a team-member link, so
+         * the clause is itself an OR and merging it in at this level would
+         * collide with the one above.
          */
-        AND: [bookingDraftVisibilityClause(user.id)],
+        AND: [
+          bookingDraftVisibilityClause(user.id),
+          ...(isSelfServiceOrBase
+            ? [
+                custodianScopeClause(
+                  await resolveCustodianScope({
+                    userId: user.id,
+                    organizationId,
+                  })
+                ),
+              ]
+            : []),
+        ],
       },
       select: {
         id: true,

@@ -10275,14 +10275,33 @@ export async function getMinimalBookings(params: {
   organizationId: Organization["id"];
   userId: Booking["creatorId"];
   statuses?: Booking["status"][] | null;
-  custodianUserId?: Booking["custodianUserId"] | null;
+  /**
+   * Restrict to bookings that are the acting user's own. Takes a flag rather
+   * than an id so the caller cannot express the restriction narrowly: custody
+   * lives on either the user link OR a team-member link, and this resolves
+   * both through {@link custodianScopeClause}.
+   */
+  restrictToCustodian?: boolean;
 }) {
-  const { organizationId, userId, statuses, custodianUserId } = params;
+  const { organizationId, userId, statuses, restrictToCustodian } = params;
 
   try {
+    const andClauses: Prisma.BookingWhereInput[] = [
+      bookingDraftVisibilityClause(userId),
+    ];
+
+    if (restrictToCustodian && userId) {
+      // AND-ed, never merged into a top-level OR where a filter could widen it.
+      andClauses.push(
+        custodianScopeClause(
+          await resolveCustodianScope({ userId, organizationId })
+        )
+      );
+    }
+
     const where: Prisma.BookingWhereInput = {
       organizationId,
-      AND: [bookingDraftVisibilityClause(userId)],
+      AND: andClauses,
     };
 
     if (statuses?.length) {
@@ -10292,10 +10311,6 @@ export async function getMinimalBookings(params: {
       where.status = {
         notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED],
       };
-    }
-
-    if (custodianUserId) {
-      where.custodianUserId = custodianUserId;
     }
 
     const bookings = await db.booking.findMany({

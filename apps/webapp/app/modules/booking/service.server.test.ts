@@ -240,6 +240,10 @@ vitest.mock("~/database/db.server", () => ({
     },
     teamMember: {
       findUnique: vitest.fn().mockResolvedValue(null),
+      // why: `resolveCustodianScope` reads every team-member row the user holds
+      // in the org, so any query that restricts to "my bookings" reaches this.
+      // Defaults to none; the custodian-scope tests supply their own rows.
+      findMany: vitest.fn().mockResolvedValue([]),
       // why: cross-org IDOR guard (assertTeamMemberBelongsToOrg) and the
       // new-custodian lookup now query teamMember.findFirst scoped by
       // organizationId. Echo a minimal row for the requested id so the
@@ -12176,22 +12180,60 @@ describe("getMinimalBookings", () => {
     expect(arg.where.custodianUserId).toBeUndefined();
   });
 
-  it("scopes to a custodian when custodianUserId is provided (self-service)", async () => {
-    // why: stub the query so we can assert the custodian where-clause
-    // getMinimalBookings adds for self-service callers, not real DB behavior.
+  it("scopes to both custody links when restricted to the custodian", async () => {
+    // Custody sits on the user link OR on a team-member link, and a booking
+    // assigned to a team member before a user was attached to it keeps
+    // `custodianUserId` NULL. Matching the user link alone hides exactly the
+    // bookings those users own.
+    // why: stub the query so the where-clause is observable without a database.
     const findMany = db.booking.findMany as unknown as ReturnType<
       typeof vitest.fn
     >;
     findMany.mockResolvedValueOnce([]);
+    // why: this is the lookup `resolveCustodianScope` performs; the user holds
+    // two team-member rows, which the schema permits (no unique on
+    // `(userId, organizationId)`).
+    (
+      db.teamMember.findMany as unknown as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([{ id: "tm-1" }, { id: "tm-2" }]);
 
     await getMinimalBookings({
       organizationId: "org-1",
       userId: "user-1",
-      custodianUserId: "user-1",
+      restrictToCustodian: true,
     });
 
     const arg = findMany.mock.calls[0][0];
-    expect(arg.where.custodianUserId).toBe("user-1");
+    // AND-ed, not merged into a top-level OR where another clause could widen
+    // it away.
+    expect(arg.where.custodianUserId).toBeUndefined();
+    expect(arg.where.AND).toContainEqual({
+      OR: [
+        { custodianUserId: "user-1" },
+        { custodianTeamMemberId: { in: ["tm-1", "tm-2"] } },
+      ],
+    });
+  });
+
+  it("falls back to the user link when the user holds no team-member row", async () => {
+    const findMany = db.booking.findMany as unknown as ReturnType<
+      typeof vitest.fn
+    >;
+    findMany.mockResolvedValueOnce([]);
+    // why: a user with no team member in the org — the clause has nothing to
+    // add, and must not degrade into matching everything.
+    (
+      db.teamMember.findMany as unknown as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+
+    await getMinimalBookings({
+      organizationId: "org-1",
+      userId: "user-1",
+      restrictToCustodian: true,
+    });
+
+    const arg = findMany.mock.calls[0][0];
+    expect(arg.where.AND).toContainEqual({ custodianUserId: "user-1" });
   });
 });
 
