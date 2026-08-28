@@ -64,6 +64,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { getIntParam } from "~/utils/search-params-number";
 import { tw } from "~/utils/tw";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -159,8 +160,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         // Anchor trend-chart axis labels in the acting user's timezone (D2).
         timeZone: formatPrefs.timeZone,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
         sortBy,
         sortOrder,
       });
@@ -171,19 +172,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await overdueItemsReport({
         organizationId,
         custodianId: url.searchParams.get("custodian") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
     case "idle-assets":
       reportData = await idleAssetsReport({
         organizationId,
-        idleThresholdDays: parseInt(url.searchParams.get("days") || "30", 10),
+        idleThresholdDays: getIntParam(url.searchParams, "days", 30),
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -192,8 +193,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         teamMemberId: url.searchParams.get("teamMember") || undefined,
         locationId: url.searchParams.get("location") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -203,8 +204,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -212,16 +213,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await topBookedKitsReport({
         organizationId,
         timeframe,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
     case "distribution":
       reportData = await assetDistributionReport({
         organizationId,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -237,8 +238,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         statuses:
           url.searchParams.get("statuses")?.split(",").filter(Boolean) ||
           undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -248,8 +249,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "12", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 12),
       });
       break;
 
@@ -259,8 +260,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -270,8 +271,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         assetId: url.searchParams.get("asset") || undefined,
         categoryId: url.searchParams.get("category") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
