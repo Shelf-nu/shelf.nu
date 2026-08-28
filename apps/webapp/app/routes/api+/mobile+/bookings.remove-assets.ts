@@ -11,7 +11,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { removeAssets } from "~/modules/booking/service.server";
-import { canSeeBooking } from "~/utils/booking-authorization.server";
+import {
+  canSeeBooking,
+  resolveMostPrivilegedRole,
+} from "~/utils/booking-authorization.server";
 import { canRoleRemoveBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
@@ -106,7 +109,16 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const { role, roles } = await getMobileUserContext(user.id, organizationId);
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+
+    // `resolveMostPrivilegedRole`, not the context's `role`, which is
+    // `roles[0]`: a membership stored `[SELF_SERVICE, ADMIN]` would otherwise
+    // read as restricted and refuse an actual admin someone else's booking.
+    // The sibling mobile endpoints (`bookings.checkin`, `partial-checkout`,
+    // `fulfil-and-checkout`) all resolve the same way, as does the web side
+    // via `resolveEffectiveRole`.
+    const role = resolveMostPrivilegedRole(roles);
+
     // BASE is as restricted as SELF_SERVICE for managing booking assets: both
     // may only touch their OWN bookings (enforced just below). Keying only on
     // SELF_SERVICE let a BASE user with `booking:update` edit anyone's booking
@@ -142,9 +154,6 @@ export async function action({ request }: ActionFunctionArgs) {
     // BASE stops at DRAFT here as it does on web: removing from a live booking
     // resets the asset to available, which is the check-in BASE cannot run.
     // Ownership is already enforced by the own-booking guard directly above.
-    // `roles`, not `[role]`: `getMobileUserContext` sets `role` to `roles[0]`,
-    // so a membership ordered `[SELF_SERVICE, ADMIN]` would refuse an actual
-    // admin here. The helper resolves the array to its most permissive answer.
     if (!canRoleRemoveBookingAssets({ roles, booking })) {
       throw new ShelfError({
         cause: null,
