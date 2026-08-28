@@ -425,6 +425,9 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <TouchableOpacity
             style={styles.settingRow}
+            // Stays Shelf's own site on every server, unlike the links
+            // around it: this policy covers the APP, which is Shelf's
+            // regardless of who hosts the instance its data lives on.
             onPress={() =>
               WebBrowser.openBrowserAsync("https://www.shelf.nu/privacy")
             }
@@ -484,11 +487,14 @@ export default function SettingsScreen() {
         For advanced features, visit{" "}
         <Text
           style={styles.companionFooterLink}
-          // why: the marketing site, not the user's instance — this one stays
-          // Shelf Cloud even for self-hosted users.
-          onPress={() => WebBrowser.openBrowserAsync("https://app.shelf.nu")}
+          // The web app this companion belongs to, which is the CONNECTED
+          // server — a self-hosted user's advanced features live on their own
+          // instance, and Shelf Cloud has no account of theirs to show them.
+          onPress={() => WebBrowser.openBrowserAsync(getApiBaseUrl())}
+          accessibilityLabel={`Open ${serverLabel} in a browser`}
+          accessibilityRole="link"
         >
-          app.shelf.nu
+          {serverLabel}
         </Text>
       </Text>
 
