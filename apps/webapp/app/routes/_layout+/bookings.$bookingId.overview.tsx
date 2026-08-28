@@ -89,7 +89,7 @@ import {
 } from "~/utils/booking-authorization.server";
 import {
   calculateTotalValueOfAssets,
-  canUserRemoveBookingAssets,
+  canRoleRemoveBookingAssets,
 } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
@@ -1516,17 +1516,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     );
 
     /**
-     * A finished booking is a closed record — its contents must not change.
+     * Role + status gate for the remove intents.
      *
-     * The remove intents were gated on `booking:update` permission alone: the
-     * COMPLETE/ARCHIVED block lived only in the client dropdown, so a crafted
-     * POST could still strip items from a finished booking. Every sibling
-     * path already guards this server-side (`manage-assets`, `manage-kits`,
-     * and the mobile remove endpoint).
+     * `booking:update` is all these intents check through `requirePermission`,
+     * and BASE holds it, so neither status nor role is settled by that call.
+     * Both are answered here, server-side: the client gating on these same
+     * rules is cosmetic, and a crafted POST reaches this action directly.
      *
-     * Status only — WHO may remove is already settled upstream by the row/bulk
-     * action gating, and differs from who may add (a self-service custodian
-     * may remove from their own RESERVED booking).
+     * A closed booking (COMPLETE / ARCHIVED / CANCELLED) is immutable for
+     * everyone. Below that, a restricted role is bounded by status — removing
+     * from a live booking reconciles the asset back to available, which is a
+     * check-in, and BASE holds no `booking:checkin`.
+     *
+     * WHO owns the booking is still settled below by `validateBookingOwnership`.
      */
     const removeIntents = [
       "removeAsset",
@@ -1535,13 +1537,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     ];
     if (
       removeIntents.includes(intent) &&
-      !canUserRemoveBookingAssets(basicBookingInfo)
+      // `[role]` is safe here, unlike on the mobile endpoint: `requirePermission`
+      // resolves through `resolveEffectiveRole`, which returns the MOST
+      // PRIVILEGED role on the membership rather than `roles[0]`.
+      !canRoleRemoveBookingAssets({ roles: [role], booking: basicBookingInfo })
     ) {
       throw new ShelfError({
         cause: null,
         message:
           "Removing items is not allowed for the current status of the booking.",
-        additionalData: { userId, id, intent, status: basicBookingInfo.status },
+        additionalData: {
+          userId,
+          id,
+          intent,
+          role,
+          status: basicBookingInfo.status,
+        },
         label: "Booking",
         status: 403,
         shouldBeCaptured: false,

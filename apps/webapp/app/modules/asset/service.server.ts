@@ -61,6 +61,7 @@ import {
   createCategoriesIfNotExists,
   getCategory,
 } from "~/modules/category/service.server";
+import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import {
   createCustomFieldsIfNotExists,
@@ -6162,10 +6163,19 @@ export async function bulkCheckOutAssets({
 
       /** Clean up any stale custody records that may exist despite AVAILABLE status.
        * This prevents P2002 unique constraint violations when a previous
-       * release/checkin updated status but failed to delete the custody row. */
+       * release/checkin updated status but failed to delete the custody row.
+       *
+       * `kitCustodyId: null` — only operator-assigned rows are stale here. The
+       * `assetsNotAvailable` pre-check rejects an IN_CUSTODY asset, so a
+       * kit-derived row reaching this point means status and custody have
+       * already drifted apart; deleting it would orphan the KitCustody and
+       * make the drift permanent. Scoping the delete keeps it for the assert
+       * below, which refuses the assignment instead. */
       await tx.custody.deleteMany({
-        where: { assetId: { in: assets.map((a) => a.id) } },
+        where: { assetId: { in: assetIdsToCustody }, kitCustodyId: null },
       });
+
+      await assertNoKitDerivedCustody(tx, assetIdsToCustody, organizationId);
 
       /**
        * Updating status of assets to IN_CUSTODY — BEFORE the custody rows.
@@ -6423,12 +6433,24 @@ export async function bulkCheckInAssets({
      * 2. Update status of all assets to AVAILABLE
      */
     await db.$transaction(async (tx) => {
-      /** Deleting custodies over assets */
+      /** Deleting custodies over assets. `kitCustodyId: null` — this release
+       * owns only operator-assigned rows; kit-derived custody is the kit's to
+       * remove, so it is scoped out of the delete and left for the assert
+       * below to reject.
+       * @see {@link assertNoKitDerivedCustody} for what that ordering does and
+       * does not guarantee. */
       await tx.custody.deleteMany({
         where: {
           assetId: { in: assets.map((asset) => asset.id) },
+          kitCustodyId: null,
         },
       });
+
+      await assertNoKitDerivedCustody(
+        tx,
+        assets.map((asset) => asset.id),
+        organizationId
+      );
 
       /**
        * Updating status of assets to AVAILABLE.
