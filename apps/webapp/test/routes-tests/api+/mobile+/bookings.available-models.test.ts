@@ -31,7 +31,13 @@ import { assertIsDataWithResponseInit } from "@helpers/assertions";
 // why: db is the integration boundary — we assert the `where` the route builds
 // so the custodian scoping is provably applied. Mock booking.findFirst only.
 vi.mock("~/database/db.server", () => ({
-  db: { booking: { findFirst: vi.fn() } },
+  db: {
+    booking: { findFirst: vi.fn() },
+    // why: a custody-restricted read resolves every team-member row the caller
+    // holds in the org, so `resolveCustodianScope` reaches this. Defaults to
+    // none; the scoping test supplies its own.
+    teamMember: { findMany: vi.fn().mockResolvedValue([]) },
+  },
 }));
 
 // why: auth/entitlement helpers are out of scope; stub them but keep
@@ -113,10 +119,34 @@ describe("GET /api/mobile/bookings/available-models", () => {
     await loader(makeArgs());
 
     const where = findFirstMock.mock.calls[0]![0]!.where;
-    expect(where).toMatchObject({
-      id: BOOKING_ID,
-      organizationId: ORG_ID,
-      custodianUserId: CALLER_ID,
+    expect(where).toMatchObject({ id: BOOKING_ID, organizationId: ORG_ID });
+
+    // Custody sits on the caller's user link OR on any team-member row they
+    // hold — a booking assigned to a team member before a user was attached to
+    // it keeps `custodianUserId` NULL, and matching that link alone hides
+    // exactly the bookings those callers own. AND-ed, so nothing beside it can
+    // widen the restriction away.
+    expect(where).not.toHaveProperty("custodianUserId");
+    expect(where!.AND).toContainEqual({ custodianUserId: CALLER_ID });
+  });
+
+  it("includes the caller's team-member links in the custody scope", async () => {
+    withRole(OrganizationRoles.SELF_SERVICE);
+    // why: this is the lookup `resolveCustodianScope` performs; a user may hold
+    // more than one team-member row in an org (no unique on the pair).
+    vi.mocked(db.teamMember.findMany).mockResolvedValueOnce([
+      { id: "tm-1" },
+      { id: "tm-2" },
+    ] as never);
+
+    await loader(makeArgs());
+
+    const where = findFirstMock.mock.calls[0]![0]!.where;
+    expect(where!.AND).toContainEqual({
+      OR: [
+        { custodianUserId: CALLER_ID },
+        { custodianTeamMemberId: { in: ["tm-1", "tm-2"] } },
+      ],
     });
   });
 

@@ -30,7 +30,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // bookings too (added assets stay AVAILABLE — progressive checkout), not
       // just DRAFT/RESERVED ones.
       statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
-      ...(isSelfServiceOrBase && { custodianUserId: userId }),
+      // Custody may sit on the user link or on a team-member link; the
+      // service resolves both.
+      ...(isSelfServiceOrBase && { restrictToCustodian: true }),
     });
 
     return data(payload({ bookings }));

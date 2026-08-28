@@ -8,6 +8,10 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import {
+  custodianScopeClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -77,7 +81,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
       where: {
         id: bookingId,
         organizationId,
-        ...(isSelfServiceOrBase && { custodianUserId: user.id }),
+        // Custody sits on the user link OR a team-member link; AND-ed so the
+        // resulting OR cannot be widened by anything beside it.
+        ...(isSelfServiceOrBase
+          ? {
+              AND: [
+                custodianScopeClause(
+                  await resolveCustodianScope({
+                    userId: user.id,
+                    organizationId,
+                  })
+                ),
+              ],
+            }
+          : {}),
       },
       select: {
         id: true,

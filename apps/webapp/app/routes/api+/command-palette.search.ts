@@ -10,6 +10,10 @@ import {
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssets } from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import {
+  custodianScopeClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -187,8 +191,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ...(bookingSearchConditions.length
         ? { OR: bookingSearchConditions }
         : {}),
-      // BASE and SELF_SERVICE users can only see their own bookings unless org settings allow otherwise
-      ...(canSeeAllBookings ? {} : { custodianUserId: userId }),
+      // BASE and SELF_SERVICE users can only see their own bookings unless org
+      // settings allow otherwise. AND-ed rather than merged in beside the
+      // search `OR` above: custody is itself an OR across the user link and any
+      // team-member link, and a search term must not be able to widen it away.
+      ...(canSeeAllBookings
+        ? {}
+        : {
+            AND: [
+              custodianScopeClause(
+                await resolveCustodianScope({ userId, organizationId })
+              ),
+            ],
+          }),
     };
 
     const locationWhere: Prisma.LocationWhereInput = {
