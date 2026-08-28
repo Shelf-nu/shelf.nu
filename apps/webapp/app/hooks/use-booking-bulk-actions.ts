@@ -7,7 +7,10 @@
 import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
-import { canRoleRemoveBookingAssets } from "~/utils/bookings";
+import {
+  canRoleRemoveBookingAssets,
+  canUserRemoveBookingAssets,
+} from "~/utils/bookings";
 import {
   PermissionAction,
   PermissionEntity,
@@ -66,12 +69,12 @@ export function useBookingBulkActions() {
         bookingStatus?.isOverdue)
   );
 
-  // Finished = COMPLETE/ARCHIVED. Computed directly from status: the helper's
-  // `isFinished` flag isn't present on its undefined-status return shape, and a
-  // direct compare matches how the rest of the booking UI checks status.
-  const isFinished =
-    booking.status === BookingStatus.COMPLETE ||
-    booking.status === BookingStatus.ARCHIVED;
+  // A closed record: COMPLETE, ARCHIVED or CANCELLED. Asked through the shared
+  // status test rather than compared against a list here, so all three closed
+  // statuses explain themselves the same way — spelling out two of them left a
+  // cancelled booking silently dropping the row the other two disable with a
+  // reason.
+  const isClosed = !canUserRemoveBookingAssets(booking);
 
   /**
    * Removal stays VISIBLE when status alone is what blocks it, so the menu can
@@ -87,7 +90,7 @@ export function useBookingBulkActions() {
     roles,
     booking: { status: BookingStatus.DRAFT },
   });
-  const showRemove = canRemove || (isFinished && canRemoveAtAnyStatus);
+  const showRemove = canRemove || (isClosed && canRemoveAtAnyStatus);
 
   return {
     canRemove,

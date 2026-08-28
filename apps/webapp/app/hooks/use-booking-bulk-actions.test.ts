@@ -111,6 +111,21 @@ describe("useBookingBulkActions", () => {
     expect(a).toMatchObject({ canRemove: false, showRemove: true });
   });
 
+  /**
+   * All three closed statuses are the same answer to the user, so they get the
+   * same disabled row and reason. Singling out COMPLETE and ARCHIVED left a
+   * cancelled booking dropping the row with nothing said.
+   */
+  it.each([
+    BookingStatus.COMPLETE,
+    BookingStatus.ARCHIVED,
+    BookingStatus.CANCELLED,
+  ])("explains rather than hides removal on a %s booking", (status) => {
+    const a = actions(status, [OrganizationRoles.ADMIN]);
+
+    expect(a).toMatchObject({ canRemove: false, showRemove: true });
+  });
+
   // The finished-booking fallback above must not fire before roles resolve.
   it("gives nothing when roles have not loaded", () => {
     expect(actions(BookingStatus.COMPLETE, []).hasAny).toBe(false);

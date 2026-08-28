@@ -153,7 +153,10 @@ function ConditionalDropdown() {
   // Mirror per-row Remove: can't remove items from a finished booking.
   const removeDisabled = canRemove
     ? false
-    : { reason: "Can't remove items from a completed or archived booking." };
+    : {
+        reason:
+          "Can't remove items from a completed, archived or cancelled booking.",
+      };
 
   const {
     ref: dropdownRef,
