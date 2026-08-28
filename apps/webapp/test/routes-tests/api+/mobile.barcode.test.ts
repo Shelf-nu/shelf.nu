@@ -376,21 +376,35 @@ describe("GET /api/mobile/barcode/:value", () => {
     expect(body.error.message).toContain("not linked");
   });
 
-  it("should correctly decode URL-encoded barcode values", async () => {
-    const specialValue = "ABC/DEF+GHI";
-    const request = createBarcodeRequest(specialValue);
+  /**
+   * The loader reads the segment from the request URL, not from `params`.
+   * React Router re-encodes a decoded `/` back to `%2F` when it builds
+   * `params`, which makes a barcode containing a slash indistinguishable from
+   * one whose literal text is `%2F` — the URL still has the difference.
+   *
+   * `params` is passed here as the router would have produced it, since the
+   * loader falls back to it for a segment that will not decode.
+   */
+  it.each([
+    // scanned                router's params        why it is interesting
+    ["ABC/DEF+GHI", "ABC%2FDEF+GHI"], // a real slash
+    ["ABC%2FDEF", "ABC%2FDEF"], // the literal text "%2F" — same param!
+    ["ABC%41", "ABC%41"], // a literal escape that must not be decoded
+    ["50%", "50%"], // a lone % that decodeURIComponent would throw on
+    ["PLAIN123", "PLAIN123"],
+  ])("looks up %s from the request URL", async (scanned, param) => {
     const result = await loader(
       createLoaderArgs({
-        request,
-        params: { value: encodeURIComponent(specialValue) },
+        request: createBarcodeRequest(scanned),
+        params: { value: param },
       })
     );
 
+    // Rows two and one share a `params` value, so a loader reading `params`
+    // cannot answer both — it finds `ABC/DEF` for a barcode stored as the
+    // literal `ABC%2FDEF`, and never finds the latter at all.
     expect(getBarcodeByValue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        value: specialValue,
-        organizationId: "org-1",
-      })
+      expect.objectContaining({ value: scanned, organizationId: "org-1" })
     );
 
     expect(result instanceof Response).toBe(true);
