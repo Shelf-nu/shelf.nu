@@ -14,10 +14,17 @@ import { releaseAssetsToAvailableUnlessCheckedOut } from "../asset/custody-statu
  * read "Available" while the kit still names a custodian — the system would
  * give two answers to "who has this?".
  *
- * Call it AFTER the release's own (kit-scoped-away) delete, inside the same
- * transaction: the delete never touches kit-derived rows, so any such row this
- * read sees — whether it predates the release or was committed concurrently by
- * a kit assignment — aborts the whole transaction rather than being lost.
+ * Call it AFTER the caller's own (kit-scoped-away) delete, inside the same
+ * transaction. The delete never touches kit-derived rows, so a row that exists
+ * by the time this read runs is still there to be found, and aborts the whole
+ * transaction rather than being silently deleted.
+ *
+ * It does NOT serialise against a kit assignment. Under READ COMMITTED — the
+ * default here, with no row lock — a kit custody row committed after this read
+ * is invisible to it, and the caller goes on to mark the asset AVAILABLE (or
+ * take custody of it) beside a live KitCustody. Closing that needs a
+ * `SELECT … FOR UPDATE` on the asset; what this guard rules out is the far
+ * likelier case of a kit-derived row that already existed.
  *
  * @param tx - the active transaction the release runs in
  * @param assetIds - assets about to have their custody rows deleted
@@ -60,7 +67,9 @@ export async function assertNoKitDerivedCustody(
  * below releases ALL custodians at once, which is exactly one row for an
  * INDIVIDUAL asset and every custodian's row for a `QUANTITY_TRACKED` one.
  * Custody a kit put on the asset is owned by the kit and is refused here by
- * {@link assertNoKitDerivedCustody} — releasing the kit is the one door out. QT releases belong to `releaseQuantity()`
+ * {@link assertNoKitDerivedCustody}; it clears when the kit's own custody is
+ * released, or when the asset leaves the kit. QT releases belong to
+ * `releaseQuantity()`
  * in the asset service, which takes a quantity and releases one custodian's
  * slice. Both callers enforce the contract with `isQuantityTracked` before
  * calling in, so the delete is deliberately NOT scoped to a single custodian —
@@ -156,10 +165,10 @@ export async function releaseCustody({
       // is incidental ordering, not a guard.
       // @see .claude/rules/org-scope-user-supplied-ids.md
       // `kitCustodyId: null` — this release owns only operator-assigned rows.
-      // Kit-derived rows are the kit's to remove, and scoping them out of the
-      // delete makes that true even against a kit assignment committing
-      // concurrently: such a row survives the delete and the assert below
-      // rolls the whole release back.
+      // Kit-derived rows are the kit's to remove, so they are scoped out of
+      // the delete and left for the assert below to reject.
+      // @see {@link assertNoKitDerivedCustody} for what that ordering does and
+      // does not guarantee.
       await tx.custody.deleteMany({
         where: { assetId, asset: { organizationId }, kitCustodyId: null },
       });
