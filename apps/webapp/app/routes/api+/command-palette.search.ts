@@ -30,6 +30,22 @@ const querySchema = z.object({
   q: z.string().trim().max(100).optional(),
 });
 
+/**
+ * Cross-entity search behind the command palette.
+ *
+ * Queries assets, audits, kits, bookings, locations and team members in one
+ * round trip, each scoped to the active organization.
+ *
+ * Bookings carry an extra restriction: unless the role (or the workspace
+ * setting) allows seeing every booking, results are limited to the caller's
+ * own — across both custody links, since a booking may name them through the
+ * user link or through any team-member row they hold. That restriction is
+ * AND-ed, never folded into the search `OR`, so a search term cannot widen it.
+ *
+ * @param args.context - Carries the auth session
+ * @param args.request - Read for the query string and active organization
+ * @returns Matches per entity, each already scoped to what the caller may see
+ */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
