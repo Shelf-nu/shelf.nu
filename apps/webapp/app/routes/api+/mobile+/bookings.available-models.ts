@@ -9,6 +9,7 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import {
+  bookingDraftVisibilityClause,
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
@@ -81,20 +82,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
       where: {
         id: bookingId,
         organizationId,
-        // Custody sits on the user link OR a team-member link; AND-ed so the
-        // resulting OR cannot be widened by anything beside it.
-        ...(isSelfServiceOrBase
-          ? {
-              AND: [
+        AND: [
+          /**
+           * Draft privacy, applied to EVERY role. A DRAFT booking is private
+           * to its creator, which is what the detail route enforces — without
+           * it here, anyone who can name a colleague's draft id reads its model
+           * reservations and availability, and custody scoping does not cover
+           * it because that scoping does not apply to ADMIN/OWNER at all.
+           */
+          bookingDraftVisibilityClause(user.id),
+          /**
+           * Custody sits on the user link OR a team-member link, so the clause
+           * is itself an OR — it joins this AND rather than sitting beside it,
+           * where the two ORs would collide.
+           */
+          ...(isSelfServiceOrBase
+            ? [
                 custodianScopeClause(
                   await resolveCustodianScope({
                     userId: user.id,
                     organizationId,
                   })
                 ),
-              ],
-            }
-          : {}),
+              ]
+            : []),
+        ],
       },
       select: {
         id: true,

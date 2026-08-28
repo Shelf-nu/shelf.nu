@@ -150,6 +150,24 @@ describe("GET /api/mobile/bookings/available-models", () => {
     });
   });
 
+  it("hides another member's DRAFT booking, even from an ADMIN", async () => {
+    // A DRAFT booking is private to its creator, which is the rule the detail
+    // route enforces. Custody scoping cannot stand in for it: ADMIN and OWNER
+    // are not custody-scoped at all, so without this clause naming a
+    // colleague's draft id returns its model reservations and availability.
+    withRole(OrganizationRoles.ADMIN);
+
+    await loader(makeArgs());
+
+    const where = findFirstMock.mock.calls[0]![0]!.where;
+    expect(where!.AND).toContainEqual({
+      OR: [
+        { status: { not: "DRAFT" } },
+        { AND: [{ status: "DRAFT" }, { creatorId: CALLER_ID }] },
+      ],
+    });
+  });
+
   it("does NOT custody-scope the booking read for ADMIN", async () => {
     withRole(OrganizationRoles.ADMIN);
 
@@ -157,6 +175,8 @@ describe("GET /api/mobile/bookings/available-models", () => {
 
     const where = findFirstMock.mock.calls[0]![0]!.where;
     expect(where).not.toHaveProperty("custodianUserId");
+    // The AND carries draft privacy for every role, but no custody branch.
+    expect(where!.AND).toHaveLength(1);
   });
 
   it("forwards the `s` query param to getBookingModelTabData as `search` (server-side model search)", async () => {
