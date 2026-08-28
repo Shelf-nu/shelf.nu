@@ -6,8 +6,12 @@
  *
  * Android's native pickers only take a `date` or a `time`, so this component
  * runs them back to back: the date dialog first, then the time dialog seeded
- * with the current value's clock, and reports the merged result once. Cancelling
- * either dialog cancels the whole selection and leaves the value untouched.
+ * with what the date dialog reported. Each step hands back a whole instant
+ * rather than its own half, so the second one's result is the answer and the
+ * two are never recombined here — see `handleAndroidChange`, where doing so
+ * would resolve the clock in the device's zone rather than `timeZoneName`.
+ * Cancelling either dialog cancels the whole selection and leaves the value
+ * untouched.
  *
  * Mount it only while the picker should be showing — `onConfirm` and `onCancel`
  * are both terminal, and the parent is expected to unmount on either.
@@ -38,13 +42,6 @@ type DateTimeFieldProps = {
   /** Highlight colour for the native picker. */
   accentColor?: string;
 };
-
-/** Merge the calendar day of `day` with the clock of `clock`. */
-function mergeDayAndClock(day: Date, clock: Date): Date {
-  const merged = new Date(day);
-  merged.setHours(clock.getHours(), clock.getMinutes(), 0, 0);
-  return merged;
-}
 
 export function DateTimeField({
   value,
@@ -88,12 +85,23 @@ export function DateTimeField({
       }
 
       if (pickedDayRef.current === null) {
+        // The date step reports a whole instant, not a bare day: the chosen
+        // calendar day resolved in `timeZoneName`, still carrying the clock it
+        // opened on. So it is already the right seed for the time step.
         pickedDayRef.current = selected;
         setAndroidStep("time");
         return;
       }
 
-      onConfirmRef.current(mergeDayAndClock(pickedDayRef.current, selected));
+      // Confirmed as reported. The time step opened on the day above and
+      // resolves in `timeZoneName`, so `selected` is already that day at the
+      // chosen clock — recombining the two halves here would have to do it in
+      // the zone the picker used, and any merge through the Date object's own
+      // getters does it in the DEVICE's zone instead. Where the two differ that
+      // silently moves the booking a day: on a UTC phone, 20:00 in Los Angeles
+      // reads back as hour 4, and writing hour 4 onto the chosen day lands on
+      // the day before.
+      onConfirmRef.current(selected);
     },
     []
   );
@@ -102,8 +110,8 @@ export function DateTimeField({
     return (
       <DateTimePicker
         value={
-          androidStep === "time" && pickedDayRef.current
-            ? mergeDayAndClock(pickedDayRef.current, valueRef.current)
+          androidStep === "time"
+            ? pickedDayRef.current ?? valueRef.current
             : valueRef.current
         }
         mode={androidStep}
