@@ -1,3 +1,9 @@
+/**
+ * Which bulk actions the current user may take on the booking being viewed.
+ *
+ * @see {@link file://../components/booking/list-bulk-actions-dropdown.tsx}
+ * @see {@link file://../components/booking/list-asset-content.tsx}
+ */
 import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";

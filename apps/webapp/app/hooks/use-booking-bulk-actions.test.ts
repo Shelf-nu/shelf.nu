@@ -5,12 +5,6 @@
  * and the row checkbox that selects things for them. `hasAny` is what keeps
  * them agreeing, so a checkbox never feeds a menu that renders nothing.
  *
- * Mocks:
- * - `react-router` — why: `useLoaderData` supplies the booking under test; the
- *   real hook needs a data router this test does not mount.
- * - `~/hooks/user-user-role-helper` — why: the roles under test. The real hook
- *   reads `useRouteLoaderData` for the `_layout` route, not mounted here.
- *
  * @see {@link file://./use-booking-bulk-actions.ts}
  */
 
@@ -22,11 +16,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useBookingBulkActions } from "./use-booking-bulk-actions";
 import { useUserRoleHelper } from "./user-user-role-helper";
 
+// why: `useLoaderData` supplies the booking under test; the real hook needs a
+// data router this test does not mount.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-router");
   return { ...actual, useLoaderData: vi.fn() };
 });
 
+// why: the roles under test. The real hook reads `useRouteLoaderData` for the
+// `_layout` route, which is not mounted here.
 vi.mock("./user-user-role-helper", () => ({
   useUserRoleHelper: vi.fn(),
 }));
