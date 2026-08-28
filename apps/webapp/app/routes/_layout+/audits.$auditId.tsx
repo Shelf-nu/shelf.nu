@@ -22,6 +22,7 @@ import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
@@ -36,6 +37,7 @@ import actionsCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams, payload } from "~/utils/http.server";
 import { parseData } from "~/utils/http.server";
@@ -43,6 +45,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 const label = "Audit";
@@ -81,11 +84,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const parsedData = parseData(formData, EditAuditSchema);
       const hints = getClientHint(request);
 
-      // Parse due date using Luxon (same pattern as create audit)
+      // Convert dueDate from the acting user's stored timezone preference to UTC.
+      // Parse against the SAME resolved timezone that date DISPLAY uses (the
+      // user's `timeZone` preference), NOT the browser hint — otherwise a
+      // browser/preference zone mismatch offsets the stored instant, and the
+      // edit path would store a different instant than the create path for the
+      // same typed wall-clock time. Resolve the preference lazily — only when a
+      // due date was actually submitted (no date → no parse → no DB lookup).
       const dueDateString = formData.get("dueDate")?.toString();
       const dueDateUTC = dueDateString
         ? DateTime.fromFormat(dueDateString, DATE_TIME_FORMAT, {
-            zone: hints.timeZone,
+            zone: (await resolveUserFormatPrefsById(userId, hints)).timeZone,
           }).toJSDate()
         : null;
 
@@ -116,13 +125,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "complete-audit") {
-      // Only assignees can complete the audit
-      // Exception: if audit has no assignees, admins/owners can complete
+      // Assignee-gated: ADMIN/OWNER may complete any audit,
+      // BASE/SELF_SERVICE only when assigned.
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,
         userId,
-        request,
         isSelfServiceOrBase,
       });
 
@@ -342,6 +350,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 export default function AuditDetailsPage() {
   const { session, isAdminOrOwner, hasScans, stats, userId } =
     useLoaderData<typeof loader>();
+  const { roles } = useUserRoleHelper();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
@@ -353,13 +362,21 @@ export default function AuditDetailsPage() {
     (assignment) => assignment.userId === userId
   );
 
-  // Allow admin/owner to scan/complete if audit has no assignees
-  const hasNoAssignees = session.assignments.length === 0;
-  const canScanAndComplete = isAssignee || (isAdminOrOwner && hasNoAssignees);
+  // ADMIN/OWNER can scan/complete any audit;
+  // BASE/SELF_SERVICE only when assigned
+  const canScanAndComplete = isAssignee || isAdminOrOwner;
 
+  // The activity loader requires `auditNote:read` and 403s without it, so the
+  // tab follows the same gate rather than routing the user into an error.
   const items = [
     { to: "overview", content: "Overview" },
-    { to: "activity", content: "Activity" },
+    ...(userHasPermission({
+      roles,
+      entity: PermissionEntity.auditNote,
+      action: PermissionAction.read,
+    })
+      ? [{ to: "activity", content: "Activity" }]
+      : []),
   ];
 
   const matches = useMatches();
@@ -409,11 +426,7 @@ export default function AuditDetailsPage() {
             !isCancelled &&
             !isArchived &&
             canScanAndComplete && (
-              <CompleteAuditDialog
-                disabled={!hasScans}
-                auditName={session.name}
-                stats={stats}
-              />
+              <CompleteAuditDialog auditName={session.name} stats={stats} />
             )}
         </div>
       </Header>

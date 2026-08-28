@@ -162,7 +162,9 @@ Once you have the groups ready, you need to add their **IDs** in the workspace s
 
 Go to the workspace settings and place the **Object ID** of each group next to its matching role (Administrator, Self service, Base). You can find the ID by clicking on each group in Entra and copying the _Object ID_. You only need to fill in the roles you use — leave the others blank, but at least one group must be mapped.
 
+Each field also accepts **more than one Object ID, separated by commas** — anyone in _any_ of the listed groups gets that role. This is useful when several existing groups should map to the same Shelf role. A user still only ever holds one role per workspace; if their groups match more than one role, the highest applies (Administrator > Self service > Base).
+
 > [!IMPORTANT]
-> These fields are case sensitive. The Object ID must be entered exactly as it appears in Microsoft Entra.
+> Enter each Object ID exactly as it appears in Microsoft Entra. Matching ignores letter case and surrounding spaces, but copying the exact value is the safest way to avoid a mismatch.
 
 ![Shelf workspace SSO group mapping](../../img/google-workspace-step-9.png)

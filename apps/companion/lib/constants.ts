@@ -7,6 +7,14 @@
  * backward-compat during migration and will be removed.
  */
 
+import {
+  ASSET_STATUS_LABELS,
+  ASSET_QTY_STATUS_LABELS,
+  ASSET_BOOKING_PSEUDO_STATUS_LABELS,
+  AUDIT_STATUS_LABELS,
+  BOOKING_STATUS_LABELS,
+} from "@shelf/labels";
+
 // ── Deprecated re-exports (use useTheme() instead) ─────────────────────────
 export { lightColors as colors } from "./theme-colors";
 export { lightShadows as shadows } from "./theme-colors";
@@ -60,40 +68,70 @@ export const hitSlop = {
 // ── Utility functions ──────────────────────────────────────────────────────
 
 /**
- * Format status enums into user-friendly labels consistent with the webapp.
- * Webapp uses sentence-case ("In custody", "Checked out") not Title Case.
+ * Format status enums into user-facing labels IDENTICAL to the webapp.
+ *
+ * All asset + booking status strings come from the shared `@shelf/labels`
+ * package (the single source of truth both apps import), so the phone can
+ * never drift from the website's wording. This mirrors the web
+ * `userFriendlyAssetStatus()` enum path, including the booking-context
+ * "partially checked in/out" pseudo-statuses that previously fell through to
+ * the default branch and rendered as raw text like "Partially checked out qty".
+ *
+ * Note: the quantity-aware badge labels ("Partial custody", "Partially
+ * reserved") are NOT enum values — they are derived from a quantity breakdown,
+ * not this map. Use {@link getQuantityStatusLabel} for those.
+ *
+ * @param status - an asset/booking/audit status enum string from the API
+ * @returns the user-facing label
  */
 export function formatStatus(status: string) {
-  // Asset statuses — match webapp's userFriendlyAssetStatus()
   switch (status) {
+    // ── Asset statuses (shared with web userFriendlyAssetStatus) ──
     case "IN_CUSTODY":
-      return "In custody";
+      return ASSET_STATUS_LABELS.IN_CUSTODY;
     case "CHECKED_OUT":
-      return "Checked out";
+      return ASSET_STATUS_LABELS.CHECKED_OUT;
     case "AVAILABLE":
-      return "Available";
-    // Booking statuses — match webapp's booking-status-badge
+      return ASSET_STATUS_LABELS.AVAILABLE;
+    // ── Booking-context pseudo-statuses (web userFriendlyAssetStatus) ──
+    // Previously missing -> the default branch mangled them (stray "qty").
+    case "PARTIALLY_CHECKED_IN":
+      return ASSET_BOOKING_PSEUDO_STATUS_LABELS.ALREADY_CHECKED_IN;
+    case "PARTIALLY_CHECKED_IN_QTY":
+      return ASSET_BOOKING_PSEUDO_STATUS_LABELS.PARTIALLY_CHECKED_IN;
+    case "PARTIALLY_CHECKED_OUT_QTY":
+    case "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN":
+      return ASSET_BOOKING_PSEUDO_STATUS_LABELS.PARTIALLY_CHECKED_OUT;
+    // ── Booking statuses (shared with web booking-status-badge) ──
     case "DRAFT":
-      return "Draft";
+      return BOOKING_STATUS_LABELS.DRAFT;
     case "RESERVED":
-      return "Reserved";
+      return BOOKING_STATUS_LABELS.RESERVED;
     case "ONGOING":
-      return "Ongoing";
+      return BOOKING_STATUS_LABELS.ONGOING;
     case "OVERDUE":
-      return "Overdue";
+      return BOOKING_STATUS_LABELS.OVERDUE;
     case "COMPLETE":
-      return "Complete";
+      return BOOKING_STATUS_LABELS.COMPLETE;
+    // These two keys are shared with AuditStatus. Both maps spell them the
+    // same way, so one case serves both — if that ever stops being true, split
+    // them rather than letting audits silently inherit booking wording.
     case "ARCHIVED":
-      return "Archived";
+      return BOOKING_STATUS_LABELS.ARCHIVED;
     case "CANCELLED":
-      return "Cancelled";
-    // Audit statuses
+      return BOOKING_STATUS_LABELS.CANCELLED;
+    // ── Audit statuses (web canonical: AuditStatusBadge) ──
+    // Only the three keys that do not collide with a booking status appear
+    // here; AuditStatus.CANCELLED / .ARCHIVED are handled by the booking cases
+    // above, whose labels are the same words in AUDIT_STATUS_LABELS. Prefer
+    // AUDIT_STATUS_LABELS directly on audit surfaces — this branch exists for
+    // the generic badge helper, which is handed a bare status string.
     case "PENDING":
-      return "Pending";
+      return AUDIT_STATUS_LABELS.PENDING;
     case "ACTIVE":
-      return "Active";
+      return AUDIT_STATUS_LABELS.ACTIVE;
     case "COMPLETED":
-      return "Completed";
+      return AUDIT_STATUS_LABELS.COMPLETED;
     // Fallback: sentence-case (capitalize first word only)
     default: {
       const words = status.replace(/_/g, " ").toLowerCase();
@@ -102,21 +140,50 @@ export function formatStatus(status: string) {
   }
 }
 
-export function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-export function formatDateTime(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+/**
+ * Quantity-aware status label for a QUANTITY_TRACKED asset, IDENTICAL to the
+ * web `getQuantityBadgeLabelAndColor` (asset-status-badge/quantity-data.ts).
+ *
+ * A quantity-tracked asset whose units span states shows a derived badge (e.g.
+ * "Partial custody" when some units are held and some are still available),
+ * NOT the raw enum. Labels come from the shared `@shelf/labels` package.
+ *
+ * Precedence mirrors web exactly: checked-out, then in-custody, then reserved,
+ * each "Partial…" when units remain available.
+ *
+ * @param breakdown - the per-status unit counts from the asset detail endpoint
+ * @returns the label, or null when there is no breakdown (caller falls back to
+ *          {@link formatStatus} on the raw enum)
+ */
+export function getQuantityStatusLabel(
+  breakdown:
+    | {
+        available: number;
+        inCustody: number;
+        reserved: number;
+        checkedOut: number;
+      }
+    | null
+    | undefined
+): string | null {
+  if (!breakdown) return null;
+  const { available, inCustody, reserved, checkedOut } = breakdown;
+  if (checkedOut > 0) {
+    return available <= 0
+      ? ASSET_QTY_STATUS_LABELS.CHECKED_OUT
+      : ASSET_QTY_STATUS_LABELS.PARTIALLY_CHECKED_OUT;
+  }
+  if (inCustody > 0) {
+    return available <= 0
+      ? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
+      : ASSET_QTY_STATUS_LABELS.PARTIAL_CUSTODY;
+  }
+  if (reserved > 0) {
+    return available <= 0
+      ? ASSET_QTY_STATUS_LABELS.RESERVED
+      : ASSET_QTY_STATUS_LABELS.PARTIALLY_RESERVED;
+  }
+  return ASSET_QTY_STATUS_LABELS.AVAILABLE;
 }
 
 /**

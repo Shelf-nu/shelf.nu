@@ -8,7 +8,7 @@ import type {
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
 import { Link, type LinkProps } from "react-router";
 import { tw } from "~/utils/tw";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
+import { DisabledReasonHoverCard } from "./disabled-reason-hover-card";
 import type { IconType } from "./icons-map";
 import {
   Tooltip,
@@ -209,6 +209,13 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
   ) {
     const Component = isLinkProps(props) ? Link : as;
 
+    /**
+     * Id linking a disabled button to the hidden copy of its reason, so
+     * `aria-describedby` can announce it. Always generated (hooks cannot be
+     * conditional); only referenced on the disabled-with-reason path.
+     */
+    const disabledReasonId = React.useId();
+
     // Default to type="button" for native button elements to prevent
     // implicit form submission (HTML spec defaults to type="submit").
     if (!isLinkProps(props) && as === "button" && !("type" in props)) {
@@ -260,6 +267,17 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       "target" in props;
     const newTab = hasTarget(props) && props.target === "_blank";
 
+    /**
+     * Reverse-tabnabbing guard: a `target="_blank"` link without `rel` hands
+     * the opened page a `window.opener` handle back to ours. Applied to every
+     * new-tab button rather than case by case, and only as a default — an
+     * explicit `rel` on the call site still wins.
+     */
+    const newTabRel =
+      newTab && !("rel" in props)
+        ? { rel: "noopener noreferrer" as const }
+        : {};
+
     const buttonContent = (
       <>
         {icon && <Icon icon={icon} />}
@@ -305,25 +323,32 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     // Render disabled button with hover card
     if (isDisabled && disabledReason) {
       return (
-        <HoverCard openDelay={50} closeDelay={50}>
-          <HoverCardTrigger className="disabled cursor-not-allowed" asChild>
-            <Component
-              {...props}
-              className={finalStyles}
-              aria-label={ariaLabel}
-              onMouseDown={(e: MouseEvent) => e.preventDefault()}
-              onClick={(e: MouseEvent) => e.preventDefault()}
-            >
-              {buttonContent}
-            </Component>
-          </HoverCardTrigger>
-          <HoverCardContent side="left">
-            <h5 className="text-left text-[14px]">
-              {disabledTitle || "Action disabled"}
-            </h5>
-            <p className="text-left text-[14px]">{disabledReason}</p>
-          </HoverCardContent>
-        </HoverCard>
+        <DisabledReasonHoverCard
+          title={disabledTitle}
+          reason={disabledReason}
+          descriptionId={disabledReasonId}
+          triggerClassName="disabled cursor-not-allowed select-none"
+          asChild
+        >
+          <Component
+            {...props}
+            {...newTabRel}
+            className={finalStyles}
+            aria-label={ariaLabel}
+            // why: no native `disabled` here — it would swallow the pointer
+            // events the reason popup needs — so expose the state to
+            // assistive tech explicitly, and point at the reason so AT users
+            // get the same explanation the hover card gives everyone else.
+            aria-disabled={true}
+            aria-describedby={disabledReasonId}
+            prefetch={isLinkProps(props) ? props.prefetch ?? "none" : undefined}
+            ref={ref}
+            onMouseDown={(e: MouseEvent) => e.preventDefault()}
+            onClick={(e: MouseEvent) => e.preventDefault()}
+          >
+            {buttonContent}
+          </Component>
+        </DisabledReasonHoverCard>
       );
     }
 
@@ -334,6 +359,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
             <TooltipTrigger asChild>
               <Component
                 {...props}
+                {...newTabRel}
                 className={finalStyles}
                 aria-label={ariaLabel}
                 prefetch={
@@ -363,6 +389,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       <>
         <Component
           {...props}
+          {...newTabRel}
           className={finalStyles}
           aria-label={ariaLabel}
           prefetch={isLinkProps(props) ? props.prefetch ?? "none" : undefined}

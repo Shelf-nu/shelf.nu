@@ -7,10 +7,12 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { formatDate, type ResolvedFormatPrefs } from "@shelf/datetime";
 import type { AssetNote } from "@/lib/api";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
-import { fontSize, spacing, borderRadius, formatDate } from "@/lib/constants";
+import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
+import { useFormatPrefs } from "@/lib/use-date-formatter";
 
 interface NotesSectionProps {
   notes: AssetNote[] | undefined;
@@ -104,7 +106,7 @@ export const NotesSection = memo(function NotesSection({
 
 // ── Helpers ─────────────────────────────────────────────
 
-function timeAgo(dateStr: string): string {
+function timeAgo(dateStr: string, prefs: ResolvedFormatPrefs): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "Just now";
@@ -113,7 +115,8 @@ function timeAgo(dateStr: string): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (days < 7) return `${days}d ago`;
-  return formatDate(dateStr);
+  // Older than a week: fall back to the user's absolute date format + timezone.
+  return formatDate(dateStr, prefs);
 }
 
 /**
@@ -124,21 +127,20 @@ function timeAgo(dateStr: string): string {
  * {% assets_list count=N ... /%}, {% kits_list count=N ... /%},
  * and **bold** markers.
  */
-function markdocToPlainText(content: string): string {
+function markdocToPlainText(
+  content: string,
+  prefs: ResolvedFormatPrefs
+): string {
   return (
     content
       // {% link to="..." text="Display Text" /%} -> Display Text
       .replace(/{%\s*link\s+[^%]*?text="([^"]*)"[^%]*\/%}/g, "$1")
-      // {% date value="2024-01-01T..." /%} -> formatted date
+      // {% date value="2024-01-01T..." /%} -> date in the user's format + timezone
       .replace(
         /{%\s*date\s+value="([^"]*)"[^%]*\/%}/g,
         (_match, iso: string) => {
           try {
-            return new Date(iso).toLocaleDateString(undefined, {
-              year: "numeric",
-              month: "short",
-              day: "numeric",
-            });
+            return formatDate(iso, prefs);
           } catch {
             return iso;
           }
@@ -149,10 +151,11 @@ function markdocToPlainText(content: string): string {
       // {% tag name="..." ... /%} -> name
       .replace(/{%\s*tag\s+name="([^"]*)"[^%]*\/%}/g, "$1")
       // {% booking_status status="RESERVED" ... /%} -> Reserved
+      // why: the shared helper rather than a local sentence-caser, so a wording
+      // change in @shelf/labels reaches this preview too.
       .replace(
         /{%\s*booking_status\s+status="([^"]*)"[^%]*\/%}/g,
-        (_match, status: string) =>
-          status.charAt(0) + status.slice(1).toLowerCase().replace(/_/g, " ")
+        (_match, status: string) => formatStatus(status)
       )
       // {% assets_list count=3 ... action="added" /%} -> 3 assets added
       .replace(
@@ -183,6 +186,7 @@ function markdocToPlainText(content: string): string {
 const NoteItem = memo(function NoteItem({ note }: { note: AssetNote }) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const prefs = useFormatPrefs();
   const userName = note.user
     ? [note.user.firstName, note.user.lastName].filter(Boolean).join(" ") ||
       "User"
@@ -204,10 +208,10 @@ const NoteItem = memo(function NoteItem({ note }: { note: AssetNote }) {
           </View>
           <Text style={styles.noteUserName}>{userName}</Text>
         </View>
-        <Text style={styles.noteTime}>{timeAgo(note.createdAt)}</Text>
+        <Text style={styles.noteTime}>{timeAgo(note.createdAt, prefs)}</Text>
       </View>
       <Text style={styles.noteContent} selectable>
-        {markdocToPlainText(note.content)}
+        {markdocToPlainText(note.content, prefs)}
       </Text>
     </View>
   );

@@ -52,6 +52,7 @@ declare global {
       ENABLE_PREMIUM_FEATURES: string;
       DISABLE_SIGNUP: string;
       DISABLE_SSO: string;
+      ENABLE_SCIM: string;
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
@@ -76,6 +77,9 @@ declare global {
       COOKIE_DOMAIN: string;
       POSTHOG_API_KEY: string;
       POSTHOG_HOST: string;
+      COMPANION_SERVERS: string;
+      INSTANCE_NAME: string;
+      MIN_COMPANION_VERSION: string;
     }
   }
 }
@@ -233,6 +237,53 @@ export const POSTHOG_HOST = getEnv("POSTHOG_HOST", {
 });
 
 /**
+ * Companion-app server registry (Shelf Cloud only).
+ *
+ * JSON object mapping a lowercased email domain to the base URL of the Shelf
+ * instance that domain's users belong to, e.g.
+ * `{"acme.edu":"https://acme.i.shelf.nu"}`. Consumed exclusively by
+ * `resolveCompanionServer` so the storage can later become a database table
+ * without touching call sites.
+ *
+ * `isSecret: true` keeps the mapping out of the client-side `window.env`
+ * payload — it reveals which organisations run self-hosted Shelf.
+ *
+ * @see {@link file://./../modules/api/companion-servers.server.ts}
+ */
+export const COMPANION_SERVERS = getEnv("COMPANION_SERVERS", {
+  isSecret: true,
+  isRequired: false,
+});
+
+/**
+ * Human-readable name of this Shelf instance, surfaced to the companion app
+ * via `/api/mobile/config` and shown to the user as "Connected to <name>".
+ * Defaults to "Shelf" when unset.
+ *
+ * @see {@link file://./../routes/api+/mobile+/config.ts}
+ */
+export const INSTANCE_NAME = getEnv("INSTANCE_NAME", {
+  isSecret: false,
+  isRequired: false,
+});
+
+/**
+ * Lowest companion-app version this instance will accept, e.g. "1.4.0".
+ *
+ * Served on `/api/mobile/config`. An app older than this shows a blocking
+ * "update required" screen with a store link instead of connecting — the
+ * standard force-update pattern. Leave unset (the default) to accept any
+ * version; set it when a breaking `/api/mobile/*` change ships, so older
+ * installs fail with an actionable message rather than a pile of 4xx.
+ *
+ * @see {@link file://./../routes/api+/mobile+/config.ts}
+ */
+export const MIN_COMPANION_VERSION = getEnv("MIN_COMPANION_VERSION", {
+  isSecret: false,
+  isRequired: false,
+});
+
+/**
  * Shared envs
  */
 export const NODE_ENV = getEnv("NODE_ENV", {
@@ -322,6 +373,29 @@ export const DISABLE_SSO =
     isSecret: false,
     isRequired: false,
   }) === "true" || false;
+
+/**
+ * Opt-in flag for SCIM user provisioning (RFC 7643/7644).
+ *
+ * Deliberately inverted relative to `DISABLE_SSO`: SCIM is OFF unless a
+ * deployment explicitly turns it on. The feature is usable for self-hosters but
+ * is not yet ready for Shelf Cloud (pending premium-plan gating and a decision
+ * on push vs. manual vs. nightly sync), so the safe default is disabled.
+ *
+ * Server-side only — intentionally absent from `getBrowserEnv()`. Surfaces that
+ * need it in the browser must receive it through a loader.
+ */
+export const ENABLE_SCIM =
+  getEnv("ENABLE_SCIM", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const DEFAULT_SSO_DOMAIN =
+  getEnv("DEFAULT_SSO_DOMAIN", {
+    isSecret: false,
+    isRequired: false,
+  }) || "";
 
 export const SEND_ONBOARDING_EMAIL =
   getEnv("SEND_ONBOARDING_EMAIL", {

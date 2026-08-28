@@ -19,6 +19,7 @@ const CONFIG: {
     showShelfBranding: boolean;
   };
   canHide: boolean;
+  canSeeAllCustody: boolean;
 } = {
   org: {
     qrIdDisplayPreference: "QR_ID",
@@ -26,6 +27,7 @@ const CONFIG: {
     showShelfBranding: true,
   },
   canHide: true,
+  canSeeAllCustody: false,
 };
 
 /** In-memory asset store the db mock filters. */
@@ -70,6 +72,9 @@ vi.mock("~/modules/asset/utils.server", () => ({
   // select-all path: just scope to the org (the real filter logic isn't under test here).
   getAssetsWhereInput: vi.fn(({ organizationId }: any) => ({ organizationId })),
 }));
+vi.mock("~/modules/team-member/service.server", () => ({
+  scopeCustodianFilterIds: vi.fn(),
+}));
 vi.mock("~/utils/subscription.server", () => ({
   canHideShelfBranding: vi.fn(),
   assertUserCanExportAssets: vi.fn(),
@@ -85,6 +90,9 @@ const { loader, MAX_BULK_QR_EXPORT } = await import(
 );
 const { db } = await import("~/database/db.server");
 const { getAssetsWhereInput } = await import("~/modules/asset/utils.server");
+const { scopeCustodianFilterIds } = await import(
+  "~/modules/team-member/service.server"
+);
 const { requirePermission } = await import("~/utils/roles.server");
 const { getOrganizationTierLimit } = await import(
   "~/modules/tier/service.server"
@@ -133,6 +141,7 @@ beforeEach(() => {
     showShelfBranding: true,
   };
   CONFIG.canHide = true;
+  CONFIG.canSeeAllCustody = false;
   vi.mocked(requirePermission).mockImplementation(
     async () =>
       ({
@@ -147,8 +156,10 @@ beforeEach(() => {
           },
         ],
         currentOrganization: CONFIG.org,
+        canSeeAllCustody: CONFIG.canSeeAllCustody,
       }) as any
   );
+  vi.mocked(scopeCustodianFilterIds).mockResolvedValue(["scoped-tm-1"]);
   vi.mocked(getOrganizationTierLimit).mockResolvedValue({
     canHideShelfBranding: true,
   } as any);
@@ -282,6 +293,26 @@ describe("loader wiring (A15–A19, A24)", () => {
         // the where-builder, otherwise select-all would ignore the user's filter.
         currentSearchParams: expect.stringContaining("s=laptop"),
       })
+    );
+  });
+
+  it("scopes the custodian filter on select-all (BASE/SELF_SERVICE hold `qr: read`)", async () => {
+    await callLoader([ALL_SELECTED], "teamMember=tm-colleague");
+
+    // The raw `?teamMember=` ids and the viewer's resolved custody visibility
+    // both reach the scoper, which decides which ids may be filtered on.
+    expect(scopeCustodianFilterIds).toHaveBeenCalledWith({
+      teamMemberIds: ["tm-colleague"],
+      canSeeAllCustody: false,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    // And its answer reaches the where-builder. Passing `"all"` here (or
+    // dropping the argument) turns select-all into an enumeration oracle for
+    // any colleague's custody.
+    expect(getAssetsWhereInput).toHaveBeenCalledWith(
+      expect.objectContaining({ allowedTeamMemberIds: ["scoped-tm-1"] })
     );
   });
 

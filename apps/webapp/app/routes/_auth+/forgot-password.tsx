@@ -22,6 +22,7 @@ import {
 } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { getValidationErrors } from "~/utils/http";
 import {
   payload,
   error,
@@ -29,7 +30,9 @@ import {
   parseData,
   readFormData,
 } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import { validEmail } from "~/utils/misc";
+import { passwordSchema } from "~/utils/zod";
 
 const ForgotPasswordSchema = z.object({
   email: z
@@ -44,10 +47,10 @@ const OtpSchema = z
   .object({
     otp: z.string().min(6, "OTP is required."),
     email: z.string().transform((email) => email.toLowerCase()),
-    password: z.string().min(8, "Password is too short. Minimum 8 characters."),
-    confirmPassword: z
-      .string()
-      .min(8, "Password is too short. Minimum 8 characters."),
+    password: passwordSchema("Password is too short. Minimum 8 characters."),
+    confirmPassword: passwordSchema(
+      "Password is too short. Minimum 8 characters."
+    ),
   })
   .superRefine(({ password, confirmPassword, otp, email }, ctx) => {
     if (password !== confirmPassword) {
@@ -97,8 +100,22 @@ export async function action({ request, context }: ActionFunctionArgs) {
           { shouldBeCaptured: false }
         );
 
-        /** We are going to get the user to make sure it exists and is confirmed
-         * this will not allow the user to use the forgot password before they have confirmed their email
+        /**
+         * Every outcome below MUST respond identically — same status, same
+         * redirect target — whether or not the address belongs to an account.
+         * Distinguishable responses let anyone enumerate which addresses are
+         * registered, and which are federated, one request at a time.
+         *
+         * Eligibility to receive a link is decided by the PER-USER `sso` flag,
+         * never by the domain's SSO configuration. `sso: true` is only set when
+         * a user actually arrives through SSO, so a domain configured for SSO
+         * can still hold password accounts created before it was federated;
+         * gating on the domain locks those users out of recovery entirely.
+         * `validateNonSSOUser` in `auth/service.server` gates the same way.
+         *
+         * A "use SSO instead" hint belongs in the page as static copy shown to
+         * everyone — that helps without answering a question about any
+         * particular address.
          */
         const user = await db.user.findFirst({
           where: { email },
@@ -108,31 +125,46 @@ export async function action({ request, context }: ActionFunctionArgs) {
           },
         });
 
-        if (!user) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "The user with this email is not confirmed yet, so you cannot reset it's password. Please confirm your user before continuing",
-            additionalData: { email },
-            shouldBeCaptured: false,
-            label: "Auth",
+        if (user && !user.sso) {
+          /**
+           * NOT awaited, and its failure never reaches the client.
+           *
+           * Response time must not depend on the answer. Awaiting this costs a
+           * second DB read inside `validateNonSSOUser` plus a Supabase API call
+           * (~50-300ms) that an unknown or SSO address never pays, and
+           * averaging repeated requests reads accounts off that difference —
+           * the uniform response above, undone by the clock.
+           *
+           * Requires a long-lived server process: this deploys under
+           * `react-router-hono-server` in Docker on Fly, so the promise settles
+           * after the response. On a runtime that suspends once the response is
+           * sent, this must become a queued job or reset emails silently stop.
+           *
+           * The rejection is swallowed because a delivery failure is only
+           * reachable for an address that exists, so surfacing it re-opens the
+           * leak by another route.
+           */
+          void sendResetPasswordLink(email).catch((cause: unknown) => {
+            Logger.error(
+              new ShelfError({
+                cause,
+                message: "Failed to send the password reset link",
+                // The USER ID, not the address. This endpoint is anonymous, so
+                // logging the email would put account addresses into the log
+                // stream and Sentry — a log-side version of the very leak this
+                // route was changed to close, since anyone with log access
+                // could then read off which addresses are registered. The id
+                // identifies the account for debugging without storing PII.
+                additionalData: { userId: user.id },
+                label: "Auth",
+              })
+            );
           });
         }
 
-        if (user.sso) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "This user is an SSO user and cannot reset password using email.",
-            additionalData: { email },
-            shouldBeCaptured: false,
-            label: "Auth",
-          });
-        }
-
-        await sendResetPasswordLink(email);
-
-        return redirect("/forgot-password?email=" + email);
+        // Encoded: an address containing `&` or `#` would otherwise
+        // truncate or corrupt the redirect target.
+        return redirect("/forgot-password?email=" + encodeURIComponent(email));
       }
       case "confirm-otp": {
         const { email, otp, password } = parseData(
@@ -153,12 +185,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
           throw new ShelfError({
             cause: verifyError,
             message: "Invalid or expired verification code",
-            additionalData: { email, otp },
+            // The OTP is deliberately NOT included. It is a live
+            // account-takeover credential until it expires, and additionalData
+            // is written straight to the log line.
+            additionalData: { email },
             label: "Auth",
             shouldBeCaptured: false,
           });
         }
 
+        /**
+         * Revokes every session for the user so other logged-in browsers are
+         * signed out on their next request. We pass the freshly-minted OTP
+         * access token so the explicit `signOut(…, "others")` defense-in-depth
+         * layer can run before the update (see `updateAccountPassword`).
+         */
         await updateAccountPassword(
           otpData.user.id,
           password,
@@ -188,10 +229,22 @@ export default function ForgotPassword() {
     zo.errors.email()?.message || actionData?.error?.message || "";
   const disabled = useDisabled();
 
+  /**
+   * Field-level validation errors from the confirm-otp (password reset) step.
+   * When present, keep the password form mounted so the errors render inline on
+   * their fields — instead of bouncing back to the email step with a generic
+   * message. Hard errors (e.g. an invalid OTP) still fall back to the email step.
+   */
+  const otpValidationErrors = getValidationErrors<typeof OtpSchema>(
+    actionData?.error
+  );
+
   return (
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full">
-        {actionData?.error || !email || email === "" ? (
+        {(actionData?.error && !otpValidationErrors) ||
+        !email ||
+        email === "" ? (
           <div>
             <p className="mb-4 text-center">
               Enter your email address and we'll send you a one-time code to
@@ -261,7 +314,19 @@ function PasswordResetForm({ email }: { email: string }) {
   const zoReset = useZorm("ResetPasswordForm", OtpSchema);
   const disabled = useDisabled();
   const actionData = useActionData<typeof action>();
-  return !email || email === "" || actionData?.error ? (
+
+  /**
+   * Server-side validation errors for the reset fields, shown as a fallback
+   * when client-side zorm validation is bypassed (disabled JS, modified
+   * request, or client/server rule divergence). See CLAUDE.md form pattern.
+   */
+  const validationErrors = getValidationErrors<typeof OtpSchema>(
+    actionData?.error
+  );
+
+  // Keep the form mounted for validation errors so field-level messages render;
+  // only a hard error (e.g. invalid OTP) falls back to the generic message.
+  return !email || email === "" || (actionData?.error && !validationErrors) ? (
     <div>Something went wrong. Please refresh the page and try again.</div>
   ) : (
     <Form method="post" ref={zoReset.ref} className="space-y-2">
@@ -274,7 +339,10 @@ function PasswordResetForm({ email }: { email: string }) {
         type="password"
         autoComplete="new-password"
         disabled={disabled}
-        error={zoReset.errors.password()?.message}
+        error={
+          validationErrors?.password?.message ||
+          zoReset.errors.password()?.message
+        }
         placeholder="********"
         required
       />
@@ -285,7 +353,10 @@ function PasswordResetForm({ email }: { email: string }) {
         type="password"
         autoComplete="new-password"
         disabled={disabled}
-        error={zoReset.errors.confirmPassword()?.message}
+        error={
+          validationErrors?.confirmPassword?.message ||
+          zoReset.errors.confirmPassword()?.message
+        }
         placeholder="********"
         required
       />

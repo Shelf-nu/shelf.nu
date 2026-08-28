@@ -710,6 +710,45 @@ export type DuplicateBarcode = {
   }[];
 };
 
+/**
+ * The five barcode CSV columns and the {@link BarcodeType} each maps to.
+ *
+ * Single source of truth for both the import entitlement guard (in
+ * `createAssetsFromContentImport`) and {@link parseBarcodesFromImportData}.
+ * Keeping them derived from one list prevents the two from drifting — the class
+ * of bug where `ExternalQR`/`EAN13` were parsed but omitted from the guard, so
+ * files carrying only those types imported and silently dropped the barcodes
+ * when the destination workspace lacked the barcodes add-on.
+ */
+export const BARCODE_IMPORT_COLUMNS: { column: string; type: BarcodeType }[] = [
+  { column: "barcode_Code128", type: "Code128" },
+  { column: "barcode_Code39", type: "Code39" },
+  { column: "barcode_DataMatrix", type: "DataMatrix" },
+  { column: "barcode_ExternalQR", type: "ExternalQR" },
+  { column: "barcode_EAN13", type: "EAN13" },
+];
+
+/**
+ * Whether any row in a content-import payload carries a value in ANY barcode
+ * column. Used by the import to reject barcode data when the workspace lacks
+ * the barcodes add-on, rather than silently discarding it.
+ *
+ * @param data - The parsed content-import rows.
+ * @returns True if at least one row has a non-empty barcode cell.
+ */
+export function importDataHasBarcodes(
+  data: CreateAssetFromContentImportPayload[]
+): boolean {
+  return data.some((asset) =>
+    BARCODE_IMPORT_COLUMNS.some(({ column }) => {
+      // Match the parser: a whitespace-only cell is not barcode data, so it
+      // mustn't trip the "barcodes disabled" 403 for those workspaces.
+      const value = asset[column];
+      return typeof value === "string" && value.trim() !== "";
+    })
+  );
+}
+
 export async function parseBarcodesFromImportData({
   data,
   userId,
@@ -726,16 +765,7 @@ export async function parseBarcodesFromImportData({
     data.forEach((asset, index) => {
       const assetBarcodes: { type: BarcodeType; value: string }[] = [];
 
-      // Check each barcode type column
-      const barcodeTypes: { column: string; type: BarcodeType }[] = [
-        { column: "barcode_Code128", type: "Code128" },
-        { column: "barcode_Code39", type: "Code39" },
-        { column: "barcode_DataMatrix", type: "DataMatrix" },
-        { column: "barcode_ExternalQR", type: "ExternalQR" },
-        { column: "barcode_EAN13", type: "EAN13" },
-      ];
-
-      barcodeTypes.forEach(({ column, type }) => {
+      BARCODE_IMPORT_COLUMNS.forEach(({ column, type }) => {
         const columnValue = asset[column];
         if (
           columnValue &&

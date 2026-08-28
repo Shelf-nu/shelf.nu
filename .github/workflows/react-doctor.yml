@@ -8,7 +8,7 @@ name: 🩺 React Doctor
 #   2. Fails the check if NEW errors are introduced — warnings stay advisory.
 
 on:
-  pull_request_target:
+  pull_request:
     paths:
       - "apps/webapp/**/*.ts"
       - "apps/webapp/**/*.tsx"
@@ -20,17 +20,12 @@ on:
       - ".github/workflows/react-doctor.yml"
       - ".github/scripts/react-doctor-pr-comment.mjs"
 
-jobs:
-  authorize:
-    environment: ${{ github.event_name == 'pull_request_target' &&
-      github.event.pull_request.head.repo.full_name != github.repository &&
-      'external' || '' }}
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo ✓
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
+jobs:
   doctor:
-    needs: authorize
     name: 🩺 React Doctor (${{ matrix.app.name }})
     runs-on: ubuntu-latest
     permissions:
@@ -47,17 +42,19 @@ jobs:
           - name: companion
             dir: apps/companion
     steps:
-      - name: 🛑 Cancel previous runs
-        uses: styfle/cancel-workflow-action@0.11.0
-
-      - name: ⬇️ Checkout PR head
+      - name: ⬇️ Checkout PR merge ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          # No `ref:` — the default checkout resolves to the PR merge ref and is
+          # exempt from actions/checkout's fork-PR guard. fetch-depth: 0 is
+          # still required so `origin/<base>` exists for the --diff below.
           fetch-depth: 0
+          # Nothing after this step needs git auth, so the token never lands in
+          # .git/config where fork-controlled code could read it back out.
+          persist-credentials: false
 
       - name: 🪢 Re-attach HEAD to a named branch
-        # actions/checkout leaves us on a DETACHED HEAD when given a sha.
+        # actions/checkout leaves us on a DETACHED HEAD at the PR merge ref.
         # react-doctor's --diff path calls `git rev-parse --abbrev-ref HEAD`
         # to find the current branch; in detached state that returns the
         # literal "HEAD", which the CLI interprets as "no branch" and silently
@@ -157,13 +154,32 @@ jobs:
           cat "$RUNNER_TEMP/comment.md"
 
       - name: 💬 Post or update PR comment
+        # Fork and Dependabot PRs run with a read-only GITHUB_TOKEN, so the
+        # comment API 403s for them. Those PRs surface findings through the
+        # inline annotations (emitted as log commands, which need no token) and
+        # the job summary written below.
+        #
+        # Predicate on pull_request.user.login, NOT github.actor: the read-only
+        # token is keyed to who AUTHORED the PR, but github.actor becomes the
+        # re-runner's login on a manual re-run — which would wrongly re-enable
+        # this step on a Dependabot PR re-run.
         if: always() && steps.changes.outputs.changed == 'true'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+        # Backstop for any read-only-token case not enumerated above.
+        continue-on-error: true
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           # Per-app header so the two matrix jobs maintain separate sticky
           # comments instead of overwriting each other.
           header: react-doctor-${{ matrix.app.name }}
           path: ${{ runner.temp }}/comment.md
+
+      - name: 📋 Write findings to job summary
+        # Runs for EVERY PR including forks and Dependabot — this is the only
+        # aggregated report those PRs get, since the sticky comment is skipped.
+        if: always() && steps.changes.outputs.changed == 'true'
+        run: cat "$RUNNER_TEMP/comment.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: ❌ Fail if errors introduced
         if: steps.changes.outputs.changed == 'true' && steps.doctor.outputs.exit_code != '0'

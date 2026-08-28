@@ -672,4 +672,256 @@ describe("DynamicSelect", () => {
       expect(onChange).toHaveBeenCalledWith("without-custody");
     });
   });
+
+  describe("resetSearchOnClose", () => {
+    it("clears the search input after selecting an item when resetSearchOnClose is set", async () => {
+      const items = createTestItems(3);
+
+      // why: DynamicSelect doesn't own `searchQuery` — it's returned by the
+      // mocked useModelFilters — so the mock's `setSearchQuery` /
+      // `resetModelFiltersFetcher` must actually mutate the mock's return
+      // value for a later render (reopen) to observe the reset, mirroring
+      // how the real hook's state setter affects subsequent renders.
+      const setSearchQuery = vi.fn((value: string) => {
+        mockUseModelFilters.mockReturnValue(
+          createMockUseModelFiltersReturn(items, {
+            searchQuery: value,
+            setSearchQuery,
+            resetModelFiltersFetcher,
+          })
+        );
+      });
+      const resetModelFiltersFetcher = vi.fn(() => {
+        setSearchQuery("");
+      });
+
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn(items, {
+          searchQuery: "",
+          setSearchQuery,
+          resetModelFiltersFetcher,
+        })
+      );
+
+      const { rerender } = render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          closeOnSelect
+          resetSearchOnClose
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      });
+
+      // Simulate the user typing "da" — the mock hook now returns the typed
+      // query, same as the "hides withoutValueItem" test above does.
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn(items, {
+          searchQuery: "da",
+          setSearchQuery,
+          resetModelFiltersFetcher,
+        })
+      );
+      rerender(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          closeOnSelect
+          resetSearchOnClose
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("da")).toBeInTheDocument();
+      });
+
+      // Selecting an item closes the popover (closeOnSelect)
+      await act(async () => {
+        await user.click(screen.getByText("Item 1"));
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+      expect(resetModelFiltersFetcher).toHaveBeenCalled();
+
+      // Reopen — search should now be empty
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      });
+      expect(screen.getByPlaceholderText("Search Category")).toHaveValue("");
+    });
+
+    it("keeps the typed search after selecting an item when resetSearchOnClose is not set (regression guard)", async () => {
+      const items = createTestItems(3);
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn(items, { searchQuery: "da" })
+      );
+
+      render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          closeOnSelect
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("da")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        await user.click(screen.getByText("Item 1"));
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+
+      // Reopen — the stale search from before persists (existing behavior)
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      });
+      expect(screen.getByPlaceholderText("Search Category")).toHaveValue("da");
+    });
+
+    it("keeps the selected label after the fetcher reset when the selection came from typeahead", async () => {
+      // A model found via typeahead lives only in the fetcher results, not the
+      // seed list. When resetSearchOnClose clears the fetcher on close, the
+      // item disappears from `items` — the trigger must still show it (from the
+      // selected-item cache) rather than falling back to the placeholder while
+      // the hidden input still posts the id.
+      const typeaheadItems = createTestItems(3);
+
+      // why: the mock hook must actually drop the item on reset, mirroring the
+      // real fetcher clearing its typeahead results — otherwise the
+      // cache-fallback path under test is never exercised.
+      const resetModelFiltersFetcher = vi.fn(() => {
+        mockUseModelFilters.mockReturnValue(
+          createMockUseModelFiltersReturn([], { resetModelFiltersFetcher })
+        );
+      });
+
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn(typeaheadItems, {
+          resetModelFiltersFetcher,
+        })
+      );
+
+      const { rerender } = render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          closeOnSelect
+          resetSearchOnClose
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      });
+
+      // Select Item 2 while it's still in the fetcher results — closeOnSelect
+      // closes the popover, which triggers the fetcher reset.
+      await act(async () => {
+        await user.click(screen.getByText("Item 2"));
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+      expect(resetModelFiltersFetcher).toHaveBeenCalled();
+
+      // Re-render reflecting the now-empty fetcher results (Item 2 is gone).
+      rerender(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          closeOnSelect
+          resetSearchOnClose
+        />
+      );
+
+      // The trigger still shows the selected model, not the placeholder.
+      expect(screen.getByRole("button")).toHaveTextContent("Item 2");
+    });
+  });
+
+  describe("Validation error", () => {
+    function renderWithError(error?: string) {
+      return render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+          error={error}
+        />
+      );
+    }
+
+    it("renders nothing extra when there is no error", () => {
+      renderWithError();
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByRole("button")).not.toHaveAttribute(
+        "aria-describedby"
+      );
+    });
+
+    it("announces the message, because a picker that refuses to submit is otherwise silent", () => {
+      renderWithError("Please select an asset model");
+
+      // `role="alert"` is what makes submit-time validation audible — without
+      // it a screen-reader user only experiences the form not submitting.
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Please select an asset model"
+      );
+    });
+
+    it("points the trigger at the message via aria-describedby", () => {
+      renderWithError("Please select an asset model");
+
+      const describedBy = screen
+        .getByRole("button")
+        .getAttribute("aria-describedby");
+
+      expect(describedBy).toBeTruthy();
+      expect(screen.getByRole("alert")).toHaveAttribute("id", describedBy);
+    });
+  });
 });

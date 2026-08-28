@@ -18,13 +18,15 @@ import {
   AssetStatus,
   AssetType,
   BookingStatus,
+  ConsumptionCategory,
   ConsumptionType,
   ErrorCorrection,
-  KitStatus,
   OrganizationRoles,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
+import { withPrismaRetry } from "@shelf/database";
+import { releaseCategory } from "@shelf/quantity-control";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
@@ -35,11 +37,24 @@ import type {
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+// Imported from the dependency-free leaf (NOT `availability.server`) so that
+// importing asset/service.server does NOT drag in the heavy
+// `availability.server → booking/service.server` graph (which transitively
+// pulls canvas/lottie UI deps and crashes happy-dom at collection time — e.g.
+// the reports `*.server.test.ts` files import this module via
+// `refreshExpiredAssetImages`). See the leaf's header doc.
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import {
+  assertStockNotBelowManualPlacements,
+  reconcileManualPlacementsForStockDecrease,
+  reportAmbiguousPlacementReconcile,
+} from "~/modules/asset/placement-reconcile.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
   parseBarcodesFromImportData,
+  importDataHasBarcodes,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import {
@@ -53,6 +68,7 @@ import {
   upsertCustomField,
 } from "~/modules/custom-field/service.server";
 import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
+import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import {
   createLocationChangeNote,
   createLocationsIfNotExists,
@@ -63,6 +79,7 @@ import { createTagsIfNotExists } from "~/modules/tag/service.server";
 import {
   createTeamMemberIfNotExists,
   getTeamMemberForCustodianFilter,
+  scopeCustodianFilterIds,
 } from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import {
@@ -70,6 +87,7 @@ import {
   formatUnitCount,
   sanitizeUnitOfMeasureLabel,
 } from "~/utils/asset-quantity";
+import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
 import { getLocale } from "~/utils/client-hints";
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
@@ -94,6 +112,8 @@ import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
+  throwIfAssetQuantityOverAllocation,
 } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -103,6 +123,7 @@ import * as importImageCacheServer from "~/utils/import.image-cache.server";
 import type { CachedImage } from "~/utils/import.image-cache.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapUserLinkForNote,
   wrapCustodianForNote,
@@ -115,7 +136,9 @@ import { threeDaysFromNow } from "~/utils/one-week-from-now";
 import {
   assertAssetModelBelongsToOrg,
   assertAssetsBelongToOrg,
+  assertCategoryBelongsToOrg,
   assertCustomFieldsBelongToOrg,
+  assertKitsBelongToOrg,
   assertLocationBelongsToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
@@ -127,6 +150,7 @@ import {
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
+import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
 import type {
   MoveAssetLocationUnitsArgs,
@@ -136,15 +160,13 @@ import type {
 } from "./move-units.types";
 import { validateQtyTrackedFields } from "./qty-validation.server";
 import {
-  CUSTOM_FIELD_SEARCH_PATHS,
-  assetQueryFragment,
-  assetQueryJoins,
-  assetReturnFragment,
-  generateCustomFieldSelect,
+  buildAdvancedAssetsQuery,
   generateWhereClause,
   parseFiltersWithHierarchy,
   parseSortingOptions,
 } from "./query.server";
+import { resolveAssetSearchIds } from "./search-ids.server";
+import { buildAssetStatusWhere, splitAssetSearchTerms } from "./search.server";
 import { getNextSequentialId } from "./sequential-id.server";
 import type {
   AdvancedIndexAsset,
@@ -154,6 +176,7 @@ import type {
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
+import type { AllowedCustodianFilterIds } from "./utils.server";
 import {
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
@@ -168,6 +191,7 @@ import {
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
 import { createKitsIfNotExists } from "../kit/service.server";
@@ -240,56 +264,83 @@ async function fetchAssetBeforeUpdate({
 /**
  * Sets kit custody for imported assets after all assets have been created
  */
-async function setKitCustodyAfterAssetImport({
+/**
+ * Assigns kit custody for imported assets after all assets have been created.
+ *
+ * A CSV row carrying both a `kit` and a `custodian` means the KIT is in that
+ * person's custody (`validateKitCustodyConflicts` has already guaranteed a single
+ * custodian per kit). This groups the affected kits by custodian and delegates to
+ * the canonical {@link bulkAssignKitCustody} flow — one call per custodian —
+ * which creates the `KitCustody`, sets the kit and its member assets to
+ * `IN_CUSTODY`, inherits a kit-driven `Custody` row onto every member asset, and
+ * records the matching notes + `CUSTODY_ASSIGNED` events. Rows lacking either a
+ * kit or a custodian are ignored. Must run after the create loop because it
+ * relies on the `AssetKit` pivot rows already existing.
+ *
+ * @param args.data - The parsed import rows (source of kit/custodian names).
+ * @param args.kits - Kit-name → Kit, from the org-scoped `createKitsIfNotExists` map.
+ * @param args.teamMembers - Custodian-name → TeamMember (org-scoped).
+ * @param args.userId - The importing user (actor for the custody events/notes).
+ * @param args.organizationId - The workspace the import runs in.
+ */
+export async function setKitCustodyAfterAssetImport({
   data,
   kits,
   teamMembers,
+  userId,
+  organizationId,
 }: {
   data: CreateAssetFromContentImportPayload[];
   kits: Record<string, Kit>;
   teamMembers: Record<string, TeamMember>;
+  userId: string;
+  organizationId: string;
 }) {
-  // Normalize kit/custodian names so padded CSV values still map to created records.
-  const assetsWithKitAndCustodian = data
-    .map((asset) => ({
-      kit: asset.kit?.trim(),
-      custodian: asset.custodian?.trim(),
-    }))
-    .filter((asset) => asset.kit && asset.custodian);
+  // A row's `custodian` combined with a `kit` means the KIT is in that person's
+  // custody (validateKitCustodyConflicts already guarantees a single custodian
+  // per kit). Group the kits that need custody by their custodian so we make one
+  // bulkAssignKitCustody call per custodian.
+  const kitIdsByCustodian = new Map<
+    string,
+    { custodianName: string; kitIds: Set<string> }
+  >();
 
-  if (assetsWithKitAndCustodian.length === 0) {
-    return; // Nothing to do
-  }
+  for (const asset of data) {
+    const kitName = asset.kit?.trim();
+    const custodianName = asset.custodian?.trim();
+    if (!kitName || !custodianName) continue;
 
-  // Group by kit name and get the custodian for each kit
-  const kitToCustodianMap = new Map<string, string>();
-  for (const asset of assetsWithKitAndCustodian) {
-    const kitName = asset.kit!;
-    const custodianName = asset.custodian!;
-    if (!kitToCustodianMap.has(kitName)) {
-      kitToCustodianMap.set(kitName, custodianName);
-    }
-  }
-
-  // Update kit custody - one update per kit instead of per asset for performance
-  for (const [kitName, custodianName] of kitToCustodianMap) {
     const kit = kits[kitName];
     const teamMember = teamMembers[custodianName];
+    if (!kit || !teamMember) continue;
 
-    if (kit && teamMember) {
-      await db.kit.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: kit comes from the `kits` map built by createKitsIfNotExists({ organizationId }) at the call site (line ~2657); all ids are already org-scoped
-        where: { id: kit.id },
-        data: {
-          status: KitStatus.IN_CUSTODY,
-          custody: {
-            create: {
-              custodian: { connect: { id: teamMember.id } },
-            },
-          },
-        },
+    const existing = kitIdsByCustodian.get(teamMember.id);
+    if (existing) {
+      existing.kitIds.add(kit.id);
+    } else {
+      kitIdsByCustodian.set(teamMember.id, {
+        custodianName: teamMember.name,
+        kitIds: new Set([kit.id]),
       });
     }
+  }
+
+  // Reuse the canonical kit-custody flow: it creates the KitCustody, sets kit +
+  // member-asset status to IN_CUSTODY, and inherits a kit-driven Custody row to
+  // every member asset (with matching notes + CUSTODY_ASSIGNED events). This
+  // keeps imports in lock-step with the interactive "assign custody to a kit".
+  for (const [custodianId, { custodianName, kitIds }] of kitIdsByCustodian) {
+    await bulkAssignKitCustody({
+      kitIds: [...kitIds],
+      organizationId,
+      custodianId,
+      custodianName,
+      userId,
+      // CSV import, gated on `asset: import` — ADMIN/OWNER only. Doubly inert
+      // here anyway: the kit ids are explicit (never ALL_SELECTED_KEY) and no
+      // `currentSearchParams` is passed, so no custodian filter is ever built.
+      allowedTeamMemberIds: "all",
+    });
   }
 }
 
@@ -530,33 +581,6 @@ const unavailableBookingStatuses = [
 ];
 
 /**
- * Matches the shape of an asset identifier or barcode / QR id. Two forms:
- *   - bare numeric ("21035", or a 12-digit UPC) — users commonly drop the
- *     prefix when scanning or typing an ID
- *   - canonical sequential ID ("SAM-0001") — letter prefix + dash + 4+
- *     digits, matching the format produced by getNextSequentialId
- *
- * Used by getAssets to run ID-shaped queries against a narrower OR clause
- * (sequentialId / barcodes.value / qrCodes.id) first, instead of the full
- * 10-branch chain. The narrower clause skips the slow paths — custodian
- * name traversal and the unindexed customFields JSON ILIKE — while still
- * covering every place an ID-shaped value is *most likely* to live.
- *
- * Because a bare number can equally be a real barcode OR a value embedded
- * in a title / description / custom field (indistinguishable by shape),
- * getAssets falls back to the full search when this narrow clause returns
- * zero rows — so nothing is ever silently missed. See the fallback re-query
- * in {@link getAssets}.
- *
- * Loose terms like "lab-12" or "AS1000" don't match here and go straight to
- * the full search, since they're more likely substrings of titles, custom
- * fields, etc.
- */
-function looksLikeAssetId(term: string): boolean {
-  return /^\d+$/.test(term) || /^[a-z]+-\d{4,}$/i.test(term);
-}
-
-/**
  * Fetches assets directly from the asset table with enhanced search capabilities
  * @param params Search and filtering parameters for asset queries
  * @returns Assets and total count matching the criteria
@@ -615,174 +639,39 @@ export async function getAssets(params: {
 
     const where: Prisma.AssetWhereInput = { organizationId };
 
-    // Lazily builds the full multi-column search clause. Held as a builder
-    // (not a prebuilt value) so a successful narrow ID lookup never pays to
-    // construct the 10-branch clause it won't use; it is only invoked by the
-    // non-ID path or by the fallback re-query when the narrow query is empty.
-    let shouldFallbackToFullSearch = false;
-    let buildFullSearchOr: (() => Prisma.AssetWhereInput[]) | undefined;
-    // Number of OR entries the narrow search contributed. Later filters
-    // (uncategorized / untagged / without-location / team-member) also append
-    // to `where.OR`, so the fallback re-query replaces only these first
-    // entries with the full clause and preserves the appended filter clauses.
-    let narrowSearchOrCount = 0;
-
     if (availableToBookOnly) {
       where.availableToBook = true;
     }
 
     if (search) {
-      const searchTerms = search
-        .toLowerCase()
-        .trim()
-        .split(",")
-        .map((term) => term.trim())
-        .filter(Boolean);
+      const searchTerms = splitAssetSearchTerms(search);
 
-      if (searchTerms.length > 0) {
-        // Builder for the full multi-column clause: matches a term anywhere it
-        // can legitimately live — title, sequentialId, description, category,
-        // location, tags, custodian names, QR/barcode, and custom fields. It
-        // is the slow path (custodian relation traversal + an unindexed
-        // customFields JSON ILIKE), so for ID-shaped searches we run the
-        // narrow clause first and only build/use this when it finds nothing
-        // (see the fallback re-query further down). Defined as a closure so the
-        // clause is constructed only when actually needed.
-        buildFullSearchOr = () =>
-          searchTerms.map((term) => ({
-            OR: [
-              // Search in asset fields
-              { title: { contains: term, mode: "insensitive" } },
-              // Search in asset sequential id
-              { sequentialId: { contains: term, mode: "insensitive" } },
-              // Search in asset description
-              { description: { contains: term, mode: "insensitive" } },
-              // Search in related category
-              { category: { name: { contains: term, mode: "insensitive" } } },
-              // Search in related location — traverses the AssetLocation pivot
-              // since an asset can be placed at multiple locations.
-              {
-                assetLocations: {
-                  some: {
-                    location: {
-                      name: { contains: term, mode: "insensitive" },
-                    },
-                  },
-                },
-              },
-              // Search in related tags
-              {
-                tags: {
-                  some: { name: { contains: term, mode: "insensitive" } },
-                },
-              },
-              // Search in custodian names — custody is a list relation, so
-              // traverse it with `some`.
-              {
-                custody: {
-                  some: {
-                    custodian: {
-                      OR: [
-                        { name: { contains: term, mode: "insensitive" } },
-                        {
-                          user: {
-                            OR: [
-                              {
-                                firstName: {
-                                  contains: term,
-                                  mode: "insensitive",
-                                },
-                              },
-                              {
-                                lastName: {
-                                  contains: term,
-                                  mode: "insensitive",
-                                },
-                              },
-                            ],
-                          },
-                        },
-                      ],
-                    },
-                  },
-                },
-              },
-              // Search qr code id
-              {
-                qrCodes: {
-                  some: { id: { contains: term, mode: "insensitive" } },
-                },
-              },
-              // Search barcode values
-              {
-                barcodes: {
-                  some: { value: { contains: term, mode: "insensitive" } },
-                },
-              },
-              // Search in custom fields
-              {
-                customFields: {
-                  some: {
-                    OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
-                      value: {
-                        path: [jsonPath],
-                        string_contains: term,
-                        mode: "insensitive",
-                      },
-                    })),
-                  },
-                },
-              },
-            ],
-          }));
-
-        // Fast path: when every term looks like an asset identifier — either
-        // bare digits ("21035", a UPC barcode) or canonical sequentialId
-        // ("SAM-0001") — narrow the OR clause to the columns where an
-        // ID-shaped value can legitimately live: sequentialId, barcode value,
-        // QR id, plus title and description. The ID columns are covered by
-        // trigram GIN indexes added in migration 20260525110348, and
-        // title/description are covered by the composite trigram GIN index
-        // Asset_title_description_idx — so the planner stays on indexed scans
-        // and a real ID lookup (the common case) returns immediately.
-        //
-        // title + description are included here (not deferred to the fallback)
-        // because a bare-numeric term often lives ONLY inside a title — e.g.
-        // searching "451" must match "KCI-451 Kids Resources Box". Without
-        // these branches the narrow query can still return rows (some OTHER
-        // asset matches "451" in an ID column), which suppresses the
-        // zero-row fallback and silently drops the title-only match.
-        //
-        // The fallback flag stays set so the remaining slow-path columns
-        // (custodian names, category/location/tags, custom-field JSON ILIKE)
-        // are still covered when this clause returns zero rows.
-        if (searchTerms.every(looksLikeAssetId)) {
-          shouldFallbackToFullSearch = true;
-          where.OR = searchTerms.flatMap((term) => [
-            { sequentialId: { contains: term, mode: "insensitive" } },
-            {
-              barcodes: {
-                some: { value: { contains: term, mode: "insensitive" } },
-              },
-            },
-            {
-              qrCodes: {
-                some: { id: { contains: term, mode: "insensitive" } },
-              },
-            },
-            // Trigram-indexed (Asset_title_description_idx) — matches a
-            // bare-numeric substring embedded in a title/description directly
-            // in the fast path, without relying on the zero-row fallback.
-            { title: { contains: term, mode: "insensitive" } },
-            { description: { contains: term, mode: "insensitive" } },
-          ]);
-          // Remember how many entries belong to the search so the fallback can
-          // swap them out without disturbing filter clauses appended later.
-          narrowSearchOrCount = where.OR.length;
-        } else {
-          // Not an ID-shaped search — go straight to the full clause.
-          where.OR = buildFullSearchOr();
-        }
+      if (searchTerms.length === 0) {
+        // Typed input that yields zero terms (whitespace / bare commas)
+        // matches NOTHING — a debounced type-ahead sending a single space
+        // must not return the full list. Mirrors the mobile composer.
+        where.id = { in: [] };
+      } else {
+        // Resolve the search to a set of matching asset ids via the shared
+        // org-scoped UNION (resolveAssetSearchIds → buildAssetSearchUnion) —
+        // index-driven, org-scoped branches, ~165ms vs the old multi-table OR's
+        // cross-org seq scans. The helper is retry-wrapped (to claim the read
+        // semantics the client extension cannot infer) and guards the id set
+        // against Postgres' ~65k bind-param ceiling, throwing a friendly 400
+        // rather than letting an extreme org + very broad term hard-fail.
+        // Setting where.OR here — BEFORE the category/tag/location/team-member
+        // filters below — preserves the historical OR-entanglement: those
+        // filters append to where.OR, so search OR-combines with them exactly
+        // as the previous Prisma OR clause did. The UNION always
+        // searches all 10 sources (the old id-shaped fast path searched a
+        // subset and fell back on zero rows); id-shaped searches therefore now
+        // return the full result set — a superset of before, the more-correct
+        // answer.
+        const ids = await resolveAssetSearchIds({
+          organizationId,
+          terms: searchTerms,
+        });
+        where.OR = [{ id: { in: ids } }];
       }
     }
 
@@ -796,18 +685,15 @@ export async function getAssets(params: {
       // truthful for qty-tracked — the row enters those states whenever ANY
       // unit does).
       if (status === AssetStatus.AVAILABLE) {
+        // QT-aware fragment shared with getAssetsWhereInput and the mobile
+        // assets endpoint — see buildAssetStatusWhere for the rationale.
         where.AND = [
           ...(Array.isArray(where.AND)
             ? where.AND
             : where.AND
             ? [where.AND]
             : []),
-          {
-            OR: [
-              { type: "INDIVIDUAL", status: AssetStatus.AVAILABLE },
-              { type: "QUANTITY_TRACKED" },
-            ],
-          },
+          buildAssetStatusWhere(status),
         ];
       } else {
         where.status = status;
@@ -1055,30 +941,30 @@ export async function getAssets(params: {
             }),
             ...extraInclude,
           },
-          orderBy: { [orderBy]: orderDirection },
+          // Stable `id` tiebreaker for deterministic skip/take paging when
+          // rows tie on the sort key (bulk-imported assets share createdAt
+          // down to the millisecond). Mirrors the tiebreaker the advanced
+          // index uses (parseSortingOptions in query.server.ts). Skipped when
+          // the caller already sorts by id.
+          orderBy: [
+            { [orderBy]: orderDirection },
+            ...(orderBy !== "id" ? [{ id: "asc" as const }] : []),
+          ],
         }),
         db.asset.count({ where: assetWhere }),
       ]);
 
-    let [assets, totalAssets] = await fetchAssetsForWhere(where);
-
-    // Fallback: an ID-shaped search ran the narrow clause but matched no
-    // assets. The term may be embedded in a title, description, or custom
-    // field rather than being a real identifier, so re-run with the full
-    // search clause before giving up. Only the narrow search entries are
-    // swapped for the full clause; any filter clauses appended to `where.OR`
-    // afterwards (uncategorized / untagged / without-location / team-member)
-    // are kept so the fallback honours the same filters as the first query.
-    if (shouldFallbackToFullSearch && totalAssets === 0 && buildFullSearchOr) {
-      const appendedFilterOr = Array.isArray(where.OR)
-        ? where.OR.slice(narrowSearchOrCount)
-        : [];
-      where.OR = [...buildFullSearchOr(), ...appendedFilterOr];
-      [assets, totalAssets] = await fetchAssetsForWhere(where);
-    }
+    const [assets, totalAssets] = await fetchAssetsForWhere(where);
 
     return { assets, totalAssets };
   } catch (cause) {
+    // A deliberate client error — e.g. the >65k bind-param ceiling 400 thrown by
+    // resolveAssetSearchIds — must reach the caller with its own actionable
+    // message intact. The generic wrapper below inherits the 400 status from the
+    // cause but overwrites the message ("refine your search" → "something went
+    // wrong"), so pass it straight through. Also covers Cmd+K, which shares
+    // getAssets without the getPaginatedAndFilterableAssets wrapper.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while fetching assets",
@@ -1109,6 +995,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   canUseBarcodes = false,
   availableToBookOnly = false,
   preParsedFilters,
+  timeZone = "UTC",
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1121,6 +1008,13 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   availableToBookOnly?: boolean;
   /** Pre-parsed filters — pass these to skip redundant parseFiltersWithHierarchy call */
   preParsedFilters?: Filter[];
+  /**
+   * IANA timezone the acting user displays dates in. Threaded into
+   * `generateWhereClause` so built-in date-column filters truncate the day in
+   * the user's tz (avoids an off-by-one for non-UTC users). Defaults to "UTC"
+   * for callers that don't resolve the acting user's prefs.
+   */
+  timeZone?: string;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1130,6 +1024,11 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   const { page, perPageParam, search } = paramsValues;
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
+
+  /** "Low stock" quick filter toggle — a `lowStockOnly=true` URL param set
+   * via the assets-index UI toggle, not a `settings.columns` field. See
+   * {@link generateWhereClause}'s `lowStockOnly` param for the predicate. */
+  const lowStockOnly = searchParams.get("lowStockOnly") === "true";
 
   const settingColumns = settings?.columns as Column[];
 
@@ -1155,52 +1054,47 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       search,
       parsedFilters,
       assetIds,
-      availableToBookOnly
+      availableToBookOnly,
+      timeZone,
+      lowStockOnly
     );
-    const { orderByClause, customFieldSortings } = parseSortingOptions(
-      searchParams.getAll("sortBy")
-    );
-    const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
+    const sortByValues = searchParams.getAll("sortBy");
+    const { orderByInner, customFieldSortings } =
+      parseSortingOptions(sortByValues);
     // Modify query to conditionally include LIMIT/OFFSET
     const paginationClause = takeAll
       ? Prisma.empty
       : Prisma.sql`LIMIT ${take} OFFSET ${skip}`;
-    const query = Prisma.sql`
-      WITH asset_query AS (
-        ${assetQueryFragment({
-          withBookings: getBookings || isUpcomingBookingsColumnVisible,
-          withBarcodes: canUseBarcodes,
-          withCustomFieldDefinitions: false,
-        })}
-        ${customFieldSelect}
-        ${assetQueryJoins}
-        ${whereClause}
-        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."profilePicture", bu.email, btm.id, btm.name, am.id, am.name
-        -- Note: custody_agg.custody / kits_agg.kits / locations_agg.locations
-        -- must be in GROUP BY because the SELECT references them. They are
-        -- per-asset aggregated jsonb arrays from lateral subqueries; jsonb
-        -- supports equality so this is safe and produces one group per
-        -- asset row.
-      ), 
-      sorted_asset_query AS (
-        SELECT * FROM asset_query
-        ${Prisma.raw(orderByClause)}
-        ${paginationClause}
-      ),
-      count_query AS (
-        SELECT COUNT(*)::integer AS total_count
-        FROM asset_query
-      )
-      SELECT 
-        (SELECT total_count FROM count_query) AS total_count,
-        ${assetReturnFragment({
-          withBookings: getBookings || isUpcomingBookingsColumnVisible,
-          withBarcodes: canUseBarcodes,
-        })}
-      FROM sorted_asset_query aq;
-    `;
 
-    const result = await db.$queryRaw<AdvancedIndexQueryResult>(query);
+    // Paginate-first assembly: a slim id+sort-keys CTE is paged via an integer
+    // ROW_NUMBER rank, counted cheaply, then the full heavy projection runs
+    // once per page row via LEFT JOIN LATERAL. See buildAdvancedAssetsQuery.
+    const query = buildAdvancedAssetsQuery({
+      whereClause,
+      orderByInner,
+      customFieldSortings,
+      sortBy: sortByValues,
+      parsedFilters,
+      withBookings: getBookings || isUpcomingBookingsColumnVisible,
+      withBarcodes: canUseBarcodes,
+      paginationClause,
+    });
+
+    // Retry the raw read on transient DB failures. The client extension retries
+    // raw SQL too, but only where the connection never opened — it cannot read
+    // a raw statement to tell a pure read from one that consumes a sequence or
+    // takes locks, so it assumes the worst. This one IS a pure read, which
+    // `operationIsRead: true` declares: safe to re-run mid-flight. That matters
+    // because this heavy query trips Postgres shared-lock-table exhaustion
+    // (SQLSTATE 53200) under the per-request fan-out on large workspaces
+    // (SHELF-WEBAPP-227), where the pressure is momentary and a short backed-off
+    // retry usually succeeds. The extension steps aside while this runs, so the
+    // attempts below are the only ones. On exhausted retries it rethrows to the
+    // catch below, which surfaces as the friendly retryable 503 (makeShelfError).
+    const result = await withPrismaRetry(
+      () => db.$queryRaw<AdvancedIndexQueryResult>(query),
+      { operationIsRead: true }
+    );
     const totalAssets = result[0].total_count;
     const assets: AdvancedIndexAsset[] = result[0].assets;
     const totalPages = Math.ceil(totalAssets / take);
@@ -1224,6 +1118,45 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       label,
     });
   }
+}
+
+/**
+ * Builds the `assetKits` nested-create fragment that attaches a newly-created
+ * asset to a kit via the `AssetKit` pivot.
+ *
+ * `Asset.kit`/`kitId` was replaced by the `AssetKit` pivot, so kit membership
+ * must be written through `assetKits`; a `kit: { connect }` throws
+ * `Unknown argument kit` at runtime (the create-with-kit crash this restores).
+ * The pivot quantity mirrors `addedAssetKitQuantity` in `kit/service.server.ts`:
+ * the asset's full tracked pool for QUANTITY_TRACKED assets, otherwise 1.
+ *
+ * @param args.kitId - The kit to attach to (must be org-scoped by the caller).
+ * @param args.organizationId - The owning workspace.
+ * @param args.type - The asset type (drives the pivot quantity).
+ * @param args.quantity - The asset's tracked quantity (QUANTITY_TRACKED only).
+ * @returns An `AssetCreateInput` fragment: `{ assetKits: { create: {...} } }`.
+ */
+export function buildAssetKitCreateData({
+  kitId,
+  organizationId,
+  type,
+  quantity,
+}: {
+  kitId: string;
+  organizationId: string;
+  type?: AssetType | null;
+  quantity?: number | null;
+}): Pick<Prisma.AssetCreateInput, "assetKits"> {
+  return {
+    assetKits: {
+      create: {
+        kit: { connect: { id: kitId } },
+        organization: { connect: { id: organizationId } },
+        quantity:
+          type === AssetType.QUANTITY_TRACKED && quantity ? quantity : 1,
+      },
+    },
+  };
 }
 
 export async function createAsset({
@@ -1378,19 +1311,34 @@ export async function createAsset({
         unitOfMeasure,
       };
 
-      /** If a kitId is passed, link the kit to the asset. */
-      if (kitId && kitId !== "uncategorized") {
-        Object.assign(data, {
-          kit: {
-            connect: {
-              id: kitId,
-            },
-          },
-        });
+      /**
+       * If a kitId is passed, attach the asset to the kit via the `AssetKit`
+       * pivot. `Asset.kit` no longer exists, so a `kit: { connect }` here throws
+       * `Unknown argument kit`. The kit id is proven to belong to this org
+       * inside the transaction below (assertKitsBelongToOrg), matching the
+       * assetModel / custom-field IDOR guards.
+       */
+      const hasKit = Boolean(kitId && kitId !== "uncategorized");
+      if (hasKit) {
+        Object.assign(
+          data,
+          buildAssetKitCreateData({
+            kitId: kitId!,
+            organizationId,
+            type,
+            quantity,
+          })
+        );
       }
 
-      /** If a categoryId is passed, link the category to the asset. */
-      if (categoryId && categoryId !== "uncategorized") {
+      /**
+       * If a categoryId is passed, link the category to the asset. The id is
+       * proven to belong to this org inside the transaction below
+       * (assertCategoryBelongsToOrg), matching the kit / assetModel /
+       * custom-field IDOR guards.
+       */
+      const hasCategory = Boolean(categoryId && categoryId !== "uncategorized");
+      if (hasCategory) {
         Object.assign(data, {
           category: {
             connect: {
@@ -1400,13 +1348,13 @@ export async function createAsset({
         });
       }
 
-      /** If an assetModelId is passed, link the asset model to the asset.
-       * Org-scope-guard before the connect — Prisma's FK only enforces
-       * that the row exists, not that it belongs to the caller's
-       * organization, so without this check a user in Org A could
-       * link their new asset to Org B's model (hex-security r3341845640
-       * / r3350881506). Same pattern as the other org-scope guards
-       * in this file (assertLocationBelongsToOrg, assertTagsBelongToOrg).
+      /**
+       * If an assetModelId is passed, link the asset model to the asset.
+       * Org-scope-guard before the connect — Prisma's FK only enforces that
+       * the row exists, not that it belongs to the caller's organization, so
+       * without this check a user in Org A could link their new asset to
+       * Org B's model. Same pattern as the other org-scope guards in this
+       * file (assertLocationBelongsToOrg, assertTagsBelongToOrg).
        */
       if (assetModelId) {
         await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
@@ -1529,6 +1477,25 @@ export async function createAsset({
           { customFieldIds: customFieldIdsToValidate, organizationId },
           tx
         );
+
+        // SECURITY (cross-org IDOR): the kitId comes from form/CSV input and is
+        // connected by the assetKits nested create above with no org scoping of
+        // its own. Prove it belongs to this org before the write (same pattern
+        // as the assetModel / custom-field guards).
+        if (hasKit) {
+          await assertKitsBelongToOrg({ kitIds: [kitId!], organizationId }, tx);
+        }
+
+        // SECURITY (cross-org IDOR): the categoryId comes from form/CSV input
+        // and is connected by the nested create above with no org scoping of
+        // its own. Prisma's foreign key only proves the row exists, not that
+        // it belongs to this workspace, so prove ownership before the write.
+        if (hasCategory) {
+          await assertCategoryBelongsToOrg(
+            { categoryId: categoryId!, organizationId },
+            tx
+          );
+        }
 
         const created = await tx.asset.create({
           data,
@@ -1861,9 +1828,8 @@ export async function bulkCreateAssetsFromModel({
       organizationId,
     });
   }
-  // kitId + customFieldsValues + categoryId — createAsset's connect will
-  // throw a 400 on cross-org id (Prisma surfaces a foreign-key violation).
-  // Could harden with explicit asserts in a future polish.
+  // kitId, customFieldsValues and categoryId need no assert here: createAsset
+  // proves each of them against this organization inside its own transaction.
 
   // ── Read model + resolve defaults ────────────────────────────────────
 
@@ -2029,13 +1995,21 @@ export async function updateAsset({
      * locations" subtraction (those rows get cleared in the transaction
      * below). INDIVIDUAL submissions ignore the qty — write path forces
      * it to 1.
+     *
+     * The bound is the total this patch LEAVES BEHIND, not the one it found:
+     * a single request can carry both a new `quantity` and a placement, and
+     * measuring against the stale total refuses valid edits in both
+     * directions (raising 10 → 100 while placing 50, or lowering 100 → 50
+     * while moving locations). The in-transaction check re-runs this against
+     * the locked row; this one exists to produce the friendly message before
+     * any write.
      */
     if (
       isSettingNewQuantity &&
       newLocationId &&
       assetForValidation?.type === AssetType.QUANTITY_TRACKED
     ) {
-      const totalQty = assetForValidation.quantity ?? 0;
+      const totalQty = quantity ?? assetForValidation.quantity ?? 0;
       if (
         typeof newLocationQuantity === "number" &&
         newLocationQuantity > totalQty
@@ -2092,10 +2066,12 @@ export async function updateAsset({
       mainImage,
       mainImageExpiration,
       thumbnailImage,
-      // Quantity-tracked fields (type is immutable, never updated here)
-      // TODO(Phase 2): Route quantity changes through an audited adjustment
-      // path that writes to ConsumptionLog. Direct mutation here bypasses
-      // the full-attribution audit trail required by the PRD.
+      // Quantity-tracked fields (type is immutable, never updated here).
+      // The direct `quantity` write is audited below: the quantity/placement
+      // transaction writes a `ConsumptionLog` ADJUSTMENT for the stock delta
+      // and the `fieldChangeEvents` block emits `ASSET_QUANTITY_CHANGED` /
+      // `ASSET_MIN_QUANTITY_CHANGED`, so the full-attribution trail the PRD
+      // requires is preserved.
       quantity,
       minQuantity,
       consumptionType,
@@ -2446,7 +2422,120 @@ export async function updateAsset({
     // Bundle the asset update and AssetLocation pivot ops in a single tx
     // so a location change is atomic (and so the sum-within-total trigger
     // sees the final state at COMMIT).
+    // Captured from the locked pre-update row so the post-update
+    // ConsumptionLog ADJUSTMENT (below) can compute the stock delta, AND so
+    // the post-transaction low-stock check can tell whether this patch LOWERED
+    // a QUANTITY_TRACKED asset's total. Hoisted out of the tx callback so both
+    // signals survive past the commit. Only populated when a quantity write is
+    // actually part of this patch.
+    let quantityBeforeUpdate: number | null = null;
+    let lockedAssetType: AssetType | null = null;
     const asset = await db.$transaction(async (tx) => {
+      // Block lowering a QUANTITY_TRACKED asset's total below the units
+      // already committed to custody, kits, or overlapping bookings. Lock the
+      // asset row first so the read-then-write is race-safe (mirrors
+      // `adjustQuantity` and the booking write guards). Also covers the CSV
+      // update-existing import, which routes through `updateAsset`.
+      //
+      // The lock is also taken for a placement-only patch: the pivot rewrite
+      // below raises the manual `AssetLocation` sum, and
+      // `asset_location_sum_within_total` validating at COMMIT only covers one
+      // interleaving. Without the lock a concurrent stock decrease can read
+      // the pre-rewrite placements, decide they fit, and commit a lower total
+      // that no trigger re-checks. Single-asset only, so it cannot deadlock
+      // against the multi-asset lockers in the booking paths.
+      if (quantity != null || shouldUpdatePlacement) {
+        const locked = await lockAssetForQuantityUpdate(tx, id, organizationId);
+        if (quantity != null) {
+          quantityBeforeUpdate = locked.quantity ?? 0;
+          lockedAssetType = locked.type;
+        }
+
+        /**
+         * The total this patch leaves behind — the submitted `quantity` when
+         * the patch carries one, otherwise the asset's current total.
+         */
+        const effectiveTotal = quantity ?? locked.quantity ?? 0;
+
+        if (
+          locked.type === AssetType.QUANTITY_TRACKED &&
+          quantity != null &&
+          quantity < (locked.quantity ?? 0)
+        ) {
+          await assertAssetQuantityNotBelowReservations({
+            assetId: id,
+            organizationId,
+            tx,
+            newTotal: quantity,
+            assetTitle: locked.title,
+            unitOfMeasure: locked.unitOfMeasure,
+          });
+        }
+
+        if (locked.type === AssetType.QUANTITY_TRACKED) {
+          /**
+           * Placement axis, which the reservations guard does not cover
+           * (custody / kits / bookings are overlapping claims on the same
+           * units; placement carries its own `sum <= Asset.quantity`).
+           *
+           * WHICH placements to measure depends on whether this same patch
+           * rewrites them. `shouldUpdatePlacement` means the transaction below
+           * deletes every manual row and creates at most one new one, so the
+           * pre-patch rows are about to stop existing — validating against
+           * them refuses edits whose end state is perfectly valid (lower the
+           * total to 50 and move the asset to another location in one save,
+           * which the asset edit form submits as a single request).
+           */
+          if (shouldUpdatePlacement) {
+            // Mirror of the pivot write below: one row at `newLocationId` with
+            // `resolveNewLocationQuantity` against the POST-patch total, or no
+            // manual row at all when the location is being cleared.
+            const resultingManualSum = newLocationId
+              ? resolveNewLocationQuantity(
+                  { type: locked.type, quantity: effectiveTotal },
+                  newLocationQuantity
+                )
+              : 0;
+
+            if (resultingManualSum > effectiveTotal) {
+              throw new ShelfError({
+                cause: null,
+                title: "Quantity exceeds available pool",
+                message: `Cannot place ${resultingManualSum} ${
+                  locked.unitOfMeasure || "units"
+                } at this location — "${
+                  locked.title
+                }" will only have ${effectiveTotal} in total.`,
+                additionalData: {
+                  assetId: id,
+                  organizationId,
+                  resultingManualSum,
+                  effectiveTotal,
+                },
+                label,
+                status: 400,
+                shouldBeCaptured: false,
+              });
+            }
+          } else if (quantity != null && quantity < (locked.quantity ?? 0)) {
+            /**
+             * No placement rewrite in this patch, so the existing manual rows
+             * are what the new total has to accommodate. Refusing (rather than
+             * trimming a location) keeps the choice of WHICH location loses
+             * units with the person who knows.
+             */
+            await assertStockNotBelowManualPlacements({
+              assetId: id,
+              organizationId,
+              tx,
+              newTotal: quantity,
+              assetTitle: locked.title,
+              unitOfMeasure: locked.unitOfMeasure,
+            });
+          }
+        }
+      }
+
       const updated = await tx.asset.update({
         where: { id, organizationId },
         data,
@@ -2457,6 +2546,32 @@ export async function updateAsset({
           organization: true,
         },
       });
+
+      // Immutable stock-movement audit for a QUANTITY_TRACKED total change made
+      // through the asset-edit form. The form has no consumption-category
+      // input, so a manual total correction is an `ADJUSTMENT` (schema
+      // Decision #9: `ConsumptionLog.quantity` is always positive — direction
+      // lives in the `ASSET_QUANTITY_CHANGED` event's from/to below). Written
+      // IN this tx (not via `adjustQuantity`, which opens its own tx and
+      // re-locks the row we already hold). Skipped for a no-op edit
+      // (`delta === 0`) because `createConsumptionLog` rejects a zero quantity.
+      if (
+        quantity != null &&
+        lockedAssetType === AssetType.QUANTITY_TRACKED &&
+        quantityBeforeUpdate != null
+      ) {
+        const delta = Math.abs(quantity - quantityBeforeUpdate);
+        if (delta > 0) {
+          await createConsumptionLog({
+            assetId: id,
+            category: ConsumptionCategory.ADJUSTMENT,
+            quantity: delta,
+            userId,
+            note: "Quantity adjusted via asset edit",
+            tx,
+          });
+        }
+      }
 
       if (shouldUpdatePlacement) {
         if (newLocationId) {
@@ -2657,6 +2772,7 @@ export async function updateAsset({
         newLocation,
         firstName: user.firstName || "",
         lastName: user.lastName || "",
+        displayName: user.displayName,
         assetId: asset.id,
         userId,
         organizationId,
@@ -2687,11 +2803,7 @@ export async function updateAsset({
       });
 
       // Create location activity notes
-      const userLink = wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
+      const userLink = wrapUserLinkForNote({ ...user, id: userId });
       // Single-asset location-timeline note. `wrapAssetWithCountForNote`
       // prefixes the qty-tracked unit count ("50 units of {asset}");
       // INDIVIDUAL renders the bare link, so phrasing is unchanged.
@@ -2873,6 +2985,42 @@ export async function updateAsset({
           toValue: asset.valuation ?? null,
         });
       }
+      // Quantity is stock; minQuantity is the reorder threshold. Each emits
+      // its own event so reports can aggregate them independently. The stock
+      // ConsumptionLog ADJUSTMENT is written in the tx above; minQuantity is a
+      // threshold (not stock), so it never writes a ConsumptionLog.
+      if (
+        typeof quantity !== "undefined" &&
+        (assetBeforeUpdate.quantity ?? null) !== (asset.quantity ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "quantity",
+          fromValue: assetBeforeUpdate.quantity ?? null,
+          toValue: asset.quantity ?? null,
+        });
+      }
+      if (
+        typeof minQuantity !== "undefined" &&
+        (assetBeforeUpdate.minQuantity ?? null) !== (asset.minQuantity ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_MIN_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "minQuantity",
+          fromValue: assetBeforeUpdate.minQuantity ?? null,
+          toValue: asset.minQuantity ?? null,
+        });
+      }
       if (fieldChangeEvents.length > 0) {
         await recordEvents(fieldChangeEvents);
       }
@@ -2953,6 +3101,7 @@ export async function updateAsset({
               newValue: change.newValue,
               firstName: user?.firstName || "",
               lastName: user?.lastName || "",
+              displayName: user?.displayName,
               assetId: asset.id,
               userId,
               organizationId,
@@ -2981,8 +3130,63 @@ export async function updateAsset({
       }
     }
 
+    /**
+     * Low-stock check — on any QUANTITY change OR any MIN-QUANTITY (threshold)
+     * change to a QUANTITY_TRACKED asset.
+     * - A quantity DROP may cross INTO the low-stock band (fire the alert); a
+     *   raise (restock via the edit form / CSV update-import) may cross back OUT
+     *   (clear the `lowStockNotifiedAt` marker + send the "back in stock" notice).
+     * - A THRESHOLD change must also run — including CLEARING `minQuantity`.
+     *   Otherwise removing a threshold while an asset is low leaves the marker
+     *   set, and re-adding a threshold later would let that stale marker suppress
+     *   the next genuine alert. The notifier only performs its clear/recovery
+     *   transition when it is actually called (it clears a stale marker when the
+     *   asset has no threshold).
+     * Mirrors the adjust-quantity route (unconditional on add/subtract). Runs
+     * OUTSIDE the committed transaction (best-effort — a notification failure
+     * must never roll back a successful asset edit). The min-quantity branch
+     * relies on `asset.type` (not the hoisted `lockedAssetType`, which is only
+     * set when a quantity write took the row lock).
+     */
+    const isQuantityTrackedAsset =
+      lockedAssetType === AssetType.QUANTITY_TRACKED ||
+      asset.type === AssetType.QUANTITY_TRACKED;
+    const quantityChanged =
+      quantity != null &&
+      quantityBeforeUpdate != null &&
+      quantity !== quantityBeforeUpdate;
+    const minQuantityChanged =
+      typeof minQuantity !== "undefined" &&
+      (assetBeforeUpdate?.minQuantity ?? null) !== (asset.minQuantity ?? null);
+    if (isQuantityTrackedAsset && (quantityChanged || minQuantityChanged)) {
+      try {
+        await checkAndNotifyLowStock({ assetId: id, userId, organizationId });
+      } catch (lowStockError) {
+        Logger.error(
+          new ShelfError({
+            cause: lowStockError,
+            message:
+              "Failed to run low-stock check after asset quantity/threshold edit",
+            label: "Assets",
+            additionalData: { assetId: id, organizationId },
+          })
+        );
+      }
+    }
+
     return asset;
   } catch (cause) {
+    // Translate the DB `AssetLocation total ... exceeds Asset.quantity` trigger
+    // violation into a friendly 400. updateAsset writes AssetLocation pivot rows
+    // in its transaction; a submitted quantity can pass the pre-check yet trip
+    // the DEFERRED trigger at COMMIT if a concurrent request lowered
+    // Asset.quantity in between. No-ops for every other error. See
+    // SHELF-WEBAPP-219 / 21N (race backstop, matching replaceAssetPlacements).
+    throwIfAssetQuantityOverAllocation(cause, {
+      label: "Assets",
+      additionalData: { userId, id, organizationId },
+    });
+
     // If it's already a ShelfError (kit guard, qty validator, org-scope
     // guard, etc.), re-throw as-is so the upstream status / title /
     // message survive. `isLikeShelfError` includes a duck-type fallback
@@ -3091,14 +3295,19 @@ export async function replaceAssetPlacements({
   placements: Array<{ locationId: string; quantity: number }>;
 }) {
   try {
-    // 1. Fetch the asset's current state — total qty, type, manual
-    //    placements only (kit-driven rows are owned by the kit's flow
-    //    and stay read-only from this dialog), and the kit-driven
-    //    placements separately so the sum-within-total math accounts
-    //    for them. Manual placements coexist with kit-driven rows on
-    //    different `assetKitId` values — the manage-placements dialog
-    //    edits manual rows only, kit-driven rows are owned by the
-    //    kit's flow.
+    // 1. Fetch the asset's shape — type, total and the labels the notes need.
+    //    The placement rows themselves are NOT read here: the diff is computed
+    //    inside the transaction against the row-locked state (step 7), so a
+    //    snapshot taken now would only be a stale second copy.
+    //
+    //    Kit-driven rows never enter any of the checks below. Since
+    //    `20260602100000_assetlocation_sum_exclude_kit_driven`,
+    //    `enforce_asset_location_sum_within_total` sums manual rows only, and
+    //    the kit axis is bounded separately by
+    //    `enforce_asset_kit_sum_within_total`. That migration exists precisely
+    //    so a fully-placed asset can still be added to a kit — counting both
+    //    axes here would refuse placement edits on an asset the database
+    //    considers perfectly valid.
     const asset = await db.asset.findUniqueOrThrow({
       where: { id: assetId, organizationId },
       select: {
@@ -3109,28 +3318,8 @@ export async function replaceAssetPlacements({
         // unitOfMeasure labels the qty-tracked unit count in per-row
         // placement notes ("placed 50 boxes at L").
         unitOfMeasure: true,
-        assetLocations: {
-          select: {
-            locationId: true,
-            quantity: true,
-            assetKitId: true,
-            location: { select: { id: true, name: true } },
-          },
-        },
       },
     });
-
-    // Split manual vs kit-driven. The diff math below operates only on
-    // manual rows; the kit-driven sum is added to the sum-within-total
-    // pre-check so a submitted set that "fits" against manual rows
-    // alone but exceeds Asset.quantity once kit rows are counted gets
-    // rejected up-front instead of failing at the DEFERRED trigger.
-    const manualPlacements = asset.assetLocations.filter(
-      (al) => al.assetKitId === null
-    );
-    const kitDrivenSum = asset.assetLocations
-      .filter((al) => al.assetKitId !== null)
-      .reduce((sum, al) => sum + (al.quantity ?? 0), 0);
 
     // 3. Shape validation — duplicate ids + per-row qty bounds.
     const seenLocationIds = new Set<string>();
@@ -3187,30 +3376,23 @@ export async function replaceAssetPlacements({
       placements = placements.map((p) => ({ ...p, quantity: 1 }));
     }
 
-    // 5. Sum-within-total — explicit pre-check so the user gets a
-    //    nice message; the DEFERRED trigger is the ultimate guard.
-    //    Includes the kit-driven sum because those rows survive this
-    //    update — the submitted manual set plus the unchanged kit-
-    //    driven rows must together fit within `Asset.quantity`.
+    // 5. Sum-within-total — explicit pre-check so the user gets a nice
+    //    message; the in-transaction re-check against the locked row (step 8)
+    //    and the DEFERRED trigger are the real guards. Manual rows only, to
+    //    match what the trigger actually bounds.
     if (asset.type === AssetType.QUANTITY_TRACKED) {
       const total = asset.quantity ?? 0;
       const submittedSum = placements.reduce((s, p) => s + p.quantity, 0);
-      const projectedSum = submittedSum + kitDrivenSum;
-      if (projectedSum > total) {
+      if (submittedSum > total) {
         throw new ShelfError({
           cause: null,
           title: "Quantity exceeds available pool",
-          message:
-            kitDrivenSum > 0
-              ? `Submitted manual placements (${submittedSum}) plus kit-driven placements (${kitDrivenSum}) sum to ${projectedSum} but the asset has only ${total} units total.`
-              : `Submitted placements sum to ${submittedSum} but the asset has only ${total} units total.`,
+          message: `Submitted placements sum to ${submittedSum} but the asset has only ${total} units total.`,
           status: 400,
           label: "Assets",
           additionalData: {
             assetId,
             submittedSum,
-            kitDrivenSum,
-            projectedSum,
             total,
           },
           shouldBeCaptured: false,
@@ -3245,34 +3427,129 @@ export async function replaceAssetPlacements({
       for (const l of orgLocations) submittedLocations.set(l.id, l);
     }
 
-    // 7. Compute diff against current MANUAL pivot rows only. Kit-
-    //    driven rows aren't editable from this dialog; they're indexed
-    //    by `assetKitId` and survive untouched. A submitted entry at
-    //    the same location as a kit-driven row creates a SECOND row
-    //    (manual, `assetKitId = null`) — the two coexist.
-    const currentByLocation = new Map(
-      manualPlacements.map((al) => [al.locationId, al])
-    );
-    const submittedByLocation = new Map(
-      placements.map((p) => [p.locationId, p])
-    );
-
-    const toCreate = placements.filter(
-      (p) => !currentByLocation.has(p.locationId)
-    );
-    const toDelete = manualPlacements.filter(
-      (al) => !submittedByLocation.has(al.locationId)
-    );
-    const toUpdate = placements.filter((p) => {
-      const existing = currentByLocation.get(p.locationId);
-      return existing != null && existing.quantity !== p.quantity;
-    });
+    /**
+     * 7. The diff, computed INSIDE the transaction below against the locked
+     *    state. Declared out here because the per-row notes are emitted after
+     *    the commit and describe what actually changed.
+     *
+     *    Computing it from the pre-transaction read would apply a stale diff:
+     *    two saves that both read the same placement set serialize on the lock
+     *    but the second one's `toDelete` was built from rows that no longer
+     *    describe the asset, so a row the first save created survives a
+     *    submission that was meant to replace the whole manual set.
+     */
+    type ManualRow = {
+      locationId: string;
+      quantity: number;
+      location: { id: string; name: string };
+    };
+    let toCreate: Array<{ locationId: string; quantity: number }> = [];
+    let toUpdate: Array<{ locationId: string; quantity: number }> = [];
+    let toDelete: ManualRow[] = [];
+    let manualByLocation = new Map<string, ManualRow>();
 
     // 8. Apply the diff in one tx. The DEFERRED sum-within-total
     //    trigger re-checks at COMMIT — covers any race where another
     //    request modified `Asset.quantity` between our validation and
     //    the write.
     await db.$transaction(async (tx) => {
+      /**
+       * Take the SAME row lock every stock-lowering path takes
+       * (`updateAsset`, `adjustQuantity`, custody release, booking check-in),
+       * so a save from THIS dialog and a stock decrease serialize instead of
+       * interleaving.
+       *
+       * The DEFERRED trigger alone only covers one ordering. If this tx
+       * commits FIRST, its trigger validates against the pre-decrement
+       * `Asset.quantity` and passes; the stock tx then commits a lower total,
+       * and no trigger fires on an `Asset` write — so its reconcile has
+       * already run against placements that no longer exist. Blocking on the
+       * lock removes that window: whichever side goes second reads what the
+       * first actually committed.
+       *
+       * Mirrors `moveAssetLocationUnits` step 2, which locks for the same
+       * reason. `updateAsset`'s placement path and the mobile
+       * `asset.update-location` route now lock too.
+       *
+       * KNOWN GAP: `updateLocationAssets` (the location page's "manage
+       * assets" flow) writes manual rows for many assets at once and does NOT
+       * lock, so the race above survives through it. Adding a per-asset lock
+       * there needs a deterministic acquisition order to avoid deadlocking
+       * against the multi-asset lockers in the booking check-in paths, which
+       * is why it is not done here.
+       */
+      const locked = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
+
+      /**
+       * Re-run the sum check against the freshly-locked total. Step 5 read
+       * `Asset.quantity` outside any transaction, so it can be stale by now;
+       * this turns what would be a raw trigger abort into an explained
+       * failure.
+       *
+       * A 409, deliberately NOT the 400 step 5 returns: the submission was
+       * valid when it was made and the asset changed underneath it, so this is
+       * a conflict to retry rather than input to correct.
+       *
+       * Manual rows only — same axis the trigger bounds (see the note at the
+       * manual/kit split above).
+       */
+      if (locked.type === AssetType.QUANTITY_TRACKED) {
+        const lockedTotal = locked.quantity ?? 0;
+        const submittedSum = placements.reduce((s, p) => s + p.quantity, 0);
+        if (submittedSum > lockedTotal) {
+          throw new ShelfError({
+            cause: null,
+            title: "Quantity exceeds available pool",
+            message: `The asset's total changed to ${lockedTotal} while you were editing. Submitted placements sum to ${submittedSum}. Reopen the dialog to see the current numbers.`,
+            status: 409,
+            label: "Assets",
+            additionalData: {
+              assetId,
+              submittedSum,
+              lockedTotal,
+            },
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      /**
+       * Diff against the MANUAL rows as they exist under the lock, not as
+       * they looked when the request started. Kit-driven rows aren't editable
+       * from this dialog; they're indexed by `assetKitId` and survive
+       * untouched. A submitted entry at the same location as a kit-driven row
+       * creates a SECOND row (manual, `assetKitId = null`) — the two coexist.
+       */
+      const lockedManual = await tx.assetLocation.findMany({
+        where: { assetId, assetKitId: null },
+        select: {
+          locationId: true,
+          quantity: true,
+          location: { select: { id: true, name: true } },
+        },
+      });
+
+      const currentByLocation = new Map(
+        lockedManual.map((al) => [al.locationId, al])
+      );
+      manualByLocation = currentByLocation;
+      const submittedByLocation = new Map(
+        placements.map((p) => [p.locationId, p])
+      );
+
+      toCreate = placements.filter((p) => !currentByLocation.has(p.locationId));
+      toDelete = lockedManual.filter(
+        (al) => !submittedByLocation.has(al.locationId)
+      );
+      toUpdate = placements.filter((p) => {
+        const existing = currentByLocation.get(p.locationId);
+        return existing != null && existing.quantity !== p.quantity;
+      });
+
       if (toDelete.length > 0) {
         // Manual-row only delete. Kit-driven rows at the same
         // (assetId, locationId) aren't on the diff set (we never
@@ -3369,13 +3646,10 @@ export async function replaceAssetPlacements({
       const firstName = user?.firstName ?? "";
       const lastName = user?.lastName ?? "";
 
-      // Resolve location ids for the toUpdate set (same locations as
-      // their pre-update manual rows; they survived the diff). We pull
-      // names from the manualPlacements snapshot so we don't need a
-      // second query.
-      const manualByLocation = new Map(
-        manualPlacements.map((al) => [al.locationId, al])
-      );
+      // Location ids for the toUpdate set resolve against `manualByLocation`,
+      // which the transaction populated from the LOCKED rows — so the
+      // "from X to Y" note quotes the quantity the update actually replaced,
+      // not one a concurrent save had already changed.
 
       // The qty-change note is inline (not via `createLocationChangeNote`)
       // because the helper handles add / move / remove, not a "same
@@ -3389,11 +3663,7 @@ export async function replaceAssetPlacements({
         const fromCount = formatUnitCount(asset, existing.quantity);
         const toCount = formatUnitCount(asset, p.quantity);
         if (!fromCount || !toCount) return [];
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName,
-          lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         const locationLink = wrapLinkForNote(
           `/locations/${locationMeta.id}`,
           locationMeta.name.trim()
@@ -3418,6 +3688,7 @@ export async function replaceAssetPlacements({
             newLocation: location,
             firstName,
             lastName,
+            displayName: user?.displayName ?? null,
             assetId,
             userId,
             isRemoving: false,
@@ -3433,6 +3704,7 @@ export async function replaceAssetPlacements({
             newLocation: null,
             firstName,
             lastName,
+            displayName: user?.displayName ?? null,
             assetId,
             userId,
             isRemoving: true,
@@ -3448,6 +3720,16 @@ export async function replaceAssetPlacements({
 
     return { ok: true as const };
   } catch (cause) {
+    // Backstop: the sum-within-total pre-check above (step 5) rejects most
+    // over-submissions with a friendly 400, but a concurrent placement / qty
+    // edit can still trip the DEFERRED `AssetLocation ... exceeds
+    // Asset.quantity` trigger at COMMIT. Translate that race to the same
+    // friendly 400 instead of a generic 500. No-ops for every other error.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label: "Assets",
+      additionalData: { assetId, userId, organizationId },
+    });
+
     if (isLikeShelfError(cause)) throw cause;
     throw new ShelfError({
       cause,
@@ -3470,7 +3752,7 @@ export async function updateAssetMainImage({
   userId: User["id"];
   organizationId: Organization["id"];
   isNewAsset?: boolean;
-}) {
+}): Promise<boolean> {
   try {
     const fileData = await parseFileFormData({
       request,
@@ -3489,8 +3771,14 @@ export async function updateAssetMainImage({
 
     const image = fileData.get("mainImage") as string | null;
 
+    /**
+     * No file in the multipart body. Returning `false` (rather than bare
+     * `undefined`) lets the caller distinguish "user uploaded nothing" from
+     * "user uploaded a new image" — the edit action needs that to decide
+     * whether a pending clear should still apply.
+     */
     if (!image) {
-      return;
+      return false;
     }
 
     // Handle both the old string response and new stringified object response
@@ -3540,6 +3828,8 @@ export async function updateAssetMainImage({
         data: { path: mainImagePath },
       });
     }
+
+    return true;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
@@ -3943,6 +4233,7 @@ export async function getPaginatedAndFilterableAssets({
   excludeLocationQuery = false,
   filters = "",
   isSelfService,
+  canSeeAllCustody,
   userId,
 }: {
   request: LoaderFunctionArgs["request"];
@@ -3957,6 +4248,12 @@ export async function getPaginatedAndFilterableAssets({
   filters?: string;
 
   isSelfService?: boolean;
+  /**
+   * Resolved custody read-visibility, from `requirePermission`. Required so
+   * the custodian filter seed is scoped by the rule rather than by a role
+   * check — `isSelfService` is false for BASE, which left the seed unscoped.
+   */
+  canSeeAllCustody: boolean;
   userId?: string;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
@@ -3990,6 +4287,21 @@ export async function getPaginatedAndFilterableAssets({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
+  /**
+   * `?teamMember=` is raw request input. Redacting the custodian from the
+   * response is not enough on its own — filtering by a colleague's id and
+   * reading which rows come back still reveals what they hold. Narrow the ids
+   * to the caller's own before they reach any custody clause, and refuse the
+   * filter outright when that leaves nothing (see the helper's JSDoc for why an
+   * empty list cannot express a refusal here).
+   */
+  const scopedTeamMemberIds = await scopeCustodianFilterIds({
+    teamMemberIds,
+    canSeeAllCustody,
+    userId: userId ?? "",
+    organizationId,
+  });
+
   try {
     /**
      * These three queries are independent (no data flows between them),
@@ -4003,6 +4315,8 @@ export async function getPaginatedAndFilterableAssets({
         totalCategories,
         locations,
         totalLocations,
+        assetModels,
+        totalAssetModels,
       },
       teamMembersData,
       { assets, totalAssets },
@@ -4016,9 +4330,15 @@ export async function getPaginatedAndFilterableAssets({
       }),
       getTeamMemberForCustodianFilter({
         organizationId,
-        selectedTeamMembers: teamMemberIds,
+        // Narrowed too: the seed renders the filter's current selection, and an
+        // unscoped id here would fetch that person's row back.
+        selectedTeamMembers: scopedTeamMemberIds,
         getAll: getAllEntries.includes("teamMember"),
-        filterByUserId: isSelfService,
+        // A read FILTER, so the resolved custody rule governs — NOT the role.
+        // `isSelfService` was false for BASE, which left this seed unscoped
+        // and shipped the whole roster to a BASE user with
+        // `baseUserCanSeeCustody` off. Same shape as the /scanner seed.
+        filterByUserId: !canSeeAllCustody,
         userId,
       }),
       getAssets({
@@ -4036,7 +4356,7 @@ export async function getPaginatedAndFilterableAssets({
         hideUnavailable,
         unhideAssetsBookigIds,
         locationIds,
-        teamMemberIds,
+        teamMemberIds: scopedTeamMemberIds,
         extraInclude,
         assetKitFilter,
         availableToBookOnly: isSelfService,
@@ -4059,9 +4379,23 @@ export async function getPaginatedAndFilterableAssets({
       cookie,
       locations: excludeLocationQuery ? [] : locations,
       totalLocations,
+      /**
+       * `getEntitiesWithSelectedValues` already queries these on every simple
+       * mode load and the results were being dropped at the destructure above.
+       * Forwarding them costs no extra query and is what seeds the asset model
+       * picker in the bulk "Update asset model" dialog — without it the picker
+       * opens blank for every simple mode workspace.
+       */
+      assetModels,
+      totalAssetModels,
       ...teamMembersData,
     };
   } catch (cause) {
+    // Preserve deliberate client errors (e.g. the search-id ceiling 400 from
+    // getAssets) so the actionable message survives this second wrapper — the
+    // web /assets index and admin org-assets route both come through here. See
+    // getAssets' catch for the rationale.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Fail to fetch paginated and filterable assets",
@@ -4093,6 +4427,7 @@ export async function createCustomFieldChangeNote({
   newValue,
   firstName,
   lastName,
+  displayName,
   assetId,
   userId,
   organizationId,
@@ -4103,6 +4438,12 @@ export async function createCustomFieldChangeNote({
   newValue?: string | null;
   firstName: string;
   lastName: string;
+  /**
+   * Acting user's `User.displayName`. It wins over first+last in the note's
+   * user link, so a caller holding the full user row must pass it or the note
+   * names the person differently from every other surface.
+   */
+  displayName?: string | null;
   assetId: Asset["id"];
   userId: User["id"];
   organizationId: Organization["id"];
@@ -4116,6 +4457,7 @@ export async function createCustomFieldChangeNote({
       userId,
       firstName,
       lastName,
+      displayName,
       isFirstTimeSet,
     });
 
@@ -4161,6 +4503,9 @@ export async function fetchAssetsForExport({
         assetModel: { select: { name: true } },
         notes: true,
         custody: {
+          // Ordered so `getPrimaryCustody` picks the same row every time — the
+          // custodian it returns is written into the exported file.
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           include: {
             custodian: true,
           },
@@ -4266,13 +4611,12 @@ export async function createAssetsFromContentImport({
       userId,
     });
 
-    // Check if any assets have barcode data and if barcodes are enabled
-    const hasBarcodesData = data.some(
-      (asset) =>
-        asset.barcode_Code128 ||
-        asset.barcode_Code39 ||
-        asset.barcode_DataMatrix
-    );
+    // Check if any assets have barcode data (any of the five barcode columns)
+    // and if barcodes are enabled. Uses the shared column list so every type
+    // the parser handles is also counted here — otherwise a file carrying only
+    // ExternalQR/EAN13 would pass this guard and have those barcodes silently
+    // dropped below when barcodes are disabled.
+    const hasBarcodesData = importDataHasBarcodes(data);
 
     if (hasBarcodesData && !canUseBarcodes) {
       throw new ShelfError({
@@ -4590,7 +4934,11 @@ export async function createAssetsFromContentImport({
         kitId,
         categoryId: asset.category ? categories?.[asset.category] : null,
         locationId: asset.location ? locations?.[asset.location] : undefined,
-        custodian: custodianId,
+        // Kit rows: custody belongs to the kit (assigned + inherited to members
+        // in setKitCustodyAfterAssetImport). Don't also create a direct operator
+        // custody on the asset, or it'd be IN_CUSTODY before the kit assignment
+        // (double-holding + tripping bulkAssignKitCustody's availability guard).
+        custodian: kitId ? undefined : custodianId,
         tags:
           asset?.tags && asset.tags.length > 0
             ? {
@@ -4622,6 +4970,8 @@ export async function createAssetsFromContentImport({
       data,
       kits,
       teamMembers,
+      userId,
+      organizationId,
     });
 
     return true;
@@ -5203,16 +5553,40 @@ export async function refreshExpiredAssetImages<
   /** Short backoff to prevent retry storms when refresh fails */
   const BACKOFF_SECONDS = 30;
 
-  const applyBackoff = async (asset: (typeof expiredAssets)[number]) => {
-    try {
-      const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
-      await db.asset.update({
-        where: { id: asset.id, organizationId: asset.organizationId },
+  /**
+   * DB persist payloads collected while re-signing. Every write this function
+   * would previously `await` inline (the re-signed URLs AND the retry-storm
+   * backoff bumps) is buffered here and flushed OFF the awaited path in a
+   * single background batch after the response value is built — the concurrent
+   * `db.asset.update` burst on this read path was part of what exhausted the
+   * Prisma pool (P2024). The response already carries the fresh URLs, so a
+   * failed background write is harmless: the next load simply re-signs
+   * (idempotent). Each entry is an `updateMany` guarded on the original
+   * `mainImage`, so a deferred write can never overwrite an image that changed
+   * between the read and the flush.
+   */
+  const pendingWrites: Array<{
+    assetId: string;
+    args: Prisma.AssetUpdateManyArgs;
+  }> = [];
+
+  // Buffer a backoff bump instead of writing it inline. Synchronous now (no DB
+  // round-trip on the critical path); the actual write happens in the flush.
+  // Guarded on the original `mainImage` (optimistic concurrency) so a stale
+  // backoff can't land on an image that was replaced between read and flush.
+  const applyBackoff = (asset: (typeof expiredAssets)[number]) => {
+    const backoffExpiration = new Date(Date.now() + BACKOFF_SECONDS * 1000);
+    pendingWrites.push({
+      assetId: asset.id,
+      args: {
+        where: {
+          id: asset.id,
+          organizationId: asset.organizationId,
+          mainImage: asset.mainImage,
+        },
         data: { mainImageExpiration: backoffExpiration },
-      });
-    } catch {
-      // If even the backoff update fails, just move on
-    }
+      },
+    });
   };
 
   const refreshAsset = async (asset: (typeof expiredAssets)[number]) => {
@@ -5220,7 +5594,7 @@ export async function refreshExpiredAssetImages<
       const mainImagePath = extractStoragePath(asset.mainImage!, "assets");
       if (!mainImagePath) {
         // Can't extract path — apply backoff to avoid retrying every load
-        await applyBackoff(asset);
+        applyBackoff(asset);
         return null;
       }
 
@@ -5265,9 +5639,30 @@ export async function refreshExpiredAssetImages<
         updateData.thumbnailImage = newThumbnailUrl;
       }
 
-      await db.asset.update({
-        where: { id: asset.id, organizationId: asset.organizationId },
-        data: updateData,
+      // Defer the persist off the awaited path — buffer the payload and let the
+      // single background flush below write it. The response value returned here
+      // is independent of whether/when this write lands, so the fresh URLs are
+      // served immediately even if the write later fails. The guard makes the
+      // write optimistic: if the image was replaced (e.g. by
+      // updateAssetMainImage) between this read and the flush, the guard no
+      // longer matches and the stale re-signed URL is silently skipped instead
+      // of clobbering the newer image. We guard on thumbnailImage too, but only
+      // when this write actually sets one — otherwise a mainImage-only refresh
+      // (thumbnail re-sign failed) would be needlessly skipped by a thumbnail
+      // that changed independently.
+      pendingWrites.push({
+        assetId: asset.id,
+        args: {
+          where: {
+            id: asset.id,
+            organizationId: asset.organizationId,
+            mainImage: asset.mainImage,
+            ...(updateData.thumbnailImage !== undefined
+              ? { thumbnailImage: asset.thumbnailImage }
+              : {}),
+          },
+          data: updateData,
+        },
       });
 
       return {
@@ -5277,20 +5672,17 @@ export async function refreshExpiredAssetImages<
         ...(newThumbnailUrl ? { thumbnailImage: newThumbnailUrl } : {}),
       };
     } catch (error) {
-      // Asset deleted between query and update — not an error
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2025"
-      ) {
-        return null;
-      }
+      // This block only wraps extractStoragePath + createSignedUrl now — the DB
+      // persist was deferred to the background flush — so no Prisma P2025 can
+      // surface here; the flush's guarded updateMany handles deleted/changed
+      // rows (count 0, no throw).
 
       // File deleted from storage — expected, not a bug
       if (isStorageObjectNotFound(error)) {
         Logger.info(
           `Image file not found in storage for asset ${asset.id}, applying backoff`
         );
-        await applyBackoff(asset);
+        applyBackoff(asset);
         return null;
       }
 
@@ -5313,7 +5705,7 @@ export async function refreshExpiredAssetImages<
         })
       );
 
-      await applyBackoff(asset);
+      applyBackoff(asset);
       throw error;
     }
   };
@@ -5356,6 +5748,48 @@ export async function refreshExpiredAssetImages<
       }
       refreshedMap.set(result.value.id, entry);
     }
+  }
+
+  // Flush all buffered writes (re-signed URLs + backoff bumps) OFF the awaited
+  // path in a fire-and-forget background task. Each write goes through the
+  // shared, process-wide background-write limiter (withBackgroundWriteSlot), so
+  // no matter how many /assets index loads run concurrently — or how many other
+  // features defer background writes — the aggregate can never exceed
+  // MAX_CONCURRENT_BACKGROUND_WRITES connections at once and starve the reads
+  // this deferral protects (P2024). Running on a long-lived Node server (Fly),
+  // the writes still complete after the response is sent — which is the intent.
+  // Every failure is swallowed and logged (never rethrown): the fresh URL is
+  // already served and the next load simply re-signs, so the write is
+  // idempotent and non-critical.
+  if (pendingWrites.length > 0) {
+    void Promise.all(
+      pendingWrites.map(({ assetId, args }) =>
+        // updateMany (not update) applies the guard in args.where: count 0 means
+        // the row was deleted OR its image changed since the read, so there is
+        // nothing safe to persist. Both are expected no-ops, and updateMany
+        // returns count 0 rather than throwing P2025, so those cases need no
+        // per-write error handling.
+        withBackgroundWriteSlot(() => db.asset.updateMany(args)).catch(
+          (error: unknown) => {
+            // why: URL already served; log as a warning so a persist failure
+            // never becomes an unhandled rejection or a Sentry error.
+            Logger.warn(
+              new ShelfError({
+                cause: error,
+                message:
+                  "Background persist of refreshed asset image URLs failed",
+                additionalData: { assetId },
+                label: "Assets",
+                shouldBeCaptured: false,
+              })
+            );
+          }
+        )
+      )
+    ).catch(() => {
+      // Extra guard: per-write errors are already swallowed above, but keep the
+      // outer background promise from ever surfacing as an unhandled rejection.
+    });
   }
 
   return assets.map((a) => {
@@ -5431,12 +5865,19 @@ export async function bulkDeleteAssets({
   userId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   userId: User["id"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5445,6 +5886,10 @@ export async function bulkDeleteAssets({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      timeZone,
     });
 
     /**
@@ -5557,6 +6002,8 @@ export async function bulkCheckOutAssets({
   organizationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
+  allowedTeamMemberIds,
 }: {
   userId: User["id"];
   /**
@@ -5573,6 +6020,19 @@ export async function bulkCheckOutAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
+  /**
+   * Custodian ids the caller may filter a "select all" by. Required because
+   * `asset: custody` is a SELF_SERVICE permission — without narrowing, a
+   * self-service user could select-all filtered by a colleague's id and act on
+   * exactly that person's assets.
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5581,6 +6041,8 @@ export async function bulkCheckOutAssets({
       organizationId,
       currentSearchParams,
       settings,
+      allowedTeamMemberIds,
+      timeZone,
     });
 
     /**
@@ -5675,6 +6137,14 @@ export async function bulkCheckOutAssets({
     }
 
     /**
+     * The ids this call will take custody of. Unique by construction —
+     * `allAssets` comes from a `findMany`, so one row per asset — which is what
+     * lets the guarded status write below compare its updated-row count against
+     * this length to detect a raced checkout.
+     */
+    const assetIdsToCustody = assets.map((asset) => asset.id);
+
+    /**
      * updateMany does not allow to create nested relationship rows
      * so we have to make two queries to bulk assign custody of assets
      * 1. Create custodies for all assets
@@ -5697,6 +6167,50 @@ export async function bulkCheckOutAssets({
         where: { assetId: { in: assets.map((a) => a.id) } },
       });
 
+      /**
+       * Updating status of assets to IN_CUSTODY — BEFORE the custody rows.
+       *
+       * Routed through the shared guard so it cannot disturb `CHECKED_OUT`.
+       * The `assetsNotAvailable` pre-check above already rejects checked-out
+       * assets, but that read happens OUTSIDE this transaction — a checkout
+       * committing in between would be silently overwritten. Guarding the
+       * write closes that window and keeps every custody-driven status write
+       * uniform.
+       *
+       * It runs FIRST because its return count gates everything after it. The
+       * guard skipping a row is not a no-op we can absorb: writing the custody
+       * row, note and CUSTODY_ASSIGNED event anyway would assert in the audit
+       * trail that custody was granted over an asset that is physically out on
+       * a booking. A shortfall means the world moved under the pre-check, so
+       * the whole batch rolls back rather than half-applying.
+       *
+       * @see {@link file://./custody-status.server.ts}
+       */
+      const statusUpdatedCount = await setCustodyDrivenAssetStatus(
+        tx,
+        assetIdsToCustody,
+        organizationId,
+        AssetStatus.IN_CUSTODY
+      );
+
+      // This is the RACE path only — the common case is caught by the
+      // `assetsNotAvailable` pre-check, which names the offending assets and
+      // reads better. 409 rather than the ShelfError default of 500: the world
+      // moved under a valid request, which is the client's cue to refresh, not
+      // a server fault worth capturing.
+      if (statusUpdatedCount !== assetIdsToCustody.length) {
+        throw new ShelfError({
+          cause: null,
+          title: "Asset is checked out",
+          message:
+            "Some of the selected assets were checked out while this action was in progress. No custody was assigned. Please refresh and try again.",
+          additionalData: { userId, custodianId, assetIds: assetIdsToCustody },
+          label: "Assets",
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
+
       /** Creating custodies over assets */
       await tx.custody.createMany({
         data: assets.map((asset) => ({
@@ -5705,23 +6219,13 @@ export async function bulkCheckOutAssets({
         })),
       });
 
-      /** Updating status of assets to IN_CUSTODY */
-      await tx.asset.updateMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3773-3779 with where { id in resolvedIds, organizationId }; every id is already org-proven
-        where: { id: { in: assets.map((asset) => asset.id) } },
-        data: { status: AssetStatus.IN_CUSTODY },
-      });
-
       /** Creating notes for the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
-        : `**${custodianName.trim()}**`;
+        : // Free-form fallback name, rendered as literal bold text.
+          `**${stripMarkdocDelimiters(custodianName)}**`;
 
       // why: `assets` is individual-only — QUANTITY_TRACKED were filtered out
       // above (they have no Custody.quantity in this path), so no unit count
@@ -5786,6 +6290,8 @@ export async function bulkCheckInAssets({
   organizationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
+  allowedTeamMemberIds,
 }: {
   userId: User["id"];
   /**
@@ -5799,6 +6305,18 @@ export async function bulkCheckInAssets({
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
+  /**
+   * Custodian ids the caller may filter a "select all" by. Required for the
+   * same reason as on `bulkCheckOutAssets` — releasing custody is reachable
+   * with the SELF_SERVICE `asset: custody` permission.
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5807,6 +6325,8 @@ export async function bulkCheckInAssets({
       organizationId,
       currentSearchParams,
       settings,
+      allowedTeamMemberIds,
+      timeZone,
     });
 
     /**
@@ -5823,6 +6343,11 @@ export async function bulkCheckInAssets({
           title: true,
           type: true,
           custody: {
+            // Ordered so `getPrimaryCustody` picks the same row every time:
+            // the custodian it returns is written into the release note and
+            // the CUSTODY_RELEASED event, so an arbitrary pick puts the wrong
+            // name in the audit trail.
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
             select: { id: true, custodian: { include: { user: true } } },
           },
         },
@@ -5905,10 +6430,24 @@ export async function bulkCheckInAssets({
         },
       });
 
-      /** Updating status of assets to AVAILABLE */
+      /**
+       * Updating status of assets to AVAILABLE.
+       *
+       * `status: { not: CHECKED_OUT }` — releasing custody must never put an
+       * asset that is still out on a booking back onto the shelf. `Asset.status`
+       * is a single column, so without the guard this bulk release advertised
+       * physically-absent assets as free on every picker, index and
+       * availability sum. Precedence
+       * (`CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`) matches
+       * `reconcileAssetStatusForBookingExit`; the booking flows own the exit
+       * from `CHECKED_OUT`.
+       */
       await tx.asset.updateMany({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assets` was fetched on lines 3948-3952 with where { id in resolvedIds, organizationId }; every id is already org-proven
-        where: { id: { in: assets.map((asset) => asset.id) } },
+        where: {
+          id: { in: assets.map((asset) => asset.id) },
+          status: { not: AssetStatus.CHECKED_OUT },
+        },
         data: { status: AssetStatus.AVAILABLE },
       });
 
@@ -5919,14 +6458,20 @@ export async function bulkCheckInAssets({
       await tx.note.createMany({
         data: assets.map((asset) => {
           const primaryCustody = getPrimaryCustody(asset.custody);
+          // Actor name, custodian name and asset title are all user-supplied
+          // and render as literal text in this Markdoc note.
+          const actorName = stripMarkdocDelimiters(
+            `${user.firstName?.trim() ?? ""} ${user.lastName ?? ""}`
+          );
+          const custodianName = stripMarkdocDelimiters(
+            primaryCustody
+              ? resolveTeamMemberName(primaryCustody.custodian)
+              : "Unknown Custodian"
+          );
           return {
-            content: `**${user.firstName?.trim()} ${
-              user.lastName
-            }** has released **${
-              primaryCustody
-                ? resolveTeamMemberName(primaryCustody.custodian)
-                : "Unknown Custodian"
-            }'s** custody over **${asset.title?.trim()}**`,
+            content: `**${actorName}** has released **${custodianName}'s** custody over **${stripMarkdocDelimiters(
+              asset.title ?? ""
+            )}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -5980,6 +6525,7 @@ export async function bulkUpdateAssetLocation({
   newLocationId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
@@ -5987,6 +6533,12 @@ export async function bulkUpdateAssetLocation({
   newLocationId?: Location["id"] | null;
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -5995,6 +6547,10 @@ export async function bulkUpdateAssetLocation({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      timeZone,
     });
 
     /** We have to create notes for all the assets so we have make this query */
@@ -6157,6 +6713,7 @@ export async function bulkUpdateAssetLocation({
               userId,
               firstName: user?.firstName ?? "",
               lastName: user?.lastName ?? "",
+              displayName: user?.displayName,
               isRemoving,
             });
 
@@ -6191,11 +6748,7 @@ export async function bulkUpdateAssetLocation({
     });
 
     // Create location activity notes
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
     // Filter out assets already at the target location
     const actuallyChanged = assets.filter(
       (a) => getPrimaryLocation(a)?.id !== newLocation?.id
@@ -6286,6 +6839,7 @@ export async function bulkUpdateAssetCategory({
   categoryId,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -6293,6 +6847,12 @@ export async function bulkUpdateAssetCategory({
   categoryId: Asset["categoryId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6301,6 +6861,10 @@ export async function bulkUpdateAssetCategory({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      timeZone,
     });
 
     if (resolvedIds.length === 0) {
@@ -6403,6 +6967,216 @@ export async function bulkUpdateAssetCategory({
   }
 }
 
+/** Outcome of a bulk asset model update, used to build an honest toast. */
+export type BulkUpdateAssetModelResult = {
+  /**
+   * Whether the action linked assets to a model (`true`) or removed the link
+   * (`false`). The caller must branch on this rather than on `modelName`,
+   * which is only a label and can be blank.
+   */
+  linked: boolean;
+  /**
+   * How many assets the selection resolved to. Distinguishes "your filters
+   * matched nothing" from "nothing needed changing", which read identically
+   * from `updated: 0`.
+   */
+  resolved: number;
+  /** Assets whose `assetModelId` actually changed. */
+  updated: number;
+  /** Of `updated`, how many were moved off a different model rather than grouped for the first time. */
+  moved: number;
+  /** Selected assets left untouched because models are individually-tracked only. */
+  skippedQuantityTracked: number;
+  /** Name of the target model, or `null` when the action removed the link. */
+  modelName: string | null;
+};
+
+/**
+ * Links (or unlinks) many assets to a single AssetModel in one action.
+ *
+ * This is the bulk counterpart of the Asset Model picker on the asset edit
+ * form. It exists so an existing library can be grouped into models without
+ * editing assets one at a time or round-tripping through a CSV re-import.
+ *
+ * Behaviour worth knowing before you change it:
+ * - QUANTITY_TRACKED assets are **skipped**, not rejected. An asset model
+ *   describes N distinguishable units of one template, while a qty-tracked
+ *   asset is a stock pool, so `createAsset`/`updateAsset` both refuse that
+ *   link. A mixed selection is normal in a real library, so the batch applies
+ *   to the individually-tracked assets and reports the skip. Only a selection
+ *   with nothing eligible in it is an error.
+ * - The model's `defaultCategoryId` / `defaultValuation` are **not** applied.
+ *   Those are create-time conveniences (see `bulkCreateAssetsFromModel`);
+ *   retro-applying them here would silently overwrite curated data on assets
+ *   that already exist.
+ * - No activity events and no notes are written. `ActivityAction` has no
+ *   ASSET_MODEL action and the singular `updateAsset` path writes neither, so
+ *   staying silent is what `.claude/rules/bulk-event-parity.md` requires:
+ *   bulk must emit exactly what singular emits. Adding the event properly
+ *   needs an additive enum migration plus the singular call site plus the
+ *   model-delete SetNull cascade, which is its own change.
+ *
+ * @param params.assetIds - Selected asset ids, possibly `[ALL_SELECTED_KEY]`
+ * @param params.assetModelId - Target model, or `null`/`""` to remove the link
+ * @param params.currentSearchParams - Active index filters, used to resolve a
+ *   cross-page "select all" into real ids
+ * @param params.settings - Asset index settings; decides simple vs advanced
+ *   filter resolution for that select-all
+ * @returns Counts describing what actually happened, for the caller's toast
+ * @throws {ShelfError} 404 when the model is not in this organization, 400
+ *   when every selected asset is quantity-tracked
+ */
+export async function bulkUpdateAssetModel({
+  userId,
+  assetIds,
+  organizationId,
+  assetModelId,
+  currentSearchParams,
+  settings,
+}: {
+  userId: string;
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  assetModelId: Asset["assetModelId"];
+  currentSearchParams?: string | null;
+  settings: AssetIndexSettings;
+}): Promise<BulkUpdateAssetModelResult> {
+  try {
+    // Resolve IDs (works for both simple and advanced mode)
+    const resolvedIds = await resolveAssetIdsForBulkOperation({
+      assetIds,
+      organizationId,
+      currentSearchParams,
+      settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+    });
+
+    /** An empty `assetModelId` is the "remove from asset model" request. */
+    const newAssetModelId = assetModelId || null;
+    const linked = newAssetModelId !== null;
+
+    if (resolvedIds.length === 0) {
+      return {
+        linked,
+        resolved: 0,
+        updated: 0,
+        moved: 0,
+        skippedQuantityTracked: 0,
+        modelName: null,
+      };
+    }
+
+    // why: `connect`-style writes are not org-scoped by Prisma, so a crafted
+    // foreign-org model id would otherwise be written verbatim onto this
+    // org's assets. Shared guard per .claude/rules/org-scope-user-supplied-ids.
+    let modelName: string | null = null;
+    if (newAssetModelId) {
+      // The guard returns the row it already had to read, so the toast label
+      // costs no extra query.
+      const model = await assertAssetModelBelongsToOrg({
+        assetModelId: newAssetModelId,
+        organizationId,
+      });
+      modelName = model.name;
+    }
+
+    /**
+     * Before-state, org-scoped. This read is also the ownership proof for the
+     * asset ids: `resolveAssetIdsForBulkOperation` returns a caller-supplied
+     * list verbatim when it is not a select-all, so nothing upstream has
+     * checked them against this organization yet.
+     */
+    const assetsBeforeUpdate = await db.asset.findMany({
+      where: { id: { in: resolvedIds }, organizationId },
+      select: { id: true, type: true, assetModelId: true },
+    });
+
+    const individuals = assetsBeforeUpdate.filter(
+      (asset) => asset.type !== AssetType.QUANTITY_TRACKED
+    );
+    const skippedQuantityTracked =
+      assetsBeforeUpdate.length - individuals.length;
+
+    /**
+     * Only the LINK direction errors here. Removing a link from a set of
+     * quantity-tracked assets is a legitimate no-op (they can never have had a
+     * model), so failing it would teach a rule the user did not break.
+     */
+    if (linked && individuals.length === 0 && skippedQuantityTracked > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset model not allowed",
+        message:
+          "All selected assets are quantity-tracked. Asset models can only be linked to individually tracked assets.",
+        additionalData: { organizationId, userId, assetModelId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /** Skip rows that already point at the target so the counts stay honest. */
+    const assetsThatChange = individuals.filter(
+      (asset) => asset.assetModelId !== newAssetModelId
+    );
+
+    /**
+     * Assets taken off another model rather than grouped for the first time.
+     * Surfaced in the toast because it is the only signal that the previous
+     * model's book-by-model availability pool just shrank.
+     */
+    const moved = newAssetModelId
+      ? assetsThatChange.filter((asset) => asset.assetModelId !== null).length
+      : 0;
+
+    if (assetsThatChange.length > 0) {
+      await db.asset.updateMany({
+        where: {
+          id: { in: assetsThatChange.map((asset) => asset.id) },
+          organizationId,
+        },
+        data: { assetModelId: newAssetModelId },
+      });
+    }
+
+    return {
+      linked,
+      /**
+       * The org-verified count, not `resolvedIds.length`. A caller-supplied id
+       * list comes back from the resolver verbatim, so counting it would report
+       * "already in this asset model" for ids that simply are not in this
+       * organization, when "matched no assets" is the truth.
+       */
+      resolved: assetsBeforeUpdate.length,
+      updated: assetsThatChange.length,
+      moved,
+      /**
+       * Only meaningful when linking. On the unlink path a quantity-tracked
+       * asset was never going to change, so reporting it as "skipped" would
+       * invent a failure.
+       */
+      skippedQuantityTracked: linked ? skippedQuantityTracked : 0,
+      modelName,
+    };
+  } catch (cause) {
+    // why: the eligibility 400 and the cross-org 404 are the two errors the
+    // user is meant to read. The generic wrapper keeps the status but replaces
+    // the message, so re-throw our own errors untouched.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating the asset model.",
+      additionalData: { userId, assetIds, organizationId, assetModelId },
+      label,
+    });
+  }
+}
+
 export async function bulkAssignAssetTags({
   userId,
   assetIds,
@@ -6411,6 +7185,7 @@ export async function bulkAssignAssetTags({
   currentSearchParams,
   remove,
   settings,
+  timeZone = "UTC",
 }: {
   userId: string;
   assetIds: Asset["id"][];
@@ -6419,6 +7194,12 @@ export async function bulkAssignAssetTags({
   currentSearchParams?: string | null;
   remove: boolean;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6427,6 +7208,10 @@ export async function bulkAssignAssetTags({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      timeZone,
     });
 
     if (resolvedIds.length === 0) {
@@ -6577,12 +7362,19 @@ export async function bulkMarkAvailability({
   type,
   currentSearchParams,
   settings,
+  timeZone = "UTC",
 }: {
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
   type: "available" | "unavailable";
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * Acting user's IANA timezone. Forwarded to the select-all id resolution so
+   * built-in date-column filters truncate the day in the user's tz (avoids an
+   * off-by-one for non-UTC users). Defaults to "UTC".
+   */
+  timeZone?: string;
 }) {
   try {
     // Resolve IDs (works for both simple and advanced mode)
@@ -6591,6 +7383,10 @@ export async function bulkMarkAvailability({
       organizationId,
       currentSearchParams,
       settings,
+      // Reachable only with an asset write permission, which BASE and
+      // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
+      allowedTeamMemberIds: "all",
+      timeZone,
     });
 
     // Simple, consistent where clause
@@ -6645,6 +7441,30 @@ export async function relinkAssetQrCode({
     }),
   ]);
 
+  /**
+   * why: `asset` is scoped to the caller's org, so null means "missing or not
+   * yours". Without this the null falls through to `tx.asset.update` and
+   * surfaces as a generic "The requested resource could not be found." from
+   * makeShelfError's P2025 branch, which tells the user nothing.
+   *
+   * `status: 404` is explicit and load-bearing: `cause: null` is not a P2025,
+   * so the ShelfError constructor would otherwise resolve this to 500 (see
+   * `status || 500` in utils/error.ts). The `relinkKitQrCode` sibling omits it
+   * and returns 500 for exactly this reason — fixed there in the same commit.
+   */
+  if (!asset) {
+    throw new ShelfError({
+      cause: null,
+      title: "Asset not found.",
+      message:
+        "The asset you are trying to link this code to does not exist in your workspace. Please reload and try again.",
+      additionalData: { assetId, organizationId, qrId },
+      label: "QR",
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
   /** User cannot link qr code of other organization */
   if (qr.organizationId && qr.organizationId !== organizationId) {
     throw new ShelfError({
@@ -6664,6 +7484,7 @@ export async function relinkAssetQrCode({
       message:
         "You cannot link to this code because its already linked to another kit. Delete the other kit to free up the code and try again.",
       label: "QR",
+      status: 403,
       shouldBeCaptured: false,
     });
   }
@@ -6675,19 +7496,58 @@ export async function relinkAssetQrCode({
       message:
         "You cannot link to this code because its already linked to another asset. Delete the other asset to free up the code and try again.",
       label: "QR",
+      status: 403,
       shouldBeCaptured: false,
     });
   }
 
-  const oldQrCode = asset?.qrCodes[0];
+  const oldQrCode = asset.qrCodes[0];
 
-  await Promise.all([
-    db.qr.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: lines 4646-4655 reject any qr whose organizationId differs from the caller's; an unclaimed qr (null org) is being claimed here, which is why this write sets organizationId
-      where: { id: qr.id },
-      data: { organizationId, userId },
-    }),
-    db.asset.update({
+  /**
+   * why: the guards above read `qr` once and then act on it, so they are
+   * check-then-act. Two callers can pass them concurrently for the same code —
+   * including two ADMINs in DIFFERENT orgs racing on the same UNCLAIMED label,
+   * since a null `organizationId` satisfies the org guard for everyone.
+   *
+   * The QR write therefore re-asserts the exact state the guards observed. A
+   * competing writer that changed it makes this update match zero rows (P2025)
+   * and that caller loses, mirroring `claimQrCode`'s atomic claim. Running it
+   * first, inside a transaction, is what stops a loser from still clearing the
+   * asset's existing code (`set: []`) or writing a "changed QR code" note for a
+   * link that never persisted.
+   */
+  await db.$transaction(async (tx) => {
+    try {
+      await tx.qr.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: the guards above reject any qr whose organizationId differs from the caller's; an unclaimed qr (null org) is being claimed here, which is why this write sets organizationId. The WHERE additionally pins that observed state so a concurrent claim cannot interleave.
+        where: {
+          id: qr.id,
+          organizationId: qr.organizationId,
+          kitId: null,
+          assetId: qr.assetId,
+        },
+        data: { organizationId, userId },
+      });
+    } catch (updateCause) {
+      if (isNotFoundError(updateCause)) {
+        throw new ShelfError({
+          // why: cause deliberately null — makeShelfError collapses any P2025
+          // anywhere in the cause chain to a 404, which would misreport this
+          // lost race as not-found.
+          cause: null,
+          title: "QR already linked.",
+          message:
+            "This QR code was claimed or linked by someone else while you were linking it. Refresh and try again.",
+          additionalData: { qrId, assetId, organizationId },
+          label: "QR",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+      throw updateCause;
+    }
+
+    await tx.asset.update({
       where: { id: assetId, organizationId },
       data: {
         qrCodes: {
@@ -6695,29 +7555,56 @@ export async function relinkAssetQrCode({
           connect: { id: qr.id },
         },
       },
-    }),
-    createNote({
-      assetId,
-      userId,
-      organizationId,
-      type: "UPDATE",
-      content: `${wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      })} changed QR code ${
-        oldQrCode ? `from **${oldQrCode.id}**` : ""
-      } to **${qrId}**.`,
-    }),
-  ]);
+    });
+
+    await createNote(
+      {
+        assetId,
+        userId,
+        organizationId,
+        type: "UPDATE",
+        content: `${wrapUserLinkForNote({
+          ...user,
+          id: userId,
+        })} changed QR code ${
+          oldQrCode ? `from **${oldQrCode.id}**` : ""
+        } to **${qrId}**.`,
+      },
+      tx
+    );
+  });
 }
 
+/**
+ * Payload for the two user Assets tabs (`/me/assets` and a team member's
+ * profile), which list the assets a given user holds.
+ *
+ * Takes TWO identities on purpose, because they are not the same person on
+ * every route: `/me/assets` views itself, while the profile tab views someone
+ * else. The helper injects `teamMember=<subject>` into the filter string, and
+ * that filter is narrowed against the CALLER's own custody — so collapsing the
+ * two is wrong in both directions. Omitting the viewer refuses the injected
+ * filter and renders an empty tab; passing the SUBJECT as the viewer would make
+ * the narrowing treat the requested custodian as the principal, letting any
+ * caller list any user's custody.
+ *
+ * @param args.userId - SUBJECT: whose assets to list.
+ * @param args.viewerId - CALLER: the principal the custody narrowing measures
+ *   against.
+ * @param args.canSeeAllCustody - Resolved by `requirePermission` on the calling
+ *   route. Required rather than assumed, so the profile tab (ADMIN/OWNER only,
+ *   who resolve `true`) still lists the subject's assets.
+ */
 export async function getUserAssetsTabLoaderData({
   userId,
+  viewerId,
+  canSeeAllCustody,
   request,
   organizationId,
 }: {
   userId: User["id"];
+  viewerId: User["id"];
+  canSeeAllCustody: boolean;
   request: Request;
   organizationId: Organization["id"];
 }) {
@@ -6748,6 +7635,12 @@ export async function getUserAssetsTabLoaderData({
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // This route injects its OWN `teamMember` filter above, so these two must
+      // be the caller's real values. Hardcoding `false` with no `userId` (the
+      // original shape) narrowed the injected filter against an empty
+      // principal, refused it, and rendered both tabs empty for every role.
+      canSeeAllCustody,
+      userId: viewerId,
       filters: filtersSearchParams.toString(),
     });
 
@@ -7130,7 +8023,11 @@ export async function checkOutQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /** Step 2: Validate asset belongs to the organization */
       if (asset.organizationId !== organizationId) {
@@ -7242,14 +8139,31 @@ export async function checkOutQuantity({
        * UI badge that gates on `Asset.status === "AVAILABLE"` then sees
        * the asset as available even though it has units in custody, which
        * (e.g.) lets the kit-assign route bypass its
-       * `someUnavailableAsset` guard. Always a write because the asset
-       * status is no longer guaranteed to be `AVAILABLE` (could be a
-       * second checkout into the same asset), but the value is constant
-       * so it's a no-op in the already-`IN_CUSTODY` case.
+       * `someUnavailableAsset` guard.
+       *
+       * `CHECKED_OUT` WINS. A quantity-tracked asset can hold custody units
+       * and booking units at the same time, but `Asset.status` is a single
+       * column — so whoever writes last used to win, and assigning custody
+       * to an asset with units already out on an ONGOING booking silently
+       * erased `CHECKED_OUT`. That is not cosmetic: every reader of the
+       * "is this asset off the shelf" signal keys on this column, so the
+       * checked-out units stopped being counted and `Available` overstated
+       * free stock by exactly the booked quantity.
+       *
+       * The precedence is the one already documented on
+       * `reconcileAssetStatusForBookingExit` (`booking/service.server.ts`):
+       * `CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`. Constraining the UPDATE
+       * itself keeps the read-and-write atomic under the row lock rather
+       * than racing a concurrent checkout between a read and a write. The
+       * booking flows restore the correct terminal status on check-in /
+       * cancel, at which point the custody row (untouched here) takes over.
        */
-      await tx.asset.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
-        where: { id: assetId },
+      await tx.asset.updateMany({
+        where: {
+          id: assetId,
+          organizationId,
+          status: { not: AssetStatus.CHECKED_OUT },
+        },
         data: { status: AssetStatus.IN_CUSTODY },
       });
 
@@ -7312,7 +8226,7 @@ export async function checkOutQuantity({
   }
 }
 
-/** Arguments for releasing (returning) a quantity from a custodian back to the available pool. */
+/** Arguments for ending a custodian's hold on N units of a QT asset. */
 type ReleaseQuantityArgs = {
   /** The asset to release units for */
   assetId: string;
@@ -7326,10 +8240,17 @@ type ReleaseQuantityArgs = {
   organizationId: string;
   /** Optional note explaining the release */
   note?: string;
+  /**
+   * How many of the released units were used up rather than handed back.
+   * Omit to let the server derive it from the asset's `consumptionType`
+   * (consume everything for a one-way consumable, nothing for a returnable).
+   * Only a consumable accepts a non-zero value.
+   */
+  consumed?: number;
 };
 
 /**
- * Releases a quantity of units from a custodian back to the available pool.
+ * Ends a custodian's hold on N units of a QUANTITY_TRACKED asset.
  *
  * Runs inside an interactive transaction with a row-level lock to prevent
  * concurrent modifications. Validates that a custody record exists for the
@@ -7337,13 +8258,29 @@ type ReleaseQuantityArgs = {
  * the custodian currently holds.
  *
  * If releasing the full custodied amount, the Custody record is deleted.
- * Otherwise, the quantity is decremented. An immutable RETURN consumption
- * log entry is always created.
+ * Otherwise, the quantity is decremented.
+ *
+ * **What happens to the units depends on `Asset.consumptionType`, and on an
+ * optional explicit split:**
+ *
+ * - `TWO_WAY` / legacy `null` — the units return to the available pool. A
+ *   `RETURN` consumption log is written and `Asset.quantity` is untouched.
+ *   These assets reject a non-zero `consumed`.
+ * - `ONE_WAY` — the units default to consumed and are gone for good: a
+ *   `CONSUME` log is written and `Asset.quantity` decremented, matching what
+ *   booking check-in already does for a consumable. An explicit `consumed`
+ *   splits the release, so unused units can still be handed back.
+ *
+ * The default is taken here rather than in a sibling `consumeQuantity` service
+ * so it is always derived from the asset row itself: both the web and mobile
+ * release endpoints hit this one function, and neither can silently pick the
+ * wrong outcome for a consumable.
  *
  * @param args - The release details
- * @returns The updated Asset record
- * @throws {ShelfError} If no custody record exists or the release quantity
- *   exceeds the custodied amount
+ * @returns The updated Asset record plus the `consumed` / `returned` split
+ * @throws {ShelfError} If no custody record exists, the release quantity
+ *   exceeds the custodied amount, `consumed` is out of range, or a returnable
+ *   asset was asked to consume
  */
 export async function releaseQuantity({
   assetId,
@@ -7352,6 +8289,7 @@ export async function releaseQuantity({
   userId,
   organizationId,
   note,
+  consumed,
 }: ReleaseQuantityArgs) {
   try {
     if (quantity <= 0) {
@@ -7365,7 +8303,11 @@ export async function releaseQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /** Step 2: Validate asset belongs to the organization */
       if (asset.organizationId !== organizationId) {
@@ -7387,6 +8329,54 @@ export async function releaseQuantity({
           label,
           status: 400,
           additionalData: { assetId, assetType: asset.type },
+        });
+      }
+
+      /**
+       * Step 3b: Resolve how many units were used up vs. handed back.
+       *
+       * The DEFAULT comes from the LOCKED asset row — never from the caller
+       * alone — so a stale client can't return a consumable's units to the
+       * pool. `lockAssetForQuantityUpdate` does `SELECT *`, so
+       * `consumptionType` is already on hand.
+       *
+       * An explicit `consumed` lets an operator record a partial use: 40
+       * gloves come back, 10 of them actually used. Without it the only
+       * available action would destroy all 40, which is the same split
+       * booking check-in already offers for consumables. It can only ever
+       * narrow a consumable's outcome — a returnable asset rejects it below.
+       */
+      const canConsume = releaseCategory(asset.consumptionType) === "CONSUME";
+      const consumedUnits = consumed ?? (canConsume ? quantity : 0);
+      const returnedUnits = quantity - consumedUnits;
+
+      if (
+        !Number.isInteger(consumedUnits) ||
+        consumedUnits < 0 ||
+        consumedUnits > quantity
+      ) {
+        throw new ShelfError({
+          cause: null,
+          message: `Cannot mark ${consumedUnits} of ${quantity} unit(s) as consumed. The consumed amount must be a whole number between 0 and the quantity being released.`,
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: { assetId, teamMemberId, quantity, consumed },
+        });
+      }
+
+      if (consumedUnits > 0 && !canConsume) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Only consumable (one-way) assets can be marked as consumed. This asset's units return to the available pool when released.",
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+          additionalData: {
+            assetId,
+            consumptionType: asset.consumptionType,
+          },
         });
       }
 
@@ -7457,34 +8447,162 @@ export async function releaseQuantity({
        * `updateKitAssets` removal). We only flip when zero rows remain so
        * an asset that still has other operator or kit-allocated custody
        * keeps its IN_CUSTODY status.
+       *
+       * `CHECKED_OUT` WINS here too, and this direction is the more
+       * dangerous of the pair: releasing the last custody row while units
+       * are still out on an ONGOING booking would advertise the asset as
+       * `AVAILABLE` on every picker and index while it is physically gone.
+       * Same precedence as the sibling guard in `checkOutQuantity` Step 6b
+       * and as `reconcileAssetStatusForBookingExit` — the booking flows own
+       * the transition out of `CHECKED_OUT`.
        */
       const remainingCustodyCount = await tx.custody.count({
         where: { assetId },
       });
       if (remainingCustodyCount === 0) {
-        await tx.asset.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
-          where: { id: assetId },
+        await tx.asset.updateMany({
+          where: {
+            id: assetId,
+            organizationId,
+            status: { not: AssetStatus.CHECKED_OUT },
+          },
           data: { status: AssetStatus.AVAILABLE },
         });
       }
 
-      /** Step 7: Create an immutable audit log entry */
-      await createConsumptionLog({
-        assetId,
-        category: "RETURN",
-        quantity,
-        userId,
-        custodianId: teamMemberId,
-        note,
-        tx,
-      });
+      /**
+       * Step 6c: Consumed units did not come back — they were used up.
+       * Permanently remove exactly those from stock, mirroring the `CONSUME`
+       * branch in booking check-in. Returned units are untouched here: they
+       * are already back in the pool the moment custody dropped.
+       *
+       * No pool-drain guard is needed (unlike booking check-in, which
+       * decrements the pool WITHOUT touching custody). With
+       * `available = Asset.quantity - SUM(Custody.quantity)`, this step
+       * changes the total by `-consumedUnits` while step 6 changed custody by
+       * `-quantity`, so available moves by exactly `returnedUnits` and never
+       * goes negative: `consumedUnits <= quantity <= custody.quantity <= C <= Q`.
+       * The same cancellation holds for `bookable` and `physicalAvailable`,
+       * both of which subtract `inCustody` from `total` — which is why no
+       * reservation guard is required either.
+       *
+       * Lowering the total can push the location axis out of bounds, so the
+       * placement sum is reconciled below — nothing else catches it.
+       * `asset_location_sum_within_total` is `AFTER INSERT OR UPDATE OR
+       * DELETE ON "AssetLocation"` (see
+       * `20260519143054_add_asset_location_pivot`), so it never fires on an
+       * `Asset` write, and `assertAssetQuantityNotBelowReservations` queries
+       * custody / assetKit / bookingAsset / consumptionLog, not assetLocation.
+       */
+      if (consumedUnits > 0) {
+        const beforeQuantity = asset.quantity ?? 0;
+        await tx.asset.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+          where: { id: assetId },
+          data: { quantity: { decrement: consumedUnits } },
+        });
+
+        /**
+         * Audit the stock drop as its own event. Consuming changes TWO
+         * things — who holds the units (CUSTODY_RELEASED, below) and how
+         * many exist (this one) — and per the one-event-per-field rule each
+         * gets its own row so reports can aggregate stock movement without
+         * parsing custody meta.
+         */
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_QUANTITY_CHANGED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            field: "quantity",
+            fromValue: beforeQuantity,
+            toValue: beforeQuantity - consumedUnits,
+          },
+          tx
+        );
+
+        /**
+         * Restore the PRD's location-axis invariant
+         * (`SUM(AssetLocation.quantity WHERE assetKitId IS NULL) <=
+         * Asset.quantity`). Destroying units lowers the total every claim is
+         * measured against, so a placement sum that was valid a moment ago can
+         * now exceed it. Nothing else catches that:
+         * `asset_location_sum_within_total` only fires on an `AssetLocation`
+         * write, so an `Asset` write slips past it silently until a later,
+         * legitimate placement edit is refused.
+         *
+         * Runs inside this tx so the reconcile commits with the decrement it
+         * corrects — a half-applied pair would leave exactly the drift this is
+         * here to prevent.
+         */
+        const reconcile = await reconcileManualPlacementsForStockDecrease({
+          assetId,
+          newTotal: beforeQuantity - consumedUnits,
+          tx,
+        });
+
+        /**
+         * Surface an unresolvable case rather than fabricating provenance.
+         * With several placements and no unplaced residual left, nothing
+         * records which location the consumed units came off, so the drift
+         * persists and is reported instead of being papered over with a guess.
+         */
+        reportAmbiguousPlacementReconcile({
+          result: reconcile,
+          context: "Consumed stock",
+          additionalData: { assetId, organizationId },
+        });
+      }
+
+      /**
+       * Step 7: Immutable audit log — one entry per non-zero leg. `CONSUME`
+       * records units that were used up (the decrement above); `RETURN`
+       * records units that went back into the available pool. Same category
+       * discriminator booking check-in uses, so consumption reporting sees
+       * every path identically.
+       *
+       * Both calls are conditional because `createConsumptionLog` rejects a
+       * non-positive quantity. A pure return therefore writes exactly the one
+       * RETURN row it always did.
+       *
+       * A split attaches the operator's note to both rows: it explains the
+       * single action the operator took, and there is no per-leg note field.
+       */
+      if (consumedUnits > 0) {
+        await createConsumptionLog({
+          assetId,
+          category: "CONSUME",
+          quantity: consumedUnits,
+          userId,
+          custodianId: teamMemberId,
+          note,
+          tx,
+        });
+      }
+
+      if (returnedUnits > 0) {
+        await createConsumptionLog({
+          assetId,
+          category: "RETURN",
+          quantity: returnedUnits,
+          userId,
+          custodianId: teamMemberId,
+          note,
+          tx,
+        });
+      }
 
       /**
        * Step 8: Activity event — emit `CUSTODY_RELEASED` inside the tx so
        * it commits atomically with the custody decrement/delete. Mirrors
        * `checkOutQuantity` — the `viaQuantity` meta flag distinguishes
-       * qty-tracked releases from INDIVIDUAL-asset custody releases.
+       * qty-tracked releases from INDIVIDUAL-asset custody releases. The
+       * custodian stops holding the units either way, so this event is
+       * emitted for both outcomes; `meta.consumed` / `meta.returned` record
+       * the split.
        */
       const custodianTeamMember = await tx.teamMember.findFirst({
         // org-scoped: teamMemberId is request input, so scope the lookup to
@@ -7502,16 +8620,27 @@ export async function releaseQuantity({
           assetId,
           teamMemberId,
           targetUserId: custodianTeamMember?.user?.id ?? undefined,
-          meta: { quantity, viaQuantity: true },
+          meta: {
+            quantity,
+            viaQuantity: true,
+            consumed: consumedUnits,
+            returned: returnedUnits,
+          },
         },
         tx
       );
 
-      /** Step 9: Return the refreshed asset */
-      return tx.asset.findUniqueOrThrow({
+      /** Step 9: Return the refreshed asset plus the split that was applied */
+      const updatedAsset = await tx.asset.findUniqueOrThrow({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
         where: { id: assetId },
       });
+
+      return {
+        asset: updatedAsset,
+        consumed: consumedUnits,
+        returned: returnedUnits,
+      };
     });
   } catch (cause) {
     if (cause instanceof ShelfError) {
@@ -7616,14 +8745,19 @@ export async function moveAssetLocationUnits(
       );
 
       /** Step 2: Lock the asset row so concurrent placement edits serialize. */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /**
-       * Step 3: Defense-in-depth org check. The `assertAssetsBelongToOrg`
-       * above already guards request input, but `lockAssetForQuantityUpdate`
-       * does NOT scope by org — so we re-check the locked row's
-       * `organizationId` to make absolutely sure we're not mutating
-       * another tenant's data.
+       * Step 3: Defense-in-depth org check. Both `assertAssetsBelongToOrg`
+       * above AND the org-scoped `lockAssetForQuantityUpdate` (which now
+       * filters `FOR UPDATE` on `organizationId`) already guarantee the row
+       * belongs to this org — a foreign-org id would have 404'd at the lock.
+       * We keep this re-check as belt-and-braces to make absolutely sure we're
+       * not mutating another tenant's data.
        */
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
@@ -7848,6 +8982,7 @@ export async function moveAssetLocationUnits(
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.location.findFirst({
@@ -7863,6 +8998,7 @@ export async function moveAssetLocationUnits(
     if (user && fromLocation && toLocation) {
       const firstName = user.firstName ?? "";
       const lastName = user.lastName ?? "";
+      const displayName = user.displayName;
 
       // Asset-side bidirectional note. The helper recognises the
       // "current + new both set" shape and emits the "moved …" phrasing.
@@ -7871,6 +9007,7 @@ export async function moveAssetLocationUnits(
         newLocation: toLocation,
         firstName,
         lastName,
+        displayName,
         assetId,
         userId,
         isRemoving: false,
@@ -7884,6 +9021,7 @@ export async function moveAssetLocationUnits(
       // the single-location update path at ~line 2596.
       const userLink = wrapUserLinkForNote({
         id: userId,
+        displayName,
         firstName,
         lastName,
       });
@@ -7992,7 +9130,11 @@ export async function placeUnplacedUnits(
         tx
       );
 
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
@@ -8137,6 +9279,7 @@ export async function placeUnplacedUnits(
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.location.findFirst({
@@ -8148,12 +9291,14 @@ export async function placeUnplacedUnits(
     if (user && toLocation) {
       const firstName = user.firstName ?? "";
       const lastName = user.lastName ?? "";
+      const displayName = user.displayName;
 
       await createLocationChangeNote({
         currentLocation: null,
         newLocation: toLocation,
         firstName,
         lastName,
+        displayName,
         assetId,
         userId,
         isRemoving: false,
@@ -8165,6 +9310,7 @@ export async function placeUnplacedUnits(
 
       const userLink = wrapUserLinkForNote({
         id: userId,
+        displayName,
         firstName,
         lastName,
       });
@@ -8192,6 +9338,22 @@ export async function placeUnplacedUnits(
       moveCorrelationId,
     };
   } catch (cause) {
+    // Backstop: the `quantity > unplaced` pre-check above rejects most
+    // over-submissions with a friendly 400, but two concurrent place-units
+    // requests can each pass their own check and still trip the DEFERRED
+    // `AssetLocation ... exceeds Asset.quantity` trigger at COMMIT. Translate
+    // that race to the same friendly 400. No-ops for every other error.
+    throwIfAssetQuantityOverAllocation(cause, {
+      label,
+      additionalData: {
+        assetId,
+        organizationId,
+        userId,
+        toLocationId,
+        quantity,
+      },
+    });
+
     if (isLikeShelfError(cause)) {
       throw cause;
     }

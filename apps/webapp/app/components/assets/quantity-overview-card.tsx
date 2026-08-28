@@ -19,6 +19,7 @@ import type { ConsumptionType } from "@prisma/client";
 import { TriangleAlertIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { InfoTooltip } from "~/components/shared/info-tooltip";
 import {
   Tooltip,
   TooltipContent,
@@ -41,16 +42,21 @@ export interface QuantityOverviewCardProps {
   /** Consumption behavior: ONE_WAY (used up) or TWO_WAY (returnable) */
   consumptionType: ConsumptionType | null;
   /**
-   * Booking-aware availability (total - inCustody - reserved - checkedOut),
-   * shown on the "Available" row. This is what's available to reserve for a
-   * future booking.
+   * Current physical availability (total - inCustody - inKits -
+   * checkedOut), shown on the "Available" row. Deliberately window-agnostic
+   * — it reflects what's on the shelf RIGHT NOW and is never reduced by
+   * future booking reservations (see the "Reserved (bookings)" row below
+   * for those). This is the #2724 fix: the headline must never go negative
+   * just because far-future reservations exist.
    */
   availableQuantity?: number;
   /**
-   * Physical availability (total - inCustody). Used as the cap for the
-   * QuickAdjustDialog's "Remove" operation — subtracting reservations here
-   * would wrongly block valid total-quantity adjustments when future
-   * bookings exist. Falls back to `availableQuantity` when not provided.
+   * Physical availability. Used as the cap for the QuickAdjustDialog's
+   * "Remove" operation. As of the #2724 fix this is numerically identical
+   * to `availableQuantity` (both source from the same `physicalAvailable`
+   * primitive field) — kept as a separate prop only so existing call sites
+   * don't need to change. Falls back to `availableQuantity` when not
+   * provided.
    */
   custodyAvailableQuantity?: number;
   /**
@@ -74,6 +80,19 @@ export interface QuantityOverviewCardProps {
    */
   inLocationsQuantity?: number;
   /**
+   * Sum of MANUAL placements only (`AssetLocation.assetKitId IS NULL`).
+   *
+   * Drives the placed / unplaced / over-placed split, because this is the
+   * sum `enforce_asset_location_sum_within_total` actually bounds: since
+   * `20260602100000_assetlocation_sum_exclude_kit_driven` the trigger ignores
+   * kit-driven rows, which are bounded on their own axis by
+   * `enforce_asset_kit_sum_within_total`. Using {@link inLocationsQuantity}
+   * here instead would report a valid asset (80 manual + 50 kit-driven units
+   * of a 100 total) as over-allocated. Falls back to `inLocationsQuantity`
+   * when absent, which is exact for the (common) asset with no kits.
+   */
+  inLocationsManualQuantity?: number;
+  /**
    * Units committed to bookings but NOT yet physically off the shelf.
    *
    * Covers two contributors:
@@ -86,6 +105,12 @@ export interface QuantityOverviewCardProps {
    * the separate "Checked out (bookings)" row for what's actually gone.
    */
   reservedQuantity?: number;
+  /**
+   * Count of distinct upcoming bookings contributing to `reservedQuantity`.
+   * Used only by the explanatory tooltip next to the "Reserved (bookings)"
+   * row — see {@link QuantityOverviewCardProps.reservedQuantity}.
+   */
+  reservingBookingCount?: number;
   /**
    * Units actively off the shelf via ONGOING/OVERDUE bookings — computed
    * via `computeCheckedOutForAsset` so this stays in lock-step with the
@@ -116,30 +141,51 @@ function formatWithUnit(value: number, unit: string | null): string {
  * @param props.label - Row label displayed on the left
  * @param props.value - Row value displayed on the right
  * @param props.warning - When true, renders the value in amber with a warning icon
+ * @param props.warningMessage - Text inside the warning tooltip; defaults to the low-stock wording
+ * @param props.labelTooltip - Optional explanatory tooltip rendered next to the label (e.g. `InfoTooltip`)
  */
 function OverviewRow({
   label,
   value,
   warning,
+  warningMessage = "Low stock — the workspace owner will be notified.",
+  labelTooltip,
 }: {
   label: string;
   value: React.ReactNode;
   warning?: boolean;
+  warningMessage?: string;
+  labelTooltip?: React.ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 last:border-b-0">
-      <span className="text-[14px] text-gray-600">{label}</span>
+      <span className="flex items-center gap-1.5 text-[14px] text-gray-600">
+        {label}
+        {labelTooltip}
+      </span>
       <span className="flex items-center gap-1.5 text-[14px] font-medium text-gray-900">
         {warning ? (
           <TooltipProvider>
             <Tooltip>
+              {/* A button, not the bare icon: the tooltip carries the only
+                  copy explaining what the row means and how to fix it, and an
+                  SVG is neither focusable nor announced, so keyboard and
+                  screen-reader users would never reach it. `aria-label`
+                  duplicates the message so it is available without hovering. */}
               <TooltipTrigger asChild>
-                <TriangleAlertIcon className="size-4 text-amber-500" />
+                <button
+                  type="button"
+                  aria-label={warningMessage}
+                  className="flex items-center rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                >
+                  <TriangleAlertIcon
+                    aria-hidden="true"
+                    className="size-4 text-amber-500"
+                  />
+                </button>
               </TooltipTrigger>
               <TooltipContent side="left">
-                <p className="text-xs">
-                  Low stock — the workspace owner will be notified.
-                </p>
+                <p className="text-xs">{warningMessage}</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -172,7 +218,9 @@ export function QuantityOverviewCard({
   inCustodyQuantity,
   inKitsQuantity,
   inLocationsQuantity,
+  inLocationsManualQuantity,
   reservedQuantity,
+  reservingBookingCount,
   checkedOutQuantity,
   canUpdate = false,
   className,
@@ -180,10 +228,45 @@ export function QuantityOverviewCard({
   const qty = quantity ?? 0;
   const unit = unitOfMeasure || null;
   const reserved = reservedQuantity ?? 0;
+  const bookingCount = reservingBookingCount ?? 0;
   const checkedOut = checkedOutQuantity ?? 0;
   const inKits = inKitsQuantity ?? 0;
   const inLocations = inLocationsQuantity ?? 0;
+  const inLocationsManual = inLocationsManualQuantity ?? inLocations;
+  /**
+   * Units not recorded at ANY location — so the COMBINED sum, kit-driven rows
+   * included. A kit-driven row does put its units somewhere: the kit is at a
+   * location and its members are with it. Measuring this on the manual axis
+   * instead would report an asset with 50 of 100 units in a kit as having all
+   * 100 unplaced, which is plainly false.
+   *
+   * Deliberately a different question from {@link overPlacedBy} below, which
+   * is measured on the manual axis alone. "Is anything sitting nowhere?" spans
+   * both axes; "have manual claims outrun the total?" can only be asked of the
+   * axis `enforce_asset_location_sum_within_total` actually bounds. The two are
+   * mutually exclusive — `unplaced > 0` requires `qty > inLocations >=
+   * inLocationsManual`, which forces `overPlacedBy` to 0 — so the card never
+   * shows a contradictory pair.
+   *
+   * The overlap case (80 manual + 50 kit-driven of 100) renders neither row,
+   * which is correct: nothing is sitting nowhere, and nothing breaches the
+   * bounded axis. The manual free pool is a question for the placements
+   * editor, which computes it there.
+   */
   const unplaced = Math.max(0, qty - inLocations);
+  /**
+   * The honest negative side of the residual, computed on the MANUAL axis
+   * because that is the one `enforce_asset_location_sum_within_total` bounds
+   * (kit-driven rows live on their own axis, so 80 manual + 50 kit-driven of
+   * 100 is valid and must not read as over-placed).
+   *
+   * A positive value means manual placements claim more units than the asset
+   * owns, which is a state the app can reach on its own: a consume lowers
+   * `Asset.quantity` without touching placements once the unplaced residual
+   * is gone. It used to surface as a clamped "Unplaced 0" — a number that was
+   * never true, hiding the drift from the only person who could correct it.
+   */
+  const overPlacedBy = Math.max(0, inLocationsManual - qty);
 
   /** Use computed values from the loader, falling back to phase-1 defaults */
   const available =
@@ -252,11 +335,38 @@ export function QuantityOverviewCard({
       {inLocations > 0 && unplaced > 0 ? (
         <OverviewRow label="Unplaced" value={formatWithUnit(unplaced, unit)} />
       ) : null}
+      {/* Over-placed is the negative side of the same residual. It gets its
+          own row rather than a negative "Unplaced" because the number is not
+          spare stock — it is a placement figure that has outrun the total and
+          needs a human to say which location actually lost the units. */}
+      {overPlacedBy > 0 ? (
+        <OverviewRow
+          label="Over-placed"
+          value={formatWithUnit(overPlacedBy, unit)}
+          warning
+          warningMessage={`Locations claim ${formatWithUnit(
+            overPlacedBy,
+            unit
+          )} more than this asset's total. Open "Manage placements" and lower the location that lost them.`}
+        />
+      ) : null}
       <OverviewRow label="In custody" value={formatWithUnit(inCustody, unit)} />
       {reserved > 0 ? (
         <OverviewRow
           label="Reserved (bookings)"
           value={formatWithUnit(reserved, unit)}
+          labelTooltip={
+            <InfoTooltip
+              content={
+                <p className="text-xs">
+                  {reserved} {unit || "units"} reserved across {bookingCount}{" "}
+                  upcoming {bookingCount === 1 ? "booking" : "bookings"}. These
+                  are committed for future dates and don&apos;t reduce
+                  what&apos;s physically on the shelf now.
+                </p>
+              }
+            />
+          }
         />
       ) : null}
       {checkedOut > 0 ? (

@@ -9,10 +9,12 @@ import AuditTeamMemberSelector from "~/components/audit/audit-team-member-select
 import Input from "~/components/forms/input";
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
+import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 
 export const EditAuditSchema = z.object({
   name: z.string().trim().min(1, "Audit name is required"),
@@ -31,14 +33,8 @@ type EditAuditDialogProps = {
     description: string | null;
     dueDate: Date | null;
     status: AuditStatus;
-    assignments: Array<{
-      userId: string;
-      user: {
-        id: string;
-        firstName: string | null;
-        lastName: string | null;
-      };
-    }>;
+    /** Only `userId` is read — it maps back to the assignee's team member. */
+    assignments: Array<{ userId: string }>;
   };
   teamMembers: Array<{
     id: string;
@@ -68,11 +64,22 @@ export function EditAuditDialog({
   const dueDateError = zo.errors.dueDate()?.message;
   const assigneeError = zo.errors.assignee()?.message;
 
-  // Format due date for datetime-local input using standard utility
+  // Resolved timezone preference — the SAME zone date DISPLAY uses. Seed the
+  // datetime-local default from the stored UTC instant in this zone (not the
+  // browser/runtime zone) so the wall-clock shown matches what the user sees
+  // everywhere else and round-trips back to the correct UTC on submit.
+  const { timeZone } = useFormatPrefs();
+
+  // Format due date for datetime-local input in the user's preferred timezone.
   const defaultDueDate = useMemo(() => {
     if (!audit.dueDate) return undefined;
-    return dateForDateTimeInputValue(new Date(audit.dueDate)).substring(0, 16);
-  }, [audit.dueDate]);
+    // toIsoDateTimeToUserTimezone → "YYYY-MM-DDTHH:mm:ss±hh:mm"; slice(0, 16)
+    // yields the "YYYY-MM-DDTHH:mm" wall-clock the datetime input expects.
+    return toIsoDateTimeToUserTimezone(new Date(audit.dueDate), timeZone).slice(
+      0,
+      16
+    );
+  }, [audit.dueDate, timeZone]);
 
   // Get current assignee's team member ID (convert from user ID)
   const defaultAssigneeTeamMemberId = useMemo(() => {
@@ -140,13 +147,16 @@ export function EditAuditDialog({
                 className="mb-4"
               />
 
-              <Input
+              <DateTimePicker
+                mode="datetime"
                 name={dueDateField}
                 label="Due date"
-                type="datetime-local"
                 defaultValue={defaultDueDate}
                 error={dueDateError}
                 disabled={disabled}
+                // Due date is optional (schema: dueDate optional) — allow
+                // clearing an existing value, matching the old native input.
+                clearable
               />
 
               <When truthy={isActiveAudit}>
@@ -170,9 +180,8 @@ export function EditAuditDialog({
               <Separator className="md:hidden" />
               <p className="p-3 pb-0 font-medium">Select assignee (optional)</p>
               <p className="border-b p-3">
-                If no assignee is selected, any admin user can perform the
-                audit. This can also be done by multiple users at different
-                times.
+                Admins can perform any audit. Choosing assignees also lets those
+                people perform it, including several at different times.
               </p>
               <AuditTeamMemberSelector
                 error={assigneeError}

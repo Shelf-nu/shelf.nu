@@ -26,6 +26,7 @@ import {
   resolveDisplayCode,
 } from "~/modules/barcode/display";
 import { getQrBaseUrl } from "~/modules/qr/utils.server";
+import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -76,13 +77,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations, currentOrganization } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.qr,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      organizations,
+      currentOrganization,
+      canSeeAllCustody,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.qr,
+      action: PermissionAction.read,
+    });
 
     // Paid feature: print-ready QR label export is gated behind the same
     // entitlement as the CSV asset export. Enforced server-side so a free user
@@ -108,6 +113,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ? getAssetsWhereInput({
           organizationId,
           currentSearchParams: searchParams.toString(),
+          /**
+           * `qr: read` is held by BASE and SELF_SERVICE, so this endpoint is
+           * reachable by roles that may not see other people's custody. With
+           * an unscoped filter, `?assetIds=all-selected&teamMember=<colleague>`
+           * returned exactly that colleague's assets — an enumeration oracle
+           * that ignored `baseUserCanSeeCustody` entirely.
+           */
+          allowedTeamMemberIds: await scopeCustodianFilterIds({
+            teamMemberIds: searchParams.getAll("teamMember"),
+            canSeeAllCustody,
+            userId,
+            organizationId,
+          }),
         })
       : { id: { in: assetIds }, organizationId };
 
@@ -163,6 +181,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         const resolved = resolveDisplayCode({
           entity: asset,
           organization: resolverOrg,
+          entityKind: "asset",
         });
         return {
           id: asset.id,

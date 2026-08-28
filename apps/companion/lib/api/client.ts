@@ -1,13 +1,28 @@
-import { supabase } from "../supabase";
+import {
+  getActiveServer,
+  getServerVersion,
+  subscribeToServerChange,
+} from "../server/active-server";
+import { getSupabase, getSupabaseClientUrl } from "../supabase";
+import { isSessionServerMismatched } from "../server/contract";
+import { reportServerMismatch } from "../sentry";
 
 /**
- * Base URL for the Shelf webapp API.
- * In development, this is your local dev server.
- * In production, this would be the deployed webapp URL.
+ * Base URL of the Shelf server the app is currently connected to.
+ *
+ * Must stay a function, never an exported constant: the app switches servers at
+ * runtime, and a captured `const` would keep pointing at whichever server was
+ * active at import time. Neither typecheck nor the unit tests can see that
+ * mistake — only running the app against a second server would.
+ *
+ * The Shelf Cloud default, including the `__DEV__` fallback split, lives on
+ * `CLOUD_SERVER` in `lib/server/active-server.ts`.
+ *
+ * @returns The active server's origin, without a trailing slash.
  */
-export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
-if (__DEV__) console.log("[API] Base URL:", API_BASE_URL);
+export function getApiBaseUrl(): string {
+  return getActiveServer().baseUrl;
+}
 
 /**
  * Global auth error listener.
@@ -38,21 +53,105 @@ const SESSION_CACHE_TTL_MS = 30_000; // 30 seconds
 let cachedAccessToken: string | null = null;
 let cachedAt = 0;
 
-// Invalidate cache when auth state changes (login, logout, token refresh)
-supabase.auth.onAuthStateChange(() => {
+/** Unsubscribe handle for the current client's auth listener. */
+let authSubscription: { unsubscribe: () => void } | null = null;
+
+/** Clears the in-memory access-token cache. */
+function resetAccessTokenCache(): void {
   cachedAccessToken = null;
   cachedAt = 0;
+}
+
+/**
+ * Subscribes the token cache to the CURRENT Supabase client's auth events
+ * (login, logout, token refresh).
+ *
+ * Re-called after every server switch: otherwise the cache keeps listening to
+ * the discarded client, silently stops invalidating, and hands the previous
+ * server's access token to the new one.
+ */
+function attachAuthListener(): void {
+  authSubscription?.unsubscribe();
+  const {
+    data: { subscription },
+  } = getSupabase().auth.onAuthStateChange(() => {
+    resetAccessTokenCache();
+  });
+  authSubscription = subscription;
+}
+
+attachAuthListener();
+
+// why: this module owns the token cache and the auth subscription, so it — not
+// active-server.ts — rearms them after a switch. Wiring it as a subscription
+// keeps the dependency one-way (api → server); importing these functions INTO
+// active-server.ts would create a require cycle, which Metro resolves to
+// `undefined` at module-eval time and surfaces far from the cause.
+subscribeToServerChange(() => {
+  resetAccessTokenCache();
+  attachAuthListener();
 });
 
-/** Returns a valid access token, using cache when possible. */
+/**
+ * Refuses the request when the live Supabase client belongs to a different
+ * project than the active server.
+ *
+ * `apiFetch` / `apiUpload` are the single chokepoint every authenticated
+ * request passes through, which makes this the one place the core invariant of
+ * multi-server support can actually be enforced: the token we are about to send
+ * was minted by the server we are about to send it to.
+ *
+ * Defence in depth: it should never fire, because `setActiveServer` signs out
+ * and rebuilds before notifying anyone and sessions are namespaced per Supabase
+ * project. Keep it anyway — the invariant is otherwise only believed, not
+ * checked, and failing closed turns a silent cross-server credential leak into
+ * a clean re-auth.
+ *
+ * @returns An error result when the request must not proceed, otherwise null.
+ */
+function guardSessionServerMatch(): { data: null; error: string } | null {
+  const active = getActiveServer();
+  if (!isSessionServerMismatched(getSupabaseClientUrl(), active.supabaseUrl)) {
+    return null;
+  }
+
+  // Loud on purpose: this is a bug, not a user condition, and it is invisible
+  // from the outside — the user would just see an unexplained sign-out.
+  reportServerMismatch(getSupabaseClientUrl(), active.supabaseUrl);
+  resetAccessTokenCache();
+  notifyAuthError();
+  return {
+    data: null,
+    error: "Session expired. Please sign in again.",
+  };
+}
+
+/**
+ * Returns a valid access token for the ACTIVE server, using cache when
+ * possible.
+ *
+ * Reading a session is slow — `getSession()` reassembles several chunked
+ * SecureStore entries — and a server switch can complete in that window. The
+ * token then belongs to the server that was active when it was requested, so
+ * it is discarded rather than returned, and above all is NOT written to the
+ * cache: `setActiveServer` clears the cache as it switches, and writing here
+ * afterwards would resurrect the previous server's token for the whole TTL.
+ *
+ * @returns The token, or `null` when there is no session or the active server
+ *   changed while it was being read.
+ */
 export async function getAccessToken(): Promise<string | null> {
   const now = Date.now();
   if (cachedAccessToken && now - cachedAt < SESSION_CACHE_TTL_MS) {
     return cachedAccessToken;
   }
+  const versionAtStart = getServerVersion();
   const {
     data: { session },
-  } = await supabase.auth.getSession();
+  } = await getSupabase().auth.getSession();
+
+  if (getServerVersion() !== versionAtStart) return null;
+
   if (session?.access_token) {
     cachedAccessToken = session.access_token;
     cachedAt = now;
@@ -64,29 +163,123 @@ export async function getAccessToken(): Promise<string | null> {
 }
 
 /**
+ * Resolves the base URL and token for one authenticated request, proving both
+ * belong to the same server.
+ *
+ * `guardSessionServerMatch` is synchronous and cannot cover the `await` that
+ * follows it, and it could not detect a completed switch anyway:
+ * `setActiveServer` moves the active record and rebuilds the Supabase client
+ * together, so afterwards the guard compares the new server against itself and
+ * passes. Capturing the server up front and re-checking the version after the
+ * await is what actually closes the window — and returning the CAPTURED base
+ * URL keeps the token and the destination from ever disagreeing, which reading
+ * live state at send time cannot guarantee.
+ *
+ * @returns The URL prefix and token to use, or the error result to return.
+ */
+async function resolveRequestTarget(): Promise<
+  | { ok: true; baseUrl: string; accessToken: string }
+  | { ok: false; result: { data: null; error: string } }
+> {
+  const mismatch = guardSessionServerMatch();
+  if (mismatch) return { ok: false, result: mismatch };
+
+  const server = getActiveServer();
+  const versionAtStart = getServerVersion();
+
+  const accessToken = await getAccessToken();
+
+  if (!accessToken || getServerVersion() !== versionAtStart) {
+    notifyAuthError();
+    return {
+      ok: false,
+      result: { data: null, error: "Session expired. Please sign in again." },
+    };
+  }
+
+  return { ok: true, baseUrl: server.baseUrl, accessToken };
+}
+
+/**
+ * `RequestInit` plus companion-specific knobs. `retry: false` opts a request
+ * out of the automatic timeout/network retry — required for non-idempotent
+ * mutations (e.g. quantity custody assign/release) where a timed-out-but-
+ * landed first request must not be re-sent and double-applied. Reads and
+ * idempotent calls keep the default retry behaviour.
+ */
+export type ApiFetchOptions = RequestInit & { retry?: boolean };
+
+/**
+ * Structured error payload from the mobile API's `{ error: { … } }` envelope.
+ * `message` mirrors the flat `error` string consumers already display.
+ * `reason` is an additive machine-readable discriminator some endpoints emit
+ * (today: `"unclaimed"` on the QR RESOLVE routes only — the link route claims
+ * unclaimed codes inline and no longer emits it), with `qrId` echoing
+ * the scanned code id whenever `reason` is present. Branch on `reason`, never
+ * on `message` text — messages are human copy and can change; the reason
+ * field is the wire contract.
+ */
+export type ApiErrorDetails = {
+  message: string;
+  reason?: string;
+  qrId?: string;
+};
+
+/**
+ * Extracts the structured error payload from a parsed non-OK response body.
+ *
+ * @param json - The parsed response body (unknown: may be an HTML error page
+ *   coerced to null, an empty body, or a proxy's own JSON).
+ * @returns The typed error payload, or `null` when the body doesn't match the
+ *   mobile API's `{ error: { message } }` envelope.
+ */
+function extractErrorDetails(json: unknown): ApiErrorDetails | null {
+  if (typeof json !== "object" || json === null) return null;
+  const err = (json as { error?: unknown }).error;
+  if (typeof err !== "object" || err === null) return null;
+  const { message, reason, qrId } = err as {
+    message?: unknown;
+    reason?: unknown;
+    qrId?: unknown;
+  };
+  if (typeof message !== "string") return null;
+  return {
+    message,
+    ...(typeof reason === "string" ? { reason } : {}),
+    ...(typeof qrId === "string" ? { qrId } : {}),
+  };
+}
+
+/**
  * Makes an authenticated API call to the Shelf webapp.
  * Automatically attaches the current Supabase session JWT.
  * - Returns structured { data, error } -- never throws.
+ * - On HTTP errors carrying the mobile API's `{ error: { … } }` envelope,
+ *   `errorDetails` additionally exposes the structured payload (message +
+ *   optional machine-readable `reason` / `qrId`) so callers can branch on
+ *   contract fields instead of message strings. Absent for transport-level
+ *   failures (timeout, network, non-JSON bodies).
  * - Detects 401/session-expired and notifies global auth listeners.
  * - Enforces a request timeout to avoid hanging on slow networks.
  */
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit = {},
+  options: ApiFetchOptions = {},
   _retryCount = 0
-): Promise<{ data: T | null; error: string | null }> {
+): Promise<{
+  data: T | null;
+  error: string | null;
+  errorDetails?: ApiErrorDetails | null;
+}> {
   // Declared outside try so catch block can read it
   let timedOut = false;
 
   try {
-    const accessToken = await getAccessToken();
+    const target = await resolveRequestTarget();
+    if (!target.ok) return target.result;
+    const { accessToken } = target;
 
-    if (!accessToken) {
-      notifyAuthError();
-      return { data: null, error: "Session expired. Please sign in again." };
-    }
-
-    const url = `${API_BASE_URL}${path}`;
+    const url = `${target.baseUrl}${path}`;
     if (__DEV__)
       console.log(
         "[API] Fetching:",
@@ -139,6 +332,7 @@ export async function apiFetch<T>(
           error: "Session expired. Please sign in again.",
         };
       }
+      const errorDetails = extractErrorDetails(json);
       // 403 = forbidden → user lacks permission, but session is valid
       if (response.status === 403) {
         return {
@@ -146,11 +340,13 @@ export async function apiFetch<T>(
           error:
             json?.error?.message ||
             "You don't have permission to perform this action.",
+          errorDetails,
         };
       }
       return {
         data: null,
         error: json?.error?.message || `Request failed (${response.status})`,
+        errorDetails,
       };
     }
 
@@ -162,13 +358,28 @@ export async function apiFetch<T>(
       return { data: null, error: null };
     }
 
-    if (__DEV__) console.error("[API] Fetch error:", err);
-
-    // Auto-retry on timeout or network errors (not on auth/permission errors)
+    // Auto-retry on timeout or network errors (not on auth/permission
+    // errors). Requests sent with `retry: false` are exempt: a timed-out
+    // POST may have landed server-side, and re-sending a non-idempotent
+    // mutation would double-apply it.
     const isRetryable =
       (err instanceof Error && err.name === "AbortError" && timedOut) ||
       err instanceof TypeError; // TypeError = network failure
-    if (isRetryable && _retryCount < MAX_RETRIES) {
+    const willRetry =
+      isRetryable && options.retry !== false && _retryCount < MAX_RETRIES;
+
+    // why warn, not error, when a retry follows: in development React
+    // Native's LogBox promotes every console.error into a full-screen red
+    // overlay. A timeout we are about to retry — and usually recover from —
+    // is not worth stopping the app for, and on a slow or flaky connection
+    // it made the app unusable for testing while nothing was actually
+    // broken. Reserve the red box for the request that has given up.
+    if (__DEV__) {
+      const log = willRetry ? console.warn : console.error;
+      log("[API] Fetch failed:", path, err);
+    }
+
+    if (willRetry) {
       if (__DEV__) console.log("[API] Retrying…", path);
       return apiFetch<T>(path, options, _retryCount + 1);
     }
@@ -192,14 +403,11 @@ export async function apiUpload<T>(
   formData: FormData
 ): Promise<{ data: T | null; error: string | null }> {
   try {
-    const accessToken = await getAccessToken();
+    const target = await resolveRequestTarget();
+    if (!target.ok) return target.result;
+    const { accessToken } = target;
 
-    if (!accessToken) {
-      notifyAuthError();
-      return { data: null, error: "Session expired. Please sign in again." };
-    }
-
-    const url = `${API_BASE_URL}${path}`;
+    const url = `${target.baseUrl}${path}`;
     if (__DEV__) console.log("[API] Uploading to:", url);
 
     // Abort controller for timeout (longer than regular fetch for uploads)

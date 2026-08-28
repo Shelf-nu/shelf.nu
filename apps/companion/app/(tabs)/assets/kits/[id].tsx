@@ -26,7 +26,7 @@ import {
 import { useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { api } from "@/lib/api";
+import { api, getApiBaseUrl } from "@/lib/api";
 import type { KitDetail } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
 import { pushIntoTab } from "@/lib/navigation";
@@ -35,9 +35,10 @@ import {
   spacing,
   borderRadius,
   formatStatus,
-  formatDate,
   formatCurrency,
 } from "@/lib/constants";
+import { useDateFormatter } from "@/lib/use-date-formatter";
+import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { InfoRow } from "@/components/shared/info-row";
@@ -72,6 +73,7 @@ export default function KitDetailScreen() {
   const { currentOrg } = useOrg();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
+  const { formatDate } = useDateFormatter();
 
   // Role-aware UI — the server re-enforces these on every API call.
   const roles = currentOrg?.roles;
@@ -309,10 +311,7 @@ export default function KitDetailScreen() {
               <View style={styles.qrCard}>
                 {QRCode ? (
                   <QRCode
-                    value={`${
-                      process.env.EXPO_PUBLIC_QR_BASE_URL ||
-                      "https://app.shelf.nu"
-                    }/qr/${kit.qrCodes[0].id}`}
+                    value={`${getApiBaseUrl()}/qr/${kit.qrCodes[0].id}`}
                     size={160}
                     backgroundColor={colors.white}
                     color={colors.foreground}
@@ -347,6 +346,13 @@ export default function KitDetailScreen() {
                     bg: colors.backgroundTertiary,
                     text: colors.muted,
                   };
+                  // Only show the "×N" kit-quantity line when we have a
+                  // formatted value — never a bare "×". Mirrors the assets
+                  // list/detail screens, which render nothing when
+                  // formatQuantity returns null (missing/non-finite qty).
+                  const kitQuantityLabel = isQuantityTracked(asset)
+                    ? formatQuantity(asset.kitQuantity, asset.unitOfMeasure)
+                    : null;
                   return (
                     <TouchableOpacity
                       key={asset.id}
@@ -387,6 +393,11 @@ export default function KitDetailScreen() {
                         <Text style={styles.assetTitle} numberOfLines={1}>
                           {asset.title}
                         </Text>
+                        {kitQuantityLabel ? (
+                          <Text style={styles.assetMeta} numberOfLines={1}>
+                            {`×${kitQuantityLabel}`}
+                          </Text>
+                        ) : null}
                         <Text style={styles.assetMeta} numberOfLines={1}>
                           {asset.category?.name || "Uncategorized"}
                         </Text>

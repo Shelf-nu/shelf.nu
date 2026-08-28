@@ -1,9 +1,11 @@
 import type { CustomField } from "@prisma/client";
 import { useSearchParams } from "~/hooks/search-params";
+import { splitFilterParam } from "~/modules/asset/filter-param";
 import type {
   Column,
   ColumnLabelKey,
 } from "~/modules/asset-index-settings/helpers";
+import { getTodayInUserTimezone } from "~/utils/date-fns";
 import { isShelfQrCode } from "~/utils/qr-code";
 import type { Filter, FilterFieldType, FilterOperator } from "./schema";
 import type { Sort } from "../advanced-asset-index-filters-and-sorting";
@@ -72,6 +74,7 @@ export function getUIFieldType({
       break;
     case "valuation":
     case "quantity":
+    case "minQuantity":
       fieldType = "number";
       break;
     case "availableToBook":
@@ -129,7 +132,13 @@ export function useInitialFilters(columns: Column[]) {
   searchParams.forEach((value, key) => {
     const column = columns.find((c) => c.name === key);
     if (column) {
-      const [operator, filterValue] = value.split(":");
+      const [operator, filterValue] = splitFilterParam(value);
+
+      // No separator means no value; there is no filter row to rebuild, and
+      // the `between` branch below would read `.split` off `undefined`.
+      if (filterValue === undefined) {
+        return;
+      }
 
       initialFilters.push({
         name: key,
@@ -142,10 +151,27 @@ export function useInitialFilters(columns: Column[]) {
   return initialFilters;
 }
 
-// Function to get default value based on field type
+/**
+ * Gets the default value for a newly-added filter row based on the column's
+ * field type.
+ *
+ * For date fields (both built-in and custom-field DATE), the default is
+ * *today's* calendar day in the acting user's timezone — not the server/UTC
+ * day — so a user in e.g. `Asia/Tokyo` seeds the filter with the day they
+ * actually see, avoiding an off-by-one when their local day differs from UTC.
+ *
+ * @param column - The column the filter row targets
+ * @param customFields - Available custom fields (or null when not loaded), used
+ *   to resolve OPTION defaults
+ * @param timeZone - The acting user's resolved preference timezone (IANA name,
+ *   e.g. `America/New_York`). Falls back to UTC when omitted so non-UI callers
+ *   still compile and behave deterministically.
+ * @returns The seed value appropriate for the column's field type
+ */
 export function getDefaultValueForFieldType(
   column: Column,
-  customFields: CustomField[] | null // Update the type to allow null
+  customFields: CustomField[] | null, // Update the type to allow null
+  timeZone: string = "UTC"
 ): any {
   if (column.name.startsWith("cf_")) {
     // Find the matching custom field, handle potential null customFields
@@ -155,7 +181,7 @@ export function getDefaultValueForFieldType(
 
     switch (column.cfType) {
       case "DATE":
-        return new Date().toISOString().split("T")[0];
+        return getTodayInUserTimezone(timeZone);
       case "BOOLEAN":
         return true;
       case "OPTION":
@@ -172,7 +198,7 @@ export function getDefaultValueForFieldType(
       case "boolean":
         return true;
       case "date":
-        return new Date().toISOString().split("T")[0];
+        return getTodayInUserTimezone(timeZone);
       case "number":
         return 0;
       default:

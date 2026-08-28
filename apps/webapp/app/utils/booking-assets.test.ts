@@ -8,6 +8,8 @@ import {
   getBookingContextAssetStatus,
   isAssetCheckableIn,
   isAssetCheckableOut,
+  isQtyRowCheckedOutOrFulfilled,
+  resolveQtyStockBadgeVariant,
   type AssetWithStatus,
 } from "./booking-assets";
 
@@ -22,6 +24,7 @@ const partialCheckinStub = {
     id: "user-1",
     firstName: "Test",
     lastName: "User",
+    displayName: null,
     profilePicture: null,
   },
 };
@@ -294,11 +297,14 @@ describe("flattenSelectedBookingItems", () => {
     { id: "asset-2", status: "AVAILABLE", kitId: "kit-1" },
   ];
 
-  it("enriches a direct asset entry from the booking record", () => {
-    // Atom entry carries a stale status; the booking record wins.
+  it("fills genuine gaps from the booking record while the selected item wins", () => {
+    // The selection atom holds the authoritative enriched loader row: its own
+    // fields win (status stays AVAILABLE, NOT the record's CHECKED_OUT), and
+    // the booking record only fills genuine gaps (kitId, absent on the item).
     const selected = [{ id: "asset-1", title: "Camera", status: "AVAILABLE" }];
     const [result] = flattenSelectedBookingItems(selected, bookingAssets);
-    expect(result.status).toBe("CHECKED_OUT");
+    expect(result.status).toBe("AVAILABLE"); // selected item wins
+    expect(result.kitId).toBe(null); // filled from booking record
     expect(result.title).toBe("Camera");
   });
 
@@ -335,5 +341,234 @@ describe("flattenSelectedBookingItems", () => {
     const kit = { id: "kit-1", name: "Kit A", _count: { assets: 2 } };
     const [result] = flattenSelectedBookingItems([kit], bookingAssets);
     expect(result).toEqual(kit);
+  });
+
+  // A QUANTITY_TRACKED asset can be booked BOTH standalone (kitId null) and
+  // inside a kit (kitId set) — two BookingAsset slices sharing one asset.id.
+  // The enrichment map keys by bookingAssetId so both slices coexist, and the
+  // selected slice's own bookingAssetId/kitId survive the merge.
+  const multiSliceBookingAssets = [
+    {
+      id: "battery",
+      bookingAssetId: "ba-standalone",
+      status: "CHECKED_OUT",
+      kitId: null,
+    },
+    {
+      id: "battery",
+      bookingAssetId: "ba-kit",
+      status: "CHECKED_OUT",
+      kitId: "kit-1",
+    },
+  ];
+
+  it("preserves a selected STANDALONE slice's kitId:null and its own bookingAssetId when both slices are present", () => {
+    const selected = [
+      {
+        id: "battery",
+        title: "Batteries",
+        bookingAssetId: "ba-standalone",
+        kitId: null,
+        status: "AVAILABLE",
+      },
+    ];
+    const [result] = flattenSelectedBookingItems(
+      selected,
+      multiSliceBookingAssets
+    );
+    // The kit slice's kitId must NOT clobber the selected standalone slice.
+    expect(result.bookingAssetId).toBe("ba-standalone");
+    expect(result.kitId).toBe(null);
+    expect(result.title).toBe("Batteries");
+  });
+
+  it("keeps a selected KIT-MEMBER slice's kitId when both slices are present", () => {
+    const selected = [
+      {
+        id: "battery",
+        title: "Batteries",
+        bookingAssetId: "ba-kit",
+        kitId: "kit-1",
+        status: "AVAILABLE",
+      },
+    ];
+    const [result] = flattenSelectedBookingItems(
+      selected,
+      multiSliceBookingAssets
+    );
+    expect(result.bookingAssetId).toBe("ba-kit");
+    expect(result.kitId).toBe("kit-1");
+  });
+
+  it("enriches a legacy item without bookingAssetId via the id fallback", () => {
+    // Legacy entries (both selection and booking record) lack bookingAssetId,
+    // so the map keys by id and the item is looked up by id — enrichment still
+    // works (status filled from the record).
+    const legacyBookingAssets = [
+      { id: "legacy-asset", status: "CHECKED_OUT", kitId: null },
+    ];
+    const selected = [{ id: "legacy-asset", title: "Old Camera" }];
+    const [result] = flattenSelectedBookingItems(selected, legacyBookingAssets);
+    expect(result.status).toBe("CHECKED_OUT");
+    expect(result.title).toBe("Old Camera");
+  });
+});
+
+describe("isQtyRowCheckedOutOrFulfilled", () => {
+  it("returns true for CHECKED_OUT, PARTIALLY_CHECKED_IN, and both partial-checkout-qty statuses", () => {
+    expect.assertions(4);
+    expect(isQtyRowCheckedOutOrFulfilled(AssetStatus.CHECKED_OUT)).toBe(true);
+    expect(isQtyRowCheckedOutOrFulfilled("PARTIALLY_CHECKED_IN")).toBe(true);
+    expect(isQtyRowCheckedOutOrFulfilled("PARTIALLY_CHECKED_OUT_QTY")).toBe(
+      true
+    );
+    expect(
+      isQtyRowCheckedOutOrFulfilled("PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN")
+    ).toBe(true);
+  });
+
+  it("returns false for AVAILABLE (row never touched the pool yet)", () => {
+    expect.assertions(1);
+    expect(isQtyRowCheckedOutOrFulfilled(AssetStatus.AVAILABLE)).toBe(false);
+  });
+});
+
+describe("resolveQtyStockBadgeVariant", () => {
+  /**
+   * Real case from the feature spec: asset "Boards" has 10 total units.
+   * A DIFFERENT booking has 7 out right now but returns before this
+   * (not-yet-started) booking's window opens, so `bookable` is the full 10
+   * (no in-window conflict) while `physicalNow` is only 3 (7 are literally
+   * off the shelf at this instant).
+   */
+  const boardsAvailability = { bookable: 10, physicalNow: 3 };
+
+  it("(a) returns 'insufficient' when rowQty exceeds bookable, regardless of physicalNow", () => {
+    expect.assertions(1);
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 11,
+        availability: boardsAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.RESERVED,
+      })
+    ).toBe("insufficient");
+  });
+
+  it("(b) returns 'pending-return' when the booking hasn't started, rowQty fits bookable but exceeds physicalNow", () => {
+    expect.assertions(2);
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 7,
+        availability: boardsAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.RESERVED,
+      })
+    ).toBe("pending-return");
+
+    // DRAFT counts as "not started" too.
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 7,
+        availability: boardsAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.DRAFT,
+      })
+    ).toBe("pending-return");
+  });
+
+  it("(c) returns null when rowQty fits within physicalNow (no shortfall at all)", () => {
+    expect.assertions(1);
+    // Also pins the strict-inequality boundary: rowQty (3) === physicalNow
+    // (3) exactly — at-capacity is NOT a shortfall.
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 3,
+        availability: boardsAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.RESERVED,
+      })
+    ).toBeNull();
+  });
+
+  it("(d) returns null for an already-checked-out-or-fulfilled row even when rowQty exceeds physicalNow", () => {
+    expect.assertions(1);
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 7,
+        availability: boardsAvailability,
+        contextStatus: AssetStatus.CHECKED_OUT,
+        bookingStatus: BookingStatus.ONGOING,
+      })
+    ).toBeNull();
+  });
+
+  it("does not warn amber once the booking has started (ONGOING/OVERDUE) even if rowQty exceeds physicalNow", () => {
+    expect.assertions(2);
+    // Row itself hasn't drawn from the pool yet (still AVAILABLE
+    // contextStatus) but the booking is active — amber only makes sense
+    // pre-start, so this must resolve to null, not "pending-return".
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 7,
+        availability: boardsAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.ONGOING,
+      })
+    ).toBeNull();
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 7,
+        availability: boardsAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.OVERDUE,
+      })
+    ).toBeNull();
+  });
+
+  it("returns null when availability is undefined (loader didn't ship the map, or INDIVIDUAL asset)", () => {
+    expect.assertions(1);
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 7,
+        availability: undefined,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.RESERVED,
+      })
+    ).toBeNull();
+  });
+
+  it("returns null for a finished booking (COMPLETE/ARCHIVED) even with a genuine shortfall", () => {
+    expect.assertions(2);
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 11,
+        availability: boardsAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.COMPLETE,
+      })
+    ).toBeNull();
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 11,
+        availability: boardsAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.ARCHIVED,
+      })
+    ).toBeNull();
+  });
+
+  it("treats at-capacity on bookable (rowQty === bookable) as NOT a shortfall (strict inequality)", () => {
+    expect.assertions(1);
+    // rowQty === bookable AND === physicalNow — no RED (at-capacity is fine)
+    // and no AMBER (physicalNow comparison is also strict).
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 10,
+        availability: { bookable: 10, physicalNow: 10 },
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.RESERVED,
+      })
+    ).toBeNull();
   });
 });

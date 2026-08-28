@@ -1,6 +1,15 @@
-import { AssetStatus, KitStatus, OrganizationRoles } from "@prisma/client";
+import {
+  type AssetType,
+  type ConsumptionType,
+  OrganizationRoles,
+} from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  serializeAssetImage,
+  type AssetImageSource,
+} from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
@@ -12,6 +21,11 @@ import {
   canUseAudits,
   canUseBarcodes,
 } from "~/utils/subscription.server";
+import {
+  computeCanSeeAllCustody,
+  filterMobileCustodyListForViewer,
+  viewerCanSeeLegacyCustody,
+} from "./mobile-custody-visibility.server";
 import { recordMobileActivity } from "./mobile-usage.server";
 
 /**
@@ -67,8 +81,17 @@ export async function requireMobileAuth(request: Request) {
       email: true,
       firstName: true,
       lastName: true,
+      displayName: true,
       profilePicture: true,
       onboarded: true,
+      // Date/time format preferences (raw, nullable). Surfaced on
+      // `/api/mobile/me` so the companion renders every date/time in the user's
+      // chosen format + timezone instead of device-local. Resolved client-side
+      // via `resolveFormatPrefs` (@shelf/datetime) with a device-hint fallback.
+      dateFormat: true,
+      timeFormat: true,
+      weekStart: true,
+      timeZone: true,
       deletedAt: true,
       lastMobileActiveAt: true,
     },
@@ -100,13 +123,41 @@ export async function requireMobileAuth(request: Request) {
 }
 
 /**
- * Fetches organizations for a user, with their roles.
+ * Fetches a user's organizations, with their roles, in landing order.
+ *
+ * `organizations[0]` is the workspace the companion should open: the app has
+ * no workspace cookie, so the ARRAY ORDER is the wire contract for where a
+ * session lands. The order mirrors the web resolver in
+ * `~/modules/organization/context.server.ts` so both clients answer "which
+ * workspace am I in?" the same way:
+ *
+ *   1. the user's `lastSelectedOrganizationId`, when they still belong to it
+ *   2. for non-SSO users, their personal workspace
+ *   3. everything else, oldest first (stable across calls)
+ *
+ * SSO users never see their personal workspace — it is filtered out here for
+ * the same reason the web filters it at every touchpoint: their membership is
+ * driven by the IdP, and the personal workspace is not part of that world.
+ *
+ * `lastSelectedOrganizationId` is also returned explicitly (null when unset or
+ * no longer valid) so the app can distinguish "the server picked for me" from
+ * "I chose this workspace" without re-deriving the hierarchy.
+ *
+ * @param userId - the authenticated user
+ * @returns organizations in landing order, plus the explicit last-selected id
  */
 export async function getUserOrganizations(userId: string) {
   const userOrgs = await db.userOrganization.findMany({
     where: { userId },
+    // Oldest-first base order keeps rank ties deterministic across calls; the
+    // id tie-break pins organizations created in the same instant.
+    orderBy: [
+      { organization: { createdAt: "asc" } },
+      { organization: { id: "asc" } },
+    ],
     select: {
       roles: true,
+      user: { select: { sso: true, lastSelectedOrganizationId: true } },
       organization: {
         select: {
           id: true,
@@ -120,18 +171,43 @@ export async function getUserOrganizations(userId: string) {
     },
   });
 
+  const isSSO = userOrgs[0]?.user?.sso === true;
+  const lastSelectedId = userOrgs[0]?.user?.lastSelectedOrganizationId ?? null;
+
+  const visible = isSSO
+    ? userOrgs.filter((uo) => uo.organization.type !== "PERSONAL")
+    : userOrgs;
+
+  const lastSelectedOrganizationId = visible.some(
+    (uo) => uo.organization.id === lastSelectedId
+  )
+    ? lastSelectedId
+    : null;
+
+  /** Landing rank per the hierarchy above; sort is stable, so ties keep the
+   * oldest-first base order. */
+  const rank = (uo: (typeof visible)[number]) => {
+    if (uo.organization.id === lastSelectedOrganizationId) return 0;
+    if (!isSSO && uo.organization.type === "PERSONAL") return 1;
+    return 2;
+  };
+  const ordered = [...visible].sort((a, b) => rank(a) - rank(b));
+
   // Serialize the *canonical* add-on capability (premium-aware), not the
   // raw DB flags, so the companion's client-side gating
   // (`currentOrg.auditsEnabled` / `.barcodesEnabled`) stays aligned with
   // the server gating, which now uses canUseAudits/canUseBarcodes. Without
   // this, non-premium/self-hosted deployments would allow the feature on
   // the API but hide it in the app.
-  return userOrgs.map((uo) => ({
-    ...uo.organization,
-    barcodesEnabled: canUseBarcodes(uo.organization),
-    auditsEnabled: canUseAudits(uo.organization),
-    roles: uo.roles,
-  }));
+  return {
+    organizations: ordered.map((uo) => ({
+      ...uo.organization,
+      barcodesEnabled: canUseBarcodes(uo.organization),
+      auditsEnabled: canUseAudits(uo.organization),
+      roles: uo.roles,
+    })),
+    lastSelectedOrganizationId,
+  };
 }
 
 /**
@@ -206,23 +282,46 @@ export async function requireMobilePermission({
  * a given organization. `canUseAudits`/`canUseBarcodes` reuse the canonical
  * subscription.server predicates so mobile matches webapp gating exactly.
  *
+ * Also returns `canSeeAllCustody` — the mobile twin of the flag the web's
+ * `requirePermission` returns (roles.server.ts:113-122): ADMIN/OWNER always
+ * see all custody; SELF_SERVICE/BASE only when the matching org override
+ * (`selfServiceCanSeeCustody` / `baseUserCanSeeCustody`) is enabled.
+ *
  * Used by mobile routes that call service layer functions requiring
- * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody).
+ * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody) and
+ * by routes that must gate custody visibility server-side.
  */
 export async function getMobileUserContext(
   userId: string,
   organizationId: string
 ): Promise<{
   role: OrganizationRoles;
+  /**
+   * Every role on this membership. `role` is `roles[0]`, which is wrong for
+   * any authorization decision: a membership ordered `[SELF_SERVICE, ADMIN]`
+   * resolves to SELF_SERVICE and an actual admin gets treated as restricted.
+   * Callers making a privilege decision should use this with
+   * `resolveMostPrivilegedRole`.
+   */
+  roles: OrganizationRoles[];
   canUseBarcodes: boolean;
   canUseAudits: boolean;
+  canSeeAllCustody: boolean;
 }> {
   const userOrg = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
     select: {
       roles: true,
       organization: {
-        select: { barcodesEnabled: true, auditsEnabled: true },
+        select: {
+          barcodesEnabled: true,
+          auditsEnabled: true,
+          // why: custody visibility is permission-gated per-org (web parity,
+          // see mobile-custody-visibility.server.ts); resolving the overrides
+          // here keeps it one query alongside the role.
+          selfServiceCanSeeCustody: true,
+          baseUserCanSeeCustody: true,
+        },
       },
     },
   });
@@ -236,13 +335,20 @@ export async function getMobileUserContext(
     });
   }
 
+  // why: roles is an array but we always operate on the first role; mirror
+  // the convention used in roles.server.ts and invite/service.server.ts so
+  // an empty array doesn't surface as `undefined` to downstream callers.
+  const role = userOrg.roles[0] ?? OrganizationRoles.BASE;
+
   return {
-    // why: roles is an array but we always operate on the first role; mirror
-    // the convention used in roles.server.ts and invite/service.server.ts so
-    // an empty array doesn't surface as `undefined` to downstream callers.
-    role: userOrg.roles[0] ?? OrganizationRoles.BASE,
+    role,
+    roles: userOrg.roles,
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
+    canSeeAllCustody: computeCanSeeAllCustody({
+      role,
+      organization: userOrg.organization,
+    }),
   };
 }
 
@@ -295,9 +401,33 @@ export const MOBILE_ASSET_SELECT = {
   id: true,
   title: true,
   status: true,
+  // The workspace-visible identifier ("SAM-0017"). Web shows it on the asset
+  // overview and the scanner invites you to type one, so every mobile surface
+  // that names an asset needs to be able to show WHICH id it is.
+  sequentialId: true,
   mainImage: true,
+  thumbnailImage: true,
+  // Cover image of the asset's model. `shapeMobileAssetResponse` resolves the
+  // cascade into `mainImage`/`thumbnailImage` before the row leaves the server,
+  // so the companion inherits model images with no client release.
+  ...ASSET_MODEL_IMAGE_SELECT,
   // why: powers the scan-to-booking "not available to book" blocker.
   availableToBook: true,
+  // why: the fulfil-and-check-out scanner matches each scan against the
+  // booking's outstanding BookingModelRequests. Without the model id the
+  // client cannot tell a matching unit from an off-model one, and can only
+  // count scans — which reads as progress toward a reservation it may not
+  // actually fulfil.
+  assetModelId: true,
+  // Quantity fields (additive). INDIVIDUAL assets carry `type: "INDIVIDUAL"`
+  // and null quantity columns; QUANTITY_TRACKED assets surface the totals the
+  // companion will use to DISPLAY quantity. The shaper passes these through
+  // verbatim alongside the existing legacy fields.
+  type: true,
+  quantity: true,
+  minQuantity: true,
+  unitOfMeasure: true,
+  consumptionType: true,
   category: { select: { name: true } },
   // Kit linkage now lives on the `AssetKit` pivot. shapeMobileAssetResponse
   // flattens `assetKits[0]` to top-level `kit` + `kitId` so the in-App-Store
@@ -311,9 +441,24 @@ export const MOBILE_ASSET_SELECT = {
     select: { location: { select: { id: true, name: true } } },
   },
   // Custody is now 1:many; the shaper flattens `custody[0]` so companion's
-  // `asset.custody?.custodian` single-object read still works.
+  // `asset.custody?.custodian` single-object read still works. We also select
+  // `quantity` so the shaper can surface the many-aware `custodyList` (the
+  // legacy single `custody` stays in place too). Ordered by `createdAt` so
+  // both the flattened `custody[0]` and `custodyList` are deterministic
+  // (the relation is otherwise unordered).
   custody: {
-    select: { custodian: { select: { id: true, name: true } } },
+    orderBy: { createdAt: "asc" },
+    select: {
+      quantity: true,
+      // why: `kitCustodyId` discriminates operator-assigned rows (null) from
+      // kit-allocated rows — the shaper sums the operator-only portion into
+      // `releasableQuantity` (kit-allocated units are released via the kit).
+      kitCustodyId: true,
+      // why: `custodian.userId` lets the companion recognize the caller's own
+      // custody row (self-service users may only release their own units).
+      // Web parity: CustodyCard already ships custodianUserId to the client.
+      custodian: { select: { id: true, name: true, userId: true } },
+    },
   },
 } as const;
 
@@ -409,13 +554,51 @@ export type MobileAssetResponse = {
   id: string;
   title: string;
   status: string;
+  /** Workspace-visible identifier, e.g. "SAM-0017". Null until one is assigned. */
+  sequentialId: string | null;
+  /** Model this asset belongs to, or null. Drives fulfil-scan matching. */
+  assetModelId?: string | null;
+  /**
+   * Image to render, with the model-image cascade already resolved: the
+   * asset's own image, else its model's cover image, else `null` (the
+   * companion draws its own placeholder — the placeholder PATH is never sent).
+   */
   mainImage: string | null;
+  /** 108px counterpart of {@link mainImage}, resolved from the same tier. */
+  thumbnailImage: string | null;
+  /**
+   * Where {@link mainImage} came from. Additive — lets the companion label an
+   * inherited image later without a second request.
+   */
+  imageSource: AssetImageSource;
   availableToBook: boolean;
   category: { name: string } | null;
   kitId: string | null;
   kit: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
-  custody: { custodian: { id: string; name: string } } | null;
+  // Legacy single custody. `custodian.userId` is additive (nullable — NRM
+  // custodians have no linked auth user); web's CustodyCard ships it too.
+  custody: {
+    custodian: { id: string; name: string; userId: string | null };
+  } | null;
+  // Quantity fields (additive). Surfaced so the companion can DISPLAY
+  // quantity data; the existing legacy fields above are unchanged.
+  type: AssetType;
+  quantity: number | null;
+  minQuantity: number | null;
+  unitOfMeasure: string | null;
+  consumptionType: ConsumptionType | null;
+  // Many-aware custody list. `custody` (above) keeps the legacy single
+  // object for the in-App-Store build; `custodyList` carries every row with
+  // its quantity for QUANTITY_TRACKED assets that may have multiple holders.
+  // `custodian.userId` (nullable — NRM custodians have none) lets the app
+  // recognize the caller's own row; `releasableQuantity` is the operator-
+  // assigned portion (kit-allocated units release via the kit's custody).
+  custodyList: Array<{
+    custodian: { id: string; name: string; userId: string | null };
+    quantity: number;
+    releasableQuantity: number;
+  }>;
 };
 
 /**
@@ -445,20 +628,147 @@ export function shapeMobileAssetResponse(asset: {
   id: string;
   title: string;
   status: string;
+  sequentialId: string | null;
   mainImage: string | null;
+  thumbnailImage: string | null;
+  assetModel: { image: string | null; thumbnailImage: string | null } | null;
   availableToBook: boolean;
   category: { name: string } | null;
+  type: AssetType;
+  quantity: number | null;
+  minQuantity: number | null;
+  unitOfMeasure: string | null;
+  consumptionType: ConsumptionType | null;
   assetKits: Array<{ kit: { id: string; name: string } }>;
   assetLocations: Array<{ location: { id: string; name: string } }>;
-  custody: Array<{ custodian: { id: string; name: string } }>;
+  custody: Array<{
+    quantity: number;
+    kitCustodyId: string | null;
+    custodian: { id: string; name: string; userId: string | null };
+  }>;
 }): MobileAssetResponse {
   const { assetKits, assetLocations, custody, ...rest } = asset;
   const kit = assetKits[0]?.kit ?? null;
+  /**
+   * Collapse the model-image cascade before the row leaves the server. The
+   * companion reads `mainImage`/`thumbnailImage` directly and cannot be
+   * updated in lockstep with the API (native binary, no OTA for native
+   * changes), so resolving here is what makes inherited images work without a
+   * client release. `imageSource` is additive, for later provenance UI.
+   */
+  const image = serializeAssetImage(rest);
+  // Aggregate custody rows by custodian so a holder with more than one row on
+  // the same asset (e.g. a kit-driven row plus a standalone row) shows once
+  // with their summed quantity rather than duplicated. Insertion order follows
+  // the `createdAt`-ordered select, so the list stays deterministic.
+  // `releasableQuantity` sums only operator-assigned rows (kitCustodyId null);
+  // kit-allocated units are only released by releasing the kit's custody.
+  const custodyList: MobileAssetResponse["custodyList"] = [];
+  const custodyIndexById = new Map<string, number>();
+  for (const c of custody) {
+    const releasable = c.kitCustodyId === null ? c.quantity : 0;
+    const existingIndex = custodyIndexById.get(c.custodian.id);
+    if (existingIndex === undefined) {
+      custodyIndexById.set(c.custodian.id, custodyList.length);
+      custodyList.push({
+        custodian: c.custodian,
+        quantity: c.quantity,
+        releasableQuantity: releasable,
+      });
+    } else {
+      custodyList[existingIndex].quantity += c.quantity;
+      custodyList[existingIndex].releasableQuantity += releasable;
+    }
+  }
   return {
-    ...rest,
+    // `...image` carries `...rest` through verbatim (including the new scalar
+    // quantity fields) with the image cascade already resolved.
+    ...image,
     kitId: kit?.id ?? null,
     kit,
     location: assetLocations[0]?.location ?? null,
-    custody: custody[0] ?? null,
+    // Legacy single-or-null custody for the in-App-Store build. `userId` is
+    // additive (web parity: CustodyCard ships custodianUserId too).
+    custody: custody[0] ? { custodian: custody[0].custodian } : null,
+    // Many-aware custody list (additive) — every holder + their summed quantity.
+    custodyList,
   };
+}
+
+/**
+ * `MobileAssetResponse` plus the custody-visibility metadata added by
+ * {@link getMobileAssetForViewer}: `custodyListOthersCount` is the number of
+ * holders hidden from the viewer (0 when the viewer can see all custody), so
+ * the companion can render "+N others" — mirroring the web's
+ * `QuantityCustodyList` hidden-count (quantity-custody-list.tsx:126).
+ */
+export type MobileAssetForViewer = MobileAssetResponse & {
+  custodyListOthersCount: number;
+};
+
+/**
+ * Fetches an asset and shapes it for a SPECIFIC mobile viewer: the standard
+ * `MOBILE_ASSET_SELECT` + `shapeMobileAssetResponse` pair, with the custody
+ * fields filtered by the web's custody-visibility rules (see
+ * mobile-custody-visibility.server.ts) so viewers without custody-view
+ * permission only receive their own custody entries.
+ *
+ * Used by the quantity-custody action endpoints to return the refreshed
+ * asset in the success envelope, saving the app a second round trip.
+ *
+ * @param args.assetId - The asset to fetch (org-scoped)
+ * @param args.organizationId - The caller's active organization
+ * @param args.viewerUserId - The authenticated caller's user id
+ * @param args.canSeeAllCustody - From {@link getMobileUserContext}
+ * @returns The viewer-shaped asset, or null when not found in the org
+ */
+export async function getMobileAssetForViewer({
+  assetId,
+  organizationId,
+  viewerUserId,
+  canSeeAllCustody,
+}: {
+  assetId: string;
+  organizationId: string;
+  viewerUserId: string;
+  canSeeAllCustody: boolean;
+}): Promise<MobileAssetForViewer | null> {
+  const asset = await db.asset.findUnique({
+    // why: inline-scope to org so cross-org probes read nothing — matches
+    // the pattern used by every other mobile route.
+    where: { id: assetId, organizationId },
+    // MOBILE_ASSET_SELECT's custody select already carries `custodian.userId`
+    // (own-row detection; web parity) and `kitCustodyId` (releasableQuantity).
+    // Shipping userId on VISIBLE rows is deliberate — privacy is enforced by
+    // the row-level filter below, which removes rows the viewer may not see.
+    select: MOBILE_ASSET_SELECT,
+  });
+
+  if (!asset) return null;
+
+  const shaped = shapeMobileAssetResponse(asset);
+
+  const { custodyList, custodyListOthersCount } =
+    filterMobileCustodyListForViewer({
+      custodyList: shaped.custodyList,
+      custodyRows: asset.custody,
+      viewerUserId,
+      canSeeAllCustody,
+    });
+
+  // Legacy single `custody` follows the web's specific-custody rule (see
+  // viewerCanSeeLegacyCustody): hidden unless the viewer can see all custody
+  // or IS the (primary) custodian.
+  const primaryCustody = asset.custody[0] ?? null;
+  const custody =
+    primaryCustody &&
+    viewerCanSeeLegacyCustody({
+      custodianUserId: primaryCustody.custodian.userId,
+      viewerUserId,
+      canSeeAllCustody,
+    })
+      ? shaped.custody
+      : null;
+
+  return { ...shaped, custody, custodyList, custodyListOthersCount };
 }

@@ -1,3 +1,4 @@
+import { OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -5,8 +6,12 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getBookings } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * GET /api/mobile/dashboard
@@ -30,10 +35,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // (canUseAudits, surfaced through getMobileUserContext) so the
     // dashboard never serves activeAudits to non-add-on workspaces — a
     // paywall bypass / data leak even with the client cards hidden.
-    const { canUseAudits } = await getMobileUserContext(
+    // The same call yields the caller's `role`, which gates booking
+    // visibility below.
+    const { canUseAudits, role } = await getMobileUserContext(
       user.id,
       organizationId
     );
+
+    // Scope the booking sections to the caller's own bookings for
+    // self-service / base users, who may only see bookings they are the
+    // custodian of. `requireOrganizationAccess` above proves membership but
+    // performs NO role check, so without this restriction any member could
+    // read every booking in the workspace — with custodian names attached —
+    // straight off the dashboard.
+    //
+    // Mirrors the mobile bookings list (`bookings.ts`), which draws the same
+    // line for the same roles. Passed as `custodianScope` — a restriction
+    // `getBookings` ANDs into the query, so it can only ever narrow. Left
+    // `null` for owners/admins, who see all bookings.
+    //
+    // NOTE: this deliberately does not mirror the web dashboard, which denies
+    // self-service/base the page outright (`PermissionEntity.dashboard` is
+    // empty for both). The companion's Home tab is the app's landing screen
+    // for every role, not an admin analytics surface — denying it would leave
+    // those users on a permanent error state rather than a scoped dashboard.
+    const isSelfServiceOrBase =
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE;
+    const custodianScope = isSelfServiceOrBase ? { userId: user.id } : null;
 
     // Run all queries in parallel for speed
     const [
@@ -96,6 +125,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           title: true,
           status: true,
           mainImage: true,
+          thumbnailImage: true,
+          // Model cover image; `serializeAssetImage` below resolves the cascade
+          ...ASSET_MODEL_IMAGE_SELECT,
           category: { select: { id: true, name: true, color: true } },
           createdAt: true,
         },
@@ -108,16 +140,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
         perPage: 5,
         statuses: ["RESERVED"],
         userId: user.id,
+        custodianScope,
         bookingFrom: new Date(),
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
           custodianTeamMember: { select: { name: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -128,15 +167,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
         perPage: 5,
         statuses: ["ONGOING"],
         userId: user.id,
+        custodianScope,
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
           custodianTeamMember: { select: { name: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -147,15 +193,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
         perPage: 5,
         statuses: ["OVERDUE"],
         userId: user.id,
+        custodianScope,
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
           custodianTeamMember: { select: { name: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -194,19 +247,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
       statusCounts[group.status] = group._count.id;
     }
 
+    /**
+     * The booking row shape the three `getBookings` calls above produce, as
+     * far as this projection reads it.
+     *
+     * Spelled out instead of `any` because the field it gets wrong is
+     * invisible at runtime: the previous `b._count?.assets` named a relation
+     * that does not exist on `Booking` (it is `bookingAssets`) and no `_count`
+     * was selected at all, so every booking reported `assetCount: 0` and the
+     * `any` kept the compiler quiet about it.
+     */
+    type MobileDashboardBooking = {
+      id: string;
+      name: string;
+      status: string;
+      from: Date | string | null;
+      to: Date | string | null;
+      /**
+       * `UserNameFields` rather than the name halves spelled out: it requires
+       * `displayName`, so this shape cannot drift back to naming the custodian
+       * by their legal name without failing to compile.
+       */
+      custodianUser?: UserNameFields | null;
+      custodianTeamMember?: { name: string } | null;
+      _count?: { bookingAssets: number };
+    };
+
     // Format booking results
-    const formatBooking = (b: any) => ({
+    const formatBooking = (b: MobileDashboardBooking) => ({
       id: b.id,
       name: b.name,
       status: b.status,
-      from: b.from?.toISOString?.() ?? b.from,
-      to: b.to?.toISOString?.() ?? b.to,
+      from: b.from instanceof Date ? b.from.toISOString() : b.from,
+      to: b.to instanceof Date ? b.to.toISOString() : b.to,
       custodianName: b.custodianUser
-        ? [b.custodianUser.firstName, b.custodianUser.lastName]
-            .filter(Boolean)
-            .join(" ") || null
+        ? resolveUserDisplayName(b.custodianUser) || null
         : b.custodianTeamMember?.name || null,
-      assetCount: b._count?.assets ?? 0,
+      assetCount: b._count?.bookingAssets ?? 0,
     });
 
     return data({
@@ -218,14 +295,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
         myCustody: myCustodyCount,
       },
       assetsByStatus: statusCounts,
-      newestAssets: newestAssets.map((a) => ({
-        id: a.id,
-        title: a.title,
-        status: a.status,
-        mainImage: a.mainImage,
-        category: a.category,
-        createdAt: a.createdAt.toISOString(),
-      })),
+      newestAssets: newestAssets.map((a) => {
+        // Hand-written projection, so typecheck can't catch a dropped field —
+        // resolve the model-image cascade explicitly here, or an asset that
+        // inherits its image shows blank on the companion's dashboard.
+        const { image, ...rest } = {
+          ...a,
+          image: resolveAssetImage({
+            mainImage: a.mainImage,
+            thumbnailImage: a.thumbnailImage,
+            assetModel: a.assetModel,
+          }),
+        };
+        return {
+          id: rest.id,
+          title: rest.title,
+          status: rest.status,
+          mainImage: image.source === "placeholder" ? null : image.fullUrl,
+          thumbnailImage:
+            image.source === "placeholder" ? null : image.thumbnailUrl,
+          imageSource: image.source,
+          category: rest.category,
+          createdAt: rest.createdAt.toISOString(),
+        };
+      }),
       upcomingBookings: upcomingBookingsResult.bookings.map(formatBooking),
       activeBookings: activeBookingsResult.bookings.map(formatBooking),
       overdueBookings: overdueBookingsResult.bookings.map(formatBooking),

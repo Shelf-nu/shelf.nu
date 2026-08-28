@@ -8,9 +8,11 @@ import {
   getOrganizationTierLimit,
   updateUserTierId,
 } from "~/modules/tier/service.server";
+import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { SERVER_URL, STRIPE_SECRET_KEY } from "./env";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
+import type { UserNameFields } from "./user";
 
 const label: ErrorLabel = "Stripe";
 export const premiumIsEnabled = config.enablePremiumFeatures;
@@ -303,6 +305,9 @@ export async function getOrCreateCustomerId(
     ? user.customerId
     : await createStripeCustomer({
         email: user.email,
+        // why: out of the display-name rule — this names the billing customer
+        // on invoices and in Stripe's records, where the legal name is the one
+        // that has to appear.
         name: `${user.firstName} ${user.lastName}`,
         userId: user.id,
       });
@@ -756,7 +761,7 @@ export async function getCustomerNotificationData({
   user,
 }: {
   customerId: string;
-  user: { email: string; firstName: string | null };
+  user: UserNameFields & { email: string };
 }) {
   const stripeCustomer = await stripe.customers.retrieve(customerId);
   const stripeEmail =
@@ -771,7 +776,12 @@ export async function getCustomerNotificationData({
 
   return {
     emailsToNotify,
-    customerName: stripeName || user.firstName,
+    /**
+     * `customerName` is a salutation ("Hey {name},"), not a billing name — so a
+     * display name outranks the name Stripe holds, which is the legal one we
+     * registered for invoices.
+     */
+    customerName: user.displayName?.trim() || stripeName || user.firstName,
   };
 }
 
@@ -783,10 +793,13 @@ export async function getInvoiceNotificationData({
   customerId,
   invoice,
   user,
+  prefs,
 }: {
   customerId: string;
   invoice: Stripe.Invoice;
-  user: { email: string; firstName: string | null };
+  user: UserNameFields & { email: string };
+  /** Resolved formatting prefs of the billed (recipient) user. */
+  prefs: ResolvedFormatPrefs;
 }) {
   const { emailsToNotify, customerName } = await getCustomerNotificationData({
     customerId,
@@ -800,7 +813,7 @@ export async function getInvoiceNotificationData({
     currency: invoice.currency,
   }).format(invoice.amount_due / 100);
   const dueDate = invoice.due_date
-    ? new Date(invoice.due_date * 1000).toLocaleDateString("en-US", {
+    ? formatDate(new Date(invoice.due_date * 1000), prefs, {
         year: "numeric",
         month: "long",
         day: "numeric",

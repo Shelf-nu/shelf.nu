@@ -34,6 +34,7 @@ import {
   KitAvailabilityLabel,
 } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
+import { ManageModelRequests } from "~/components/booking/manage-model-requests";
 import styles from "~/components/booking/styles.css?url";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
@@ -59,6 +60,7 @@ import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
+import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
   getBooking,
   getDetailedPartialCheckinData,
@@ -67,15 +69,23 @@ import {
   updateBookingAssets,
   createKitBookingNote,
 } from "~/modules/booking/service.server";
+import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { getClientHint } from "~/utils/client-hints";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { payload, error, getParams, parseData } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getParams,
+  parseData,
+  safeRedirect,
+} from "~/utils/http.server";
 import {
   wrapAssetWithCountForNote,
   wrapLinkForNote,
@@ -86,6 +96,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 export const meta = () => [{ title: appendToMetaTitle("Manage kits") }];
 
@@ -142,13 +153,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const {
+      organizationId,
+      userOrganizations,
+      isSelfServiceOrBase,
+      canSeeAllCustody,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     const modelName = {
       singular: "kit",
@@ -188,11 +203,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking.bookingAssets.map((ba) => ba.asset)
     );
 
+    /**
+     * Book-by-Model — Models tab payload. Shared with the manage-assets
+     * loader via `getBookingModelTabData` so both surfaces compute model
+     * availability identically (see the helper's JSDoc for the "total −
+     * inCustody − reserved" formula).
+     */
+    const modelTabData = await getBookingModelTabData({
+      organizationId,
+      booking,
+    });
+
     const { page, perPage, kits, search, totalKits, totalPages } =
       await getPaginatedAndFilterableKits({
         request,
         organizationId,
         currentBookingId: bookingId,
+        // Only reaches `?teamMember=` here; pass the resolved rule so an
+        // admin's custodian filter still works on this dialog.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
           assetKits: {
@@ -269,9 +299,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       perPage,
       totalPages,
       search,
-      items: kits,
+      // `KITS_INCLUDE_FIELDS` selects the whole `custody.custodian.user`,
+      // `email` included, and this picker is reachable with `booking: update`
+      // — which BASE and SELF_SERVICE both hold on their own DRAFT booking.
+      // Scoping the custodian FILTER (above) does not shape the rows, so the
+      // identity has to be redacted here too. Not the literal `false` passed to
+      // the filter: that argument is deliberately fixed for a seed nothing
+      // renders, and reusing it would redact for ADMIN/OWNER as well.
+      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
       totalItems: totalKits,
       bookingKitIds,
+      ...modelTabData,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -424,17 +462,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // `assetId`). This is what fixes the multi-kit-per-asset drop: a
     // qty-tracked asset in two kits added to one booking now yields two
     // kit-driven `BookingAsset` rows.
-    const kitSlices: Array<{
-      assetId: string;
-      assetKitId: string;
-      quantity: number;
-    }> = [];
+    const kitSlices: KitSliceSpec[] = [];
     for (const kit of selectedKits) {
       for (const ak of kit.assetKits) {
         if (existingAssetKitIds.has(ak.id)) continue; // kit-slice already present
         kitSlices.push({
           assetId: ak.asset.id,
           assetKitId: ak.id,
+          // Durable provenance — persisted to `BookingAsset.sourceKitId`, which
+          // outlives the `AssetKit` row `assetKitId` points at.
+          kitId: kit.id,
           quantity: ak.quantity,
         });
       }
@@ -551,11 +588,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        * slice loop the BookingAsset insert uses, so the per-row
        * AssetKit.quantity is naturally what we name in the note.
        */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, booking.name);
       const assetKitToKit = new Map<string, { id: string; name: string }>();
       for (const kit of newlyAddedKits) {
@@ -609,6 +642,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         booking: { id: bookingId, assetIds: allRemovedAssetIds },
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
+        displayName: user?.displayName ?? null,
         userId,
         kitIds: removedKitIds,
         kits: removedKits.map((kit) => ({ id: kit.id, name: kit.name })),
@@ -637,10 +671,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     /**
      * If redirectTo is in form that means user has submitted the form through alert dialog,
-     * so we have to redirect to manage-assets url
+     * so we have to redirect to manage-assets url. `redirectTo` is a
+     * client-supplied form value, so route it through `safeRedirect` to block
+     * open-redirects to another origin — falling back to the booking page.
      */
     if (redirectTo) {
-      return redirect(redirectTo);
+      return redirect(safeRedirect(redirectTo, `/bookings/${bookingId}`));
     }
 
     return redirect(`/bookings/${bookingId}`);
@@ -654,7 +690,23 @@ export default function AddKitsToBooking() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, items, bookingKitIds } = useLoaderData<typeof loader>();
+  const {
+    booking,
+    items,
+    bookingKitIds,
+    showModelsTab,
+    assetModels,
+    modelRequests,
+  } = useLoaderData<typeof loader>();
+
+  /**
+   * Local state for the active tab value. "kits" is the default on mount.
+   * "assets" always navigates away (existing manage-assets route); "models"
+   * renders inline via `ManageModelRequests`, mirroring manage-assets' tab
+   * pattern.
+   */
+  const [activeTab, setActiveTab] = useState<"kits" | "models">("kits");
+
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -689,6 +741,16 @@ export default function AddKitsToBooking() {
     (ba) => ba.asset.assetKits.length === 0
   ).length;
   const hasUnsavedChanges = selectedBulkItems.length !== bookingKitIds.length;
+
+  /**
+   * Total quantity reserved via model-level requests — shown as a count
+   * badge on the Models tab trigger, identical to manage-assets
+   * (`manage-assets.tsx` — `totalModelRequestUnits`).
+   */
+  const totalModelRequestUnits = useMemo(
+    () => modelRequests.reduce((acc, req) => acc + req.quantity, 0),
+    [modelRequests]
+  );
 
   /**
    * Set selected items for kit based on the route data.
@@ -727,14 +789,23 @@ export default function AddKitsToBooking() {
   return (
     <Tabs
       className="flex h-full max-h-full flex-col"
-      value="kits"
-      onValueChange={() => {
-        if (hasUnsavedChanges) {
-          setIsAlertOpen(true);
+      value={activeTab}
+      activationMode="manual"
+      onValueChange={(nextValue) => {
+        // "assets" always navigates away (existing route). "kits" and
+        // "models" render inline on this route — just update the
+        // active-tab state.
+        if (nextValue === "assets") {
+          if (hasUnsavedChanges) {
+            setIsAlertOpen(true);
+            return;
+          }
+          void navigate(manageAssetsUrl);
           return;
         }
-
-        void navigate(manageAssetsUrl);
+        if (nextValue === "models" || nextValue === "kits") {
+          setActiveTab(nextValue);
+        }
       }}
     >
       <div className="border-b px-6 py-2">
@@ -755,14 +826,39 @@ export default function AddKitsToBooking() {
               </GrayBadge>
             ) : null}
           </TabsTrigger>
+          {showModelsTab ? (
+            <TabsTrigger
+              className="flex-1 gap-x-2"
+              value="models"
+              aria-label={`Models tab${
+                totalModelRequestUnits > 0
+                  ? ` (${totalModelRequestUnits} reserved)`
+                  : ""
+              }`}
+            >
+              Models
+              {totalModelRequestUnits > 0 ? (
+                <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                  {totalModelRequestUnits}
+                </GrayBadge>
+              ) : null}
+            </TabsTrigger>
+          ) : null}
         </TabsList>
       </div>
 
-      <Filters
-        slots={{ "right-of-search": <AvailabilitySelect label="kits" /> }}
-        innerWrapperClassName="justify-between"
-        className="justify-between !border-t-0 border-b px-6 md:flex"
-      />
+      {/*
+       * The kit availability filter only makes sense on the Kits tab. The
+       * Models tab uses its own picker + availability hints (via
+       * `ManageModelRequests`).
+       */}
+      {activeTab === "kits" ? (
+        <Filters
+          slots={{ "right-of-search": <AvailabilitySelect label="kits" /> }}
+          innerWrapperClassName="justify-between"
+          className="justify-between !border-t-0 border-b px-6 md:flex"
+        />
+      ) : null}
 
       <TabsContent value="kits" asChild>
         <List
@@ -799,11 +895,40 @@ export default function AddKitsToBooking() {
         />
       </TabsContent>
 
-      {/* Footer of the modal */}
-      <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
-        <div className="flex flex-col justify-center gap-1">
-          {selectedBulkItems.length} kits selected
-        </div>
+      {showModelsTab ? (
+        <TabsContent
+          value="models"
+          className="mt-0 flex min-h-0 flex-1 flex-col"
+        >
+          <ManageModelRequests
+            bookingId={booking.id}
+            assetModels={assetModels}
+            modelRequests={modelRequests}
+          />
+        </TabsContent>
+      ) : null}
+
+      {/*
+       * Footer of the modal. The `<Form ref={formRef}>` (and every hidden
+       * input in it) is ALWAYS mounted, regardless of `activeTab`:
+       * `UnsavedChangesAlert.onYes` submits `formRef.current` directly, so
+       * switching tabs must not leave that ref null (a conditionally-mounted
+       * form would make confirm-from-alert silently no-op on the non-Kits
+       * tabs). Only the visible "N kits selected" text and the Confirm button
+       * are Kits-tab-only: the Models tab has no standalone save of its own
+       * (each reservation posts inline via the model-requests API route).
+       */}
+      <footer
+        className={tw(
+          "mt-auto flex shrink-0 items-center border-t px-6 py-3",
+          activeTab === "kits" ? "justify-between" : "justify-end"
+        )}
+      >
+        {activeTab === "kits" ? (
+          <div className="flex flex-col justify-center gap-1">
+            {selectedBulkItems.length} kits selected
+          </div>
+        ) : null}
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
             Close
@@ -831,14 +956,17 @@ export default function AddKitsToBooking() {
             {hasUnsavedChanges && isAlertOpen ? (
               <input name="redirectTo" value={manageAssetsUrl} type="hidden" />
             ) : null}
-            <Button
-              type="submit"
-              name="intent"
-              value="addKits"
-              disabled={isSearching}
-            >
-              Confirm
-            </Button>
+            {/* Omitted entirely (not just hidden) on the Models tab — see the comment above the footer. */}
+            {activeTab === "kits" ? (
+              <Button
+                type="submit"
+                name="intent"
+                value="addKits"
+                disabled={isSearching}
+              >
+                Confirm
+              </Button>
+            ) : null}
           </Form>
         </div>
       </footer>
@@ -865,7 +993,11 @@ function Row({ item: kit }: { item: KitForBooking }) {
   const { isCheckedOut } = getKitAvailabilityStatus(kit, booking.id);
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: kit, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: kit,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
     : null;
 
   // For Case 1: Check if kit is checked out in current booking

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    This file is an EXAMPLE configuration file containing some example attributes
+    based on some commonly used approaches when LDAP is the principal data source.
+     
+    Not all attribute definitions or data connectors are demonstrated, but some
+    LDAP attributes common to Shibboleth deployments (and some not so common) are
+    included.
+
+    This example is in no way usable as a substitute for reading the documentation.    
+-->
+<AttributeResolver
+        xmlns="urn:mace:shibboleth:2.0:resolver"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="urn:mace:shibboleth:2.0:resolver http://shibboleth.net/schema/idp/shibboleth-attribute-resolver.xsd">
+
+    <!-- ========================================== -->
+    <!--      Attribute Definitions                 -->
+    <!-- ========================================== -->
+
+    <!-- Simple attributes are exported directly from the LDAP connector. -->
+
+    <!-- eduPerson attributes requiring post-lookup manipulation -->
+<!-- 
+
+    <AttributeDefinition xsi:type="Prescoped" id="eduPersonPrincipalName">
+        <InputDataConnector ref="myLDAP" attributeNames="eduPersonPrincipalName"/>
+    </AttributeDefinition>
+
+    <AttributeDefinition xsi:type="Prescoped" id="eduPersonPrincipalNamePrior">
+        <InputDataConnector ref="myLDAP" attributeNames="eduPersonPrincipalNamePrior"/>
+    </AttributeDefinition>
+
+    <AttributeDefinition xsi:type="Scoped" id="eduPersonScopedAffiliation" scope="%{idp.scope}">
+        <InputDataConnector ref="myLDAP" attributeNames="eduPersonAffiliation"/>
+    </AttributeDefinition>
+-->
+
+    <!-- Schema: SAML Subject ID Attributes -->
+<!--
+    <AttributeDefinition xsi:type="Scoped" id="samlSubjectID" scope="%{idp.scope}">
+        <InputDataConnector ref="myLDAP" attributeNames="%{idp.persistentId.sourceAttribute}"/>
+    </AttributeDefinition>
+
+    <AttributeDefinition xsi:type="Scoped" id="samlPairwiseID" scope="%{idp.scope}">
+        <InputDataConnector ref="computed" attributeNames="computedId"/>
+    </AttributeDefinition>
+-->
+
+    <!-- ========================================== -->
+    <!--      Data Connectors                       -->
+    <!-- ========================================== -->
+
+    <!-- Example LDAP Connector -->
+
+    <DataConnector id="myLDAP" xsi:type="LDAPDirectory"
+        ldapURL="%{idp.attribute.resolver.LDAP.ldapURL}"
+        baseDN="%{idp.attribute.resolver.LDAP.baseDN}" 
+        principal="%{idp.attribute.resolver.LDAP.bindDN}"
+        principalCredential="%{idp.attribute.resolver.LDAP.bindDNCredential}"
+        useStartTLS="%{idp.attribute.resolver.LDAP.useStartTLS:true}"
+        startTLSTimeout="%{idp.attribute.resolver.LDAP.startTLSTimeout}"
+        connectTimeout="%{idp.attribute.resolver.LDAP.connectTimeout}"
+        trustFile="%{idp.attribute.resolver.LDAP.trustCertificates}"
+        responseTimeout="%{idp.attribute.resolver.LDAP.responseTimeout}"
+        connectionStrategy="%{idp.attribute.resolver.LDAP.connectionStrategy}"
+        noResultIsError="true"
+        multipleResultsIsError="true"
+        excludeResolutionPhases="c14n/attribute"
+        exportAttributes="mail displayName sn givenName departmentNumber employeeNumber eduPersonEntitlement eduPersonAssurance">
+        <FilterTemplate>
+            <![CDATA[
+                %{idp.attribute.resolver.LDAP.searchFilter}
+            ]]>
+        </FilterTemplate>
+        <ConnectionPool
+            minPoolSize="%{idp.pool.LDAP.minSize:3}"
+            maxPoolSize="%{idp.pool.LDAP.maxSize:10}"
+            blockWaitTime="%{idp.pool.LDAP.blockWaitTime:PT3S}"
+            validatePeriodically="%{idp.pool.LDAP.validatePeriodically:true}"
+            validateTimerPeriod="%{idp.pool.LDAP.validatePeriod:PT5M}"
+            validateDN="%{idp.pool.LDAP.validateDN:}"
+            validateOnCheckout="%{idp.pool.LDAP.validateOnCheckout:false}"
+            validateFilter="%{idp.pool.LDAP.validateFilter:(objectClass=*)}"
+            prunePeriod="%{idp.pool.LDAP.prunePeriod:PT5M}"
+            expirationTime="%{idp.pool.LDAP.idleTime:PT10M}"/>
+    </DataConnector>
+
+    <!--
+    DataConnector for pairwise-id (example depends in part on saml-nameid.properties).
+    Note that this relies on BASE32 encoding in accordance with the attribute definition.
+    Older uses of this plugin for legacy eduPersonTargetedID/NameID values may require
+    different settings.
+    -->
+<!-- 
+    <DataConnector id="computed" xsi:type="ComputedId"
+        excludeResolutionPhases="c14n/attribute"
+	    generatedAttributeID="computedId"
+	    salt="%{idp.persistentId.salt}"
+	    algorithm="%{idp.persistentId.algorithm:SHA}"
+        encoding="BASE32">
+	    
+        <InputDataConnector ref="myLDAP" attributeNames="%{idp.persistentId.sourceAttribute}" />
+        
+	</DataConnector>
+-->
+
+</AttributeResolver>

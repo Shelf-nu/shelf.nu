@@ -1,0 +1,128 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Book by model (reserve, edit, remove, see)"
+tags:
+  - bookings
+  - models
+  - high-impact
+
+---
+# Full book-by-model lifecycle on the mobile app (feature parity with the web
+# "Models" tab): create a DRAFT booking -> open the availability picker's
+# Models tab -> reserve N units of an asset model -> edit that reservation ->
+# see it on the booking detail's "Reserved models" section -> remove it.
+#
+# PRECONDITIONS (like the sibling lifecycle flow 07):
+#   - GRANULAR WORKSPACE (TEAM) selected
+#   - team member "Dr. Sarah Mitchell" exists
+#   - the workspace has at least one AssetModel with available INDIVIDUAL units
+#     (the Models picker is empty otherwise — book-by-model needs models)
+#
+# @see ../../../app/(tabs)/bookings/add-assets.tsx  Models segment
+# @see ../../../app/(tabs)/bookings/[id].tsx        Reserved models section
+
+- runFlow: ../../shared/login.yaml
+
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+# ── Create a DRAFT booking to reserve models against ──
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 15000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "Booking name, required"
+    timeout: 15000
+- tapOn: "Booking name, required"
+- inputText: "QA Model Booking"
+- scrollUntilVisible:
+    element:
+      text: "Select a custodian"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Select a custodian"
+- extendedWaitUntil:
+    visible: "Select Team Member"
+    timeout: 15000
+- tapOn: ".*Sarah Mitchell.*"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 10000
+- tapOn: "Create booking"
+- extendedWaitUntil:
+    visible: "QA Model Booking"
+    timeout: 20000
+
+# ── Open the availability picker and switch to the Models tab ──
+- extendedWaitUntil:
+    visible: "Browse available assets and kits to add"
+    timeout: 15000
+- tapOn: "Browse available assets and kits to add"
+- extendedWaitUntil:
+    visible: "Models"
+    timeout: 15000
+- tapOn: "Models"
+- waitForAnimationToEnd
+- takeScreenshot: booking-models-picker
+
+# ── Reserve the first available model ──
+# Tap whatever model row exposes a "Reserve" action (accessibilityLabel
+# "Reserve units of <name>"). If this fails, the workspace has no models with
+# availability — seed one first (see preconditions).
+- extendedWaitUntil:
+    visible: ".*Reserve units of.*"
+    timeout: 15000
+- tapOn: ".*Reserve units of.*"
+# Quantity sheet opens ("Reserve model"); the default seeded value is fine.
+- extendedWaitUntil:
+    visible: "Reserve model"
+    timeout: 10000
+- takeScreenshot: booking-model-quantity-sheet
+- tapOn: "Reserve"
+# Back on the picker — the reserved row now offers "Edit" instead of "Reserve".
+- extendedWaitUntil:
+    visible: ".*reservation, currently.*"
+    timeout: 15000
+- takeScreenshot: booking-model-reserved
+
+# ── Edit the reservation quantity ──
+- tapOn: ".*reservation, currently.*"
+- extendedWaitUntil:
+    visible: "Edit reservation"
+    timeout: 10000
+- tapOn:
+    "Increase quantity"
+    # bump the reserved count by one (guarded by availability cap in the sheet)
+- tapOn: "Reserve"
+- extendedWaitUntil:
+    visible: ".*reservation, currently.*"
+    timeout: 15000
+
+# ── Go back to the booking detail and confirm it shows under Reserved models ──
+- back
+- extendedWaitUntil:
+    visible: ".*Reserved models.*"
+    timeout: 20000
+- takeScreenshot: booking-detail-reserved-models
+
+# ── Manage -> remove the reservation ──
+# "Manage reserved models" opens the picker's Models tab directly (mode=models).
+- tapOn: "Manage reserved models"
+- extendedWaitUntil:
+    visible: ".*Remove.*reservation.*"
+    timeout: 15000
+- tapOn: ".*Remove.*reservation.*"
+- extendedWaitUntil:
+    visible: "Remove reservation"
+    timeout: 10000
+- tapOn: "Remove"
+- extendedWaitUntil:
+    visible: ".*Reserve units of.*"
+    timeout: 15000
+- takeScreenshot: booking-model-removed

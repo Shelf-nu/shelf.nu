@@ -32,8 +32,11 @@ export const AuditImagesComponent = React.memo(
     ids,
     disablePortal,
   }: AuditImagesComponentProps) {
-    // Cheap string interpolation — safe to inline (recomputed each render)
-    const apiUrl = `/api/audit-images?ids=${ids}`;
+    // Cheap string interpolation — safe to inline (recomputed each render).
+    // `ids` comes from stored note content, so an injected Markdoc tag can put
+    // anything here; encoding stops it appending its own query params. The
+    // endpoint is org-scoped, so this closes the injection rather than a leak.
+    const apiUrl = `/api/audit-images?ids=${encodeURIComponent(ids)}`;
 
     const { data, isLoading, error } = useApiQuery<{ images: AuditImage[] }>({
       api: apiUrl,

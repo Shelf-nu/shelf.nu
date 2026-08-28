@@ -1,0 +1,583 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:util="http://www.springframework.org/schema/util"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:c="http://www.springframework.org/schema/c"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+                           
+       default-init-method="initialize"
+       default-destroy-method="destroy">
+
+    <!--
+    Note that all built-in rules rely on URI-naming and thus include the implied settings:
+    
+    <prop key="saml2.nameFormat">urn:oasis:names:tc:SAML:2.0:attrname-format:uri</prop>
+    <prop key="saml1.namespace">urn:mace:shibboleth:1.0:attributeNamespace:uri</prop>
+    -->
+
+    <!-- https://tools.ietf.org/html/rfc2798 -->
+
+    <bean parent="shibboleth.TranscodingRuleLoader">
+    <constructor-arg>
+    <list>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">cn</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.3</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:cn</prop>
+                    <prop key="displayName.en">Common name</prop>
+                    <prop key="displayName.de">Name und Vorname</prop>
+                    <prop key="displayName.fr">Nom et Prénom</prop>
+                    <prop key="displayName.sk">Meno a priezvisko</prop>
+                    <prop key="description.en">Common name of a person</prop>
+                    <prop key="description.de">Vollständiger Name einer Person</prop>
+                    <prop key="description.fr">Nom complet sans accent d'une personne</prop>
+                    <prop key="description.sk">Celé meno osoby</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">departmentNumber</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.16.840.1.113730.3.1.2</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:departmentNumber</prop>
+                    <prop key="displayName.en">Department number</prop>
+                    <prop key="displayName.fr">departmentNumber</prop>
+                    <prop key="displayName.de">Abteilungsnummer</prop>
+                    <prop key="displayName.sk">Číslo oddelenia</prop>
+                    <prop key="description.en">Department number</prop>
+                    <prop key="description.de">Nummer der Abteilung</prop>
+                    <prop key="description.fr">Identifiant du département dans l'organisation</prop>
+                    <prop key="description.sk">Číslo oddelenia</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">displayName</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.16.840.1.113730.3.1.241</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:displayName</prop>
+                    <prop key="displayName.en">Display name</prop>
+                    <prop key="displayName.de">Anzeigename</prop>
+                    <prop key="displayName.fr">Nom</prop>
+                    <prop key="displayName.it">Nome</prop>
+                    <prop key="displayName.ja">表示名</prop>
+                    <prop key="displayName.sk">Meno</prop>
+                    <prop key="description.en">The name that should appear in white-pages-like applications for this person</prop>
+                    <prop key="description.de">Anzeigename</prop>
+                    <prop key="description.fr">Nom complet d'affichage</prop>
+                    <prop key="description.it">Nome</prop>
+                    <prop key="description.ja">アプリケーションでの表示に用いられる英字氏名</prop>
+                    <prop key="description.sk">Meno, ktoré sa má zobrazovať</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">employeeNumber</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.16.840.1.113730.3.1.3</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:employeeNumber</prop>
+                    <prop key="displayName.en">Employee number</prop>
+                    <prop key="displayName.de">Mitarbeiternummer</prop>
+                    <prop key="displayName.fr">Numéro d'employé</prop>
+                    <prop key="displayName.it">Numero dell'utente</prop>
+                    <prop key="displayName.ja">従業員番号</prop>
+                    <prop key="displayName.sk">Číslo zamestnanca</prop>
+                    <prop key="description.en">Identifies an employee within an organization</prop>
+                    <prop key="description.de">Identifiziert einen Mitarbeiter innerhalb der Organisation</prop>
+                    <prop key="description.fr">Identifie un employé au sein de l'organisation</prop>
+                    <prop key="description.it">Identifica l' utente presso l'organizzazione</prop>
+                    <prop key="description.ja">所属機関における利用者の従業員番号</prop>
+                    <prop key="description.sk">Identifikuje zamestnanca v rámci organizácie</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">employeeType</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.16.840.1.113730.3.1.4</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:employeeType</prop>
+                    <prop key="displayName.en">Employee type</prop>
+                    <prop key="displayName.de">Typ des Mitarbeiters</prop>
+                    <prop key="displayName.fr">Type d'employé</prop>
+                    <prop key="displayName.sk">Druh zamestnanca</prop>
+                    <prop key="description.en">Employee type</prop>
+                    <prop key="description.de">Typ des Mitarbeiters</prop>
+                    <prop key="description.fr">Catégorie d'employé dans l'organisation</prop>
+                    <prop key="description.sk">Druh zamestnanca</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">givenName</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.42</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:givenName</prop>
+                    <prop key="displayName.en">Given name</prop>
+                    <prop key="displayName.de">Vorname</prop>
+                    <prop key="displayName.fr">Prénom</prop>
+                    <prop key="displayName.it">Nome</prop>
+                    <prop key="displayName.ja">名</prop>
+                    <prop key="displayName.sk">Krstné meno</prop>
+                    <prop key="description.en">Given name of a person</prop>
+                    <prop key="description.de">Vorname</prop>
+                    <prop key="description.fr">Prénom de l'utilisateur</prop>
+                    <prop key="description.it">Nome</prop>
+                    <prop key="description.ja">氏名(名)の英語表記</prop>
+                    <prop key="description.sk">Krstné meno</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">homePhone</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:0.9.2342.19200300.100.1.20</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:homePhone</prop>
+                    <prop key="displayName.en">Private phone number</prop>
+                    <prop key="displayName.de">Telefon Privat</prop>
+                    <prop key="displayName.fr">Teléphone personnel</prop>
+                    <prop key="displayName.it">Numero di telefono privato</prop>
+                    <prop key="displayName.ja">自宅電話番号</prop>
+                    <prop key="displayName.sk">Súkromné telefónne číslo</prop>
+                    <prop key="description.en">Private phone number</prop>
+                    <prop key="description.de">Private Telefonnummer</prop>
+                    <prop key="description.fr">Numéro de téléphone de domicile de la personne</prop>
+                    <prop key="description.it">Numero di telefono privato</prop>
+                    <prop key="description.ja">自宅の電話番号</prop>
+                    <prop key="description.sk">Súkromné telefónne číslo</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">homePostalAddress</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:0.9.2342.19200300.100.1.39</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:homePostalAddress</prop>
+                    <prop key="displayName.en">Home postal address</prop>
+                    <prop key="displayName.de">Heimatadresse</prop>
+                    <prop key="displayName.de-ch">Heimadresse</prop>
+                    <prop key="displayName.fr">Adresse personnelle</prop>
+                    <prop key="displayName.it">Indirizzo personale</prop>
+                    <prop key="displayName.ja">自宅住所</prop>
+                    <prop key="displayName.sk">Poštová adresa bydliska</prop>
+                    <prop key="description.en">Home postal address: Home address of the user</prop>
+                    <prop key="description.de">Heimatadresse</prop>
+                    <prop key="description.de-ch">Heimadresse</prop>
+                    <prop key="description.fr">Adresse postale de domicile de la personne</prop>
+                    <prop key="description.it">Indirizzo personale: indirizzo dove abita l'utente</prop>
+                    <prop key="description.ja">自宅の住所</prop>
+                    <prop key="description.sk">Poštová adresa bydliska: Adresa bydliska používateľa</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">initials</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.43</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:initials</prop>
+                    <prop key="displayName.en">Initials</prop>
+                    <prop key="displayName.de">Initialen</prop>
+                    <prop key="displayName.fr">Initiales</prop>
+                    <prop key="displayName.ja">イニシャル</prop>
+                    <prop key="displayName.sk">Iniciály mena</prop>
+                    <prop key="description.en">Initials</prop>
+                    <prop key="description.de">Anfangsbuchstaben des Namens</prop>
+                    <prop key="description.de-ch">Anfangsbuchstaben</prop>
+                    <prop key="description.fr">L' initiales</prop>
+                    <prop key="description.ja">イニシャル</prop>
+                    <prop key="description.sk">Iniciály mena</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">l</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.7</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:l</prop>
+                    <prop key="displayName.en">Locality name</prop>
+                    <prop key="displayName.de">Ort</prop>
+                    <prop key="displayName.fr">Localité</prop>
+                    <prop key="displayName.ja">場所(L)</prop>
+                    <prop key="displayName.sk">Názov lokality</prop>
+                    <prop key="description.en">Locality name</prop>
+                    <prop key="description.de">Ort</prop>
+                    <prop key="description.fr">Nom de la localité où réside l'objet</prop>
+                    <prop key="description.ja">場所の名前 日本の場合は市区町村名</prop>
+                    <prop key="description.sk">Názov lokality</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">mail</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:0.9.2342.19200300.100.1.3</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:mail</prop>
+                    <prop key="displayName.en">E-mail</prop>
+                    <prop key="displayName.de">E-Mail</prop>
+                    <prop key="displayName.fr">Email</prop>
+                    <prop key="displayName.it">E-mail</prop>
+                    <prop key="displayName.ja">メールアドレス</prop>
+                    <prop key="displayName.sk">E-mail</prop>
+                    <prop key="description.en">E-Mail: Preferred address for e-mail to be sent to this person</prop>
+                    <prop key="description.de">E-Mail-Adresse</prop>
+                    <prop key="description.de-ch">E-Mail Adresse</prop>
+                    <prop key="description.fr">Adresse de courrier électronique</prop>
+                    <prop key="description.it">E-Mail: l'indirizzo e-mail preferito dall'utente</prop>
+                    <prop key="description.ja">メールアドレス</prop>
+                    <prop key="description.sk">E-mail</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">mobile</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:0.9.2342.19200300.100.1.41</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:mobile</prop>
+                    <prop key="displayName.en">Mobile phone number</prop>
+                    <prop key="displayName.de">Telefon Mobil</prop>
+                    <prop key="displayName.fr">Numéro de mobile</prop>
+                    <prop key="displayName.it">Numero di cellulare</prop>
+                    <prop key="displayName.ja">携帯電話番号</prop>
+                    <prop key="displayName.sk">Číslo mobilného telefónu</prop>
+                    <prop key="description.en">Mobile phone number</prop>
+                    <prop key="description.de">Mobile Telefonnummer</prop>
+                    <prop key="description.fr">Numéro de teléphone mobile</prop>
+                    <prop key="description.it">Numero di cellulare</prop>
+                    <prop key="description.ja">携帯電話の電話番号</prop>
+                    <prop key="description.sk">Číslo mobilného telefónu</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">o</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.10</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:o</prop>
+                    <prop key="displayName.en">Organization name</prop>
+                    <prop key="displayName.de">Organisationsname</prop>
+                    <prop key="displayName.fr">Nom de l'organisation</prop>
+                    <prop key="displayName.ja">所属機関名</prop>
+                    <prop key="displayName.sk">Názov organizácie</prop>
+                    <prop key="description.en">Organization name</prop>
+                    <prop key="description.de">Name der Organisation</prop>
+                    <prop key="description.fr">Nom de l'organisation</prop>
+                    <prop key="description.ja">所属機関名称の英語表記</prop>
+                    <prop key="description.sk">Názov organizácie</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">ou</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.11</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:ou</prop>
+                    <prop key="displayName.en">Organizational unit</prop>
+                    <prop key="displayName.de">Organisationseinheit</prop>
+                    <prop key="displayName.fr">Unité organisationnelle</prop>
+                    <prop key="displayName.ja">機関内所属名</prop>
+                    <prop key="displayName.sk">Organizačná jednotka</prop>
+                    <prop key="description.en">Organizational unit</prop>
+                    <prop key="description.de">Name der Organisationseinheit</prop>
+                    <prop key="description.fr">Nom de l'unité organisationnelle</prop>
+                    <prop key="description.ja">機関内所属名称の英語表記</prop>
+                    <prop key="description.sk">Organizačná jednotka</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">pager</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:0.9.2342.19200300.100.1.42</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:pager</prop>
+                    <prop key="displayName.en">Pager number</prop>
+                    <prop key="displayName.de">Pager-Nummer</prop>
+                    <prop key="displayName.sk">Číslo pageru</prop>
+                    <prop key="description.en">Pager number</prop>
+                    <prop key="description.de">Pager-Nummer</prop>
+                    <prop key="description.sk">Číslo pageru</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">postalAddress</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.16</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:postalAddress</prop>
+                    <prop key="displayName.en">Business postal address</prop>
+                    <prop key="displayName.de">Geschäftsadresse</prop>
+                    <prop key="displayName.fr">Adresse professionnelle</prop>
+                    <prop key="displayName.it">Indirizzo professionale</prop>
+                    <prop key="displayName.ja">所属機関住所</prop>
+                    <prop key="displayName.sk">Poštová adresa organizácie</prop>
+                    <prop key="description.en">Business postal address: Campus or office address</prop>
+                    <prop key="description.de">Geschäftliche Adresse</prop>
+                    <prop key="description.de-ch">Adresse am Arbeitsplatz</prop>
+                    <prop key="description.fr">Adresse de l'institut, de l'université</prop>
+                    <prop key="description.it">Indirizzo professionale: indirizzo dell'istituto o dell'ufficio</prop>
+                    <prop key="description.ja">所属機関の住所</prop>
+                    <prop key="description.sk">Poštová adresa organizácie: Adresa kampusu alebo kancelárie</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">postalCode</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.17</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:postalCode</prop>
+                    <prop key="displayName.en">Postal code</prop>
+                    <prop key="displayName.en-us">ZIP code</prop>
+                    <prop key="displayName.de">Postleitzahl</prop>
+                    <prop key="displayName.fr">Code postal</prop>
+                    <prop key="displayName.ja">郵便番号</prop>
+                    <prop key="displayName.sk">Poštové smerovacie číslo</prop>
+                    <prop key="description.en">Postal code</prop>
+                    <prop key="description.en-us">ZIP code</prop>
+                    <prop key="description.de">Postleitzahl</prop>
+                    <prop key="description.fr">Code postal</prop>
+                    <prop key="description.ja">郵便番号</prop>
+                    <prop key="description.sk">Poštové smerovacie číslo</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">postOfficeBox</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:mace:dir:attribute-def:postOfficeBox</prop>
+                    <prop key="saml1.name">urn:oid:2.5.4.18</prop>
+                    <prop key="displayName.en">Postal box</prop>
+                    <prop key="displayName.de">Postfach</prop>
+                    <prop key="displayName.fr">Boite postale</prop>
+                    <prop key="displayName.fr-ch">Case postale</prop>
+                    <prop key="displayName.ja">私書箱</prop>
+                    <prop key="displayName.sk">Poštová schránka</prop>
+                    <prop key="description.en">Postal box identifier</prop>
+                    <prop key="description.de">Postfach</prop>
+                    <prop key="description.fr">Boite postale</prop>
+                    <prop key="description.fr-ch">Case postale</prop>
+                    <prop key="description.ja">私書箱</prop>
+                    <prop key="description.sk">Poštová schránka</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">preferredLanguage</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.16.840.1.113730.3.1.39</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:preferredLanguage</prop>
+                    <prop key="displayName.en">Preferred Language</prop>
+                    <prop key="displayName.de">Bevorzugte Sprache</prop>
+                    <prop key="displayName.fr">Langue préférée</prop>
+                    <prop key="displayName.it">Lingua preferita</prop>
+                    <prop key="displayName.ja">希望言語</prop>
+                    <prop key="displayName.sk">Zvolený jazyk</prop>
+                    <prop key="description.en">Preferred language: Users preferred language (see RFC1766)</prop>
+                    <prop key="description.de">Bevorzugte Sprache (siehe RFC1766)</prop>
+                    <prop key="description.fr">Exemple: fr, de, it, en, ... (voir RFC1766)</prop>
+                    <prop key="description.it">Lingua preferita: la lingua preferita dall'utente (cfr. RFC1766)</prop>
+                    <prop key="description.ja">利用者が希望する言語(RFC1766 を参照)</prop>
+                    <prop key="description.sk">Zvolený jazyk: Používateľom preferovaný jazyk (pozri RFC1766)</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">sn</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.4</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:sn</prop>
+                    <prop key="displayName.en">Surname</prop>
+                    <prop key="displayName.de">Nachname</prop>
+                    <prop key="displayName.fr">Nom de famille</prop>
+                    <prop key="displayName.it">Cognome</prop>
+                    <prop key="displayName.ja">姓</prop>
+                    <prop key="displayName.sk">Priezvisko</prop>
+                    <prop key="description.en">Surname or family name</prop>
+                    <prop key="description.de">Familienname</prop>
+                    <prop key="description.fr">Nom de famille de l'utilisateur</prop>
+                    <prop key="description.it">Cognome dell'utilizzatore</prop>
+                    <prop key="description.ja">氏名(姓)の英語表記</prop>
+                    <prop key="description.sk">Priezvisko</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">st</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.8</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:st</prop>
+                    <prop key="displayName.en">State or province name</prop>
+                    <prop key="displayName.de">Name des Bundesstaates oder der Provinz</prop>
+                    <prop key="displayName.fr">Etat ou nom de province</prop>
+                    <prop key="displayName.ja">都道府県もしくは州や省(ST)</prop>
+                    <prop key="displayName.sk">Názov spolkového štátu alebo provincie</prop>
+                    <prop key="description.en">State or province name</prop>
+                    <prop key="description.de">Name des Bundeslandes oder der Provinz</prop>
+                    <prop key="description.fr">Etat ou nom de province</prop>
+                    <prop key="description.ja">州名や省名 国によって異なり日本の場合は都道府県名</prop>
+                    <prop key="description.sk">Názov spolkového štátu alebo provincie</prop>
+                </props>
+            </property>
+        </bean>
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">street</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.9</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:street</prop>
+                    <prop key="displayName.en">Street</prop>
+                    <prop key="displayName.de">Straße</prop>
+                    <prop key="displayName.de-ch">Strasse</prop>
+                    <prop key="displayName.fr">Rue</prop>
+                    <prop key="displayName.ja">通り</prop>
+                    <prop key="displayName.sk">Ulica</prop>
+                    <prop key="description.en">Street address</prop>
+                    <prop key="description.de">Name der Straße</prop>
+                    <prop key="description.de-ch">Strassenadresse</prop>
+                    <prop key="description.fr">Nom de rue</prop>
+                    <prop key="description.ja">通りおよび番地</prop>
+                    <prop key="description.sk">Názov ulice</prop>
+                </props>
+            </property>
+        </bean>
+
+
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">telephoneNumber</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.20</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:telephoneNumber</prop>
+                    <prop key="displayName.en">Business phone number</prop>
+                    <prop key="displayName.de">Telefon Geschäft</prop>
+                    <prop key="displayName.fr">Teléphone professionnel</prop>
+                    <prop key="displayName.it">Numero di telefono dell'ufficio</prop>
+                    <prop key="displayName.ja">所属機関内電話番号</prop>
+                    <prop key="displayName.sk">Telefónne číslo do zmestnania</prop>
+                    <prop key="description.en">Business phone number: Office or campus phone number</prop>
+                    <prop key="description.de">Telefonnummer am Arbeitsplatz</prop>
+                    <prop key="description.fr">Teléphone de l'institut, de l'université</prop>
+                    <prop key="description.it">Numero di telefono dell'ufficio</prop>
+                    <prop key="description.ja">所属機関での利用者の電話番号</prop>
+                    <prop key="description.sk">Telefónne číslo do zmestnania: Telefónne číslo do kancelárie alebo na akademickú pôdu</prop>
+                </props>
+            </property>
+        </bean>
+        
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">title</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:2.5.4.12</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:title</prop>
+                    <prop key="displayName.en">Title</prop>
+                    <prop key="displayName.de">Titel</prop>
+                    <prop key="displayName.fr">Title</prop>
+                    <prop key="displayName.ja">肩書き</prop>
+                    <prop key="displayName.sk">Titul</prop>
+                    <prop key="description.en">Title of a person</prop>
+                    <prop key="description.de">Titel der Person</prop>
+                    <prop key="description.fr">Titre de la personne</prop>
+                    <prop key="description.ja">利用者の肩書き</prop>
+                    <prop key="description.sk">Titul osoby</prop>
+                </props>
+            </property>
+        </bean>
+        
+        <bean parent="shibboleth.TranscodingProperties">
+            <property name="properties">
+                <props merge="true">
+                    <prop key="id">uid</prop>
+                    <prop key="transcoder">SAML2StringTranscoder SAML1StringTranscoder</prop>
+                    <prop key="saml2.name">urn:oid:0.9.2342.19200300.100.1.1</prop>
+                    <prop key="saml1.name">urn:mace:dir:attribute-def:uid</prop>
+                    <prop key="displayName.en">User ID</prop>
+                    <prop key="displayName.de">Benutzer-ID</prop>
+                    <prop key="displayName.fr">ID utilisateur</prop>
+                    <prop key="displayName.it">ID dell'utente</prop>
+                    <prop key="displayName.ja">ユーザID</prop>
+                    <prop key="displayName.sk">ID používateľa</prop>
+                    <prop key="description.en">A unique identifier for a person, mainly used for user identification within the user's home organization</prop>
+                    <prop key="description.de">Eine eindeutige Nummer für eine Person, welche hauptsächlich zur Identifikation innerhalb der Organisation benutzt wird</prop>
+                    <prop key="description.fr">Identifiant de connexion d'une personnes sur les systèmes informatiques</prop>
+                    <prop key="description.it">Identificativo unico della persona, usato per l'identificazione dell'utente all'interno della organizzazione di appartenenza</prop>
+                    <prop key="description.ja">所属機関内で一意の利用者識別子</prop>
+                    <prop key="description.sk">Jedinečný identifikátor osoby, ktorý sa používa najmä na identifikáciu používateľa v rámci jeho domovskej organizácie.</prop>
+                </props>
+            </property>
+        </bean>
+
+    </list>
+    </constructor-arg>
+    </bean>
+    
+</beans>

@@ -1,27 +1,3 @@
-import { useEffect } from "react";
-
-import type { ActionFunctionArgs, MetaFunction } from "react-router";
-import { data, useFetcher } from "react-router";
-import { z } from "zod";
-import { Button } from "~/components/shared/button";
-import { Spinner } from "~/components/shared/spinner";
-import { config } from "~/config/shelf.config";
-import { supabaseClient } from "~/integrations/supabase/client";
-import { createMobileAuthCode } from "~/modules/auth/mobile-sso.server";
-import { refreshAccessToken } from "~/modules/auth/service.server";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { createSSOFormData } from "~/utils/auth";
-import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
-import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
-import {
-  getActionMethod,
-  logException,
-  parseData,
-  payload,
-  readFormData,
-} from "~/utils/http.server";
-import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
-
 /**
  * Mobile SSO callback (native-app web-delegated auth).
  *
@@ -39,6 +15,31 @@ import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
  * @see apps/webapp/app/routes/api+/mobile+/exchange.ts
  * @see apps/webapp/app/routes/_auth+/oauth.callback.tsx — web counterpart
  */
+
+import { useEffect } from "react";
+
+import type { ActionFunctionArgs, MetaFunction } from "react-router";
+import { data, useFetcher } from "react-router";
+import { z } from "zod";
+import { Button } from "~/components/shared/button";
+import { Spinner } from "~/components/shared/spinner";
+import { config } from "~/config/shelf.config";
+import { supabaseClient } from "~/integrations/supabase/client";
+import { createMobileAuthCode } from "~/modules/auth/mobile-sso.server";
+import { refreshAccessToken } from "~/modules/auth/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { createSSOFormData } from "~/utils/auth";
+import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
+import { mobilePkceChallengeCookie } from "~/utils/cookies.server";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import {
+  getActionMethod,
+  logException,
+  parseData,
+  payload,
+  readFormData,
+} from "~/utils/http.server";
+import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
 
 /** Custom-scheme deeplink the companion app registers and listens for. */
 const MOBILE_CALLBACK_URL = "shelf://auth-callback";
@@ -132,18 +133,25 @@ export async function action({ request }: ActionFunctionArgs) {
         // Provision the user/org exactly as the web flow does (creates the user
         // on first login, links SCIM groups). The app's bearer-auth API looks
         // the user up by email, so this must run before we mint a code.
+        // Same detection as the web callback; timeZone is null when the mobile
+        // Request lacks the CH-time-zone cookie (see
+        // detectFormatPrefsForPersistence), so the lazy backfill fills the real
+        // zone later rather than sticking on the "UTC" fallback.
+        const formatPrefs = detectFormatPrefsForPersistence(request);
         await resolveUserAndOrgForSsoCallback({
           authSession,
           firstName,
           lastName,
           groups,
           contactInfo,
+          formatPrefs,
         });
 
-        // PKCE: if a PKCE-capable app started this login, the S256 challenge is
-        // waiting in the cookie `/sso-login` set at the start of the flow. Bind
-        // it to the auth code so the exchange must present a matching verifier.
-        // Absent → legacy (pre-PKCE) flow, redeemed without a verifier.
+        // PKCE: `/sso-login` stashes the S256 challenge in a short-lived cookie
+        // at the start of the flow. Bind it to the auth code so the exchange
+        // must present a matching verifier. Whenever that cookie does not reach
+        // us the code is minted unbound, and redemption refuses it outright —
+        // an unbound code is never honoured as a bearer token.
         const codeChallenge = await mobilePkceChallengeCookie.parse(
           request.headers.get("Cookie")
         );

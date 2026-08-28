@@ -22,18 +22,36 @@ describe("resolveUserDisplayName", () => {
     ).toBe("John Doe");
   });
 
-  it("falls back to firstName + lastName when displayName is undefined", () => {
-    expect(resolveUserDisplayName({ firstName: "John", lastName: "Doe" })).toBe(
-      "John Doe"
-    );
+  it("refuses a projection that omits displayName", () => {
+    // The failure this guards is invisible at runtime: a projection that drops
+    // `displayName` still resolves to a perfectly plausible name — the user's
+    // legal one — so no assertion can tell the two apart. The compiler has to
+    // be the guard, and this is the only thing enforcing it.
+    //
+    // The directive below IS that guard: make `displayName` optional again and
+    // it stops suppressing anything, so `tsc` fails on an unused directive.
+    // (Keep any mention of the directive off the start of a comment line —
+    // TypeScript reads one there as real, wherever it appears.)
+    // @ts-expect-error - displayName is deliberately required
+    const result = resolveUserDisplayName({
+      firstName: "John",
+      lastName: "Doe",
+    });
+
+    // Still resolves at runtime — which is exactly why the type must object.
+    expect(result).toBe("John Doe");
   });
 
   it("returns only firstName when lastName is missing", () => {
-    expect(resolveUserDisplayName({ firstName: "John" })).toBe("John");
+    expect(
+      resolveUserDisplayName({ displayName: null, firstName: "John" })
+    ).toBe("John");
   });
 
   it("returns only lastName when firstName is missing", () => {
-    expect(resolveUserDisplayName({ lastName: "Doe" })).toBe("Doe");
+    expect(resolveUserDisplayName({ displayName: null, lastName: "Doe" })).toBe(
+      "Doe"
+    );
   });
 
   it("returns empty string when user is null", () => {
@@ -56,7 +74,11 @@ describe("resolveUserDisplayName", () => {
 
   it("trims whitespace from firstName and lastName", () => {
     expect(
-      resolveUserDisplayName({ firstName: "  John  ", lastName: "  Doe  " })
+      resolveUserDisplayName({
+        displayName: null,
+        firstName: "  John  ",
+        lastName: "  Doe  ",
+      })
     ).toBe("John Doe");
   });
 
@@ -109,7 +131,7 @@ describe("resolveTeamMemberName", () => {
     expect(
       resolveTeamMemberName({
         name: "Team Member",
-        user: { firstName: "John", lastName: "Doe" },
+        user: { displayName: null, firstName: "John", lastName: "Doe" },
       })
     ).toBe("John Doe");
   });
@@ -143,6 +165,7 @@ describe("resolveTeamMemberName", () => {
         {
           name: "Team Member",
           user: {
+            displayName: null,
             firstName: "John",
             lastName: "Doe",
             email: "john@example.com",
@@ -157,7 +180,7 @@ describe("resolveTeamMemberName", () => {
     expect(
       resolveTeamMemberName({
         name: "Stored Name",
-        user: {},
+        user: { displayName: null },
       })
     ).toBe("Stored Name");
   });

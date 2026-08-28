@@ -2,6 +2,7 @@ import type { Category, Currency, Prisma, User } from "@prisma/client";
 import type { LoadUserForNotesFn } from "~/modules/note/load-user-for-notes.server";
 
 import { formatCurrency } from "~/utils/currency";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapCategoryForNote,
   wrapDescriptionForNote,
@@ -19,11 +20,7 @@ export async function resolveUserLink({
   loadUserForNotes: LoadUserForNotesFn;
 }) {
   const user = await loadUserForNotes();
-  return wrapUserLinkForNote({
-    id: userId,
-    firstName: user.firstName ?? "",
-    lastName: user.lastName ?? "",
-  });
+  return wrapUserLinkForNote({ ...user, id: userId });
 }
 
 /**
@@ -94,7 +91,10 @@ export function buildNameChangeNote({
   }
 
   const formatName = (value: string) => {
-    const escaped = value.replace(/([*_`~])/g, "\\$1");
+    // Strip Markdoc delimiters BEFORE escaping emphasis: asset titles are
+    // free-form user input and escaping `*_~` alone still lets `{% … %}`
+    // through as a live tag.
+    const escaped = stripMarkdocDelimiters(value).replace(/([*_`~])/g, "\\$1");
     return `**${escaped}**`;
   };
 

@@ -1,9 +1,21 @@
-import { OrganizationRoles } from "@prisma/client";
-import {
-  Role2PermissionMap,
-  type PermissionAction,
-  type PermissionEntity,
-} from "./permission.data";
+/**
+ * Client-side permission gating for the webapp UI.
+ *
+ * Thin adapter over the shared `roleHasPermission` resolver in
+ * `@shelf/permissions` — the SAME matrix and the SAME ADMIN/OWNER allow-all
+ * short-circuit the server validator enforces, so what the UI shows and what
+ * the server permits cannot drift.
+ *
+ * These checks are cosmetic (hide/show UI). Every mutation they gate is
+ * independently enforced server-side via `requirePermission` /
+ * `requireMobilePermission`.
+ *
+ * @see {@link file://../../../../../packages/permissions/src/index.ts}
+ * @see {@link file://./permission.validator.server.ts} — the server counterpart
+ */
+import type { OrganizationRoles } from "@prisma/client";
+import type { PermissionAction, PermissionEntity } from "@shelf/permissions";
+import { roleHasPermission } from "@shelf/permissions";
 
 type UserHasPermissionArgs = {
   /** Role of the user for which we have to check for permission */
@@ -19,36 +31,20 @@ type UserHasPermissionArgs = {
   action: PermissionAction | PermissionAction[];
 };
 
+/**
+ * Checks whether a user holds a role granting `action` on `entity`.
+ *
+ * @param roles - The user's roles in the active organization. `undefined` or
+ *   empty denies — the safe direction while the session is still loading.
+ * @param entity - The permission entity being checked.
+ * @param action - A single action, or an array meaning ANY-match.
+ * @returns `true` when any held role grants it.
+ * @throws Never — unknown roles/entities resolve to `false`.
+ */
 export function userHasPermission({
   roles,
   action,
   entity,
-}: UserHasPermissionArgs) {
-  if (!roles || !roles.length) return false;
-
-  if (
-    roles.includes(OrganizationRoles.ADMIN) ||
-    roles.includes(OrganizationRoles.OWNER)
-  ) {
-    //owner and admin can do anything for now
-    return true;
-  }
-
-  const actionsToCheck = typeof action === "string" ? [action] : action;
-
-  const validRoles = roles.filter((role) => {
-    const entityPermMap = Role2PermissionMap[role];
-
-    if (!entityPermMap) {
-      return false;
-    }
-
-    const permissions = entityPermMap[entity];
-
-    return permissions.some((permission) =>
-      actionsToCheck.includes(permission)
-    );
-  });
-
-  return validRoles.length > 0;
+}: UserHasPermissionArgs): boolean {
+  return roleHasPermission({ roles, entity, action });
 }

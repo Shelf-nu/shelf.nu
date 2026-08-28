@@ -7,6 +7,7 @@ import type {
   Note,
   Prisma,
   Tag,
+  Organization,
   User,
 } from "@prisma/client";
 import type { AssetType, ConsumptionType } from "@prisma/client";
@@ -23,11 +24,15 @@ import type {
   LoadUserForNotesFn,
 } from "~/modules/note/load-user-for-notes.server";
 export type { BasicUserName } from "~/modules/note/load-user-for-notes.server";
+import { NOTE_TYPE_FILTER_MAP } from "~/modules/note/note-filters";
 import {
   formatUnitCount,
   sanitizeUnitOfMeasureLabel,
 } from "~/utils/asset-quantity";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { ShelfError } from "~/utils/error";
+import { getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import {
   wrapKitsWithDataForNote,
   wrapLinkForNote,
@@ -38,6 +43,7 @@ import {
   assertAssetsBelongToOrg,
   type OrgValidationTxClient,
 } from "~/utils/org-validation.server";
+import type { UserNameFields } from "~/utils/user";
 
 const label = "Note";
 
@@ -54,6 +60,9 @@ export type NotesTxClient = OrgValidationTxClient & {
     createMany: (args: {
       data: Prisma.NoteUncheckedCreateInput[];
     }) => Promise<{ count: number }>;
+    // why: `createNote` (singular) writes through nested `connect`, so it needs
+    // `NoteCreateInput` rather than the unchecked shape `createMany` takes.
+    create: (args: { data: Prisma.NoteCreateInput }) => Promise<Note>;
   };
 };
 
@@ -67,22 +76,31 @@ export type TagSummary = Pick<Tag, "id" | "name">;
  * where a caller supplies an asset ID from another tenant.
  *
  * @param params.organizationId - Caller's validated organization ID
+ * @param tx - Optional transaction client. When the note must commit or roll
+ *   back together with the mutation it describes — e.g. the QR relink, where a
+ *   note for a link that lost a race would falsify the audit trail — pass it so
+ *   the org guard and the note write join that transaction.
  * @throws {ShelfError} 400 if the asset is not in `organizationId`
  */
-export async function createNote({
-  content,
-  type,
-  userId,
-  assetId,
-  organizationId,
-}: Pick<Note, "content"> & {
-  type?: Note["type"];
-  userId: User["id"];
-  assetId: Asset["id"];
-  organizationId: string;
-}) {
+export async function createNote(
+  {
+    content,
+    type,
+    userId,
+    assetId,
+    organizationId,
+  }: Pick<Note, "content"> & {
+    type?: Note["type"];
+    userId: User["id"];
+    assetId: Asset["id"];
+    organizationId: string;
+  },
+  tx?: NotesTxClient
+) {
   try {
-    await assertAssetsBelongToOrg({ assetIds: [assetId], organizationId });
+    const client = tx ?? db;
+
+    await assertAssetsBelongToOrg({ assetIds: [assetId], organizationId }, tx);
 
     const data = {
       content,
@@ -99,7 +117,7 @@ export async function createNote({
       },
     };
 
-    return await db.note.create({
+    return await client.note.create({
       data,
     });
   } catch (cause) {
@@ -168,16 +186,189 @@ export async function createNotes(
 export async function deleteNote({
   id,
   userId,
-}: Pick<Note, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<Note, "id"> & {
+  userId: User["id"];
+  /**
+   * Required, not optional: Note has no organizationId column, so the only
+   * scoping was `userId` -- which let an author delete a asset note belonging to
+   * an organization they are no longer part of. Making it required means the
+   * compiler, not a grep, finds every call site.
+   */
+  organizationId: Organization["id"];
+}) {
   try {
-    return await db.note.deleteMany({
-      where: { id, userId },
+    // Scoped through the parent asset, which is where organizationId lives.
+    // Still one query -- a relation filter, not an extra round trip.
+    const result = await db.note.deleteMany({
+      where: { id, userId, asset: { organizationId } },
     });
+
+    if (result.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Note not found or you don't have permission to delete it.",
+        additionalData: { id, userId, organizationId },
+        label,
+        status: 403,
+      });
+    }
+
+    return result;
   } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting the note",
       additionalData: { id, userId },
+      label,
+    });
+  }
+}
+
+/**
+ * Loads a single asset's notes (its activity log) with pagination, free-text
+ * search, and a note-type filter — so the activity tab reuses the same list
+ * mechanics (`<Filters>`, `<StatusFilter>`, `<Pagination>`) as the rest of the
+ * app instead of rendering every note unbounded.
+ *
+ * Reads the standard list query params from the request:
+ * - `page` / `per_page` — pagination ({@link getParamsValues} + {@link updateCookieWithPerPage})
+ * - `s` — free-text search, matched against note content and the author's name
+ * - `noteType` — "Comments" (human `COMMENT` notes) or "Updates" (system
+ *   `UPDATE` notes); any other value (incl. absent / "ALL") returns both.
+ *
+ * The total count is resolved BEFORE the page is fetched so the requested
+ * The requested `page` is clamped to the last populated page: an out-of-range
+ * page (deleting the last note on a page, or a stale bookmarked `?page=N`)
+ * returns that page instead of an empty list that reads as a false "No Notes"
+ * empty state. The clamped value is what's returned as `page`. `totalPages`
+ * itself follows the shared list contract (`0` when nothing matches).
+ *
+ * `organizationId` is required and scopes the query via `asset.organizationId`,
+ * so a note can never be read across tenants even if a foreign `assetId` is
+ * supplied (see `.claude/rules/org-scope-user-supplied-ids.md`).
+ *
+ * @returns Pagination metadata plus the page of notes (`items`, newest first),
+ *   `hasNotes` (whether the asset has ANY notes ignoring the active filter — so
+ *   the UI can keep the "Export activity CSV" action visible even when a filter
+ *   matches zero notes), and the `cookie` for the loader to serialize as a
+ *   `Set-Cookie` header (persists the per-page preference).
+ * @throws {ShelfError} If the database query fails.
+ */
+export async function getPaginatedAndFilterableAssetNotes({
+  assetId,
+  organizationId,
+  request,
+}: {
+  assetId: Asset["id"];
+  organizationId: string;
+  request: Request;
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPageParam, search } = getParamsValues(searchParams);
+
+  const typeFilter = NOTE_TYPE_FILTER_MAP[searchParams.get("noteType") ?? ""];
+
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  try {
+    /**
+     * Normalize the page size once and use it for the query, the skip offset,
+     * and the returned metadata so `perPage`/`totalPages` always describe the
+     * page we actually fetched (200 is the established out-of-range fallback).
+     */
+    const safePerPage = perPage >= 1 && perPage <= 100 ? perPage : 200;
+
+    /** Scope by the asset AND its organization (cross-tenant read guard) */
+    const where: Prisma.NoteWhereInput = {
+      assetId,
+      asset: { organizationId },
+    };
+
+    if (typeFilter) {
+      where.type = typeFilter;
+    }
+
+    if (search) {
+      /**
+       * Match the search term against the note body or the author's name.
+       * `displayName` is included because the note card shows it (via
+       * `resolveUserDisplayName`) for SSO users, so a search for the visible
+       * author name must match it too.
+       */
+      where.OR = [
+        { content: { contains: search, mode: "insensitive" } },
+        {
+          user: {
+            OR: [
+              { firstName: { contains: search, mode: "insensitive" } },
+              { lastName: { contains: search, mode: "insensitive" } },
+              { displayName: { contains: search, mode: "insensitive" } },
+            ],
+          },
+        },
+      ];
+    }
+
+    // Count first so the requested page can be clamped into range before the
+    // page is fetched (see JSDoc). `totalPages` follows the shared list contract
+    // (`0` when nothing matches, like the other paginated services), so clamp
+    // against a separate `lastPage` ceiling instead of inflating the metadata.
+    const totalItems = await db.note.count({ where });
+    const totalPages = Math.ceil(totalItems / safePerPage);
+    // Clamp the requested page into [1, lastPage] so an out-of-range page
+    // (e.g. deleting the last note on a page, or a stale bookmarked ?page=N)
+    // still returns a populated page instead of an empty list.
+    const lastPage = Math.max(1, totalPages);
+    const currentPage = Math.min(Math.max(page, 1), lastPage);
+    const skip = (currentPage - 1) * safePerPage;
+
+    const notes = await db.note.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: safePerPage,
+      include: {
+        user: {
+          select: { firstName: true, lastName: true, displayName: true },
+        },
+      },
+    });
+
+    /**
+     * Whether the asset has ANY notes, ignoring the active filter — lets the UI
+     * keep the "Export activity CSV" action visible when a filter matches zero
+     * notes (an empty filtered view is not an empty activity log). Only pay for
+     * the extra unfiltered count when a filter is active; otherwise `totalItems`
+     * already is the unfiltered total.
+     */
+    const hasActiveFilter = Boolean(typeFilter || search);
+    const hasNotes = hasActiveFilter
+      ? (await db.note.count({
+          where: { assetId, asset: { organizationId } },
+        })) > 0
+      : totalItems > 0;
+
+    return {
+      page: currentPage,
+      perPage: safePerPage,
+      search,
+      items: notes,
+      totalItems,
+      totalPages,
+      hasNotes,
+      cookie,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching the asset's notes",
+      additionalData: { assetId, organizationId },
       label,
     });
   }
@@ -245,8 +436,7 @@ export async function createBulkKitChangeNotes({
         await createKitChangeNote({
           currentKit,
           newKit,
-          firstName: user.firstName ?? "",
-          lastName: user.lastName ?? "",
+          user,
           assetId: asset.id,
           userId,
           organizationId,
@@ -277,8 +467,7 @@ export async function createBulkKitChangeNotes({
 export async function createKitChangeNote({
   currentKit,
   newKit,
-  firstName,
-  lastName,
+  user,
   assetId,
   userId,
   organizationId,
@@ -289,8 +478,8 @@ export async function createKitChangeNote({
 }: {
   currentKit: Pick<Kit, "id" | "name"> | null;
   newKit: Pick<Kit, "id" | "name"> | null;
-  firstName: string;
-  lastName: string;
+  /** Acting user's name columns — names the actor in the note's user link. */
+  user: UserNameFields;
   assetId: Asset["id"];
   userId: User["id"];
   /** Caller's validated org — propagated to the note's asset ownership check */
@@ -308,11 +497,7 @@ export async function createKitChangeNote({
   quantity?: number | null;
 }) {
   try {
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName,
-      lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
     // Qty-tracked unit label ("50 units") for this kit's slice, or null
     // for INDIVIDUAL / missing quantity — in which case we keep the
     // original countless phrasing ("added asset to ...").
@@ -401,7 +586,7 @@ export async function createKitChangeNote({
  *
  * @param params.fromKit - Source kit (asset is losing units from here)
  * @param params.toKit - Destination kit (asset is gaining units here)
- * @param params.firstName / params.lastName - Acting user (for the userLink)
+ * @param params.user - Acting user's name columns (for the userLink)
  * @param params.assetId - Asset whose units are being redistributed
  * @param params.userId - Acting user — written to `Note.userId`
  * @param params.organizationId - Caller's validated organization ID
@@ -413,8 +598,7 @@ export async function createKitChangeNote({
 export async function createKitMoveNote({
   fromKit,
   toKit,
-  firstName,
-  lastName,
+  user,
   assetId,
   userId,
   organizationId,
@@ -424,8 +608,8 @@ export async function createKitMoveNote({
 }: {
   fromKit: Pick<Kit, "id" | "name">;
   toKit: Pick<Kit, "id" | "name">;
-  firstName: string;
-  lastName: string;
+  /** Acting user's name columns — names the actor in the note's user link. */
+  user: UserNameFields;
   assetId: Asset["id"];
   userId: User["id"];
   /** Caller's validated org — propagated to the note's asset ownership check */
@@ -438,11 +622,7 @@ export async function createKitMoveNote({
   quantity: number;
 }) {
   try {
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName,
-      lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
     const fromKitLink = wrapKitsWithDataForNote(
       { id: fromKit.id, name: fromKit.name.trim() },
@@ -510,11 +690,7 @@ export async function createTagChangeNoteIfNeeded({
   }
 
   const user = await loadUserForNotes();
-  const userLink = wrapUserLinkForNote({
-    id: userId,
-    firstName: user.firstName ?? "",
-    lastName: user.lastName ?? "",
-  });
+  const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
   const formatTagNames = (tagList: TagSummary[]) =>
     tagList
@@ -742,11 +918,7 @@ export async function createAssetNotesForAuditAddition({
 
     if (!user || assetIds.length === 0) return;
 
-    const userLink = wrapUserLinkForNote({
-      id: user.id,
-      firstName: user.firstName ?? "",
-      lastName: user.lastName ?? "",
-    });
+    const userLink = wrapUserLinkForNote(user);
 
     const auditLink = wrapLinkForNote(
       `/audits/${audit.id}/overview`,
@@ -796,11 +968,7 @@ export async function createAssetNotesForAuditRemoval({
 
     if (!user || assetIds.length === 0) return;
 
-    const userLink = wrapUserLinkForNote({
-      id: user.id,
-      firstName: user.firstName ?? "",
-      lastName: user.lastName ?? "",
-    });
+    const userLink = wrapUserLinkForNote(user);
 
     const auditLink = wrapLinkForNote(
       `/audits/${audit.id}/overview`,

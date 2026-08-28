@@ -160,9 +160,19 @@ export const CodePreview = ({
           qrIdDisplayPreference: organization?.qrIdDisplayPreference ?? "QR_ID",
           barcodesEnabled: organization?.barcodesEnabled ?? false,
         },
+        // This preview renders both assets and kits; the kind only steers the
+        // resolver's fallback help text, never the code it picks.
+        entityKind: item.type,
       }).value || qrId
     );
-  }, [qrObj, sequentialId, barcodes, preferredBarcodeId, organization]);
+  }, [
+    qrObj,
+    sequentialId,
+    barcodes,
+    preferredBarcodeId,
+    organization,
+    item.type,
+  ]);
   const [isAddBarcodeDialogOpen, setIsAddBarcodeDialogOpen] = useState(false);
 
   // Build available codes list

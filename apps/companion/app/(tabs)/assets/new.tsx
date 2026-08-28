@@ -64,7 +64,11 @@ try {
 
 export default function CreateAssetScreen() {
   const router = useRouter();
-  const { qrId } = useLocalSearchParams<{ qrId?: string }>();
+  const { qrId: qrIdParam } = useLocalSearchParams<{ qrId?: string }>();
+  // A scanned QR links only ONE asset: the server ignores a qrId that is
+  // already claimed. Held as state so "Create Another" can drop it — the next
+  // asset is not linked, and the banner must stop saying it will be.
+  const [qrId, setQrId] = useState(qrIdParam);
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
@@ -93,6 +97,9 @@ export default function CreateAssetScreen() {
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(false);
   const [isLocationsLoading, setIsLocationsLoading] = useState(false);
   const [isTagsLoading, setIsTagsLoading] = useState(false);
+  // Server-computed from GET /api/mobile/tags: whether the caller may mint
+  // tags inline (admins/owners). Gates the picker's "create tag" row.
+  const [canCreateTag, setCanCreateTag] = useState(false);
 
   // ── Picker visibility ───────────────────────────
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
@@ -171,6 +178,8 @@ export default function CreateAssetScreen() {
       if (requestId !== latestTagsRequestRef.current) return;
       const nextTags = data?.tags ?? [];
       setTags(nextTags);
+      // Server-computed create capability (false on older servers).
+      setCanCreateTag(data?.canCreate ?? false);
       setSelectedTags((prev) =>
         prev.filter((selected) =>
           nextTags.some((tag) => tag.id === selected.id)
@@ -182,6 +191,26 @@ export default function CreateAssetScreen() {
       }
     }
   }, [currentOrg]);
+
+  // Inline tag creation from the picker (admins/owners; the server enforces
+  // `tag.create`). Adds the new tag to the local list so the dropdown shows it
+  // without a refetch (the API helper already invalidated the cached list).
+  const handleCreateTag = useCallback(
+    async (name: string): Promise<Tag | null> => {
+      if (!currentOrg) return null;
+      const { data, error } = await api.createTag(currentOrg.id, name);
+      if (error || !data?.tag) {
+        Alert.alert("Couldn't create tag", error || "Please try again.");
+        return null;
+      }
+      const tag = data.tag;
+      setTags((prev) =>
+        [...prev, tag].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      return tag;
+    },
+    [currentOrg]
+  );
 
   // ── Load custom fields for the selected category ──
   // Re-runs whenever the chosen category changes (including "no category").
@@ -503,6 +532,10 @@ export default function CreateAssetScreen() {
           setImageUri(null);
           setImageMimeType("image/jpeg");
           setCustomFieldValues({});
+          setQrId(undefined);
+          // The route still carries the old qrId; clear it too, or a screen
+          // remount would re-seed the state and resurrect the banner.
+          router.setParams({ qrId: undefined });
         },
       },
     ]);
@@ -866,6 +899,8 @@ export default function CreateAssetScreen() {
               setShowLocationPicker(false);
             }
           }}
+          canCreate={canCreateTag}
+          onCreateTag={handleCreateTag}
         />
 
         {/* ── Custom Fields (scoped to selected category) ────────── */}

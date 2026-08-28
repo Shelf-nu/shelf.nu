@@ -132,6 +132,15 @@ vi.mock("~/utils/error", () => {
     // generic 500 wrap from the outer catch
     isLikeShelfError: (cause: unknown) => cause instanceof ShelfError,
     isNotFoundError: () => false,
+    // why: no-op here — production only translates the DB "exceeds
+    // Asset.quantity" trigger error; these tests exercise other errors (403
+    // org-scope guard, 400 quantity pre-check) which must fall through to
+    // their own status unchanged, exactly as the real helper does for them
+    throwIfAssetQuantityOverAllocation: () => {},
+    // why: same no-op rationale — the single-location trigger translator only
+    // fires on the DB "already placed at a location" error, which these tests
+    // don't exercise; other errors must fall through unchanged
+    throwIfIndividualAssetAlreadyPlaced: () => {},
     maybeUniqueConstraintViolation: (
       _cause: unknown,
       _label: string,
@@ -172,10 +181,12 @@ describe("location service activity logging", () => {
     dbMocks.user.findFirstOrThrow.mockResolvedValue({
       firstName: "Jane",
       lastName: "Doe",
+      displayName: null,
     });
     dbMocks.user.findFirst.mockResolvedValue({
       firstName: "Jane",
       lastName: "Doe",
+      displayName: null,
     });
     dbMocks.kit.findMany.mockResolvedValue([]);
     // why: assertion helpers count submitted IDs; default to "all authorized"
@@ -229,6 +240,7 @@ describe("location service activity logging", () => {
         newLocation: { id: "loc-2", name: "New" },
         firstName: "Ada",
         lastName: "Lovelace",
+        displayName: null,
         assetId: "asset-1",
         userId: "user-1",
         organizationId: "org-1",

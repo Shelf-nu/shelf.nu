@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Test-rig attribute release policy: release exactly the 6 attributes
+    Shelf's Supabase SAML SP needs, and only to that SP's entityID.
+-->
+<AttributeFilterPolicyGroup id="ShibbolethFilterPolicy"
+    xmlns="urn:mace:shibboleth:2.0:afp"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="urn:mace:shibboleth:2.0:afp http://shibboleth.net/schema/idp/shibboleth-afp.xsd">
+  <AttributeFilterPolicy id="releaseToSupabase">
+    <PolicyRequirementRule xsi:type="Requester" value="https://wlkiilcvuycnnlzdvvws.supabase.co/auth/v1/sso/saml/metadata"/>
+    <AttributeRule attributeID="mail"><PermitValueRule xsi:type="ANY"/></AttributeRule>
+    <AttributeRule attributeID="givenName"><PermitValueRule xsi:type="ANY"/></AttributeRule>
+    <AttributeRule attributeID="sn"><PermitValueRule xsi:type="ANY"/></AttributeRule>
+    <AttributeRule attributeID="eduPersonScopedAffiliation"><PermitValueRule xsi:type="ANY"/></AttributeRule>
+    <AttributeRule attributeID="isMemberOf"><PermitValueRule xsi:type="ANY"/></AttributeRule>
+    <AttributeRule attributeID="eduPersonEntitlement"><PermitValueRule xsi:type="ANY"/></AttributeRule>
+  </AttributeFilterPolicy>
+</AttributeFilterPolicyGroup>

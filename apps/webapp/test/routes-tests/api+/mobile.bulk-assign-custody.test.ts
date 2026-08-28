@@ -1,5 +1,6 @@
 import { action } from "~/routes/api+/mobile+/bulk-assign-custody";
 import { createActionArgs } from "@mocks/remix";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 
 // @vitest-environment node
 
@@ -33,9 +34,13 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
   getMobileUserContext: vitest.fn(),
 }));
 
-// why: external service — we mock the custody assignment without hitting the database
+// why: external service — we mock the custody assignment without hitting the
+// database. Resolves the real service's return shape — the route now
+// destructures `skippedQuantityTracked` off it.
 vitest.mock("~/modules/asset/service.server", () => ({
-  bulkCheckOutAssets: vitest.fn().mockResolvedValue(undefined),
+  bulkCheckOutAssets: vitest
+    .fn()
+    .mockResolvedValue({ success: true, skippedQuantityTracked: 0 }),
 }));
 
 // why: external service — we mock the team member lookup without hitting the database
@@ -122,6 +127,39 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     });
   });
 
+  it("rejects the select-all sentinel instead of expanding it org-wide", async () => {
+    // Mobile has no select-all control and sends no `currentSearchParams`, so
+    // the sentinel would expand against an empty filter — every AVAILABLE asset
+    // in the organization. SELF_SERVICE holds `asset:custody`, so this is
+    // reachable by a restricted role, not just an admin.
+    const request = createBulkAssignRequest({
+      assetIds: [ALL_SELECTED_KEY],
+      custodianId: "custodian-1",
+    });
+
+    const result = await action(createActionArgs({ request }));
+
+    // 400, not 500: an expected client error must not be reported as a server
+    // outage, or it drowns in Sentry alongside real faults.
+    expect((result as unknown as Response).status).toBe(400);
+    // The write must never be reached
+    expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+  });
+
+  it("rejects the sentinel even when mixed with real ids", async () => {
+    // The service checks `ids.includes(ALL_SELECTED_KEY)`, so one sentinel
+    // anywhere switches the whole request to select-all.
+    const request = createBulkAssignRequest({
+      assetIds: ["asset-1", ALL_SELECTED_KEY],
+      custodianId: "custodian-1",
+    });
+
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(400);
+    expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+  });
+
   it("should bulk assign custody successfully", async () => {
     const request = createBulkAssignRequest({
       assetIds: ["asset-1", "asset-2"],
@@ -133,6 +171,8 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     expect(result instanceof Response).toBe(true);
     const body = await (result as unknown as Response).json();
     expect(body.success).toBe(true);
+    // Additive skip count — 0 for an all-INDIVIDUAL selection
+    expect(body.skippedQuantityTracked).toBe(0);
 
     expect(bulkCheckOutAssets).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -144,6 +184,27 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
         role: "ADMIN",
       })
     );
+  });
+
+  it("forwards the service's skippedQuantityTracked count to the client", async () => {
+    // Mixed selections silently skip QUANTITY_TRACKED assets in the service;
+    // the route must forward the count so the app can report it honestly.
+    (bulkCheckOutAssets as any).mockResolvedValueOnce({
+      success: true,
+      skippedQuantityTracked: 2,
+    });
+
+    const request = createBulkAssignRequest({
+      assetIds: ["asset-1", "qt-asset-1", "qt-asset-2"],
+      custodianId: "custodian-1",
+    });
+
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(200);
+    const body = await (result as unknown as Response).json();
+    expect(body.success).toBe(true);
+    expect(body.skippedQuantityTracked).toBe(2);
   });
 
   it("forwards SELF_SERVICE role so the service-level guard fires (hex r3202162994)", async () => {

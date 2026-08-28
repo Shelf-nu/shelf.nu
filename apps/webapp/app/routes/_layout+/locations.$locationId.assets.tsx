@@ -1,3 +1,19 @@
+/**
+ * Location Assets
+ *
+ * The asset list on a location's detail page: every asset with a placement at
+ * this location, with the per-location quantity, whether that placement came
+ * from a kit, and who holds the asset.
+ *
+ * Rows come from `getLocation`, which has no `Location.assets` relation to
+ * follow and instead runs a pivot-filtered query and returns the assets
+ * alongside the location. The row type here is written by hand and must be
+ * kept in step with that query's projection.
+ *
+ * @see {@link file://./../../modules/location/service.server.ts} getLocation
+ * @see {@link file://./locations.$locationId.overview.tsx}
+ */
+
 import type {
   Asset,
   BarcodeType,
@@ -46,7 +62,9 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
+import { getPrimaryCustody } from "~/modules/custody/utils";
 import { resolveLocationAssetIds } from "~/modules/location/bulk-select.server";
 import {
   getLocation,
@@ -210,18 +228,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "bulk-remove-assets": {
-        const { assetIds } = parseData(
+        // `currentSearchParams` comes from the submitted form, not `request.url`
+        // — the dialog posts to a bare action URL, so the request carries no
+        // query string and "select all" would match every asset here.
+        const { assetIds, currentSearchParams } = parseData(
           formData,
-          z.object({
-            assetIds: z.array(z.string()).min(1),
-          })
+          z
+            .object({
+              assetIds: z.array(z.string()).min(1),
+            })
+            .and(CurrentSearchParamsSchema)
         );
 
         const resolvedAssetIds = await resolveLocationAssetIds({
           ids: assetIds,
           organizationId,
           locationId,
-          request,
+          currentSearchParams,
         });
 
         if (resolvedAssetIds.length === 0) {
@@ -303,6 +326,8 @@ export default function LocationAssets() {
                       name: "teamMember",
                       queryKey: "name",
                       deletedAt: null,
+                      // A read FILTER — the workspace custody override governs.
+                      custodyPurpose: "custody-filter",
                     }}
                     label="Filter by custodian"
                     placeholder="Search team members"
@@ -394,6 +419,9 @@ const ListAssetContent = ({
   extraProps,
 }: {
   item: Asset & {
+    /** Cover image of the asset's model, rendered when the asset has no
+     * image of its own. See `~/modules/asset/image-resolution`. */
+    assetModel: { image: string | null; thumbnailImage: string | null } | null;
     category: Pick<Category, "id" | "name" | "color"> | null;
     tags?: Tag[];
     location?: Location;
@@ -412,30 +440,51 @@ const ListAssetContent = ({
     }>;
     qrCodes: { id: string }[];
     barcodes: { id: string; type: BarcodeType; value: string }[];
-    custody: {
+    /**
+     * Custody rows for this asset, one per holder — quantity-tracked stock can
+     * be held by several people at once. The list column shows one badge, so
+     * it renders the primary holder via `getPrimaryCustody`.
+     *
+     * Optionality mirrors the schema: a `TeamMember` need not be linked to a
+     * `User` (non-registered members exist), and a linked user's name fields
+     * and avatar are all optional. This projection is written by hand, so the
+     * compiler checks it against nothing — keep it in step with the `custody`
+     * select in `getLocation`.
+     */
+    custody: Array<{
+      quantity: number;
       custodian: {
         id: string;
         name: string;
         user: {
           id: string;
-          firstName: string;
-          lastName: string;
-          profilePicture: string;
+          firstName: string | null;
+          lastName: string | null;
+          displayName: string | null;
+          profilePicture: string | null;
           email: string;
-        };
+        } | null;
       };
-    };
+    }>;
   };
   extraProps: { canReadCustody: boolean; userRoleCanManageAssets: boolean };
 }) => {
   const { category, tags, custody } = item;
+  // The list column shows one badge, so it shows the primary holder — the
+  // same choice `getPrimaryCustody` makes everywhere else custody is
+  // summarised in a single slot.
+  const primaryCustody = getPrimaryCustody(custody);
   // The location whose detail page we're on — used to pick this asset's
   // pivot row out of `item.assetLocations`. Mirrors the kit-page
   // `useParams<{ kitId }>` pattern at `kits.$kitId.assets.tsx:179`.
   const { locationId } = useParams<{ locationId: string }>();
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "asset",
+      })
     : null;
   return (
     <>
@@ -449,6 +498,7 @@ const ListAssetContent = ({
                   mainImage: item.mainImage,
                   thumbnailImage: item.thumbnailImage,
                   mainImageExpiration: item.mainImageExpiration,
+                  assetModel: item.assetModel ?? null,
                 }}
                 alt={`Image of ${item.title}`}
                 className="size-full rounded-[4px] border object-cover"
@@ -608,8 +658,8 @@ const ListAssetContent = ({
       {/* Custodian */}
       <When truthy={extraProps.canReadCustody}>
         <Td>
-          {custody?.custodian ? (
-            <TeamMemberBadge teamMember={custody.custodian} />
+          {primaryCustody?.custodian ? (
+            <TeamMemberBadge teamMember={primaryCustody.custodian} />
           ) : (
             <EmptyTableValue />
           )}

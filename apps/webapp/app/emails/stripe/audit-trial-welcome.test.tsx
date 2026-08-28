@@ -25,6 +25,7 @@ vi.mock("~/utils/env", () => ({
   FREE_TRIAL_DAYS: "7",
   DISABLE_SIGNUP: false,
   DISABLE_SSO: false,
+  ENABLE_SCIM: false,
   SHOW_HOW_DID_YOU_FIND_US: false,
   COLLECT_BUSINESS_INTEL: false,
   GEOCODING_USER_AGENT: "",
@@ -77,6 +78,7 @@ describe("sendAuditTrialWelcomeEmail", () => {
   it("calls sendEmail with correct to, subject, and content", async () => {
     await sendAuditTrialWelcomeEmail({
       firstName: "Alice",
+      displayName: null,
       email: "alice@example.com",
       hasPaymentMethod: false,
     });
@@ -101,6 +103,7 @@ describe("sendAuditTrialWelcomeEmail", () => {
     await expect(
       sendAuditTrialWelcomeEmail({
         firstName: "Alice",
+        displayName: null,
         email: "alice@example.com",
         hasPaymentMethod: false,
       })

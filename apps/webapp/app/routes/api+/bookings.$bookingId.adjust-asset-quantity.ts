@@ -2,20 +2,24 @@
  * API Route: Adjust Booking Asset Quantity
  *
  * Updates the booked quantity of a single QUANTITY_TRACKED asset inside
- * a booking. Validates availability (Total - InCustody - Reserved excluding
- * this booking) before applying the new quantity.
+ * a booking. Validates the new quantity via the shared directional,
+ * windowed availability guard (`assertAssetQuantityAvailable`) before
+ * applying it — a reduction always passes (even if the pool is already
+ * over-committed by other bookings, #2725); only an increase is measured
+ * against windowed availability over the booking's own `[from, to]`.
  *
  * @see {@link file://./../../components/booking/adjust-booking-asset-quantity-dialog.tsx}
+ * @see {@link file://./../../modules/asset/availability.server.ts}
  */
 
 import type { Prisma } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { assertAssetQuantityAvailable } from "~/modules/asset/availability.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
-import { computeBookingAvailableQuantity } from "~/modules/consumption-log/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
@@ -29,6 +33,7 @@ import {
   parseData,
 } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
@@ -88,13 +93,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         booking: { organizationId },
       },
       include: {
-        asset: { select: { id: true, title: true, type: true } },
+        asset: {
+          select: { id: true, title: true, type: true, unitOfMeasure: true },
+        },
         booking: {
           select: {
             id: true,
             name: true,
             creatorId: true,
             custodianUserId: true,
+            from: true,
+            to: true,
           },
         },
       },
@@ -147,6 +156,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * can show the "from X → to Y" delta. If the quantity didn't actually
      * change we skip the note write below.
      *
+     * Seeded from the outside-tx snapshot, but overwritten inside the tx with
+     * the value re-read UNDER the lock (see below) so the note reflects the
+     * real pre-edit quantity even if a concurrent request changed it.
+     *
      * Declared outside the transaction so the activity-notes block (which
      * intentionally lives outside the tx) can reference it.
      */
@@ -162,33 +175,75 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * snapshot, each pass their own guard, and both commit — oversubscribing
      * the pool.
      *
-     * `computeBookingAvailableQuantity` intentionally keeps its original
-     * signature and uses the default `db` client. The row lock held by
-     * this transaction blocks concurrent writers; read-committed isolation
-     * then returns correct values for the availability computation.
+     * `assertAssetQuantityAvailable` is the shared directional, windowed
+     * guard (see `~/modules/asset/availability.server`). It runs inside
+     * this transaction (behind the row lock above) so the read-then-decide
+     * is race-safe. Critically, it is *directional*: a submission that is
+     * `≤` the row's current quantity is always a reduction and always
+     * passes, even when the pool is already over-committed by other
+     * bookings — otherwise a booking that became over-reserved (e.g. the
+     * asset's total quantity was lowered elsewhere) could never be edited
+     * back down (#2725). Only the *increase* portion of a submission is
+     * measured against windowed availability, using the booking's own
+     * `[from, to]` so non-overlapping reservations don't compete.
      *
      * Exclude the current booking so its existing reservation isn't
      * double-counted.
      */
     await db.$transaction(async (tx) => {
-      await lockAssetForQuantityUpdate(tx, assetId);
+      await lockAssetForQuantityUpdate(tx, assetId, organizationId);
 
-      const availability = await computeBookingAvailableQuantity(
-        assetId,
-        bookingId
-      );
+      /**
+       * TOCTOU guard: re-read this slice's booked quantity UNDER the asset
+       * lock. `bookingAsset.quantity` was read outside the tx (for the
+       * ownership/type/permission checks above, which don't race meaningfully),
+       * but it may be stale by now. The directional rule in
+       * `assertAssetQuantityAvailable` treats `requested <= currentQuantity` as
+       * an always-allowed reduction that SKIPS the availability check — so a
+       * stale-HIGH `currentQuantity` (a concurrent request already lowered the
+       * real booked qty) would let a genuine INCREASE masquerade as a reduction
+       * and bypass the guard, oversubscribing the pool. The asset `FOR UPDATE`
+       * lock serializes concurrent adjusts on this asset, so this re-read
+       * observes the committed value.
+       */
+      const freshBookingAsset = await tx.bookingAsset.findUnique({
+        where: { id: bookingAsset.id },
+        select: { quantity: true },
+      });
 
-      if (quantity > availability.available) {
+      // The slice vanished between the outside-tx read and here (concurrent
+      // removal) — treat it as not-found, consistent with the check above.
+      if (!freshBookingAsset) {
         throw new ShelfError({
           cause: null,
-          message: `Cannot reserve ${quantity} units of "${bookingAsset.asset.title}". Only ${availability.available} available.`,
+          title: "Not found",
+          message: "This asset is not part of the booking.",
           label: "Booking",
-          status: 400,
+          status: 404,
           shouldBeCaptured: false,
         });
       }
 
-      previousQuantity = bookingAsset.quantity;
+      const currentQuantity = freshBookingAsset.quantity;
+
+      await assertAssetQuantityAvailable({
+        assetId,
+        organizationId,
+        tx,
+        window:
+          bookingAsset.booking.from && bookingAsset.booking.to
+            ? { from: bookingAsset.booking.from, to: bookingAsset.booking.to }
+            : null,
+        excludeBookingId: bookingId,
+        currentQuantity,
+        requestedQuantity: quantity,
+        assetTitle: bookingAsset.asset.title,
+        unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,
+      });
+
+      // Drive the "from X → to Y" activity note off the FRESH value too, so the
+      // note reflects the real pre-edit quantity (not the stale snapshot).
+      previousQuantity = currentQuantity;
 
       await tx.bookingAsset.update({
         where: { id: bookingAsset.id },
@@ -221,11 +276,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           } satisfies Prisma.UserSelect,
         });
 
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         const bookingLink = wrapLinkForNote(
           `/bookings/${bookingAsset.booking.id}`,
           bookingAsset.booking.name
@@ -242,7 +293,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           createSystemBookingNote({
             bookingId,
             organizationId,
-            content: `${actor} adjusted booked quantity for **${bookingAsset.asset.title}** from **${previousQuantity}** to **${quantity}**.`,
+            content: `${actor} adjusted booked quantity for **${stripMarkdocDelimiters(
+              bookingAsset.asset.title
+            )}** from **${previousQuantity}** to **${quantity}**.`,
           }),
         ]);
       } catch (noteError) {

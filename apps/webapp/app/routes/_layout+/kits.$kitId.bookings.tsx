@@ -4,7 +4,11 @@ import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { getBookings } from "~/modules/booking/service.server";
+import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
+import {
+  getBookings,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -45,12 +49,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId, canSeeAllBookings } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.kit,
-      action: PermissionAction.read,
-    });
+    const { organizationId, canSeeAllBookings, canSeeAllCustody } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.kit,
+        action: PermissionAction.read,
+      });
 
     const searchParams = getCurrentSearchParams(request);
     const {
@@ -64,6 +69,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const { perPage } = await updateCookieWithPerPage(request, perPageParam);
 
+    // Self-service / base users see only their own bookings here. Resolve the
+    // full scope (user link + every team-member link) so legacy team-member-
+    // linked bookings aren't hidden while showing on the index.
+    const custodianScope = !canSeeAllBookings
+      ? await resolveCustodianScope({ userId, organizationId })
+      : undefined;
+
     const [{ bookings, bookingCount }, teamMembersData, tagsData, kit] =
       await Promise.all([
         getBookings({
@@ -73,14 +85,30 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           search,
           userId,
           statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-          ...(!canSeeAllBookings && {
-            // If the user is self service, we only show bookings that belong to that user)
-            custodianUserId: userId,
-          }),
+          ...(custodianScope && { custodianScope }),
           custodianTeamMemberIds: teamMemberIds,
           kitId,
           tags: filterTags,
-          extraInclude: { tags: TAG_WITH_COLOR_SELECT },
+          // PERF: the list renders booking-level fields plus an asset COUNT. The
+          // per-booking `bookingAssets` payload existed only for the assets
+          // drawer, which now fetches it from
+          // `/api/bookings/:bookingId/assets-sidebar` when a row is expanded.
+          includeAssets: false,
+          extraInclude: {
+            // Asset count for the row's drawer trigger, now that the pivot rows
+            // themselves are no longer loaded.
+            _count: { select: { bookingAssets: true } },
+            tags: TAG_WITH_COLOR_SELECT,
+            // Same reason as the asset Bookings tab: this route renders the
+            // shared bookings row via `BookingsIndexPage`, and the
+            // unassigned-units pill reads `item.modelRequests`. Omitting it
+            // makes the pill vanish rather than read zero.
+            modelRequests: {
+              include: {
+                assetModel: { select: { id: true, name: true } },
+              },
+            },
+          },
         }),
 
         // TeamMember data for custodian
@@ -91,6 +119,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
           userId,
+          // A FILTER. This passed no scoping argument at all, so a restricted
+          // user — /kits is gated on `kit:read`, which BASE holds — received
+          // the entire team roster here.
+          filterByUserId: !canSeeAllCustody,
         }),
         getTagsForBookingTagsFilter({
           organizationId,
@@ -103,6 +135,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           select: { name: true },
         }),
       ]);
+
+    // Flag bookings whose QUANTITY_TRACKED assets are over-committed in their
+    // window, so the shared list renders the amber "Stock conflict" pill here
+    // too (see `~/modules/booking/stock-conflicts.server`).
+    const decoratedBookings = await decorateBookingsForList({
+      bookings,
+      organizationId,
+    });
 
     const totalPages = Math.ceil(bookingCount / perPage);
 
@@ -117,7 +157,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return payload({
       header,
-      items: bookings,
+      items: decoratedBookings,
       search,
       page,
       perPage,

@@ -1,7 +1,14 @@
+import type { ComponentProps } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+
+/**
+ * A valid Ionicons glyph name. Deriving it from the component keeps action
+ * icons type-checked (no `as any` casts) and in sync with the icon set.
+ */
+export type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
 /**
  * Optional action button displayed on the scan result card.
@@ -9,16 +16,28 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
  */
 type ScanResultAction = {
   label: string;
-  icon?: string;
+  icon?: IoniconName;
   onPress: () => void;
 };
 
 export type ScanResult = {
-  type: "success" | "error" | "not_found";
+  type: "success" | "error" | "not_found" | "duplicate" | "advisory";
   title: string;
   message: string;
   /** Optional action button (e.g., "Link in Browser" for unlinked QR codes) */
   action?: ScanResultAction;
+  /**
+   * Optional second action, rendered below the primary one (e.g. the
+   * unclaimed-QR card offers "Create New Asset" and "Link Existing Asset").
+   * Only meaningful when `action` is also set.
+   */
+  secondaryAction?: ScanResultAction;
+  /**
+   * Optional third action, rendered last (e.g. the unlinked-QR card keeps a
+   * "Link in Browser" exit under Create/Link for what the app cannot link
+   * natively yet, like kits). Only meaningful when `secondaryAction` is set.
+   */
+  tertiaryAction?: ScanResultAction;
 };
 
 type ScanResultCardProps = {
@@ -26,10 +45,17 @@ type ScanResultCardProps = {
   onDismiss: () => void;
 };
 
-const ICON_MAP: Record<ScanResult["type"], string> = {
+const ICON_MAP: Record<ScanResult["type"], IoniconName> = {
   success: "checkmark-circle",
   error: "alert-circle",
   not_found: "help-circle",
+  // A re-scan is routine, not a failure — copy icon, amber card (matching
+  // the audit scanner's duplicate treatment).
+  duplicate: "copy",
+  // Not a failure either: the scan resolved, it just resolved somewhere the
+  // viewer is not right now, and the card carries the step that fixes it.
+  // Distinct from `duplicate`, which names the already-scanned case.
+  advisory: "swap-horizontal",
 };
 
 /**
@@ -47,6 +73,8 @@ export function ScanResultCard({ result, onDismiss }: ScanResultCardProps) {
         result.type === "success" && styles.resultCardSuccess,
         result.type === "error" && styles.resultCardError,
         result.type === "not_found" && styles.resultCardWarning,
+        result.type === "duplicate" && styles.resultCardDuplicate,
+        result.type === "advisory" && styles.resultCardAdvisory,
       ]}
     >
       <TouchableOpacity
@@ -56,7 +84,7 @@ export function ScanResultCard({ result, onDismiss }: ScanResultCardProps) {
         accessibilityRole="button"
         accessibilityLabel={`${result.title}. ${result.message}. Tap to dismiss.`}
       >
-        <Ionicons name={ICON_MAP[result.type] as any} size={24} color="#fff" />
+        <Ionicons name={ICON_MAP[result.type]} size={24} color="#fff" />
         <View style={styles.resultTextContainer}>
           <Text style={styles.resultTitle}>{result.title}</Text>
           <Text style={styles.resultMessage}>{result.message}</Text>
@@ -76,13 +104,53 @@ export function ScanResultCard({ result, onDismiss }: ScanResultCardProps) {
         >
           {result.action.icon && (
             <Ionicons
-              name={result.action.icon as any}
+              name={result.action.icon}
               size={16}
               color="#fff"
               style={styles.actionIcon}
             />
           )}
           <Text style={styles.actionLabel}>{result.action.label}</Text>
+        </TouchableOpacity>
+      )}
+
+      {result.secondaryAction && (
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={result.secondaryAction.onPress}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={result.secondaryAction.label}
+        >
+          {result.secondaryAction.icon && (
+            <Ionicons
+              name={result.secondaryAction.icon}
+              size={16}
+              color="#fff"
+              style={styles.actionIcon}
+            />
+          )}
+          <Text style={styles.actionLabel}>{result.secondaryAction.label}</Text>
+        </TouchableOpacity>
+      )}
+
+      {result.tertiaryAction && (
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={result.tertiaryAction.onPress}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={result.tertiaryAction.label}
+        >
+          {result.tertiaryAction.icon && (
+            <Ionicons
+              name={result.tertiaryAction.icon}
+              size={16}
+              color="#fff"
+              style={styles.actionIcon}
+            />
+          )}
+          <Text style={styles.actionLabel}>{result.tertiaryAction.label}</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -110,8 +178,23 @@ const useStyles = createStyles(() => ({
   resultCardError: {
     backgroundColor: "rgba(240,68,56,0.9)",
   },
+  // Deep orange for the same reason as the amber cards below: this card is
+  // read, and white on the brighter orange lands under the 4.5:1 WCAG AA asks
+  // of body text. This ground holds white at ~8:1, and ~5:1 on the lighter
+  // action buttons the unlinked-QR card puts here.
   resultCardWarning: {
-    backgroundColor: "rgba(239,104,32,0.9)",
+    backgroundColor: "rgba(154,52,18,0.92)",
+  },
+  // Deep amber, following the audit scanner's duplicate toast: the bright
+  // #FFC107 of the scan FRAME is a graphic and carries no text, while a card
+  // is read, and white on bright amber lands near 1.9:1 — far under the 4.5:1
+  // WCAG AA asks of body text. This ground holds white at ~5.8:1.
+  resultCardDuplicate: {
+    backgroundColor: "rgba(161,98,7,0.92)",
+  },
+  // Same ground: an advisory card and a duplicate card are one visual state.
+  resultCardAdvisory: {
+    backgroundColor: "rgba(161,98,7,0.92)",
   },
   resultTextContainer: {
     flex: 1,

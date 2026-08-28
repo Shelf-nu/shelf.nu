@@ -28,6 +28,11 @@ vi.mock("~/database/db.server", () => ({
     note: {
       findMany: vi.fn(),
     },
+    // why: exportNotesToCsv now resolves the acting user's format prefs via
+    // resolveUserFormatPrefsById (db.user.findFirst). null → HARDCODED_DEFAULT_PREFS.
+    user: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -132,20 +137,61 @@ describe("app/routes/_layout+/assets.$assetId.activity[.csv] loader", () => {
     expect(response instanceof Response).toBe(true);
     expect((response as unknown as Response).status).toBe(200);
     expect((response as unknown as Response).headers.get("content-type")).toBe(
-      "text/csv"
+      "text/csv; charset=utf-8"
     );
     expect(
       (response as unknown as Response).headers.get("content-disposition")
     ).toContain("Test Asset-activity");
 
+    // Excel reads the leading byte order mark to pick UTF-8; without it,
+    // non-Latin note content opens in the machine's locale codepage. Read as
+    // bytes, because `text()` decodes as UTF-8 and drops the mark.
+    const bytes = new Uint8Array(
+      await (response as unknown as Response).clone().arrayBuffer()
+    );
+    expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
+
     const csv = await (response as unknown as Response).text();
     const rows = csv.trim().split("\n");
     expect(rows[0]).toBe("Date,Author,Type,Content");
     expect(rows[1]).toBe(
-      '"formatted-2024-01-02T10:00:00.000Z","Carlos Virreira","COMMENT","Line with ""quotes"" and newline"'
+      '"01/02/2024, 10:00 AM","Carlos Virreira","COMMENT","Line with ""quotes"" and newline"'
     );
-    expect(rows[2]).toBe(
-      '"formatted-2024-01-01T09:30:00.000Z","","UPDATE","System note"'
+    expect(rows[2]).toBe('"01/01/2024, 9:30 AM","","UPDATE","System note"');
+  });
+
+  it("names the author by displayName when they have one", async () => {
+    // `displayName` replaces the legal name in the Author column. The row
+    // reaching `notesToCsv` carries all three name fields, so only the column
+    // it builds decides which one is exported.
+    dbMock.note.findMany.mockResolvedValue([
+      {
+        id: "note-3",
+        content: "Renamed author",
+        type: "COMMENT",
+        createdAt: new Date("2024-01-02T10:00:00.000Z"),
+        user: {
+          firstName: "Carlos",
+          lastName: "Virreira",
+          displayName: "Carlie Virreira",
+        },
+      },
+    ]);
+
+    const response = await loader(
+      createLoaderArgs({
+        context,
+        request: new Request(
+          "https://example.com/assets/asset-123/activity.csv"
+        ),
+        params: { assetId: "asset-123" },
+      })
     );
+
+    const csv = await (response as unknown as Response).text();
+    const rows = csv.trim().split("\n");
+
+    expect(rows[1]).toContain('"Carlie Virreira"');
+    expect(rows[1]).not.toContain("Carlos Virreira");
   });
 });

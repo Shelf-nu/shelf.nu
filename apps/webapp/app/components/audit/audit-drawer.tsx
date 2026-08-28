@@ -21,25 +21,21 @@ import {
   type AuditSessionInfo,
   type ScanListItems,
 } from "~/atoms/qr-scanner";
-import { AuditAssetActions } from "~/components/audit/audit-asset-actions";
+import { renderAuditItems } from "~/components/audit/audit-item-row";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
-import { AvailabilityBadge } from "~/components/booking/availability-label";
-import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
-import { createAvailabilityLabels } from "~/components/scanner/drawer/availability-label-factory";
 import {
   createBlockers,
   type BlockerConfig,
 } from "~/components/scanner/drawer/blockers-factory";
 import ConfigurableDrawer from "~/components/scanner/drawer/configurable-drawer";
-import {
-  DefaultLoadingState,
-  GenericItemRow,
-  Tr,
-} from "~/components/scanner/drawer/generic-item-row";
 import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
 import { Spinner } from "~/components/shared/spinner";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
+import {
+  countDeletedExpectedScans,
+  resolveScannedExpectedness,
+} from "~/utils/audit-scan-expectedness";
 import { tw } from "~/utils/tw";
 
 const AuditSchema = z.object({
@@ -131,8 +127,158 @@ function AuditDrawerFooter({
   );
 }
 
-// react-doctor:no-giant-component — deferred for follow-up refactor
-export function AuditDrawer({
+/** Props for {@link AuditDrawerTitle}. */
+type AuditDrawerTitleProps = {
+  /** Human-readable name of the audited context (location/kit/selection). */
+  contextName: string;
+  /** Number of expected assets that have been found so far. */
+  foundCount: number;
+  /** Total number of expected assets in this audit. */
+  totalExpected: number;
+  /** Number of scanned assets that were not expected. */
+  unexpectedCount: number;
+  /** Count of resolved scans still being persisted to the database. */
+  pendingScanCount: number;
+};
+
+/**
+ * Drawer title shown while an audit session is active: a summary line plus
+ * either a "saving scans" indicator (while persists are in flight) or a
+ * progress bar of found-vs-expected assets.
+ *
+ * @param props - See {@link AuditDrawerTitleProps}.
+ * @returns The active-audit drawer title node.
+ */
+function AuditDrawerTitle({
+  contextName,
+  foundCount,
+  totalExpected,
+  unexpectedCount,
+  pendingScanCount,
+}: AuditDrawerTitleProps) {
+  return (
+    <div className="text-right">
+      <span className="block text-gray-600">
+        Audit: {contextName} • {foundCount}/{totalExpected} found
+        {unexpectedCount > 0 && ` • ${unexpectedCount} unexpected`}
+      </span>
+      {pendingScanCount > 0 ? (
+        <span className="flex items-center gap-1.5 text-xs text-gray-500">
+          Saving scans: {pendingScanCount} remaining
+          <Spinner className="size-3" />
+        </span>
+      ) : (
+        <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
+          <Progress
+            aria-label={`Audit progress: ${foundCount} of ${totalExpected} assets found`}
+            value={totalExpected > 0 ? (foundCount / totalExpected) * 100 : 0}
+          />
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Props for {@link AuditDrawerEmptyState}. */
+type AuditDrawerEmptyStateProps = {
+  /** Whether the drawer is currently expanded (affects copy + extra panel). */
+  expanded: boolean;
+  /**
+   * Optional caller-provided empty-state renderer. When present it takes
+   * precedence over the default empty state below.
+   */
+  customEmptyState?: AuditDrawerProps["emptyStateContent"];
+  /** The active audit session, or `null` when none is in progress. */
+  auditSession: AuditSessionInfo;
+  /** Aggregate audit counts, surfaced in the expanded info panel. */
+  stats: AuditDrawerStats;
+  /** Label of the audited context type (e.g. "Location"). */
+  contextLabel: string;
+  /** Human-readable name of the audited context. */
+  contextName: string;
+};
+
+/**
+ * Empty-state content for the audit drawer. Delegates to a caller-provided
+ * renderer when supplied; otherwise renders the default prompt (plus, when
+ * expanded during an active session, a small audit summary panel).
+ *
+ * @param props - See {@link AuditDrawerEmptyStateProps}.
+ * @returns The empty-state node.
+ */
+function AuditDrawerEmptyState({
+  expanded,
+  customEmptyState,
+  auditSession,
+  stats,
+  contextLabel,
+  contextName,
+}: AuditDrawerEmptyStateProps) {
+  if (customEmptyState) {
+    return customEmptyState({
+      expanded,
+      auditSession,
+      stats,
+      contextLabel,
+      contextName,
+    });
+  }
+
+  return (
+    <div className="py-8 text-center">
+      <p className="text-gray-500">
+        {expanded
+          ? `No assets scanned yet. Start scanning to audit this ${contextLabel.toLowerCase()}.`
+          : `Scan assets to audit this ${contextLabel.toLowerCase()}...`}
+      </p>
+      {auditSession && expanded && (
+        <div className="mt-4 rounded-lg bg-blue-50 p-3">
+          <p className="text-sm text-blue-700">
+            Audit: <strong>{contextName}</strong>
+          </p>
+          <p className="mt-1 text-xs text-blue-600">
+            Expected: {stats.totalExpected} • Found: {stats.foundCount} •
+            Unexpected: {stats.unexpectedCount}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Bottom drawer for an in-progress audit scan session.
+ *
+ * Renders the live list of scanned items (via {@link AuditItemRow}) and the
+ * still-expected-but-unscanned assets (via {@link AuditPendingRow}), a progress
+ * title, an empty state, and a footer with completion controls — all inside a
+ * shared `ConfigurableDrawer`. Reads scan state from the audit Jotai atoms.
+ *
+ * @param props - See {@link AuditDrawerProps}.
+ * @param props.contextLabel - Entity-type label for the audit (e.g. "Location").
+ * @param props.contextName - Name of the entity being audited.
+ * @param props.expectedAssets - Assets expected to be found in this audit.
+ * @param props.pendingScanCount - Count of scans still being processed.
+ * @param props.onScanRemoved - Called when a scanned item is removed from the list.
+ * @param props.getAdditionalBlockers - Supplies extra "cannot complete" blockers.
+ * @param props.emptyStateContent - Overrides the default empty-state render.
+ * @returns The audit scan drawer.
+ */
+/**
+ * A scanned asset as the drawer reads it.
+ *
+ * `AssetFromQr` describes an asset fetched live by the scanner. A row restored
+ * from an audit's saved scans carries two extra facts that no live scan has —
+ * whether the asset has since been deleted, and the expectedness the server
+ * resolved from the scan's own snapshot — and a deleted row is the one case
+ * where the expected list cannot answer for it.
+ */
+type ScannedAssetData = AssetFromQr & {
+  assetDeleted?: boolean;
+  isExpected?: boolean;
+};
+
+export default function AuditDrawer({
   contextLabel,
   contextName,
   expectedAssets,
@@ -198,23 +344,24 @@ export function AuditDrawer({
     () => new Set(expectedAssets.map((asset) => asset.id)),
     [expectedAssets]
   );
-  const assetTypeBadgeClass = tw(
-    "inline-block bg-gray-50 px-[6px] py-[2px]",
-    "rounded-md border border-gray-200",
-    "text-xs text-gray-700"
-  );
 
   const scannedAssets = useMemo(
     () =>
       Object.values(items)
         .filter((item) => !!item && item.data && item.type === "asset")
         .map((item) => {
-          const assetData = item!.data as AssetFromQr;
+          const assetData = item!.data as ScannedAssetData;
+          const wasExpected = resolveScannedExpectedness({
+            assetId: assetData.id,
+            assetDeleted: assetData.assetDeleted,
+            isExpected: assetData.isExpected,
+            expectedAssetIds,
+          });
           return {
             id: assetData.id,
             name: assetData.title,
             type: "asset" as const,
-            auditStatus: expectedAssetIds.has(assetData.id)
+            auditStatus: wasExpected
               ? ("found" as const)
               : ("unexpected" as const),
           } satisfies AuditScannedItem;
@@ -233,6 +380,22 @@ export function AuditDrawer({
     [items]
   );
 
+  // A deleted asset the audit expected is gone from `expectedAssets` — its
+  // AuditAsset row was cascaded away — but it is still counted as found above,
+  // and the session's own expectedAssetCount still counts it. Leaving it out of
+  // the expected total is what makes the drawer read "1 of 0 found".
+  const deletedExpectedCount = useMemo(
+    () =>
+      countDeletedExpectedScans(
+        Object.values(items).map((item) =>
+          item && item.type === "asset"
+            ? (item.data as ScannedAssetData | undefined)
+            : undefined
+        )
+      ),
+    [items]
+  );
+
   const foundAssets = scannedAssets.filter(
     (asset) => asset.auditStatus === "found"
   );
@@ -245,13 +408,14 @@ export function AuditDrawer({
 
   const stats: AuditDrawerStats = useMemo(
     () => ({
-      totalExpected: expectedAssets.length,
+      totalExpected: expectedAssets.length + deletedExpectedCount,
       foundCount: foundAssets.length,
       missingCount: missingAssets.length,
       unexpectedCount: unexpectedAssets.length,
     }),
     [
       expectedAssets.length,
+      deletedExpectedCount,
       foundAssets.length,
       missingAssets.length,
       unexpectedAssets.length,
@@ -274,30 +438,13 @@ export function AuditDrawer({
       return contextLabel;
     }
     return (
-      <div className="text-right">
-        <span className="block text-gray-600">
-          Audit: {contextName} • {stats.foundCount}/{stats.totalExpected} found
-          {stats.unexpectedCount > 0 &&
-            ` • ${stats.unexpectedCount} unexpected`}
-        </span>
-        {pendingScanCount > 0 ? (
-          <span className="flex items-center gap-1.5 text-xs text-gray-500">
-            Saving scans: {pendingScanCount} remaining
-            <Spinner className="size-3" />
-          </span>
-        ) : (
-          <span className="flex h-5 flex-col justify-center font-medium text-gray-900">
-            <Progress
-              aria-label={`Audit progress: ${stats.foundCount} of ${stats.totalExpected} assets found`}
-              value={
-                stats.totalExpected > 0
-                  ? (stats.foundCount / stats.totalExpected) * 100
-                  : 0
-              }
-            />
-          </span>
-        )}
-      </div>
+      <AuditDrawerTitle
+        contextName={contextName}
+        foundCount={stats.foundCount}
+        totalExpected={stats.totalExpected}
+        unexpectedCount={stats.unexpectedCount}
+        pendingScanCount={pendingScanCount}
+      />
     );
   }, [
     contextLabel,
@@ -342,7 +489,8 @@ export function AuditDrawer({
   ]);
 
   /**
-   * Render a scanned item using GenericItemRow
+   * Persist the removal of a scanned asset (when part of an audit session) and
+   * drop it from the local scanned-items list.
    */
   const handleRemove = useCallback(
     (qrId: string) => {
@@ -370,242 +518,28 @@ export function AuditDrawer({
     [auditSession, items, onScanRemoved, removeItem, removeScanFetcher]
   );
 
-  const renderItem = (qrId: string, item: any) => (
-    <GenericItemRow
-      key={qrId}
-      qrId={qrId}
-      item={item}
-      onRemove={handleRemove}
-      className={
-        highlightedQrId === qrId
-          ? "duration-[2500ms] bg-amber-50 transition-colors"
-          : undefined
-      }
-      searchParams={
-        auditSession ? { auditSessionId: auditSession.id } : undefined
-      }
-      renderLoading={(pendingQrId: string, error?: string) => (
-        <DefaultLoadingState qrId={pendingQrId} error={error} />
-      )}
-      renderItem={(data: any) => {
-        const isAsset = item?.type === "asset";
-        const isExpected = isAsset && data?.id && expectedAssetIds.has(data.id);
-        const isUnexpected =
-          isAsset && data?.id && !expectedAssetIds.has(data.id);
-        const auditAssetId =
-          typeof data?.auditAssetId === "string"
-            ? data.auditAssetId
-            : undefined;
-        // Prefer live meta counts over loader data for instant UI feedback.
-        const meta = auditAssetId ? auditAssetMeta[auditAssetId] : undefined;
-        const notesCount =
-          meta?.notesCount ??
-          (typeof data?.auditNotesCount === "number"
-            ? data.auditNotesCount
-            : 0);
-        const imagesCount =
-          meta?.imagesCount ??
-          (typeof data?.auditImagesCount === "number"
-            ? data.auditImagesCount
-            : 0);
-
-        const availabilityConfigs = [
-          {
-            condition: isExpected,
-            badgeText: "Expected",
-            tooltipTitle: "Expected asset",
-            tooltipContent:
-              "This asset belongs to this audit according to records.",
-            priority: 100,
-            className: "border-green-200 bg-green-50 text-green-700",
-          },
-          {
-            condition: isUnexpected,
-            badgeText: "Unexpected",
-            tooltipTitle: "Unexpected asset",
-            tooltipContent:
-              "This asset was not expected in this audit context.",
-            priority: 90,
-            className: "border-red-200 bg-red-50 text-red-700",
-          },
-        ];
-
-        const [, AuditLabels] = createAvailabilityLabels(availabilityConfigs);
-
-        return (
-          <div className="flex items-center gap-2">
-            <ImageWithPreview
-              thumbnailUrl={data.thumbnailImage || data.mainImage}
-              alt={data.title || "Asset"}
-              className="size-[54px] rounded-[2px]"
-            />
-            <div className="flex flex-col gap-1">
-              <Button
-                asChild
-                variant="link"
-                className="text-left font-medium text-gray-800 hover:text-gray-700 hover:underline"
-                to={`${auditAssetId}/details`}
-              >
-                <span className="word-break whitespace-break-spaces">
-                  {"title" in data ? data.title : data.name}
-                </span>
-              </Button>
-              {showLocation && data.location?.name && (
-                <span className="text-xs text-gray-500">
-                  {data.location.name}
-                </span>
-              )}
-              <div className="flex flex-wrap items-center gap-1">
-                <span className={assetTypeBadgeClass}>
-                  {item.type === "asset" ? "asset" : "kit"}
-                </span>
-                <AuditLabels />
-                {/* Action buttons for notes and images */}
-                {auditSession && item.type === "asset" && data?.id && (
-                  <AuditAssetActions
-                    auditAssetId={data.auditAssetId || ""}
-                    auditSessionId={auditSession.id}
-                    assetName={
-                      ("title" in data ? data.title : data.name) || "Asset"
-                    }
-                    isPending={false}
-                    notesCount={notesCount}
-                    imagesCount={imagesCount}
-                  />
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      }}
-    />
-  );
-
   /**
-   * Render a pending (expected but not yet scanned) asset
+   * Custom renderer that shows scanned items at the top, followed by pending
+   * assets. Delegates to the shared {@link renderAuditItems} helper so the
+   * keyed rows remain the direct children of `<AnimatePresence>`.
    */
-  const renderPendingAsset = (asset: AuditScannedItem) => (
-    <Tr key={`pending-${asset.id}`} skipEntrance>
-      <td className="w-full p-0 md:p-0">
-        <div className="flex items-center justify-between gap-3 p-4 md:px-6">
-          <div className="flex items-center gap-2">
-            <ImageWithPreview
-              thumbnailUrl={asset.thumbnailImage || asset.mainImage}
-              alt={asset.name || "Asset"}
-              className="size-[54px] rounded-[2px]"
-            />
+  const customRenderAllItems = (): ReactNode =>
+    renderAuditItems({
+      items,
+      expectedAssets,
+      scannedAssetIds,
+      onRemove: handleRemove,
+      highlightedQrId,
+      auditSession,
+      expectedAssetIds,
+      auditAssetMeta,
+      showLocation,
+    });
 
-            <div className="flex flex-col gap-1">
-              <Button
-                asChild
-                variant="link"
-                className="text-left font-medium text-gray-800 hover:text-gray-700 hover:underline"
-                to={`${asset.auditAssetId}/details`}
-              >
-                <span className="word-break whitespace-break-spaces">
-                  {asset.name}
-                </span>
-              </Button>
-              {showLocation && asset.locationName && (
-                <span className="text-xs text-gray-500">
-                  {asset.locationName}
-                </span>
-              )}
-              <div className="flex flex-wrap items-center gap-1">
-                <span className={assetTypeBadgeClass}>asset</span>
-                <AvailabilityBadge
-                  badgeText="Pending"
-                  tooltipTitle="Pending scan"
-                  tooltipContent="This asset is expected but has not been scanned yet."
-                  className="border-gray-200 bg-gray-50 text-gray-600"
-                />
-                {/* Action buttons for notes and images on pending assets */}
-                {auditSession && (
-                  <AuditAssetActions
-                    auditAssetId={asset.auditAssetId || ""}
-                    auditSessionId={auditSession.id}
-                    assetName={asset.name}
-                    isPending={true}
-                    notesCount={
-                      asset.auditAssetId
-                        ? auditAssetMeta[asset.auditAssetId]?.notesCount ??
-                          asset.auditNotesCount ??
-                          0
-                        : asset.auditNotesCount ?? 0
-                    }
-                    imagesCount={
-                      asset.auditAssetId
-                        ? auditAssetMeta[asset.auditAssetId]?.imagesCount ??
-                          asset.auditImagesCount ??
-                          0
-                        : asset.auditImagesCount ?? 0
-                    }
-                  />
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </td>
-      <td>
-        {/* No remove button for pending items */}
-        <div className="w-[52px]" />
-      </td>
-    </Tr>
-  );
-
-  /**
-   * Custom renderer that shows scanned items at the top, followed by pending assets
-   */
-  const customRenderAllItems = (): ReactNode => {
-    // Get pending (expected but not scanned) assets
-    const pendingAssets = expectedAssets.filter(
-      (asset) => !scannedAssetIds.has(asset.id)
-    );
-
-    // Render scanned items first, then pending assets at the bottom
-    return (
-      <>
-        {Object.entries(items).map(([qrId, item]) => renderItem(qrId, item))}
-        {pendingAssets.map((asset) => renderPendingAsset(asset))}
-      </>
-    );
-  };
-
-  const resolvedEmptyState = emptyStateContent
-    ? (expanded: boolean) =>
-        emptyStateContent({
-          expanded,
-          auditSession,
-          stats,
-          contextLabel,
-          contextName,
-        })
-    : (expanded: boolean) => (
-        <div className="py-8 text-center">
-          <p className="text-gray-500">
-            {expanded
-              ? `No assets scanned yet. Start scanning to audit this ${contextLabel.toLowerCase()}.`
-              : `Scan assets to audit this ${contextLabel.toLowerCase()}...`}
-          </p>
-          {auditSession && expanded && (
-            <div className="mt-4 rounded-lg bg-blue-50 p-3">
-              <p className="text-sm text-blue-700">
-                Audit: <strong>{contextName}</strong>
-              </p>
-              <p className="mt-1 text-xs text-blue-600">
-                Expected: {stats.totalExpected} • Found: {stats.foundCount} •
-                Unexpected: {stats.unexpectedCount}
-              </p>
-            </div>
-          )}
-        </div>
-      );
-
-  const shouldDisableSubmit =
-    hasBlockers ||
-    !auditSession ||
-    stats.foundCount + stats.unexpectedCount === 0;
+  // Completing with nothing scanned is legal — it marks every expected asset
+  // missing. The CompleteAuditDialog this drawer submits through states that
+  // outcome before anything is committed, so the button itself stays enabled.
+  const shouldDisableSubmit = hasBlockers || !auditSession;
 
   return (
     <ConfigurableDrawer
@@ -621,7 +555,16 @@ export function AuditDrawer({
       defaultExpanded={defaultExpanded}
       className={className}
       style={style}
-      emptyStateContent={resolvedEmptyState}
+      emptyStateContent={(expanded) => (
+        <AuditDrawerEmptyState
+          expanded={expanded}
+          customEmptyState={emptyStateContent}
+          auditSession={auditSession}
+          stats={stats}
+          contextLabel={contextLabel}
+          contextName={contextName}
+        />
+      )}
       // Render pending assets list even when no scans exist yet.
       renderWhenEmpty
       headerContent={headerContent}
@@ -644,5 +587,3 @@ export function AuditDrawer({
     />
   );
 }
-
-export default AuditDrawer;

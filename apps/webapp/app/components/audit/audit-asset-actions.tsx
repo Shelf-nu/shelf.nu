@@ -98,26 +98,47 @@ export function AuditAssetActions({
         onChange={handleFileSelected}
       />
 
-      {/* Main action button - opens dialog */}
-      <Button
-        asChild
-        type="button"
-        variant="secondary"
-        size="xs"
-        className="relative"
-        title="Add comment"
-        to={`${auditAssetId}/details`}
-      >
-        <span className="flex items-center gap-1">
-          <MessageSquarePlus className="inline-block size-4" />
-          <span>Add comment</span>
-          {totalCount > 0 && (
-            <span className="absolute -right-2 -top-2 flex size-4 items-center justify-center rounded-full bg-gray-300 text-[10px] font-medium text-gray-800">
-              {totalCount}
-            </span>
-          )}
-        </span>
-      </Button>
+      {/* Main action button - opens dialog. Only render as a navigable link
+          when we actually have an AuditAsset id — `to={`${undefined}/details`}`
+          would produce a broken `/scan/undefined/details` link (404). Callers
+          currently pass `auditAssetId || ""` for rows that don't have one yet
+          (e.g. a kit row that was rejected before reaching this component, or
+          a race where the asset hasn't been persisted to an AuditAsset yet). */}
+      {auditAssetId ? (
+        <Button
+          asChild
+          type="button"
+          variant="secondary"
+          size="xs"
+          className="relative"
+          title="Add comment"
+          to={`${auditAssetId}/details`}
+        >
+          <span className="flex items-center gap-1">
+            <MessageSquarePlus className="inline-block size-4" />
+            <span>Add comment</span>
+            {totalCount > 0 && (
+              <span className="absolute -right-2 -top-2 flex size-4 items-center justify-center rounded-full bg-gray-300 text-[10px] font-medium text-gray-800">
+                {totalCount}
+              </span>
+            )}
+          </span>
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          variant="secondary"
+          size="xs"
+          className="relative"
+          title="Add comment"
+          disabled
+        >
+          <span className="flex items-center gap-1">
+            <MessageSquarePlus className="inline-block size-4" />
+            <span>Add comment</span>
+          </span>
+        </Button>
+      )}
 
       {/* Quick camera/image picker - especially useful on mobile */}
       <Button

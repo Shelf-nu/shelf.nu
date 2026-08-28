@@ -137,7 +137,9 @@
     "local-rules/require-deleted-at-check-on-custom-field-queries": "error",
     "local-rules/require-meta-export-in-routes": "warn",
     "local-rules/require-button-type": "error",
-    "local-rules/require-org-scope-on-id-queries": "error"
+    "local-rules/require-org-scope-on-id-queries": "error",
+    "local-rules/require-complete-404-shape": "error",
+    "local-rules/no-test-files-in-routes": "error"
   },
   "overrides": [
     {

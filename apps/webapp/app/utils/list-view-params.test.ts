@@ -14,8 +14,21 @@ describe("isClientViewOnlyNavigation", () => {
     ).toBe(true);
   });
 
-  it("is true when nothing differs (same URL)", () => {
-    expect(isClientViewOnlyNavigation(url("?s=a"), url("?s=a"))).toBe(true);
+  it("is false when nothing differs (same URL)", () => {
+    // A navigation to the identical URL is a re-navigation — a redirect that
+    // lands back where we already are, or router.revalidate() — never a view
+    // change. Skipping it silently swallowed the refetch those navigations
+    // exist to perform.
+    expect(isClientViewOnlyNavigation(url("?s=a"), url("?s=a"))).toBe(false);
+    expect(isClientViewOnlyNavigation(url(""), url(""))).toBe(false);
+  });
+
+  it("is true when only the fragment differs", () => {
+    // Fragments are client-only, so a hash change is still a view change and
+    // must not drag the app shell into a refetch.
+    expect(isClientViewOnlyNavigation(url("?s=a"), url("?s=a#row-3"))).toBe(
+      true
+    );
   });
 
   it("is false when the pathname differs", () => {
@@ -60,6 +73,21 @@ describe("skipRevalidationOnClientViewChange", () => {
       call({
         currentUrl: new URL("https://app.test/bookings/b1/overview"),
         nextUrl: new URL("https://app.test/assets"),
+      })
+    ).toBe(true);
+  });
+
+  it("revalidates when a redirect lands back on the current URL", () => {
+    // Regression: switching workspace redirects through "/" and can land back
+    // on the URL the user was already on. React Router drops the POST context
+    // across that loader-redirect hop, so `formMethod` is undefined here — the
+    // predicate must still let the app shell refetch, or the sidebar keeps the
+    // previous workspace's nav while the page below shows the new one.
+    expect(
+      call({
+        currentUrl: new URL("https://app.test/assets?per_page=100"),
+        nextUrl: new URL("https://app.test/assets?per_page=100"),
+        formMethod: undefined,
       })
     ).toBe(true);
   });

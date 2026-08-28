@@ -18,6 +18,7 @@ import type {
   BookingStatus,
 } from "@prisma/client";
 import { Prisma } from "@prisma/client";
+import { DateTime } from "luxon";
 
 import { db } from "~/database/db.server";
 import {
@@ -25,9 +26,13 @@ import {
   getLatenessMs,
   isOnTime,
   resolveCheckInAt,
+  resolvePlannedEnd,
+  resolvePlannedStart,
 } from "~/modules/booking/lateness";
 import { getAssetTotalValue } from "~/utils/asset-value";
 import { ShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 
 import { resolveCheckInTimes } from "./check-in-time.server";
 
@@ -55,9 +60,12 @@ import type {
   TopBookedKitRow,
 } from "./types";
 import { bookingStatusTransitionCounts } from "../activity-event/reports.server";
+import type { ResolvableAssetModelImage } from "../asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
 import { refreshExpiredKitImages } from "../kit/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 
 // Re-export timeframe utilities for server use
 export { resolveTimeframe } from "./timeframe";
@@ -101,6 +109,46 @@ interface BookingComplianceArgs {
   sortBy?: BookingComplianceSortColumn;
   /** Sort direction */
   sortOrder?: "asc" | "desc";
+  /**
+   * IANA timezone of the acting user (from their resolved format prefs).
+   *
+   * The compliance-trend chart's day/week axis buckets are anchored to
+   * `timeframe.from`, which is itself midnight in this same zone. The axis tick
+   * labels must therefore read each bucket's day IN THIS ZONE — reading them in
+   * UTC renders them off-by-one for east-of-UTC users (a Tokyo "Fri 17" bucket
+   * labels as "Thu 16"). Defaults to `"UTC"` when the caller has no resolved
+   * prefs, preserving the historical behavior.
+   */
+  timeZone?: string;
+}
+
+/**
+ * Timeframe predicate on the PLANNED end of a booking.
+ *
+ * Extension and check-in both rewrite `to` — to the renegotiated deadline and
+ * to the actual return moment respectively — while the planned end stays in
+ * `originalTo`. Filtering on `to` alone therefore lets a booking due inside
+ * the window escape its own period, and moves it between periods over its
+ * lifetime. `originalTo` is null only on rows predating the column, where `to`
+ * still is the planned end.
+ *
+ * This is the SQL form of `resolvePlannedEnd` — the two must stay equivalent,
+ * so a row is filtered, displayed, and measured against one date.
+ *
+ * @param windowStart - Inclusive start of the timeframe.
+ * @param windowEnd - Inclusive end of the timeframe.
+ * @returns A `where` fragment matching bookings whose planned end is in range.
+ */
+function plannedEndInWindow(
+  windowStart: Date,
+  windowEnd: Date
+): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { originalTo: { gte: windowStart, lte: windowEnd } },
+      { originalTo: null, to: { gte: windowStart, lte: windowEnd } },
+    ],
+  };
 }
 
 /**
@@ -111,7 +159,10 @@ interface BookingComplianceArgs {
  * - Late returns
  * - Currently overdue items
  *
- * KPIs are pre-aggregated via SQL. The chart shows status transition trends.
+ * Every axis of the report — which period a booking belongs to, the end date
+ * shown in its row, and how late it was — reads the PLANNED end
+ * (`resolvePlannedEnd`), so a booking's period membership and lateness do not
+ * change when it is extended or checked in.
  *
  * @param args - Report parameters
  * @returns Complete report payload
@@ -129,6 +180,9 @@ export async function bookingComplianceReport(
     pageSize = 50,
     sortBy = "scheduledEnd",
     sortOrder = "desc",
+    // Pref timezone drives the trend axis day/week labels; UTC keeps parity
+    // with the pre-prefs behavior when the caller doesn't resolve prefs.
+    timeZone = "UTC",
   } = args;
 
   const startTime = performance.now();
@@ -136,16 +190,20 @@ export async function bookingComplianceReport(
   try {
     // Build the where clause for bookings
     // Compliance can only be measured on bookings that:
-    // 1. Had a due date (scheduledEnd/to) within the selected timeframe
+    // 1. Were planned to end within the selected timeframe
     // 2. Have a measurable outcome (COMPLETE, OVERDUE, or ARCHIVED). ARCHIVED
     //    bookings are returned bookings that have aged out of the active list,
     //    so they belong in the table just like COMPLETE rows.
     const where: Prisma.BookingWhereInput = {
       organizationId,
-      to: { gte: timeframe.from, lte: timeframe.to }, // Due date in timeframe
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
       status: {
         in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[],
       },
+      // Exclude bookings archived straight from RESERVED (never checked in):
+      // they were never returned, so they must not count toward compliance.
+      archivedWithoutCheckin: false,
     };
 
     // Allow further status filtering within the measurable statuses
@@ -190,7 +248,7 @@ export async function bookingComplianceReport(
       // Compliance rate calculation with prior period comparison
       computeComplianceRate(organizationId, timeframe),
       // Weekly compliance trend
-      computeComplianceTrend(organizationId, timeframe),
+      computeComplianceTrend(organizationId, timeframe, timeZone),
       // Custodian performance breakdown
       computeCustodianPerformance(organizationId, timeframe),
     ]);
@@ -257,8 +315,8 @@ export async function bookingComplianceReport(
  *
  * Remaining KPIs:
  * - `total_bookings` — count of measurable bookings (COMPLETE + OVERDUE +
- *   ARCHIVED) whose due date falls in the timeframe.
- * - `currently_overdue` — count of OVERDUE bookings with a due date in the
+ *   ARCHIVED) whose planned end falls in the timeframe.
+ * - `currently_overdue` — count of OVERDUE bookings with a planned end in the
  *   timeframe. Consumed by the PDF generator's hero overdue tile.
  */
 async function computeBookingComplianceKpis(
@@ -324,11 +382,12 @@ async function fetchBookingComplianceRows(
       // (legacy bookings, partial check-ins that recorded a custom note,
       // or rare event-write failures). See `resolveCheckInAt`.
       updatedAt: true,
+      // The planned period. `from`/`to` are rewritten by extension and by
+      // check-out/check-in with the adjust-date intent; these two are not.
+      originalFrom: true,
+      originalTo: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMember: {
         select: {
@@ -366,13 +425,15 @@ async function fetchBookingComplianceRows(
       fromEvent: checkInTimes.get(b.id) ?? null,
     });
 
-    // Lateness via the canonical helper:
-    // - OVERDUE → `now − to`
-    // - COMPLETE/ARCHIVED with a recorded check-in → `checkInAt − to`
+    // Compliance asks whether the agreed plan was honoured, so every row is
+    // measured against the planned end — the same date `plannedEndInWindow`
+    // filtered on and the row displays as `scheduledEnd`.
+    // - OVERDUE → `now − plannedEnd`
+    // - COMPLETE/ARCHIVED with a recorded check-in → `checkInAt − plannedEnd`
     // - otherwise null (no measurable lateness)
     const latenessMs = getLatenessMs({
       status: b.status,
-      to: b.to,
+      scheduledEnd: resolvePlannedEnd(b),
       checkInAt,
       now,
     });
@@ -383,17 +444,16 @@ async function fetchBookingComplianceRows(
       bookingName: b.name || `Booking ${b.id.slice(0, 8)}`,
       status: b.status,
       custodian: b.custodianUser
-        ? stripNameSuffix(
-            `${b.custodianUser.firstName || ""} ${
-              b.custodianUser.lastName || ""
-            }`.trim()
-          )
+        ? stripNameSuffix(resolveUserDisplayName(b.custodianUser))
         : b.custodianTeamMember
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
       assetCount: b._count.bookingAssets,
-      scheduledStart: b.from!,
-      scheduledEnd: b.to!,
+      // Both ends of the period the booking was PLANNED to run for — an early
+      // check-out rewrites `from` and a check-in rewrites `to`, so the raw
+      // columns would label a "scheduled" period with actual moments.
+      scheduledStart: resolvePlannedStart(b)!,
+      scheduledEnd: resolvePlannedEnd(b)!,
       actualCheckout: null,
       actualCheckin: checkInAt,
       isOnTime: isOnTime({ status: b.status, latenessMs }),
@@ -494,11 +554,17 @@ function formatStatusLabel(status: BookingStatus): string {
 // -----------------------------------------------------------------------------
 
 /**
- * Calculate compliance rate for completed bookings in the timeframe.
+ * Calculate the compliance rate for the timeframe, plus the prior period's
+ * rate for the trend comparison.
  *
- * A booking is "on-time" if it was marked COMPLETE and doesn't have OVERDUE
- * in its history. For now, we use a simplified heuristic based on whether
- * the booking ever had OVERDUE status.
+ * A booking counts as on-time when `getLatenessMs` — measured against its
+ * planned end — lands within `COMPLIANCE_GRACE_PERIOD_MS`. OVERDUE bookings
+ * are never on-time. The same helpers back the table, the trend chart and the
+ * custodian breakdown, so every number on the report agrees.
+ *
+ * @param organizationId - Workspace whose bookings are measured.
+ * @param timeframe - Resolved reporting window (planned end must fall inside).
+ * @returns On-time/late counts, the rate, and the prior-period comparison.
  */
 async function computeComplianceRate(
   organizationId: string,
@@ -512,8 +578,10 @@ async function computeComplianceRate(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
-      // Bookings scheduled to end within the timeframe
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
+      archivedWithoutCheckin: false,
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -522,6 +590,7 @@ async function computeComplianceRate(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -547,8 +616,10 @@ async function computeComplianceRate(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
-      // Filter by scheduled end date for consistency with main query
-      to: { gte: priorFrom, lte: priorTo },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
+      archivedWithoutCheckin: false,
+      // Planned end (originalTo ?? to), consistent with the main query.
+      ...plannedEndInWindow(priorFrom, priorTo),
     },
     select: {
       id: true,
@@ -556,6 +627,7 @@ async function computeComplianceRate(
       to: true,
       status: true,
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -594,8 +666,8 @@ async function computeComplianceRate(
  * are treated as on-time per `isOnTime`.
  *
  * @param bookings - Measurable bookings (COMPLETE / OVERDUE / ARCHIVED) with
- *   their `id`, scheduled return (`to`), `updatedAt`, and current `status`
- *   selected.
+ *   their `id`, planned end (`originalTo`), live end (`to`), `updatedAt`, and
+ *   current `status` selected.
  * @param checkInTimes - Map from `bookingId` to the canonical check-in moment
  *   produced by `resolveCheckInTimes`. Missing entries trigger the fallback.
  * @returns Counts of on-time and late bookings; the sum equals `bookings.length`.
@@ -604,6 +676,7 @@ function categorizeBookings(
   bookings: {
     id: string;
     to: Date | null;
+    originalTo: Date | null;
     status: BookingStatus;
     updatedAt: Date | null;
   }[],
@@ -620,7 +693,7 @@ function categorizeBookings(
     });
     const latenessMs = getLatenessMs({
       status: booking.status,
-      to: booking.to,
+      scheduledEnd: resolvePlannedEnd(booking),
       checkInAt,
       now,
     });
@@ -657,29 +730,61 @@ function getPriorPeriodLabel(preset: string): string {
  *
  * Breaks the timeframe into weeks and calculates compliance rate for each.
  * This enables the trend visualization showing improvement/decline over time.
+ *
+ * @param organizationId - Organization whose bookings are measured
+ * @param timeframe - Resolved timeframe; its `from` is midnight in `timeZone`
+ * @param timeZone - IANA timezone of the acting user. Each bucket start instant
+ *   is derived from `timeframe.from` (pref-tz midnight), so the axis labels are
+ *   resolved in this same zone to avoid an off-by-one day for east-of-UTC
+ *   users. Defaults to `"UTC"`.
  */
 async function computeComplianceTrend(
   organizationId: string,
-  timeframe: ResolvedTimeframe
+  timeframe: ResolvedTimeframe,
+  timeZone: string = "UTC"
 ): Promise<ComplianceTrendPoint[]> {
   const periodMs = timeframe.to.getTime() - timeframe.from.getTime();
   const msPerDay = 24 * 60 * 60 * 1000;
-  const msPerWeek = 7 * msPerDay;
   const periodDays = periodMs / msPerDay;
 
-  // Adaptive granularity: daily for short periods, weekly for longer
+  // Adaptive granularity: daily for short periods, weekly for longer. A ±1h DST
+  // drift never flips this threshold, so an ms-based day count is fine HERE.
   const useDailyGranularity = periodDays <= 14;
-  const bucketMs = useDailyGranularity ? msPerDay : msPerWeek;
-  const numBuckets = Math.max(1, Math.ceil(periodMs / bucketMs));
 
-  // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with due date
+  // Bucket boundaries are stepped by CALENDAR days/weeks in the acting user's
+  // timezone (via Luxon), NOT fixed 24h/7d millisecond intervals. On a DST
+  // transition a calendar day is 23h or 25h long; fixed-ms stepping would drift
+  // every subsequent boundary off pref-tz midnight (to 23:00 / 01:00) and
+  // misclassify due dates near a boundary. Calendar stepping keeps every bucket
+  // anchored to pref-tz midnight regardless of DST.
+  const fromZoned = DateTime.fromJSDate(timeframe.from).setZone(timeZone);
+  const toZoned = DateTime.fromJSDate(timeframe.to).setZone(timeZone);
+  /** Start of bucket `n` as a zoned DateTime, calendar-stepped from `from`. */
+  const bucketStartAt = (n: number): DateTime =>
+    useDailyGranularity
+      ? fromZoned.plus({ days: n })
+      : fromZoned.plus({ weeks: n });
+  // Calendar-aware span → bucket count (DST-correct, unlike periodMs / bucketMs).
+  const numBuckets = Math.max(
+    1,
+    Math.ceil(
+      useDailyGranularity
+        ? toZoned.diff(fromZoned, "days").days
+        : toZoned.diff(fromZoned, "weeks").weeks
+    )
+  );
+
+  // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with planned end
   // in the timeframe. ARCHIVED is included so finished-then-archived bookings
   // still count toward the trend.
   const measurableBookings = await db.booking.findMany({
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from the trend.
+      archivedWithoutCheckin: false,
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -687,6 +792,7 @@ async function computeComplianceTrend(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -703,14 +809,19 @@ async function computeComplianceTrend(
   const trend: ComplianceTrendPoint[] = [];
 
   for (let i = 0; i < numBuckets; i++) {
-    const bucketStart = new Date(timeframe.from.getTime() + i * bucketMs);
+    // Calendar-stepped boundaries (see bucketStartAt): bucket i spans
+    // [from + i units, from + (i+1) units) in the pref tz, so DST-transition
+    // days don't shift the boundary off midnight. End = the instant just before
+    // the next bucket start, clamped to the timeframe end.
+    const bucketStart = bucketStartAt(i).toJSDate();
     const bucketEnd = new Date(
-      Math.min(bucketStart.getTime() + bucketMs - 1, timeframe.to.getTime())
+      Math.min(bucketStartAt(i + 1).toMillis() - 1, timeframe.to.getTime())
     );
 
-    // Filter bookings with due date in this bucket
+    // Filter bookings whose planned end falls in this bucket
     const bucketBookings = measurableBookings.filter((b) => {
-      const dueDate = b.to?.getTime() || 0;
+      // Bucket by the planned end, matching the window filter and the table.
+      const dueDate = resolvePlannedEnd(b)?.getTime() || 0;
       return dueDate >= bucketStart.getTime() && dueDate <= bucketEnd.getTime();
     });
 
@@ -727,7 +838,7 @@ async function computeComplianceTrend(
       });
       const latenessMs = getLatenessMs({
         status: b.status,
-        to: b.to,
+        scheduledEnd: resolvePlannedEnd(b),
         checkInAt,
         now,
       });
@@ -739,12 +850,13 @@ async function computeComplianceTrend(
     // null rate for empty buckets (no data, not 0% compliance)
     const rate = total > 0 ? Math.round((onTime / total) * 100) : null;
 
-    // Format label based on granularity
+    // Format label based on granularity. The bucket instants are anchored to
+    // the pref-tz `timeframe.from`, so the labels are derived in `timeZone`.
     const label = useDailyGranularity
-      ? formatDayLabel(bucketStart)
+      ? formatDayLabel(bucketStart, timeZone)
       : numBuckets <= 4
       ? `Week ${i + 1}`
-      : formatWeekLabel(bucketStart, bucketEnd);
+      : formatWeekLabel(bucketStart, bucketEnd, timeZone);
 
     trend.push({
       label,
@@ -761,24 +873,60 @@ async function computeComplianceTrend(
 
 /**
  * Format day as "Mon 21" style label.
+ *
+ * The bucket instant is midnight in the acting user's timezone, so both the
+ * weekday name and the day number are resolved in that same `timeZone`. Reading
+ * them in UTC would render the tick off-by-one for east-of-UTC users (a Tokyo
+ * "Fri 17" bucket labeling as "Thu 16"). Only the ZONE used to pick the day
+ * changes — the weekday NAME stays English by design.
+ *
+ * @param date - The bucket start instant
+ * @param timeZone - IANA timezone the bucket day is read in
+ * @returns the assembled day label (e.g. "Fri 17")
  */
-function formatDayLabel(date: Date): string {
-  const dayName = date.toLocaleDateString("en-US", { weekday: "short" });
-  const dayNum = date.getDate();
+function formatDayLabel(date: Date, timeZone: string): string {
+  // why: weekday NAME kept English on purpose — chart-axis labels read
+  // consistently regardless of the viewer's locale or date-format preference;
+  // not user-facing prose. Only the zone used to resolve the day is prefs-tz.
+  const dayName = date.toLocaleDateString("en-US", {
+    weekday: "short",
+    timeZone,
+  });
+  const dayNum = DateTime.fromJSDate(date).setZone(timeZone).day;
   return `${dayName} ${dayNum}`;
 }
 
 /**
  * Format week range as "Mar 3-9" style label.
+ *
+ * The bucket boundary instants are midnight in the acting user's timezone, so
+ * month names and day numbers are resolved in that same `timeZone` to keep the
+ * tick from rendering off-by-one for east-of-UTC users. The month NAMES stay
+ * English by design.
+ *
+ * @param start - The bucket start instant
+ * @param end - The bucket end instant
+ * @param timeZone - IANA timezone the bucket days/months are read in
+ * @returns the assembled week-range label (e.g. "Mar 3-9" or "Mar 28-Apr 3")
  */
-function formatWeekLabel(start: Date, end: Date): string {
-  const startMonth = start.toLocaleDateString("en-US", { month: "short" });
-  const startDay = start.getDate();
-  const endDay = end.getDate();
+function formatWeekLabel(start: Date, end: Date, timeZone: string): string {
+  // why: month NAMES kept English on purpose — chart-axis labels read
+  // consistently for consistent report visuals; not affected by the user's
+  // display date-format preference. Only the zone used to resolve the day is
+  // prefs-tz.
+  const startMonth = start.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone,
+  });
+  const startDay = DateTime.fromJSDate(start).setZone(timeZone).day;
+  const endDay = DateTime.fromJSDate(end).setZone(timeZone).day;
 
   // If same month, show "Mar 3-9"
   // If different months, show "Mar 28-Apr 3"
-  const endMonth = end.toLocaleDateString("en-US", { month: "short" });
+  const endMonth = end.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone,
+  });
   if (startMonth === endMonth) {
     return `${startMonth} ${startDay}-${endDay}`;
   }
@@ -807,8 +955,10 @@ async function computeCustodianPerformance(
     where: {
       organizationId,
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
-      // Filter by scheduled end date for consistency with main compliance query
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
+      archivedWithoutCheckin: false,
+      // Planned end (originalTo ?? to), consistent with the main compliance query.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -816,12 +966,10 @@ async function computeCustodianPerformance(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
       custodianUserId: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMemberId: true,
       custodianTeamMember: {
@@ -854,11 +1002,7 @@ async function computeCustodianPerformance(
     const key =
       booking.custodianUserId || booking.custodianTeamMemberId || "__none__";
     const name = booking.custodianUser
-      ? stripNameSuffix(
-          `${booking.custodianUser.firstName || ""} ${
-            booking.custodianUser.lastName || ""
-          }`.trim()
-        )
+      ? stripNameSuffix(resolveUserDisplayName(booking.custodianUser))
       : booking.custodianTeamMember
       ? stripNameSuffix(booking.custodianTeamMember.name)
       : "No Custodian";
@@ -880,7 +1024,7 @@ async function computeCustodianPerformance(
     });
     const latenessMs = getLatenessMs({
       status: booking.status,
-      to: booking.to,
+      scheduledEnd: resolvePlannedEnd(booking),
       checkInAt,
       now,
     });
@@ -1010,7 +1154,9 @@ async function fetchOverdueRows(
 
   const bookings = await db.booking.findMany({
     where,
-    orderBy: { to: "asc" }, // Most overdue first (earliest scheduled end)
+    // Most overdue first (earliest scheduled end); `id` tiebreaker keeps
+    // skip/take paging deterministic for bookings sharing the same `to`.
+    orderBy: [{ to: "asc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -1019,10 +1165,7 @@ async function fetchOverdueRows(
       to: true,
       custodianUserId: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMember: {
         select: {
@@ -1053,6 +1196,11 @@ async function fetchOverdueRows(
   });
 
   return bookings.map((b) => {
+    // why: this is a live operational list — "what is late right now, and by
+    // how much" — so it measures against the CURRENT deadline. An extension
+    // moves that date and this report must follow it. Booking Compliance asks
+    // whether the agreed plan was honoured and reads the planned end instead,
+    // so the two reports can legitimately disagree for an extended booking.
     const scheduledEnd = b.to!;
     const msOverdue = now.getTime() - scheduledEnd.getTime();
     const daysOverdue = Math.max(
@@ -1089,11 +1237,7 @@ async function fetchOverdueRows(
       bookingId: b.id,
       bookingName: b.name || `Booking ${b.id.slice(0, 8)}`,
       custodian: b.custodianUser
-        ? stripNameSuffix(
-            `${b.custodianUser.firstName || ""} ${
-              b.custodianUser.lastName || ""
-            }`.trim()
-          )
+        ? stripNameSuffix(resolveUserDisplayName(b.custodianUser))
         : b.custodianTeamMember
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
@@ -1408,7 +1552,9 @@ async function fetchIdleAssetRows(
         },
       },
     },
-    orderBy: { updatedAt: "asc" }, // Least recently updated first
+    // Least recently updated first; `id` tiebreaker keeps skip/take paging
+    // deterministic for assets sharing an `updatedAt` (bulk operations).
+    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -1418,6 +1564,8 @@ async function fetchIdleAssetRows(
       mainImage: true,
       mainImageExpiration: true,
       thumbnailImage: true,
+      // Model cover image for assets with no image of their own
+      ...ASSET_MODEL_IMAGE_SELECT,
       status: true,
       valuation: true,
       type: true,
@@ -1480,6 +1628,8 @@ async function fetchIdleAssetRows(
       assetId: asset.id,
       assetName: asset.title,
       thumbnailImage: asset.thumbnailImage,
+      mainImage: asset.mainImage,
+      assetModel: asset.assetModel ?? null,
       category: asset.category?.name || null,
       location: getPrimaryLocation(asset)?.name || null,
       lastBookedAt,
@@ -1802,7 +1952,9 @@ async function fetchCustodyRows(
   // `refreshExpiredAssetImages` below without an extra round-trip.
   const custodyRecords = await db.custody.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    // `id` tiebreaker keeps skip/take paging deterministic for rows sharing
+    // a `createdAt` (bulk operations land in the same millisecond).
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -1826,6 +1978,8 @@ async function fetchCustodyRows(
           mainImage: true,
           mainImageExpiration: true,
           thumbnailImage: true,
+          // Model cover image for assets with no image of their own
+          ...ASSET_MODEL_IMAGE_SELECT,
           valuation: true,
           type: true,
           unitOfMeasure: true,
@@ -1855,6 +2009,12 @@ async function fetchCustodyRows(
   const refreshedThumbnailByAssetId = new Map(
     refreshedAssets.map((a) => [a.id, a.thumbnailImage])
   );
+  // `refreshExpiredAssetImages` may re-sign BOTH urls; keeping only the
+  // thumbnail would hand the row a stale `mainImage`, and the resolver reads
+  // `mainImage` to decide the tier.
+  const refreshedMainImageByAssetId = new Map(
+    refreshedAssets.map((a) => [a.id, a.mainImage])
+  );
 
   return custodyRecords.map((c) => {
     const assignedAt = c.createdAt;
@@ -1868,6 +2028,9 @@ async function fetchCustodyRows(
       assetName: c.asset.title,
       thumbnailImage:
         refreshedThumbnailByAssetId.get(c.asset.id) ?? c.asset.thumbnailImage,
+      mainImage:
+        refreshedMainImageByAssetId.get(c.asset.id) ?? c.asset.mainImage,
+      assetModel: c.asset.assetModel ?? null,
       category: c.asset.category?.name || null,
       location: getPrimaryLocation(c.asset)?.name || null,
       custodianId: c.custodian.id,
@@ -2111,6 +2274,8 @@ async function fetchTopBookedAssetRows(
               mainImage: true,
               mainImageExpiration: true,
               thumbnailImage: true,
+              // Model cover image for assets with no image of their own
+              ...ASSET_MODEL_IMAGE_SELECT,
               category: { select: { name: true } },
               assetLocations: {
                 select: {
@@ -2132,6 +2297,13 @@ async function fetchTopBookedAssetRows(
         id: string;
         title: string;
         thumbnailImage: string | null;
+        /**
+         * The asset's OWN image. `resolveAssetImage` decides the ownership
+         * tier from this alone, so dropping it here would make every asset
+         * look like it inherits its model's cover.
+         */
+        mainImage: string | null;
+        assetModel: ResolvableAssetModelImage;
         category: string | null;
         location: string | null;
       };
@@ -2176,6 +2348,8 @@ async function fetchTopBookedAssetRows(
             id: asset.id,
             title: asset.title,
             thumbnailImage: asset.thumbnailImage,
+            mainImage: asset.mainImage,
+            assetModel: asset.assetModel ?? null,
             category: asset.category?.name || null,
             location: getPrimaryLocation(asset)?.name || null,
           },
@@ -2198,6 +2372,11 @@ async function fetchTopBookedAssetRows(
   const refreshedThumbnailByAssetId = new Map(
     refreshedAssets.map((a) => [a.id, a.thumbnailImage])
   );
+  // See the note in the custody-snapshot builder: the re-signed `mainImage`
+  // must travel with the thumbnail or the row keeps a stale url.
+  const refreshedMainImageByAssetId = new Map(
+    refreshedAssets.map((a) => [a.id, a.mainImage])
+  );
 
   // Convert to array and sort by booking count
   const results = Array.from(assetMap.values())
@@ -2208,6 +2387,10 @@ async function fetchTopBookedAssetRows(
       thumbnailImage:
         refreshedThumbnailByAssetId.get(entry.asset.id) ??
         entry.asset.thumbnailImage,
+      mainImage:
+        refreshedMainImageByAssetId.get(entry.asset.id) ??
+        entry.asset.mainImage,
+      assetModel: entry.asset.assetModel,
       category: entry.asset.category,
       location: entry.asset.location,
       bookingCount: entry.bookingCount,
@@ -3042,7 +3225,9 @@ async function fetchInventoryRows(
   // extra round-trip.
   const assets = await db.asset.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    // `id` tiebreaker keeps skip/take paging deterministic for rows sharing
+    // a `createdAt` (bulk operations land in the same millisecond).
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     skip: (page - 1) * pageSize,
     take: pageSize,
     select: {
@@ -3052,6 +3237,8 @@ async function fetchInventoryRows(
       mainImage: true,
       mainImageExpiration: true,
       thumbnailImage: true,
+      // Model cover image for assets with no image of their own
+      ...ASSET_MODEL_IMAGE_SELECT,
       status: true,
       valuation: true,
       type: true,
@@ -3084,6 +3271,8 @@ async function fetchInventoryRows(
     assetId: a.id,
     assetName: a.title,
     thumbnailImage: a.thumbnailImage,
+    mainImage: a.mainImage,
+    assetModel: a.assetModel ?? null,
     category: a.category?.name || null,
     location: getPrimaryLocation(a)?.name || null,
     status: a.status,
@@ -3308,6 +3497,9 @@ export async function monthlyBookingTrendsReport(
 
         return {
           id: key,
+          // why: kept ISO/English on purpose — chart-axis month label stays
+          // in English for consistent report visuals; not driven by the
+          // user's display date-format preference.
           month: data.monthStart.toLocaleDateString("en-US", {
             month: "short",
             year: "numeric",
@@ -3527,6 +3719,8 @@ export async function assetUtilizationReport(
         mainImage: true,
         mainImageExpiration: true,
         thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
         valuation: true,
         type: true,
         quantity: true,
@@ -3596,6 +3790,8 @@ export async function assetUtilizationReport(
         assetId: asset.id,
         assetName: asset.title,
         thumbnailImage: asset.thumbnailImage,
+        mainImage: asset.mainImage,
+        assetModel: asset.assetModel ?? null,
         category: asset.category?.name || null,
         location: getPrimaryLocation(asset)?.name || null,
         totalDays,
@@ -3679,10 +3875,15 @@ export async function assetUtilizationReport(
     const refreshedThumbnailByAssetId = new Map(
       refreshedPageAssets.map((a) => [a.id, a.thumbnailImage])
     );
+    // See the note in the custody-snapshot builder.
+    const refreshedMainImageByAssetId = new Map(
+      refreshedPageAssets.map((a) => [a.id, a.mainImage])
+    );
     const pagedRows = pageRows.map((r) => ({
       ...r,
       thumbnailImage:
         refreshedThumbnailByAssetId.get(r.assetId) ?? r.thumbnailImage,
+      mainImage: refreshedMainImageByAssetId.get(r.assetId) ?? r.mainImage,
     }));
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -3760,6 +3961,8 @@ export async function assetActivityReport(
       "ASSET_LOCATION_CHANGED",
       "ASSET_STATUS_CHANGED",
       "ASSET_VALUATION_CHANGED",
+      "ASSET_QUANTITY_CHANGED",
+      "ASSET_MIN_QUANTITY_CHANGED",
       "ASSET_TAGS_CHANGED",
       "ASSET_CUSTOM_FIELD_CHANGED",
       "CUSTODY_ASSIGNED",
@@ -3791,7 +3994,9 @@ export async function assetActivityReport(
     const [events, totalCount] = await Promise.all([
       db.activityEvent.findMany({
         where,
-        orderBy: { occurredAt: "desc" },
+        // `id` tiebreaker keeps skip/take paging deterministic for events
+        // sharing an `occurredAt` (bulk mutations emit same-instant events).
+        orderBy: [{ occurredAt: "desc" }, { id: "asc" }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -3813,6 +4018,8 @@ export async function assetActivityReport(
         mainImage: true,
         mainImageExpiration: true,
         thumbnailImage: true,
+        // Model cover image for assets with no image of their own
+        ...ASSET_MODEL_IMAGE_SELECT,
       },
     });
     const refreshedAssets = await refreshExpiredAssetImages(assets);
@@ -3821,27 +4028,20 @@ export async function assetActivityReport(
     // Map events to rows
     const rows: AssetActivityRow[] = events.map((event) => {
       const asset = event.assetId ? assetMap.get(event.assetId) : null;
-      const actorSnapshot = event.actorSnapshot as {
-        firstName?: string;
-        lastName?: string;
-        displayName?: string;
-      } | null;
+      const actorSnapshot = event.actorSnapshot as UserNameFields | null;
 
       return {
         id: event.id,
         assetId: event.assetId || "",
         assetName: asset?.title || "Unknown Asset",
         thumbnailImage: asset?.thumbnailImage || null,
+        mainImage: asset?.mainImage || null,
+        assetModel: asset?.assetModel ?? null,
         activityType: mapActionToActivityType(event.action),
         description: buildActivityDescription(event),
         occurredAt: event.occurredAt,
         performedBy: actorSnapshot
-          ? stripNameSuffix(
-              actorSnapshot.displayName ||
-                `${actorSnapshot.firstName || ""} ${
-                  actorSnapshot.lastName || ""
-                }`.trim()
-            )
+          ? stripNameSuffix(resolveUserDisplayName(actorSnapshot))
           : null,
         context: null,
       };
@@ -3991,6 +4191,8 @@ function buildActivityDescription(event: {
     ASSET_LOCATION_CHANGED: "Location changed",
     ASSET_STATUS_CHANGED: "Status changed",
     ASSET_VALUATION_CHANGED: "Valuation changed",
+    ASSET_QUANTITY_CHANGED: "Quantity changed",
+    ASSET_MIN_QUANTITY_CHANGED: "Min quantity changed",
     ASSET_TAGS_CHANGED: "Tags updated",
     ASSET_CUSTOM_FIELD_CHANGED: "Custom field updated",
     CUSTODY_ASSIGNED: "Custody assigned",

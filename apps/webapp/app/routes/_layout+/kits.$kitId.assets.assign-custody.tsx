@@ -337,8 +337,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         await tx.custody.createMany({ data: inheritData });
 
         const inheritedAssetIds = inheritData.map((row) => row.assetId);
+        // `status: { not: CHECKED_OUT }` — a quantity-tracked kit member can
+        // hold custody units and booking units at the same time, but
+        // `Asset.status` is a single column. Without this guard, taking the
+        // kit into custody overwrote `CHECKED_OUT` on a member that still had
+        // units out on an ONGOING booking, and every reader of the
+        // "is it off the shelf" signal then counted zero checked-out units, so
+        // `Available` overstated free stock by exactly the booked quantity.
+        // Precedence (`CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`) matches
+        // `reconcileAssetStatusForBookingExit` and the sibling guards in
+        // `kit/service.server.ts` and `asset/service.server.ts`.
         await tx.asset.updateMany({
-          where: { id: { in: inheritedAssetIds }, organizationId },
+          where: {
+            id: { in: inheritedAssetIds },
+            organizationId,
+            status: { not: AssetStatus.CHECKED_OUT },
+          },
           data: { status: AssetStatus.IN_CUSTODY },
         });
 
@@ -368,11 +382,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     // Create notes for all assets using markdoc wrappers (not critical for atomicity)
-    const actor = wrapUserLinkForNote({
-      id: userId,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: userId });
 
     const custodianDisplay = wrapCustodianForNote({
       teamMember: custodianTeamMember,
@@ -472,6 +482,10 @@ export default function GiveKitCustody() {
               name: "teamMember",
               queryKey: "name",
               deletedAt: null,
+              // ASSET custody: SELF_SERVICE may only take custody itself and
+              // BASE never. Stated explicitly so the behaviour survives a
+              // change to the endpoint's fallback.
+              custodyPurpose: "custody-assignment",
             }}
             fieldName="custodian"
             contentLabel="Team members"

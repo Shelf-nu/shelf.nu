@@ -9,11 +9,12 @@
  * are strings after the network / hydration); it never constructs Dates itself.
  *
  * @see {@link file://./helpers.ts} filterBookingAssets / groupAndSortAssetsByKit
- * @see {@link file://../../utils/booking-assets.ts} sortBookingAssets
+ * @see {@link file://../../utils/booking-assets.ts} resolveBookingRowQtyState
  * @see docs/superpowers/specs/2026-06-01-booking-asset-search-in-memory-design.md
  */
+import { AssetStatus } from "@prisma/client";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
-import { sortBookingAssets } from "~/utils/booking-assets";
+import { resolveBookingRowQtyState } from "~/utils/booking-assets";
 import { filterBookingAssets, groupAndSortAssetsByKit } from "./helpers";
 
 /** A rendered pagination row: a grouped kit (with its assets) or a lone asset. */
@@ -39,6 +40,8 @@ export interface ShapeBookingAssetsParams<TAsset, TKit> {
   page: number;
   perPage: number;
   partialCheckinDetails: PartialCheckinDetailsType;
+  /** Parent booking status — drives booking-context checked-out resolution. */
+  bookingStatus: string;
 }
 
 /** Output of {@link shapeBookingAssets} — the view fields the route returns. */
@@ -68,6 +71,7 @@ export function shapeBookingAssets<
   page,
   perPage,
   partialCheckinDetails,
+  bookingStatus,
 }: ShapeBookingAssetsParams<TAsset, TKit>): ShapeBookingAssetsResult<
   TAsset,
   TKit
@@ -75,18 +79,22 @@ export function shapeBookingAssets<
   // 1. Search-filter (with kit re-expansion).
   const filtered = filterBookingAssets(rawAssets, search);
 
-  // 2. Status sort needs partial check-in date ordering; other fields are
-  //    handled entirely by groupAndSortAssetsByKit.
-  const isStatusSort = !orderBy || orderBy === "status";
-  const listAssets = isStatusSort
-    ? sortBookingAssets(filtered, partialCheckinDetails)
-    : filtered;
-
-  // 3. Group by kit + apply the sort to assets and kit groups.
+  // 2. Group by kit + sort. A row counts as "checked out" (bottom bucket) when
+  //    its RESOLVED badge status is CHECKED_OUT — computed by the SAME shared
+  //    resolver the row badge uses, so the badge a user sees and the bucket the
+  //    row sorts into can never disagree. This covers per-slice QT correctly:
+  //    a fully-checked-out kit slice sinks even though the multi-slice asset's
+  //    GLOBAL status hasn't flipped, while a QT row with a partial return
+  //    underway (or DRAFT/RESERVED) stays on top as its actionable state.
   const sortedAssets = groupAndSortAssetsByKit(
-    listAssets,
+    filtered,
     orderBy,
-    orderDirection
+    orderDirection,
+    {
+      isCheckedOut: (asset) =>
+        resolveBookingRowQtyState(asset, partialCheckinDetails, bookingStatus)
+          .contextStatus === AssetStatus.CHECKED_OUT,
+    }
   );
 
   // 4. Build pagination items (kits grouped, individual assets separate).

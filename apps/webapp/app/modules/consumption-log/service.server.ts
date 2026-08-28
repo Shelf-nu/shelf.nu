@@ -21,7 +21,20 @@ import {
   BookingStatus,
   ConsumptionCategory as ConsumptionCategoryEnum,
 } from "@prisma/client";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+// `recordEvent` writes the structured activity-event audit row alongside the
+// immutable ConsumptionLog. The activity-event service is a dependency-free
+// leaf (imports only db + error + its own types), so this does NOT reintroduce
+// the availability/booking cycle guarded against below.
+import { recordEvent } from "~/modules/activity-event/service.server";
+// Imported from the dependency-free leaf (NOT `availability.server`) to avoid
+// the cycle `consumption-log → availability.server → booking/service.server →
+// consumption-log`, which corrupts Vitest partial-mock bindings on
+// `createConsumptionLog` in the booking suite. See the leaf's header doc.
+import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import { assertStockNotBelowManualPlacements } from "~/modules/asset/placement-reconcile.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { lockAssetForQuantityUpdate } from "./quantity-lock.server";
@@ -171,8 +184,7 @@ export async function getConsumptionLogs({
         include: {
           performedBy: {
             select: {
-              firstName: true,
-              lastName: true,
+              ...USER_NAME_SELECT,
               profilePicture: true,
             },
           },
@@ -214,27 +226,51 @@ export type AvailableQuantity = {
 };
 
 /**
+ * Minimal client surface {@link computeAvailableQuantity} reads through — the
+ * `asset` and `custody` delegates only. A `Pick` of {@link ExtendedPrismaClient}
+ * so BOTH the root `db` client and an interactive-transaction client satisfy it
+ * without a cast (an interactive tx is structurally a subset of the extended
+ * client), letting `getAssetAvailability` thread its active `tx` straight in.
+ */
+export type AvailableQuantityClient = Pick<
+  ExtendedPrismaClient,
+  "asset" | "custody"
+>;
+
+/**
  * Computes the available quantity for a quantity-tracked asset.
  *
  * Calculates how many units are currently in custody (summing all custody
  * records for the asset) and subtracts from the total to determine availability.
  *
  * @param assetId - The ID of the asset to compute availability for
+ * @param client - Prisma client or interactive transaction. Defaults to the
+ *   global `db`. `getAssetAvailability` passes its active `tx` so this read
+ *   joins the caller's transaction — row locks taken and uncommitted writes
+ *   made earlier in that tx are visible here, which is what keeps the
+ *   availability write guards race-safe (reading `total`/`inCustody` outside
+ *   the tx would defeat the `lockAssetForQuantityUpdate` serialization).
  * @returns The quantity breakdown: total, inCustody, and available
  * @throws {ShelfError} If the asset is not found or the query fails
  */
 export async function computeAvailableQuantity(
-  assetId: string
+  assetId: string,
+  client: AvailableQuantityClient = db
 ): Promise<AvailableQuantity> {
   try {
     const [asset, custodySum] = await Promise.all([
-      db.asset.findUniqueOrThrow({
+      client.asset.findUniqueOrThrow({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified by the caller (adjustQuantity / checkout flows validate the asset against organizationId before logging)
         where: { id: assetId },
         select: { quantity: true },
       }),
-      db.custody.aggregate({
-        where: { assetId },
+      client.custody.aggregate({
+        // `kitCustodyId: null` = OPERATOR custody only. Kit-inherited custody
+        // rows (a kit holding this asset that is itself assigned custody) carry
+        // a non-null `kitCustodyId`; those units are already accounted for via
+        // `AssetKit.quantity` (`inKits`) in the availability model, so counting
+        // them here too would double-deduct them from the pool.
+        where: { assetId, kitCustodyId: null },
         _sum: { quantity: true },
       }),
     ]);
@@ -458,7 +494,11 @@ export async function adjustQuantity({
 
     return await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
-      const asset = await lockAssetForQuantityUpdate(tx, assetId);
+      const asset = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
       /**
        * Step 2: Validate asset belongs to the caller's organization.
@@ -466,6 +506,10 @@ export async function adjustQuantity({
        * user with `asset:update` in any org could mutate another org's
        * qty-tracked asset by passing its id. Mirrors the pattern used in
        * `checkOutQuantity` / `releaseQuantity` in `asset/service.server.ts`.
+       *
+       * Now defense-in-depth: `lockAssetForQuantityUpdate` is org-scoped, so a
+       * foreign-org id already 404'd at Step 1 (no lock taken) and never reaches
+       * here. We keep this belt-and-braces check to document the invariant.
        */
       if (asset.organizationId !== organizationId) {
         throw new ShelfError({
@@ -511,6 +555,43 @@ export async function adjustQuantity({
             additionalData: { assetId, quantity, currentQuantity, inCustody },
           });
         }
+
+        /**
+         * Reservations guard. The in-custody check above only protects units
+         * held by custodians right now; this also blocks lowering the total
+         * below what active bookings have RESERVED (their peak-concurrent
+         * booked footprint) or what's allocated into kits. This is the shared
+         * stock-lowering guard used by `updateAsset` too, so the `adjust
+         * quantity` endpoint can't strand a reservation the asset-edit path
+         * would reject. Runs inside this same tx with the asset already
+         * row-locked above, so the read-then-decide is race-safe.
+         */
+        await assertAssetQuantityNotBelowReservations({
+          assetId,
+          organizationId,
+          tx,
+          newTotal: currentQuantity - quantity,
+          assetTitle: asset.title,
+          unitOfMeasure: asset.unitOfMeasure,
+        });
+
+        /**
+         * Placement guard, the orthogonal axis the reservations guard does not
+         * cover. `asset_location_sum_within_total` only fires on an
+         * `AssetLocation` write, so lowering the total here would otherwise
+         * leave locations claiming more units than the asset owns — invisible
+         * until a later, legitimate placement edit is refused. Refused rather
+         * than auto-trimmed: nothing has physically moved yet, so the operator
+         * can unplace the right location first.
+         */
+        await assertStockNotBelowManualPlacements({
+          assetId,
+          organizationId,
+          tx,
+          newTotal: currentQuantity - quantity,
+          assetTitle: asset.title,
+          unitOfMeasure: asset.unitOfMeasure,
+        });
       }
 
       /** Step 5: Compute the new total quantity */
@@ -535,6 +616,28 @@ export async function adjustQuantity({
         note,
         tx,
       });
+
+      /**
+       * Step 8: Structured activity event for the reporting pipeline — one
+       * `ASSET_QUANTITY_CHANGED` per total-quantity change, emitted inside the
+       * SAME tx so it commits atomically with the asset update + log (see
+       * `.claude/rules/use-record-event.md`). `fromValue`/`toValue` capture the
+       * true direction the direction-agnostic ConsumptionLog cannot.
+       */
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_QUANTITY_CHANGED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          field: "quantity",
+          fromValue: currentQuantity,
+          toValue: newQuantity,
+        },
+        tx
+      );
 
       return updatedAsset;
     });

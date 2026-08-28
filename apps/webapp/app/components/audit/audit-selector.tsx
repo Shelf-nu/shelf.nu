@@ -11,23 +11,24 @@ import { Search } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 import { ChevronRight } from "../icons/library";
 
-type PendingAudit = {
+/**
+ * One selectable audit, as `/api/audits/get-pending` returns it.
+ *
+ * Exported so the dialogs that fetch that endpoint share this shape rather
+ * than re-declaring it — a second copy drifts, and a copy that omits
+ * `displayName` renames every creator and assignee in the picker.
+ */
+export type PendingAudit = {
   id: string;
   name: string;
   createdAt: Date;
   expectedAssetCount: number;
-  createdBy: {
-    firstName: string | null;
-    lastName: string | null;
-  };
-  assignments: Array<{
-    user: {
-      firstName: string | null;
-      lastName: string | null;
-    };
-  }>;
+  createdBy: UserNameFields;
+  assignments: Array<{ user: UserNameFields }>;
 };
 
 export interface AuditSelectorProps {
@@ -186,17 +187,15 @@ const AuditSelector: FunctionComponent<AuditSelectorProps> = ({
             {filteredAudits.length > 0 ? (
               filteredAudits.map((audit, index) => {
                 const creatorName =
-                  audit.createdBy.firstName || audit.createdBy.lastName
-                    ? `${audit.createdBy.firstName || ""} ${
-                        audit.createdBy.lastName || ""
-                      }`.trim()
-                    : "Unknown";
+                  resolveUserDisplayName(audit.createdBy) || "Unknown";
 
+                // "Unassigned" and "Unknown" mean different things: nobody is
+                // assigned, versus someone is but has no name on record — an
+                // SSO account whose IdP sent no name claims resolves to "".
                 const assigneeName =
                   audit.assignments.length > 0
-                    ? `${audit.assignments[0].user.firstName || ""} ${
-                        audit.assignments[0].user.lastName || ""
-                      }`.trim()
+                    ? resolveUserDisplayName(audit.assignments[0].user) ||
+                      "Unknown"
                     : "Unassigned";
 
                 return (

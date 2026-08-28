@@ -1,6 +1,12 @@
 import { useState, useRef, useMemo } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
+// Named-timezone support for FullCalendar. v6 only understands "local"/"UTC"
+// out of the box; a named IANA `timeZone` (e.g. "Asia/Tokyo") silently falls
+// back to UTC — rendering every non-UTC user's events at the wrong local time —
+// UNLESS this Luxon connector is registered in the plugins array below. luxon
+// is already a project dependency, so this connector is lightweight.
+import luxonPlugin from "@fullcalendar/luxon3";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import { type BookingStatus, type Tag } from "@prisma/client";
@@ -11,6 +17,7 @@ import BookingFilters from "~/components/booking/booking-filters";
 import CreateBookingDialog from "~/components/booking/create-booking-dialog";
 
 import { CalendarNavigation } from "~/components/calendar/calendar-navigation";
+import CalendarSubscribeDialog from "~/components/calendar/calendar-subscribe-dialog";
 import renderEventCard from "~/components/calendar/event-card";
 import TitleContainer from "~/components/calendar/title-container";
 import { ViewButtonGroup } from "~/components/calendar/view-button-group";
@@ -21,10 +28,12 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import type { TeamMemberForBadge } from "~/components/user/team-member-badge";
 import { useSearchParams } from "~/hooks/search-params";
+import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { useDisabled } from "~/hooks/use-disabled";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
+import { getMemberCalendarFeedUrl } from "~/modules/calendar-subscription/service.server";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import {
   getTeamMemberForCustodianFilter,
@@ -61,6 +70,20 @@ export const handle = {
   breadcrumb: () => <Link to="/calendar">Calendar</Link>,
 };
 
+/** One folded BookingAsset pivot slice on a collapsed availability bar.
+ * `assetKitId === null` ⇒ standalone (free pool); non-null ⇒ kit-driven.
+ * `quantity` is booked units (BookingAsset.quantity). Availability view only.
+ *
+ * why: out of this rule — no `sourceKitId` fallback for detached kit residue.
+ * This view is asset-centric (one bar per booking of ONE asset) rather than a
+ * grouping of a booking's rows by kit, so `kitName` is a per-slice annotation,
+ * not the structure a snapshot would restore. */
+export type AvailabilitySlice = {
+  assetKitId: string | null;
+  kitName: string | null;
+  quantity: number;
+};
+
 export type CalendarExtendedProps = {
   id: string;
   status: BookingStatus;
@@ -71,6 +94,17 @@ export type CalendarExtendedProps = {
   custodian: TeamMemberForBadge;
   creator: TeamMemberForBadge;
   tags: Pick<Tag, "id" | "name">[];
+  /** Availability view only: per-slice breakdown of one (asset, booking).
+   * Absent on the booking calendar (which never sets it). */
+  slices?: AvailabilitySlice[];
+  /** Number of folded slices (>1 ⇒ show glyph count on the bar). */
+  sliceCount?: number;
+  /** Sum of BookingAsset.quantity across folded slices (booked-units total). */
+  bookedTotal?: number;
+  /** True only for QUANTITY_TRACKED assets. INDIVIDUAL assets are single
+   * physical units (always qty 1), so the calendar hides the per-slice `Qty`
+   * and the booked-units total for them — the number is redundant noise. */
+  quantityTracked?: boolean;
 };
 
 // Loader Function to Return Bookings Data
@@ -109,40 +143,46 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 
     const searchParams = getCurrentSearchParams(request);
     const { teamMemberIds } = getParamsValues(searchParams);
-    const [teamMembersData, teamMembersForFormData, tagsData, events] =
-      await Promise.all([
-        // Team members for filters - when canSeeAllCustody is false, only current user's team member
-        getTeamMemberForCustodianFilter({
-          organizationId,
-          selectedTeamMembers: teamMemberIds,
-          getAll:
-            searchParams.has("getAll") &&
-            hasGetAllValue(searchParams, "teamMember"),
-          filterByUserId: !canSeeAllCustody,
-          userId,
-        }),
-        // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
-        isSelfServiceOrBase
-          ? getTeamMemberForForm({
-              organizationId,
-              userId,
-              isSelfServiceOrBase,
-              getAll:
-                searchParams.has("getAll") &&
-                hasGetAllValue(searchParams, "teamMember"),
-            })
-          : Promise.resolve(null), // ADMIN users reuse teamMembersData
-        getTagsForBookingTagsFilter({
-          organizationId,
-        }),
-        getBookingsForCalendar({
-          request,
-          organizationId,
-          userId,
-          canSeeAllBookings,
-          canSeeAllCustody,
-        }),
-      ]);
+    const [
+      teamMembersData,
+      teamMembersForFormData,
+      tagsData,
+      events,
+      calendarFeedUrl,
+    ] = await Promise.all([
+      // Team members for filters - when canSeeAllCustody is false, only current user's team member
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll:
+          searchParams.has("getAll") &&
+          hasGetAllValue(searchParams, "teamMember"),
+        filterByUserId: !canSeeAllCustody,
+        userId,
+      }),
+      // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
+      isSelfServiceOrBase
+        ? getTeamMemberForForm({
+            organizationId,
+            userId,
+            isSelfServiceOrBase,
+            getAll:
+              searchParams.has("getAll") &&
+              hasGetAllValue(searchParams, "teamMember"),
+          })
+        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+      getTagsForBookingTagsFilter({
+        organizationId,
+      }),
+      getBookingsForCalendar({
+        request,
+        organizationId,
+        userId,
+        canSeeAllBookings,
+        canSeeAllCustody,
+      }),
+      getMemberCalendarFeedUrl({ organizationId, userId }),
+    ]);
 
     const modelName = {
       singular: "booking",
@@ -152,6 +192,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     return payload({
       header,
       events,
+      organizationId,
       ...teamMembersData,
       // For BASE/SELF_SERVICE users, provide dedicated form team members
       // For ADMIN users, reuse the filter team members
@@ -162,6 +203,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       modelName,
       isSelfServiceOrBase,
       userId,
+      calendarFeedUrl,
       searchFieldTooltip: {
         title: "Search your bookings",
         text: parseMarkdownToReact(bookingsSearchFieldTooltipText),
@@ -179,10 +221,18 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 // Calendar Component
 export default function Calendar() {
   const { isMd } = useViewportHeight();
-  const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
+  const { prefs } = useDateFormatter();
+  // Drive FullCalendar's clock (12h vs 24h) from the user's time-format pref.
+  const hour12 = prefs.timeFormat === "H12";
+  const [startingDay, endingDay] = getWeekStartingAndEndingDates(
+    new Date(),
+    prefs
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const { events } = useLoaderData<typeof loader>();
+  const [subscribeOpen, setSubscribeOpen] = useState(false);
+  const { events, calendarFeedUrl, organizationId } =
+    useLoaderData<typeof loader>();
   const isLoading = useDisabled();
   const [calendarHeader, setCalendarHeader] = useState<{
     title?: string;
@@ -210,7 +260,9 @@ export default function Calendar() {
   function updateTitle(viewType = calendarView) {
     const calendarApi = calendarRef.current?.getApi();
     if (calendarApi) {
-      setCalendarHeader(getCalendarTitleAndSubtitle({ viewType, calendarApi }));
+      setCalendarHeader(
+        getCalendarTitleAndSubtitle({ viewType, calendarApi, prefs })
+      );
     }
   }
 
@@ -285,19 +337,34 @@ export default function Calendar() {
                 onViewChange={handleViewChange}
               />
             ) : null}
+
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="ml-3"
+              onClick={() => setSubscribeOpen(true)}
+            >
+              Subscribe
+            </Button>
           </div>
         </div>
         <ClientOnly fallback={<FallbackLoading className="size-[150px]" />}>
           {() => (
             <FullCalendar
               ref={calendarRef}
-              plugins={[dayGridPlugin, listPlugin, timeGridPlugin]}
+              // luxonPlugin registers named-IANA-timezone resolution so
+              // `timeZone={prefs.timeZone}` below renders events in the user's
+              // chosen zone instead of falling back to UTC (see import note).
+              plugins={[dayGridPlugin, listPlugin, timeGridPlugin, luxonPlugin]}
               initialView={calendarView}
               initialDate={initialDate}
               expandRows={true}
               height="auto"
-              firstDay={1}
-              timeZone="local"
+              // Week start, display timezone, and 12/24h clock all follow the
+              // acting user's resolved formatting prefs (see useDateFormatter).
+              firstDay={prefs.weekStartsOn}
+              timeZone={prefs.timeZone}
               nowIndicator
               headerToolbar={false}
               events={events}
@@ -314,6 +381,15 @@ export default function Calendar() {
                 hour: "numeric",
                 minute: "2-digit",
                 meridiem: "short",
+                hour12,
+              }}
+              // Slot labels (timeGrid Week/Day axis) also honor the 12/24h pref.
+              slotLabelFormat={{
+                hour: "numeric",
+                minute: "2-digit",
+                omitZeroMinute: true,
+                meridiem: "short",
+                hour12,
               }}
               viewDidMount={(args) => {
                 const calendarContainer = args.el;
@@ -355,6 +431,13 @@ export default function Calendar() {
           )}
         </ClientOnly>
       </div>
+
+      <CalendarSubscribeDialog
+        organizationId={organizationId}
+        calendarFeedUrl={calendarFeedUrl}
+        open={subscribeOpen}
+        onClose={() => setSubscribeOpen(false)}
+      />
     </>
   );
 }

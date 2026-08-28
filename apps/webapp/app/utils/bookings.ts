@@ -2,6 +2,7 @@ import type { Booking, Currency } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
+import type { UserNameFields } from "./user";
 import { resolveTeamMemberName } from "./user";
 
 export function canUserManageBookingAssets(
@@ -21,6 +22,33 @@ export function canUserManageBookingAssets(
     !isCancelled &&
     !cantManageAssetsAsSelfService
   );
+}
+
+/**
+ * Whether items may still be REMOVED from a booking in its current status.
+ *
+ * Removal stays open until the booking is finished — a booking that is
+ * COMPLETE, ARCHIVED or CANCELLED is a closed record and its contents must not
+ * change.
+ *
+ * Deliberately status-only, unlike {@link canUserManageBookingAssets}. Who may
+ * remove is a separate question that the callers already answer, and answer
+ * differently from "who may add": a self-service custodian may remove items
+ * from their own RESERVED booking, which a role+status check with no notion of
+ * custodianship cannot express. Ownership is enforced by the caller — the web
+ * UI's `canSeeActions` gating and the mobile endpoint's own-booking 403.
+ *
+ * @param booking - The booking being modified; only `status` is consulted
+ * @returns `true` when the booking is still open to item removal
+ */
+export function canUserRemoveBookingAssets(booking: Pick<Booking, "status">) {
+  const closedStatuses: BookingStatus[] = [
+    BookingStatus.COMPLETE,
+    BookingStatus.ARCHIVED,
+    BookingStatus.CANCELLED,
+  ];
+
+  return !closedStatuses.includes(booking.status);
 }
 
 export const bookingStatusColorMap: {
@@ -56,10 +84,7 @@ export const bookingStatusColorMap: {
 /** Resolve custodian display name from booking data */
 export function getBookingCustodianName(booking: {
   custodianTeamMember?: { name: string } | null;
-  custodianUser?: {
-    firstName?: string | null;
-    lastName?: string | null;
-  } | null;
+  custodianUser?: UserNameFields | null;
 }): string | null {
   if (booking.custodianTeamMember) {
     return resolveTeamMemberName({

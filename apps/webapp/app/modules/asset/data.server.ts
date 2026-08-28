@@ -14,6 +14,9 @@ import {
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import type { RowWithCustody } from "~/utils/custody-visibility.server";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
 import { payload, getCurrentSearchParams } from "~/utils/http.server";
@@ -27,6 +30,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canExportAssets, canImportAssets } from "~/utils/subscription.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import { parseFiltersWithHierarchy } from "./query.server";
 import {
@@ -58,8 +62,15 @@ interface Props {
   organizations: OrganizationFromUser[];
   role: OrganizationRoles;
   currentOrganization: OrganizationFromUser;
-  user: { firstName: string | null };
+  /** The viewer, for the personal-workspace header. */
+  user: UserNameFields;
   settings: AssetIndexSettings;
+  /**
+   * Resolved custody read-visibility, from `requirePermission`. Required, not
+   * optional: the custodian filter seed previously passed no scoping at all,
+   * and an optional field would let a caller silently restore that.
+   */
+  canSeeAllCustody: boolean;
 }
 
 const searchFieldTooltipText = `
@@ -76,6 +87,66 @@ Search assets based on asset fields. Separate your keywords by a comma(,) to sea
 - Barcodes values
 `;
 
+/** Minimal structural shape of one BookingAsset pivot row returned under the
+ * availability `extraInclude`. Only the fields this helper reads/writes. */
+type MutableBookingAssetSlice = {
+  assetKitId: string | null;
+  kitId?: string | null;
+  kitName?: string | null;
+};
+
+/**
+ * Attaches the kit name (and kit id) onto every kit-driven BookingAsset slice.
+ *
+ * `BookingAsset.assetKitId` is a bare FK with no Prisma relation accessor, so
+ * the kit name cannot be nested-selected. This resolves all names in ONE
+ * org-scoped read and mutates the slices in place. Standalone slices
+ * (assetKitId === null) are left untouched. Availability view only.
+ *
+ * Kit names are supplementary UI data, so the availability loader wraps this
+ * call and degrades gracefully (logs + continues) if the read fails — the raw
+ * Prisma error propagates here and is handled at the call site rather than
+ * being rethrown as a ShelfError.
+ *
+ * @param args.assets - Loaded assets, each optionally carrying `bookingAssets`.
+ * @param args.organizationId - Active org; scopes the AssetKit read (defense in
+ *   depth per org-scope-user-supplied-ids).
+ */
+export async function attachKitNamesToBookingAssets({
+  assets,
+  organizationId,
+}: {
+  assets: Array<{ bookingAssets?: MutableBookingAssetSlice[] }>;
+  organizationId: string;
+}): Promise<void> {
+  const assetKitIds = Array.from(
+    new Set(
+      assets.flatMap((a) =>
+        (a.bookingAssets ?? [])
+          .map((ba) => ba.assetKitId)
+          .filter((id): id is string => id !== null)
+      )
+    )
+  );
+  if (assetKitIds.length === 0) return;
+
+  const assetKits = await db.assetKit.findMany({
+    where: { id: { in: assetKitIds }, organizationId },
+    select: { id: true, kit: { select: { id: true, name: true } } },
+  });
+  const byId = new Map(assetKits.map((ak) => [ak.id, ak.kit]));
+
+  for (const a of assets) {
+    for (const ba of a.bookingAssets ?? []) {
+      if (ba.assetKitId) {
+        const kit = byId.get(ba.assetKitId);
+        ba.kitId = kit?.id ?? null;
+        ba.kitName = kit?.name ?? null;
+      }
+    }
+  }
+}
+
 export async function simpleModeLoader({
   request,
   userId,
@@ -85,7 +156,11 @@ export async function simpleModeLoader({
   currentOrganization,
   user,
   settings,
+  canSeeAllCustody,
 }: Props) {
+  // Threaded into the asset query so the custodian FILTER seed is scoped —
+  // it used a role-only check that let BASE through unscoped. See
+  // `getPaginatedAndFilterableAssets`.
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
   const isSelfServiceOrBase =
@@ -145,6 +220,8 @@ export async function simpleModeLoader({
       totalTags,
       locations,
       totalLocations,
+      assetModels,
+      totalAssetModels,
       teamMembers,
       totalTeamMembers,
     },
@@ -161,6 +238,9 @@ export async function simpleModeLoader({
     getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      // The fix: this route DOES render the custodian filter, and the seed was
+      // scoped on a role check that let BASE through unscoped.
+      canSeeAllCustody,
       filters,
       extraInclude:
         view === "availability"
@@ -180,8 +260,23 @@ export async function simpleModeLoader({
                       from: true,
                       to: true,
                       description: true,
-                      custodianTeamMember: true,
-                      custodianUser: true,
+                      // Narrowed from `true` on both: that shipped the whole
+                      // TeamMember row and the ENTIRE User row — email,
+                      // Stripe `customerId`, billing flags — to render a name
+                      // and an avatar. `userId` stays so the redaction can
+                      // tell the viewer's own booking from a colleague's.
+                      custodianTeamMember: {
+                        select: { id: true, name: true, userId: true },
+                      },
+                      custodianUser: {
+                        select: {
+                          id: true,
+                          firstName: true,
+                          lastName: true,
+                          displayName: true,
+                          profilePicture: true,
+                        },
+                      },
                       tags: TAG_WITH_COLOR_SELECT,
                       creator: {
                         select: {
@@ -257,6 +352,36 @@ export async function simpleModeLoader({
     );
   }
 
+  // Availability view only: resolve kit names for kit-driven booking slices so
+  // the calendar can show per-slice attribution. `assetKitId`/`quantity` are
+  // already present (BookingAsset scalars via the include). One `as unknown as`
+  // structural cast — `bookingAssets` is an availability-only extraInclude not
+  // in the base asset type (same pattern the availability hook uses).
+  if (view === "availability") {
+    // Kit-name attribution is supplementary UI data — mirror the graceful
+    // degradation of the image-refresh above so a transient AssetKit read
+    // failure logs and continues instead of 500-ing the whole availability
+    // page. The calendar simply falls back to "via a kit" without the name.
+    try {
+      await attachKitNamesToBookingAssets({
+        assets: assets as unknown as Array<{
+          bookingAssets?: MutableBookingAssetSlice[];
+        }>,
+        organizationId,
+      });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Failed to attach kit names to booking assets",
+          label: "Assets",
+          additionalData: { organizationId, assetCount: assets.length },
+          shouldBeCaptured: true,
+        })
+      );
+    }
+  }
+
   const userName = resolveUserDisplayName(user);
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
@@ -282,7 +407,22 @@ export async function simpleModeLoader({
   return data(
     payload({
       header,
-      items: assets,
+      /**
+       * `TeamMemberBadge` only decides whether to DRAW the custodian; the name
+       * and `user.email` shipped in this payload regardless, so a restricted
+       * viewer read them out of `/assets.data` while the column said "private".
+       *
+       * The cast is load-bearing, not cosmetic. `getAssets` builds its include
+       * dynamically from `assetIndexFields()`, which nests `custodian` — but
+       * the DECLARED return type resolves `custody` to the raw Prisma model,
+       * with no `custodian` at all. Trusting the type here means skipping the
+       * redaction entirely; the browser payload proves the custodian is
+       * present at runtime.
+       */
+      items: redactCustodianForViewer(
+        assets as unknown as Array<(typeof assets)[number] & RowWithCustody>,
+        { canSeeAllCustody, userId }
+      ),
       categories,
       tags,
       search,
@@ -303,6 +443,13 @@ export async function simpleModeLoader({
       totalTags,
       locations,
       totalLocations,
+      /**
+       * Seeds the asset model picker in the bulk "Update asset model" dialog.
+       * Advanced mode already returned these; simple mode was querying them and
+       * throwing them away, so this adds no database work.
+       */
+      assetModels,
+      totalAssetModels,
       teamMembers,
       totalTeamMembers,
       currentUserTeamMember,
@@ -344,6 +491,7 @@ export async function advancedModeLoader({
   currentOrganization,
   user,
   settings,
+  canSeeAllCustody,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
@@ -397,6 +545,15 @@ export async function advancedModeLoader({
     parsedFilters
   );
 
+  // Off-by-one fix: date filters on built-in timestamptz columns
+  // (createdAt/updatedAt) must compare the calendar DAY in the acting user's
+  // resolved timezone preference — the same zone the list is displayed in — not
+  // the DB session zone (UTC). Resolve it once and thread it into the fetch.
+  const { timeZone: prefTimeZone } = await resolveUserFormatPrefsById(
+    userId,
+    getClientHint(request)
+  );
+
   // getEntitiesWithSelectedValues fetches filter dropdown options (tags,
   // categories, locations, asset models). Its output is only used in the final
   // response payload — no other query depends on it. Running it inside
@@ -442,6 +599,7 @@ export async function advancedModeLoader({
     getAdvancedPaginatedAndFilterableAssets({
       request,
       organizationId,
+      timeZone: prefTimeZone,
       filters,
       settings,
       getBookings: view === "availability",
@@ -463,6 +621,9 @@ export async function advancedModeLoader({
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
       userId,
+      // A FILTER. This passed no scoping argument at all, so the seed
+      // disagreed with the search endpoint for any restricted role.
+      filterByUserId: !canSeeAllCustody,
     }),
 
     // Kits
@@ -571,7 +732,14 @@ export async function advancedModeLoader({
   return data(
     payload({
       header,
-      items: refreshedAssets,
+      // Same redaction as simple mode. ADVANCED is ADMIN/OWNER-only today
+      // (`assets._index.tsx` refuses it to restricted roles), so this is a
+      // no-op in practice — applied so the rule lives with the payload rather
+      // than depending on a gate two files away.
+      items: redactCustodianForViewer(refreshedAssets, {
+        canSeeAllCustody,
+        userId,
+      }),
       search,
       page,
       totalItems: totalAssets,

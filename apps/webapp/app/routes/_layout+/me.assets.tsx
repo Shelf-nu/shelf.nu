@@ -23,7 +23,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const userId = authSession.userId;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllCustody } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -31,7 +31,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     });
 
     const { headers, ...loaderData } = await getUserAssetsTabLoaderData({
+      // Viewer and subject are the same person on this route — but they are
+      // still passed separately, because the helper narrows the custodian
+      // filter it injects against `viewerId`.
       userId,
+      viewerId: userId,
+      canSeeAllCustody,
       request,
       organizationId,
     });

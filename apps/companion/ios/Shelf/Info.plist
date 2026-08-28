@@ -19,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.3</string>
+	<string>1.5.0</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleURLTypes</key>
@@ -55,6 +55,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Shelf needs camera access to scan QR codes and barcodes on your assets.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Shelf records where assets were scanned so your team can see each item's last known location.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Shelf needs photo access to attach images to your assets.</string>
 	<key>NSUserActivityTypes</key>

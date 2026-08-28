@@ -29,34 +29,69 @@ import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { api, type AvailableAsset, type AvailableKit } from "@/lib/api";
+import {
+  api,
+  type AvailableAsset,
+  type AvailableKit,
+  type AvailableModel,
+  type AvailableModelExistingRequest,
+} from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
 import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
+import { QuantityInputSheet } from "@/components/quantity-input-sheet";
 
-type Mode = "assets" | "kits";
+type Mode = "assets" | "kits" | "models";
 
 const assetKeyExtractor = (item: AvailableAsset) => item.id;
+/**
+ * Rows fetched per page. Every tab pages through the whole list, so this is a
+ * latency/-payload tradeoff, not a cap: nothing is unreachable at any size.
+ */
+const PICKER_PAGE_SIZE = 50;
+
 const kitKeyExtractor = (item: AvailableKit) => item.id;
+const modelKeyExtractor = (item: AvailableModel) => item.id;
 
 export default function AddBookingAssetsScreen() {
   const router = useRouter();
-  const { bookingId, from, to } = useLocalSearchParams<{
+  const {
+    bookingId,
+    from,
+    to,
+    mode: initialMode,
+  } = useLocalSearchParams<{
     bookingId: string;
     bookingName?: string;
     from: string;
     to: string;
+    /** When "models", open straight to the book-by-model tab (from detail). */
+    mode?: string;
   }>();
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
 
-  const [mode, setMode] = useState<Mode>("assets");
+  const [mode, setMode] = useState<Mode>(
+    initialMode === "models" ? "models" : "assets"
+  );
   const [assets, setAssets] = useState<AvailableAsset[]>([]);
   const [kits, setKits] = useState<AvailableKit[]>([]);
+  const [models, setModels] = useState<AvailableModel[]>([]);
+  // This booking's existing model reservations, keyed by model id, so each row
+  // knows its current reserved amount and fulfilled count.
+  const [modelRequestsById, setModelRequestsById] = useState<
+    Record<string, AvailableModelExistingRequest>
+  >({});
+  // The model whose quantity sheet is open (null = closed).
+  const [activeModel, setActiveModel] = useState<AvailableModel | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  /** True while a "load more" page is in flight (footer spinner only). */
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  /** Whether the active tab has further pages to pull in. */
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [searchInput, setSearchInput] = useState("");
@@ -77,42 +112,142 @@ export default function AddBookingAssetsScreen() {
   // Monotonic id so a slow earlier fetch (e.g. an old search/mode) can't
   // overwrite the newest results with stale availability.
   const requestIdRef = useRef(0);
-  const load = useCallback(async () => {
-    if (!currentOrg || !from || !to) return;
-    const reqId = ++requestIdRef.current;
-    setIsLoading(true);
-    setError(null);
-    if (mode === "assets") {
-      const { data, error: err } = await api.availableAssets(currentOrg.id, {
-        bookingFrom: from,
-        bookingTo: to,
-        // Keep THIS booking's own assets selectable when editing (otherwise they
-        // filter out as "unavailable" against their own reservation).
-        unhideBookingId: bookingId,
-        search: debouncedSearch || undefined,
-      });
-      if (reqId !== requestIdRef.current) return; // superseded by a newer load
-      if (err) setError(err);
-      else if (data) setAssets(data.assets);
-    } else {
-      const { data, error: err } = await api.availableKits(currentOrg.id, {
-        bookingFrom: from,
-        bookingTo: to,
-        // REQUIRED: enables the kit conflict filter (else already-booked kits
-        // show as available) and keeps this booking's own kits selectable.
-        currentBookingId: bookingId,
-        search: debouncedSearch || undefined,
-      });
-      if (reqId !== requestIdRef.current) return; // superseded by a newer load
-      if (err) setError(err);
-      else if (data) setKits(data.kits);
-    }
-    if (reqId === requestIdRef.current) setIsLoading(false);
-  }, [currentOrg, from, to, mode, debouncedSearch, bookingId]);
+  /** Highest page currently held, so `loadMore` knows what to ask for next. */
+  const pageRef = useRef(1);
 
+  /**
+   * Fetch one page for the active tab.
+   *
+   * Every tab is paginated: the operator must be able to reach EVERY asset,
+   * kit and model that is valid for this booking, not just the first page.
+   * A capped list silently hides inventory — a workspace whose first page is
+   * all one category looks like it owns nothing else.
+   *
+   * `append` distinguishes "load more" (concatenate) from a fresh load after a
+   * tab switch or a new search (replace). The request-id guard makes a slow
+   * earlier page lose to a newer one rather than clobber it.
+   */
+  const fetchPage = useCallback(
+    async (targetPage: number, append: boolean) => {
+      if (!currentOrg || !from || !to) return;
+      const reqId = ++requestIdRef.current;
+      if (append) {
+        setIsLoadingMore(true);
+      } else {
+        setIsLoading(true);
+        setError(null);
+      }
+
+      if (mode === "assets") {
+        const { data, error: err } = await api.availableAssets(currentOrg.id, {
+          bookingFrom: from,
+          bookingTo: to,
+          // Keep THIS booking's own assets selectable when editing (otherwise they
+          // filter out as "unavailable" against their own reservation).
+          unhideBookingId: bookingId,
+          search: debouncedSearch || undefined,
+          page: targetPage,
+          perPage: PICKER_PAGE_SIZE,
+        });
+        if (reqId !== requestIdRef.current) return; // superseded by a newer load
+        if (err) setError(err);
+        else if (data) {
+          setAssets((prev) =>
+            append ? [...prev, ...data.assets] : data.assets
+          );
+          setHasMore(targetPage < (data.totalPages ?? 1));
+          pageRef.current = targetPage;
+        }
+      } else if (mode === "kits") {
+        const { data, error: err } = await api.availableKits(currentOrg.id, {
+          bookingFrom: from,
+          bookingTo: to,
+          // REQUIRED: enables the kit conflict filter (else already-booked kits
+          // show as available) and keeps this booking's own kits selectable.
+          currentBookingId: bookingId,
+          search: debouncedSearch || undefined,
+          page: targetPage,
+          perPage: PICKER_PAGE_SIZE,
+        });
+        if (reqId !== requestIdRef.current) return; // superseded by a newer load
+        if (err) setError(err);
+        else if (data) {
+          setKits((prev) => (append ? [...prev, ...data.kits] : data.kits));
+          setHasMore(targetPage < (data.totalPages ?? 1));
+          pageRef.current = targetPage;
+        }
+      } else {
+        // Book-by-model: availability is computed server-side over the booking's
+        // window, and so is search. Paginated like the other tabs so a model
+        // sorting past the first page is still reachable by scrolling.
+        const { data, error: err } = await api.availableModels(
+          currentOrg.id,
+          bookingId,
+          debouncedSearch || undefined,
+          { page: targetPage, perPage: PICKER_PAGE_SIZE }
+        );
+        if (reqId !== requestIdRef.current) return; // superseded by a newer load
+        if (err) setError(err);
+        else if (data) {
+          const rows = data.assetModels ?? [];
+          setModels((prev) => (append ? [...prev, ...rows] : rows));
+          setHasMore(targetPage < (data.totalPages ?? 1));
+          pageRef.current = targetPage;
+          // Reservations are the same on every page — only seed them once, so a
+          // "load more" can't clobber edits made since the first page landed.
+          if (!append) {
+            setModelRequestsById(
+              Object.fromEntries(
+                (data.modelRequests ?? []).map((mr) => [mr.assetModelId, mr])
+              )
+            );
+          }
+        }
+      }
+      if (reqId === requestIdRef.current) {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
+    },
+    [currentOrg, from, to, mode, debouncedSearch, bookingId]
+  );
+
+  // Reset to page 1 whenever the tab, search or booking window changes.
+  // `fetchPage`'s identity already tracks exactly those inputs.
   useEffect(() => {
-    load();
-  }, [load]);
+    pageRef.current = 1;
+    setHasMore(false);
+    void fetchPage(1, false);
+  }, [fetchPage]);
+
+  /** Pull the next page in when the list nears its end. */
+  const loadMore = useCallback(() => {
+    if (isLoading || isLoadingMore || !hasMore) return;
+    void fetchPage(pageRef.current + 1, true);
+  }, [isLoading, isLoadingMore, hasMore, fetchPage]);
+
+  /**
+   * Reload the active tab from page 1. Used after a mutation (reserving or
+   * clearing a model) and by the error retry — both invalidate availability,
+   * so any pages already held are stale and must be dropped, not appended to.
+   */
+  const reload = useCallback(() => {
+    pageRef.current = 1;
+    setHasMore(false);
+    void fetchPage(1, false);
+  }, [fetchPage]);
+
+  /**
+   * Footer shared by all three tabs: a spinner while the next page loads.
+   * Deliberately renders nothing once everything is loaded — reaching the end
+   * of a fully-loaded list needs no explanation, whereas the old "showing 50
+   * of N, search to find the rest" copy existed only to excuse a hard cap.
+   */
+  const listFooter = isLoadingMore ? (
+    <View style={styles.listFooter}>
+      <ActivityIndicator size="small" color={colors.muted} />
+    </View>
+  ) : null;
 
   const toggleAsset = useCallback((assetId: string) => {
     setSelectedAssetIds((prev) => {
@@ -153,6 +288,79 @@ export default function AddBookingAssetsScreen() {
     router.back();
   };
 
+  // ── Book-by-model reserve / edit / remove ────────────────────────────────
+
+  /**
+   * Upper bound for reserving a model: what's free in the window PLUS the units
+   * this booking has already had assigned (they can't be re-reserved away but
+   * the total can't drop below them). Mirrors the server cap in
+   * `upsertBookingModelRequest` (available + existingFulfilled).
+   */
+  const reserveMax = (model: AvailableModel) => {
+    const existing = modelRequestsById[model.id];
+    return model.available + (existing?.fulfilledQuantity ?? 0);
+  };
+
+  const handleReserveSubmit = async (quantity: number) => {
+    if (!currentOrg || !bookingId || !activeModel) return;
+    const model = activeModel;
+    setActiveModel(null); // the sheet's confirm IS the confirmation step
+    setIsSubmitting(true);
+    const { error: err } = await api.upsertModelRequest(
+      currentOrg.id,
+      bookingId,
+      model.id,
+      quantity
+    );
+    setIsSubmitting(false);
+    if (err) {
+      Alert.alert("Couldn't reserve model", err);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    markBookingDirty(bookingId);
+    reload(); // refresh availability + the reserved amounts
+  };
+
+  // Memoized so `renderModel` (which references it) keeps a stable identity
+  // across renders — avoids the FlatList row remount churn the render-stability
+  // rule warns about.
+  const handleRemoveModel = useCallback(
+    (model: AvailableModel) => {
+      if (!currentOrg || !bookingId) return;
+      Alert.alert(
+        "Remove reservation",
+        `Remove the reservation for ${model.name}?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: async () => {
+              setIsSubmitting(true);
+              const { error: err } = await api.removeModelRequest(
+                currentOrg.id,
+                bookingId,
+                model.id
+              );
+              setIsSubmitting(false);
+              if (err) {
+                Alert.alert("Couldn't remove reservation", err);
+                return;
+              }
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Success
+              );
+              markBookingDirty(bookingId);
+              reload();
+            },
+          },
+        ]
+      );
+    },
+    [currentOrg, bookingId, reload]
+  );
+
   const renderAsset = useCallback(
     ({ item }: { item: AvailableAsset }) => {
       const selected = selectedAssetIds.has(item.id);
@@ -162,7 +370,11 @@ export default function AddBookingAssetsScreen() {
           onPress={() => toggleAsset(item.id)}
           accessibilityRole="button"
           accessibilityState={{ selected }}
-          accessibilityLabel={`${item.title}${selected ? ", selected" : ""}`}
+          accessibilityLabel={`${item.title}${
+            item.displayCode
+              ? `, ${item.displayCode.label} ${item.displayCode.value}`
+              : ""
+          }${selected ? ", selected" : ""}`}
         >
           <View style={[styles.checkbox, selected && styles.checkboxChecked]}>
             {selected && (
@@ -184,9 +396,25 @@ export default function AddBookingAssetsScreen() {
               <Ionicons name="cube-outline" size={18} color={colors.gray300} />
             </View>
           )}
-          <Text style={styles.rowTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
+          <View style={styles.assetInfo}>
+            <Text style={styles.rowAssetTitle} numberOfLines={1}>
+              {item.title}
+            </Text>
+            {/* The code the operator reads off the physical tag — scan it, or
+                just eyeball this id and toggle the row (web-parity code badge). */}
+            {item.displayCode ? (
+              <View style={styles.rowCodeLine}>
+                <Ionicons
+                  name="qr-code-outline"
+                  size={12}
+                  color={colors.muted}
+                />
+                <Text style={styles.rowCode} numberOfLines={1}>
+                  {item.displayCode.value}
+                </Text>
+              </View>
+            ) : null}
+          </View>
         </TouchableOpacity>
       );
     },
@@ -225,29 +453,98 @@ export default function AddBookingAssetsScreen() {
     [selectedKitIds, toggleKit, colors, styles]
   );
 
-  return (
-    <View style={styles.container}>
-      {/* Segmented Assets / Kits */}
-      <View style={styles.segment}>
-        {(["assets", "kits"] as Mode[]).map((m) => (
+  const renderModel = useCallback(
+    ({ item }: { item: AvailableModel }) => {
+      const existing = modelRequestsById[item.id];
+      const reserved = existing?.quantity ?? 0;
+      const max = item.available + (existing?.fulfilledQuantity ?? 0);
+      // Nothing free to reserve AND nothing already reserved → can't act.
+      const canReserve = max >= 1;
+      return (
+        <View style={styles.row}>
+          <View style={[styles.thumb, styles.thumbPlaceholder]}>
+            <Ionicons name="cube-outline" size={18} color={colors.gray300} />
+          </View>
+          <View style={styles.modelInfo}>
+            <Text style={styles.rowTitle} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.modelMeta}>
+              {item.available} of {item.total} available
+              {reserved > 0 ? ` · ${reserved} reserved here` : ""}
+            </Text>
+          </View>
+          {reserved > 0 && (
+            <TouchableOpacity
+              style={styles.modelRemoveButton}
+              onPress={() => handleRemoveModel(item)}
+              disabled={isSubmitting}
+              hitSlop={hitSlop.sm}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${item.name} reservation`}
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.error} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            key={m}
-            style={[styles.segmentItem, mode === m && styles.segmentItemActive]}
-            onPress={() => setMode(m)}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: mode === m }}
-            accessibilityLabel={m === "assets" ? "Assets" : "Kits"}
+            style={[
+              styles.modelReserveButton,
+              !canReserve && styles.modelReserveButtonDisabled,
+            ]}
+            onPress={() => setActiveModel(item)}
+            disabled={!canReserve || isSubmitting}
+            accessibilityRole="button"
+            accessibilityLabel={
+              reserved > 0
+                ? `Edit ${item.name} reservation, currently ${reserved}`
+                : `Reserve units of ${item.name}`
+            }
           >
             <Text
               style={[
-                styles.segmentText,
-                mode === m && styles.segmentTextActive,
+                styles.modelReserveText,
+                !canReserve && styles.modelReserveTextDisabled,
               ]}
             >
-              {m === "assets" ? "Assets" : "Kits"}
+              {reserved > 0 ? "Edit" : "Reserve"}
             </Text>
           </TouchableOpacity>
-        ))}
+        </View>
+      );
+    },
+    [modelRequestsById, isSubmitting, colors, styles, handleRemoveModel]
+  );
+
+  return (
+    <View style={styles.container}>
+      {/* Segmented Assets / Kits / Models */}
+      <View style={styles.segment}>
+        {(["assets", "kits", "models"] as Mode[]).map((m) => {
+          const label =
+            m === "assets" ? "Assets" : m === "kits" ? "Kits" : "Models";
+          return (
+            <TouchableOpacity
+              key={m}
+              style={[
+                styles.segmentItem,
+                mode === m && styles.segmentItemActive,
+              ]}
+              onPress={() => setMode(m)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: mode === m }}
+              accessibilityLabel={label}
+            >
+              <Text
+                style={[
+                  styles.segmentText,
+                  mode === m && styles.segmentTextActive,
+                ]}
+              >
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* Search */}
@@ -290,7 +587,7 @@ export default function AddBookingAssetsScreen() {
           <Text style={styles.emptyText}>{error}</Text>
           <TouchableOpacity
             style={styles.retryButton}
-            onPress={load}
+            onPress={reload}
             accessibilityRole="button"
             accessibilityLabel="Retry"
           >
@@ -304,6 +601,9 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={assetKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={listFooter}
           ListEmptyComponent={
             <View style={styles.centered}>
               <Ionicons
@@ -317,13 +617,16 @@ export default function AddBookingAssetsScreen() {
             </View>
           }
         />
-      ) : (
+      ) : mode === "kits" ? (
         <FlatList
           data={kits}
           renderItem={renderKit}
           keyExtractor={kitKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={listFooter}
           ListEmptyComponent={
             <View style={styles.centered}>
               <Ionicons
@@ -337,7 +640,46 @@ export default function AddBookingAssetsScreen() {
             </View>
           }
         />
+      ) : (
+        <FlatList
+          data={models}
+          renderItem={renderModel}
+          keyExtractor={modelKeyExtractor}
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={listFooter}
+          ListEmptyComponent={
+            <View style={styles.centered}>
+              <Ionicons name="cube-outline" size={40} color={colors.border} />
+              <Text style={styles.emptyText}>
+                {debouncedSearch
+                  ? "No models match your search"
+                  : "This workspace has no asset models yet"}
+              </Text>
+            </View>
+          }
+        />
       )}
+
+      {/* Reserve/edit quantity sheet for book-by-model */}
+      <QuantityInputSheet
+        visible={activeModel !== null}
+        title={
+          activeModel && modelRequestsById[activeModel.id]
+            ? "Edit reservation"
+            : "Reserve model"
+        }
+        subtitle={activeModel?.name}
+        max={activeModel ? reserveMax(activeModel) : 1}
+        defaultValue={
+          activeModel ? modelRequestsById[activeModel.id]?.quantity ?? 1 : 1
+        }
+        confirmLabel="Reserve"
+        onSubmit={handleReserveSubmit}
+        onClose={() => setActiveModel(null)}
+      />
 
       {/* Add bar */}
       {totalSelected > 0 && (
@@ -455,6 +797,60 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
     fontWeight: "600",
     color: colors.foreground,
+  },
+  // Asset row text column: title + code line stacked.
+  assetInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  rowAssetTitle: {
+    fontSize: fontSize.base,
+    fontWeight: "600",
+    color: colors.foreground,
+  },
+  rowCodeLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  rowCode: {
+    flex: 1,
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    fontVariant: ["tabular-nums"],
+  },
+  // Book-by-model rows
+  modelInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  modelMeta: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+  },
+  modelReserveButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primaryBg,
+  },
+  modelReserveButtonDisabled: {
+    backgroundColor: colors.backgroundTertiary,
+  },
+  modelReserveText: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primary,
+  },
+  modelReserveTextDisabled: {
+    color: colors.muted,
+  },
+  modelRemoveButton: {
+    padding: spacing.xs,
+  },
+  listFooter: {
+    paddingVertical: spacing.lg,
+    alignItems: "center",
   },
   checkbox: {
     width: 22,

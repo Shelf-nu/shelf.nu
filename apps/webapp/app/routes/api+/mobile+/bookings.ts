@@ -6,7 +6,14 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import {
+  bookingDraftVisibilityClause,
+  custodianScopeClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
+import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * GET /api/mobile/bookings
@@ -74,15 +81,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // can only see the bookings they are the custodian of (web parity — see
     // getBookings' `isSelfServiceOrBase` branch). Owners/admins see all. This
     // matters especially now that DRAFT bookings appear in the default view.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    /**
+     * Resolved from `roles`, not from the context's `role`, which is `roles[0]`
+     * and wrong for any privilege decision: a membership stored
+     * `[SELF_SERVICE, ADMIN]` resolves to SELF_SERVICE there, so a genuine admin
+     * was narrowed to their own bookings. The calendar lens must reach the same
+     * verdict from the same membership, or the two lenses on this screen
+     * disagree about what exists.
+     */
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+    const role = resolveMostPrivilegedRole(roles);
     const isSelfServiceOrBase =
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
 
+    /**
+     * Custodian scope (web parity). Web matches a self-service or base user's
+     * bookings through their user link OR any of their team-member links -
+     * `custodianScopeClause`, fed by `resolveCustodianScope`. Mobile matched
+     * only the user link, so a booking whose custodian was assigned by picking
+     * a TEAM MEMBER rather than a user was visible on the website and missing
+     * from the phone, for the very user it belonged to.
+     */
+    const custodianScope = isSelfServiceOrBase
+      ? await resolveCustodianScope({ userId: user.id, organizationId })
+      : null;
+
     const where = {
       organizationId,
       status: { in: statusFilter },
-      ...(isSelfServiceOrBase && { custodianUserId: user.id }),
+      /**
+       * Draft privacy (web parity). A DRAFT booking is private to whoever
+       * created it — web enforces this in `getBookings`, the slim picker list
+       * and the CSV export via this same shared clause. Mobile applied it
+       * nowhere, so every user saw every colleague's unfinished drafts.
+       *
+       * AND-ed rather than merged into the search `OR` below: an OR at this
+       * level would widen the search clause instead of restricting it.
+       */
+      AND: [
+        bookingDraftVisibilityClause(user.id),
+        ...(custodianScope ? [custodianScopeClause(custodianScope)] : []),
+      ],
       // Keyword search over booking name + description (the field-tech "find my
       // booking" case). Web also searches tags/custodian/asset names; name +
       // description covers the common case without a heavier query.
@@ -115,6 +155,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: {
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
@@ -122,7 +163,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
             select: { name: true },
           },
           _count: {
-            select: { bookingAssets: true },
+            select: {
+              bookingAssets: true,
+              // Outstanding book-by-model reservations (units reserved but not
+              // yet assigned to concrete assets). Lets the list card tell a
+              // "reserved but nothing physical to check out yet" booking apart
+              // from a genuinely check-out-ready one, so it never mislabels a
+              // model-only reservation as "Ready to check out".
+              modelRequests: { where: { fulfilledAt: null } },
+            },
+          },
+          // The outstanding rows themselves, so the card can report UNITS
+          // reserved rather than how many model rows hold them. `_count` above
+          // answers "is anything outstanding?"; this answers "how much?", which
+          // is what the fulfil banner already shows ("Tablecloth x2") and what
+          // the operator is actually going to carry. Two scalars per row, and
+          // most bookings have none.
+          modelRequests: {
+            where: { fulfilledAt: null },
+            select: { quantity: true, fulfilledQuantity: true },
           },
         },
         orderBy: [{ [sortBy]: sortOrder }],
@@ -142,12 +201,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
         createdAt: b.createdAt,
         custodianName:
           b.custodianTeamMember?.name ||
-          [b.custodianUser?.firstName, b.custodianUser?.lastName]
-            .filter(Boolean)
-            .join(" ") ||
+          resolveUserDisplayName(b.custodianUser) ||
           null,
         custodianImage: b.custodianUser?.profilePicture || null,
         assetCount: b._count.bookingAssets,
+        // Outstanding book-by-model reservations still to assign. > 0 means the
+        // booking holds reserved units with no concrete assets behind them yet.
+        outstandingModelCount: b._count.modelRequests,
+        // Units still to assign across those reservations. Mirrors
+        // `outstandingModelUnitCount` on the booking detail endpoint so both
+        // surfaces name and count the same thing.
+        outstandingModelUnitCount: b.modelRequests.reduce(
+          (sum, mr) => sum + Math.max(0, mr.quantity - mr.fulfilledQuantity),
+          0
+        ),
       })),
       page,
       perPage,

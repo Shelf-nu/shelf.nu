@@ -74,6 +74,21 @@ type GenericItemRowProps<T> = {
   searchParams?: Record<string, string>;
   /** Optional className to apply to the row wrapper (Tr) */
   className?: string;
+  /**
+   * Some drawers only support one item type (e.g. audits are asset-only —
+   * kits have no `AuditAsset` record). When the resolved item matches this
+   * type, it is stored with just an `error` instead of `data`/`type` — the
+   * same shape already used for "Failed to fetch item" and duplicate-scan
+   * errors. This routes the row through `renderLoading` (an error row: no
+   * detail link, no clickable content) instead of `renderItem`, and keeps
+   * it out of `data`-driven persistence loops entirely.
+   */
+  rejectItemType?: "asset" | "kit";
+  /**
+   * Message shown in the error row when the item matches `rejectItemType`.
+   * Falls back to a generic message if omitted.
+   */
+  rejectItemMessage?: string;
 };
 
 /**
@@ -90,6 +105,8 @@ export function GenericItemRow<T>({
   kitExtraInclude,
   searchParams: additionalSearchParams,
   className: rowClassName,
+  rejectItemType,
+  rejectItemMessage,
 }: GenericItemRowProps<T>) {
   const setItem = useSetAtom(updateScannedItemAtom);
 
@@ -143,6 +160,23 @@ export function GenericItemRow<T>({
         ? (apiResponse as BarcodeApiResponse).barcode
         : (apiResponse as QrApiResponse).qr;
 
+      // Reject unsupported item types at the point they resolve, before
+      // they ever get `data`/`type` set. Storing only `error` reuses the
+      // existing error-row rendering path (see `shouldShowItem` below),
+      // so a rejected item never becomes clickable and never enters a
+      // `data`-driven persistence pipeline.
+      if (dataSource && dataSource.type === rejectItemType) {
+        setItem({
+          qrId,
+          item: {
+            error:
+              rejectItemMessage ??
+              `Scanning a ${rejectItemType} is not supported here.`,
+          },
+        });
+        return;
+      }
+
       if (dataSource && dataSource.type === "asset") {
         const itemWithType: ScanListItem = {
           data: dataSource.asset,
@@ -163,7 +197,7 @@ export function GenericItemRow<T>({
         }
       }
     },
-    [isBarcode, qrId, setItem]
+    [isBarcode, qrId, setItem, rejectItemType, rejectItemMessage]
   );
 
   /**

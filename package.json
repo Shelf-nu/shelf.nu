@@ -8,6 +8,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:tooling": "bash scripts/__tests__/pr-review.test.sh",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "prepare": "git config --unset core.hooksPath || echo ok && npx lefthook install || echo ok",
     "webapp:dev": "turbo run dev --filter=@shelf/webapp",
@@ -28,12 +29,14 @@
     "webapp:clean:reporting-demo:staging": "pnpm --filter @shelf/webapp clean:reporting-demo:staging",
     "companion:dev": "pnpm --filter @shelf/companion dev",
     "companion:dev:clear": "pnpm --filter @shelf/companion dev:clear",
+    "companion:sim:env": "pnpm --filter @shelf/companion sim:env",
     "companion:dev:tunnel": "pnpm --filter @shelf/companion dev:tunnel",
     "companion:build:ios": "pnpm --filter @shelf/companion build:ios",
     "companion:build:ios:device": "pnpm --filter @shelf/companion build:ios:device",
     "companion:build:android": "pnpm --filter @shelf/companion build:android",
     "companion:prebuild": "pnpm --filter @shelf/companion prebuild",
     "companion:prebuild:clean": "pnpm --filter @shelf/companion prebuild:clean",
+    "companion:test": "pnpm --filter @shelf/companion test",
     "companion:test:e2e": "pnpm --filter @shelf/companion test:e2e",
     "companion:test:e2e:suite": "pnpm --filter @shelf/companion test:e2e:suite --",
     "companion:doctor": "pnpm --filter @shelf/companion run doctor",
@@ -47,7 +50,8 @@
     "db:deploy-migration:staging": "pnpm --filter @shelf/database run db:deploy-migration:staging",
     "db:deploy-migration:production": "pnpm --filter @shelf/database run db:deploy-migration:production",
     "db:reset": "pnpm --filter @shelf/database run db:reset",
-    "db:reset:staging": "pnpm --filter @shelf/database run db:reset:staging"
+    "db:reset:staging": "pnpm --filter @shelf/database run db:reset:staging",
+    "companion:seed:e2e": "cd apps/companion/.maestro && bash scripts/seed-e2e.sh"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",

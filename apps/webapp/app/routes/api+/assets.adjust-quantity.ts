@@ -26,7 +26,10 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
-import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import {
+  appendUserTextToNote,
+  wrapUserLinkForNote,
+} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -102,15 +105,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       });
 
       const actor = wrapUserLinkForNote(user);
       const sign = direction === "add" ? "+" : "-";
       const categoryLabel = category.toLowerCase();
-      const noteContent = note
-        ? `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel}). *"${note}"*`
-        : `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel}).`;
+      const baseLine = `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel}).`;
+      const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({
         content: noteContent,

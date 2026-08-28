@@ -1,4 +1,5 @@
 import type { BookingStatus, Prisma } from "@prisma/client";
+import { ASSET_MODEL_IMAGE_SELECT } from "./image-select";
 
 export const LOCATION_WITH_HIERARCHY = {
   select: {
@@ -13,8 +14,42 @@ export const LOCATION_WITH_HIERARCHY = {
   },
 } satisfies Prisma.LocationDefaultArgs;
 
+/**
+ * An asset's placement rows, shared by every surface that resolves a location.
+ *
+ * `quantity` lets loaders show per-location slices and derive the
+ * "placed / unplaced" split for qty-tracked assets. `assetKitId` plus the
+ * nested `assetKit.kit` discriminate manual from kit-driven placements, so the
+ * UI can render the "via kit" badge alongside the kit-driven rows.
+ *
+ * Ordering is explicit because `getPrimaryLocation()` reads index 0 and must
+ * not depend on heap order. Oldest row first keeps the asset's own manual
+ * placement primary in list views. `id` breaks ties: `createdAt` defaults to
+ * CURRENT_TIMESTAMP, which Postgres evaluates at transaction start, so every
+ * row written by one cascade shares a timestamp.
+ *
+ * Kept in one place so the ordering guarantee can't drift between surfaces —
+ * a divergence there would silently change which location an asset reports.
+ */
+export const ASSET_LOCATIONS_INCLUDE = {
+  orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  select: {
+    quantity: true,
+    assetKitId: true,
+    location: LOCATION_WITH_HIERARCHY,
+    assetKit: {
+      select: {
+        id: true,
+        kit: { select: { id: true, name: true } },
+      },
+    },
+  },
+} satisfies Prisma.Asset$assetLocationsArgs;
+
 export const KITS_INCLUDE_FIELDS = {
   _count: { select: { assetKits: true } },
+  // `Kit.custody` is a single optional record, not a list — there is nothing
+  // to order, and nothing here reaches `getPrimaryCustody`.
   custody: {
     select: {
       custodian: {
@@ -43,25 +78,12 @@ export const getAssetOverviewFields = (
     category: true,
     qrCodes: true,
     tags: true,
-    // `quantity` is pulled so loaders can show per-location slices and
-    // derive the "placed / unplaced" split for qty-tracked assets.
-    // `assetKitId` + nested `assetKit.kit` discriminate manual vs kit-
-    // driven placements so the UI can render the "via kit" badge
-    // alongside the kit-driven rows.
-    assetLocations: {
-      select: {
-        quantity: true,
-        assetKitId: true,
-        location: LOCATION_WITH_HIERARCHY,
-        assetKit: {
-          select: {
-            id: true,
-            kit: { select: { id: true, name: true } },
-          },
-        },
-      },
-    },
+    assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
+      // Ordered so `getPrimaryCustody` picks the same row every time;
+      // without it a multi-custodian asset can show a different holder
+      // on each request.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         createdAt: true,
         quantity: true,
@@ -108,7 +130,22 @@ export const getAssetOverviewFields = (
         },
       },
     },
-    assetModel: { select: { id: true, name: true } },
+    /**
+     * `id`/`name` drive the Asset Model property row; the image columns drive
+     * the inherited-image notice beside it.
+     *
+     * Merged into ONE key on purpose. A `...ASSET_MODEL_IMAGE_SELECT` spread
+     * higher in this same object literal was silently shadowed by this key —
+     * later keys win — so Prisma returned no image and the notice could never
+     * render. Keep both concerns here rather than reintroducing the spread.
+     */
+    assetModel: {
+      select: {
+        id: true,
+        name: true,
+        ...ASSET_MODEL_IMAGE_SELECT.assetModel.select,
+      },
+    },
     // A QUANTITY_TRACKED asset can sit in multiple kits at distinct slices.
     // Pull `quantity` so the asset-overview sidebar can list each kit with
     // its allocation and so the loader can derive a true "available" pool
@@ -139,8 +176,21 @@ export const getAssetOverviewFields = (
             id: true,
             name: true,
             from: true,
-            custodianTeamMember: true,
-            custodianUser: true,
+            // Narrowed from `true` on both — that shipped the whole
+            // TeamMember row and the ENTIRE User row (email, Stripe
+            // `customerId`, billing flags). `userId` stays for the redaction.
+            custodianTeamMember: {
+              select: { id: true, name: true, userId: true },
+            },
+            custodianUser: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                displayName: true,
+                profilePicture: true,
+              },
+            },
           },
         },
       },
@@ -189,25 +239,16 @@ export const assetIndexFields = ({
     assetKits: { select: { kit: true } },
     category: true,
     tags: true,
-    // `quantity` is pulled so loaders can show per-location slices and
-    // derive the "placed / unplaced" split for qty-tracked assets.
-    // `assetKitId` + nested `assetKit.kit` discriminate manual vs kit-
-    // driven placements so the UI can render the "via kit" badge
-    // alongside the kit-driven rows.
-    assetLocations: {
-      select: {
-        quantity: true,
-        assetKitId: true,
-        location: LOCATION_WITH_HIERARCHY,
-        assetKit: {
-          select: {
-            id: true,
-            kit: { select: { id: true, name: true } },
-          },
-        },
-      },
-    },
+    // Cover image of the asset's model, rendered when the asset has none of
+    // its own. Two columns off a batched to-one relation read; every
+    // inheriting asset on the page then shares one public, cacheable URL.
+    ...ASSET_MODEL_IMAGE_SELECT,
+    assetLocations: ASSET_LOCATIONS_INCLUDE,
     custody: {
+      // Ordered so `getPrimaryCustody` picks the same row every time;
+      // without it a multi-custodian asset can show a different holder
+      // on each request.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         quantity: true,
         custodian: {
@@ -261,7 +302,12 @@ export const assetIndexFields = ({
           select: {
             id: true,
             status: true,
-            custodianTeamMember: true,
+            // Narrowed from `true`, which selected the whole TeamMember row.
+            // `userId` is required by `redactCustodianForViewer` to recognise
+            // the viewer's own booking custody.
+            custodianTeamMember: {
+              select: { id: true, name: true, userId: true },
+            },
             custodianUser: {
               select: {
                 firstName: true,
@@ -305,7 +351,11 @@ export const assetIndexFields = ({
               id: true,
               name: true,
               // Custodian fields needed by updateAssetsWithBookingCustodians()
-              custodianTeamMember: true,
+              // Narrowed from `true`; `userId` is what lets the redaction
+              // recognise the viewer's own booking custody.
+              custodianTeamMember: {
+                select: { id: true, name: true, userId: true },
+              },
               custodianUser: {
                 select: {
                   firstName: true,
@@ -329,6 +379,10 @@ export const advancedAssetIndexFields = () => {
     assetKits: { select: { kit: true } },
     category: true,
     tags: true,
+    // Cover image of the asset's model, rendered when the asset has none of
+    // its own. Two columns off a batched to-one relation read; every
+    // inheriting asset on the page then shares one public, cacheable URL.
+    ...ASSET_MODEL_IMAGE_SELECT,
     assetLocations: {
       select: {
         quantity: true,
@@ -336,6 +390,10 @@ export const advancedAssetIndexFields = () => {
       },
     },
     custody: {
+      // Ordered so `getPrimaryCustody` picks the same row every time;
+      // without it a multi-custodian asset can show a different holder
+      // on each request.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         custodian: {
           select: {

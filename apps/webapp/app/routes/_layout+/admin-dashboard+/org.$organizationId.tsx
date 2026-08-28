@@ -39,6 +39,7 @@ import { getParams, payload, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { validateDomains } from "~/utils/sso.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [
   { title: appendToMetaTitle("Organization details") },
@@ -288,7 +289,7 @@ export default function OrgPage() {
         </Button>
         <h3>
           {" "}
-          Owner: {organization.owner.firstName} {organization.owner.lastName} -{" "}
+          Owner: {resolveUserDisplayName(organization.owner)} -{" "}
           {organization.owner.email}
         </h3>
       </div>
@@ -446,7 +447,8 @@ export default function OrgPage() {
                     subHeading={
                       <div>
                         Place the Id of the group that should be mapped to the{" "}
-                        <b>Administrator</b> role.
+                        <b>Administrator</b> role. Accepts one or more group
+                        IDs, separated by commas.
                       </div>
                     }
                     className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
@@ -469,7 +471,8 @@ export default function OrgPage() {
                     subHeading={
                       <div>
                         Place the Id of the group that should be mapped to the{" "}
-                        <b>Self service</b> role.
+                        <b>Self service</b> role. Accepts one or more group IDs,
+                        separated by commas.
                       </div>
                     }
                     className="block border-b-0 pb-0 [&>div]:lg:basis-auto"

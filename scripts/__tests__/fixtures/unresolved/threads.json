@@ -1,0 +1,369 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "headRefOid": "15a4e0a58707a8db432eba9ac4e3b5e31d136b7c",
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0wNy0zMFQwODoyNjowOFrOlQkN8Q=="
+          },
+          "nodes": [
+            {
+              "id": "PRRT_kwDOI8UBac6VCGHB",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "apps/webapp/app/modules/asset/availability-primitives.server.ts",
+              "line": null,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7baTg3",
+                    "databaseId": 3681105975,
+                    "author": {
+                      "login": "chatgpt-codex-connector"
+                    },
+                    "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Make the booking filter match half-open windows**\n\nWhen an existing booking ends exactly when the requested window begins (or starts exactly when it ends), the inclusive `gte`/`lte` predicates still fetch it. Because the subsequent sweep uses the booking's original interval rather than clipping it to the requested window, that non-overlapping reservation contributes its full quantity to `peakConcurrent`, potentially making a back-to-back booking appear to have no stock and blocking reservation or checkout. Use strict half-open overlap predicates (`from < window.to` and `to > window.from`) to match the sweep semantics.\n\nUseful? React with 👍 / 👎.",
+                    "createdAt": "2026-07-30T08:15:04Z"
+                  },
+                  {
+                    "id": "PRRC_kwDOI8UBac7bfpyC",
+                    "databaseId": 3682507906,
+                    "author": {
+                      "login": "DonKoko"
+                    },
+                    "body": "Fixed in 779fb60b — `buildActiveBookingWhere` now uses strict half-open overlap (`from < window.to` / `to > window.from`) to match the end-exclusive peak-concurrent sweep, so a back-to-back booking that only touches the window no longer blocks it.",
+                    "createdAt": "2026-07-30T12:06:31Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCGHK",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "apps/webapp/app/modules/booking/service.server.ts",
+              "line": 1730,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7baThA",
+                    "databaseId": 3681105984,
+                    "author": {
+                      "login": "chatgpt-codex-connector"
+                    },
+                    "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Validate only standalone quantities against the free pool**\n\nWhen a draft contains a quantity-tracked kit slice, this aggregation treats that slice as a new request against `bookable`, even though `bookable` has already subtracted the same units through `inKits` and the availability query deliberately excludes kit-driven booking rows. For example, an asset whose entire quantity is allocated to a kit has `bookable = 0`, so reserving a booking containing that kit is rejected even though the kit owns the allocation. Exclude `assetKitId != null` slices from this free-pool guard, while still validating any standalone slice of the same asset.\n\nUseful? React with 👍 / 👎.",
+                    "createdAt": "2026-07-30T08:15:04Z"
+                  },
+                  {
+                    "id": "PRRC_kwDOI8UBac7bfp2J",
+                    "databaseId": 3682508169,
+                    "author": {
+                      "login": "DonKoko"
+                    },
+                    "body": "Fixed in 779fb60b — the reserve and update guards now validate only standalone (`assetKitId IS NULL`) slices against the free pool. Kit slices draw from their kit's allocation, already subtracted via `inKits`, so they're no longer double-counted.",
+                    "createdAt": "2026-07-30T12:06:34Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCGHO",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "apps/webapp/app/modules/asset/availability.server.ts",
+              "line": null,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7baThF",
+                    "databaseId": 3681105989,
+                    "author": {
+                      "login": "chatgpt-codex-connector"
+                    },
+                    "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Exclude kit-inherited custody from the pool deduction**\n\nWhen a kit holding this asset is assigned custody, Shelf creates `Custody` rows with a non-null `kitCustodyId`; this unfiltered aggregation counts those rows as `inCustody`, while the same availability result also subtracts the corresponding `AssetKit.quantity` as `inKits`. The shared batch primitive therefore double-deducts kit units, understates picker and booking availability, and can produce false stock conflicts. Filter custody to `kitCustodyId: null`; the same unfiltered custody aggregation should also be corrected in the singular availability and stock-lowering paths.\n\nUseful? React with 👍 / 👎.",
+                    "createdAt": "2026-07-30T08:15:04Z"
+                  },
+                  {
+                    "id": "PRRC_kwDOI8UBac7bfp5u",
+                    "databaseId": 3682508398,
+                    "author": {
+                      "login": "DonKoko"
+                    },
+                    "body": "Fixed in 779fb60b — custody is filtered to `kitCustodyId: null` in `computeAvailableQuantity`, the batch primitive, the stock-lowering guard, and the stock-conflict detector, so kit-inherited custody is no longer double-deducted alongside `inKits`.",
+                    "createdAt": "2026-07-30T12:06:36Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCGHT",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "apps/webapp/app/modules/booking/service.server.ts",
+              "line": null,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7baThM",
+                    "databaseId": 3681105996,
+                    "author": {
+                      "login": "chatgpt-codex-connector"
+                    },
+                    "body": "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Preserve directional checks for existing quantity edits**\n\nWhen `updateBookingAssets` is used by the manage-assets route to reduce an existing quantity, this item omits `currentQuantity`, so the shared guard defaults it to zero and treats every submission as an increase. If the booking is already over-committed—for example, reducing 8 units to 7 while other reservations leave only 5 bookable—the reduction is rejected, recreating the over-reservation dead-end that the directional guard is intended to fix. Fetch and pass the existing standalone row quantity for updates, while retaining zero for genuinely new rows.\n\nUseful? React with 👍 / 👎.",
+                    "createdAt": "2026-07-30T08:15:04Z"
+                  },
+                  {
+                    "id": "PRRC_kwDOI8UBac7bfp9_",
+                    "databaseId": 3682508671,
+                    "author": {
+                      "login": "DonKoko"
+                    },
+                    "body": "Fixed in 779fb60b — `updateBookingAssets` fetches and passes each asset's existing standalone quantity as `currentQuantity`, so reducing an already-over-committed booking via manage-assets is allowed (the #2725 directional rule).",
+                    "createdAt": "2026-07-30T12:06:39Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCQ26",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "apps/webapp/app/components/booking/list-bookings-content.tsx",
+              "line": 87,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7bajHG",
+                    "databaseId": 3681169862,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "_📐 Maintainability & Code Quality_ | _🟠 Major_ | _⚡ Quick win_\n\n**Tooltip explanation is mouse-only.**\n\n`TooltipTrigger asChild` renders the plain `<span>`, which isn't focusable, so keyboard and screen-reader users never receive the \"over-reserved for these dates\" explanation — only the bare \"Stock conflict\" label.\n\n<details>\n<summary>♿ Proposed fix</summary>\n\n```diff\n-          <span className=\"cursor-help\">\n+          <span\n+            tabIndex={0}\n+            role=\"button\"\n+            aria-label=\"Stock conflict: one or more quantity-tracked assets are over-reserved for these dates\"\n+            className=\"cursor-help focus-visible:outline focus-visible:outline-2\"\n+          >\n```\n</details>\n\nAs per coding guidelines: \"UI implementations must meet WCAG 2.1 AA, including adequate contrast, keyboard access, ... and visible focus indicators.\"\n\n<!-- suggestion_start -->\n\n<details>\n<summary>📝 Committable suggestion</summary>\n\n> ‼️ **IMPORTANT**\n> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.\n\n```suggestion\nfunction StockConflictPill() {\n  return (\n    <TooltipProvider delayDuration={100}>\n      <Tooltip>\n        <TooltipTrigger asChild>\n          <span\n            tabIndex={0}\n            role=\"button\"\n            aria-label=\"Stock conflict: one or more quantity-tracked assets are over-reserved for these dates\"\n            className=\"cursor-help focus-visible:outline focus-visible:outline-2\"\n          >\n            <Badge\n              color={BADGE_COLORS.amber.bg}\n              textColor={BADGE_COLORS.amber.text}\n              withDot={false}\n            >\n              Stock conflict\n            </Badge>\n          </span>\n        </TooltipTrigger>\n        <TooltipContent side=\"top\" align=\"center\" className=\"max-w-xs\">\n          One or more quantity-tracked assets are over-reserved for these dates.\n          Open the booking to resolve.\n        </TooltipContent>\n      </Tooltip>\n    </TooltipProvider>\n  );\n}\n```\n\n</details>\n\n<!-- suggestion_end -->\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/components/booking/list-bookings-content.tsx` around lines 56\n- 78, Update StockConflictPill so its TooltipTrigger is keyboard-focusable and\nexposes the explanation to assistive technology, while preserving the existing\nmouse hover behavior and badge appearance. Add an appropriate accessible label\nor description and a visible focus indicator to the trigger element, ensuring\nthe \"Stock conflict\" control can be reached and understood via keyboard and\nscreen readers.\n```\n\n</details>\n\n<!-- fingerprinting:phantom:medusa:komodo -->\n\n<!-- cr-indicator-types:potential_issue -->\n\n<!-- cr-comment:v1:13e186b6493174b53cbcc5ef -->\n\n_Source: Coding guidelines_\n\n<!-- This is an auto-generated reply by CodeRabbit -->\n\n✅ Confirmed as addressed by @DonKoko\n\n<!-- This is an auto-generated comment by CodeRabbit -->",
+                    "createdAt": "2026-07-30T08:26:07Z"
+                  },
+                  {
+                    "id": "PRRC_kwDOI8UBac7bfqCW",
+                    "databaseId": 3682508950,
+                    "author": {
+                      "login": "DonKoko"
+                    },
+                    "body": "Addressed in 779fb60b via `role=\"img\"` + `aria-label` rather than `tabIndex`/`role=\"button\"`: a non-interactive role satisfies `jsx-a11y/no-noninteractive-tabindex` and stays valid inside the clickable booking row, while giving screen readers the full explanation instead of the bare label.",
+                    "createdAt": "2026-07-30T12:06:41Z"
+                  },
+                  {
+                    "id": "PRRC_kwDOI8UBac7bfqgy",
+                    "databaseId": 3682510898,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "`@DonKoko`, thanks—`role=\"img\"` with the descriptive `aria-label` is a better semantic fit for this non-interactive status indicator, especially within the clickable booking row. It exposes the full conflict context to assistive technology without introducing an invalid nested control.\n\n<!-- <review_comment_addressed> -->\n\n---\n\n<!-- This is an auto-generated comment: tweet message by coderabbit.ai -->\n\nIf you found this review helpful, would you consider giving us a shout-out on [X](https://twitter.com/intent/tweet?related=CodeRabbitAI&text=%40coderabbitai%20catches%20accessibility%20gaps%3A%20make%20tooltip%20context%20available%20to%20screen%20readers%20with%20a%20semantic%20role%20and%20clear%20aria-label%E2%80%94without%20breaking%20clickable%20rows.%20Ship%20more%20inclusive%20UI.%20%E2%99%BF%20Try%20it!&url=https%3A%2F%2Fgithub.com%2FShelf-nu%2Fshelf.nu%2Fpull%2F2770%23discussion_r3681169862)?\n\nThank you for using CodeRabbit!\n\n<!-- end of auto-generated comment: tweet message by coderabbit.ai -->\n\n<sub>You are interacting with an AI system.</sub>\n\n<!-- This is an auto-generated reply by CodeRabbit -->",
+                    "createdAt": "2026-07-30T12:07:02Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCQ3K",
+              "isResolved": true,
+              "isOutdated": true,
+              "path": "apps/webapp/app/components/booking/list-bookings-content.tsx",
+              "line": null,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7bajHg",
+                    "databaseId": 3681169888,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "_📐 Maintainability & Code Quality_ | _🟡 Minor_ | _⚡ Quick win_\n\n<details>\n<summary>🧩 Analysis chain</summary>\n\n🏁 Script executed:\n\n```shell\n#!/bin/bash\n# Confirm whether BookingInclude permits scalar keys, and how other payload\n# types in the repo model from/to.\nfd -t f 'index.d.ts' node_modules/.prisma 2>/dev/null | head -5\nrg -nP --type=ts -C2 'BookingGetPayload<' apps/webapp/app | head -60\n```\n\nRepository: Shelf-nu/shelf.nu\n\nLength of output: 4362\n\n---\n\n🏁 Script executed:\n\n```shell\n#!/bin/bash\nset -euo pipefail\n\n# Inspect the relevant Booking schema fields and generated Prisma scalar payload typing.\necho \"== schema booking fields ==\"\nrg -n 'model Booking|model bookingAssets|model BookingAsset' schema.prisma -A 80 | sed -n '1,140p'\n\necho\necho \"== list component relevant includes/payload ==\"\nsed -n '70,165p' apps/webapp/app/components/booking/list-bookings-content.tsx\n\necho\necho \"== generated prisma client availability and BookingInclude excerpt ==\"\nif [ -f node_modules/.prisma/client/index.d.ts ]; then\n  rg -n 'type BookingInclude|interface BookingInclude|type BookingScalars|interface BookingScalarFieldEnum' node_modules/.prisma/client/index.d.ts | head -30\n  rg -n -A 20 'namespace Prisma\\|$BookingInclude|interface BookingInclude' node_modules/.prisma/client/index.d.ts | head -80\nelse\n  echo \"node_modules/.prisma/client/index.d.ts not present\"\nfi\n\necho\necho \"== TypeScript availability ==\"\ncommand -v tsc || true\ncommand -v npx || true\n```\n\nRepository: Shelf-nu/shelf.nu\n\nLength of output: 282\n\n---\n\n🏁 Script executed:\n\n```shell\n#!/bin/bash\nset -u\n\necho \"== candidate schema files ==\"\nfd -a 'schema\\.prisma$|\\.prisma$' . 2>/dev/null | sed -n '1,40p'\n\necho\necho \"== tracked prisma schema candidates ==\"\ngit ls-files '*schema*.prisma' '*schema/*prisma' '*.prisma' 2>/dev/null | sed -n '1,80p'\n\necho\necho \"== file existence quick checks ==\"\nfor f in schema.prisma apps/prisma/schema.prisma prisma/schema.prisma packages/prisma/schema.prisma node_modules/.prisma/client/index.d.ts; do\n  if [ -e \"$f\" ]; then echo \"EXISTS: $f\"; else echo \"MISSING: $f\"; fi\ndone\n\necho\necho \"== list component lines if present ==\"\nif [ -f apps/webapp/app/components/booking/list-bookings-content.tsx ]; then\n  sed -n '70,165p' apps/webapp/app/components/booking/list-bookings-content.tsx\nelse\n  echo \"MISSING apps/webapp/app/components/booking/list-bookings-content.tsx\"\nfi\n\necho\necho \"== generated client generated BookingInclude excerpts if available ==\"\nif [ -f node_modules/.prisma/client/index.d.ts ]; then\n  rg -n -A 50 'type BookingInclude|interface BookingInclude' node_modules/.prisma/client/index.d.ts | sed -n '1,160p'\nelse\n  echo \"node_modules/.prisma/client/index.d.ts not present\"\nfi\n```\n\nRepository: Shelf-nu/shelf.nu\n\nLength of output: 3585\n\n---\n\n🏁 Script executed:\n\n```shell\n#!/bin/bash\nset -u\n\necho \"== Booking schema model ==\"\nsed -n '1,220p' packages/database/prisma/schema.prisma | sed -n '/model Booking/,/model/ p' | sed '/model Booking/,$d'\nmodel_line=$(rg -n '^model Booking' packages/database/prisma/schema.prisma | head -1 | cut -d: -f1)\nsed -n \"${model_line},${model_line:+150}p\" packages/database/prisma/schema.prisma\n\necho\necho \"== generated Prisma files tracked/available ==\"\nrg -n 'type BookingInclude|interface BookingInclude|namespace Prisma|BookingInclude|BookingGetPayload' packages/database apps/webapp -g '*.ts' -g '*.d.ts' -g '*.tsx' | sed -n '1,120p'\n\necho\necho \"== package manager/tooling availability ==\"\ncommand -v pnpm || true\ncommand -v tsc || true\n```\n\nRepository: Shelf-nu/shelf.nu\n\nLength of output: 2126\n\n---\n\n🏁 Script executed:\n\n```shell\n#!/bin/bash\nset -u\n\necho \"== schema line counts/Booking names ==\"\nwc -l packages/database/prisma/schema.prisma\nrg -n '^model (Booking|BookingModelRequest|booking)$|model Booking' packages/database/prisma/schema.prisma\n\necho\necho \"== broad model Booking search ==\"\nrg -n 'model Booking[^a-zA-Z]|type Booking[^a-zA-Z]' packages/database/prisma/schema.prisma packages/database apps/webapp/app/modules/booking/constants.ts apps/webapp/app/modules/booking/types.d.ts apps/webapp/app/components/booking/list-bookings-content.tsx | sed -n '1,160p'\n\necho\necho \"== constants include scalar context ==\"\nsed -n '1,260p' apps/webapp/app/modules/booking/constants.ts\n```\n\nRepository: Shelf-nu/shelf.nu\n\nLength of output: 10021\n\n---\n\n🏁 Script executed:\n\n```shell\n#!/bin/bash\nset -u\n\necho \"== Booking model fields ==\"\nsed -n '1535,1608p' packages/database/prisma/schema.prisma\n\necho\necho \"== exact current includes with from/to ==\"\npython3 - <<'PY'\nfrom pathlib import Path\np = Path('apps/webapp/app/components/booking/list-bookings-content.tsx')\ntext = p.read_text()\nidx = text.find('type ListBookingsContentProps = {')\nstart = text.find('item: Prisma.BookingGetPayload<', idx)\nend = text.find('}> & {', start)\nprint(text[start:end + len('}> & {')])\nPY\n```\n\nRepository: Shelf-nu/shelf.nu\n\nLength of output: 5856\n\n---\n\n🌐 Web query:\n\n`Prisma client TypeScript include does not accept scalar fields BookingInclude TypeScript error`\n\n💡 Result:\n\nThe error you are encountering—where Prisma Client does not seem to accept scalar fields within an `include` statement—is caused by a fundamental rule in the Prisma API: you cannot mix `select` and `include` at the same level of a query [1][2][3]. If you are seeing a TypeScript error or a runtime validation error, it is likely because you are attempting to use `include` for relations while simultaneously trying to filter or select specific scalar fields at that same level [1][2]. To resolve this, follow these guidelines: 1. Use Nested Selects: Instead of trying to mix `select` and `include` at the same level, use `select` to specify the scalar fields you want, and nest your `include` (or a nested `select` for relations) inside that [2][3]. // Incorrect: Mixing select and include at the same level // await prisma.booking.findMany({ // include: { user: true }, // select: { id: true, date: true } // This will cause an error // }); // Correct: Use nested selects await prisma.booking.findMany({ select: { id: true, date: true, user: { select: { name: true, // Select specific fields from the relation }, }, }, }); 2. Understanding Prisma Default Behavior: By default, Prisma Client queries return all scalar fields for a model and no relations [2][3]. If you simply want to include a relation, you only need to use `include` (e.g., `{ include: { user: true } }`). You do not need to explicitly \"include\" or \"select\" the scalar fields unless you are trying to restrict them [3]. 3. Type Safety and Payloads: If you are having trouble with TypeScript not recognizing the fields returned by your query (a common issue when using `include`), use Prisma's generated payload types to ensure type safety [4][5]. import { Prisma } from '`@prisma/client`'; // Define the query shape using the validator const bookingWithUserArgs = Prisma.validator<Prisma.BookingDefaultArgs>({ include: { user: true }, }); // Create a type for the result type BookingWithUser = Prisma.BookingGetPayload<typeof bookingWithUserArgs>; // Use it in your query const bookings = await prisma.booking.findMany({...bookingWithUserArgs, }); If you continue to see unexpected errors, try restarting your TypeScript server (in VS Code, run \"Restart TS Server\") or regenerating your Prisma Client with `npx prisma generate` to ensure your local types are perfectly synced with your schema [6].\n\nCitations:\n\n- 1: https://github.com/prisma/prisma/issues/26324\n- 2: https://www.prisma.io/docs/orm/prisma-client/queries/relation-queries\n- 3: https://www.prisma.io/docs/orm/prisma-client/queries/select-fields\n- 4: https://www.prisma.io/docs/orm/prisma-client/type-safety/operating-against-partial-structures-of-model-types\n- 5: https://stackoverflow.com/questions/78571777/typescript-incompatible-after-prisma-request\n- 6: https://stackoverflow.com/questions/76854414/prisma-error-cannot-select-both-scalars-true-and-a-specific-scalar-field-a\n\n---\n\n🌐 Web query:\n\n`GitHub Prisma client generate BookingInclude scalar fields include select include scalar false`\n\n💡 Result:\n\nIn Prisma Client, there is no native configuration option within the `generator` block (e.g., `include scalar false`) to globally change how scalar fields are generated or returned [1]. By default, Prisma Client queries return all scalar fields of a model and no relations [2][3]. To control which fields are returned in a specific query, you should use the `select`, `include`, or `omit` options [4][3]: 1. Select: Use `select` to specify exactly which fields (scalar or relations) you want to return. When `select` is used, only the fields explicitly set to `true` are returned [2][3]. 2. Include: Use `include` to return all scalar fields plus specific relations [2][3]. 3. Omit: Use `omit` to exclude specific scalar fields from the default set [4][3]. Note that `select` and `include` are mutually exclusive at the same level of a query [5][6]. If you are encountering a type or generation issue related to `BookingInclude` (e.g., in a generated TypeScript client), it is likely a result of how Prisma generates types based on your schema. You can manage these types using helper utilities like `Prisma.ModelNameGetPayload` (e.g., `Prisma.BookingGetPayload`) in combination with the TypeScript `satisfies` operator to enforce specific return shapes [7]. If you were referring to a third-party generator (such as a JSON schema generator), those tools often have their own specific configuration flags in the `generator` block—for instance, `keepRelationScalarFields` [8]—but these are specific to that tool and not part of the standard Prisma Client generator [1].\n\nCitations:\n\n- 1: https://www.prisma.io/docs/orm/v6/prisma-schema/overview/generators\n- 2: https://www.prisma.io/docs/orm/prisma-client/queries/select-fields\n- 3: https://www.prisma.io/docs/orm/v6/prisma-client/queries/select-fields\n- 4: https://www.prisma.io/docs/orm/reference/prisma-client-reference\n- 5: https://www.prisma.io/docs/orm/prisma-client/queries/relation-queries\n- 6: https://github.com/multipliedtwice/prisma-generator-express\n- 7: https://www.prisma.io/docs/orm/prisma-client/type-safety/operating-against-partial-structures-of-model-types\n- 8: https://github.com/valentinpalkovic/prisma-json-schema-generator/blob/main/README.md\n\n---\n\n\n\n</details>\n\n**Remove the no-op `from`/`to` include keys.**\n\n`Booking` includes all scalar fields by default, and the SDK include types only model the relation keys. Drop these scalars from the Prisma include payload to avoid an invalid `BookingInclude` contract.\n\n<details>\n<summary>♻️ Proposed fix</summary>\n\n```diff\n-      from: true;\n-      to: true;\n       custodianUser: true;\n```\n</details>\n\n<!-- suggestion_start -->\n\n<details>\n<summary>📝 Committable suggestion</summary>\n\n> ‼️ **IMPORTANT**\n> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.\n\n```suggestion\n      custodianUser: true;\n```\n\n</details>\n\n<!-- suggestion_end -->\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/components/booking/list-bookings-content.tsx` around lines\n150 - 151, Remove the no-op from and to keys from the Prisma include payload in\nthe booking query near the Booking include configuration. Keep only supported\nrelation keys, since Booking scalar fields are included by default and the SDK\nBookingInclude contract does not accept these scalar entries.\n```\n\n</details>\n\n<!-- fingerprinting:phantom:medusa:komodo -->\n\n<!-- cr-indicator-types:potential_issue -->\n\n<!-- cr-comment:v1:ce70aea0ccba5c6777b84432 -->\n\n_Source: Learnings_\n\n<!-- This is an auto-generated reply by CodeRabbit -->\n\n✅ Confirmed as addressed by @DonKoko\n\n<!-- This is an auto-generated comment by CodeRabbit -->",
+                    "createdAt": "2026-07-30T08:26:08Z"
+                  },
+                  {
+                    "id": "PRRC_kwDOI8UBac7bfqF8",
+                    "databaseId": 3682509180,
+                    "author": {
+                      "login": "DonKoko"
+                    },
+                    "body": "Fixed in 265273167 — removed the redundant scalar `from`/`to` from the `include` clause (Prisma returns scalars by default); they remain on the `BookingGetPayload` type.",
+                    "createdAt": "2026-07-30T12:06:44Z"
+                  },
+                  {
+                    "id": "PRRC_kwDOI8UBac7bfqnv",
+                    "databaseId": 3682511343,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "`@DonKoko`, thanks — removing those scalar keys while retaining them on the payload type addresses the Prisma `include` contract issue.  \n\n<!-- <review_comment_addressed> -->\n\n\n---\n\n<details>\n<summary>🧠 Learnings used</summary>\n\n```\nLearnt from: carlosvirreira\nRepo: Shelf-nu/shelf.nu PR: 2567\nFile: apps/webapp/app/modules/location/service.server.ts:250-255\nTimestamp: 2026-05-25T11:41:27.366Z\nLearning: In Prisma queries, when you use `include` for a related model, `include` does not accept scalar fields for that related model—Prisma automatically returns the related model’s scalar fields. Do not list scalar fields (e.g., `sequentialId`, `preferredBarcodeId`) inside an `include` block; if you need to control which scalar fields are returned, use a `select` block instead. Attempting to add scalars to `include` will typically fail with a TypeScript error like `TS2322: ... '<fieldName>' does not exist in type '<Model>Include'`.\n```\n\n</details>\n\n---\n\n<!-- This is an auto-generated comment: tweet message by coderabbit.ai -->\n\nIf you found this review helpful, would you consider giving us a shout-out on [X](https://twitter.com/intent/tweet?related=CodeRabbitAI&text=Prisma%20includes%20scalar%20fields%20by%20default%E2%80%94remove%20redundant%20%60from%60%2F%60to%60%20keys%20to%20keep%20%60BookingInclude%60%20valid%20and%20type-safe.%20Small%20fix%2C%20better%20maintainability.%20Try%20%40coderabbitai%20%F0%9F%9A%80&url=https%3A%2F%2Fgithub.com%2FShelf-nu%2Fshelf.nu%2Fpull%2F2770%23discussion_r3681169888)?\n\nThank you for using CodeRabbit!\n\n<!-- end of auto-generated comment: tweet message by coderabbit.ai -->\n\n<sub>You are interacting with an AI system.</sub>\n\n<!-- This is an auto-generated reply by CodeRabbit -->",
+                    "createdAt": "2026-07-30T12:07:07Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCQ3R",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "apps/webapp/app/modules/asset/availability.server.ts",
+              "line": 369,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7bajHs",
+                    "databaseId": 3681169900,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "_🗄️ Data Integrity & Integration_ | _🟠 Major_ | _⚡ Quick win_\n\n<details>\n<summary>🧩 Analysis chain</summary>\n\n🏁 Script executed:\n\n```shell\n#!/bin/bash\n# Locate computeAvailableQuantity's definition and check whether it accepts a client/tx.\nfd -t f 'service.server.ts' -p 'consumption-log' --exec ast-grep outline {} --match computeAvailableQuantity --view expanded\nrg -nP -C6 'export (async )?function computeAvailableQuantity' apps/webapp/app\n# All call sites, to see whether any already pass a tx.\nrg -nP -C2 '\\bcomputeAvailableQuantity\\s*\\(' apps/webapp/app\n```\n\nRepository: Shelf-nu/shelf.nu\n\nLength of output: 3276\n\n---\n\n🏁 Script executed:\n\n```shell\n#!/bin/bash\nset -euo pipefail\n\nprintf '--- availability.server.ts relevant section ---\\n'\nsed -n '320,370p' apps/webapp/app/modules/asset/availability.server.ts\n\nprintf '\\n--- computeAvailableQuantity definition ---\\n'\nsed -n '220,270p' apps/webapp/app/modules/consumption-log/service.server.ts\n\nprintf '\\n--- availability helper imports/db usage ---\\n'\nrg -n -C2 'import .*db|`@shelf/database`|from [\"'\\'']`@shelf/database`[\"'\\'']|const db' apps/webapp/app/modules/asset/availability.server.ts apps/webapp/app/modules/consumption-log/service.server.ts\n\nprintf '\\n--- getAssetAvailability signature/imports ---\\n'\nsed -n '290,310p' apps/webapp/app/modules/consumption-log/service.server.ts\n```\n\nRepository: Shelf-nu/shelf.nu\n\nLength of output: 246\n\n---\n\n🏁 Script executed:\n\n```shell\n#!/bin/bash\nset -euo pipefail\n\nprintf '%s\\n' '--- availability.server.ts relevant section ---'\nsed -n '320,370p' apps/webapp/app/modules/asset/availability.server.ts\n\nprintf '\\n%s\\n' '--- computeAvailableQuantity definition ---'\nsed -n '220,270p' apps/webapp/app/modules/consumption-log/service.server.ts\n\nprintf '\\n%s\\n' '--- availability helper imports/db usage ---'\nrg -n -C2 'import .*db|`@shelf/database`|from [\"'\\'']`@shelf/database`[\"'\\'']|const db' apps/webapp/app/modules/asset/availability.server.ts apps/webapp/app/modules/consumption-log/service.server.ts\n\nprintf '\\n%s\\n' '--- getAssetAvailability signature/imports ---'\nsed -n '290,310p' apps/webapp/app/modules/consumption-log/service.server.ts\n```\n\nRepository: Shelf-nu/shelf.nu\n\nLength of output: 6615\n\n---\n\n\n\n</details>\n\n**Thread the active transaction into the base availability query.**\n\n`getAssetAvailability()` defaults `client` from `dbOrTx`, but `computeAvailableQuantity()` still reads `total` and `inCustody` from the global `db`, while the subsequent asset-availability terms run on `client`. This breaks atomicity at a caller boundary and can make the availability check use stale data if `Asset.quantity` was updated earlier in the same transaction.\n\nExtend `computeAvailableQuantity()` to accept a Prisma client/transaction and pass `client` through here.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/asset/availability.server.ts` around lines 348 - 356,\nUpdate computeAvailableQuantity to accept a Prisma client or transaction and use\nit for the total and inCustody query instead of the global db. In\ngetAssetAvailability, pass the active client into computeAvailableQuantity so\nall availability terms read from the same transaction context.\n```\n\n</details>\n\n<!-- fingerprinting:phantom:medusa:komodo -->\n\n<!-- cr-indicator-types:potential_issue -->\n\n<!-- cr-comment:v1:5726be762039f6289f6adb4c -->\n\n<!-- This is an auto-generated comment by CodeRabbit -->\n\n✅ Addressed in commit 231962a",
+                    "createdAt": "2026-07-30T08:26:08Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCQ3V",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "apps/webapp/app/modules/booking/service.server.ts",
+              "line": 7886,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7bajH0",
+                    "databaseId": 3681169908,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "_🗄️ Data Integrity & Integration_ | _🟠 Major_ | _⚡ Quick win_\n\n**Guard can under-count this booking's own demand and let a pool be over-committed.**\n\n`excludeBookingId: id` removes *all* of this booking's demand from the pool, but `requestedQtyByAssetId` only covers the rows this call writes. When the booking already has other `BookingAsset` rows for the same asset (e.g. a kit-driven slice, or a standalone slice not part of this call), their units are neither counted as demand nor subtracted from the pool — so `existing + requested` can exceed the pool while the guard passes. Example: pool 10, existing kit slice 5, this call adds standalone 8 → 8 ≤ 10 passes, total committed 13.\n\nAlso note the kit branch uses `ON CONFLICT DO NOTHING`, so re-adding an already-present kit slice contributes phantom demand to the check even though no write occurs.\n\nAggregating the booking's existing rows for the affected assets (one extra `tx.bookingAsset.groupBy`) and adding them to `requestedQtyByAssetId` (minus rows this call overwrites) would close both gaps.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/modules/booking/service.server.ts` around lines 7775 - 7849,\nUpdate the QUANTITY_TRACKED guard around requestedQtyByAssetId and\nassertAssetQuantitiesAvailable to include this booking’s existing BookingAsset\nquantities for each affected asset, using one tx.bookingAsset.groupBy query.\nExclude rows overwritten by this call and rows whose kit insert uses ON CONFLICT\nDO NOTHING, so only the booking’s final committed demand is added before passing\nexcludeBookingId: id to assertAssetQuantitiesAvailable.\n```\n\n</details>\n\n<!-- fingerprinting:phantom:medusa:komodo -->\n\n<!-- cr-indicator-types:potential_issue -->\n\n<!-- cr-comment:v1:68f8fb68af457341e94fe3fa -->\n\n<!-- This is an auto-generated comment by CodeRabbit -->\n\n✅ Addressed in commits 70d5463 to 779fb60",
+                    "createdAt": "2026-07-30T08:26:08Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCQ3Z",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "apps/webapp/app/routes/_layout+/assets.$assetId.bookings.tsx",
+              "line": 136,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7bajH5",
+                    "databaseId": 3681169913,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "_🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_\n\n**Decorative stock-conflict query can fail the whole bookings list.**\n\n`getStockConflictedBookingIds` runs unguarded in the loader, so any error in this purely cosmetic pill computation propagates to the catch block and renders the error boundary instead of the list. Consider wrapping it so the list degrades to \"no pill\" instead of failing.\n\n<details>\n<summary>♻️ Suggested resilience wrapper</summary>\n\n```diff\n-    const conflictedBookingIds = await getStockConflictedBookingIds({\n-      bookings: bookings.map((b) => ({\n-        id: b.id,\n-        status: b.status,\n-        from: b.from,\n-        to: b.to,\n-      })),\n-      organizationId,\n-    });\n+    // The pill is advisory only — never fail the list for it.\n+    const conflictedBookingIds = await getStockConflictedBookingIds({\n+      bookings: bookings.map((b) => ({\n+        id: b.id,\n+        status: b.status,\n+        from: b.from,\n+        to: b.to,\n+      })),\n+      organizationId,\n+    }).catch(() => new Set<string>());\n```\n</details>\n\n<!-- suggestion_start -->\n\n<details>\n<summary>📝 Committable suggestion</summary>\n\n> ‼️ **IMPORTANT**\n> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.\n\n```suggestion\n    /**\n     * Same amber \"Stock conflict\" pill as the main bookings index — this\n     * route shares `ListBookingsContent` via `<BookingsIndexPage />` below,\n     * so it needs the same per-booking flag wired in its own loader (see\n     * `.claude/rules/quantity-semantics-per-surface.md` / the module doc in\n     * `~/modules/booking/stock-conflicts.server`).\n     */\n    // The pill is advisory only — never fail the list for it.\n    const conflictedBookingIds = await getStockConflictedBookingIds({\n      bookings: bookings.map((b) => ({\n        id: b.id,\n        status: b.status,\n        from: b.from,\n        to: b.to,\n      })),\n      organizationId,\n    }).catch(() => new Set<string>());\n```\n\n</details>\n\n<!-- suggestion_end -->\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/routes/_layout`+/assets.$assetId.bookings.tsx around lines\n125 - 141, Wrap the getStockConflictedBookingIds call in the loader with error\nhandling so failures yield an empty conflictedBookingIds result and the bookings\nlist still renders without stock-conflict pills. Keep the existing booking\ninputs and successful-query behavior unchanged.\n```\n\n</details>\n\n<!-- fingerprinting:phantom:medusa:komodo -->\n\n<!-- cr-indicator-types:potential_issue -->\n\n<!-- cr-comment:v1:9fc0916d20838294884b2db0 -->\n\n<!-- This is an auto-generated comment by CodeRabbit -->\n\n✅ Addressed in commits 70d5463 to 779fb60",
+                    "createdAt": "2026-07-30T08:26:08Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCQ3k",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "apps/webapp/app/routes/_layout+/bookings._index.tsx",
+              "line": 208,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7bajIM",
+                    "databaseId": 3681169932,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "_📐 Maintainability & Code Quality_ | _🟠 Major_ | _⚡ Quick win_\n\n**Extract the repeated stock-conflict decoration into one helper.** Five bookings loaders now copy the same `bookings.map({ id, status, from, to })` → `getStockConflictedBookingIds` → `items: bookings.map(+hasStockConflict)` sequence, each with its own comment block and each unguarded. A single helper (e.g. `withStockConflictFlags({ bookings, organizationId })` next to `getStockConflictedBookingIds`) removes the duplication and gives one place to keep the advisory pill non-fatal.\n\n- `apps/webapp/app/routes/_layout+/bookings._index.tsx#L198-L213`: replace the inline call + `items` mapping (Line 334) with the shared helper.\n- `apps/webapp/app/routes/_layout+/assets.$assetId.bookings.tsx#L125-L141`: replace the inline call + `items` mapping (Line 153) with the shared helper.\n- `apps/webapp/app/routes/_layout+/kits.$kitId.bookings.tsx#L115-L127`: replace the inline call + `items` mapping (Line 141) with the shared helper.\n- `apps/webapp/app/routes/_layout+/me.bookings.tsx#L79-L91`: replace the inline call + `items` mapping (Line 104) with the shared helper.\n- `apps/webapp/app/routes/_layout+/settings.team.users.$userId.bookings.tsx#L101-L113`: replace the inline call + `items` mapping (Line 127) with the shared helper.\n\nAs per coding guidelines: \"Abstract duplicated patterns into focused reusable helpers.\"\n\n<details>\n<summary>📍 Affects 5 files</summary>\n\n- `apps/webapp/app/routes/_layout+/bookings._index.tsx#L198-L213` (this comment)\n- `apps/webapp/app/routes/_layout+/assets.$assetId.bookings.tsx#L125-L141`\n- `apps/webapp/app/routes/_layout+/kits.$kitId.bookings.tsx#L115-L127`\n- `apps/webapp/app/routes/_layout+/me.bookings.tsx#L79-L91`\n- `apps/webapp/app/routes/_layout+/settings.team.users.$userId.bookings.tsx#L101-L113`\n\n</details>\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/routes/_layout`+/bookings._index.tsx around lines 198 - 213,\nThe repeated stock-conflict decoration is duplicated and unguarded across five\nbooking loaders. Add a shared withStockConflictFlags helper alongside\ngetStockConflictedBookingIds that maps booking fields, performs the lookup, and\nreturns bookings with hasStockConflict flags while keeping this advisory\ndecoration non-fatal; replace the inline lookup and items mappings in\napps/webapp/app/routes/_layout+/bookings._index.tsx (198-213),\napps/webapp/app/routes/_layout+/assets.$assetId.bookings.tsx (125-141),\napps/webapp/app/routes/_layout+/kits.$kitId.bookings.tsx (115-127),\napps/webapp/app/routes/_layout+/me.bookings.tsx (79-91), and\napps/webapp/app/routes/_layout+/settings.team.users.$userId.bookings.tsx\n(101-113) with the helper.\n```\n\n</details>\n\n<!-- consolidated_sites_start -->\n<!--\n<consolidated_sites>\n<site>\n<role>anchor</role>\n<file>apps/webapp/app/routes/_layout+/bookings._index.tsx</file>\n<line_range>198-213</line_range>\n</site>\n<site>\n<role>sibling</role>\n<file>apps/webapp/app/routes/_layout+/assets.$assetId.bookings.tsx</file>\n<line_range>125-141</line_range>\n</site>\n<site>\n<role>sibling</role>\n<file>apps/webapp/app/routes/_layout+/kits.$kitId.bookings.tsx</file>\n<line_range>115-127</line_range>\n</site>\n<site>\n<role>sibling</role>\n<file>apps/webapp/app/routes/_layout+/me.bookings.tsx</file>\n<line_range>79-91</line_range>\n</site>\n<site>\n<role>sibling</role>\n<file>apps/webapp/app/routes/_layout+/settings.team.users.$userId.bookings.tsx</file>\n<line_range>101-113</line_range>\n</site>\n</consolidated_sites>\n-->\n<!-- consolidated_sites_end -->\n\n<!-- fingerprinting:phantom:medusa:komodo -->\n\n<!-- cr-indicator-types:refactor_suggestion -->\n\n<!-- cr-comment:v1:934829be192156ea9400794a -->\n\n_Source: Coding guidelines_\n\n<!-- This is an auto-generated comment by CodeRabbit -->\n\n✅ Addressed in commits 70d5463 to 779fb60",
+                    "createdAt": "2026-07-30T08:26:08Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCQ3p",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "apps/webapp/app/routes/_layout+/kits.$kitId.bookings.tsx",
+              "line": 122,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7bajIQ",
+                    "databaseId": 3681169936,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "_🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_\n\n**Same unguarded/duplicated stock-conflict block as the other bookings loaders.**\n\nIdentical to `apps/webapp/app/routes/_layout+/assets.$assetId.bookings.tsx`; a failure here takes down the kit's Bookings tab for a cosmetic pill.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/routes/_layout`+/kits.$kitId.bookings.tsx around lines 115 -\n127, Guard the getStockConflictedBookingIds call in the kit bookings loader so a\nstock-conflict lookup failure does not prevent the Bookings tab from loading.\nPreserve normal conflict IDs when the lookup succeeds, but fall back to an empty\nset/list on failure, matching the resilient handling used by the assets bookings\nloader.\n```\n\n</details>\n\n<!-- fingerprinting:phantom:medusa:komodo -->\n\n<!-- cr-indicator-types:potential_issue -->\n\n<!-- cr-comment:v1:0ba209d587ade9ffa59381ac -->\n\n<!-- This is an auto-generated comment by CodeRabbit -->\n\n✅ Addressed in commits 70d5463 to 779fb60",
+                    "createdAt": "2026-07-30T08:26:08Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCQ3s",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "apps/webapp/app/routes/_layout+/me.bookings.tsx",
+              "line": 86,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7bajIV",
+                    "databaseId": 3681169941,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "_🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_\n\n**Same unguarded/duplicated stock-conflict block.**\n\nMirrors the other bookings loaders; extract the shared decoration and make it non-fatal.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/routes/_layout`+/me.bookings.tsx around lines 79 - 91, The\nbookings loader duplicates the stock-conflict decoration and lets failures\npropagate. Extract the shared booking decoration into the existing common helper\nused by the other bookings loaders, invoke it from this loader, and ensure\nstock-conflict lookup failures are handled non-fatally while preserving the\nbooking list response.\n```\n\n</details>\n\n<!-- fingerprinting:phantom:medusa:komodo -->\n\n<!-- cr-indicator-types:potential_issue -->\n\n<!-- cr-comment:v1:896c7ff1c71c5d423f013fb7 -->\n\n<!-- This is an auto-generated comment by CodeRabbit -->\n\n✅ Addressed in commits 70d5463 to 779fb60",
+                    "createdAt": "2026-07-30T08:26:08Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCQ3u",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "apps/webapp/app/routes/_layout+/settings.team.users.$userId.bookings.tsx",
+              "line": 108,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7bajIX",
+                    "databaseId": 3681169943,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "_🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_\n\n**Same unguarded/duplicated stock-conflict block.**\n\nOrg scoping is correct here, but the duplication and hard-failure behavior match the sibling loaders.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@apps/webapp/app/routes/_layout`+/settings.team.users.$userId.bookings.tsx\naround lines 101 - 113, Update the stock-conflict lookup around\ngetStockConflictedBookingIds in this loader to reuse the shared stock-conflict\nhandling used by the sibling loaders instead of duplicating the block. Preserve\norganizationId scoping and ensure lookup failures degrade gracefully without\nfailing the loader.\n```\n\n</details>\n\n<!-- fingerprinting:phantom:medusa:komodo -->\n\n<!-- cr-indicator-types:potential_issue -->\n\n<!-- cr-comment:v1:e448ea6207ee9d5bdc0f0555 -->\n\n<!-- This is an auto-generated comment by CodeRabbit -->\n\n✅ Addressed in commits 70d5463 to 779fb60",
+                    "createdAt": "2026-07-30T08:26:08Z"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_kwDOI8UBac6VCQ3x",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "apps/webapp/app/routes/api+/bookings.$bookingId.adjust-asset-quantity.test.server.ts",
+              "line": 333,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_kwDOI8UBac7bajIf",
+                    "databaseId": 3681169951,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "_📐 Maintainability & Code Quality_ | _🟡 Minor_ | _⚡ Quick win_\n\n**Contradictory comments about the `available` figure in the error message.**\n\nLine 295 states the message's figure is `currentQuantity + bookable` = 2 + 3 = 5, while Lines 328-329 (and the asserted string) state it's the absolute `bookable` = 3. One of the two is wrong; drop/fix the first so the fixture math documented here matches the assertion.\n\n<details>\n<summary>📝 Suggested cleanup</summary>\n\n```diff\n     // physicalAvailable = total(10) - inCustody(0) - inKits(0) - checkedOut(0) = 10.\n     // One other booking overlaps the full window reserving 7 units, so\n     // bookable = 10 - 7 = 3. Current row quantity = 2, requested = 8, so the\n-    // increase (6) exceeds bookable (3) and must be rejected. The message's\n-    // `available` figure is `currentQuantity + bookable` = 2 + 3 = 5.\n+    // increase (6) exceeds bookable (3) and must be rejected. The message\n+    // reports the ABSOLUTE max this booking may hold (bookable = 3).\n```\n</details>\n\n<!-- suggestion_start -->\n\n<details>\n<summary>📝 Committable suggestion</summary>\n\n> ‼️ **IMPORTANT**\n> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.\n\n```suggestion\n    // physicalAvailable = total(10) - inCustody(0) - inKits(0) - checkedOut(0) = 10.\n    // One other booking overlaps the full window reserving 7 units, so\n    // bookable = 10 - 7 = 3. Current row quantity = 2, requested = 8, so the\n    // increase (6) exceeds bookable (3) and must be rejected. The message\n    // reports the ABSOLUTE max this booking may hold (bookable = 3).\n    const bookingAsset = buildBookingAssetFixture({\n      quantity: 2,\n      unitOfMeasure: null,\n    });\n    // `@ts-expect-error` mocked\n    db.bookingAsset.findFirst.mockResolvedValue(bookingAsset);\n    // `@ts-expect-error` mocked\n    computeAvailableQuantity.mockResolvedValue({ total: 10, inCustody: 0 });\n\n    const tx = createTxMock({\n      reservedRows: [\n        {\n          bookingId: \"other-booking-1\",\n          quantity: 7,\n          booking: {\n            from: new Date(\"2026-08-01T09:00:00.000Z\"),\n            to: new Date(\"2026-08-05T09:00:00.000Z\"),\n          },\n        },\n      ],\n    });\n    // `@ts-expect-error` mocked\n    db.$transaction.mockImplementation((callback: (tx: unknown) => unknown) =>\n      callback(tx)\n    );\n\n    const response = await action(\n      buildActionArgs({ assetId: ASSET_ID, quantity: \"8\" })\n    );\n\n    expect(response.data.error).not.toBeNull();\n    if (response.data.error === null) throw new Error(\"expected a 400 error\");\n    // bookable = 10 total − 7 reserved by the other overlapping booking = 3,\n    // the ABSOLUTE max this booking may hold (not current + bookable).\n    expect(response.data.error.message).toBe(\n      \"Only 3 of 10 units available in this window — reduce the quantity to continue.\"\n    );\n```\n\n</details>\n\n<!-- suggestion_end -->\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn\n`@apps/webapp/app/routes/api`+/bookings.$bookingId.adjust-asset-quantity.test.server.ts\naround lines 291 - 332, Correct the setup comments in the test around\nbookingAsset and the asserted error message so they consistently describe\navailable as the absolute bookable quantity of 3, not currentQuantity + bookable\n= 5. Preserve the existing fixture values and assertion.\n```\n\n</details>\n\n<!-- fingerprinting:phantom:medusa:komodo -->\n\n<!-- cr-indicator-types:potential_issue -->\n\n<!-- cr-comment:v1:4555a0c5173d7e4a9617e9b2 -->\n\n<!-- This is an auto-generated comment by CodeRabbit -->\n\n✅ Addressed in commits 70d5463 to 779fb60",
+                    "createdAt": "2026-07-30T08:26:08Z"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

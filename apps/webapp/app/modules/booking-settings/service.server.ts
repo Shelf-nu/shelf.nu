@@ -4,62 +4,156 @@ import { ShelfError } from "~/utils/error";
 
 const label = "Booking Settings";
 
+/**
+ * Shared `select` clause for the full `BookingSettings` shape.
+ *
+ * Hoisted to module scope so the read-first `findUnique` in
+ * {@link getBookingSettingsForOrganization}, its `upsert` fallback, and the
+ * `update` in {@link updateBookingSettings} all return the exact same shape —
+ * a single source of truth keeps those paths from drifting apart over time.
+ * (The notification-only helpers below deliberately select a leaner subset.)
+ */
+export const BOOKING_SETTINGS_SELECT = {
+  id: true,
+  bufferStartTime: true,
+  maxBookingLength: true,
+  maxBookingLengthSkipClosedDays: true,
+  tagsRequired: true,
+  autoArchiveBookings: true,
+  autoArchiveDays: true,
+  autoArchiveExpiredReservations: true,
+  requireExplicitCheckinForAdmin: true,
+  requireExplicitCheckinForSelfService: true,
+  countKitsAsSingleUnit: true,
+  notifyBookingCreator: true,
+  notifyAdminsOnNewBooking: true,
+  alwaysNotifyTeamMembers: {
+    select: {
+      id: true,
+      name: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+          profilePicture: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.BookingSettingsSelect;
+
+/**
+ * Lean `select` for the notification-only booking settings.
+ *
+ * Hoisted so the `upsert` in {@link getBookingNotificationSettingsForOrg} and
+ * its `P2002` re-read return the exact same shape (single source of truth).
+ */
+export const BOOKING_NOTIFICATION_SETTINGS_SELECT = {
+  notifyBookingCreator: true,
+  notifyAdminsOnNewBooking: true,
+  alwaysNotifyTeamMembers: {
+    select: {
+      id: true,
+      name: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+          profilePicture: true,
+          // Format-preference columns so the booking notification resolver can
+          // carry them onto each recipient and resolve recipient-specific email
+          // date/time formatting from the loaded row (no per-recipient DB
+          // fetch). See `NotificationRecipient`.
+          dateFormat: true,
+          timeFormat: true,
+          weekStart: true,
+          timeZone: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.BookingSettingsSelect;
+
+/**
+ * Retrieves the `BookingSettings` row for an organization, creating a
+ * default row only on first access.
+ *
+ * This is called from the root authenticated layout loader
+ * (`_layout+/_layout.tsx`), so it runs on **every** authenticated page load
+ * and React Router `.data` revalidation. It is deliberately **read-first**:
+ * a plain `findUnique` satisfies the overwhelming majority of calls (the row
+ * almost always already exists), avoiding an unconditional write + row lock
+ * on every request. Only when the row is genuinely absent do we fall through
+ * to an `upsert` that also catches `P2002` and re-reads, so two concurrent
+ * first requests for the same organization can't race into a unique-constraint
+ * error (the upsert emulates a read + create because it returns a nested
+ * relation, so it isn't atomic on its own).
+ *
+ * @param organizationId - The organization whose settings to fetch
+ * @returns The organization's booking settings, creating defaults if absent
+ * @throws {ShelfError} If the database operation fails
+ */
 export async function getBookingSettingsForOrganization(
   organizationId: string
 ) {
   try {
-    // First try to find existing working hours
-    const bookingSettings = await db.bookingSettings.upsert({
-      where: {
-        organizationId,
-      },
-      update: {},
-      create: {
-        bufferStartTime: 0,
-        maxBookingLength: null,
-        maxBookingLengthSkipClosedDays: false,
-        tagsRequired: false,
-        autoArchiveBookings: false,
-        autoArchiveDays: 2,
-        requireExplicitCheckinForAdmin: false,
-        requireExplicitCheckinForSelfService: false,
-        countKitsAsSingleUnit: false,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        organizationId,
-      },
-      select: {
-        id: true,
-        bufferStartTime: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        tagsRequired: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-        countKitsAsSingleUnit: true,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
+    // Hot path: the row exists for almost every call, so a plain read avoids
+    // taking a write lock on every authenticated page load.
+    const existing = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: BOOKING_SETTINGS_SELECT,
     });
 
-    return bookingSettings;
+    if (existing) {
+      return existing;
+    }
+
+    // Cold path: first access for this organization. `upsert` (not `create`)
+    // makes a concurrent first-hit idempotent — but because this returns a
+    // nested relation (`alwaysNotifyTeamMembers` in BOOKING_SETTINGS_SELECT),
+    // Prisma emulates the upsert with a separate read + create rather than a
+    // native atomic `INSERT … ON CONFLICT`, so a concurrent create can still
+    // throw P2002. Catch it and re-read the row the winning request created.
+    try {
+      return await db.bookingSettings.upsert({
+        where: {
+          organizationId,
+        },
+        update: {},
+        create: {
+          bufferStartTime: 0,
+          maxBookingLength: null,
+          maxBookingLengthSkipClosedDays: false,
+          tagsRequired: false,
+          autoArchiveBookings: false,
+          autoArchiveDays: 2,
+          autoArchiveExpiredReservations: false,
+          requireExplicitCheckinForAdmin: false,
+          requireExplicitCheckinForSelfService: false,
+          countKitsAsSingleUnit: false,
+          notifyBookingCreator: true,
+          notifyAdminsOnNewBooking: true,
+          organizationId,
+        },
+        select: BOOKING_SETTINGS_SELECT,
+      });
+    } catch (cause) {
+      if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+        // `await` so a (rare) re-read failure is caught by the outer try and
+        // wrapped in a ShelfError rather than escaping as a bare rejection.
+        return await db.bookingSettings.findUniqueOrThrow({
+          where: { organizationId },
+          select: BOOKING_SETTINGS_SELECT,
+        });
+      }
+      throw cause;
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -78,6 +172,7 @@ export async function updateBookingSettings({
   maxBookingLengthSkipClosedDays,
   autoArchiveBookings,
   autoArchiveDays,
+  autoArchiveExpiredReservations,
   requireExplicitCheckinForAdmin,
   requireExplicitCheckinForSelfService,
   countKitsAsSingleUnit,
@@ -91,6 +186,7 @@ export async function updateBookingSettings({
   maxBookingLengthSkipClosedDays?: boolean;
   autoArchiveBookings?: boolean;
   autoArchiveDays?: number;
+  autoArchiveExpiredReservations?: boolean;
   requireExplicitCheckinForAdmin?: boolean;
   requireExplicitCheckinForSelfService?: boolean;
   countKitsAsSingleUnit?: boolean;
@@ -111,6 +207,9 @@ export async function updateBookingSettings({
       updateData.autoArchiveBookings = autoArchiveBookings;
     if (autoArchiveDays !== undefined)
       updateData.autoArchiveDays = autoArchiveDays;
+    if (autoArchiveExpiredReservations !== undefined)
+      updateData.autoArchiveExpiredReservations =
+        autoArchiveExpiredReservations;
     if (requireExplicitCheckinForAdmin !== undefined)
       updateData.requireExplicitCheckinForAdmin =
         requireExplicitCheckinForAdmin;
@@ -127,35 +226,7 @@ export async function updateBookingSettings({
     const bookingSettings = await db.bookingSettings.update({
       where: { organizationId },
       data: updateData,
-      select: {
-        id: true,
-        bufferStartTime: true,
-        tagsRequired: true,
-        maxBookingLength: true,
-        maxBookingLengthSkipClosedDays: true,
-        autoArchiveBookings: true,
-        autoArchiveDays: true,
-        requireExplicitCheckinForAdmin: true,
-        requireExplicitCheckinForSelfService: true,
-        countKitsAsSingleUnit: true,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
-        },
-      },
+      select: BOOKING_SETTINGS_SELECT,
     });
 
     return bookingSettings;
@@ -188,8 +259,11 @@ export async function updateBookingSettings({
  * config, etc.) to keep the notification resolver lightweight and avoid
  * pulling unnecessary data on every booking email.
  *
- * Uses `upsert` to lazily create default settings if the organization
- * doesn't have a `BookingSettings` row yet.
+ * Uses `upsert` to lazily create default settings if the organization doesn't
+ * have a `BookingSettings` row yet. Because the select returns a nested
+ * relation (`alwaysNotifyTeamMembers`), Prisma emulates the upsert with a
+ * separate read + create, so a concurrent first-hit can throw `P2002`; we catch
+ * it and re-read (same as {@link getBookingSettingsForOrganization}).
  *
  * @param organizationId - The organization whose settings to fetch
  * @returns Notification flags and the always-notify team member list
@@ -198,34 +272,28 @@ export async function getBookingNotificationSettingsForOrg(
   organizationId: string
 ) {
   try {
-    return await db.bookingSettings.upsert({
-      where: { organizationId },
-      update: {},
-      create: {
-        organizationId,
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-      },
-      select: {
-        notifyBookingCreator: true,
-        notifyAdminsOnNewBooking: true,
-        alwaysNotifyTeamMembers: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                profilePicture: true,
-              },
-            },
-          },
+    try {
+      return await db.bookingSettings.upsert({
+        where: { organizationId },
+        update: {},
+        create: {
+          organizationId,
+          notifyBookingCreator: true,
+          notifyAdminsOnNewBooking: true,
         },
-      },
-    });
+        select: BOOKING_NOTIFICATION_SETTINGS_SELECT,
+      });
+    } catch (cause) {
+      if (cause instanceof Error && "code" in cause && cause.code === "P2002") {
+        // `await` so a (rare) re-read failure is caught by the outer try and
+        // wrapped in a ShelfError rather than escaping as a bare rejection.
+        return await db.bookingSettings.findUniqueOrThrow({
+          where: { organizationId },
+          select: BOOKING_NOTIFICATION_SETTINGS_SELECT,
+        });
+      }
+      throw cause;
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -285,6 +353,7 @@ export async function updateAlwaysNotifyTeamMembers({
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },

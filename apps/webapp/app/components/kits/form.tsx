@@ -1,7 +1,7 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { Barcode, Kit } from "@prisma/client";
 import { useAtom, useAtomValue } from "jotai";
-import { useActionData } from "react-router";
+import { useActionData, useLocation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -10,6 +10,7 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
 import type { action as createKitAction } from "~/routes/_layout+/kits.new";
+import { resolveCancelTo } from "~/utils/cancel-destination";
 import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
@@ -46,6 +47,9 @@ type KitFormProps = Partial<
   Pick<Kit, "name" | "description" | "categoryId" | "locationId">
 > & {
   className?: string;
+  /** Present when editing an existing kit; absent on create. Only used to
+   * pick a sensible Cancel destination when there's no referer. */
+  id?: string;
   qrId?: string | null;
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
   referer?: string | null;
@@ -53,6 +57,7 @@ type KitFormProps = Partial<
 
 export default function KitsForm({
   className,
+  id,
   name,
   description,
   qrId,
@@ -64,6 +69,26 @@ export default function KitsForm({
   const disabled = useDisabled();
   const { canUseBarcodes } = useBarcodePermissions();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
+
+  /**
+   * Snapshot of the referer as it was when this form first mounted.
+   * Deliberately ignores later prop updates — see the matching comment in
+   * `~/components/assets/form.tsx`. The Referer header is only meaningful on
+   * arrival; any in-route navigation overwrites it with this page's own URL.
+   */
+  const [initialReferer] = useState(referer);
+
+  /**
+   * Where Cancel goes. The referer is best-effort and unusable in three
+   * separate cases (absent prop, no Referer header, and self-reference).
+   * `resolveCancelTo` owns all three — see its JSDoc.
+   */
+  const { pathname } = useLocation();
+  const cancelTo = resolveCancelTo({
+    referer: initialReferer,
+    currentPathname: pathname,
+    fallback: id ? `/kits/${id}` : "/kits",
+  });
 
   // Focus the Name field on mount so create/edit pages start the user
   // typing immediately instead of relying on a removed autoFocus prop.
@@ -320,7 +345,7 @@ export default function KitsForm({
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
           <div className="ml-auto flex gap-2">
-            <Button to={referer} variant="secondary" disabled={disabled}>
+            <Button to={cancelTo} variant="secondary" disabled={disabled}>
               Cancel
             </Button>
             <Button type="submit" disabled={disabled}>

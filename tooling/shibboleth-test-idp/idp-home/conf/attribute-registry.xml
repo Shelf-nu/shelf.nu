@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:util="http://www.springframework.org/schema/util"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:c="http://www.springframework.org/schema/c"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+                           http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd"
+                           
+       default-init-method="initialize"
+       default-destroy-method="destroy">
+
+    <!--
+    The system comes preconfigured to load rules directly from resource files
+    configured in services.xml so they're monitored for changes.
+    
+    You can add mappings here, add more XML resource files, or drop property
+    files into the directory noted below, but they won't be monitored for changes
+    themselves.
+    -->
+
+    <!-- Default directory for custom mappings. -->
+    <bean parent="shibboleth.TranscodingRuleLoader"
+        c:dir="%{idp.home}/conf/attributes/custom"
+        c:extensions="#{{'.txt', '.props', '.properties', '.rule'}}" />
+   
+</beans>

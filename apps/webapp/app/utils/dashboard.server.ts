@@ -6,6 +6,7 @@ import {
 import { db } from "~/database/db.server";
 import { defaultUserCategories } from "~/modules/user/service.server";
 import { ShelfError } from "./error";
+import type { UserNameFields } from "./user";
 
 // ---------------------------------------------------------------------------
 // buildAssetsByStatusChart — converts Prisma groupBy result to chart shape
@@ -31,20 +32,10 @@ interface MonthlyGrowthRow {
   assets_created: number;
 }
 
-const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
+// Fixed-en-US short-month formatter — the SAME mechanism the shared date
+// formatter (formatDate) uses for name-months. Constructed once at module
+// scope because Intl formatter construction is costly to repeat in a loop.
+const SHORT_MONTH_FMT = new Intl.DateTimeFormat("en-US", { month: "short" });
 
 export function buildMonthlyGrowthData(
   monthlyRows: MonthlyGrowthRow[],
@@ -77,7 +68,12 @@ export function buildMonthlyGrowthData(
     cumulative += assetsCreated;
 
     months.push({
-      month: MONTH_NAMES[d.getMonth()],
+      // why: a monthly chart-axis BUCKET label, not a full date — it uses the
+      // same fixed-en-US Intl month rendering as the shared date formatter
+      // (short English month, e.g. "Jul"), and deliberately does NOT follow the
+      // user's numeric date-format preference (a "07/2026" axis would be worse
+      // UX). Kept a short name so a month-name preference stays visually aligned.
+      month: SHORT_MONTH_FMT.format(d),
       year: d.getFullYear(),
       assetsCreated,
       "Total assets": cumulative,
@@ -95,12 +91,9 @@ interface DirectCustodian {
   id: string;
   name: string;
   userId: string | null;
-  user: {
-    firstName: string | null;
-    lastName: string | null;
-    profilePicture: string | null;
-    email: string;
-  } | null;
+  user:
+    | (UserNameFields & { profilePicture: string | null; email: string })
+    | null;
   _count: { custodies: number };
 }
 
@@ -112,12 +105,9 @@ interface BookingForCustodians {
     name: string;
     userId: string | null;
   } | null;
-  custodianUser: {
-    firstName: string | null;
-    lastName: string | null;
-    profilePicture: string | null;
-    email: string;
-  } | null;
+  custodianUser:
+    | (UserNameFields & { profilePicture: string | null; email: string })
+    | null;
   /**
    * Count of assets on this booking via the explicit `BookingAsset` pivot.
    * Pre-Phase-3a this field was `_count.assets` (from the implicit M2M);
@@ -144,11 +134,7 @@ export function getCustodiansOrderedByTotalCustodies({
         id: string;
         name: string;
         userId: string | null;
-        user: {
-          firstName: string | null;
-          lastName: string | null;
-          profilePicture: string | null;
-        } | null;
+        user: (UserNameFields & { profilePicture: string | null }) | null;
       };
     }
   >();
@@ -166,13 +152,7 @@ export function getCustodiansOrderedByTotalCustodies({
           id: tm.id,
           name: tm.name,
           userId: tm.userId,
-          user: tm.user
-            ? {
-                firstName: tm.user.firstName,
-                lastName: tm.user.lastName,
-                profilePicture: tm.user.profilePicture,
-              }
-            : null,
+          user: tm.user,
         },
       });
     }
@@ -212,11 +192,7 @@ export function getCustodiansOrderedByTotalCustodies({
             id: booking.custodianUserId,
             name: "",
             userId: booking.custodianUserId,
-            user: {
-              firstName: booking.custodianUser.firstName,
-              lastName: booking.custodianUser.lastName,
-              profilePicture: booking.custodianUser.profilePicture,
-            },
+            user: booking.custodianUser,
           },
         });
       }
@@ -241,59 +217,54 @@ export function getCustodiansOrderedByTotalCustodies({
 // checklistOptions
 // ---------------------------------------------------------------------------
 
+/**
+ * Computes the count-backed onboarding checklist booleans.
+ *
+ * `hasAssets` and `hasCustodies` are composed at the call site (the home
+ * loader) from queries it already runs, so they are deliberately not
+ * re-counted here — see the `checklistOptions` object it builds.
+ *
+ * @param args.organizationId - The workspace to compute the checklist for
+ * @returns Checklist booleans keyed by onboarding step
+ * @throws {ShelfError} If any count query fails
+ */
 export async function checklistOptions({
-  hasAssets,
   organizationId,
 }: {
-  hasAssets: boolean;
   organizationId: string;
 }) {
   try {
-    const [
-      categoriesCount,
-      tagsCount,
-      teamMembersCount,
-      custodiesCount,
-      customFieldsCount,
-    ] = await Promise.all([
-      db.category.count({
-        where: {
-          organizationId,
-          name: {
-            notIn: defaultUserCategories.map((uc) => uc.name),
+    const [categoriesCount, tagsCount, teamMembersCount, customFieldsCount] =
+      await Promise.all([
+        db.category.count({
+          where: {
+            organizationId,
+            name: {
+              notIn: defaultUserCategories.map((uc) => uc.name),
+            },
           },
-        },
-      }),
+        }),
 
-      db.tag.count({
-        where: { organizationId },
-      }),
+        db.tag.count({
+          where: { organizationId },
+        }),
 
-      db.teamMember.count({
-        where: { organizationId },
-      }),
+        db.teamMember.count({
+          where: { organizationId },
+        }),
 
-      db.teamMember.count({
-        where: {
-          organizationId,
-          custodies: { some: {} },
-        },
-      }),
-
-      db.customField.count({
-        where: {
-          organizationId,
-          deletedAt: null,
-        },
-      }),
-    ]);
+        db.customField.count({
+          where: {
+            organizationId,
+            deletedAt: null,
+          },
+        }),
+      ]);
 
     return {
-      hasAssets,
       hasCategories: categoriesCount > 0,
       hasTags: tagsCount > 0,
       hasTeamMembers: teamMembersCount > 0,
-      hasCustodies: custodiesCount > 0,
       hasCustomFields: customFieldsCount > 0,
     };
   } catch (cause) {

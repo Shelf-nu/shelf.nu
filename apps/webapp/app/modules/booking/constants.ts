@@ -1,23 +1,104 @@
-import type { Prisma } from "@prisma/client";
+import { BookingStatus, type Prisma } from "@prisma/client";
+import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
+import { USER_NAME_SELECT } from "../user/fields";
+
+/**
+ * Booking statuses an asset or kit can still be added to.
+ *
+ * DRAFT/RESERVED are not yet started; ONGOING/OVERDUE are active — items added
+ * to an active booking stay AVAILABLE until purposefully checked out
+ * (progressive checkout).
+ *
+ * This single list has to drive all three layers of the "Add to existing
+ * booking" dialogs, or they disagree and rows vanish:
+ *   1. the loader that seeds the picker (`loadBookingsData`),
+ *   2. the `/api/model-filters` search the picker fires once you type,
+ *   3. the client-side `renderItem` guard in the dialog itself.
+ */
+export const ADDABLE_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/**
+ * Statuses where a booking is still being planned and nothing has physically
+ * left the warehouse.
+ *
+ * Drives kit-membership removal: a kit-driven `BookingAsset` slice on one of
+ * these bookings is DELETED when the asset leaves the kit (the booking tracks
+ * the kit's contents), whereas on any other status the row survives as a
+ * snapshot of what actually went out. See `removeKitSlicesFromPlanningBookings`
+ * in `~/modules/kit/service.server`.
+ *
+ * Deliberately NOT {@link ADDABLE_BOOKING_STATUSES}: that list also includes
+ * ONGOING/OVERDUE, where the items ARE physically out and deleting a slice
+ * would strand custody and checkout attribution.
+ */
+export const PLANNING_BOOKING_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
+];
+
+/**
+ * Whether an asset or kit can still be added to this booking.
+ *
+ * Used by the "Add to existing booking" dialogs to decide whether to render a
+ * row for a booking the picker handed them. Accepts a loose shape because the
+ * pickers pass records from two sources (the route loader and
+ * `/api/model-filters`), neither of which is narrowed to `Booking` client-side.
+ *
+ * @param booking - Candidate booking; anything without a `status` is rejected.
+ * @returns `true` when the booking's status is in {@link ADDABLE_BOOKING_STATUSES}.
+ */
+export function isAddableBooking(
+  booking: { status?: string | null } | null | undefined
+): boolean {
+  return (
+    !!booking?.status &&
+    ADDABLE_BOOKING_STATUSES.includes(booking.status as BookingStatus)
+  );
+}
 
 /** Includes needed for booking to have all data required for emails */
 export const BOOKING_INCLUDE_FOR_EMAIL = {
   custodianTeamMember: true,
   custodianUser: true,
   // Include creator details so the notification resolver can add the
-  // booking creator as a recipient when the org setting is enabled
+  // booking creator as a recipient when the org setting is enabled.
+  // The four format-preference columns are carried so the email fan-out can
+  // resolve this recipient's date/time formatting from the loaded row
+  // (see NotificationRecipient) without a per-recipient DB fetch.
   creator: {
-    select: { id: true, email: true, firstName: true, lastName: true },
+    select: {
+      id: true,
+      email: true,
+      ...USER_NAME_SELECT,
+      dateFormat: true,
+      timeFormat: true,
+      weekStart: true,
+      timeZone: true,
+    },
   },
   // Include per-booking notification recipients (team members explicitly
-  // added to this booking) for the recipient resolver's step 6
+  // added to this booking) for the recipient resolver's step 6. Format-pref
+  // columns carried for recipient-specific email formatting (see `creator`).
   notificationRecipients: {
     select: {
       id: true,
       name: true,
       user: {
-        select: { id: true, email: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          email: true,
+          ...USER_NAME_SELECT,
+          dateFormat: true,
+          timeFormat: true,
+          weekStart: true,
+          timeZone: true,
+        },
       },
     },
   },
@@ -105,6 +186,100 @@ export const BOOKING_COMMON_INCLUDE = {
   tags: TAG_WITH_COLOR_SELECT,
 } as Prisma.BookingInclude;
 
+/**
+ * Per-booking `bookingAssets` payload for the bookings LIST surfaces.
+ *
+ * Single source of truth for the row shape the bookings-list assets drawer
+ * (`BookingAssetsSidebar`) renders, shared by:
+ * - `getBookings` (service.server.ts) — attached when `includeAssets` is true,
+ *   which today means the bookings CSV select-all export;
+ * - the `/api/bookings/:bookingId/assets-sidebar` resource route — the five
+ *   bookings-list loaders no longer ship assets (the drawer fetches this exact
+ *   shape when a row is expanded).
+ *
+ * Keeping both callers on one constant is what guarantees the drawer renders
+ * identically no matter which path supplied the data.
+ */
+export const BOOKINGS_LIST_ASSETS_INCLUDE = {
+  bookingAssets: {
+    // Explicit `select` (instead of `include`) so the inferred
+    // type surfaces `assetKitId` on each row — the bookings list
+    // sidebar (`BookingAssetsSidebar`) groups by it. Without an
+    // explicit select, Prisma's type inference for
+    // `include + nested include` doesn't expose the parent
+    // scalars in a form the local component types accept.
+    select: {
+      id: true,
+      quantity: true,
+      assetKitId: true,
+      asset: {
+        select: {
+          title: true,
+          id: true,
+          type: true,
+          quantity: true,
+          custody: true,
+          availableToBook: true,
+          status: true,
+          mainImage: true,
+          thumbnailImage: true,
+          // Model cover image for assets with no image of their own
+          ...ASSET_MODEL_IMAGE_SELECT,
+          mainImageExpiration: true,
+          // Asset-code resolution fields — see `app/modules/barcode/display.ts`.
+          // Surfaced by the BookingAssetsSidebar so the chip matches the
+          // simple-mode booking overview list and every other code-bearing
+          // surface (see .claude/rules/code-bearing-entity-list-consistency.md).
+          sequentialId: true,
+          preferredBarcodeId: true,
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
+          category: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
+            },
+          },
+          // NOTE: deliberately NO `bookingAssets` here. A previous
+          // version selected each asset's entire lifetime
+          // `bookingAssets: { bookingId }` pivot history, which grows
+          // without bound and had zero consumers (every reader of
+          // `asset.bookingAssets` needs `ba.booking.{id,status}` from
+          // asset-centric queries, which this shape cannot provide).
+          // If a surface ever needs conflict info here, scope it with
+          // a `where` on active statuses + date overlap like
+          // getBookingFlags does.
+          assetKits: {
+            select: {
+              // See the comment in `bookings.$bookingId.overview.tsx`
+              // for why both `id` (the AssetKit row id) and `kitId`
+              // are needed for kit-source grouping.
+              id: true,
+              kitId: true,
+              kit: {
+                select: {
+                  id: true,
+                  name: true,
+                  image: true,
+                  imageExpiration: true,
+                  category: {
+                    select: {
+                      id: true,
+                      name: true,
+                      color: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.BookingInclude;
+
 export const BOOKING_WITH_ASSETS_INCLUDE = {
   ...BOOKING_COMMON_INCLUDE,
   bookingAssets: {
@@ -148,6 +323,8 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           // second round-trip for images.
           mainImage: true,
           thumbnailImage: true,
+          // Model cover image for assets with no image of their own
+          ...ASSET_MODEL_IMAGE_SELECT,
           // Tag names — searchable in-memory by filterBookingAssets (assets only).
           tags: { select: { name: true } },
           category: {
@@ -192,6 +369,14 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
                   id: true,
                   name: true,
                   image: true,
+                  // Kit-code resolution, mirroring the asset select above.
+                  // Kits carry Qr and Barcode rows too, and the sidebar's kit
+                  // group header is a kit-listing surface — without these it
+                  // is the only row in that sidebar with no code chip.
+                  // Kit has no sequentialId / preferredBarcodeId; the resolver
+                  // tolerates their absence and falls back to QR.
+                  qrCodes: { take: 1, select: { id: true } },
+                  barcodes: { select: { id: true, type: true, value: true } },
                   location: {
                     select: { id: true, name: true },
                   },
@@ -206,11 +391,10 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
       },
     },
     // Base fetch order. The rendered order is computed in-memory by the
-    // consuming route (sortBookingAssets / groupAndSortAssetsByKit); this DB
-    // order only acts as the stable tiebreaker fed into those sorts. Kept
-    // identical to the historical default (CHECKED_OUT first, then creation
-    // order) so the in-memory sorts receive the exact same input as before —
-    // preserving the booking page's default ordering 1:1.
+    // consuming route (groupAndSortAssetsByKit); this DB order only acts as
+    // the stable tiebreaker fed into that sort. Kept identical to the
+    // historical default (CHECKED_OUT first, then creation order) so the
+    // in-memory sort receives the exact same input as before.
     orderBy: [
       { asset: { status: "desc" } }, // CHECKED_OUT (desc) comes before AVAILABLE (asc)
       { asset: { createdAt: "asc" } }, // Then by creation order as fallback
@@ -250,6 +434,7 @@ export enum BOOKING_SCHEDULER_EVENTS_ENUM {
   checkinReminder = `booking-checkin-reminder`,
   overdueHandler = `booking-overdue-handler`,
   autoArchiveHandler = `booking-auto-archive-handler`,
+  autoArchiveExpiredHandler = `booking-auto-archive-expired-handler`,
 }
 
 /**
@@ -260,6 +445,7 @@ export const BOOKING_ASSET_SORTING_OPTIONS = {
   title: "Name",
   category: "Category",
   location: "Location",
+  type: "Item type",
 } as const;
 
 export type BookingAssetSortingOption =

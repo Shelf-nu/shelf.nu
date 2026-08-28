@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { HARDCODED_DEFAULT_PREFS } from "~/utils/date-format";
 
 // why: Stripe SDK makes external API calls that should not run in tests
 // Using vi.hoisted to ensure the mock function is available when vi.mock runs
@@ -51,6 +52,7 @@ describe("getCustomerNotificationData", () => {
   const baseUser = {
     email: "user@example.com",
     firstName: "John",
+    displayName: null,
   };
 
   beforeEach(() => {
@@ -168,10 +170,28 @@ describe("getCustomerNotificationData", () => {
 
     const result = await getCustomerNotificationData({
       customerId: "cus_123",
-      user: { email: "user@example.com", firstName: null },
+      user: { email: "user@example.com", firstName: null, displayName: null },
     });
 
     expect(result.customerName).toBeNull();
+  });
+
+  it("greets by displayName in preference to the Stripe customer name", async () => {
+    // `customerName` is a salutation, so the name the user chose wins over the
+    // legal name we registered with Stripe for invoicing.
+    mockCustomersRetrieve.mockResolvedValue({
+      id: "cus_123",
+      deleted: false,
+      email: "user@example.com",
+      name: "Jonathan Legalname",
+    } as unknown as Stripe.Customer);
+
+    const result = await getCustomerNotificationData({
+      customerId: "cus_123",
+      user: { ...baseUser, displayName: "Jo" },
+    });
+
+    expect(result.customerName).toBe("Jo");
   });
 });
 
@@ -179,6 +199,7 @@ describe("getInvoiceNotificationData", () => {
   const baseUser = {
     email: "user@example.com",
     firstName: "John",
+    displayName: null,
   };
 
   const baseInvoice = {
@@ -206,6 +227,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: baseInvoice,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(result.amountDue).toBe("$29.99");
@@ -229,6 +251,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: euroInvoice,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     // EUR formatting varies by locale, just verify it contains the amount
@@ -247,6 +270,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: baseInvoice,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(result.dueDate).toBe("January 1, 2024");
@@ -269,6 +293,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: invoiceWithoutDueDate,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(result.dueDate).toBeNull();
@@ -291,6 +316,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: invoiceWithoutDescription,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(result.subscriptionName).toBe("Shelf Subscription");
@@ -313,6 +339,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: invoiceWithEmptyLines,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     expect(result.subscriptionName).toBe("Shelf Subscription");
@@ -330,6 +357,7 @@ describe("getInvoiceNotificationData", () => {
       customerId: "cus_123",
       invoice: baseInvoice,
       user: baseUser,
+      prefs: HARDCODED_DEFAULT_PREFS,
     });
 
     // Verify it includes the customer notification data

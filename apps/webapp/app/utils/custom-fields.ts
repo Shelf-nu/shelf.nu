@@ -4,7 +4,7 @@ import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import type { ClientHint } from "~/utils/client-hints";
+import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import {
   formatDateBasedOnLocaleOnly,
   parseDateOnlyString,
@@ -460,16 +460,17 @@ export const buildCustomFieldValue = (
 export { formatInvalidNumericMessage as formatInvalidNumericCustomFieldMessage };
 
 /**
- * Returns a display value for a custom field based on its type
- * For dates, uses the raw date string to avoid timezone conversions
+ * Produce the human-readable display value for a stored custom-field value.
  *
- * @param value - The custom field value to display
- * @param hints - Client hints containing locale information
- * @returns Formatted display value as string or markdown node
+ * @param value - The stored custom-field value shape
+ * @param prefs - Optional resolved format prefs; when supplied, DATE values
+ *   render in the user's configured order (absolute, no tz conversion).
+ *   When omitted, falls back to `PPP` (server / prefs-less contexts).
+ * @returns A string or renderable Markdoc node
  */
 export const getCustomFieldDisplayValue = (
   value: ShelfAssetCustomFieldValueType["value"],
-  hints?: ClientHint
+  prefs?: ResolvedFormatPrefs
 ): string | RenderableTreeNode => {
   if (value.valueMultiLineText) {
     return parseMarkdownToReact(value.raw as string);
@@ -482,13 +483,108 @@ export const getCustomFieldDisplayValue = (
   if (value.valueDate) {
     // Use raw date string directly for formatting
     // This ensures the date displayed matches the date entered
-    return hints
-      ? formatDateBasedOnLocaleOnly(value.raw as string, hints.locale)
+    return prefs
+      ? formatDateBasedOnLocaleOnly(value.raw as string, prefs)
       : format(parseDateOnlyString(value.raw as string), "PPP");
   }
 
   return String(value.raw);
 };
+
+/**
+ * The subset of a custom-field definition the asset-overview list needs.
+ *
+ * Deliberately narrow so BOTH sources satisfy it: the full `CustomField`
+ * records returned by `getActiveCustomFields`, and the trimmed definition
+ * nested inside each stored `AssetCustomFieldValue` row (see
+ * `getAssetOverviewFields`).
+ */
+export type CustomFieldDefinitionForDisplay = {
+  id: string;
+  name: string;
+  type: CustomFieldType;
+  options: string[];
+};
+
+/** A stored custom-field value paired with the definition it belongs to. */
+export type StoredCustomFieldValueForDisplay = {
+  value: unknown;
+  customField: CustomFieldDefinitionForDisplay;
+};
+
+/** One row of the asset-overview custom-fields list. */
+export type AssetOverviewCustomField<
+  TStored extends StoredCustomFieldValueForDisplay,
+> = {
+  /** The definition used to label and render the row */
+  def: CustomFieldDefinitionForDisplay;
+  /** The stored value, or `null` when the field has never been set */
+  storedValue: TStored | null;
+  /**
+   * Whether this field appears in `editableDefinitions`. Always `false` for
+   * view-only users, who receive none. A row can carry a value the caller is
+   * not offered for editing (see the uncategorized-asset case below); the
+   * route's action rejects those writes with a 400, so the UI must not present
+   * an editor for them.
+   */
+  isEditable: boolean;
+};
+
+/**
+ * Build the unified, alphabetically-sorted custom-fields list for the asset
+ * overview page.
+ *
+ * The list is seeded from the asset's STORED VALUES — each one already carries
+ * its own definition — and only then topped up with the org's editable
+ * definitions, which produce the "Not set" placeholder rows.
+ *
+ * Seeding from the values is what makes the list permission-independent. The
+ * loader only fetches `editableDefinitions` for users who can update the asset
+ * (skipping three queries for view-only users), so a list built from those
+ * alone renders empty for every BASE and SELF_SERVICE user. It also keeps a
+ * value visible when its definition falls outside the editable set — an
+ * uncategorized asset is offered only uncategorized definitions, yet may still
+ * hold a value written while it belonged to a category.
+ *
+ * @param params.storedValues - The asset's custom-field value rows; rows with
+ *   an empty `value` are treated as unset
+ * @param params.editableDefinitions - Active definitions the user may fill in;
+ *   pass an empty array for view-only users
+ * @returns One entry per distinct definition, sorted by name. Neither input
+ *   array is mutated.
+ */
+export function buildAssetOverviewCustomFields<
+  TStored extends StoredCustomFieldValueForDisplay,
+>({
+  storedValues,
+  editableDefinitions,
+}: {
+  storedValues: TStored[];
+  editableDefinitions: CustomFieldDefinitionForDisplay[];
+}): AssetOverviewCustomField<TStored>[] {
+  const editableIds = new Set(editableDefinitions.map((def) => def.id));
+  const rows = new Map<string, AssetOverviewCustomField<TStored>>();
+
+  for (const storedValue of storedValues) {
+    if (!storedValue.value) continue;
+    rows.set(storedValue.customField.id, {
+      def: storedValue.customField,
+      storedValue,
+      isEditable: editableIds.has(storedValue.customField.id),
+    });
+  }
+
+  for (const def of editableDefinitions) {
+    if (rows.has(def.id)) continue;
+    rows.set(def.id, { def, storedValue: null, isEditable: true });
+  }
+
+  // Spread before sorting: `.sort()` is in-place, and these entries reference
+  // arrays owned by the loader payload.
+  return [...rows.values()].sort((a, b) =>
+    a.def.name.localeCompare(b.def.name)
+  );
+}
 
 //header = "cf:name,type:text"
 export const getDefinitionFromCsvHeader = (

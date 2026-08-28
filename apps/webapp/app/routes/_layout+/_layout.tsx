@@ -13,7 +13,6 @@ import {
   Link,
   NavLink,
   Outlet,
-  useFetchers,
   useLoaderData,
 } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -43,7 +42,6 @@ import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import { CHANGE_CURRENT_ORGANIZATION_ACTION } from "~/modules/organization/constants";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -88,6 +86,27 @@ export type LayoutLoaderResponse = typeof loader;
  */
 export const shouldRevalidate = skipRevalidationOnClientViewChange;
 
+/**
+ * Gate for every authenticated route beneath this layout, and the source of the
+ * data its chrome renders.
+ *
+ * The gates run in a fixed order and the order is load-bearing: subscription
+ * validity, then onboarding, then organization resolution. Onboarding has to
+ * clear before org resolution because `getSelectedOrganization` throws for a
+ * user with no membership, which is exactly the state a non-onboarded user is
+ * in — resolving first turns "finish signing up" into an error page.
+ *
+ * Because the gate covers routes at every depth, its redirects are absolute. A
+ * relative target resolves against the URL the user arrived at, so anyone
+ * following a QR or email link into a nested route would be sent somewhere
+ * that does not exist.
+ *
+ * @param args.context - Carries the auth session the gates run against
+ * @param args.request - Read for the per-page cookie and the current URL
+ * @returns The user, their organizations, subscription state and layout prefs
+ * @throws {Response} A redirect to `/onboarding` for a user who has not
+ *   finished signing up, or an error response when a gate refuses
+ */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -143,7 +162,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     }
 
     if (!user.onboarded) {
-      return redirect("onboarding");
+      // Absolute: a relative target resolves against the URL the user arrived
+      // at, so anyone landing deeper than the root — a QR link, a link from an
+      // email — is sent to `<their/path>/onboarding`, which does not exist.
+      return redirect("/onboarding");
     }
 
     // Org resolution runs after the onboarding guard — safe now since
@@ -238,7 +260,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       {
         headers: [
           setCookie(await userPrefs.serialize(userPrefsCookie)),
-          expireHostOnlyUserPrefsCookie(),
+          ...expireHostOnlyUserPrefsCookie(),
           ...(cookieRefreshNeeded
             ? [setCookie(await setSelectedOrganizationIdCookie(organizationId))]
             : []),
@@ -282,7 +304,6 @@ export default function App() {
     needsSequentialIdMigration,
     currentOrganizationId,
   } = useLoaderData<typeof loader>();
-  const fetchers = useFetchers();
   const isHydrated = useHydrated();
   // Several authenticated routes (assets._index, kits._index, locations.*, …)
   // call `userHasPermission` from `permission.validator.client` during their
@@ -294,14 +315,12 @@ export default function App() {
   // spinner until the client has hydrated. This matches the prior status
   // quo, when `switchingWorkspaceAtom` defaulted to `true` and produced the
   // same one-frame spinner on every full reload.
+  //
+  // This also covers a workspace switch: that posts as a native document
+  // submission, so the new workspace arrives as a fresh document and shows
+  // this spinner while it hydrates.
   // TODO: lift `userHasPermission` checks into route loaders so SSR works.
-  const workspaceSwitching =
-    !isHydrated ||
-    fetchers.some(
-      (f) =>
-        f.formAction === CHANGE_CURRENT_ORGANIZATION_ACTION &&
-        (f.state === "submitting" || f.state === "loading")
-    );
+  const workspaceSwitching = !isHydrated;
   const [feedbackModalOpen, setFeedbackModalOpen] = useAtom(
     feedbackModalOpenAtom
   );

@@ -18,6 +18,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
+import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapCustodianForNote,
   wrapUserLinkForNote,
@@ -210,21 +211,12 @@ export const action = async ({
         ? wrapCustodianForNote({
             teamMember: {
               name: custodianDisplayName,
-              user: custodyRecord.custodian.user
-                ? {
-                    id: custodyRecord.custodian.user.id,
-                    firstName: custodyRecord.custodian.user.firstName,
-                    lastName: custodyRecord.custodian.user.lastName,
-                  }
-                : null,
+              user: custodyRecord.custodian.user,
             },
           })
-        : `**${custodianDisplayName}**`;
-      const actor = wrapUserLinkForNote({
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
+        : // Free-form fallback name, rendered as literal bold text.
+          `**${stripMarkdocDelimiters(custodianDisplayName)}**`;
+      const actor = wrapUserLinkForNote(user);
       const content = isSelfService
         ? `${actor} released their custody.`
         : `${actor} released ${custodianDisplay}'s custody.`;

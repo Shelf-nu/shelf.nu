@@ -20,6 +20,7 @@ import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import FormRow from "~/components/forms/form-row";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
+import type { TeamMemberNameFields, UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { NotificationPreview } from "../../notification-preview";
 
@@ -27,15 +28,9 @@ import { NotificationPreview } from "../../notification-preview";
  * Team member shape for pre-selected recipients (edit form).
  * Must include `name` and optional `user` for display name resolution.
  */
-export type NotificationRecipientTeamMember = {
+export type NotificationRecipientTeamMember = TeamMemberNameFields & {
   id: string;
-  name: string;
-  user?: {
-    id: string;
-    email: string;
-    firstName: string | null;
-    lastName: string | null;
-  } | null;
+  user?: (UserNameFields & { id: string; email: string }) | null;
 };
 
 type NotificationRecipientsFieldProps = {
@@ -221,6 +216,12 @@ export function NotificationRecipientsField({
             deletedAt: null,
             userWithAdminAndOwnerOnly: true,
             usersOnly: true,
+            // why: no `custodyPurpose` on purpose. This picks admins to notify
+            // — neither custody nor a booking custodian — and
+            // `userWithAdminAndOwnerOnly` already does the narrowing. The
+            // endpoint's assignment fallback resolves to "all" for the
+            // ADMIN/OWNER users this is rendered for, and fails closed for
+            // anyone else, which is what we want here.
           }}
           initialDataKey="teamMembersForNotify"
           countKey="totalTeamMembersForNotify"

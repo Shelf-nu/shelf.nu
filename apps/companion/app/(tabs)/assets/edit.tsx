@@ -409,6 +409,8 @@ export default function EditAssetScreen() {
             isLoading={form.isTagsLoading}
             isOpen={showTagsPicker}
             onToggle={setShowTagsPicker}
+            canCreate={form.canCreateTag}
+            onCreateTag={form.createTag}
           />
 
           {/* ── Valuation ──────────────────────────────── */}
