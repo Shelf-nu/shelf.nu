@@ -6140,7 +6140,7 @@ export async function bulkRemoveAssetsFromKits({
       ReturnType<typeof fetchAssetKitDetachmentImpact>
     > = [];
 
-    await db.$transaction(async (tx) => {
+    const removedFromKitCount = await db.$transaction(async (tx) => {
       /**
        * If there are assets whose kits were in custody, then we have to remove
        * the custody FIRST to avoid orphaned custody records when status is set
@@ -6381,6 +6381,11 @@ export async function bulkRemoveAssetsFromKits({
           tx
         );
       }
+
+      // What the caller can honestly report: assets that were actually IN
+      // a kit, which is neither the number selected nor — under select-all —
+      // the number of ids it was given.
+      return assetsRemovedFromKit.length;
     });
 
     // Notify each affected booking that its kit-driven BookingAsset
@@ -6391,7 +6396,7 @@ export async function bulkRemoveAssetsFromKits({
       organizationId,
     });
 
-    return true;
+    return { removedFromKitCount };
   } catch (cause) {
     throw new ShelfError({
       cause,
