@@ -599,7 +599,7 @@ function AssetInventoryPreview({
                   {row.valuation == null
                     ? "—"
                     : formatCurrency({
-                        value: row.valuation,
+                        value: row.valuation * (row.quantity ?? 1),
                         currency: pdfMeta.currency,
                         locale: pdfMeta.locale,
                       })}
@@ -690,7 +690,7 @@ function CustodySnapshotPreview({
                   {row.valuation == null
                     ? "—"
                     : formatCurrency({
-                        value: row.valuation,
+                        value: row.valuation * (row.quantity ?? 1),
                         currency: pdfMeta.currency,
                         locale: pdfMeta.locale,
                       })}
