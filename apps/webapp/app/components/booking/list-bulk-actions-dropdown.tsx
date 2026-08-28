@@ -1,13 +1,11 @@
 import { useMemo, useState } from "react";
-import { BookingStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import { ChevronRight, PackageCheck, PackageMinus } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithStatus } from "~/utils/booking-assets";
 import {
@@ -16,12 +14,6 @@ import {
   isAssetCheckableOut,
   isAssetPartiallyCheckedIn,
 } from "~/utils/booking-assets";
-import { canRoleRemoveBookingAssets } from "~/utils/bookings";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import BulkPartialCheckinDialog from "./bulk-partial-checkin-dialog";
 import BulkPartialCheckoutDialog from "./bulk-partial-checkout-dialog";
@@ -64,69 +56,12 @@ function ConditionalDropdown() {
     checkedOutAssetIds = [],
     remainingToCheckOutByAsset = {},
   } = useLoaderData<BookingPageLoaderData>();
-  const bookingStatus = useBookingStatusHelpers(
-    booking.status as BookingStatus
-  );
   const actionsButtonDisabled = selectedItems.length === 0;
 
-  /**
-   * Role gating for this menu, one question per item.
-   *
-   * The column-level `canSeeActions` that renders this menu
-   * (`booking-assets-column.tsx`) asks only whether the user is the custodian,
-   * so it cannot stand in for these: a BASE custodian is a custodian at every
-   * status, and holds neither `booking:checkin` nor `booking:checkout` at any
-   * of them. Each item asks for itself, against the same rules the route
-   * action and the mobile remove endpoint enforce server-side.
-   */
-  const { roles } = useUserRoleHelper();
-  const canCheckin = userHasPermission({
-    roles,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.checkin,
-  });
-  const canCheckout = userHasPermission({
-    roles,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.checkout,
-  });
-  const canRemove = canRoleRemoveBookingAssets({ roles, booking });
-
-  // Show partial check-in only for ONGOING/OVERDUE bookings.
-  const showPartialCheckin =
-    canCheckin && (bookingStatus?.isOngoing || bookingStatus?.isOverdue);
-
-  // Show partial check-out for RESERVED/ONGOING/OVERDUE bookings. Unlike
-  // check-in, checkout can START from a RESERVED booking.
-  const showPartialCheckout =
-    canCheckout &&
-    (bookingStatus?.isReserved ||
-      bookingStatus?.isOngoing ||
-      bookingStatus?.isOverdue);
-
-  // Finished = COMPLETE/ARCHIVED. Computed directly from status: the helper's
-  // `isFinished` flag isn't present on its undefined-status return shape, and a
-  // direct compare matches how the rest of the booking UI checks status.
-  const isFinished =
-    booking.status === BookingStatus.COMPLETE ||
-    booking.status === BookingStatus.ARCHIVED;
-
-  /**
-   * Kept visible when STATUS alone is what blocks removal, so the existing
-   * explanatory disabled state survives for a role that may remove at other
-   * statuses. Hidden outright when the role may not remove here at all —
-   * a disabled row with a status reason would misstate why.
-   *
-   * The fallback probes DRAFT rather than trusting `isFinished` on its own:
-   * every role that removes at all removes in DRAFT, so this asks "is status
-   * the only thing in the way". Without it, a session whose roles have not
-   * loaded yet would be shown the row on a finished booking.
-   */
-  const canRemoveAtAnyStatus = canRoleRemoveBookingAssets({
-    roles,
-    booking: { status: BookingStatus.DRAFT },
-  });
-  const showRemove = canRemove || (isFinished && canRemoveAtAnyStatus);
+  // Which of the three this user may take here. Shared with the row checkbox
+  // that feeds this menu, so the two cannot disagree.
+  const { canRemove, showPartialCheckin, showPartialCheckout, showRemove } =
+    useBookingBulkActions();
 
   // Denormalised view of `booking.bookingAssets` (the QT pivot). Project the
   // pivot rows down to the plain asset shape the shared resolver

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import { LocationBadge } from "~/components/location/location-badge";
+import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserData } from "~/hooks/use-user-data";
@@ -92,6 +93,7 @@ export default function ListAssetContent({
   }>();
   const currentOrganization = useCurrentOrganization();
   const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
 
   // Resolve the asset's display code (QR id, SAM id, or barcode value) per
   // the workspace preference and per-asset override. Cheap pure call; safe
@@ -267,7 +269,11 @@ export default function ListAssetContent({
 
   return (
     <>
-      <When truthy={!isKitAsset} fallback={<Td> </Td>}>
+      {/* The empty cell keeps the column aligned, exactly as it already does
+          for kit members. A checkbox is only offered when this user has a bulk
+          action to feed: a BASE custodian past DRAFT has none, and selecting
+          rows for a menu that renders nothing is dead UI. */}
+      <When truthy={!isKitAsset && hasAnyBulkAction} fallback={<Td> </Td>}>
         <BulkListItemCheckbox item={item} />
       </When>
 
