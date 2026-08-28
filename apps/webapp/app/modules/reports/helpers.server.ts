@@ -1172,10 +1172,13 @@ async function fetchOverdueRows(
           name: true,
         },
       },
-      // Phase 3a: walk the BookingAsset pivot to reach the asset for
-      // valuation, and count pivot rows for asset count.
+      // Walk the BookingAsset pivot for valuation and booked units, and
+      // count pivot rows for asset count.
       bookingAssets: {
         select: {
+          // Booked units — the value-at-risk multiplier for this surface
+          // (see .claude/rules/quantity-semantics-per-surface.md).
+          quantity: true,
           asset: {
             select: { id: true, valuation: true },
           },
@@ -1228,9 +1231,10 @@ async function fetchOverdueRows(
      * Sum valuations only for assets still outstanding (not yet checked in),
      * walking the Phase 3a `BookingAsset` pivot.
      */
+    // Per-unit valuation × booked units, matching the hero KPI's math.
     const valueAtRisk = b.bookingAssets
       .filter((ba) => !checkedInAssetIds.has(ba.asset.id))
-      .reduce((sum, ba) => sum + (ba.asset.valuation || 0), 0);
+      .reduce((sum, ba) => sum + (ba.asset.valuation ?? 0) * ba.quantity, 0);
 
     return {
       id: b.id,
@@ -2854,12 +2858,17 @@ export async function assetDistributionReport(
   const startTime = performance.now();
 
   try {
-    // Fetch all distribution data in parallel.
-    const [byCategory, byLocation, byStatus, kpis] = await Promise.all([
-      computeDistributionByCategory(organizationId),
-      computeDistributionByLocation(organizationId),
-      computeDistributionByStatus(organizationId),
+    // One asset read feeds all three breakdowns — each bucket builder is a
+    // pure reduction over the same rows, so a large inventory is scanned
+    // once instead of three times.
+    const [assets, kpis] = await Promise.all([
+      fetchDistributionAssets(organizationId),
       computeDistributionKpis(organizationId),
+    ]);
+    const [byCategory, byLocation, byStatus] = await Promise.all([
+      computeDistributionByCategory(assets, organizationId),
+      Promise.resolve(computeDistributionByLocation(assets)),
+      Promise.resolve(computeDistributionByStatus(assets)),
     ]);
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -2910,96 +2919,141 @@ export async function assetDistributionReport(
   }
 }
 
-async function computeDistributionByCategory(
+/** The shared asset row every distribution breakdown reduces over. */
+type DistributionAsset = {
+  id: string;
+  categoryId: string | null;
+  status: string;
+  valuation: number | null;
+  quantity: number | null;
+  assetLocations: {
+    quantity: number;
+    location: { id: string; name: string };
+  }[];
+};
+
+/**
+ * One asset read shared by all three distribution breakdowns.
+ *
+ * Bucket values are per-unit valuation × the surface's quantity, matching
+ * the headline Total Value KPI, so the builders need raw rows rather than a
+ * database groupBy (which cannot multiply columns).
+ */
+async function fetchDistributionAssets(
   organizationId: string
-): Promise<AssetDistributionRow[]> {
-  const assets = await db.asset.groupBy({
-    by: ["categoryId"],
-    where: { organizationId },
-    _count: { id: true },
-    _sum: { valuation: true },
-  });
-
-  const totalAssets = assets.reduce((sum, a) => sum + a._count.id, 0);
-
-  // Fetch category names
-  const categoryIds = assets
-    .map((a) => a.categoryId)
-    .filter((id): id is string => id !== null);
-
-  const categories = await db.category.findMany({
-    where: { id: { in: categoryIds }, organizationId },
-    select: { id: true, name: true },
-  });
-
-  const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
-
-  return assets
-    .map((a) => ({
-      id: a.categoryId || "uncategorized",
-      groupName: a.categoryId
-        ? categoryMap.get(a.categoryId) || "Unknown"
-        : "Uncategorized",
-      assetCount: a._count.id,
-      percentage:
-        totalAssets > 0 ? Math.round((a._count.id / totalAssets) * 100) : 0,
-      totalValue: a._sum.valuation,
-    }))
-    .sort((a, b) => b.assetCount - a.assetCount);
-}
-
-async function computeDistributionByLocation(
-  organizationId: string
-): Promise<AssetDistributionRow[]> {
-  // Pull every asset with its AssetLocation pivot rows (+ location name)
-  // so we can bucket each asset under each location it occupies. A
-  // QUANTITY_TRACKED asset can span multiple locations, so it may
-  // contribute to several buckets; assets with no pivot rows fall into
-  // "No Location".
-  const assets = await db.asset.findMany({
+): Promise<DistributionAsset[]> {
+  return db.asset.findMany({
     where: { organizationId },
     select: {
       id: true,
+      categoryId: true,
+      status: true,
       valuation: true,
+      quantity: true,
       assetLocations: {
         select: {
+          quantity: true,
           location: { select: { id: true, name: true } },
         },
       },
     },
   });
+}
 
-  // bucketKey → { name, assetCount, totalValue }. Counts are per
-  // (asset, location) pair to mirror the previous groupBy semantics.
+async function computeDistributionByCategory(
+  assets: DistributionAsset[],
+  organizationId: string
+): Promise<AssetDistributionRow[]> {
+  const totalAssets = assets.length;
+
+  const buckets = new Map<
+    string,
+    { assetCount: number; totalValue: number | null }
+  >();
+  for (const a of assets) {
+    const key = a.categoryId || "uncategorized";
+    const bucket = buckets.get(key) ?? { assetCount: 0, totalValue: null };
+    bucket.assetCount += 1;
+    if (a.valuation !== null) {
+      // Per-unit valuation × workspace stock, matching the headline KPI.
+      bucket.totalValue =
+        (bucket.totalValue ?? 0) + a.valuation * (a.quantity ?? 1);
+    }
+    buckets.set(key, bucket);
+  }
+
+  // Resolve category names for the buckets that have one.
+  const categoryIds = Array.from(buckets.keys()).filter(
+    (id) => id !== "uncategorized"
+  );
+  const categories = await db.category.findMany({
+    where: { id: { in: categoryIds }, organizationId },
+    select: { id: true, name: true },
+  });
+  const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
+
+  return Array.from(buckets.entries())
+    .map(([id, b]) => ({
+      id,
+      groupName:
+        id === "uncategorized"
+          ? "Uncategorized"
+          : categoryMap.get(id) || "Unknown",
+      assetCount: b.assetCount,
+      percentage:
+        totalAssets > 0 ? Math.round((b.assetCount / totalAssets) * 100) : 0,
+      totalValue: b.totalValue,
+    }))
+    .sort((a, b) => b.assetCount - a.assetCount);
+}
+
+function computeDistributionByLocation(
+  assets: DistributionAsset[]
+): AssetDistributionRow[] {
+  // A QUANTITY_TRACKED asset can span multiple locations, so it may
+  // contribute to several buckets; value weighs the per-unit valuation by
+  // the UNITS AT THAT LOCATION (`AssetLocation.quantity`).
+  //
+  // "No Location" holds only assets with no placement rows at all: the
+  // donut slice drills down to `/assets?location=without-location`, whose
+  // filter matches `assetLocations: { none: {} }`, so the bucket must
+  // describe exactly that population. Unplaced remainders of partially
+  // placed assets are deliberately not attributed here.
   const buckets = new Map<
     string,
     { name: string; assetCount: number; totalValue: number | null }
   >();
 
-  const addToBucket = (key: string, name: string, valuation: number | null) => {
-    const existing = buckets.get(key);
-    if (existing) {
-      existing.assetCount += 1;
-      existing.totalValue =
-        valuation === null
-          ? existing.totalValue
-          : (existing.totalValue ?? 0) + valuation;
-    } else {
-      buckets.set(key, {
-        name,
-        assetCount: 1,
-        totalValue: valuation,
-      });
+  const addToBucket = (key: string, name: string, value: number | null) => {
+    const existing = buckets.get(key) ?? {
+      name,
+      assetCount: 0,
+      totalValue: null,
+    };
+    existing.assetCount += 1;
+    if (value !== null) {
+      existing.totalValue = (existing.totalValue ?? 0) + value;
     }
+    buckets.set(key, existing);
   };
 
   for (const asset of assets) {
     if (asset.assetLocations.length === 0) {
-      addToBucket("without-location", "No Location", asset.valuation);
+      addToBucket(
+        "without-location",
+        "No Location",
+        asset.valuation === null
+          ? null
+          : asset.valuation * (asset.quantity ?? 1)
+      );
       continue;
     }
     for (const pivot of asset.assetLocations) {
-      addToBucket(pivot.location.id, pivot.location.name, asset.valuation);
+      addToBucket(
+        pivot.location.id,
+        pivot.location.name,
+        asset.valuation === null ? null : asset.valuation * pivot.quantity
+      );
     }
   }
 
@@ -3020,17 +3074,10 @@ async function computeDistributionByLocation(
     .sort((a, b) => b.assetCount - a.assetCount);
 }
 
-async function computeDistributionByStatus(
-  organizationId: string
-): Promise<AssetDistributionRow[]> {
-  const assets = await db.asset.groupBy({
-    by: ["status"],
-    where: { organizationId },
-    _count: { id: true },
-    _sum: { valuation: true },
-  });
-
-  const totalAssets = assets.reduce((sum, a) => sum + a._count.id, 0);
+function computeDistributionByStatus(
+  assets: DistributionAsset[]
+): AssetDistributionRow[] {
+  const totalAssets = assets.length;
 
   const statusLabels: Record<string, string> = {
     AVAILABLE: "Available",
@@ -3038,14 +3085,32 @@ async function computeDistributionByStatus(
     CHECKED_OUT: "Checked Out",
   };
 
-  return assets
-    .map((a) => ({
-      id: a.status,
-      groupName: statusLabels[a.status] || a.status,
-      assetCount: a._count.id,
+  const buckets = new Map<
+    string,
+    { assetCount: number; totalValue: number | null }
+  >();
+  for (const a of assets) {
+    const bucket = buckets.get(a.status) ?? {
+      assetCount: 0,
+      totalValue: null,
+    };
+    bucket.assetCount += 1;
+    if (a.valuation !== null) {
+      // Per-unit valuation × workspace stock, matching the headline KPI.
+      bucket.totalValue =
+        (bucket.totalValue ?? 0) + a.valuation * (a.quantity ?? 1);
+    }
+    buckets.set(a.status, bucket);
+  }
+
+  return Array.from(buckets.entries())
+    .map(([status, b]) => ({
+      id: status,
+      groupName: statusLabels[status] || status,
+      assetCount: b.assetCount,
       percentage:
-        totalAssets > 0 ? Math.round((a._count.id / totalAssets) * 100) : 0,
-      totalValue: a._sum.valuation,
+        totalAssets > 0 ? Math.round((b.assetCount / totalAssets) * 100) : 0,
+      totalValue: b.totalValue,
     }))
     .sort((a, b) => b.assetCount - a.assetCount);
 }

@@ -24,6 +24,20 @@ vi.mock("~/database/db.server", () => ({
     activityEvent: {
       findMany: vi.fn(),
     },
+    // why: the overdue and distribution suites below drive reports that read
+    // assets, categories and locations; declaring the members here keeps one
+    // shared client mock.
+    asset: {
+      findMany: vi.fn(),
+      count: vi.fn(),
+    },
+    category: {
+      findMany: vi.fn(),
+      count: vi.fn(),
+    },
+    location: {
+      count: vi.fn(),
+    },
     // why: `bookingStatusTransitionCounts` issues `db.$queryRaw` for the
     // chart series. We stub it to a resolved empty array so the hero-data
     // path is not coupled to chart math.
@@ -33,7 +47,11 @@ vi.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 
-import { bookingComplianceReport } from "./helpers.server";
+import {
+  assetDistributionReport,
+  bookingComplianceReport,
+  overdueItemsReport,
+} from "./helpers.server";
 import type { ResolvedTimeframe } from "./types";
 
 const TIMEFRAME: ResolvedTimeframe = {
@@ -396,6 +414,142 @@ describe("bookingComplianceReport — trend axis labels (timezone)", () => {
 
     const labels = result.complianceTrend!.map((point) => point.label);
     expect(labels).toEqual(["Thu 16", "Fri 17"]);
+  });
+});
+
+describe("overdueItemsReport — booked-unit value math", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // why: the KPI helper and row fetch both read booking.findMany; count
+    // feeds totalRows only.
+    vi.mocked(db.booking.count).mockResolvedValue(1 as any);
+  });
+
+  it("multiplies row value-at-risk by BookingAsset.quantity", async () => {
+    // One overdue booking holding 5 units of a $100 asset: the exposure is
+    // $500 on the row and the CSV, exactly as the hero KPI computes it.
+    const overdueBooking = {
+      id: "booking-qt",
+      name: "QT Overdue",
+      to: new Date("2026-04-10T12:00:00Z"),
+      custodianUserId: null,
+      custodianUser: null,
+      custodianTeamMember: null,
+      bookingAssets: [
+        {
+          quantity: 5,
+          asset: { id: "asset-1", valuation: 100 },
+        },
+      ],
+      partialCheckins: [],
+      _count: { bookingAssets: 1 },
+    };
+    vi.mocked(db.booking.findMany).mockResolvedValue([overdueBooking] as any);
+
+    const result = await overdueItemsReport({ organizationId: "org-1" });
+
+    expect(result.rows[0].valueAtRisk).toBe(500);
+    const vaRKpi = result.kpis.find((k) => k.id === "total_value_at_risk");
+    expect(vaRKpi?.rawValue).toBe(500);
+  });
+});
+
+describe("assetDistributionReport — quantity-aware bucket values", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // why: the headline Total Value KPI runs a raw SQL sum plus asset,
+    // category and location counts; fixed results keep the KPIs stable while
+    // the buckets under test read asset.findMany.
+    vi.mocked(db.$queryRaw).mockResolvedValue([{ total: 57 }] as any);
+    vi.mocked(db.asset.count).mockResolvedValue(2 as any);
+    vi.mocked(db.category.count).mockResolvedValue(1 as any);
+    vi.mocked(db.location.count).mockResolvedValue(1 as any);
+    vi.mocked(db.category.findMany).mockResolvedValue([
+      { id: "cat-1", name: "Cameras" },
+    ] as any);
+  });
+
+  it("sums category buckets as valuation × stock, matching the headline", async () => {
+    // 10 units at $5 plus one individual $7 asset: the bucket must say $57,
+    // the same arithmetic as the quantity-aware headline above it.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        id: "a-qt",
+        categoryId: "cat-1",
+        status: "AVAILABLE",
+        valuation: 5,
+        quantity: 10,
+        assetLocations: [],
+      },
+      {
+        id: "a-ind",
+        categoryId: "cat-1",
+        status: "AVAILABLE",
+        valuation: 7,
+        quantity: null,
+        assetLocations: [],
+      },
+    ] as any);
+
+    const result = await assetDistributionReport({ organizationId: "org-1" });
+
+    const catBucket = result.distributionBreakdown!.byCategory.find(
+      (b) => b.id === "cat-1"
+    );
+    expect(catBucket?.totalValue).toBe(57);
+    expect(catBucket?.assetCount).toBe(2);
+    const statusBucket = result.distributionBreakdown!.byStatus.find(
+      (b) => b.id === "AVAILABLE"
+    );
+    expect(statusBucket?.totalValue).toBe(57);
+  });
+
+  it("weights location buckets by units placed there; No Location means no placements at all", async () => {
+    // 10 units at $5 with 6 placed at Warehouse: the bucket carries $30
+    // (units there × unit value). The asset has placement rows, so it must
+    // NOT appear under No Location — that slice drills down to the
+    // `assetLocations: none` filter and has to describe exactly that
+    // population. A second, fully unplaced asset lands there with its full
+    // stock value.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        id: "a-qt",
+        categoryId: null,
+        status: "AVAILABLE",
+        valuation: 5,
+        quantity: 10,
+        assetLocations: [
+          {
+            quantity: 6,
+            location: { id: "loc-1", name: "Warehouse" },
+          },
+        ],
+      },
+      {
+        id: "a-unplaced",
+        categoryId: null,
+        status: "AVAILABLE",
+        valuation: 4,
+        quantity: 3,
+        assetLocations: [],
+      },
+    ] as any);
+
+    const result = await assetDistributionReport({ organizationId: "org-1" });
+
+    const byLocation = result.distributionBreakdown!.byLocation;
+    expect(byLocation.find((b) => b.id === "loc-1")?.totalValue).toBe(30);
+    const noLocation = byLocation.find((b) => b.id === "without-location");
+    expect(noLocation?.totalValue).toBe(12);
+    expect(noLocation?.assetCount).toBe(1);
+  });
+
+  it("reads the asset table once for all three breakdowns", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValue([] as any);
+
+    await assetDistributionReport({ organizationId: "org-1" });
+
+    expect(vi.mocked(db.asset.findMany)).toHaveBeenCalledTimes(1);
   });
 });
 
