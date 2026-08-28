@@ -10,10 +10,13 @@ set -euo pipefail
 #   ./run-suite.sh auth           # Run auth suite
 #   ./run-suite.sh dashboard      # Run dashboard suite
 #   ./run-suite.sh dark-mode      # Run dark mode suite
+#   PLATFORM=android ./run-suite.sh bookings
 #############################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAESTRO_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=./platform.sh
+source "$SCRIPT_DIR/platform.sh"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 RESULTS_DIR="$MAESTRO_DIR/results/$TIMESTAMP"
 
@@ -75,16 +78,18 @@ while IFS='=' read -r key value; do
   MAESTRO_ENV_FLAGS+=(-e "$key=$value")
 done < "$ENV_FILE"
 
-echo -e "${CYAN}${BOLD}━━━ Running suite: $SUITE_NAME ━━━${NC}"
+echo -e "${CYAN}${BOLD}━━━ Running suite: $SUITE_NAME on $(platform_label) ━━━${NC}"
 echo ""
+
+platform_ensure_device
 
 # Create results dir
 mkdir -p "$RESULTS_DIR"
 
 # Toggle dark mode for dark-mode suite
 if [ "$SUITE_NAME" = "dark-mode" ]; then
-  xcrun simctl ui booted appearance dark 2>/dev/null || true
-  echo -e "${YELLOW}  Set simulator to dark mode${NC}"
+  platform_set_appearance dark
+  echo -e "${YELLOW}  Set device to dark mode${NC}"
 fi
 
 PASS_COUNT=0
@@ -98,7 +103,7 @@ for flow in "$SUITE_DIR"/*.yaml; do
   echo -n "  ▸ $FLOW_NAME ... "
 
   FLOW_OUTPUT="$RESULTS_DIR/${SUITE_NAME}_${FLOW_NAME}.log"
-  if maestro test "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
+  if maestro test "${MAESTRO_DEVICE_FLAGS[@]}" "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
     echo -e "${GREEN}PASS${NC}"
     PASS_COUNT=$((PASS_COUNT + 1))
   else
@@ -110,7 +115,7 @@ done
 
 # Reset dark mode
 if [ "$SUITE_NAME" = "dark-mode" ]; then
-  xcrun simctl ui booted appearance light 2>/dev/null || true
+  platform_set_appearance light
 fi
 
 TOTAL=$((PASS_COUNT + FAIL_COUNT))

@@ -8,13 +8,20 @@ set -euo pipefail
 # generates a report, and appends to LESSONS.md.
 #
 # Usage:
-#   ./run-all.sh                   # Run all suites
-#   SKIP_DARK=1 ./run-all.sh       # Skip dark mode suite
+#   ./run-all.sh                     # Run all suites on iOS (default)
+#   PLATFORM=android ./run-all.sh    # Run all suites on an Android emulator
+#   SKIP_DARK=1 ./run-all.sh         # Skip dark mode suite
+#
+# Both platforms run the same flows. Run BOTH before cutting a release: the
+# native modules behind date pickers, action sheets, permissions and the camera
+# are where iOS and Android diverge, and a green iOS run says nothing about them.
 #############################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAESTRO_DIR="$(dirname "$SCRIPT_DIR")"
 MOBILE_DIR="$(dirname "$MAESTRO_DIR")"
+# shellcheck source=./platform.sh
+source "$SCRIPT_DIR/platform.sh"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 RESULTS_DIR="$MAESTRO_DIR/results/$TIMESTAMP"
 
@@ -35,6 +42,7 @@ BOLD='\033[1m'
 
 echo -e "${CYAN}${BOLD}═══════════════════════════════════════════════════${NC}"
 echo -e "${CYAN}${BOLD}  Shelf Mobile — Maestro E2E Test Runner${NC}"
+echo -e "${CYAN}${BOLD}  Platform: $(platform_label)${NC}"
 echo -e "${CYAN}${BOLD}  $(date '+%Y-%m-%d %H:%M:%S')${NC}"
 echo -e "${CYAN}${BOLD}═══════════════════════════════════════════════════${NC}"
 echo ""
@@ -71,30 +79,20 @@ if ! command -v maestro &>/dev/null; then
 fi
 echo -e "${GREEN}✓ Maestro $(maestro --version 2>/dev/null | tail -1)${NC}"
 
-# ─── Boot iOS simulator if needed ───────────────────────────────────
-SIMULATOR_NAME="iPhone 15 Pro Max"
-BOOTED=$(xcrun simctl list devices booted 2>/dev/null | grep -c "Booted" || true)
-if [ "$BOOTED" -eq 0 ]; then
-  echo -e "${YELLOW}  Booting simulator: $SIMULATOR_NAME...${NC}"
-  xcrun simctl boot "$SIMULATOR_NAME" 2>/dev/null || true
-  sleep 5
-fi
-echo -e "${GREEN}✓ iOS Simulator ready${NC}"
+# ─── Boot the device if needed ──────────────────────────────────────
+platform_ensure_device
+echo -e "${GREEN}✓ $(platform_label) ready${NC}"
 
-# Clear iOS Keychain to reset SecureStore auth tokens
-# (clearState only clears AsyncStorage, not Keychain)
-xcrun simctl keychain booted reset 2>/dev/null || true
-echo -e "${GREEN}✓ Keychain reset (SecureStore cleared)${NC}"
+platform_reset_credentials "$(maestro_app_id "$MAESTRO_DIR")"
 
 # ─── Create results directory ───────────────────────────────────────
 mkdir -p "$RESULTS_DIR"
 echo -e "${GREEN}✓ Results dir: $RESULTS_DIR${NC}"
 
 # ─── Start simulator log collection ────────────────────────────────
-LOG_FILE="$RESULTS_DIR/simulator.log"
-xcrun simctl spawn booted log stream --level=debug --predicate 'processImagePath CONTAINS "Shelf"' > "$LOG_FILE" 2>&1 &
-LOG_PID=$!
-echo -e "${GREEN}✓ Simulator log collection started (PID: $LOG_PID)${NC}"
+LOG_FILE="$RESULTS_DIR/device.log"
+platform_start_log_capture "$LOG_FILE"
+echo -e "${GREEN}✓ Device log collection started (PID: $PLATFORM_LOG_PID)${NC}"
 echo ""
 
 # ─── Define test suites ────────────────────────────────────────────
@@ -127,7 +125,7 @@ for suite in "${SUITES[@]}"; do
     echo -n "  ▸ $FLOW_NAME ... "
 
     FLOW_OUTPUT="$RESULTS_DIR/${suite}_${FLOW_NAME}.log"
-    if maestro test "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
+    if maestro test "${MAESTRO_DEVICE_FLAGS[@]}" "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
       echo -e "${GREEN}PASS${NC}"
       PASS_COUNT=$((PASS_COUNT + 1))
       SUITE_PASS=$((SUITE_PASS + 1))
@@ -150,7 +148,7 @@ if [ "${SKIP_DARK:-}" != "1" ]; then
     echo -e "${CYAN}${BOLD}━━━ Running: dark-mode ━━━${NC}"
 
     # Set simulator to dark mode
-    xcrun simctl ui booted appearance dark 2>/dev/null || true
+    platform_set_appearance dark
     SUITE_PASS=0
     SUITE_FAIL=0
 
@@ -162,7 +160,7 @@ if [ "${SKIP_DARK:-}" != "1" ]; then
       echo -n "  ▸ $FLOW_NAME ... "
 
       FLOW_OUTPUT="$RESULTS_DIR/dark-mode_${FLOW_NAME}.log"
-      if maestro test "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
+      if maestro test "${MAESTRO_DEVICE_FLAGS[@]}" "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
         echo -e "${GREEN}PASS${NC}"
         PASS_COUNT=$((PASS_COUNT + 1))
         SUITE_PASS=$((SUITE_PASS + 1))
@@ -177,14 +175,14 @@ if [ "${SKIP_DARK:-}" != "1" ]; then
     SUITE_RESULTS+=("dark-mode: $SUITE_PASS passed, $SUITE_FAIL failed")
 
     # Reset simulator back to light mode
-    xcrun simctl ui booted appearance light 2>/dev/null || true
+    platform_set_appearance light
     echo ""
   fi
 fi
 
 # ─── Stop log collection ───────────────────────────────────────────
-kill "$LOG_PID" 2>/dev/null || true
-echo -e "${GREEN}✓ Simulator log collection stopped${NC}"
+platform_stop_log_capture
+echo -e "${GREEN}✓ Device log collection stopped${NC}"
 
 # ─── Generate report ───────────────────────────────────────────────
 REPORT_FILE="$RESULTS_DIR/REPORT.md"
@@ -192,7 +190,7 @@ cat > "$REPORT_FILE" <<EOF
 # Maestro E2E Test Report
 
 **Date:** $(date '+%Y-%m-%d %H:%M:%S')
-**Platform:** iOS Simulator ($SIMULATOR_NAME)
+**Platform:** $(platform_label)
 **Maestro:** $(maestro --version 2>/dev/null | tail -1)
 
 ## Summary
@@ -231,7 +229,7 @@ cat >> "$REPORT_FILE" <<EOF
 ## Files
 
 - Report: \`$REPORT_FILE\`
-- Simulator Log: \`simulator.log\`
+- Device Log: \`device.log\`
 - Screenshots: \`*.png\` files in this directory
 - Flow Logs: \`*_*.log\` files in this directory
 EOF
