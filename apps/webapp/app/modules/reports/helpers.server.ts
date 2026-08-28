@@ -16,6 +16,7 @@ import type {
   ActivityAction,
   AssetStatus,
   BookingStatus,
+  Currency,
 } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { DateTime } from "luxon";
@@ -30,6 +31,7 @@ import {
   resolvePlannedStart,
 } from "~/modules/booking/lateness";
 import { getAssetTotalValue } from "~/utils/asset-value";
+import { formatCurrency } from "~/utils/currency";
 import { ShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
@@ -81,6 +83,24 @@ export { resolveTimeframe } from "./timeframe";
 function stripNameSuffix(name: string | null | undefined): string {
   if (!name) return "Unknown";
   return name.replace(/\s*\(Owner\)$/i, "").trim() || "Unknown";
+}
+
+// -----------------------------------------------------------------------------
+// Money KPI Formatting
+// -----------------------------------------------------------------------------
+
+/**
+ * Format a money KPI value string in the workspace's currency.
+ *
+ * KPI value strings are assembled server-side, where no viewer locale is
+ * available, so they use the same fixed en-US locale as the CSV export
+ * builders (see `~/utils/csv.server.ts`). The workspace currency drives the
+ * symbol and decimal digits — on-screen table cells and the PDF renderer
+ * format from the same organization setting, so the currency always agrees
+ * even though those surfaces apply the viewer's locale.
+ */
+function formatKpiCurrency(value: number, currency: Currency): string {
+  return formatCurrency({ value, currency, locale: "en-US" });
 }
 
 // -----------------------------------------------------------------------------
@@ -1067,6 +1087,8 @@ async function computeCustodianPerformance(
 
 interface OverdueItemsArgs {
   organizationId: string;
+  /** Workspace currency the money KPI value strings are formatted in. */
+  currency: Currency;
   custodianId?: string;
   page?: number;
   pageSize?: number;
@@ -1084,7 +1106,13 @@ interface OverdueItemsArgs {
 export async function overdueItemsReport(
   args: OverdueItemsArgs
 ): Promise<ReportPayload<OverdueItemRow>> {
-  const { organizationId, custodianId, page = 1, pageSize = 50 } = args;
+  const {
+    organizationId,
+    currency,
+    custodianId,
+    page = 1,
+    pageSize = 50,
+  } = args;
 
   const startTime = performance.now();
 
@@ -1103,7 +1131,7 @@ export async function overdueItemsReport(
     const [rows, totalCount, kpis] = await Promise.all([
       fetchOverdueRows(where, page, pageSize),
       db.booking.count({ where }),
-      computeOverdueKpis(organizationId, where),
+      computeOverdueKpis(organizationId, where, currency),
     ]);
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -1258,7 +1286,8 @@ async function fetchOverdueRows(
 
 async function computeOverdueKpis(
   organizationId: string,
-  baseWhere: Prisma.BookingWhereInput
+  baseWhere: Prisma.BookingWhereInput,
+  currency: Currency
 ): Promise<ReportKpi[]> {
   const now = new Date();
 
@@ -1375,7 +1404,9 @@ async function computeOverdueKpis(
       id: "total_value_at_risk",
       label: "Value at Risk",
       value:
-        totalValueAtRisk > 0 ? `$${totalValueAtRisk.toLocaleString()}` : "—",
+        totalValueAtRisk > 0
+          ? formatKpiCurrency(totalValueAtRisk, currency)
+          : "—",
       rawValue: totalValueAtRisk,
       format: "currency",
       delta: null,
@@ -1418,6 +1449,8 @@ async function computeOverdueKpis(
 
 interface IdleAssetsArgs {
   organizationId: string;
+  /** Workspace currency the money KPI value strings are formatted in. */
+  currency: Currency;
   /** Number of days without activity to consider "idle" (default: 30) */
   idleThresholdDays?: number;
   categoryId?: string;
@@ -1440,6 +1473,7 @@ export async function idleAssetsReport(
 ): Promise<ReportPayload<IdleAssetRow>> {
   const {
     organizationId,
+    currency,
     idleThresholdDays = 30,
     categoryId,
     locationId,
@@ -1478,7 +1512,7 @@ export async function idleAssetsReport(
         pageSize
       ),
       countIdleAssets(organizationId, assetWhere, cutoffDate),
-      computeIdleAssetsKpis(organizationId, assetWhere, cutoffDate),
+      computeIdleAssetsKpis(organizationId, assetWhere, cutoffDate, currency),
     ]);
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -1699,7 +1733,8 @@ async function countIdleAssets(
 async function computeIdleAssetsKpis(
   organizationId: string,
   assetWhere: Prisma.AssetWhereInput,
-  cutoffDate: Date
+  cutoffDate: Date,
+  currency: Currency
 ): Promise<ReportKpi[]> {
   const now = new Date();
 
@@ -1813,7 +1848,8 @@ async function computeIdleAssetsKpis(
     {
       id: "total_idle_value",
       label: "Idle Value",
-      value: totalIdleValue > 0 ? `$${totalIdleValue.toLocaleString()}` : "—",
+      value:
+        totalIdleValue > 0 ? formatKpiCurrency(totalIdleValue, currency) : "—",
       rawValue: totalIdleValue,
       format: "currency",
       delta: null,
@@ -1847,6 +1883,8 @@ async function computeIdleAssetsKpis(
 
 interface CustodySnapshotArgs {
   organizationId: string;
+  /** Workspace currency the money KPI value strings are formatted in. */
+  currency: Currency;
   teamMemberId?: string;
   locationId?: string;
   page?: number;
@@ -1867,6 +1905,7 @@ export async function custodySnapshotReport(
 ): Promise<ReportPayload<CustodySnapshotRow>> {
   const {
     organizationId,
+    currency,
     teamMemberId,
     locationId,
     page = 1,
@@ -1902,7 +1941,7 @@ export async function custodySnapshotReport(
     const [rows, totalCount, kpis] = await Promise.all([
       fetchCustodyRows(where, page, pageSize),
       db.custody.count({ where }),
-      computeCustodyKpis(organizationId, where),
+      computeCustodyKpis(organizationId, where, currency),
     ]);
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -2053,7 +2092,8 @@ async function fetchCustodyRows(
 
 async function computeCustodyKpis(
   organizationId: string,
-  baseWhere: Prisma.CustodyWhereInput
+  baseWhere: Prisma.CustodyWhereInput,
+  currency: Currency
 ): Promise<ReportKpi[]> {
   const now = new Date();
 
@@ -2123,7 +2163,7 @@ async function computeCustodyKpis(
     {
       id: "total_custody_value",
       label: "Total Value",
-      value: totalValue > 0 ? `$${totalValue.toLocaleString()}` : "—",
+      value: totalValue > 0 ? formatKpiCurrency(totalValue, currency) : "—",
       rawValue: totalValue,
       format: "currency",
       delta: null,
@@ -2833,6 +2873,8 @@ function buildTopBookedKitsKpis({
 
 interface AssetDistributionArgs {
   organizationId: string;
+  /** Workspace currency the money KPI value strings are formatted in. */
+  currency: Currency;
   page?: number;
   pageSize?: number;
 }
@@ -2853,7 +2895,7 @@ export async function assetDistributionReport(
     distributionBreakdown: DistributionBreakdown;
   }
 > {
-  const { organizationId, page = 1, pageSize = 50 } = args;
+  const { organizationId, currency, page = 1, pageSize = 50 } = args;
 
   const startTime = performance.now();
 
@@ -2863,7 +2905,7 @@ export async function assetDistributionReport(
     // once instead of three times.
     const [assets, kpis] = await Promise.all([
       fetchDistributionAssets(organizationId),
-      computeDistributionKpis(organizationId),
+      computeDistributionKpis(organizationId, currency),
     ]);
     const [byCategory, byLocation, byStatus] = await Promise.all([
       computeDistributionByCategory(assets, organizationId),
@@ -3116,7 +3158,8 @@ function computeDistributionByStatus(
 }
 
 async function computeDistributionKpis(
-  organizationId: string
+  organizationId: string,
+  currency: Currency
 ): Promise<ReportKpi[]> {
   const [totalAssets, totalValueRows, categoryCount, locationCount] =
     await Promise.all([
@@ -3152,7 +3195,10 @@ async function computeDistributionKpis(
     {
       id: "total_value",
       label: "Total Value",
-      value: totalAssetValue > 0 ? `$${totalAssetValue.toLocaleString()}` : "—",
+      value:
+        totalAssetValue > 0
+          ? formatKpiCurrency(totalAssetValue, currency)
+          : "—",
       rawValue: totalAssetValue,
       format: "currency",
       delta: null,
@@ -3185,6 +3231,8 @@ async function computeDistributionKpis(
 
 interface AssetInventoryArgs {
   organizationId: string;
+  /** Workspace currency the money KPI value strings are formatted in. */
+  currency: Currency;
   categoryIds?: string[];
   locationIds?: string[];
   statuses?: string[];
@@ -3205,6 +3253,7 @@ export async function assetInventoryReport(
 ): Promise<ReportPayload<AssetInventoryRow>> {
   const {
     organizationId,
+    currency,
     categoryIds,
     locationIds,
     statuses,
@@ -3235,11 +3284,16 @@ export async function assetInventoryReport(
       db.asset.count({ where }),
       // Filters are passed through so the KPI helper can mirror them in its
       // `$queryRaw` valuation sum (Prisma doesn't expose where → SQL).
-      computeInventoryKpis(organizationId, where, {
-        categoryIds,
-        locationIds,
-        statuses: statuses as AssetStatus[] | undefined,
-      }),
+      computeInventoryKpis(
+        organizationId,
+        where,
+        {
+          categoryIds,
+          locationIds,
+          statuses: statuses as AssetStatus[] | undefined,
+        },
+        currency
+      ),
     ]);
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -3363,7 +3417,8 @@ async function computeInventoryKpis(
     categoryIds?: string[];
     locationIds?: string[];
     statuses?: AssetStatus[];
-  }
+  },
+  currency: Currency
 ): Promise<ReportKpi[]> {
   // Defense-in-depth: enforce organizationId on every query even though
   // callers' `where` already includes it. Cheap to add, prevents an
@@ -3433,7 +3488,10 @@ async function computeInventoryKpis(
     {
       id: "total_value",
       label: "Total Value",
-      value: totalAssetValue > 0 ? `$${totalAssetValue.toLocaleString()}` : "—",
+      value:
+        totalAssetValue > 0
+          ? formatKpiCurrency(totalAssetValue, currency)
+          : "—",
       rawValue: totalAssetValue,
       format: "currency",
       delta: null,
