@@ -225,3 +225,42 @@ describe("roleHasPermission — absent or unknown roles", () => {
     );
   });
 });
+
+describe("roleHasPermission — reports entity", () => {
+  test("denies BASE and SELF_SERVICE both read and export", () => {
+    // Reports aggregate org-wide custody, booking and value data. The
+    // sidebar never offers them below ADMIN, and the server matrix must
+    // agree — an empty action list, not a missing entry.
+    for (const role of ["BASE", "SELF_SERVICE"]) {
+      assert.deepEqual(
+        Role2PermissionMap[role]?.[PermissionEntity.reports],
+        []
+      );
+      for (const action of [PermissionAction.read, PermissionAction.export]) {
+        assert.equal(
+          roleHasPermission({
+            roles: [role],
+            entity: PermissionEntity.reports,
+            action,
+          }),
+          false
+        );
+      }
+    }
+  });
+
+  test("grants ADMIN and OWNER read and export", () => {
+    for (const role of ["ADMIN", "OWNER"]) {
+      for (const action of [PermissionAction.read, PermissionAction.export]) {
+        assert.equal(
+          roleHasPermission({
+            roles: [role],
+            entity: PermissionEntity.reports,
+            action,
+          }),
+          true
+        );
+      }
+    }
+  });
+});
