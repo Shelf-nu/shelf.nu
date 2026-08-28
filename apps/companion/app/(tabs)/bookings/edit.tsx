@@ -28,9 +28,6 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from "@react-native-community/datetimepicker";
 import { api, type BookingTag } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
@@ -42,8 +39,18 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { TeamMemberPicker } from "@/components/team-member-picker";
+import { DateTimeField } from "@/components/date-time-field";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 export default function EditBookingScreen() {
+  return (
+    <ErrorBoundary screenName="Edit booking">
+      <EditBookingContent />
+    </ErrorBoundary>
+  );
+}
+
+function EditBookingContent() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { currentOrg } = useOrg();
@@ -167,30 +174,22 @@ export default function EditBookingScreen() {
   }, [navigation, isLoading, hasUnsavedChanges]);
 
   // ── Date pickers ────────────────────────────────
-  const onFromChange = useCallback(
-    (event: DateTimePickerEvent, selected: Date | undefined) => {
-      if (Platform.OS === "android") setShowFromPicker(false);
-      if (event.type === "dismissed") return;
-      if (selected) {
-        setFrom(selected);
-        setTo((prev) => keepEndAfterStart(prev, selected, prefs.timeZone));
-        if (Platform.OS === "ios") setShowFromPicker(false);
-      }
+  const closeFromPicker = useCallback(() => setShowFromPicker(false), []);
+  const closeToPicker = useCallback(() => setShowToPicker(false), []);
+
+  const onFromConfirm = useCallback(
+    (selected: Date) => {
+      setShowFromPicker(false);
+      setFrom(selected);
+      setTo((prev) => keepEndAfterStart(prev, selected, prefs.timeZone));
     },
     [prefs.timeZone]
   );
 
-  const onToChange = useCallback(
-    (event: DateTimePickerEvent, selected: Date | undefined) => {
-      if (Platform.OS === "android") setShowToPicker(false);
-      if (event.type === "dismissed") return;
-      if (selected) {
-        setTo(selected);
-        if (Platform.OS === "ios") setShowToPicker(false);
-      }
-    },
-    []
-  );
+  const onToConfirm = useCallback((selected: Date) => {
+    setShowToPicker(false);
+    setTo(selected);
+  }, []);
 
   const toggleTag = useCallback((tagId: string) => {
     setSelectedTagIds((prev) => {
@@ -403,18 +402,14 @@ export default function EditBookingScreen() {
             )}
           </TouchableOpacity>
           {isDraft && showFromPicker && (
-            <View
-              style={Platform.OS === "ios" ? styles.dateInlineWrap : undefined}
-            >
-              <DateTimePicker
-                value={from ?? new Date()}
-                mode="datetime"
-                display={Platform.OS === "ios" ? "inline" : "default"}
-                timeZoneName={prefs.timeZone}
-                onChange={onFromChange}
-                accentColor={colors.primary}
-              />
-            </View>
+            <DateTimeField
+              value={from ?? new Date()}
+              timeZoneName={prefs.timeZone}
+              onConfirm={onFromConfirm}
+              onCancel={closeFromPicker}
+              inlineStyle={styles.dateInlineWrap}
+              accentColor={colors.primary}
+            />
           )}
         </View>
 
@@ -446,19 +441,15 @@ export default function EditBookingScreen() {
             )}
           </TouchableOpacity>
           {isDraft && showToPicker && (
-            <View
-              style={Platform.OS === "ios" ? styles.dateInlineWrap : undefined}
-            >
-              <DateTimePicker
-                value={to ?? from ?? new Date()}
-                mode="datetime"
-                display={Platform.OS === "ios" ? "inline" : "default"}
-                timeZoneName={prefs.timeZone}
-                minimumDate={from ?? undefined}
-                onChange={onToChange}
-                accentColor={colors.primary}
-              />
-            </View>
+            <DateTimeField
+              value={to ?? from ?? new Date()}
+              timeZoneName={prefs.timeZone}
+              minimumDate={from ?? undefined}
+              onConfirm={onToConfirm}
+              onCancel={closeToPicker}
+              inlineStyle={styles.dateInlineWrap}
+              accentColor={colors.primary}
+            />
           )}
         </View>
 
