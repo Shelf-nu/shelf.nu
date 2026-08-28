@@ -63,7 +63,7 @@ export const loader = async ({
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -275,6 +275,10 @@ export const loader = async ({
       case "audit-completion": {
         const reportData = await auditCompletionReport({
           organizationId,
+          // The CSV must carry the same assignment scoping as the page —
+          // an export is just the page's data in a file.
+          userId,
+          isSelfServiceOrBase,
           timeframe,
           page: 1,
           pageSize: 10000,
@@ -795,7 +799,8 @@ function generateAuditCompletionCsv(
     AUDIT_STATUS_LABELS[row.status] || row.status,
     row.expectedAssetCount.toString(),
     row.foundAssetCount.toString(),
-    row.missingAssetCount.toString(),
+    // Null until completion (counter still counts "not scanned"): empty cell.
+    row.missingAssetCount !== null ? row.missingAssetCount.toString() : "",
     row.unexpectedAssetCount.toString(),
     // Null accuracy (0 expected assets) exports as an empty cell, not "0%".
     row.accuracy !== null ? `${row.accuracy}%` : "",

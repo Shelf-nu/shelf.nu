@@ -108,6 +108,8 @@ describe("auditCompletionReport", () => {
   it("counts completion by completedAt, never by status", async () => {
     await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
     });
 
@@ -127,6 +129,8 @@ describe("auditCompletionReport", () => {
 
     const result = await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
     });
 
@@ -141,6 +145,8 @@ describe("auditCompletionReport", () => {
   it("excludes cancelled sessions from the total via cancelledAt, not status", async () => {
     await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
     });
 
@@ -158,6 +164,8 @@ describe("auditCompletionReport", () => {
     const before = new Date();
     await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
     });
     const after = new Date();
@@ -179,6 +187,8 @@ describe("auditCompletionReport", () => {
 
     const result = await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
     });
 
@@ -212,6 +222,8 @@ describe("auditCompletionReport", () => {
 
     const result = await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
     });
 
@@ -231,6 +243,8 @@ describe("auditCompletionReport", () => {
 
     const result = await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
     });
 
@@ -242,6 +256,8 @@ describe("auditCompletionReport", () => {
 
     const result = await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
     });
 
@@ -257,6 +273,8 @@ describe("auditCompletionReport", () => {
 
     const result = await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
     });
 
@@ -273,6 +291,8 @@ describe("auditCompletionReport", () => {
 
     const result = await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
       page: 3,
       pageSize: 20,
@@ -298,6 +318,8 @@ describe("auditCompletionReport", () => {
   it("scopes every query to the organization and the createdAt window", async () => {
     await auditCompletionReport({
       organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
       timeframe: TIMEFRAME,
     });
 
@@ -324,5 +346,106 @@ describe("auditCompletionReport", () => {
     ).where;
     expect(aggregateWhere.organizationId).toBe("org-1");
     expect(aggregateWhere.createdAt).toEqual(window);
+  });
+});
+
+describe("auditCompletionReport — assignment scoping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // why: every query resolves empty — these tests assert only the WHERE
+    // shapes the report sends, not result math.
+    vi.mocked(db.auditSession.findMany).mockResolvedValue([] as any);
+    vi.mocked(db.auditSession.count).mockResolvedValue(0 as any);
+    vi.mocked(db.auditSession.aggregate).mockResolvedValue({
+      _sum: { missingAssetCount: null },
+    } as any);
+  });
+
+  it("counts a session with both timestamps as cancelled, not completed", async () => {
+    // A cancellation that races the completion write can leave both
+    // `completedAt` and `cancelledAt` set; the cancellation wins so the
+    // completed count can never exceed the never-cancelled total.
+    vi.mocked(db.auditSession.findMany).mockResolvedValue([] as any);
+
+    await auditCompletionReport({
+      organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
+      timeframe: TIMEFRAME,
+    });
+
+    const countWheres = vi
+      .mocked(db.auditSession.count)
+      .mock.calls.map((c) => (c[0] as any).where);
+    const completedWhere = countWheres.find(
+      (w) => w.completedAt && w.completedAt.not === null
+    );
+    expect(completedWhere.cancelledAt).toBeNull();
+    const aggWhere = (
+      vi.mocked(db.auditSession.aggregate).mock.calls[0][0] as any
+    ).where;
+    expect(aggWhere.completedAt).toEqual({ not: null });
+    expect(aggWhere.cancelledAt).toBeNull();
+  });
+
+  it("reports missing and accuracy as null until a session completes", async () => {
+    // The missing counter starts at the expected count and counts DOWN while
+    // scanning, so an in-progress session must read "not scanned", never
+    // "lost every asset" — and a 0/19 accuracy score before completion would
+    // brand an audit nobody finished as a failure.
+    vi.mocked(db.auditSession.findMany).mockResolvedValue([
+      makeSession({
+        id: "in-progress",
+        status: "ACTIVE",
+        expectedAssetCount: 19,
+        foundAssetCount: 0,
+        missingAssetCount: 19,
+        completedAt: null,
+      }),
+    ] as any);
+
+    const payload = await auditCompletionReport({
+      organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
+      timeframe: TIMEFRAME,
+    });
+
+    expect(payload.rows[0].missingAssetCount).toBeNull();
+    expect(payload.rows[0].accuracy).toBeNull();
+  });
+
+  it("scopes every query to assigned audits for BASE and SELF_SERVICE viewers", async () => {
+    await auditCompletionReport({
+      organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: true,
+      timeframe: TIMEFRAME,
+    });
+
+    // The audits index applies assignments.some.userId for these roles; the
+    // report must never list a session its viewer cannot open.
+    for (const call of [
+      ...vi.mocked(db.auditSession.findMany).mock.calls,
+      ...vi.mocked(db.auditSession.count).mock.calls,
+      ...vi.mocked(db.auditSession.aggregate).mock.calls,
+    ]) {
+      expect((call[0] as any).where.assignments).toEqual({
+        some: { userId: "user-1" },
+      });
+    }
+  });
+
+  it("applies no assignment filter for admins and owners", async () => {
+    await auditCompletionReport({
+      organizationId: "org-1",
+      userId: "user-1",
+      isSelfServiceOrBase: false,
+      timeframe: TIMEFRAME,
+    });
+
+    for (const call of vi.mocked(db.auditSession.findMany).mock.calls) {
+      expect((call[0] as any).where.assignments).toBeUndefined();
+    }
   });
 });

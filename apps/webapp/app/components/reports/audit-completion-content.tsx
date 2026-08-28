@@ -58,7 +58,7 @@ const AUDIT_COMPLETION_COLUMNS: ColumnDef<AuditCompletionRow>[] = [
   {
     accessorKey: "missingAssetCount",
     header: "Missing",
-    cell: ({ row }) => <NumberCell value={row.original.missingAssetCount} />,
+    cell: ({ row }) => <MissingCell value={row.original.missingAssetCount} />,
   },
   {
     accessorKey: "unexpectedAssetCount",
@@ -100,9 +100,21 @@ const AUDIT_COMPLETION_COLUMNS: ColumnDef<AuditCompletionRow>[] = [
  *
  * @param accuracy - found/expected as a whole percentage, or null
  */
+/**
+ * Missing-asset count for a session. Null means the session has not
+ * completed yet — the counter still measures "not scanned", so the cell
+ * says that instead of branding in-progress audits as having lost assets.
+ */
+function MissingCell({ value }: { value: number | null }) {
+  if (value === null) {
+    return <span className="text-xs text-gray-600">Not scanned</span>;
+  }
+  return <NumberCell value={value} />;
+}
+
 function AccuracyCell({ accuracy }: { accuracy: number | null }) {
   if (accuracy === null) {
-    return <span className="text-gray-400">—</span>;
+    return <span className="text-gray-600">—</span>;
   }
   return (
     <div className="flex items-center gap-3">

@@ -697,7 +697,9 @@ export interface AuditCompletionRow {
   /** Expected assets actually scanned. */
   foundAssetCount: number;
   /** Expected assets never scanned. */
-  missingAssetCount: number;
+  /** Null until the session completes — the counter counts down while
+   * scanning, so pre-completion it means "not yet scanned", not "lost". */
+  missingAssetCount: number | null;
   /** Scanned assets that were not expected. */
   unexpectedAssetCount: number;
   /** found/expected as a whole percentage (0-100). Null when the session

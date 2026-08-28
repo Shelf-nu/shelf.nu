@@ -40,6 +40,11 @@ import { USER_NAME_SELECT } from "../user/fields";
 /** Arguments for {@link auditCompletionReport}. */
 interface AuditCompletionArgs {
   organizationId: string;
+  /** Acting user — the subject of assignment scoping below. */
+  userId: string;
+  /** BASE and SELF_SERVICE see only audits assigned to them, mirroring the
+   * audits index (`getAuditsForOrganization`); admins and owners see all. */
+  isSelfServiceOrBase: boolean;
   /** Window applied to `AuditSession.createdAt` — a session belongs to the
    * period it was created in, regardless of when it finished. */
   timeframe: ResolvedTimeframe;
@@ -67,7 +72,14 @@ interface AuditCompletionArgs {
 export async function auditCompletionReport(
   args: AuditCompletionArgs
 ): Promise<ReportPayload<AuditCompletionRow>> {
-  const { organizationId, timeframe, page = 1, pageSize = 50 } = args;
+  const {
+    organizationId,
+    userId,
+    isSelfServiceOrBase,
+    timeframe,
+    page = 1,
+    pageSize = 50,
+  } = args;
 
   const startTime = performance.now();
 
@@ -79,6 +91,10 @@ export async function auditCompletionReport(
     const windowWhere = {
       organizationId,
       createdAt: { gte: timeframe.from, lte: timeframe.to },
+      // Assignment scoping for low-permission roles, the same
+      // `assignments.some.userId` predicate the audits index applies — the
+      // report must never show a session its viewer cannot open.
+      ...(isSelfServiceOrBase ? { assignments: { some: { userId } } } : {}),
     };
 
     const [
@@ -122,8 +138,15 @@ export async function auditCompletionReport(
       }),
       // Completed: `completedAt`, not `status` — archiving a completed
       // session rewrites its status to ARCHIVED but keeps the timestamp.
+      // `cancelledAt: null` besides: a cancellation that raced the
+      // completion write leaves both timestamps set, and the cancellation
+      // wins here so completed can never exceed the never-cancelled total.
       db.auditSession.count({
-        where: { ...windowWhere, completedAt: { not: null } },
+        where: {
+          ...windowWhere,
+          completedAt: { not: null },
+          cancelledAt: null,
+        },
       }),
       // Overdue: past due and still open — neither finished nor cancelled.
       db.auditSession.count({
@@ -139,7 +162,13 @@ export async function auditCompletionReport(
       // missing counter still shrinks as scanning proceeds.
       db.auditSession.aggregate({
         _sum: { missingAssetCount: true },
-        where: { ...windowWhere, completedAt: { not: null } },
+        // Same completed-family guard as the count above: a cancellation
+        // that raced the completion write wins.
+        where: {
+          ...windowWhere,
+          completedAt: { not: null },
+          cancelledAt: null,
+        },
       }),
     ]);
 
@@ -149,12 +178,20 @@ export async function auditCompletionReport(
       status: session.status,
       expectedAssetCount: session.expectedAssetCount,
       foundAssetCount: session.foundAssetCount,
-      missingAssetCount: session.missingAssetCount,
+      // The counter starts at the expected count and counts DOWN as assets
+      // are scanned, so until the session completes it measures "not yet
+      // scanned", not "lost". Null until `completedAt`, matching the audits
+      // index's "Not scanned" wording.
+      missingAssetCount:
+        session.completedAt !== null ? session.missingAssetCount : null,
       unexpectedAssetCount: session.unexpectedAssetCount,
       // Null when the session expected 0 assets — nothing to be accurate
       // against, and null (not 0%) renders as "—" instead of a failing score.
+      // Accuracy is only meaningful once the session finished; an unfinished
+      // session would read as a failing score while people are still
+      // scanning. Also null when the session expected 0 assets.
       accuracy:
-        session.expectedAssetCount > 0
+        session.completedAt !== null && session.expectedAssetCount > 0
           ? Math.round(
               (session.foundAssetCount / session.expectedAssetCount) * 100
             )

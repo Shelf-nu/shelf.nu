@@ -115,7 +115,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 
   // Check permissions
-  const { organizationId } = await requirePermission({
+  const { organizationId, isSelfServiceOrBase } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.asset,
@@ -279,6 +279,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     case "audit-completion":
       reportData = await auditCompletionReport({
         organizationId,
+        userId,
+        isSelfServiceOrBase,
         timeframe,
         page: parseInt(url.searchParams.get("page") || "1", 10),
         pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
