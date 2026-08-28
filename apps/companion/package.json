@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "expo start --dev-client",
     "dev:clear": "expo start --dev-client --clear",
+    "sim:env": "node scripts/setup-sim-env.mjs",
     "dev:tunnel": "expo start --dev-client --tunnel",
     "build:ios": "expo run:ios",
     "build:ios:device": "expo run:ios --device",

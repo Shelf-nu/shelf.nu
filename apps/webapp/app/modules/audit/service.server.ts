@@ -212,6 +212,8 @@ export type RecordAuditScanResult = {
  * Used when fetching existing scans to restore audit state.
  */
 export type AuditScanData = {
+  /** AuditScan row id — the identity that survives asset deletion */
+  id: string;
   /** The QR code or barcode that was scanned */
   code: string;
   /** The ID of the asset that was scanned */
@@ -232,6 +234,8 @@ export type AuditScanData = {
   auditImagesCount: number;
   /** Asset location name for display */
   assetLocationName: string | null;
+  /** True when the scanned asset has since been deleted. */
+  assetDeleted: boolean;
 };
 
 export async function createAuditSession(
@@ -1446,6 +1450,13 @@ export async function recordAuditScan(
             assetId,
             scannedById: userId,
             scannedAt: new Date(),
+            // Snapshot what was scanned, so this row still means something
+            // once the asset is gone. `scannedAsset` is the org-verified
+            // fetch above, so this is the title as it stood at scan time.
+            // `wasExpected` is not known yet — it is derived from the audit's
+            // own rows below and written with `auditAssetId` in the same
+            // transaction.
+            assetTitle: scannedAsset.title,
           },
         });
 
@@ -1583,7 +1594,15 @@ export async function recordAuditScan(
         // resolvable now: every branch above either found or created the row.
         await tx.auditScan.update({
           where: { id: scan.id },
-          data: { auditAssetId },
+          data: {
+            auditAssetId,
+            // why: recorded here rather than at create because expectedness is
+            // derived from AuditAsset above, never trusted from the request.
+            // Snapshotting it is what lets a deleted asset's row still say
+            // whether it belonged to the audit, once the cascade has taken the
+            // AuditAsset row that would otherwise answer that.
+            wasExpected: isExpected,
+          },
         });
 
         // Update the audit session counts.
@@ -1989,13 +2008,39 @@ export async function getAuditScans({
         scan.auditAsset ??
         (scan.assetId ? auditAssetsByAssetId.get(scan.assetId) : undefined);
 
+      // The asset is gone precisely when `assetId` is null: `AuditScan.asset`
+      // is SetNull, so deletion is the only thing that empties it.
+      const assetDeleted = scan.assetId === null;
+
+      // The live row wins over the snapshot: a rename must show the CURRENT
+      // name. The snapshot's job is to survive deletion, not to freeze naming.
+      // A row written before the snapshot columns existed has neither and
+      // falls back to "", leaving the client the `code`, which also outlives
+      // the asset.
+      const assetTitle = scan.asset?.title ?? scan.assetTitle ?? "";
+
+      // Expectedness falls back to the snapshot ONLY once the asset is gone.
+      // `AuditScan.auditAsset` is SetNull too, so a missing AuditAsset does not
+      // imply deletion — removing an asset from a pending audit leaves the scan
+      // behind with its asset intact, and that row is genuinely no longer part
+      // of the audit. Keying on deletion keeps the snapshot from resurrecting
+      // it as expected.
+      const isExpected = assetDeleted
+        ? scan.wasExpected ?? false
+        : auditAsset?.expected ?? false;
+
       return {
+        id: scan.id,
         code: scan.code ?? "",
         assetId: scan.assetId ?? "",
         type: "asset" as const,
         scannedAt: scan.scannedAt,
-        isExpected: auditAsset?.expected ?? false,
-        assetTitle: scan.asset?.title ?? "",
+        isExpected,
+        assetTitle,
+        // Distinguishes "the asset is gone" from "this scan predates the
+        // snapshot columns", so the client can say which it is instead of
+        // guessing from an empty title.
+        assetDeleted,
         auditAssetId: auditAsset?.id ?? null,
         auditNotesCount: auditAsset?._count?.notes ?? 0,
         auditImagesCount: auditAsset?._count?.images ?? 0,
@@ -3076,7 +3121,10 @@ export async function removeAssetFromAudit({
         });
       }
 
-      // Delete the audit asset (cascade will delete related scans). Scoped
+      // Delete the audit asset. `AuditScan.auditAsset` is SetNull, so any scan
+      // of this asset SURVIVES with its `auditAssetId` emptied — the row stays
+      // in the audit's scan history while ceasing to be part of the audit.
+      // `getAuditScans` relies on that distinction. Scoped
       // again rather than by id alone: defence in depth, so the write cannot
       // outlive a future refactor of the check above.
       const removed = await tx.auditAsset.deleteMany({
