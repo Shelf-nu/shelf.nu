@@ -63,7 +63,7 @@ export const loader = async ({
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
+      entity: PermissionEntity.reports,
       action: PermissionAction.export,
     });
 

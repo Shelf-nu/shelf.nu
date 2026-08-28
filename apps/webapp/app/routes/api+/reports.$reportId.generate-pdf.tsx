@@ -100,8 +100,10 @@ export const loader = async ({
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
+      entity: PermissionEntity.reports,
+      // PDF generation hands the data out of the app, like the CSV route:
+      // both are export surfaces and share the export action.
+      action: PermissionAction.export,
     });
 
     // Acting user's resolved prefs drive both the timeframe label ordering and
