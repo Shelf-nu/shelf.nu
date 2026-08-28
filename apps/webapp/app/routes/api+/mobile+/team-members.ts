@@ -64,6 +64,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
               id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },

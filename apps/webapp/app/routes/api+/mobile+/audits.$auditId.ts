@@ -101,12 +101,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         createdBy: {
           firstName: session.createdBy?.firstName ?? null,
           lastName: session.createdBy?.lastName ?? null,
+          displayName: session.createdBy?.displayName ?? null,
           profilePicture: session.createdBy?.profilePicture ?? null,
         },
         assignments: session.assignments.map((a) => ({
           userId: a.user.id,
-          firstName: a.user.firstName,
-          lastName: a.user.lastName,
+          firstName: a.user.firstName ?? null,
+          lastName: a.user.lastName ?? null,
+          displayName: a.user.displayName,
           profilePicture: a.user.profilePicture,
           role: a.role,
         })),
@@ -133,6 +135,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodianName: a.custodianName ?? null,
       })),
       existingScans: scans.map((s) => ({
+        id: s.id,
         code: s.code,
         assetId: s.assetId,
         assetTitle: s.assetTitle,
@@ -141,6 +144,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           s.scannedAt instanceof Date ? s.scannedAt.toISOString() : s.scannedAt,
         auditAssetId: s.auditAssetId,
         assetLocationName: s.assetLocationName,
+        // why: lets the app say "deleted" instead of inferring it from an
+        // empty title, which is also what a pre-snapshot row looks like.
+        assetDeleted: s.assetDeleted,
         auditNotesCount: s.auditNotesCount,
         auditImagesCount: s.auditImagesCount,
       })),

@@ -168,6 +168,7 @@ describe("sendAdminInvoiceEmail", () => {
       email: "user@test.com",
       firstName: "Jane",
       lastName: "Doe",
+      displayName: null,
     },
     eventType: "invoice.payment_failed",
     invoiceId: "inv_123",
@@ -203,6 +204,7 @@ describe("constructVerifiedWebhookEvent", () => {
     email: "user@test.com",
     firstName: "Jane",
     lastName: "Doe",
+    displayName: null,
     tierId: "tier_1",
     warnForNoPaymentMethod: false,
   };
