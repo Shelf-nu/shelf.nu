@@ -345,7 +345,9 @@ function generateCustodySnapshotCsv(
     "Assigned To",
     "Assigned Date",
     "Days Held",
-    "Valuation",
+    "Units Held",
+    "Unit Value",
+    "Total Value",
   ];
 
   const csvRows = rows.map((row) => [
@@ -357,7 +359,13 @@ function generateCustodySnapshotCsv(
     // Datetime column: include the time part.
     formatDateForCsv(row.assignedAt, prefs, { includeTime: true }),
     row.daysInCustody.toString(),
+    // Units held in THIS custody row (`Custody.quantity`), the multiplier
+    // for this surface; null means one unit.
+    (row.quantity ?? 1).toString(),
     row.valuation?.toString() || "",
+    row.valuation == null
+      ? ""
+      : (row.valuation * (row.quantity ?? 1)).toString(),
   ]);
 
   return buildCsv(headers, csvRows);
@@ -601,7 +609,9 @@ function generateAssetInventoryCsv(
     "Location",
     "Status",
     "Custodian",
-    "Valuation",
+    "Quantity",
+    "Unit Value",
+    "Total Value",
     "Created Date",
     "QR Code ID",
   ];
@@ -613,7 +623,12 @@ function generateAssetInventoryCsv(
     row.location || "",
     formatAssetStatus(row.status),
     row.custodian || "",
+    // Workspace stock, the value multiplier for this surface; null means one.
+    (row.quantity ?? 1).toString(),
     row.valuation?.toString() || "",
+    row.valuation == null
+      ? ""
+      : (row.valuation * (row.quantity ?? 1)).toString(),
     // Date-only column: no time part.
     formatDateForCsv(row.createdAt, prefs),
     row.qrId || "",
