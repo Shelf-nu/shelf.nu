@@ -88,9 +88,10 @@ describe("canRoleRemoveBookingAssets", () => {
   });
 
   /**
-   * The reported bug. A BASE custodian was offered — and served — "Remove"
-   * on their own ONGOING booking, which resets those assets to available:
-   * the check-in that BASE does not hold `booking:checkin` for.
+   * BASE holds `booking:update`, which every remove intent checks, so status
+   * is the only thing bounding it. It stops at DRAFT because removing from a
+   * live booking resets the asset to available, and that is a check-in — an
+   * action BASE does not hold.
    */
   it("stops BASE at DRAFT", () => {
     expect(removalsFor([OrganizationRoles.BASE])).toEqual([

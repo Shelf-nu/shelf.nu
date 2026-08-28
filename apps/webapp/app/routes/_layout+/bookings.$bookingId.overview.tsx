@@ -1537,6 +1537,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     ];
     if (
       removeIntents.includes(intent) &&
+      // `[role]` is safe here, unlike on the mobile endpoint: `requirePermission`
+      // resolves through `resolveEffectiveRole`, which returns the MOST
+      // PRIVILEGED role on the membership rather than `roles[0]`.
       !canRoleRemoveBookingAssets({ roles: [role], booking: basicBookingInfo })
     ) {
       throw new ShelfError({

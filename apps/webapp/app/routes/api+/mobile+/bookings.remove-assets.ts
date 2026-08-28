@@ -106,7 +106,7 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { role, roles } = await getMobileUserContext(user.id, organizationId);
     // BASE is as restricted as SELF_SERVICE for managing booking assets: both
     // may only touch their OWN bookings (enforced just below). Keying only on
     // SELF_SERVICE let a BASE user with `booking:update` edit anyone's booking
@@ -142,13 +142,16 @@ export async function action({ request }: ActionFunctionArgs) {
     // BASE stops at DRAFT here as it does on web: removing from a live booking
     // resets the asset to available, which is the check-in BASE cannot run.
     // Ownership is already enforced by the own-booking guard directly above.
-    if (!canRoleRemoveBookingAssets({ roles: [role], booking })) {
+    // `roles`, not `[role]`: `getMobileUserContext` sets `role` to `roles[0]`,
+    // so a membership ordered `[SELF_SERVICE, ADMIN]` would refuse an actual
+    // admin here. The helper resolves the array to its most permissive answer.
+    if (!canRoleRemoveBookingAssets({ roles, booking })) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
         message:
           "Assets cannot be removed from this booking in its current status.",
-        additionalData: { userId, bookingId, role, status: booking.status },
+        additionalData: { userId, bookingId, roles, status: booking.status },
         label: "Booking",
         status: 403,
         shouldBeCaptured: false,

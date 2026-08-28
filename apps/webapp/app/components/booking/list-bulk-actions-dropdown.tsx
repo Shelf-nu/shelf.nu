@@ -116,8 +116,17 @@ function ConditionalDropdown() {
    * explanatory disabled state survives for a role that may remove at other
    * statuses. Hidden outright when the role may not remove here at all —
    * a disabled row with a status reason would misstate why.
+   *
+   * The fallback probes DRAFT rather than trusting `isFinished` on its own:
+   * every role that removes at all removes in DRAFT, so this asks "is status
+   * the only thing in the way". Without it, a session whose roles have not
+   * loaded yet would be shown the row on a finished booking.
    */
-  const showRemove = canRemove || isFinished;
+  const canRemoveAtAnyStatus = canRoleRemoveBookingAssets({
+    roles,
+    booking: { status: BookingStatus.DRAFT },
+  });
+  const showRemove = canRemove || (isFinished && canRemoveAtAnyStatus);
 
   // Denormalised view of `booking.bookingAssets` (the QT pivot). Project the
   // pivot rows down to the plain asset shape the shared resolver
