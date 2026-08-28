@@ -12,6 +12,7 @@ import {
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -118,10 +119,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? requestedPage
       : 1;
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+    /**
+     * A membership can carry several roles. Custodian scoping must be decided
+     * by the most privileged one, or an admin who also holds SELF_SERVICE is
+     * scoped to their own bookings and told the asset has never been booked.
+     */
+    const effectiveRole = resolveMostPrivilegedRole(roles);
     const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+      effectiveRole === OrganizationRoles.SELF_SERVICE ||
+      effectiveRole === OrganizationRoles.BASE;
 
     /**
      * Custodian scope (web parity). Web matches a self-service or base user's

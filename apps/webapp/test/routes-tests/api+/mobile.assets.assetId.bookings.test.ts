@@ -69,6 +69,13 @@ vi.mock("~/utils/error", () => ({
   },
 }));
 
+vi.mock("~/utils/booking-authorization.server", () => ({
+  // why: mirrors the real resolver — the most privileged role wins, so a
+  // membership ordered [SELF_SERVICE, ADMIN] resolves to ADMIN.
+  resolveMostPrivilegedRole: (roles: string[]) =>
+    roles.includes("ADMIN") || roles.includes("OWNER") ? "ADMIN" : roles[0],
+}));
+
 import { db } from "~/database/db.server";
 import {
   custodianScopeClause,
@@ -125,7 +132,7 @@ function mobileUser(overrides: Partial<MobileAuth["user"]> = {}): MobileAuth {
 
 function mobileContext(overrides: Partial<MobileContext> = {}): MobileContext {
   return {
-    role: OrganizationRoles.ADMIN,
+    roles: [OrganizationRoles.ADMIN],
     canUseBarcodes: true,
     canUseAudits: true,
     canSeeAllCustody: true,
@@ -165,7 +172,7 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
       // a list, because the section then states "This asset has never been
       // booked", which is a claim rather than an empty list.
       vi.mocked(getMobileUserContext).mockResolvedValue(
-        mobileContext({ role: OrganizationRoles.SELF_SERVICE })
+        mobileContext({ roles: [OrganizationRoles.SELF_SERVICE] })
       );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
@@ -187,13 +194,30 @@ describe("GET /api/mobile/assets/:assetId/bookings", () => {
 
     it("applies the same scope to BASE", async () => {
       vi.mocked(getMobileUserContext).mockResolvedValue(
-        mobileContext({ role: OrganizationRoles.BASE })
+        mobileContext({ roles: [OrganizationRoles.BASE] })
       );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
 
       expect(resolveCustodianScope).toHaveBeenCalled();
       expect(lastWhere().AND).toContainEqual({ __custodianClause: true });
+    });
+
+    it("does not scope an admin whose membership also carries SELF_SERVICE", async () => {
+      // why: a membership can hold several roles, and the array order is not
+      // meaningful. Reading roles[0] would resolve this admin to SELF_SERVICE
+      // and scope them to their own bookings, so the screen would tell a real
+      // admin the asset has never been booked.
+      vi.mocked(getMobileUserContext).mockResolvedValue(
+        mobileContext({
+          roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
+        })
+      );
+
+      await loader(createLoaderArgs({ request: request(), ...ARGS }));
+
+      expect(resolveCustodianScope).not.toHaveBeenCalled();
+      expect(lastWhere().AND).not.toContainEqual({ __custodianClause: true });
     });
 
     it("does not scope an ADMIN to their own bookings", async () => {
