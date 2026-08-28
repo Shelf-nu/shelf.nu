@@ -5637,3 +5637,166 @@ describe("kit custody release must not overwrite CHECKED_OUT", () => {
     expect(currentStatus).toBe(AssetStatus.AVAILABLE);
   });
 });
+
+/**
+ * Regression cover for the stale-`Kit.status` stamp.
+ *
+ * `updateKitAssets` used to stamp every newly added asset CHECKED_OUT whenever
+ * the kit's own status column read CHECKED_OUT, without checking that a live
+ * booking existed. `Kit.status` goes stale on its own (check-in resolves kits
+ * from the assets' CURRENT membership, so detaching a kit's assets mid-booking
+ * leaves the flag set forever), so the stamp landed on assets with no booking
+ * behind it, and no release path clears CHECKED_OUT.
+ *
+ * The stamp now keys on the booking rows this call actually wrote.
+ */
+describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * @param existingBookingStatus status of the booking the kit's sitting
+   *        member is on, which is what `bookingsToUpdate` is derived from.
+   * @param kitStatus the kit's own (possibly stale) status column.
+   */
+  function arrange(
+    existingBookingStatus: BookingStatus,
+    kitStatus: KitStatus = KitStatus.CHECKED_OUT
+  ) {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      name: "Kit 1",
+      status: kitStatus,
+      location: null,
+      custody: null,
+      assetKits: [
+        {
+          id: "ak-sitting",
+          kitId: "kit-1",
+          quantity: 1,
+          asset: {
+            id: "sitting-member",
+            title: "Sitting member",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [{ kitId: "kit-1" }],
+            bookingAssets: [
+              {
+                id: "ba-sitting",
+                bookingId: "booking-1",
+                assetId: "sitting-member",
+                assetKitId: "ak-sitting",
+                sourceKitId: "kit-1",
+                quantity: 1,
+                booking: { id: "booking-1", status: existingBookingStatus },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    // Submitted membership: the sitting member plus the newcomer.
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "sitting-member",
+        title: "Sitting member",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        unitOfMeasure: null,
+        assetKits: [{ kitId: "kit-1" }],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+      {
+        id: "newcomer",
+        title: "Newcomer",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        unitOfMeasure: null,
+        assetKits: [],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+    ]);
+
+    // The AssetKit row the picker just created for the newcomer, read back by
+    // the propagation block to populate `assetKitId` / `sourceKitId`.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-newcomer", assetId: "newcomer", quantity: 1 },
+    ]);
+  }
+
+  async function act() {
+    const { updateKitAssets } = await import("./service.server");
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["sitting-member", "newcomer"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+  }
+
+  /** Every CHECKED_OUT write this call made, as `where.id.in` id lists. */
+  function checkedOutStamps() {
+    return (
+      db.asset.updateMany as unknown as {
+        mock: {
+          calls: Array<
+            [{ where?: { id?: { in?: string[] } }; data?: { status?: string } }]
+          >;
+        };
+      }
+    ).mock.calls
+      .filter((c) => c[0]?.data?.status === AssetStatus.CHECKED_OUT)
+      .map((c) => c[0].where?.id?.in ?? []);
+  }
+
+  it("does NOT stamp CHECKED_OUT when the kit's flag is stale and the booking is over", async () => {
+    // The exact production shape: kit reads CHECKED_OUT, but its only booking
+    // has already been checked in. Nothing is physically out.
+    arrange(BookingStatus.COMPLETE);
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
+  });
+
+  it("does NOT stamp CHECKED_OUT when the kit is only on a booking that has not started", async () => {
+    // The newcomer joins the DRAFT booking, but nothing has left the building,
+    // so its status must stay untouched.
+    arrange(BookingStatus.DRAFT);
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
+  });
+
+  it("DOES stamp CHECKED_OUT for an asset added to a kit that is out on an ONGOING booking", async () => {
+    // The legitimate case this write exists for. Guards against "fixing" the
+    // bug by deleting the stamp outright.
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([["newcomer"]]);
+  });
+
+  it("scopes the stamp to the caller's organization", async () => {
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["newcomer"] }, organizationId: "org-1" },
+      data: { status: AssetStatus.CHECKED_OUT },
+    });
+  });
+});
