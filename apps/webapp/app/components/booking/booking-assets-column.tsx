@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
+import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -187,6 +188,13 @@ export function BookingAssetsColumn() {
     !isBaseOrSelfService ||
     (isBaseOrSelfService && booking?.custodianUser?.id === userId);
 
+  /**
+   * Custody alone decides whether this column offers actions at all; which of
+   * them the role may actually take is the hook's question, and it is what
+   * decides whether selecting rows leads anywhere.
+   */
+  const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
+
   function itemsGetter(data: LoaderData) {
     return data.items
       .map((item) => {
@@ -308,7 +316,16 @@ export function BookingAssetsColumn() {
               <>
                 <Table className="border-collapse">
                   <ListHeader hideFirstColumn>
-                    <BulkListHeader itemsGetter={itemsGetter} />
+                    {/* Select-all is offered only when there is a bulk action
+                        to feed, matching the per-row checkboxes. The empty
+                        header cell mirrors their `<Td> </Td>` fallback, so the
+                        column stays aligned either way. */}
+                    <When
+                      truthy={hasAnyBulkAction}
+                      fallback={<Th className="md:pl-4 md:pr-3"> </Th>}
+                    >
+                      <BulkListHeader itemsGetter={itemsGetter} />
+                    </When>
                     <Th>Name</Th>
                     <Th>Qty</Th>
                     <Th> </Th>

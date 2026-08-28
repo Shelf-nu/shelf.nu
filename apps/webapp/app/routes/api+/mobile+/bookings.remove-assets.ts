@@ -11,8 +11,11 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { removeAssets } from "~/modules/booking/service.server";
-import { canSeeBooking } from "~/utils/booking-authorization.server";
-import { canUserRemoveBookingAssets } from "~/utils/bookings";
+import {
+  canSeeBooking,
+  resolveMostPrivilegedRole,
+} from "~/utils/booking-authorization.server";
+import { canRoleRemoveBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import {
@@ -34,11 +37,11 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * Adding assets/kits is handled by the existing `add-scanned-assets` endpoint;
  * this endpoint is the removal counterpart for the picker-based edit flow.
  *
- * Status gating uses `canUserRemoveBookingAssets` (COMPLETE / ARCHIVED /
- * CANCELLED reject), plus an explicit own-booking guard for self-service and
- * BASE users. Note this is intentionally looser than the ADD counterpart: a
- * custodian may remove items from their own booking in any non-finished
- * status, matching the web booking-overview remove actions.
+ * Gating is `canRoleRemoveBookingAssets` (role + status) plus an explicit
+ * own-booking guard for self-service and BASE users. Still looser than the ADD
+ * counterpart for SELF_SERVICE, which may remove from its own RESERVED
+ * booking; BASE stops at DRAFT on both. Matches the web booking-overview
+ * remove actions.
  *
  * Body: { bookingId: string, assetIds?: string[], kitIds?: string[] }
  * Query: ?orgId=...
@@ -106,7 +109,16 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { roles } = await getMobileUserContext(user.id, organizationId);
+
+    // `resolveMostPrivilegedRole`, not the context's `role`, which is
+    // `roles[0]`: a membership stored `[SELF_SERVICE, ADMIN]` would otherwise
+    // read as restricted and refuse an actual admin someone else's booking.
+    // The sibling mobile endpoints (`bookings.checkin`, `partial-checkout`,
+    // `fulfil-and-checkout`) all resolve the same way, as does the web side
+    // via `resolveEffectiveRole`.
+    const role = resolveMostPrivilegedRole(roles);
+
     // BASE is as restricted as SELF_SERVICE for managing booking assets: both
     // may only touch their OWN bookings (enforced just below). Keying only on
     // SELF_SERVICE let a BASE user with `booking:update` edit anyone's booking
@@ -135,18 +147,20 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // Status only. `canUserManageBookingAssets` (which the ADD counterpart
-    // uses) additionally pins self-service/BASE to DRAFT, which blocked a
-    // custodian from removing an item from their OWN reserved booking — the
-    // web allows exactly that, and the two surfaces must agree. Ownership is
-    // already enforced by the own-booking guard directly above.
-    if (!canUserRemoveBookingAssets(booking)) {
+    // Role + status. Looser than the ADD counterpart
+    // (`canUserManageBookingAssets`) for SELF_SERVICE, which pins to DRAFT and
+    // so blocked a custodian from removing an item from their OWN reserved
+    // booking — the web allows exactly that, and the two surfaces must agree.
+    // BASE stops at DRAFT here as it does on web: removing from a live booking
+    // resets the asset to available, which is the check-in BASE cannot run.
+    // Ownership is already enforced by the own-booking guard directly above.
+    if (!canRoleRemoveBookingAssets({ roles, booking })) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
         message:
           "Assets cannot be removed from this booking in its current status.",
-        additionalData: { userId, bookingId, status: booking.status },
+        additionalData: { userId, bookingId, roles, status: booking.status },
         label: "Booking",
         status: 403,
         shouldBeCaptured: false,
