@@ -100,7 +100,9 @@ export const loader = async ({
       userId,
       request,
       entity: PermissionEntity.reports,
-      action: PermissionAction.read,
+      // PDF generation hands the data out of the app, like the CSV route:
+      // both are export surfaces and share the export action.
+      action: PermissionAction.export,
     });
 
     // Acting user's resolved prefs drive both the timeframe label ordering and

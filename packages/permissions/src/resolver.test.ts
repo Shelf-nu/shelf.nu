@@ -251,6 +251,12 @@ describe("roleHasPermission — reports entity", () => {
 
   test("grants ADMIN and OWNER read and export", () => {
     for (const role of ["ADMIN", "OWNER"]) {
+      // The resolver grants these roles everything via the short-circuit, so
+      // assert the matrix rows directly too — the role-matrix contract must
+      // hold even for readers that consult the map without the resolver.
+      const entry = Role2PermissionMap[role]?.[PermissionEntity.reports] ?? [];
+      assert.equal(entry.includes(PermissionAction.read), true);
+      assert.equal(entry.includes(PermissionAction.export), true);
       for (const action of [PermissionAction.read, PermissionAction.export]) {
         assert.equal(
           roleHasPermission({
