@@ -148,10 +148,6 @@ vitest.mock("~/database/db.server", () => ({
       // bookings that already hold this kit, one `createMany` per booking.
       createMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
-      // why: `updateKitAssets` asks whether this kit's existing slices carry
-      // `checkedOutAt` before inheriting CHECKED_OUT onto a new member. Zero
-      // by default so a test must opt in to "the kit really did go out".
-      count: vitest.fn().mockResolvedValue(0),
     },
     // why: the same helper re-opens any `BookingModelRequest` the deleted
     // slice was fulfilling, mirroring `removeAssets`.
@@ -5665,6 +5661,18 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
     vitest.clearAllMocks();
   });
 
+  /** An instant a slice left on, for cases that need a non-null marker. */
+  const WENT_OUT = new Date("2026-08-01T10:00:00.000Z");
+  /** An instant a slice came back on. */
+  const CAME_BACK = new Date("2026-08-02T10:00:00.000Z");
+
+  /** One pre-existing kit slice as the eligibility read sees it. */
+  type PriorSlice = {
+    bookingId: string;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+  };
+
   /**
    * @param existingBookingStatus status of the booking the kit's sitting
    *        member is on, which is what `bookingsToUpdate` is derived from.
@@ -5678,13 +5686,39 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
      * the kit physically went out. A booking can be ONGOING because a
      * different kit was scanned, so the two are independent.
      */
-    kitSlicesWereCheckedOut = true
+    kitSlicesWereCheckedOut = true,
+    options: {
+      /**
+       * Further bookings the sitting member also holds a slice on, so a case
+       * can put this kit on two live bookings at once.
+       */
+      extraBookings?: Array<{ id: string; status: BookingStatus }>;
+      /**
+       * The kit's pre-existing slices, overriding the single slice implied by
+       * `kitSlicesWereCheckedOut`. Lets a case model a kit that only half
+       * left, or one whose members have since come back.
+       */
+      priorSlices?: PriorSlice[];
+    } = {}
   ) {
-    // why: the service counts this kit's checked-out slices to decide whether
-    // a new member inherits CHECKED_OUT. This is the switch between "the kit
-    // really is out" and "the booking is live but this kit never left".
+    const { extraBookings = [], priorSlices } = options;
+
+    // why: the service reads this kit's pre-existing slices to decide, per
+    // booking, whether the whole kit left it. Discriminated on the `select`
+    // because `updateKitAssets` also calls `bookingAsset.findMany` for
+    // detachment impact and planning-booking removal, and those must keep
+    // seeing the empty default — no other call site selects `checkedOutAt`.
+    const slices: PriorSlice[] = priorSlices ?? [
+      {
+        bookingId: "booking-1",
+        checkedOutAt: kitSlicesWereCheckedOut ? WENT_OUT : null,
+        checkedInAt: null,
+      },
+    ];
     //@ts-expect-error missing vitest type
-    db.bookingAsset.count.mockResolvedValue(kitSlicesWereCheckedOut ? 1 : 0);
+    db.bookingAsset.findMany.mockImplementation((args) =>
+      Promise.resolve(args?.select?.checkedOutAt ? slices : [])
+    );
 
     // why: the service locks each live booking row and re-reads its status
     // before trusting it. Set here rather than left to the module-level
@@ -5724,6 +5758,15 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
                 quantity: 1,
                 booking: { id: "booking-1", status: existingBookingStatus },
               },
+              ...extraBookings.map((b) => ({
+                id: `ba-sitting-${b.id}`,
+                bookingId: b.id,
+                assetId: "sitting-member",
+                assetKitId: "ak-sitting",
+                sourceKitId: "kit-1",
+                quantity: 1,
+                booking: { id: b.id, status: b.status },
+              })),
             ],
           },
         },
@@ -5924,21 +5967,81 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
     expect(sliceCheckoutMarkers()).toEqual([]);
   });
 
-  it("counts only slices that are still out when deciding whether the kit vouches", async () => {
-    // A booking stays ONGOING while a different kit is out, so a kit whose
-    // every slice has already come back must not vouch for a new member.
-    arrange(BookingStatus.ONGOING);
+  it("does NOT stamp when every slice of the kit has already come back", async () => {
+    // A booking stays ONGOING while a different kit is still out, so a kit
+    // whose every slice has been returned must not vouch for a new member.
+    arrange(BookingStatus.ONGOING, KitStatus.CHECKED_OUT, true, {
+      priorSlices: [
+        {
+          bookingId: "booking-1",
+          checkedOutAt: WENT_OUT,
+          checkedInAt: CAME_BACK,
+        },
+      ],
+    });
 
     await act();
 
-    expect(db.bookingAsset.count).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          sourceKitId: "kit-1",
-          checkedOutAt: { not: null },
-          checkedInAt: null,
-        }),
-      })
-    );
+    expect(checkedOutStamps()).toEqual([]);
+    expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("marks only the booking this kit actually left, not every live booking", async () => {
+    // Progressive checkout flips a booking to ONGOING on the first scan of
+    // ANYTHING, so a second live booking can hold this kit without it having
+    // left there. Evidence from booking-1 must not vouch for booking-2.
+    arrange(BookingStatus.ONGOING, KitStatus.CHECKED_OUT, true, {
+      extraBookings: [{ id: "booking-2", status: BookingStatus.ONGOING }],
+      priorSlices: [
+        { bookingId: "booking-1", checkedOutAt: WENT_OUT, checkedInAt: null },
+        { bookingId: "booking-2", checkedOutAt: null, checkedInAt: null },
+      ],
+    });
+
+    await act();
+
+    const markers = sliceCheckoutMarkers();
+    expect(markers).toHaveLength(1);
+    expect(markers[0][0].where?.bookingId).toEqual({ in: ["booking-1"] });
+  });
+
+  it("does NOT stamp when the kit only half left the booking", async () => {
+    // Progressive checkout stamps only the slices actually scanned, so a kit
+    // can sit half out on one booking. A member that stayed behind is not
+    // evidence that a newcomer went anywhere.
+    arrange(BookingStatus.ONGOING, KitStatus.CHECKED_OUT, true, {
+      priorSlices: [
+        { bookingId: "booking-1", checkedOutAt: WENT_OUT, checkedInAt: null },
+        { bookingId: "booking-1", checkedOutAt: null, checkedInAt: null },
+      ],
+    });
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
+    expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("DOES stamp when the whole kit left and some members have since returned", async () => {
+    // The disqualifier is "never left", not "not out right now". Check-in
+    // clears `Kit.status` only for a complete kit, so a kit returned member by
+    // member still reads CHECKED_OUT and the picker still promises additions
+    // inherit it. Refusing here would be stricter than the behaviour this
+    // replaces.
+    arrange(BookingStatus.ONGOING, KitStatus.CHECKED_OUT, true, {
+      priorSlices: [
+        {
+          bookingId: "booking-1",
+          checkedOutAt: WENT_OUT,
+          checkedInAt: CAME_BACK,
+        },
+        { bookingId: "booking-1", checkedOutAt: WENT_OUT, checkedInAt: null },
+      ],
+    });
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([["newcomer"]]);
+    expect(sliceCheckoutMarkers()).toHaveLength(1);
   });
 });

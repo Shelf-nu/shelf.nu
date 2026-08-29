@@ -6028,26 +6028,67 @@ export async function updateKitAssets({
           }
 
           if (liveBookingIds.length > 0) {
-            const checkedOutSlices = await tx.bookingAsset.count({
-              where: {
-                bookingId: { in: liveBookingIds },
-                sourceKitId: kit.id,
-                // Out RIGHT NOW, not "went out at some point": a booking stays
-                // ONGOING while other kits are still out, so a kit whose every
-                // slice has already been returned must not vouch for a new
-                // member. Same pair the check-in guard and the
-                // `BookingAsset_bookingId_checkedOutAt_idx` partial index use.
-                checkedOutAt: { not: null },
-                checkedInAt: null,
-                booking: {
-                  status: {
-                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                  },
-                },
-              },
+            /**
+             * The kit's PRE-EXISTING slices on those bookings.
+             *
+             * `thisKitAssetKitIds` is read before the membership transaction,
+             * so it names only memberships that predate this call — and it has
+             * to. The `BookingAsset` rows written above carry this kit's
+             * `sourceKitId` with a NULL `checkedOutAt`, so letting them into
+             * this set would make the "did all of it leave" test below
+             * permanently unsatisfiable.
+             */
+            const preExistingAssetKitIds = [...thisKitAssetKitIds];
+
+            const priorSlices =
+              preExistingAssetKitIds.length > 0
+                ? await tx.bookingAsset.findMany({
+                    where: {
+                      bookingId: { in: liveBookingIds },
+                      // Names this kit's own membership rows, so no separate
+                      // `sourceKitId` filter is needed.
+                      assetKitId: { in: preExistingAssetKitIds },
+                    },
+                    select: {
+                      bookingId: true,
+                      checkedOutAt: true,
+                      checkedInAt: true,
+                    },
+                  })
+                : [];
+
+            /**
+             * A booking earns the stamp on its OWN evidence, and only when the
+             * whole kit left it.
+             *
+             * Per booking, because two live bookings can hold this kit and
+             * disagree: progressive checkout flips a booking to ONGOING on the
+             * first scan of anything, so the second can be live with none of
+             * this kit's slices out. One count across both would let the first
+             * vouch for the second.
+             *
+             * "Every prior slice left" is the other half. Progressive checkout
+             * stamps only the slices actually scanned, so a kit can sit half
+             * out on one booking, and a member that stayed behind is not
+             * evidence that a newcomer went anywhere.
+             *
+             * The disqualifier is `checkedOutAt` NULL — never left — not "not
+             * out right now". Check-in clears `Kit.status` only for a kit whose
+             * every member came back, so a kit returned one member at a time
+             * still reads CHECKED_OUT and the kit picker still promises that
+             * additions inherit that status. Refusing there would be stricter
+             * than the behaviour this replaces.
+             */
+            const eligibleBookingIds = liveBookingIds.filter((bookingId) => {
+              const slices = priorSlices.filter(
+                (s) => s.bookingId === bookingId
+              );
+              if (slices.length === 0) return false;
+              if (slices.some((s) => !s.checkedOutAt)) return false;
+              return slices.some((s) => !s.checkedInAt);
             });
 
-            if (checkedOutSlices > 0) {
+            if (eligibleBookingIds.length > 0) {
               /**
                * The members whose kit-driven slice this call actually wrote.
                *
@@ -6097,9 +6138,9 @@ export async function updateKitAssets({
                  * one did not go out with this kit. Those ids are new, so the
                  * only rows they reach are the ones `createMany` wrote above.
                  *
-                 * Scoped to `liveBookingIds` so a DRAFT or RESERVED booking
-                 * holding the same kit keeps an unmarked slice — nothing has
-                 * physically left for those.
+                 * Scoped to `eligibleBookingIds`, so a booking this kit never
+                 * left — one still in planning, or one that is live for a
+                 * different kit's sake — keeps an unmarked slice.
                  */
                 await tx.bookingAsset.updateMany({
                   // `BookingAsset` carries no organization column; tenancy here
@@ -6107,7 +6148,7 @@ export async function updateKitAssets({
                   // org-scoped slices, the assetKit ids from the org-scoped
                   // membership write above.
                   where: {
-                    bookingId: { in: liveBookingIds },
+                    bookingId: { in: eligibleBookingIds },
                     assetKitId: { in: stampable.map((s) => s.assetKitId) },
                   },
                   data: { checkedOutAt: new Date(), checkedOutById: userId },
