@@ -43,6 +43,7 @@ import {
   getTotalPartialCheckinCount,
   getPartiallyCheckedInAssetIds,
   getKitIdsByAssets,
+  getKitIdsByBookingSlices,
   updateBasicBooking,
   updateBookingAssets,
   buildKitSlicesForBooking,
@@ -12272,6 +12273,162 @@ describe("cancelBooking — handled validation (SHELF-WEBAPP-222)", () => {
     expect(err.additionalData).toMatchObject({
       bookingId: "booking-1",
       status: BookingStatus.COMPLETE,
+    });
+  });
+});
+
+/**
+ * Kit release resolves from the booking's own slices as well as from live
+ * membership.
+ *
+ * Membership alone cannot see a kit whose member was detached while the
+ * booking ran, so nothing releases it and `Kit.status` stays CHECKED_OUT with
+ * nothing out. The booking's rows still remember the kit, so they answer where
+ * membership cannot — and the two are UNIONED, never substituted: a standalone
+ * slice carries no provenance even when its asset is a live kit member.
+ */
+describe("getKitIdsByBookingSlices", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("resolves a kit from sourceKitId with no membership left", async () => {
+    const result = await getKitIdsByBookingSlices({
+      slices: [
+        { assetId: "asset-1", assetKitId: null, sourceKitId: "kit-1" },
+        { assetId: "asset-2", assetKitId: null, sourceKitId: "kit-1" },
+        { assetId: "asset-3", assetKitId: null, sourceKitId: "kit-2" },
+      ],
+      organizationId: "org-1",
+    });
+
+    expect([...result.keys()].sort()).toEqual(["kit-1", "kit-2"]);
+    expect([...(result.get("kit-1") ?? [])].sort()).toEqual([
+      "asset-1",
+      "asset-2",
+    ]);
+    // No legacy rows, so the AssetKit hop is skipped entirely.
+    expect(db.assetKit.findMany).not.toHaveBeenCalled();
+  });
+
+  it("falls back to assetKitId for rows written before sourceKitId existed", async () => {
+    // why: the mocked delegate echoes ids back as `kit-of-<id>`, mirroring the
+    // real `assetKitId -> kitId` lookup this leg performs.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([{ id: "ak-1", kitId: "kit-9" }]);
+
+    const result = await getKitIdsByBookingSlices({
+      slices: [{ assetId: "asset-1", assetKitId: "ak-1", sourceKitId: null }],
+      organizationId: "org-1",
+    });
+
+    expect([...result.keys()]).toEqual(["kit-9"]);
+    // Org-scoped, so the lookup cannot reach another workspace's memberships.
+    expect(db.assetKit.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
+      select: { id: true, kitId: true },
+    });
+  });
+
+  it("ignores a standalone slice, which carries no kit provenance", async () => {
+    const result = await getKitIdsByBookingSlices({
+      slices: [{ assetId: "asset-1", assetKitId: null, sourceKitId: null }],
+      organizationId: "org-1",
+    });
+
+    expect(result.size).toBe(0);
+  });
+
+  it("resolves nothing rather than throwing when a membership has vanished", async () => {
+    // A concurrent detach legitimately removes the row between the two reads.
+    // That means "no kit to release", never "reject the check-in".
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([]);
+
+    const result = await getKitIdsByBookingSlices({
+      slices: [{ assetId: "asset-1", assetKitId: "ak-gone", sourceKitId: null }],
+      organizationId: "org-1",
+    });
+
+    expect(result.size).toBe(0);
+  });
+
+  it("prefers sourceKitId and skips the lookup when every row carries it", async () => {
+    const result = await getKitIdsByBookingSlices({
+      slices: [
+        { assetId: "asset-1", assetKitId: "ak-stale", sourceKitId: "kit-1" },
+      ],
+      organizationId: "org-1",
+    });
+
+    expect([...result.keys()]).toEqual(["kit-1"]);
+    expect(db.assetKit.findMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A kit whose members were detached while the booking ran is still released.
+ *
+ * The detach leaves the slices on the booking with their kit provenance
+ * intact, but the assets themselves no longer name the kit — so membership
+ * alone resolves nothing and the kit keeps reading CHECKED_OUT after the
+ * booking ends. A kit in that state cannot be added to a live booking and has
+ * no way out of the UI.
+ */
+describe("checkinBooking - releases a kit detached mid-booking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("releases the kit from slice provenance when membership is gone", async () => {
+    expect.assertions(1);
+
+    // why: the slices still carry `sourceKitId`, but `assetKits` is empty —
+    // exactly what a mid-booking detach leaves behind. Membership-based
+    // resolution finds no kit here, so nothing would release it.
+    const detachedKitBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-detached",
+          assetKitId: null,
+          sourceKitId: "kit-1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(detachedKitBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...detachedKitBooking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    await checkinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      hints: mockClientHints,
+    });
+
+    expect(db.kit.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["kit-1"] }, organizationId: "org-1" },
+      data: { status: KitStatus.AVAILABLE },
     });
   });
 });

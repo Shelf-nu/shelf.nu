@@ -4394,6 +4394,11 @@ export async function checkinBooking({
               id: true,
               assetId: true,
               quantity: true,
+              // Kit provenance: which kit this slice came from, which survives
+              // the member being detached from the kit mid-booking. Required by
+              // `getKitIdsByBookingSlices`, so dropping either is a type error.
+              assetKitId: true,
+              sourceKitId: true,
               asset: {
                 select: {
                   id: true,
@@ -4452,7 +4457,24 @@ export async function checkinBooking({
     /** Map bookingAssets to flat asset array for downstream logic */
     const bookingFoundAssets = bookingFound.bookingAssets.map((ba) => ba.asset);
 
-    const kitIds = getKitIdsByAssets(bookingFoundAssets);
+    /**
+     * Kits to release, from BOTH directions.
+     *
+     * Live membership alone misses a kit whose member was detached while the
+     * booking ran; the booking's own slices alone miss a kit reached through a
+     * standalone row, which carries no provenance. A kit released redundantly
+     * is a no-op write; a kit missed stays stuck with no way out of the UI.
+     */
+    const sliceKitAssetIds = await getKitIdsByBookingSlices({
+      slices: bookingFound.bookingAssets,
+      organizationId,
+    });
+    const kitIds = [
+      ...new Set([
+        ...getKitIdsByAssets(bookingFoundAssets),
+        ...sliceKitAssetIds.keys(),
+      ]),
+    ];
     const hasKits = kitIds.length > 0;
 
     const isEarlyCheckin = isBookingEarlyCheckin(bookingFound.to!);
@@ -4573,8 +4595,13 @@ export async function checkinBooking({
     const assetsToCheckinSet = new Set(assetsToCheckin);
     const kitsToCheckin = hasKits
       ? kitIds.filter((kitId) => {
+          // Same union as the resolution above. Filtering on membership alone
+          // yields [] for a kit reached only through provenance, and `.every()`
+          // on [] is vacuously true — which would release it unconditionally.
           const kitAssetsInBooking = bookingFoundAssets.filter(
-            (asset) => asset.assetKits?.[0]?.kitId === kitId
+            (asset) =>
+              sliceKitAssetIds.get(kitId)?.has(asset.id) ||
+              asset.assetKits?.[0]?.kitId === kitId
           );
           return kitAssetsInBooking.every(
             (asset) =>
@@ -6094,18 +6121,55 @@ export async function partialCheckinBooking({
     const assetsBeingCheckedIn = bookingFoundAssets.filter((a) =>
       effectiveAssetIds.includes(a.id)
     );
-    const kitIdsBeingCheckedIn = getKitIdsByAssets(assetsBeingCheckedIn);
+    /**
+     * Kits touched by this session, from live membership AND from the
+     * booking's own slices. See `getKitIdsByBookingSlices` for why both.
+     */
+    const sliceKitAssetIds = await getKitIdsByBookingSlices({
+      slices: bookingFound.bookingAssets,
+      organizationId,
+    });
+    const beingCheckedInIds = new Set(assetsBeingCheckedIn.map((a) => a.id));
+    const kitIdsBeingCheckedIn = [
+      ...new Set([
+        ...getKitIdsByAssets(assetsBeingCheckedIn),
+        ...[...sliceKitAssetIds.entries()]
+          .filter(([, assetIds]) =>
+            [...assetIds].some((assetId) => beingCheckedInIds.has(assetId))
+          )
+          .map(([kitId]) => kitId),
+      ]),
+    ];
+
+    /**
+     * Slices still owed back on this booking. A kit is complete when this
+     * session accounts for every one of them, so slices reconciled by an
+     * earlier session must not keep the kit permanently short.
+     */
+    const outstandingAssetIds = new Set(
+      bookingFound.bookingAssets
+        .filter((ba) => ba.checkedInAt === null)
+        .map((ba) => ba.assetId)
+    );
+
+    const belongsToKit = (assetId: string, kitId: string, kitOfAsset?: string) =>
+      sliceKitAssetIds.get(kitId)?.has(assetId) || kitOfAsset === kitId;
 
     const completeKitIds: string[] = [];
     for (const kitId of kitIdsBeingCheckedIn) {
       const kitAssetsInBooking = bookingFoundAssets.filter(
-        (a) => a.assetKits?.[0]?.kitId === kitId
+        (a) =>
+          belongsToKit(a.id, kitId, a.assetKits?.[0]?.kitId) &&
+          outstandingAssetIds.has(a.id)
       );
-      const kitAssetsBeingCheckedIn = assetsBeingCheckedIn.filter(
-        (a) => a.assetKits?.[0]?.kitId === kitId
+      const kitAssetsBeingCheckedIn = assetsBeingCheckedIn.filter((a) =>
+        belongsToKit(a.id, kitId, a.assetKits?.[0]?.kitId)
       );
 
-      if (kitAssetsInBooking.length === kitAssetsBeingCheckedIn.length) {
+      if (
+        kitAssetsInBooking.length > 0 &&
+        kitAssetsInBooking.length === kitAssetsBeingCheckedIn.length
+      ) {
         completeKitIds.push(kitId);
       }
     }
@@ -9549,7 +9613,20 @@ export async function cancelBooking({
       });
     }
 
-    const kitIds = getKitIdsByAssets(cancelAssets);
+    /**
+     * Kits to release, from live membership AND the booking's own slices.
+     * A kit released redundantly is a no-op write; a kit missed stays stuck.
+     */
+    const cancelSliceKitIds = await getKitIdsByBookingSlices({
+      slices: bookingFound.bookingAssets,
+      organizationId,
+    });
+    const kitIds = [
+      ...new Set([
+        ...getKitIdsByAssets(cancelAssets),
+        ...cancelSliceKitIds.keys(),
+      ]),
+    ];
     const hasKits = kitIds.length > 0;
 
     const booking = await db.$transaction(async (tx) => {
@@ -11399,10 +11476,20 @@ export async function deleteBooking(
 
     const activeBookingAssets =
       activeBooking?.bookingAssets.map((ba) => ba.asset) ?? [];
-    const assetKitIds = activeBookingAssets
-      .map((a) => a.assetKits?.[0]?.kitId)
-      .filter((id): id is string => Boolean(id));
-    const uniqueKitIds = new Set(assetKitIds);
+    /**
+     * Kits to release, from live membership AND the booking's own slices.
+     * A kit released redundantly is a no-op write; a kit missed stays stuck.
+     */
+    const deleteSliceKitIds = activeBooking
+      ? await getKitIdsByBookingSlices({
+          slices: activeBooking.bookingAssets,
+          organizationId,
+        })
+      : new Map<string, Set<string>>();
+    const uniqueKitIds = new Set([
+      ...getKitIdsByAssets(activeBookingAssets),
+      ...deleteSliceKitIds.keys(),
+    ]);
     const hasKits = uniqueKitIds.size > 0;
 
     // Capture the active asset IDs BEFORE entering the tx: `Booking.delete`
@@ -12042,6 +12129,92 @@ export function getKitIdsByAssets(assets: AssetWithKitId[]) {
   return [...uniqueKitIds];
 }
 
+/**
+ * One `BookingAsset` row's kit provenance.
+ *
+ * Both provenance fields are REQUIRED, deliberately. `getKitIdsByAssets` above
+ * tolerates an unprojected relation with a defensive `?.`, which lets a narrow
+ * `select` resolve silently to zero kits. Here that silence is the failure mode
+ * being designed out: with required props, a caller that forgets to project
+ * them is a type error rather than a no-op that leaves a kit stuck.
+ */
+type BookingSliceKitProvenance = {
+  assetId: string;
+  assetKitId: string | null;
+  sourceKitId: string | null;
+};
+
+/**
+ * Release-path sibling of {@link getKitIdsByAssets}: resolves kits from the
+ * BOOKING's own rows rather than from the assets' current membership.
+ *
+ * A kit whose member was detached while the booking was live is invisible to
+ * membership-based resolution, so nothing releases it and `Kit.status` stays
+ * CHECKED_OUT with nothing out. The booking's rows still remember which kit the
+ * slice came from, so they can answer where membership cannot.
+ *
+ * Two legs, mirroring {@link computeBookingKitDrift}: `sourceKitId` is the
+ * durable pointer that survives the detach, and `assetKitId` resolved through
+ * `AssetKit` is the legacy fallback. Keep both. The
+ * "assetKitId non-null implies sourceKitId non-null" invariant is enforced by
+ * code alone with no CHECK constraint, and the migration lands before the code,
+ * so a rolling deploy can still write a kit-driven row with a NULL
+ * `sourceKitId`.
+ *
+ * Returns kit id to the asset ids this booking took from that kit, because the
+ * completeness gates that consume it filter at that grain.
+ *
+ * @param client Pass the active `tx` if ever called inside a transaction. Every
+ *               caller today resolves before opening one.
+ *
+ * ALWAYS UNION the result with {@link getKitIdsByAssets}, never substitute it.
+ * A standalone slice carries no provenance by design even when its asset is a
+ * live kit member, and the acquire paths stamp that kit CHECKED_OUT from
+ * membership — so provenance alone would leave exactly those kits stuck.
+ * Never use on an acquire path: it names kits the asset has already left.
+ */
+export async function getKitIdsByBookingSlices({
+  slices,
+  organizationId,
+  client = db,
+}: {
+  slices: BookingSliceKitProvenance[];
+  organizationId: Organization["id"];
+  client?: Pick<typeof db, "assetKit">;
+}): Promise<Map<string, Set<string>>> {
+  // Truthiness rather than `!== null`: test fixtures hand us rows whose
+  // provenance columns are absent entirely, and `undefined !== null` is true.
+  const legacyAssetKitIds = slices
+    .filter((s) => !s.sourceKitId && Boolean(s.assetKitId))
+    .map((s) => s.assetKitId as string);
+
+  let kitIdByAssetKitId = new Map<string, string>();
+  if (legacyAssetKitIds.length > 0) {
+    // Deliberately not `assertAssetKitsBelongToOrg`: that throws a 400 when a
+    // row is missing, and a concurrent detach makes a row legitimately vanish
+    // between these two reads — the very operation this resolver exists for.
+    // A missing row means "no kit to release", not "reject the check-in".
+    const rows = await client.assetKit.findMany({
+      where: { id: { in: legacyAssetKitIds }, organizationId },
+      select: { id: true, kitId: true },
+    });
+    kitIdByAssetKitId = new Map(rows.map((r) => [r.id, r.kitId]));
+  }
+
+  const assetIdsByKitId = new Map<string, Set<string>>();
+  for (const slice of slices) {
+    const kitId =
+      slice.sourceKitId ??
+      (slice.assetKitId ? kitIdByAssetKitId.get(slice.assetKitId) : undefined);
+    if (!kitId) continue;
+    const bucket = assetIdsByKitId.get(kitId) ?? new Set<string>();
+    bucket.add(slice.assetId);
+    assetIdsByKitId.set(kitId, bucket);
+  }
+
+  return assetIdsByKitId;
+}
+
 export async function getBookingFlags(
   booking: Pick<Booking, "id" | "from" | "to"> & {
     assetIds: Asset["id"][];
@@ -12250,6 +12423,15 @@ export async function bulkDeleteBookings({
       (booking) => booking.status === "OVERDUE" || booking.status === "ONGOING"
     );
 
+    /**
+     * Resolved before the transaction opens: the legacy provenance hop is a
+     * read, and holding a transaction open across it buys nothing.
+     */
+    const bulkDeleteSliceKitIds = await getKitIdsByBookingSlices({
+      slices: overdueOrOngoingBookings.flatMap((b) => b.bookingAssets),
+      organizationId,
+    });
+
     /** We have to cancel scheduler for the bookings */
     const bookingsWithSchedulerReference = bookings.filter(
       (booking) => !!booking.activeSchedulerReference
@@ -12270,11 +12452,12 @@ export async function bulkDeleteBookings({
           booking.bookingAssets.map((ba) => ba.asset)
         );
 
-        const allKitIds = allAssets
-          .map((asset) => asset.assetKits?.[0]?.kitId)
-          .filter((id): id is string => Boolean(id));
-
-        const uniqueKitIds = new Set(allKitIds);
+        // Union of live membership and booking-slice provenance — a kit whose
+        // member was detached mid-booking is invisible to membership alone.
+        const uniqueKitIds = new Set([
+          ...getKitIdsByAssets(allAssets),
+          ...bulkDeleteSliceKitIds.keys(),
+        ]);
 
         await tx.asset.updateMany({
           where: {
@@ -12657,6 +12840,15 @@ export async function bulkCancelBookings({
       (b) => b.status === "ONGOING" || b.status === "OVERDUE"
     );
 
+    /**
+     * Resolved before the transaction opens: the legacy provenance hop is a
+     * read, and holding a transaction open across it buys nothing.
+     */
+    const bulkCancelSliceKitIds = await getKitIdsByBookingSlices({
+      slices: ongoingOrOverdueBookings.flatMap((b) => b.bookingAssets),
+      organizationId,
+    });
+
     /** We have to cancel scheduler for the bookings */
     const bookingsWithSchedulerReference = bookings.filter(
       (booking) => !!booking.activeSchedulerReference
@@ -12674,11 +12866,12 @@ export async function bulkCancelBookings({
         const allAssets = ongoingOrOverdueBookings.flatMap((b) =>
           b.bookingAssets.map((ba) => ba.asset)
         );
-        const allKitIds = allAssets
-          .map((a) => a.assetKits?.[0]?.kitId)
-          .filter((id): id is string => Boolean(id));
-
-        const uniqueKitIds = new Set(allKitIds);
+        // Union of live membership and booking-slice provenance — a kit whose
+        // member was detached mid-booking is invisible to membership alone.
+        const uniqueKitIds = new Set([
+          ...getKitIdsByAssets(allAssets),
+          ...bulkCancelSliceKitIds.keys(),
+        ]);
 
         /** Making assets available */
         await tx.asset.updateMany({
