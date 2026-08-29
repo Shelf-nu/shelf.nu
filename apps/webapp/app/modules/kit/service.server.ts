@@ -97,6 +97,7 @@ import {
 } from "../asset/utils.server";
 import type { AllowedCustodianFilterIds } from "../asset/utils.server";
 import { PLANNING_BOOKING_STATUSES } from "../booking/constants";
+import { lockBookingForStatusCheck } from "../booking/utils.server";
 import {
   createSystemBookingNote,
   createSystemBookingNotes,
@@ -5970,7 +5971,7 @@ export async function updateKitAssets({
           }
 
           /**
-           * Did THIS kit physically leave on one of those bookings?
+           * Is THIS kit out right now on one of those bookings?
            *
            * A booking's own status cannot answer that. Progressive checkout
            * flips a booking to ONGOING on the first scan, so a booking can be
@@ -5986,36 +5987,132 @@ export async function updateKitAssets({
            * completing concurrently cannot leave us stamping against a booking
            * that has since finished.
            */
-          const liveBookingIds = bookingsToUpdate
+          const candidateBookingIds = bookingsToUpdate
             .filter((b) => b.status === "ONGOING" || b.status === "OVERDUE")
-            .map((b) => b.id);
+            .map((b) => b.id)
+            // Sorted so concurrent callers take the locks below in the same
+            // order and cannot deadlock against one another.
+            .sort();
+
+          /**
+           * Re-read those bookings under a row lock before trusting the status.
+           *
+           * `bookingsToUpdate` carries the status read at the top of this
+           * function — outside any transaction, and potentially seconds ago —
+           * so a check-in that has since completed still reads as ONGOING
+           * here. A plain re-read inside the transaction narrows that window;
+           * only the lock closes it. See `lockBookingForStatusCheck`.
+           *
+           * Sequential, not `Promise.all`: an interactive transaction runs on a
+           * single connection. The set is the bookings holding this kit, small.
+           *
+           * This does not make the stamp race-free by itself, and is not meant
+           * to. `checkinBooking` computes which assets to release BEFORE
+           * opening its own transaction, so a check-in already in flight never
+           * sees a member added after that read. Closing the remaining half
+           * belongs in the check-in path, not here.
+           */
+          const liveBookingIds: string[] = [];
+          for (const bookingId of candidateBookingIds) {
+            const currentStatus = await lockBookingForStatusCheck(
+              tx,
+              bookingId,
+              organizationId
+            );
+            if (
+              currentStatus === BookingStatus.ONGOING ||
+              currentStatus === BookingStatus.OVERDUE
+            ) {
+              liveBookingIds.push(bookingId);
+            }
+          }
 
           if (liveBookingIds.length > 0) {
             const checkedOutSlices = await tx.bookingAsset.count({
               where: {
                 bookingId: { in: liveBookingIds },
                 sourceKitId: kit.id,
+                // Out RIGHT NOW, not "went out at some point": a booking stays
+                // ONGOING while other kits are still out, so a kit whose every
+                // slice has already been returned must not vouch for a new
+                // member. Same pair the check-in guard and the
+                // `BookingAsset_bookingId_checkedOutAt_idx` partial index use.
                 checkedOutAt: { not: null },
+                checkedInAt: null,
                 booking: {
-                  status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+                  status: {
+                    in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
+                  },
                 },
               },
             });
 
             if (checkedOutSlices > 0) {
-              const assetIdsToStamp = newlyAddedAssets.map((a) => a.id);
-
               /**
-               * Written in the SAME transaction as the count above and the
-               * rows below it, so the evidence the stamp rests on and the
-               * stamp itself commit together. Outside the tx they could
-               * disagree: a check-in committing in between would release the
-               * kit's other slices and leave this one stamped against nothing.
+               * The members whose kit-driven slice this call actually wrote.
+               *
+               * An asset with no resolved `AssetKit` fell back to a standalone
+               * row above, which `skipDuplicates` may have dropped against one
+               * that already existed — so there is no slice this call can
+               * prove it created. Stamping its status anyway would mint the
+               * status-without-a-marker state the pair below exists to avoid.
+               * Same scoping as `propagatedEvents`, for the same reason.
                */
-              await tx.asset.updateMany({
-                where: { id: { in: assetIdsToStamp }, organizationId },
-                data: { status: AssetStatus.CHECKED_OUT },
+              const stampable = newlyAddedAssets.flatMap((a) => {
+                const ak = akByAssetId.get(a.id);
+                return ak ? [{ assetId: a.id, assetKitId: ak.id }] : [];
               });
+
+              if (stampable.length > 0) {
+                /**
+                 * Status and slice marker are written together, in the SAME
+                 * transaction as the count they rest on.
+                 *
+                 * `Asset.status` alone says the member is out; only
+                 * `BookingAsset.checkedOutAt` says which booking it went out
+                 * ON, and that is what the check-in guard reads to decide
+                 * eligibility. A member handed the status without the marker
+                 * is refused at the scanner with "Cannot check in assets that
+                 * were never checked out" — every path that sends an asset out
+                 * maintains both, per
+                 * `.claude/rules/booking-checkout-is-recorded-per-slice.md`.
+                 *
+                 * Outside the tx the two could disagree with the evidence they
+                 * rest on: a check-in committing in between would release the
+                 * kit's other slices and leave these stamped against nothing.
+                 */
+                await tx.asset.updateMany({
+                  where: {
+                    id: { in: stampable.map((s) => s.assetId) },
+                    organizationId,
+                  },
+                  data: { status: AssetStatus.CHECKED_OUT },
+                });
+
+                /**
+                 * Keyed on the `AssetKit` ids the membership write just
+                 * created, never on `assetId`: a member can hold a standalone
+                 * slice on the same booking alongside its kit-driven one (the
+                 * two partial uniques allow exactly that), and the standalone
+                 * one did not go out with this kit. Those ids are new, so the
+                 * only rows they reach are the ones `createMany` wrote above.
+                 *
+                 * Scoped to `liveBookingIds` so a DRAFT or RESERVED booking
+                 * holding the same kit keeps an unmarked slice — nothing has
+                 * physically left for those.
+                 */
+                await tx.bookingAsset.updateMany({
+                  // `BookingAsset` carries no organization column; tenancy here
+                  // comes from both keys — the booking ids from this kit's own
+                  // org-scoped slices, the assetKit ids from the org-scoped
+                  // membership write above.
+                  where: {
+                    bookingId: { in: liveBookingIds },
+                    assetKitId: { in: stampable.map((s) => s.assetKitId) },
+                  },
+                  data: { checkedOutAt: new Date(), checkedOutById: userId },
+                });
+              }
             }
           }
         });

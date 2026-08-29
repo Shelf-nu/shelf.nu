@@ -43,6 +43,12 @@ import { getQr } from "../qr/service.server";
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    // why: `updateKitAssets` locks each live booking row via
+    // `lockBookingForStatusCheck` before trusting the status it read outside
+    // the transaction. Answers "still ONGOING" by default so the existing
+    // cases keep their arranged booking state; a test overrides it to model a
+    // check-in that committed first.
+    $queryRaw: vitest.fn().mockResolvedValue([{ status: "ONGOING" }]),
     kit: {
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
@@ -5680,6 +5686,13 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
     //@ts-expect-error missing vitest type
     db.bookingAsset.count.mockResolvedValue(kitSlicesWereCheckedOut ? 1 : 0);
 
+    // why: the service locks each live booking row and re-reads its status
+    // before trusting it. Set here rather than left to the module-level
+    // default because `clearAllMocks` does not restore implementations, so an
+    // override in one case would otherwise leak into the next.
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: existingBookingStatus }]);
+
     // why: `updateKitAssets` reads the kit with its members and their booking
     // rows in one go; this is the persisted state each case is arranged around
     // (the kit's own flag, and the booking its sitting member sits on).
@@ -5831,5 +5844,101 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
       where: { id: { in: ["newcomer"] }, organizationId: "org-1" },
       data: { status: AssetStatus.CHECKED_OUT },
     });
+  });
+
+  /**
+   * Slice checkout markers written by this call. Filtered on
+   * `data.checkedOutAt` because `updateKitAssets` also runs
+   * `bookingAsset.updateMany` to sync kit slice quantity edits.
+   */
+  function sliceCheckoutMarkers() {
+    return (
+      db.bookingAsset.updateMany as unknown as {
+        mock: {
+          calls: Array<
+            [
+              {
+                where?: {
+                  bookingId?: { in?: string[] };
+                  assetKitId?: { in?: string[] };
+                };
+                data?: { checkedOutAt?: Date; checkedOutById?: string };
+              },
+            ]
+          >;
+        };
+      }
+    ).mock.calls.filter((c) => c[0]?.data?.checkedOutAt !== undefined);
+  }
+
+  it("marks the newcomer's kit slice checked out alongside the status stamp", async () => {
+    // The two travel together. `Asset.status` says the member is out;
+    // `BookingAsset.checkedOutAt` says which booking it went out ON, and that
+    // is what the check-in guard reads. A status without a marker is refused
+    // at the scanner with "Cannot check in assets that were never checked out".
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    const markers = sliceCheckoutMarkers();
+    expect(markers).toHaveLength(1);
+    // Keyed on the brand-new AssetKit id, never on assetId: a member can hold
+    // a standalone slice on the same booking that did not go out with the kit.
+    expect(markers[0][0].where).toEqual({
+      bookingId: { in: ["booking-1"] },
+      assetKitId: { in: ["ak-newcomer"] },
+    });
+    expect(markers[0][0].data?.checkedOutById).toBe("user-1");
+    expect(markers[0][0].data?.checkedOutAt).toBeInstanceOf(Date);
+  });
+
+  it("writes no slice marker when the kit's flag is stale and nothing is out", async () => {
+    arrange(BookingStatus.COMPLETE);
+
+    await act();
+
+    expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("writes no slice marker for a booking that has not started", async () => {
+    // A DRAFT booking still gains the row, but nothing has physically left, so
+    // the slice must stay unmarked.
+    arrange(BookingStatus.DRAFT);
+
+    await act();
+
+    expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("does NOT stamp when the booking completed between the status read and the write", async () => {
+    // `bookingsToUpdate` carries a status read at the top of the function,
+    // outside any transaction. The locked re-read is what catches a check-in
+    // that committed in between.
+    arrange(BookingStatus.ONGOING);
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: BookingStatus.COMPLETE }]);
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
+    expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("counts only slices that are still out when deciding whether the kit vouches", async () => {
+    // A booking stays ONGOING while a different kit is out, so a kit whose
+    // every slice has already come back must not vouch for a new member.
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    expect(db.bookingAsset.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sourceKitId: "kit-1",
+          checkedOutAt: { not: null },
+          checkedInAt: null,
+        }),
+      })
+    );
   });
 });
