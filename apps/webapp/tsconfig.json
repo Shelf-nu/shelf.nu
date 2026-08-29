@@ -21,6 +21,7 @@
       "@mocks": ["./test/mocks"],
       "@helpers/*": ["./test/helpers/*"],
       "@helpers": ["./test/helpers"],
+      "@tooling/*": ["./test/tooling/*"],
       "@server/*": ["./server/*"]
     },
     "skipLibCheck": true,

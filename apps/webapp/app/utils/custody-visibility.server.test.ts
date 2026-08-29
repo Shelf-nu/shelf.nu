@@ -14,8 +14,12 @@
  * @see {@link file://./permissions/custody-and-bookings-permissions.validator.client.ts}
  */
 import { describe, expect, it } from "vitest";
+import type { BookingLite } from "~/modules/asset/advanced-index/types";
 
-import { redactCustodianForViewer } from "./custody-visibility.server";
+import {
+  redactBookingsForViewer,
+  redactCustodianForViewer,
+} from "./custody-visibility.server";
 
 const VIEWER = "user-viewer";
 const COLLEAGUE = "user-colleague";
@@ -321,5 +325,172 @@ describe("redactCustodianForViewer — booking-derived custody", () => {
     ).toBeNull();
     expect(JSON.stringify(row)).not.toContain("Colleague Name");
     expect(JSON.stringify(row)).not.toContain("someone-else");
+  });
+});
+
+describe("redactBookingsForViewer", () => {
+  /** One `BookingLite` entry, held by whichever of the two custodian shapes
+   * the caller supplies (never both — a real booking has only one). */
+  function bookingHeldBy({
+    custodianUserId,
+    custodianTeamMemberUserId,
+  }: {
+    custodianUserId?: string;
+    custodianTeamMemberUserId?: string;
+  }): BookingLite {
+    return {
+      id: "booking-1",
+      name: "Weekend Shoot",
+      description: null,
+      status: "RESERVED",
+      from: "2026-09-01T10:00:00+00:00",
+      to: "2026-09-02T10:00:00+00:00",
+      tags: [{ id: "tag-1", name: "Outdoor" }],
+      custodianTeamMember: custodianTeamMemberUserId
+        ? {
+            id: "tm-colleague",
+            name: "Colleague Name",
+            user: {
+              id: custodianTeamMemberUserId,
+              firstName: "Colleague",
+              lastName: "Person",
+              displayName: null,
+              profilePicture: null,
+            },
+          }
+        : null,
+      custodianUser: custodianUserId
+        ? {
+            id: custodianUserId,
+            firstName: "Colleague",
+            lastName: "Person",
+            displayName: null,
+            profilePicture: null,
+          }
+        : null,
+      creator: {
+        id: "creator-1",
+        firstName: "Creator",
+        lastName: "Person",
+        displayName: null,
+        profilePicture: null,
+      },
+      assetKitId: null,
+      quantity: 1,
+      kitName: null,
+    };
+  }
+
+  it("leaves bookings untouched when the viewer may see all custody", () => {
+    const bookings = [bookingHeldBy({ custodianUserId: "someone-else" })];
+
+    const out = redactBookingsForViewer(bookings, {
+      canSeeAllCustody: true,
+      userId: "me",
+    });
+
+    expect(out).toBe(bookings);
+  });
+
+  it("redacts a colleague's custodianUser for a restricted viewer", () => {
+    const bookings = [bookingHeldBy({ custodianUserId: "someone-else" })];
+
+    const [out] = redactBookingsForViewer(bookings, {
+      canSeeAllCustody: false,
+      userId: "me",
+    });
+
+    expect(out.custodianUser).toBeNull();
+    expect(JSON.stringify(out)).not.toContain("someone-else");
+  });
+
+  it("redacts a colleague's custodianTeamMember, clearing id, name, and user", () => {
+    const bookings = [
+      bookingHeldBy({ custodianTeamMemberUserId: "someone-else" }),
+    ];
+
+    const [out] = redactBookingsForViewer(bookings, {
+      canSeeAllCustody: false,
+      userId: "me",
+    });
+
+    // Every identifying field is cleared — including the opaque `id`, which
+    // still correlates the row to one holder. The object is kept (its presence
+    // signals "a private custodian exists"), but `id` becomes "" rather than
+    // leaking the real team-member id.
+    expect(out.custodianTeamMember?.id).toBe("");
+    expect(out.custodianTeamMember?.name).toBe("");
+    expect(out.custodianTeamMember?.user).toBeNull();
+    expect(JSON.stringify(out)).not.toContain("Colleague Name");
+    expect(JSON.stringify(out)).not.toContain("tm-colleague");
+    expect(JSON.stringify(out)).not.toContain("someone-else");
+  });
+
+  it("keeps a booking the viewer holds themselves via custodianUser", () => {
+    const bookings = [bookingHeldBy({ custodianUserId: "me" })];
+
+    const [out] = redactBookingsForViewer(bookings, {
+      canSeeAllCustody: false,
+      userId: "me",
+    });
+
+    expect(out.custodianUser?.id).toBe("me");
+  });
+
+  it("keeps a booking the viewer holds themselves via custodianTeamMember", () => {
+    const bookings = [bookingHeldBy({ custodianTeamMemberUserId: "me" })];
+
+    const [out] = redactBookingsForViewer(bookings, {
+      canSeeAllCustody: false,
+      userId: "me",
+    });
+
+    expect(out.custodianTeamMember?.name).toBe("Colleague Name");
+    expect(out.custodianTeamMember?.user?.id).toBe("me");
+  });
+
+  it("never redacts the creator, even when the custodian is redacted", () => {
+    const bookings = [bookingHeldBy({ custodianUserId: "someone-else" })];
+
+    const [out] = redactBookingsForViewer(bookings, {
+      canSeeAllCustody: false,
+      userId: "me",
+    });
+
+    expect(out.creator?.firstName).toBe("Creator");
+  });
+
+  it("never redacts tags", () => {
+    const bookings = [bookingHeldBy({ custodianUserId: "someone-else" })];
+
+    const [out] = redactBookingsForViewer(bookings, {
+      canSeeAllCustody: false,
+      userId: "me",
+    });
+
+    expect(out.tags).toEqual([{ id: "tag-1", name: "Outdoor" }]);
+  });
+
+  it("leaves a booking with no custodian at all untouched", () => {
+    const bookings = [bookingHeldBy({})];
+
+    const [out] = redactBookingsForViewer(bookings, {
+      canSeeAllCustody: false,
+      userId: "me",
+    });
+
+    expect(out.custodianTeamMember).toBeNull();
+    expect(out.custodianUser).toBeNull();
+  });
+
+  it("does not mutate the caller's array or entries", () => {
+    const bookings = [bookingHeldBy({ custodianUserId: "someone-else" })];
+
+    redactBookingsForViewer(bookings, {
+      canSeeAllCustody: false,
+      userId: "me",
+    });
+
+    expect(bookings[0].custodianUser?.id).toBe("someone-else");
   });
 });
