@@ -5897,25 +5897,26 @@ export async function updateKitAssets({
        * against an existing one, and claiming an add that did not happen would
        * make the trail lie.
        */
-      const propagatedEvents = bookingsToUpdate.flatMap((booking) =>
-        newlyAddedAssets.flatMap((asset) => {
-          const ak = akByAssetId.get(asset.id);
-          if (!ak) return [];
-          return [
-            {
-              organizationId,
-              actorUserId: userId,
-              action: "BOOKING_ASSETS_ADDED" as const,
-              entityType: "BOOKING" as const,
-              entityId: booking.id,
-              bookingId: booking.id,
-              assetId: asset.id,
-              kitId: kit.id,
-              meta: assetQtyMeta(asset, ak.quantity),
-            },
-          ];
-        })
-      );
+      const buildPropagatedEvents = (bookings: typeof bookingsToUpdate) =>
+        bookings.flatMap((booking) =>
+          newlyAddedAssets.flatMap((asset) => {
+            const ak = akByAssetId.get(asset.id);
+            if (!ak) return [];
+            return [
+              {
+                organizationId,
+                actorUserId: userId,
+                action: "BOOKING_ASSETS_ADDED" as const,
+                entityType: "BOOKING" as const,
+                entityId: booking.id,
+                bookingId: booking.id,
+                assetId: asset.id,
+                kitId: kit.id,
+                meta: assetQtyMeta(asset, ak.quantity),
+              },
+            ];
+          })
+        );
 
       /**
        * Propagated rows and their events commit together.
@@ -5946,7 +5947,79 @@ export async function updateKitAssets({
        */
       if (newlyAddedAssets.length > 0) {
         await db.$transaction(async (tx) => {
-          for (const booking of bookingsToUpdate) {
+          /**
+           * Which of those bookings is live, under a row lock, BEFORE anything
+           * in this transaction writes to them.
+           *
+           * `bookingsToUpdate` carries the status read at the top of this
+           * function — outside any transaction, and potentially seconds ago —
+           * so a check-in that has since completed still reads as ONGOING
+           * here. A plain re-read inside the transaction narrows that window;
+           * only the lock closes it. See `lockBookingForStatusCheck`.
+           *
+           * The lock has to come first, and the whole transaction has to be
+           * ordered around that. Inserting a `BookingAsset` row makes Postgres
+           * take FOR KEY SHARE on the parent `Booking` row to validate the
+           * foreign key, and FOR KEY SHARE is a SHARED mode: two callers can
+           * hold it on the same row at once. If either then asks for FOR
+           * UPDATE, which conflicts with it, each waits on the other's share
+           * and Postgres aborts one with a deadlock. Sorting cannot help — the
+           * two sides are contending for a single row, in identical order.
+           * Taking the strongest lock first means nothing is ever upgraded.
+           * `updateBookingAssets` and the scan-add path order themselves the
+           * same way.
+           *
+           * Sorted so concurrent callers take the locks in the same order and
+           * cannot deadlock across two different bookings.
+           *
+           * Sequential, not `Promise.all`: an interactive transaction runs on a
+           * single connection. The set is the bookings holding this kit, small.
+           *
+           * This does not make the stamp race-free by itself, and is not meant
+           * to. `checkinBooking` computes which assets to release BEFORE
+           * opening its own transaction, so a check-in already in flight never
+           * sees a member added after that read. Closing the remaining half
+           * belongs in the check-in path, not here.
+           */
+          const candidateBookingIds = bookingsToUpdate
+            .filter((b) => b.status === "ONGOING" || b.status === "OVERDUE")
+            .map((b) => b.id)
+            .sort();
+
+          const liveBookingIds: string[] = [];
+          for (const bookingId of candidateBookingIds) {
+            const currentStatus = await lockBookingForStatusCheck(
+              tx,
+              bookingId,
+              organizationId
+            );
+            if (
+              currentStatus === BookingStatus.ONGOING ||
+              currentStatus === BookingStatus.OVERDUE
+            ) {
+              liveBookingIds.push(bookingId);
+            }
+          }
+
+          /**
+           * The bookings this call actually writes to.
+           *
+           * A booking that is still in planning takes the member unconditionally
+           * — nothing has left the building, so there is nothing to be late for.
+           * A live one has to prove it is still live under the lock: the status
+           * on `bookingsToUpdate` was read outside any transaction, and a
+           * check-in that has since committed would otherwise gain an asset it
+           * never held, on a booking already reported as finished.
+           */
+          const liveBookingIdSet = new Set(liveBookingIds);
+          const bookingsReceivingRows = bookingsToUpdate.filter(
+            (b) =>
+              b.status === BookingStatus.DRAFT ||
+              b.status === BookingStatus.RESERVED ||
+              liveBookingIdSet.has(b.id)
+          );
+
+          for (const booking of bookingsReceivingRows) {
             await tx.bookingAsset.createMany({
               data: newlyAddedAssets.map((a) => {
                 const ak = akByAssetId.get(a.id);
@@ -5966,6 +6039,9 @@ export async function updateKitAssets({
             });
           }
 
+          // Built from the same set the rows were written to, so the trail
+          // reports exactly what persisted.
+          const propagatedEvents = buildPropagatedEvents(bookingsReceivingRows);
           if (propagatedEvents.length > 0) {
             await recordEvents(propagatedEvents, tx);
           }
@@ -5987,46 +6063,6 @@ export async function updateKitAssets({
            * completing concurrently cannot leave us stamping against a booking
            * that has since finished.
            */
-          const candidateBookingIds = bookingsToUpdate
-            .filter((b) => b.status === "ONGOING" || b.status === "OVERDUE")
-            .map((b) => b.id)
-            // Sorted so concurrent callers take the locks below in the same
-            // order and cannot deadlock against one another.
-            .sort();
-
-          /**
-           * Re-read those bookings under a row lock before trusting the status.
-           *
-           * `bookingsToUpdate` carries the status read at the top of this
-           * function — outside any transaction, and potentially seconds ago —
-           * so a check-in that has since completed still reads as ONGOING
-           * here. A plain re-read inside the transaction narrows that window;
-           * only the lock closes it. See `lockBookingForStatusCheck`.
-           *
-           * Sequential, not `Promise.all`: an interactive transaction runs on a
-           * single connection. The set is the bookings holding this kit, small.
-           *
-           * This does not make the stamp race-free by itself, and is not meant
-           * to. `checkinBooking` computes which assets to release BEFORE
-           * opening its own transaction, so a check-in already in flight never
-           * sees a member added after that read. Closing the remaining half
-           * belongs in the check-in path, not here.
-           */
-          const liveBookingIds: string[] = [];
-          for (const bookingId of candidateBookingIds) {
-            const currentStatus = await lockBookingForStatusCheck(
-              tx,
-              bookingId,
-              organizationId
-            );
-            if (
-              currentStatus === BookingStatus.ONGOING ||
-              currentStatus === BookingStatus.OVERDUE
-            ) {
-              liveBookingIds.push(bookingId);
-            }
-          }
-
           if (liveBookingIds.length > 0) {
             /**
              * The kit's PRE-EXISTING slices on those bookings.
