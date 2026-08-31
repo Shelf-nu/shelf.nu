@@ -5661,6 +5661,9 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
     vitest.clearAllMocks();
   });
 
+  /** A mock viewed only for when it was called relative to other mocks. */
+  type MockedOrder = { mock: { invocationCallOrder: number[] } };
+
   /** An instant a slice left on, for cases that need a non-null marker. */
   const WENT_OUT = new Date("2026-08-01T10:00:00.000Z");
   /** An instant a slice came back on. */
@@ -6043,5 +6046,34 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
 
     expect(checkedOutStamps()).toEqual([["newcomer"]]);
     expect(sliceCheckoutMarkers()).toHaveLength(1);
+  });
+
+  it("takes the booking row lock before inserting any row that references it", async () => {
+    // Order is the behaviour here, so the assertion has to be about order.
+    //
+    // Inserting a `BookingAsset` makes Postgres take FOR KEY SHARE on the
+    // parent `Booking` to validate the foreign key. That mode is SHARED, so
+    // two callers adding assets to two kits on the SAME booking both hold it;
+    // when each then asks for the FOR UPDATE this block needs, each waits on
+    // the other's share and Postgres kills one with a deadlock. Sorting the
+    // ids cannot help — the contention is one row, reached in one order.
+    //
+    // Taking the strongest lock first means nothing is ever upgraded. The
+    // aborted transaction would not be recoverable by retrying, either: the
+    // membership transaction has already committed, so a second attempt
+    // recomputes `newlyAddedAssets` as empty and silently skips propagation,
+    // leaving the asset in the kit but absent from the booking.
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    const lockOrder = (db.$queryRaw as unknown as MockedOrder).mock
+      .invocationCallOrder;
+    const insertOrder = (db.bookingAsset.createMany as unknown as MockedOrder)
+      .mock.invocationCallOrder;
+
+    expect(lockOrder.length).toBeGreaterThan(0);
+    expect(insertOrder.length).toBeGreaterThan(0);
+    expect(Math.max(...lockOrder)).toBeLessThan(Math.min(...insertOrder));
   });
 });
