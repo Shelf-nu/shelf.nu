@@ -6593,26 +6593,59 @@ export async function partialCheckinBooking({
         for (const assetId of qtyAssetIdsTouched) {
           const slices = bookingSlicesByAssetId.get(assetId) ?? [];
           if (slices.length === 0) continue;
+
+          /**
+           * What each slice owes: the units it actually sent out.
+           *
+           * Both halves of the decision below measure against this one number.
+           * As the CAPACITY it stops a slice that never left from absorbing an
+           * untagged return — the mobile payload names no slice, so its units
+           * are spread standalone-first, and every unit swallowed by a slice
+           * that owes nothing is one the kit-driven slice needs to settle. As
+           * the THRESHOLD it settles a slice on what it owes rather than what
+           * it booked. Sizing the two differently strands a kit either way.
+           *
+           * A slice marked out that the sessions cannot size falls back to its
+           * booked quantity, which holds its kit — the safe direction while the
+           * two disagree. One that never left owes nothing at all.
+           */
+          const owedBySlice = new Map<string, number>();
+          for (const slice of slices) {
+            // Whether a slice left is answered by its OWN marker and nothing
+            // else. `computeBookingAssetsSliceRemainingToCheckOut` reports a
+            // slice with no session claims as fully dispatched whenever the
+            // booking is live and the ASSET reads CHECKED_OUT — and that status
+            // is global, so a sibling slice being out is enough to trigger it.
+            // Sizing from that alone hands a slice that never moved the whole
+            // obligation of one that did.
+            if (!slice.checkedOutAt) {
+              owedBySlice.set(slice.id, 0);
+              continue;
+            }
+            const dispatched =
+              slice.quantity - (remainingToCheckOutBySlice.get(slice.id) ?? 0);
+            owedBySlice.set(
+              slice.id,
+              dispatched > 0 ? dispatched : slice.quantity
+            );
+          }
+
           // The asset's FULL slice set, so a claim tagged to one slice never
           // leaks into a sibling and the untagged pool is capped per slice.
           const attributed = attributeDispositionsByBookingAsset({
             bookingAssetRows: slices.map((slice) => ({
               id: slice.id,
-              quantity: slice.quantity,
+              quantity: owedBySlice.get(slice.id) ?? 0,
               assetKitId: slice.assetKitId,
             })),
             consumptionLogs: logsByAssetId.get(assetId) ?? [],
           });
           for (const slice of slices) {
-            const dispatched =
-              slice.quantity - (remainingToCheckOutBySlice.get(slice.id) ?? 0);
-            // A marked slice that reports nothing dispatched cannot be sized
-            // from the sessions, so it falls back to its booked quantity and
-            // holds the kit — the safe direction while the two disagree.
-            const obligation = dispatched > 0 ? dispatched : slice.quantity;
+            const owed = owedBySlice.get(slice.id) ?? 0;
             if (
               isOutstandingSlice(slice) &&
-              (attributed.get(slice.id) ?? 0) >= obligation
+              owed > 0 &&
+              (attributed.get(slice.id) ?? 0) >= owed
             ) {
               settledSliceIds.add(slice.id);
             }

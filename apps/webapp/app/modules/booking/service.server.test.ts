@@ -12900,4 +12900,53 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
 
     expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
+
+  /**
+   * The mobile check-in sends no slice id, so its units are spread across the
+   * asset's slices in `compareSlicesForGreedyFill` order — standalone first.
+   * A standalone slice that never left must not absorb that return: it owes
+   * nothing, and every unit it swallows is one the kit-driven slice needs to
+   * settle. Capacity has to be what a slice SENT, the same measure the
+   * threshold uses.
+   */
+  it("does not let a slice that never left absorb an untagged return owed to a kit", async () => {
+    expect.assertions(1);
+
+    const looseSlice = {
+      id: "ba-loose",
+      assetId: "asset-x",
+      quantity: 5,
+      assetKitId: null,
+      sourceKitId: null,
+      // Never went out on this booking.
+      checkedOutAt: null,
+      checkedInAt: null,
+      asset: {
+        id: "asset-x",
+        type: AssetType.QUANTITY_TRACKED,
+        assetKits: [{ kitId: "kit-a" }, { kitId: "kit-b" }],
+      },
+    };
+    const slices = [looseSlice, tapeSlice("ba-kit-a", "kit-a", 5), fillerSlice];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+    // All 5 units that left did so on the kit's slice.
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetIds: ["asset-x"], quantities: [5], bookingAssetIds: ["ba-kit-a"] },
+    ]);
+    // The mobile payload names no slice.
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: null, quantity: 5 },
+    ]);
+
+    await partialCheckinBooking(
+      params({ checkins: [{ assetId: "asset-x", returned: 5 }] })
+    );
+
+    expect(releasedKitIds()).toEqual(["kit-a"]);
+  });
 });
