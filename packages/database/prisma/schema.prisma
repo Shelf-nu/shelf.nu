@@ -208,16 +208,23 @@ model UserBusinessIntel {
 }
 
 model Asset {
-  id                  String      @id @default(cuid())
-  title               String
-  description         String?
-  mainImage           String?
-  thumbnailImage      String?
-  mainImageExpiration DateTime?
-  status              AssetStatus @default(AVAILABLE)
-  valuation           Float?      @map("value") // Field to store the monetary value of an asset
-  availableToBook     Boolean     @default(true)
-  sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
+  id                     String      @id @default(cuid())
+  title                  String
+  description            String?
+  mainImage              String?
+  thumbnailImage         String?
+  mainImageExpiration    DateTime?
+  // Single optional file attachment (purchase invoice, manual,
+  // calibration certificate, etc. - see issue #2660). Stored in the public
+  // `files` bucket alongside location/audit images, so `attachmentUrl` is
+  // a full public URL, not a bare storage path.
+  attachmentUrl          String?
+  attachmentOriginalName String?
+  attachmentSize         Int?
+  status                 AssetStatus @default(AVAILABLE)
+  valuation              Float?      @map("value") // Field to store the monetary value of an asset
+  availableToBook        Boolean     @default(true)
+  sequentialId           String? // Sequential identifier for the asset (e.g., "SAM-0001")
 
   // Tracking method & model
   type            AssetType        @default(INDIVIDUAL)

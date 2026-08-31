@@ -339,6 +339,9 @@ export default function AssetEditPage() {
               ? new Date(asset.mainImageExpiration)
               : null
           }
+          attachmentUrl={asset.attachmentUrl}
+          attachmentOriginalName={asset.attachmentOriginalName}
+          attachmentSize={asset.attachmentSize}
           title={asset.title}
           categoryId={asset.categoryId}
           assetModelId={asset.assetModelId}

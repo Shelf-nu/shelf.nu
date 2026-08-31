@@ -9,6 +9,7 @@ import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
+  ASSET_ATTACHMENT_MAX_SIZE,
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
@@ -491,6 +492,136 @@ export function findShelfErrorInCause(error: unknown): ShelfError | null {
   }
 
   return findShelfErrorInCause(cause);
+}
+
+/**
+ * Uploads a file to Supabase Storage as-is, with no image processing.
+ * Companion to `uploadFile()` above for non-image files (e.g. PDF asset
+ * attachments) - `uploadFile()` always runs `cropImage()`, which rejects
+ * anything that isn't a JPEG/PNG/GIF/WebP/BMP.
+ */
+export async function uploadRawFile(
+  fileData: AsyncIterable<Uint8Array>,
+  { filename, contentType, bucketName, upsert = false }: UploadOptions
+): Promise<{ path: string; size: number }> {
+  try {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of fileData) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .upload(filename, buffer, { contentType, upsert });
+
+    if (error) {
+      throw error;
+    }
+
+    return { path: data.path, size: buffer.byteLength };
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while uploading the file. Please try again or contact support.",
+      additionalData: { filename, contentType, bucketName },
+      label,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : undefined,
+    });
+  }
+}
+
+/**
+ * Parses a single-PDF multipart upload (asset attachments - invoices,
+ * manuals, certificates; see issue #2660). Mirrors `parseFileFormData()`'s
+ * shape, but uploads via `uploadRawFile()` instead of `uploadFile()` since
+ * PDFs must skip the image pipeline entirely.
+ *
+ * The returned FormData's entry for the file field is a JSON string
+ * `{ path, originalName, size }` - callers need `originalName`/`size` for
+ * display, which a bare path string can't carry (mirrors how
+ * `parseFileFormData` stringifies `{ originalPath, thumbnailPath }` when
+ * `generateThumbnail` is set).
+ */
+export async function parsePdfFormData({
+  request,
+  newFileName,
+  bucketName = PUBLIC_BUCKET,
+  maxFileSize = ASSET_ATTACHMENT_MAX_SIZE,
+}: {
+  request: Request;
+  newFileName: string;
+  bucketName?: string;
+  maxFileSize?: number;
+}) {
+  try {
+    const uploadHandler = async (upload: any) => {
+      const file = upload?.file ?? upload;
+      const mimeType =
+        upload?.type ?? upload?.contentType ?? file?.type ?? undefined;
+      const originalName =
+        upload?.name ?? upload?.filename ?? file?.name ?? undefined;
+
+      // Only process PDFs - anything else (including a same-form image
+      // field, if this is ever reused on a multi-file form) is left alone.
+      if (mimeType && mimeType !== "application/pdf") {
+        return undefined;
+      }
+
+      if (!file) {
+        return undefined;
+      }
+
+      const fileStream = await normalizeToAsyncIterable(file);
+
+      if (!fileStream) {
+        return undefined;
+      }
+
+      const targetFilename = `${newFileName}.pdf`;
+
+      const { path, size } = await uploadRawFile(fileStream, {
+        filename: targetFilename,
+        contentType: mimeType ?? "application/pdf",
+        bucketName,
+      });
+
+      return JSON.stringify({ path, originalName, size });
+    };
+
+    return await parseFormData(request, { maxFileSize }, uploadHandler);
+  } catch (cause) {
+    const sizeLimitError = getMaxFileSizeExceededError(cause);
+
+    if (sizeLimitError) {
+      throw new ShelfError({
+        cause,
+        title: "File too large",
+        message: `File size exceeds maximum allowed size of ${
+          maxFileSize / (1024 * 1024)
+        }MB`,
+        additionalData: { maxFileSize },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const nestedShelfError = findShelfErrorInCause(cause);
+
+    throw new ShelfError({
+      cause,
+      message: nestedShelfError
+        ? nestedShelfError.message
+        : "Something went wrong while uploading the file. Please try again or contact support.",
+      title: nestedShelfError?.title,
+      label,
+      shouldBeCaptured: nestedShelfError?.shouldBeCaptured,
+    });
+  }
 }
 
 /**

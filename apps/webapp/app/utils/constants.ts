@@ -16,6 +16,10 @@ export const ACCEPT_SUPPORTED_IMAGES =
 export const DEFAULT_MAX_IMAGE_UPLOAD_SIZE = 4 * 1024 * 1024; // 4MB in bytes
 export const ASSET_MAX_IMAGE_UPLOAD_SIZE = 8 * 1024 * 1024; // 8MB in bytes
 
+/** For asset attachment uploads (invoices, manuals, certificates - PDF only) */
+export const ASSET_ATTACHMENT_MAX_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+export const ACCEPT_SUPPORTED_ATTACHMENTS = "application/pdf,.pdf";
+
 /** Default date format */
 export const DATE_TIME_FORMAT = "yyyy-MM-dd'T'HH:mm";
 

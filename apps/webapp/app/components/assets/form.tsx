@@ -57,6 +57,7 @@ import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { DisabledReasonHoverCard } from "../shared/disabled-reason-hover-card";
+import { AssetAttachmentUpload } from "../shared/file-dropzone/asset-attachment-upload";
 import {
   HoverCard,
   HoverCardContent,
@@ -205,6 +206,9 @@ type Props = Partial<
     | "thumbnailImage"
     | "mainImage"
     | "mainImageExpiration"
+    | "attachmentUrl"
+    | "attachmentOriginalName"
+    | "attachmentSize"
     | "categoryId"
     | "assetModelId"
     | "description"
@@ -252,6 +256,9 @@ export const AssetForm = ({
   thumbnailImage,
   mainImage,
   mainImageExpiration,
+  attachmentUrl,
+  attachmentOriginalName,
+  attachmentSize,
   categoryId,
   assetModelId,
   locationId,
@@ -1090,6 +1097,26 @@ export const AssetForm = ({
             </div>
           </div>
         </FormRow>
+
+        <When truthy={Boolean(id)}>
+          <FormRow
+            rowLabel={"Attachment"}
+            subHeading={
+              <p>
+                A single PDF file for this asset - a purchase invoice, manual,
+                or calibration certificate.
+              </p>
+            }
+            className="pt-[10px]"
+          >
+            <AssetAttachmentUpload
+              assetId={id as string}
+              attachmentUrl={attachmentUrl}
+              attachmentOriginalName={attachmentOriginalName}
+              attachmentSize={attachmentSize}
+            />
+          </FormRow>
+        </When>
 
         <div>
           <FormRow

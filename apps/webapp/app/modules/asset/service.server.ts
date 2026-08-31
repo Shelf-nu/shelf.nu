@@ -93,6 +93,7 @@ import { getLocale } from "~/utils/client-hints";
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
   LEGACY_CUID_LENGTH,
+  PUBLIC_BUCKET,
 } from "~/utils/constants";
 import {
   getFiltersFromRequest,
@@ -146,7 +147,10 @@ import {
 } from "~/utils/org-validation.server";
 import {
   createSignedUrl,
+  getPublicFileURL,
   parseFileFormData,
+  parsePdfFormData,
+  removePublicFile,
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
@@ -3839,6 +3843,136 @@ export async function updateAssetMainImage({
         ? cause.message
         : "Something went wrong while updating asset main image",
       additionalData: { assetId, userId, field: "mainImage" },
+      label,
+    });
+  }
+}
+
+/**
+ * Uploads (or replaces) an asset's single PDF attachment - purchase
+ * invoice, manual, calibration certificate, etc. See issue #2660.
+ *
+ * Deliberately standalone rather than routed through `updateAsset()`: this
+ * is called from its own dedicated API route with an instant drag-and-drop
+ * UI, not as part of the big multi-field edit-asset form submission, so it
+ * only needs to touch the three attachment columns.
+ */
+export async function updateAssetAttachment({
+  request,
+  assetId,
+  organizationId,
+}: {
+  request: Request;
+  assetId: Asset["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    const asset = await db.asset.findFirstOrThrow({
+      where: { id: assetId, organizationId },
+      select: { id: true, attachmentUrl: true },
+    });
+
+    const formData = await parsePdfFormData({
+      request,
+      newFileName: `${organizationId}/${assetId}/attachment-${dateTimeInUnix(
+        Date.now()
+      )}`,
+    });
+
+    const raw = formData.get("file") as string | null;
+    if (!raw) {
+      throw new ShelfError({
+        cause: null,
+        title: "No file uploaded",
+        message: "Please choose a PDF file to upload.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const { path, originalName, size } = JSON.parse(raw) as {
+      path: string;
+      originalName?: string;
+      size: number;
+    };
+
+    const attachmentUrl = getPublicFileURL({
+      filename: path,
+      bucketName: PUBLIC_BUCKET,
+    });
+
+    if (asset.attachmentUrl) {
+      // Best-effort cleanup of the file being replaced - an orphaned
+      // storage object isn't worth failing the new upload over.
+      try {
+        await removePublicFile({ publicUrl: asset.attachmentUrl });
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Failed to delete the previous asset attachment",
+            additionalData: { assetId },
+            label,
+          })
+        );
+      }
+    }
+
+    return await db.asset.update({
+      where: { id: assetId, organizationId },
+      data: {
+        attachmentUrl,
+        attachmentOriginalName: originalName ?? null,
+        attachmentSize: size,
+      },
+    });
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+    throw new ShelfError({
+      cause,
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while uploading the asset attachment",
+      additionalData: { assetId },
+      label,
+    });
+  }
+}
+
+/** Deletes an asset's attachment, both from storage and from the DB. */
+export async function removeAssetAttachment({
+  assetId,
+  organizationId,
+}: {
+  assetId: Asset["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    const asset = await db.asset.findFirstOrThrow({
+      where: { id: assetId, organizationId },
+      select: { id: true, attachmentUrl: true },
+    });
+
+    if (asset.attachmentUrl) {
+      await removePublicFile({ publicUrl: asset.attachmentUrl });
+    }
+
+    return await db.asset.update({
+      where: { id: assetId, organizationId },
+      data: {
+        attachmentUrl: null,
+        attachmentOriginalName: null,
+        attachmentSize: null,
+      },
+    });
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+    throw new ShelfError({
+      cause,
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while removing the asset attachment",
+      additionalData: { assetId },
       label,
     });
   }
