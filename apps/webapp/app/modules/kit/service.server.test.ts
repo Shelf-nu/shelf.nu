@@ -5664,6 +5664,13 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
   /** A mock viewed only for when it was called relative to other mocks. */
   type MockedOrder = { mock: { invocationCallOrder: number[] } };
 
+  /** Only the propagation events; membership events share the same spy. */
+  function propagatedAddedEvents() {
+    return (recordEvents as ReturnType<typeof vitest.fn>).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_ASSETS_ADDED");
+  }
+
   /** An instant a slice left on, for cases that need a non-null marker. */
   const WENT_OUT = new Date("2026-08-01T10:00:00.000Z");
   /** An instant a slice came back on. */
@@ -5968,6 +5975,34 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
 
     expect(checkedOutStamps()).toEqual([]);
     expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("adds no row to a booking the lock reports as no longer live", async () => {
+    // The status on `bookingsToUpdate` was read outside any transaction. A
+    // check-in that committed in between leaves a booking that is finished but
+    // still reads ONGOING here, and a member added to it would land on a
+    // booking already reported as complete — with a BOOKING_ASSETS_ADDED event
+    // claiming it. The locked re-read is what the write set is built from.
+    arrange(BookingStatus.ONGOING);
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: BookingStatus.COMPLETE }]);
+
+    await act();
+
+    expect(db.bookingAsset.createMany).not.toHaveBeenCalled();
+    // `recordEvents` still carries this call's membership events, so assert on
+    // the propagation action specifically.
+    expect(propagatedAddedEvents()).toEqual([]);
+  });
+
+  it("still adds the row when the lock confirms the booking is live", async () => {
+    // The other side of the guard: a booking that is genuinely still ONGOING
+    // must keep receiving the member, or the fix would quietly drop rows.
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    expect(db.bookingAsset.createMany).toHaveBeenCalled();
   });
 
   it("does NOT stamp when every slice of the kit has already come back", async () => {

@@ -5897,25 +5897,26 @@ export async function updateKitAssets({
        * against an existing one, and claiming an add that did not happen would
        * make the trail lie.
        */
-      const propagatedEvents = bookingsToUpdate.flatMap((booking) =>
-        newlyAddedAssets.flatMap((asset) => {
-          const ak = akByAssetId.get(asset.id);
-          if (!ak) return [];
-          return [
-            {
-              organizationId,
-              actorUserId: userId,
-              action: "BOOKING_ASSETS_ADDED" as const,
-              entityType: "BOOKING" as const,
-              entityId: booking.id,
-              bookingId: booking.id,
-              assetId: asset.id,
-              kitId: kit.id,
-              meta: assetQtyMeta(asset, ak.quantity),
-            },
-          ];
-        })
-      );
+      const buildPropagatedEvents = (bookings: typeof bookingsToUpdate) =>
+        bookings.flatMap((booking) =>
+          newlyAddedAssets.flatMap((asset) => {
+            const ak = akByAssetId.get(asset.id);
+            if (!ak) return [];
+            return [
+              {
+                organizationId,
+                actorUserId: userId,
+                action: "BOOKING_ASSETS_ADDED" as const,
+                entityType: "BOOKING" as const,
+                entityId: booking.id,
+                bookingId: booking.id,
+                assetId: asset.id,
+                kitId: kit.id,
+                meta: assetQtyMeta(asset, ak.quantity),
+              },
+            ];
+          })
+        );
 
       /**
        * Propagated rows and their events commit together.
@@ -6000,7 +6001,25 @@ export async function updateKitAssets({
             }
           }
 
-          for (const booking of bookingsToUpdate) {
+          /**
+           * The bookings this call actually writes to.
+           *
+           * A booking that is still in planning takes the member unconditionally
+           * — nothing has left the building, so there is nothing to be late for.
+           * A live one has to prove it is still live under the lock: the status
+           * on `bookingsToUpdate` was read outside any transaction, and a
+           * check-in that has since committed would otherwise gain an asset it
+           * never held, on a booking already reported as finished.
+           */
+          const liveBookingIdSet = new Set(liveBookingIds);
+          const bookingsReceivingRows = bookingsToUpdate.filter(
+            (b) =>
+              b.status === BookingStatus.DRAFT ||
+              b.status === BookingStatus.RESERVED ||
+              liveBookingIdSet.has(b.id)
+          );
+
+          for (const booking of bookingsReceivingRows) {
             await tx.bookingAsset.createMany({
               data: newlyAddedAssets.map((a) => {
                 const ak = akByAssetId.get(a.id);
@@ -6020,6 +6039,9 @@ export async function updateKitAssets({
             });
           }
 
+          // Built from the same set the rows were written to, so the trail
+          // reports exactly what persisted.
+          const propagatedEvents = buildPropagatedEvents(bookingsReceivingRows);
           if (propagatedEvents.length > 0) {
             await recordEvents(propagatedEvents, tx);
           }
