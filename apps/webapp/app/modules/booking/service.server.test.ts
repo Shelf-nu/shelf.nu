@@ -69,6 +69,7 @@ import {
   bookingDraftVisibilityClause,
   bulkArchiveBookings,
   bulkCancelBookings,
+  bulkDeleteBookings,
   // Phase 3c helpers
   computeBookingAssetRemaining,
   computeBookingAssetSliceRemaining,
@@ -131,6 +132,7 @@ vitest.mock("~/database/db.server", () => ({
       findFirst: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
       delete: vitest.fn().mockResolvedValue({}),
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       count: vitest.fn().mockResolvedValue(0),
     },
     asset: {
@@ -11177,6 +11179,124 @@ describe("bulkCancelBookings", () => {
       ]),
       expect.anything()
     );
+  });
+
+  /**
+   * An asset can sit on two live bookings at once. Cancelling one of them says
+   * nothing about the other, so the exit has to ask what commitment is left
+   * rather than blanket-writing AVAILABLE. Marking it available while a
+   * borrower still holds it for the other booking puts it back in the pool for
+   * someone else to book.
+   */
+  it("leaves an asset CHECKED_OUT when another live booking still holds it", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "bk-ongoing",
+        name: "Ongoing booking",
+        status: BookingStatus.ONGOING,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+        bookingAssets: [{ asset: { id: "asset-shared", assetKits: [] } }],
+        from: new Date("2025-01-01T09:00:00Z"),
+        to: new Date("2025-01-02T17:00:00Z"),
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+        _count: { bookingAssets: 1 },
+      },
+    ]);
+    // The asset is still on one OTHER ONGOING booking, outside this selection.
+    (db.bookingAsset.count as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      1
+    );
+    (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(0);
+
+    await bulkCancelBookings({
+      bookingIds: ["bk-ongoing"],
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.OWNER,
+      hints: mockClientHints,
+    });
+
+    const assetWrites = (
+      db.asset.updateMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.filter((c: any) => c[0]?.data?.status !== undefined);
+
+    expect(
+      assetWrites.some((c: any) => c[0].data.status === AssetStatus.AVAILABLE),
+      "no write may free an asset another live booking still holds"
+    ).toBe(false);
+    expect(
+      assetWrites.some(
+        (c: any) => c[0].data.status === AssetStatus.CHECKED_OUT
+      ),
+      "the remaining commitment should keep it checked out"
+    ).toBe(true);
+  });
+});
+
+describe("bulkDeleteBookings", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * Same rule as the bulk cancel: deleting a booking says nothing about the
+   * other commitments on its assets. This path deletes the bookings first, so
+   * their own rows are already gone by the time the reconciliation reads.
+   */
+  it("leaves an asset CHECKED_OUT when another live booking still holds it", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "bk-del-ongoing",
+        name: "Ongoing booking",
+        status: BookingStatus.ONGOING,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+        bookingAssets: [{ asset: { id: "asset-shared", assetKits: [] } }],
+        from: new Date("2025-01-01T09:00:00Z"),
+        to: new Date("2025-01-02T17:00:00Z"),
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+        _count: { bookingAssets: 1 },
+      },
+    ]);
+    // Still on one OTHER ONGOING booking, outside this selection.
+    (db.bookingAsset.count as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      1
+    );
+    (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(0);
+
+    await bulkDeleteBookings({
+      bookingIds: ["bk-del-ongoing"],
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.OWNER,
+      hints: mockClientHints,
+    });
+
+    const assetWrites = (
+      db.asset.updateMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.filter((c: any) => c[0]?.data?.status !== undefined);
+
+    expect(
+      assetWrites.some((c: any) => c[0].data.status === AssetStatus.AVAILABLE),
+      "no write may free an asset another live booking still holds"
+    ).toBe(false);
+    expect(
+      assetWrites.some(
+        (c: any) => c[0].data.status === AssetStatus.CHECKED_OUT
+      ),
+      "the remaining commitment should keep it checked out"
+    ).toBe(true);
   });
 });
 
