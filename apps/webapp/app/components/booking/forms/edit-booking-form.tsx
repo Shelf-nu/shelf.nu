@@ -15,6 +15,7 @@ import type {
   BookingPageActionData,
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
+import { isBookingPendingApproval } from "~/utils/bookings";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
@@ -32,15 +33,16 @@ import { DatesFields } from "./fields/dates";
 import { DescriptionField } from "./fields/description";
 import { NameField } from "./fields/name";
 import TagField from "./fields/tag-field";
+import type { BookingFormSchemaType } from "./forms-schema";
+import { BookingFormSchema } from "./forms-schema";
 import { AbsolutePositionedHeaderActions } from "../../layout/header/absolute-positioned-header-actions";
 import { Button } from "../../shared/button";
 import When from "../../when/when";
 import { ActionsDropdown } from "../actions-dropdown";
+import ApproveBookingDialog from "../approval/approve-booking-dialog";
 import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDropdown from "../checkout-dropdown";
-import type { BookingFormSchemaType } from "./forms-schema";
-import { BookingFormSchema } from "./forms-schema";
 
 type BookingFlags = {
   hasAssets: boolean;
@@ -106,6 +108,19 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   // haven't been checked out yet (the Booked bucket). Once everything has been
   // checked out, hide the "Scan to check out" entry point.
   const hasItemsToCheckOut = (lifecycleProgress?.bookedCount ?? 0) > 0;
+
+  /**
+   * Approval: while a reservation request is pending, the checkout controls
+   * are replaced — admins get an Approve button (approving is the next
+   * logical step, and the server refuses checkout anyway), and Base /
+   * Self-service custodians see only the "Pending approval" badge in the
+   * header. Derived client-side from the same helper the server guard uses.
+   */
+  const isPendingApproval = isBookingPendingApproval({
+    status,
+    approvedAt: loaderBooking.approvedAt ?? null,
+    requireBookingApproval: useBookingSettings().requireBookingApproval,
+  });
 
   const isProcessing = isFormProcessing(navigation.state);
   // TIMEZONE FIX: seed the datetime-local inputs with the wall-clock in the
@@ -371,12 +386,17 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               the dropdown entirely and route through the fulfil-and-checkout
               scanner — HEAD's qty-tracked behaviour.
             */}
+            <When truthy={isPendingApproval && !isBaseOrSelfService}>
+              <ApproveBookingDialog booking={{ name: name ?? "", status }} />
+            </When>
+
             <When
               truthy={
                 (bookingStatus?.isReserved ||
                   ((bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
                     hasItemsToCheckOut)) &&
-                canCheckOutBooking
+                canCheckOutBooking &&
+                !isPendingApproval
               }
             >
               {(() => {

@@ -51,7 +51,7 @@ describe("userHasPermission (client adapter)", () => {
 
     expect(disagreements).toEqual([]);
     // Guard against the sweep silently covering nothing if an enum is emptied.
-    expect(roles.length * entities.length * actions.length).toBe(1860);
+    expect(roles.length * entities.length * actions.length).toBe(1984);
   });
 
   it("forwards action ARRAYS to the resolver rather than reimplementing them", () => {

@@ -22,6 +22,7 @@ export const BOOKING_SETTINGS_SELECT = {
   autoArchiveBookings: true,
   autoArchiveDays: true,
   autoArchiveExpiredReservations: true,
+  requireBookingApproval: true,
   requireExplicitCheckinForAdmin: true,
   requireExplicitCheckinForSelfService: true,
   countKitsAsSingleUnit: true,
@@ -173,6 +174,7 @@ export async function updateBookingSettings({
   autoArchiveBookings,
   autoArchiveDays,
   autoArchiveExpiredReservations,
+  requireBookingApproval,
   requireExplicitCheckinForAdmin,
   requireExplicitCheckinForSelfService,
   countKitsAsSingleUnit,
@@ -187,6 +189,7 @@ export async function updateBookingSettings({
   autoArchiveBookings?: boolean;
   autoArchiveDays?: number;
   autoArchiveExpiredReservations?: boolean;
+  requireBookingApproval?: boolean;
   requireExplicitCheckinForAdmin?: boolean;
   requireExplicitCheckinForSelfService?: boolean;
   countKitsAsSingleUnit?: boolean;
@@ -210,6 +213,8 @@ export async function updateBookingSettings({
     if (autoArchiveExpiredReservations !== undefined)
       updateData.autoArchiveExpiredReservations =
         autoArchiveExpiredReservations;
+    if (requireBookingApproval !== undefined)
+      updateData.requireBookingApproval = requireBookingApproval;
     if (requireExplicitCheckinForAdmin !== undefined)
       updateData.requireExplicitCheckinForAdmin =
         requireExplicitCheckinForAdmin;

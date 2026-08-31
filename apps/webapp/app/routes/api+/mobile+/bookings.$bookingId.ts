@@ -28,6 +28,7 @@ import {
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
+import { isBookingPendingApproval } from "~/utils/bookings";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -105,6 +106,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         name: true,
         description: true,
         status: true,
+        // Feeds the derived pending-approval flag exposed in the response.
+        approvedAt: true,
         from: true,
         to: true,
         createdAt: true,
@@ -443,7 +446,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // this caller may. Both have to hold, or the app draws a button the server
     // then refuses — the endpoints gate on these same permissions regardless,
     // so without this the user meets the rule as a 403 instead of an absence.
-    const canCheckout = canCheckoutByState && canCheckoutPerm;
+    // Approval gate (v1 companion support): while a reservation request is
+    // pending, no one can check out — the server-side service guard refuses
+    // regardless of app version; this flag keeps the app from drawing the
+    // button. Derived with the same shared helper the web + service use.
+    const isPendingApproval = isBookingPendingApproval({
+      status: booking.status,
+      approvedAt: booking.approvedAt,
+      requireBookingApproval: bookingSettings.requireBookingApproval ?? false,
+    });
+    const canCheckout =
+      canCheckoutByState && canCheckoutPerm && !isPendingApproval;
     const canCheckin = canCheckinByState && canCheckinPerm;
 
     const bookingActions = {
@@ -597,6 +610,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         outstandingModelUnitCount,
         lifecycleProgress,
         hasAlreadyBookedAssets,
+        // True while this reservation request awaits an admin's approval —
+        // the app renders a "Pending approval" badge and hides checkout.
+        isPendingApproval,
       },
       checkedInAssetIds,
       canCheckout,

@@ -94,6 +94,41 @@ export const assetReservedEmailContent = ({
 };
 
 /**
+ * Sent instead of the reserved confirmation when the org requires approval
+ * and the reservation was made by a BASE / SELF_SERVICE user: the booking is
+ * RESERVED (it holds its assets) but cannot be checked out until an admin
+ * approves it, so the copy must not read as a confirmation.
+ */
+export const bookingRequestReceivedEmailContent = ({
+  modelRequests,
+  ...args
+}: BasicEmailContentArgs & {
+  modelRequests?: { quantity: number; modelName: string }[];
+}) => {
+  const modelRequestsBlock =
+    modelRequests && modelRequests.length > 0
+      ? `\n\nRequested models:\n${modelRequests
+          .map((req) => `- ${req.quantity} × ${req.modelName}`)
+          .join("\n")}`
+      : "";
+
+  return baseBookingTextEmailContent({
+    ...args,
+    emailContent: `Booking request for ${args.custodian} — waiting for admin approval. The requested items are held for the booking period, and an admin will review the request before check-out.${modelRequestsBlock}`,
+  });
+};
+
+/**
+ * Sent to the custodian (and other recipients) when an admin approves a
+ * pending reservation request.
+ */
+export const bookingApprovedEmailContent = (args: BasicEmailContentArgs) =>
+  baseBookingTextEmailContent({
+    ...args,
+    emailContent: `Your booking request has been approved: "${args.bookingName}". The equipment can now be checked out for your booking period.`,
+  });
+
+/**
  * This is the content of the email sent to the custodian when a booking is checked out.
  */
 export const checkoutReminderEmailContent = (args: BasicEmailContentArgs) =>

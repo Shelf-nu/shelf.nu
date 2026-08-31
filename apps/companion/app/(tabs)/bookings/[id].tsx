@@ -1110,6 +1110,26 @@ export default function BookingDetailScreen() {
                     {formatStatus(booking.status)}
                   </Text>
                 </View>
+                {booking.isPendingApproval ? (
+                  // Approval pill: web parity for the derived pending state.
+                  // The server also refuses checkout while pending and sends
+                  // `canCheckout: false`, so this is display-only.
+                  <View
+                    style={[
+                      styles.statusBadgeLg,
+                      { backgroundColor: colors.warningBg },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.statusTextLg,
+                        { color: colors.warningText },
+                      ]}
+                    >
+                      Pending approval
+                    </Text>
+                  </View>
+                ) : null}
               </View>
 
               {booking.description ? (

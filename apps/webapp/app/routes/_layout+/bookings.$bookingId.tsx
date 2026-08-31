@@ -24,6 +24,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingHeaderData } from "~/modules/booking/service.server";
@@ -31,6 +32,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import type { RouteHandleWithName } from "~/modules/types";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { isBookingPendingApproval } from "~/utils/bookings";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -143,6 +145,13 @@ export default function AssetDetailsPage() {
     "booking.overview.checkout-assets",
   ].includes(currentRoute?.handle?.name);
 
+  const { requireBookingApproval } = useBookingSettings();
+  const isPendingApproval = isBookingPendingApproval({
+    status: booking.status,
+    approvedAt: booking.approvedAt,
+    requireBookingApproval,
+  });
+
   return (
     <div className="relative">
       {!shouldHideHeader && (
@@ -157,6 +166,7 @@ export default function AssetDetailsPage() {
                 <BookingStatusBadge
                   status={booking.status}
                   custodianUserId={booking.custodianUserId || undefined}
+                  isPendingApproval={isPendingApproval}
                 />
                 <TimeRemaining
                   from={booking.from}

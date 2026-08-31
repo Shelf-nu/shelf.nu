@@ -721,6 +721,13 @@ export type BookingDetail = {
    */
   hasAlreadyBookedAssets?: boolean;
   /**
+   * True while this reservation request awaits an admin's approval
+   * (workspace has `requireBookingApproval` on and the booking has no
+   * `approvedAt`). Optional for rolling-deploy safety: an older server omits
+   * it, and absent must read as `false` so nothing is hidden.
+   */
+  isPendingApproval?: boolean;
+  /**
    * Segmented lifecycle progress (Booked / Partial / Fully out / Returned),
    * computed server-side by the SAME shared helper the web booking overview
    * uses, so the mobile progress bar shows identical numbers to web. `null` /

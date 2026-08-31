@@ -15,11 +15,13 @@
  * @see {@link file://../../routes/_layout+/bookings._index.tsx}
  */
 import type { Prisma } from "@prisma/client";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import {
   canAssignModelUnits,
   countUnassignedModelUnits,
 } from "~/utils/booking-model-requests";
+import { isBookingPendingApproval } from "~/utils/bookings";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AvailabilityBadge } from "./availability-label";
 import { BookingAssetsSidebar } from "./booking-assets-sidebar";
@@ -155,6 +157,8 @@ type ListBookingsContentProps = {
 export default function ListBookingsContent({
   item,
 }: ListBookingsContentProps) {
+  const { requireBookingApproval } = useBookingSettings();
+
   return (
     <>
       {/* Item */}
@@ -175,6 +179,11 @@ export default function ListBookingsContent({
                 <BookingStatusBadge
                   status={item.status}
                   custodianUserId={item.custodianUserId || undefined}
+                  isPendingApproval={isBookingPendingApproval({
+                    status: item.status,
+                    approvedAt: item.approvedAt,
+                    requireBookingApproval,
+                  })}
                 />
               </div>
             </div>

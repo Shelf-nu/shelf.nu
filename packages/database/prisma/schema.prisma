@@ -34,20 +34,20 @@ model Image {
 }
 
 model User {
-  id                    String  @id @default(cuid())
-  email                 String  @unique
-  username              String  @unique @default(cuid())
-  firstName             String?
-  lastName              String?
-  displayName           String?
-  profilePicture        String?
-  usedFreeTrial         Boolean @default(false)
-  onboarded             Boolean @default(false)
-  customerId            String? @unique // Stripe customer id
-  sso                   Boolean @default(false)
-  createdWithInvite     Boolean @default(false) // Set to true if the user was created by being invited to a workspace
-  skipSubscriptionCheck Boolean @default(false) // Set to true if the user has opted out of subscription checks
-  hasUnpaidInvoice     Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
+  id                     String  @id @default(cuid())
+  email                  String  @unique
+  username               String  @unique @default(cuid())
+  firstName              String?
+  lastName               String?
+  displayName            String?
+  profilePicture         String?
+  usedFreeTrial          Boolean @default(false)
+  onboarded              Boolean @default(false)
+  customerId             String? @unique // Stripe customer id
+  sso                    Boolean @default(false)
+  createdWithInvite      Boolean @default(false) // Set to true if the user was created by being invited to a workspace
+  skipSubscriptionCheck  Boolean @default(false) // Set to true if the user has opted out of subscription checks
+  hasUnpaidInvoice       Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
   warnForNoPaymentMethod Boolean @default(false) // Set when subscription is transferred to a user without a payment method
 
   // Last selected organization for cross-device workspace persistence
@@ -74,41 +74,42 @@ model User {
   // ~/utils/date-format (resolveFormatPrefs / detectFormatPrefsFromHints).
   dateFormat DateFormatPreference? // null → not yet detected
   timeFormat TimeFormatPreference? // null → not yet detected
-  weekStart  WeekStartPreference?  // null → not yet detected
-  timeZone   String?               // IANA name; null → not yet detected
+  weekStart  WeekStartPreference? // null → not yet detected
+  timeZone   String? // IANA name; null → not yet detected
 
   // Relationships
-  assets             Asset[]
-  categories         Category[]
-  notes              Note[]
-  bookingNotes      BookingNote[]      @relation("BookingNoteUser")
-  auditNotes        AuditNote[]        @relation("AuditNoteUser")
-  locationNotes     LocationNote[]     @relation("LocationNoteUser")
-  qrCodes            Qr[]
-  scans              Scan[]
-  tags               Tag[]
-  roles              Role[]
-  locations          Location[]
-  images             Image[]
-  organizations      Organization[]
-  customFields       CustomField[]
-  sentInvites        Invite[]           @relation("inviter")
-  receivedInvites    Invite[]           @relation("invitee")
-  teamMembers        TeamMember[]
-  userOrganizations  UserOrganization[]
-  bookings           Booking[]          @relation("creator")
-  custodies          Booking[]          @relation("custodian")
-  createdKits        Kit[]
-  tierId             TierId             @default(free)
-  tier               Tier               @relation(fields: [tierId], references: [id])
-  assetReminders     AssetReminder[]
-  contact            UserContact?
-  businessIntel      UserBusinessIntel?
-  auditsCreated      AuditSession[]
-  auditAssignments   AuditAssignment[]
-  auditAssetsScanned AuditAsset[]
-  auditScans         AuditScan[]
-  auditImagesUploaded AuditImage[] @relation("AuditImageUploader")
+  assets              Asset[]
+  categories          Category[]
+  notes               Note[]
+  bookingNotes        BookingNote[]      @relation("BookingNoteUser")
+  auditNotes          AuditNote[]        @relation("AuditNoteUser")
+  locationNotes       LocationNote[]     @relation("LocationNoteUser")
+  qrCodes             Qr[]
+  scans               Scan[]
+  tags                Tag[]
+  roles               Role[]
+  locations           Location[]
+  images              Image[]
+  organizations       Organization[]
+  customFields        CustomField[]
+  sentInvites         Invite[]           @relation("inviter")
+  receivedInvites     Invite[]           @relation("invitee")
+  teamMembers         TeamMember[]
+  userOrganizations   UserOrganization[]
+  bookings            Booking[]          @relation("creator")
+  custodies           Booking[]          @relation("custodian")
+  approvedBookings    Booking[]          @relation("bookingApprover")
+  createdKits         Kit[]
+  tierId              TierId             @default(free)
+  tier                Tier               @relation(fields: [tierId], references: [id])
+  assetReminders      AssetReminder[]
+  contact             UserContact?
+  businessIntel       UserBusinessIntel?
+  auditsCreated       AuditSession[]
+  auditAssignments    AuditAssignment[]
+  auditAssetsScanned  AuditAsset[]
+  auditScans          AuditScan[]
+  auditImagesUploaded AuditImage[]       @relation("AuditImageUploader")
 
   // @deprecated - Historical data only. New entries go to UserBusinessIntel table
   referralSource String? // "How did you hear about us?" field.
@@ -220,15 +221,15 @@ model Asset {
   sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
 
   // Tracking method & model
-  type            AssetType        @default(INDIVIDUAL)
-  assetModelId    String?
-  assetModel      AssetModel?      @relation(fields: [assetModelId], references: [id])
+  type         AssetType   @default(INDIVIDUAL)
+  assetModelId String?
+  assetModel   AssetModel? @relation(fields: [assetModelId], references: [id])
 
   // Quantity-tracked fields (null for INDIVIDUAL assets)
-  quantity        Int? // Total quantity at this location
-  minQuantity     Int? // Low-stock alert threshold
-  consumptionType ConsumptionType? // How consumption is tracked
-  unitOfMeasure   String? // e.g., "pcs", "boxes", "liters"
+  quantity           Int? // Total quantity at this location
+  minQuantity        Int? // Low-stock alert threshold
+  consumptionType    ConsumptionType? // How consumption is tracked
+  unitOfMeasure      String? // e.g., "pcs", "boxes", "liters"
   // Debounce marker for low-stock alerting: set when available first crosses
   // to/below minQuantity (alert sent), cleared when it recovers above. Prevents
   // re-alerting on every subsequent decrement while already low.
@@ -251,20 +252,20 @@ model Asset {
   // INDIVIDUAL assets are capped at one row via the
   // `enforce_individual_asset_single_location` trigger.
 
-  custody      Custody[]
-  notes        Note[]
-  qrCodes      Qr[]
-  barcodes     Barcode[]              @relation("AssetBarcodes")
-  reports      ReportFound[]
-  tags         Tag[]
-  customFields AssetCustomFieldValue[]
+  custody         Custody[]
+  notes           Note[]
+  qrCodes         Qr[]
+  barcodes        Barcode[]               @relation("AssetBarcodes")
+  reports         ReportFound[]
+  tags            Tag[]
+  customFields    AssetCustomFieldValue[]
   bookingAssets   BookingAsset[]
   consumptionLogs ConsumptionLog[]
   reminders       AssetReminder[]
   auditEntries    AuditAsset[]
   auditScans      AuditScan[]
-  assetKits      AssetKit[]
-  assetLocations AssetLocation[]
+  assetKits       AssetKit[]
+  assetLocations  AssetLocation[]
 
   // Per-asset override: when an org has multiple linked Barcodes (only possible
   // with the barcode add-on), this picks the specific Barcode to display in
@@ -310,19 +311,25 @@ enum AssetStatus {
   CHECKED_OUT
 }
 
-/** Determines how an asset is tracked throughout the system. Immutable after creation. */
+/**
+ * Determines how an asset is tracked throughout the system. Immutable after creation.
+ */
 enum AssetType {
   INDIVIDUAL // Default. One row = one physical item.
   QUANTITY_TRACKED // One row = N fungible items at a location.
 }
 
-/** Controls what happens after checkout for quantity-tracked assets. */
+/**
+ * Controls what happens after checkout for quantity-tracked assets.
+ */
 enum ConsumptionType {
   ONE_WAY // Checked out and consumed. No return expected.
   TWO_WAY // Checked out and returned, with consumption report.
 }
 
-/** Classifies the type of quantity change in a ConsumptionLog entry. */
+/**
+ * Classifies the type of quantity change in a ConsumptionLog entry.
+ */
 enum ConsumptionCategory {
   CHECKOUT // Items checked out to a custodian or booking
   RETURN // Items returned from a custodian or booking
@@ -446,9 +453,9 @@ model AssetModel {
   // Relationships
   assets         Asset[]
   modelRequests  BookingModelRequest[]
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   organizationId String
-  createdBy      User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdBy      User                  @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId         String
 
   // Datetime
@@ -824,7 +831,7 @@ model Location {
   // single location, like INDIVIDUAL assets).
   assetLocations AssetLocation[]
   kits           Kit[]
-  notes          LocationNote[] @relation("LocationNotes")
+  notes          LocationNote[]  @relation("LocationNotes")
 
   // Self-relation for nested locations
   parentId String?
@@ -868,8 +875,8 @@ model TeamMember {
   userId          String?
   kitCustodies    KitCustody[]
 
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   deletedAt       DateTime?
   bookings        Booking[]
   assetReminders  AssetReminder[]
@@ -902,8 +909,8 @@ model Custody {
   // custody automatically removes the asset-side rows that were
   // inherited from the kit, while leaving operator-assigned rows
   // (kitCustodyId = null) untouched.
-  kitCustody    KitCustody? @relation(fields: [kitCustodyId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  kitCustodyId  String?
+  kitCustody   KitCustody? @relation(fields: [kitCustodyId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kitCustodyId String?
 
   quantity Int @default(1) // How many units in custody (1 for individual assets)
 
@@ -937,9 +944,9 @@ model Organization {
   userId   String
   currency Currency @default(USD)
 
-  members TeamMember[]
-  assets  Asset[]
-  assetKits AssetKit[]
+  members        TeamMember[]
+  assets         Asset[]
+  assetKits      AssetKit[]
   assetLocations AssetLocation[]
 
   image   Image?  @relation("orgImage", fields: [imageId], references: [id])
@@ -966,9 +973,9 @@ model Organization {
   usedBarcodeTrial  Boolean   @default(false) // Set once a 7-day free barcode trial is activated (prevents reuse)
 
   // Audit add-on (per-organization, managed via Stripe subscription)
-  auditsEnabled    Boolean   @default(false) // If true, this organization can use audit functionality
-  auditsEnabledAt  DateTime? // Track when audit feature was enabled
-  usedAuditTrial   Boolean   @default(false) // Set once a 7-day free audit trial is activated (prevents reuse)
+  auditsEnabled   Boolean   @default(false) // If true, this organization can use audit functionality
+  auditsEnabledAt DateTime? // Track when audit feature was enabled
+  usedAuditTrial  Boolean   @default(false) // Set once a 7-day free audit trial is activated (prevents reuse)
 
   // This is used to disable the workspace for the user. It is set to true when the user leaves the workspace
   workspaceDisabled Boolean @default(false) // If true, the workspace is disabled and the user cannot access it
@@ -992,17 +999,16 @@ model Organization {
   assetReminders     AssetReminder[]
   assetFilterPresets AssetFilterPreset[]
 
-  auditSessions      AuditSession[]
-  auditImages        AuditImage[]
+  auditSessions AuditSession[]
+  auditImages   AuditImage[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
-  
+
   scimTokens      ScimToken[]
   scimExternalIds UserScimExternalId[]
   roleChangeLogs  RoleChangeLog[]
-  teamMemberNotes     TeamMemberNote[]
-  activityEvents      ActivityEvent[]
-
+  teamMemberNotes TeamMemberNote[]
+  activityEvents  ActivityEvent[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -1494,12 +1500,12 @@ enum BookingStatus {
  * Quantity is always positive — direction is determined by category.
  */
 model ConsumptionLog {
-  id        String              @id @default(cuid())
-  asset     Asset               @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  assetId   String
-  category  ConsumptionCategory
-  quantity  Int // Always positive. Direction determined by category (Decision #9).
-  note      String?
+  id       String              @id @default(cuid())
+  asset    Asset               @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId  String
+  category ConsumptionCategory
+  quantity Int // Always positive. Direction determined by category (Decision #9).
+  note     String?
 
   performedBy User   @relation(fields: [userId], references: [id])
   userId      String
@@ -1731,6 +1737,16 @@ model Booking {
 
   cancellationReason String?
 
+  // Approval of the reservation request. Stamped at reserve time when the
+  // org does not require approval for the reserving role (self-approved),
+  // or by an admin's explicit Approve action when it does. NULL on a
+  // RESERVED booking whose org requires approval = pending approval
+  // (derived — there is no PENDING status). Cleared when the booking is
+  // reverted to draft.
+  approvedAt   DateTime? @db.Timestamptz(3)
+  approvedBy   User?     @relation("bookingApprover", fields: [approvedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  approvedById String?
+
   // Per-booking notification recipients (team members who receive all email updates for this booking)
   notificationRecipients TeamMember[] @relation("BookingNotificationRecipients")
 
@@ -1738,6 +1754,7 @@ model Booking {
   @@index([creatorId])
   @@index([custodianTeamMemberId])
   @@index([custodianUserId])
+  @@index([approvedById])
   @@index([organizationId])
   // Speeds up status filtering when joining from Asset → Booking
   // (e.g. fetching ONGOING/OVERDUE bookings for asset custodian display)
@@ -1768,15 +1785,21 @@ model BookingSettings {
   // calendar and don't check out/in). Reuses autoArchiveDays for the delay.
   autoArchiveExpiredReservations Boolean @default(false)
 
-  requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
+  // When true, bookings reserved by BASE / SELF_SERVICE users need an
+  // admin's explicit approval before they can be checked out. Approval is
+  // data on the booking (approvedAt/approvedById), NOT a status — RESERVED
+  // stays the only held state and conflict semantics are unchanged.
+  requireBookingApproval Boolean @default(false)
+
+  requireExplicitCheckinForAdmin       Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
 
   // Progressive check-in/out settings
   countKitsAsSingleUnit Boolean @default(false) // When true, the booking check-in progress bar treats each kit as one unit instead of counting the assets inside it
 
   // Notification settings
-  notifyBookingCreator     Boolean @default(true) // Whether the booking creator receives email notifications
-  notifyAdminsOnNewBooking Boolean @default(true) // Whether all admins receive a notification when a booking is reserved
+  notifyBookingCreator     Boolean      @default(true) // Whether the booking creator receives email notifications
+  notifyAdminsOnNewBooking Boolean      @default(true) // Whether all admins receive a notification when a booking is reserved
   alwaysNotifyTeamMembers  TeamMember[] @relation("BookingSettingsAlwaysNotify") // Team members who always receive ALL booking email notifications
 
   // Relationships
@@ -1838,12 +1861,12 @@ model PartialBookingCheckout {
   id String @id @default(cuid())
 
   // Track which assets were checked out during this session
-  assetIds      String[] // Array of asset IDs checked out
+  assetIds        String[] // Array of asset IDs checked out
   // Units checked out per entry in `assetIds` (positional alignment).
   // INDIVIDUAL assets always record `1`. QUANTITY_TRACKED slices record the
   // unit count submitted for the matching `bookingAssetId`. Empty default
   // keeps legacy rows (written before Wave B) readable without a backfill.
-  quantities    Int[]    @default([])
+  quantities      Int[]    @default([])
   // BookingAsset (slice) IDs per entry in `assetIds` (positional alignment
   // with `assetIds`/`quantities`). Disambiguates a QUANTITY_TRACKED asset that
   // is booked as multiple slices (e.g. standalone + kit member). An empty
@@ -1918,10 +1941,10 @@ model Kit {
 
   // `assets Asset[]` reverse relation on Asset.kitId.
   assetKits AssetKit[]
-  custody  KitCustody?
-  qrCodes  Qr[]
-  barcodes Barcode[]
-  reports  ReportFound[]
+  custody   KitCustody?
+  qrCodes   Qr[]
+  barcodes  Barcode[]
+  reports   ReportFound[]
 
   // NOTE: there is intentionally no `bookingAssets BookingAsset[]`
   // back-relation here. `BookingAsset.sourceKitId` is a plain FK column
@@ -1991,15 +2014,15 @@ model KitCustody {
 /// add a type-aware single-row trigger + sum-within-total CONSTRAINT
 /// TRIGGER (parallel to the Custody / BookingAsset pivots).
 model AssetKit {
-  id             String          @id @default(cuid())
-  asset          Asset           @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  id             String       @id @default(cuid())
+  asset          Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId        String
-  kit            Kit             @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kit            Kit          @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   kitId          String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   organizationId String
 
-  quantity       Int             @default(1)
+  quantity Int @default(1)
 
   // Back-relation to the AssetLocation rows that are "driven by" this
   // kit membership — at most one per AssetKit. Created when the kit has
@@ -2017,8 +2040,8 @@ model AssetKit {
   // where: { assetKitId } })`. The `SET NULL` cascade still fires at
   // the DB level when an AssetKit row is deleted.
 
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // The "INDIVIDUAL asset belongs to at most one kit" cap is enforced
   // by the `enforce_individual_asset_single_kit` trigger rather than a
@@ -2040,7 +2063,7 @@ model AssetLocation {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   organizationId String
 
-  quantity       Int          @default(1)
+  quantity Int @default(1)
 
   // Manual-vs-kit-driven discriminator. NULL = manual placement (user-
   // managed via the manage-placements dialog or location picker).
@@ -2051,11 +2074,11 @@ model AssetLocation {
   // `Kit.locationId`. The `onDelete: Cascade` means removing the asset
   // from the kit auto-deletes the kit-driven row. Mirrors the
   // `Custody.kitCustodyId` discriminator pattern.
-  assetKit       AssetKit?    @relation(fields: [assetKitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  assetKitId     String?
+  assetKit   AssetKit? @relation(fields: [assetKitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetKitId String?
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // The "INDIVIDUAL asset at one location" cap is enforced by the
   // `enforce_individual_asset_single_location` trigger; the
@@ -2303,10 +2326,10 @@ model AuditSession {
   missingAssetCount    Int @default(0)
   unexpectedAssetCount Int @default(0)
 
-  startedAt   DateTime?
-  dueDate     DateTime?
-  completedAt DateTime?
-  cancelledAt DateTime?
+  startedAt                DateTime?
+  dueDate                  DateTime?
+  completedAt              DateTime?
+  cancelledAt              DateTime?
   activeSchedulerReference String?
 
   createdBy      User         @relation(fields: [createdById], references: [id])
@@ -2367,9 +2390,9 @@ model AuditAsset {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  scans AuditScan[]
+  scans  AuditScan[]
   images AuditImage[]
-  notes AuditNote[]
+  notes  AuditNote[]
 
   @@unique([auditSessionId, assetId])
   @@index([status])

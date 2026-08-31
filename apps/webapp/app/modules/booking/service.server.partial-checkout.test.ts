@@ -77,6 +77,14 @@ vitest.mock("~/database/db.server", () => {
       // the in-flight assertion, so a single default serves every path this
       // suite exercises. String literal — this factory is hoisted.
       $queryRaw: vitest.fn().mockResolvedValue([{ status: "ONGOING" }]),
+      // why: the first-scan approval gate reads the org's
+      // `requireBookingApproval` through the tx. Default off — the approval
+      // feature's own tests cover the pending branch.
+      bookingSettings: {
+        findUnique: vitest
+          .fn()
+          .mockResolvedValue({ requireBookingApproval: false }),
+      },
       booking: {
         findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
         // why: computeBookingAssetRemainingToCheckOut's legacy-ONGOING
@@ -508,6 +516,34 @@ describe("partialCheckoutBooking", () => {
       },
       select: { id: true },
     });
+  });
+
+  it("refuses the first partial scan of a pending-approval reservation", async () => {
+    expect.assertions(2);
+
+    // Org requires approval and this reservation was never approved — the
+    // scanner is the mobile entry point into ONGOING, so the guard must fire
+    // here, not just in the web checkout dialog.
+    (
+      db.bookingSettings.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ requireBookingApproval: true });
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, approvedAt: null });
+
+    await expect(
+      partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-1"],
+      })
+    ).rejects.toThrow(/not been approved yet/);
+
+    // The transition write must not have happened.
+    expect(db.booking.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: BookingStatus.ONGOING }),
+      })
+    );
   });
 
   it("flips a RESERVED booking to ONGOING and scanned assets to CHECKED_OUT on the first partial scan", async () => {

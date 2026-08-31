@@ -6,6 +6,10 @@ import type {
 } from "react-router";
 import { data, useLoaderData } from "react-router";
 import {
+  ApprovalSettings,
+  ApprovalSettingsSchema,
+} from "~/components/booking/approval/approval-settings";
+import {
   AutoArchiveSettings,
   AutoArchiveDaysSchema,
   AutoArchiveExpiredToggleSchema,
@@ -33,7 +37,10 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Overrides } from "~/components/working-hours/overrides/overrides";
 import { EnableWorkingHoursForm } from "~/components/working-hours/toggle-working-hours-form";
 import { WeeklyScheduleForm } from "~/components/working-hours/weekly-schedule-form";
-import { scheduleExpiryArchiveForExistingReservations } from "~/modules/booking/service.server";
+import {
+  markExistingReservationsApproved,
+  scheduleExpiryArchiveForExistingReservations,
+} from "~/modules/booking/service.server";
 import {
   getBookingSettingsForOrganization,
   updateAlwaysNotifyTeamMembers,
@@ -144,6 +151,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ![
         "updateTimeSettings",
         "updateTagsRequired",
+        "updateRequireBookingApproval",
         "updateAutoArchiveToggle",
         "updateAutoArchiveExpiredToggle",
         "updateAutoArchiveDays",
@@ -217,6 +225,45 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "Settings updated",
           message: "Tags requirement setting has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+      case "updateRequireBookingApproval": {
+        const { requireBookingApproval } = parseData(
+          formData,
+          ApprovalSettingsSchema,
+          {
+            additionalData: {
+              intent,
+              organizationId,
+              formData: Object.fromEntries(formData),
+            },
+          }
+        );
+
+        await updateBookingSettings({
+          organizationId,
+          requireBookingApproval,
+        });
+
+        // Enabling must not retro-flag existing reservations as pending:
+        // stamp everything currently RESERVED as approved so approval only
+        // applies to requests made from this point on.
+        if (requireBookingApproval) {
+          await markExistingReservationsApproved({
+            organizationId,
+            userId: authSession.userId,
+          });
+        }
+
+        sendNotification({
+          title: "Settings updated",
+          message: requireBookingApproval
+            ? "Booking approval is now required for new requests from Base and Self service users"
+            : "Booking approval is no longer required",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -601,6 +648,16 @@ export default function GeneralPage() {
     <>
       {/* Email notification recipient settings */}
       <NotificationSettings bookingSettings={bookingSettings} />
+
+      {/* Booking approval settings form */}
+      <ApprovalSettings
+        header={{
+          title: "Booking approval",
+          subHeading:
+            "Control whether booking requests from Base and Self service users need an admin's approval before check-out.",
+        }}
+        defaultValue={bookingSettings.requireBookingApproval}
+      />
 
       {/* Explicit check-in settings form */}
       <ExplicitCheckinSettings
