@@ -6522,9 +6522,15 @@ export async function partialCheckinBooking({
       }
 
       /**
-       * A QUANTITY_TRACKED slice is finished only when its OWN booked quantity
-       * is accounted for. Read this booking's dispositions back — including the
-       * rows written above — and spread them with
+       * A QUANTITY_TRACKED slice is finished when everything that actually LEFT
+       * on it is accounted for — not when its booked quantity is. Progressive
+       * checkout stamps `checkedOutAt` as soon as any unit goes, so a slice
+       * booked at 10 with 3 in the field is ordinary; measuring against 10 would
+       * leave it outstanding after all 3 came back, and its kit checked out with
+       * nothing of it anywhere.
+       *
+       * Read this booking's dispositions back — including the rows written above
+       * — and spread them with
        * {@link attributeDispositionsByBookingAsset}, the same function every
        * read site uses: a log tagged with a slice lands on it, an untagged one
        * greedy-fills in `compareSlicesForGreedyFill` order.
@@ -6542,6 +6548,22 @@ export async function partialCheckinBooking({
         ...new Set(qtySummaries.map((s) => s.assetId)),
       ];
       if (qtyAssetIdsTouched.length > 0) {
+        /**
+         * Units dispatched per slice = booked minus what is still checkoutable.
+         * {@link computeBookingAssetsSliceRemainingToCheckOut} is the reader
+         * every checkout surface already uses, including its all-at-once
+         * fallback, so a slice sent out by the button reports its whole
+         * quantity dispatched and settles exactly as it always has.
+         */
+        const remainingToCheckOutBySlice =
+          await computeBookingAssetsSliceRemainingToCheckOut(
+            tx,
+            id,
+            qtyAssetIdsTouched.flatMap((assetId) =>
+              (bookingSlicesByAssetId.get(assetId) ?? []).map((s) => s.id)
+            )
+          );
+
         const dispositionLogs = await tx.consumptionLog.findMany({
           where: {
             bookingId: id,
@@ -6582,9 +6604,15 @@ export async function partialCheckinBooking({
             consumptionLogs: logsByAssetId.get(assetId) ?? [],
           });
           for (const slice of slices) {
+            const dispatched =
+              slice.quantity - (remainingToCheckOutBySlice.get(slice.id) ?? 0);
+            // A marked slice that reports nothing dispatched cannot be sized
+            // from the sessions, so it falls back to its booked quantity and
+            // holds the kit — the safe direction while the two disagree.
+            const obligation = dispatched > 0 ? dispatched : slice.quantity;
             if (
               isOutstandingSlice(slice) &&
-              (attributed.get(slice.id) ?? 0) >= slice.quantity
+              (attributed.get(slice.id) ?? 0) >= obligation
             ) {
               settledSliceIds.add(slice.id);
             }

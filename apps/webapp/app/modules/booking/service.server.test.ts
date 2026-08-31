@@ -12348,7 +12348,9 @@ describe("getKitIdsByBookingSlices", () => {
     db.assetKit.findMany.mockResolvedValue([]);
 
     const result = await getKitIdsByBookingSlices({
-      slices: [{ assetId: "asset-1", assetKitId: "ak-gone", sourceKitId: null }],
+      slices: [
+        { assetId: "asset-1", assetKitId: "ak-gone", sourceKitId: null },
+      ],
       organizationId: "org-1",
     });
 
@@ -12510,6 +12512,37 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockImplementation((q?: any) => {
+        // `computeBookingAssetsSliceRemainingToCheckOut`, read (1): the slices
+        // it was asked about. Keyed on `where.id.in`, which no other read here
+        // uses.
+        if (q?.where?.id?.in) {
+          return Promise.resolve(
+            args.slices
+              .filter((s) => q.where.id.in.includes(s.id))
+              .map((s) => ({
+                id: s.id,
+                assetId: s.assetId,
+                quantity: s.quantity,
+                assetKitId: s.assetKitId,
+                asset: { status: AssetStatus.CHECKED_OUT },
+              }))
+          );
+        }
+        // Same helper, read (2): every sibling slice of the involved assets, so
+        // its greedy fill sees the full set. `where.assetId` is an `in` filter
+        // here and a scalar in the asset-level read below.
+        if (q?.where?.assetId?.in) {
+          return Promise.resolve(
+            args.slices
+              .filter((s) => q.where.assetId.in.includes(s.assetId))
+              .map((s) => ({
+                id: s.id,
+                assetId: s.assetId,
+                quantity: s.quantity,
+                assetKitId: s.assetKitId,
+              }))
+          );
+        }
         if (q?.where?.assetId) {
           return Promise.resolve(
             args.slices
@@ -12618,10 +12651,11 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     ];
     arrangeBooking(slices);
     mockSliceReads({ slices, stillOutNow: [] });
-    (db.consumptionLog.findMany as ReturnType<typeof vitest.fn>)
-      .mockResolvedValue([
-        { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
-      ]);
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
+    ]);
 
     await partialCheckinBooking(
       params({
@@ -12644,10 +12678,11 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     ];
     arrangeBooking(slices);
     mockSliceReads({ slices, stillOutNow: [] });
-    (db.consumptionLog.findMany as ReturnType<typeof vitest.fn>)
-      .mockResolvedValue([
-        { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
-      ]);
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
+    ]);
 
     await partialCheckinBooking(
       params({
@@ -12713,10 +12748,11 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     ];
     arrangeBooking(slices);
     mockSliceReads({ slices, stillOutNow: [] });
-    (db.consumptionLog.findMany as ReturnType<typeof vitest.fn>)
-      .mockResolvedValue([
-        { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 2 },
-      ]);
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 2 },
+    ]);
 
     await partialCheckinBooking(
       params({
@@ -12751,10 +12787,11 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
         },
       ],
     });
-    (db.consumptionLog.findMany as ReturnType<typeof vitest.fn>)
-      .mockResolvedValue([
-        { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
-      ]);
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
+    ]);
 
     await partialCheckinBooking(
       params({
@@ -12797,5 +12834,70 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     await partialCheckinBooking(params({ assetIds: ["asset-d"] }));
 
     expect(releasedKitIds()).toEqual(["kit-z"]);
+  });
+
+  /**
+   * Progressive checkout stamps `checkedOutAt` as soon as ANY unit leaves, so a
+   * slice booked at 10 with 3 in the field is an ordinary state, not a broken
+   * one. What settles it is those 3 coming back. Measuring against the booked
+   * 10 leaves the kit checked out with nothing of it anywhere, and once the
+   * booking completes no later check-in can release it.
+   */
+  it("releases a kit once every unit its slice actually sent out is back", async () => {
+    expect.assertions(1);
+
+    const slices = [tapeSlice("ba-kit-a", "kit-a", 10), fillerSlice];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+    // Only 3 of the booked 10 ever left.
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetIds: ["asset-x"], quantities: [3], bookingAssetIds: ["ba-kit-a"] },
+    ]);
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 3 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 3 },
+        ],
+      })
+    );
+
+    expect(releasedKitIds()).toEqual(["kit-a"]);
+  });
+
+  it("holds the kit while a unit its slice sent out is still in the field", async () => {
+    expect.assertions(1);
+
+    const slices = [tapeSlice("ba-kit-a", "kit-a", 10), fillerSlice];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetIds: ["asset-x"], quantities: [3], bookingAssetIds: ["ba-kit-a"] },
+    ]);
+    // 3 went out, 2 came back.
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 2 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 2 },
+        ],
+      })
+    );
+
+    expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
 });
