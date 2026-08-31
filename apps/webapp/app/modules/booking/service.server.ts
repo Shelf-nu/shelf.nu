@@ -137,6 +137,7 @@ import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import {
   attributeDispositionsByBookingAsset,
+  attributeSessionCheckoutToSlices,
   checkoutSessionsToLogsByAsset,
   compareSlicesForGreedyFill,
 } from "./checkout-attribution";
@@ -8158,46 +8159,29 @@ export async function partialCheckoutBooking({
          * positionally-aligned arrays the session row was just built from, so
          * the count and the session can never describe different departures.
          *
-         * A tagged entry names its slice. An untagged one names only the asset,
-         * so its units are laid down in `compareSlicesForGreedyFill` order and
-         * capped at each slice's booked quantity — the same spread every read
-         * site applies to an untagged claim.
+         * {@link attributeSessionCheckoutToSlices} owns the per-slice split and
+         * the capacity rule that keeps it agreeing with the marker above.
          *
          * Cumulative: a slice returned in full and sent out again adds to its
          * count rather than replacing it.
          */
-        const unitsBySliceId = new Map<string, number>();
-        const untaggedUnitsByAsset = new Map<string, number>();
-        for (const [index, assetId] of sessionAssetIds.entries()) {
-          const units = sessionQuantities[index] ?? 1;
-          const sliceId = sessionBookingAssetIds[index];
-          if (sliceId) {
-            unitsBySliceId.set(
-              sliceId,
-              (unitsBySliceId.get(sliceId) ?? 0) + units
-            );
-          } else {
-            untaggedUnitsByAsset.set(
-              assetId,
-              (untaggedUnitsByAsset.get(assetId) ?? 0) + units
-            );
-          }
-        }
-        for (const [assetId, total] of untaggedUnitsByAsset) {
-          let left = total;
-          const slices = bookingFound.bookingAssets
-            .filter((ba) => ba.asset.id === assetId)
-            .sort(compareSlicesForGreedyFill);
-          for (const slice of slices) {
-            if (left <= 0) break;
-            const take = Math.min(slice.quantity, left);
-            unitsBySliceId.set(
-              slice.id,
-              (unitsBySliceId.get(slice.id) ?? 0) + take
-            );
-            left -= take;
-          }
-        }
+        const unitsBySliceId = attributeSessionCheckoutToSlices({
+          sliceRows: bookingFound.bookingAssets.map((ba) => ({
+            id: ba.id,
+            assetId: ba.asset.id,
+            quantity: ba.quantity,
+            assetKitId: ba.assetKitId,
+          })),
+          committedRemainingBySlice: sliceCommittedRemainingBySlice,
+          // The session arrays are positionally aligned and carry "" for an
+          // untagged claim, which the attributor reads as "names no slice".
+          claims: sessionAssetIds.map((assetId, index) => ({
+            assetId,
+            bookingAssetId: sessionBookingAssetIds[index] || null,
+            quantity: sessionQuantities[index] ?? 1,
+          })),
+        });
+
         for (const [sliceId, units] of unitsBySliceId) {
           if (units <= 0) continue;
           await tx.bookingAsset.updateMany({
