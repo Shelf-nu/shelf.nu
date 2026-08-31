@@ -730,51 +730,86 @@ async function reconcileAssetStatusForBookingExit({
   if (uniqueAssetIds.length === 0) return resolvedStatuses;
 
   try {
-    for (const assetId of uniqueAssetIds) {
-      // Run both queries in parallel — each is a single indexed count, and
-      // they are independent. Scoped to the active tx snapshot so a
-      // concurrent booking write cannot race the decision.
-      const [otherActiveBookings, custodyCount] = await Promise.all([
-        tx.bookingAsset.count({
-          where: {
-            assetId,
-            // Exclude the exiting bookings' own rows so they cannot pin the
-            // asset, or each other.
-            bookingId: { notIn: excludeBookingIds },
-            booking: {
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-              },
+    /**
+     * Two set-based reads for the whole batch, not two per asset. A bulk exit
+     * runs inside an interactive transaction and its selection is uncapped —
+     * select-all spans every page — so per-asset round trips would hold locks
+     * long enough to hit the transaction timeout and roll the booking mutation
+     * back with it.
+     *
+     * Scoped to the active tx snapshot so a concurrent booking write cannot
+     * race the decision.
+     */
+    const [slicesStillOut, custodies] = await Promise.all([
+      tx.bookingAsset.findMany({
+        where: {
+          assetId: { in: uniqueAssetIds },
+          // Exclude the exiting bookings' own rows so they cannot pin the
+          // asset, or each other.
+          bookingId: { notIn: excludeBookingIds },
+          booking: {
+            status: {
+              in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
             },
           },
-        }),
-        tx.custody.count({ where: { assetId } }),
-      ]);
+          // A live booking is not by itself evidence that it holds this asset.
+          // Only the slice's own markers say that: one added after checkout has
+          // never left, and one already reconciled has come back. Counting
+          // either would pin the asset to CHECKED_OUT with nothing in the
+          // field, and no later exit could clear it. Partially returned
+          // QUANTITY_TRACKED slices keep a null `checkedInAt` and so still
+          // count, which is correct — some of their units are still out.
+          checkedOutAt: { not: null },
+          checkedInAt: null,
+        },
+        select: { assetId: true },
+        distinct: ["assetId"],
+      }),
+      tx.custody.findMany({
+        where: { assetId: { in: uniqueAssetIds } },
+        select: { assetId: true },
+        distinct: ["assetId"],
+      }),
+    ]);
 
-      // Pick the strongest commitment first: CHECKED_OUT beats IN_CUSTODY
-      // beats AVAILABLE. See JSDoc above for the rationale on not
-      // downgrading to IN_CUSTODY when both a booking and a custody coexist.
-      let nextStatus: AssetStatus;
-      if (otherActiveBookings > 0) {
-        nextStatus = AssetStatus.CHECKED_OUT;
-      } else if (custodyCount > 0) {
-        nextStatus = AssetStatus.IN_CUSTODY;
+    const heldByAnotherBooking = new Set(
+      (slicesStillOut as Array<{ assetId: string }>).map((row) => row.assetId)
+    );
+    const heldInCustody = new Set(
+      (custodies as Array<{ assetId: string }>).map((row) => row.assetId)
+    );
+
+    // Pick the strongest commitment first: CHECKED_OUT beats IN_CUSTODY beats
+    // AVAILABLE. See JSDoc above for the rationale on not downgrading to
+    // IN_CUSTODY when both a booking and a custody coexist.
+    const assetIdsByStatus = new Map<AssetStatus, Asset["id"][]>();
+    for (const assetId of uniqueAssetIds) {
+      const nextStatus = heldByAnotherBooking.has(assetId)
+        ? AssetStatus.CHECKED_OUT
+        : heldInCustody.has(assetId)
+        ? AssetStatus.IN_CUSTODY
+        : AssetStatus.AVAILABLE;
+      const bucket = assetIdsByStatus.get(nextStatus);
+      if (bucket) {
+        bucket.push(assetId);
       } else {
-        nextStatus = AssetStatus.AVAILABLE;
+        assetIdsByStatus.set(nextStatus, [assetId]);
       }
+      resolvedStatuses.set(assetId, nextStatus);
+    }
 
-      // Use `updateMany` so we can compound `id` + `organizationId` in the
-      // where clause without depending on a `@@unique` constraint. Org-scope
-      // is defence-in-depth: even though `assetId` originated from a booking
-      // already loaded org-scoped by every caller, this filter makes the
-      // IDOR impossible to (re)introduce by a future refactor. The lint rule
-      // for `require-org-scope-on-id-queries` is exactly what this satisfies.
+    // One write per distinct status, so the whole batch costs at most three.
+    // `updateMany` compounds `id` + `organizationId` without depending on a
+    // `@@unique` constraint. Org-scope is defence-in-depth: even though the
+    // asset ids originated from a booking already loaded org-scoped by every
+    // caller, this filter makes the IDOR impossible to (re)introduce by a
+    // future refactor. The `require-org-scope-on-id-queries` lint rule is
+    // exactly what this satisfies.
+    for (const [nextStatus, idsForStatus] of assetIdsByStatus) {
       await tx.asset.updateMany({
-        where: { id: assetId, organizationId },
+        where: { id: { in: idsForStatus }, organizationId },
         data: { status: nextStatus },
       });
-
-      resolvedStatuses.set(assetId, nextStatus);
     }
 
     return resolvedStatuses;
