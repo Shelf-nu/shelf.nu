@@ -43,6 +43,12 @@ import { getQr } from "../qr/service.server";
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    // why: `updateKitAssets` locks each live booking row via
+    // `lockBookingForStatusCheck` before trusting the status it read outside
+    // the transaction. Answers "still ONGOING" by default so the existing
+    // cases keep their arranged booking state; a test overrides it to model a
+    // check-in that committed first.
+    $queryRaw: vitest.fn().mockResolvedValue([{ status: "ONGOING" }]),
     kit: {
       create: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
@@ -5635,5 +5641,474 @@ describe("kit custody release must not overwrite CHECKED_OUT", () => {
 
     expect(db.asset.updateMany).toHaveBeenCalled();
     expect(currentStatus).toBe(AssetStatus.AVAILABLE);
+  });
+});
+
+/**
+ * Regression cover for the stale-`Kit.status` stamp.
+ *
+ * `updateKitAssets` used to stamp every newly added asset CHECKED_OUT whenever
+ * the kit's own status column read CHECKED_OUT, without checking that a live
+ * booking existed. `Kit.status` goes stale on its own (check-in resolves kits
+ * from the assets' CURRENT membership, so detaching a kit's assets mid-booking
+ * leaves the flag set forever), so the stamp landed on assets with no booking
+ * behind it, and no release path clears CHECKED_OUT.
+ *
+ * The stamp now keys on the booking rows this call actually wrote.
+ */
+describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /** A mock viewed only for when it was called relative to other mocks. */
+  type MockedOrder = { mock: { invocationCallOrder: number[] } };
+
+  /** Only the propagation events; membership events share the same spy. */
+  function propagatedAddedEvents() {
+    return (recordEvents as ReturnType<typeof vitest.fn>).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_ASSETS_ADDED");
+  }
+
+  /** An instant a slice left on, for cases that need a non-null marker. */
+  const WENT_OUT = new Date("2026-08-01T10:00:00.000Z");
+  /** An instant a slice came back on. */
+  const CAME_BACK = new Date("2026-08-02T10:00:00.000Z");
+
+  /** One pre-existing kit slice as the eligibility read sees it. */
+  type PriorSlice = {
+    bookingId: string;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+  };
+
+  /**
+   * @param existingBookingStatus status of the booking the kit's sitting
+   *        member is on, which is what `bookingsToUpdate` is derived from.
+   * @param kitStatus the kit's own (possibly stale) status column.
+   */
+  function arrange(
+    existingBookingStatus: BookingStatus,
+    kitStatus: KitStatus = KitStatus.CHECKED_OUT,
+    /**
+     * Whether this kit's existing slices carry `checkedOutAt` — i.e. whether
+     * the kit physically went out. A booking can be ONGOING because a
+     * different kit was scanned, so the two are independent.
+     */
+    kitSlicesWereCheckedOut = true,
+    options: {
+      /**
+       * Further bookings the sitting member also holds a slice on, so a case
+       * can put this kit on two live bookings at once.
+       */
+      extraBookings?: Array<{ id: string; status: BookingStatus }>;
+      /**
+       * The kit's pre-existing slices, overriding the single slice implied by
+       * `kitSlicesWereCheckedOut`. Lets a case model a kit that only half
+       * left, or one whose members have since come back.
+       */
+      priorSlices?: PriorSlice[];
+    } = {}
+  ) {
+    const { extraBookings = [], priorSlices } = options;
+
+    // why: the service reads this kit's pre-existing slices to decide, per
+    // booking, whether the whole kit left it. Discriminated on the `select`
+    // because `updateKitAssets` also calls `bookingAsset.findMany` for
+    // detachment impact and planning-booking removal, and those must keep
+    // seeing the empty default — no other call site selects `checkedOutAt`.
+    const slices: PriorSlice[] = priorSlices ?? [
+      {
+        bookingId: "booking-1",
+        checkedOutAt: kitSlicesWereCheckedOut ? WENT_OUT : null,
+        checkedInAt: null,
+      },
+    ];
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockImplementation((args) =>
+      Promise.resolve(args?.select?.checkedOutAt ? slices : [])
+    );
+
+    // why: the service locks each live booking row and re-reads its status
+    // before trusting it. Set here rather than left to the module-level
+    // default because `clearAllMocks` does not restore implementations, so an
+    // override in one case would otherwise leak into the next.
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: existingBookingStatus }]);
+
+    // why: `updateKitAssets` reads the kit with its members and their booking
+    // rows in one go; this is the persisted state each case is arranged around
+    // (the kit's own flag, and the booking its sitting member sits on).
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      name: "Kit 1",
+      status: kitStatus,
+      location: null,
+      custody: null,
+      assetKits: [
+        {
+          id: "ak-sitting",
+          kitId: "kit-1",
+          quantity: 1,
+          asset: {
+            id: "sitting-member",
+            title: "Sitting member",
+            type: AssetType.INDIVIDUAL,
+            unitOfMeasure: null,
+            assetKits: [{ kitId: "kit-1" }],
+            bookingAssets: [
+              {
+                id: "ba-sitting",
+                bookingId: "booking-1",
+                assetId: "sitting-member",
+                assetKitId: "ak-sitting",
+                sourceKitId: "kit-1",
+                quantity: 1,
+                booking: { id: "booking-1", status: existingBookingStatus },
+              },
+              ...extraBookings.map((b) => ({
+                id: `ba-sitting-${b.id}`,
+                bookingId: b.id,
+                assetId: "sitting-member",
+                assetKitId: "ak-sitting",
+                sourceKitId: "kit-1",
+                quantity: 1,
+                booking: { id: b.id, status: b.status },
+              })),
+            ],
+          },
+        },
+      ],
+    });
+
+    // why: the service re-reads the submitted asset ids to diff them against
+    // current membership. Returning both the sitting member and the newcomer
+    // is what makes `newlyAddedAssets` exactly `["newcomer"]`.
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "sitting-member",
+        title: "Sitting member",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        unitOfMeasure: null,
+        assetKits: [{ kitId: "kit-1" }],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+      {
+        id: "newcomer",
+        title: "Newcomer",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        unitOfMeasure: null,
+        assetKits: [],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+    ]);
+
+    // why: the propagation block reads back the AssetKit row the membership
+    // write just created, to populate `assetKitId` / `sourceKitId` on the new
+    // BookingAsset row. Without it the newcomer never reaches the booking.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([
+      { id: "ak-newcomer", assetId: "newcomer", quantity: 1 },
+    ]);
+  }
+
+  async function act() {
+    const { updateKitAssets } = await import("./service.server");
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["sitting-member", "newcomer"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+  }
+
+  /** Every CHECKED_OUT write this call made, as `where.id.in` id lists. */
+  function checkedOutStamps() {
+    return (
+      db.asset.updateMany as unknown as {
+        mock: {
+          calls: Array<
+            [{ where?: { id?: { in?: string[] } }; data?: { status?: string } }]
+          >;
+        };
+      }
+    ).mock.calls
+      .filter((c) => c[0]?.data?.status === AssetStatus.CHECKED_OUT)
+      .map((c) => c[0].where?.id?.in ?? []);
+  }
+
+  it("does NOT stamp CHECKED_OUT when the kit's flag is stale and the booking is over", async () => {
+    // The exact production shape: kit reads CHECKED_OUT, but its only booking
+    // has already been checked in. Nothing is physically out.
+    arrange(BookingStatus.COMPLETE);
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
+  });
+
+  it("does NOT stamp CHECKED_OUT when the kit is only on a booking that has not started", async () => {
+    // The newcomer joins the DRAFT booking, but nothing has left the building,
+    // so its status must stay untouched.
+    arrange(BookingStatus.DRAFT);
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
+  });
+
+  it("DOES stamp CHECKED_OUT for an asset added to a kit that is out on an ONGOING booking", async () => {
+    // The legitimate case this write exists for. Guards against "fixing" the
+    // bug by deleting the stamp outright.
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([["newcomer"]]);
+  });
+
+  it("does NOT stamp when the booking is live but this kit was never scanned out", async () => {
+    // Progressive checkout flips a booking to ONGOING on the first scan, and
+    // only stamps kits whose every slice went. So a live booking is not proof
+    // that THIS kit left: its slices carry no `checkedOutAt`.
+    arrange(BookingStatus.ONGOING, KitStatus.CHECKED_OUT, false);
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
+  });
+
+  it("scopes the stamp to the caller's organization", async () => {
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["newcomer"] }, organizationId: "org-1" },
+      data: { status: AssetStatus.CHECKED_OUT },
+    });
+  });
+
+  /**
+   * Slice checkout markers written by this call. Filtered on
+   * `data.checkedOutAt` because `updateKitAssets` also runs
+   * `bookingAsset.updateMany` to sync kit slice quantity edits.
+   */
+  function sliceCheckoutMarkers() {
+    return (
+      db.bookingAsset.updateMany as unknown as {
+        mock: {
+          calls: Array<
+            [
+              {
+                where?: {
+                  bookingId?: { in?: string[] };
+                  assetKitId?: { in?: string[] };
+                };
+                data?: { checkedOutAt?: Date; checkedOutById?: string };
+              },
+            ]
+          >;
+        };
+      }
+    ).mock.calls.filter((c) => c[0]?.data?.checkedOutAt !== undefined);
+  }
+
+  it("marks the newcomer's kit slice checked out alongside the status stamp", async () => {
+    // The two travel together. `Asset.status` says the member is out;
+    // `BookingAsset.checkedOutAt` says which booking it went out ON, and that
+    // is what the check-in guard reads. A status without a marker is refused
+    // at the scanner with "Cannot check in assets that were never checked out".
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    const markers = sliceCheckoutMarkers();
+    expect(markers).toHaveLength(1);
+    // Keyed on the brand-new AssetKit id, never on assetId: a member can hold
+    // a standalone slice on the same booking that did not go out with the kit.
+    expect(markers[0][0].where).toEqual({
+      bookingId: { in: ["booking-1"] },
+      assetKitId: { in: ["ak-newcomer"] },
+    });
+    expect(markers[0][0].data?.checkedOutById).toBe("user-1");
+    expect(markers[0][0].data?.checkedOutAt).toBeInstanceOf(Date);
+  });
+
+  it("writes no slice marker when the kit's flag is stale and nothing is out", async () => {
+    arrange(BookingStatus.COMPLETE);
+
+    await act();
+
+    expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("writes no slice marker for a booking that has not started", async () => {
+    // A DRAFT booking still gains the row, but nothing has physically left, so
+    // the slice must stay unmarked.
+    arrange(BookingStatus.DRAFT);
+
+    await act();
+
+    expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("does NOT stamp when the booking completed between the status read and the write", async () => {
+    // `bookingsToUpdate` carries a status read at the top of the function,
+    // outside any transaction. The locked re-read is what catches a check-in
+    // that committed in between.
+    arrange(BookingStatus.ONGOING);
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: BookingStatus.COMPLETE }]);
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
+    expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("adds no row to a booking the lock reports as no longer live", async () => {
+    // The status on `bookingsToUpdate` was read outside any transaction. A
+    // check-in that committed in between leaves a booking that is finished but
+    // still reads ONGOING here, and a member added to it would land on a
+    // booking already reported as complete — with a BOOKING_ASSETS_ADDED event
+    // claiming it. The locked re-read is what the write set is built from.
+    arrange(BookingStatus.ONGOING);
+    //@ts-expect-error missing vitest type
+    db.$queryRaw.mockResolvedValue([{ status: BookingStatus.COMPLETE }]);
+
+    await act();
+
+    expect(db.bookingAsset.createMany).not.toHaveBeenCalled();
+    // `recordEvents` still carries this call's membership events, so assert on
+    // the propagation action specifically.
+    expect(propagatedAddedEvents()).toEqual([]);
+  });
+
+  it("still adds the row when the lock confirms the booking is live", async () => {
+    // The other side of the guard: a booking that is genuinely still ONGOING
+    // must keep receiving the member, or the fix would quietly drop rows.
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    expect(db.bookingAsset.createMany).toHaveBeenCalled();
+  });
+
+  it("does NOT stamp when every slice of the kit has already come back", async () => {
+    // A booking stays ONGOING while a different kit is still out, so a kit
+    // whose every slice has been returned must not vouch for a new member.
+    arrange(BookingStatus.ONGOING, KitStatus.CHECKED_OUT, true, {
+      priorSlices: [
+        {
+          bookingId: "booking-1",
+          checkedOutAt: WENT_OUT,
+          checkedInAt: CAME_BACK,
+        },
+      ],
+    });
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
+    expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("marks only the booking this kit actually left, not every live booking", async () => {
+    // Progressive checkout flips a booking to ONGOING on the first scan of
+    // ANYTHING, so a second live booking can hold this kit without it having
+    // left there. Evidence from booking-1 must not vouch for booking-2.
+    arrange(BookingStatus.ONGOING, KitStatus.CHECKED_OUT, true, {
+      extraBookings: [{ id: "booking-2", status: BookingStatus.ONGOING }],
+      priorSlices: [
+        { bookingId: "booking-1", checkedOutAt: WENT_OUT, checkedInAt: null },
+        { bookingId: "booking-2", checkedOutAt: null, checkedInAt: null },
+      ],
+    });
+
+    await act();
+
+    const markers = sliceCheckoutMarkers();
+    expect(markers).toHaveLength(1);
+    expect(markers[0][0].where?.bookingId).toEqual({ in: ["booking-1"] });
+  });
+
+  it("does NOT stamp when the kit only half left the booking", async () => {
+    // Progressive checkout stamps only the slices actually scanned, so a kit
+    // can sit half out on one booking. A member that stayed behind is not
+    // evidence that a newcomer went anywhere.
+    arrange(BookingStatus.ONGOING, KitStatus.CHECKED_OUT, true, {
+      priorSlices: [
+        { bookingId: "booking-1", checkedOutAt: WENT_OUT, checkedInAt: null },
+        { bookingId: "booking-1", checkedOutAt: null, checkedInAt: null },
+      ],
+    });
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([]);
+    expect(sliceCheckoutMarkers()).toEqual([]);
+  });
+
+  it("DOES stamp when the whole kit left and some members have since returned", async () => {
+    // The disqualifier is "never left", not "not out right now". Check-in
+    // clears `Kit.status` only for a complete kit, so a kit returned member by
+    // member still reads CHECKED_OUT and the picker still promises additions
+    // inherit it. Refusing here would be stricter than the behaviour this
+    // replaces.
+    arrange(BookingStatus.ONGOING, KitStatus.CHECKED_OUT, true, {
+      priorSlices: [
+        {
+          bookingId: "booking-1",
+          checkedOutAt: WENT_OUT,
+          checkedInAt: CAME_BACK,
+        },
+        { bookingId: "booking-1", checkedOutAt: WENT_OUT, checkedInAt: null },
+      ],
+    });
+
+    await act();
+
+    expect(checkedOutStamps()).toEqual([["newcomer"]]);
+    expect(sliceCheckoutMarkers()).toHaveLength(1);
+  });
+
+  it("takes the booking row lock before inserting any row that references it", async () => {
+    // Order is the behaviour here, so the assertion has to be about order.
+    //
+    // Inserting a `BookingAsset` makes Postgres take FOR KEY SHARE on the
+    // parent `Booking` to validate the foreign key. That mode is SHARED, so
+    // two callers adding assets to two kits on the SAME booking both hold it;
+    // when each then asks for the FOR UPDATE this block needs, each waits on
+    // the other's share and Postgres kills one with a deadlock. Sorting the
+    // ids cannot help — the contention is one row, reached in one order.
+    //
+    // Taking the strongest lock first means nothing is ever upgraded. The
+    // aborted transaction would not be recoverable by retrying, either: the
+    // membership transaction has already committed, so a second attempt
+    // recomputes `newlyAddedAssets` as empty and silently skips propagation,
+    // leaving the asset in the kit but absent from the booking.
+    arrange(BookingStatus.ONGOING);
+
+    await act();
+
+    const lockOrder = (db.$queryRaw as unknown as MockedOrder).mock
+      .invocationCallOrder;
+    const insertOrder = (db.bookingAsset.createMany as unknown as MockedOrder)
+      .mock.invocationCallOrder;
+
+    expect(lockOrder.length).toBeGreaterThan(0);
+    expect(insertOrder.length).toBeGreaterThan(0);
+    expect(Math.max(...lockOrder)).toBeLessThan(Math.min(...insertOrder));
   });
 });
