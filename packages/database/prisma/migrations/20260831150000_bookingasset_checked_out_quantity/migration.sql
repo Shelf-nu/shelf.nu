@@ -33,8 +33,15 @@ ALTER TABLE "BookingAsset"
 -- UNTAGGED claims name no slice, so their units are known per asset only. They
 -- are laid down in the order every read site fills an untagged claim
 -- (`compareSlicesForGreedyFill`): standalone slices before kit-driven ones,
--- then by id. Each slice takes what is left after the ones ahead of it, capped
--- at its own booked quantity, so the spread can never exceed what was claimed.
+-- then by id.
+--
+-- A slice's capacity for the untagged pool is its booked quantity MINUS what
+-- tagged claims already took, exactly as `attributeDispositionsByBookingAsset`
+-- computes it. Filling to the full booked quantity and adding tagged units on
+-- top would put a slice above what it booked and leave the next slice at zero
+-- for a history that plainly split across both. `prior` therefore accumulates
+-- capacity, not quantity, so what one slice cannot absorb passes to the next.
+--
 -- Sizing them any other way would describe a slice differently from what the
 -- booking's own screens report for it.
 --
@@ -59,19 +66,26 @@ untagged_total AS (
      OR t."bookingAssetId" = ''
   GROUP BY pco."bookingId", t."assetId"
 ),
+capacity AS (
+  SELECT ba2.id, ba2."bookingId", ba2."assetId", ba2."assetKitId",
+         COALESCE(tg.units, 0)::int AS tagged_units,
+         GREATEST(0, ba2.quantity - COALESCE(tg.units, 0))::int AS capacity
+  FROM "BookingAsset" ba2
+  LEFT JOIN tagged tg ON tg.slice_id = ba2.id
+),
 greedy AS (
-  SELECT ba2.id, ba2."bookingId", ba2."assetId", ba2.quantity,
+  SELECT c.*,
          COALESCE(
-           SUM(ba2.quantity) OVER (
-             PARTITION BY ba2."bookingId", ba2."assetId"
-             ORDER BY (ba2."assetKitId" IS NOT NULL), ba2.id
+           SUM(c.capacity) OVER (
+             PARTITION BY c."bookingId", c."assetId"
+             ORDER BY (c."assetKitId" IS NOT NULL), c.id
              ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
            ), 0
          )::int AS prior
-  FROM "BookingAsset" ba2
+  FROM capacity c
 ),
 untagged_share AS (
-  SELECT g.id, LEAST(g.quantity, GREATEST(0, u.total - g.prior))::int AS units
+  SELECT g.id, LEAST(g.capacity, GREATEST(0, u.total - g.prior))::int AS units
   FROM greedy g
   JOIN untagged_total u
     ON u."bookingId" = g."bookingId"
@@ -79,10 +93,9 @@ untagged_share AS (
 ),
 sized AS (
   SELECT g.id,
-         COALESCE(tg.units, 0) + COALESCE(us.units, 0) AS units
+         g.tagged_units + COALESCE(us.units, 0) AS units
   FROM greedy g
-  LEFT JOIN tagged tg        ON tg.slice_id = g.id
-  LEFT JOIN untagged_share us ON us.id      = g.id
+  LEFT JOIN untagged_share us ON us.id = g.id
 )
 UPDATE "BookingAsset" ba
 SET "checkedOutQuantity" = sized.units
@@ -90,14 +103,43 @@ FROM sized
 WHERE ba.id = sized.id
   AND ba."checkedOutQuantity" IS DISTINCT FROM sized.units;
 
--- Backfill 3 — slices that went out without any session naming them.
+-- Backfill 2 — slices that went out without any session naming them.
 --
 -- The all-at-once checkout and the kit-member propagation both send a WHOLE
 -- slice out and record only the marker, so a marked slice no session accounts
 -- for left in full. Fenced on `checkedOutQuantity = 0` so it cannot double-count
--- a slice backfill 1 or 2 already sized, and on `checkedOutAt` so it never
--- invents a departure for a slice that stayed on the shelf.
+-- a slice backfill 1 already sized, and on `checkedOutAt` so it never invents a
+-- departure for a slice that stayed on the shelf.
 UPDATE "BookingAsset" ba
 SET "checkedOutQuantity" = ba.quantity
 WHERE ba."checkedOutAt" IS NOT NULL
   AND ba."checkedOutQuantity" = 0;
+
+-- Backfill 3 — a button departure on a slice that ALSO has session history.
+--
+-- Backfill 2 cannot see this one: the slice's sessions gave it a non-zero count,
+-- so the earlier full-slice dispatch is invisible. The evidence it happened is
+-- that MORE units came back than every session together ever sent — only the
+-- button or the kit propagation could have sent the difference.
+--
+-- One full-slice dispatch is added, which is the smallest history consistent
+-- with the evidence; the records cannot say how many there were. Without this
+-- the units are missing from the count while the returns are recorded against
+-- it, so `checkedOutQuantity` minus the dispositions goes NEGATIVE and the slice
+-- reports fewer units outstanding than are physically out.
+--
+-- Re-running is a no-op: once the dispatch is added the returns no longer exceed
+-- the count, so the predicate stops matching.
+WITH disposed AS (
+  SELECT cl."bookingAssetId" AS slice_id, SUM(cl.quantity)::int AS total
+  FROM "ConsumptionLog" cl
+  WHERE cl."bookingAssetId" IS NOT NULL
+    AND cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')
+  GROUP BY cl."bookingAssetId"
+)
+UPDATE "BookingAsset" ba
+SET "checkedOutQuantity" = ba."checkedOutQuantity" + ba.quantity
+FROM disposed d
+WHERE d.slice_id = ba.id
+  AND ba."checkedOutAt" IS NOT NULL
+  AND d.total > ba."checkedOutQuantity";

@@ -2507,16 +2507,29 @@ async function checkoutBookingWritesWithinTx(
    * is cleared: a full checkout sends the whole booking back out.
    */
   /**
-   * The slices this call is about to send out, read while they are still
-   * identifiable — the marker write below is what distinguishes them, so after
-   * it runs nothing separates them from slices an earlier batch sent out.
+   * The slices this call sends out, read while they are still identifiable —
+   * the marker writes below are what distinguish them, so afterwards nothing
+   * separates them from slices an earlier batch sent out.
    *
-   * `quantity` is what each one's count becomes: an all-at-once checkout sends
-   * every unit of every slice it touches.
+   * Two groups depart, and both count. A slice that never left is the obvious
+   * one. A slice that already went out and came back IN FULL is departing
+   * again: the re-out write below clears its `checkedInAt`, and its units are
+   * physically gone a second time. Counting only the first group would let the
+   * derived "still out" figure go negative, because the return that came
+   * between the two departures is already recorded against it.
+   *
+   * An all-at-once checkout sends every unit of every slice it touches, so each
+   * one's count grows by its full booked quantity.
    */
   const departingSlices = await tx.bookingAsset.findMany({
     // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
-    where: { bookingId, checkedOutAt: null },
+    where: {
+      bookingId,
+      OR: [
+        { checkedOutAt: null },
+        { checkedOutAt: { not: null }, checkedInAt: { not: null } },
+      ],
+    },
     select: { id: true, quantity: true },
   });
 
@@ -2540,8 +2553,10 @@ async function checkoutBookingWritesWithinTx(
    * distinct quantities — every `INDIVIDUAL` slice is 1 — so this is a handful
    * of statements, not one per slice.
    *
-   * Only the slices read above, so a slice a progressive batch had already
-   * sent out keeps the count that batch recorded.
+   * Incremented, never assigned: the column is cumulative, so a slice on its
+   * second departure adds to what its first one recorded. Only the slices read
+   * above, so a slice a progressive batch had partly sent out — still out, not
+   * yet reconciled — keeps the count that batch recorded.
    */
   const departingSliceIdsByQuantity = new Map<number, string[]>();
   for (const slice of departingSlices) {
@@ -2556,7 +2571,7 @@ async function checkoutBookingWritesWithinTx(
     await tx.bookingAsset.updateMany({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these ids were read above from a bookingId the caller org-checked
       where: { id: { in: sliceIds } },
-      data: { checkedOutQuantity: quantity },
+      data: { checkedOutQuantity: { increment: quantity } },
     });
   }
 
