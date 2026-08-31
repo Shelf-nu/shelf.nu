@@ -1657,6 +1657,29 @@ model BookingAsset {
   checkedInAt    DateTime? @db.Timestamptz(3)
   checkedInById  String?
 
+  // How many of this slice's units have been sent out on this booking.
+  //
+  // `checkedOutAt` answers WHETHER any units left; this answers HOW MANY. A
+  // QUANTITY_TRACKED slice can go out a few units at a time, and a timestamp
+  // cannot express "3 of 10 are out" — so any reader deriving an obligation
+  // from the timestamp alone must guess, and both guesses are wrong: the full
+  // quantity demands back units that never moved, zero strands the ones that
+  // did.
+  //
+  // CUMULATIVE units dispatched, never decremented. Units coming back are
+  // counted by `ConsumptionLog`, so what is still out is
+  // `checkedOutQuantity - dispositioned`. That split matches the counters the
+  // booking surfaces already read (`bookedQuantity` / `checkedOutQuantity` /
+  // `dispositionedQuantity`); this column is where the second one lives so it
+  // no longer has to be reconstructed from scan sessions. A slice returned in
+  // full and sent out again simply adds to it.
+  //
+  // Every writer that sends units out maintains it — the all-at-once checkout,
+  // progressive checkout, and the kit-member propagation in `updateKitAssets`.
+  // A writer that sets `checkedOutAt` without adding here leaves a slice whose
+  // departure nothing can size.
+  checkedOutQuantity Int @default(0)
+
   // The old `@@unique([bookingId, assetId])` is replaced by two partial
   // unique indexes in the migration SQL (Postgres-only feature Prisma
   // can't express in the schema):

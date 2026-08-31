@@ -2505,6 +2505,20 @@ async function checkoutBookingWritesWithinTx(
    * keeps its own (earlier, more accurate) timestamp. Any stale check-in marker
    * is cleared: a full checkout sends the whole booking back out.
    */
+  /**
+   * The slices this call is about to send out, read while they are still
+   * identifiable — the marker write below is what distinguishes them, so after
+   * it runs nothing separates them from slices an earlier batch sent out.
+   *
+   * `quantity` is what each one's count becomes: an all-at-once checkout sends
+   * every unit of every slice it touches.
+   */
+  const departingSlices = await tx.bookingAsset.findMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: { bookingId, checkedOutAt: null },
+    select: { id: true, quantity: true },
+  });
+
   await tx.bookingAsset.updateMany({
     // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
     where: { bookingId, checkedOutAt: null },
@@ -2515,6 +2529,35 @@ async function checkoutBookingWritesWithinTx(
       checkedInById: null,
     },
   });
+
+  /**
+   * Size those departures, each slice's count becoming its full booked
+   * quantity.
+   *
+   * Grouped by quantity because `updateMany`'s `data` takes literals only and
+   * cannot name another column on the row. Real bookings carry very few
+   * distinct quantities — every `INDIVIDUAL` slice is 1 — so this is a handful
+   * of statements, not one per slice.
+   *
+   * Only the slices read above, so a slice a progressive batch had already
+   * sent out keeps the count that batch recorded.
+   */
+  const departingSliceIdsByQuantity = new Map<number, string[]>();
+  for (const slice of departingSlices) {
+    const ids = departingSliceIdsByQuantity.get(slice.quantity);
+    if (ids) {
+      ids.push(slice.id);
+    } else {
+      departingSliceIdsByQuantity.set(slice.quantity, [slice.id]);
+    }
+  }
+  for (const [quantity, sliceIds] of departingSliceIdsByQuantity) {
+    await tx.bookingAsset.updateMany({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these ids were read above from a bookingId the caller org-checked
+      where: { id: { in: sliceIds } },
+      data: { checkedOutQuantity: quantity },
+    });
+  }
 
   /**
    * Slices that were already out AND reconciled return to outstanding. The
@@ -8104,6 +8147,63 @@ export async function partialCheckoutBooking({
               checkedInAt: { not: null },
             },
             data: { checkedInAt: null, checkedInById: null },
+          });
+        }
+
+        /**
+         * Size what this session sent out, per slice.
+         *
+         * The marker above says a slice is out; this says how many of its units
+         * went, which is the part a timestamp cannot carry. Read from the three
+         * positionally-aligned arrays the session row was just built from, so
+         * the count and the session can never describe different departures.
+         *
+         * A tagged entry names its slice. An untagged one names only the asset,
+         * so its units are laid down in `compareSlicesForGreedyFill` order and
+         * capped at each slice's booked quantity — the same spread every read
+         * site applies to an untagged claim.
+         *
+         * Cumulative: a slice returned in full and sent out again adds to its
+         * count rather than replacing it.
+         */
+        const unitsBySliceId = new Map<string, number>();
+        const untaggedUnitsByAsset = new Map<string, number>();
+        for (const [index, assetId] of sessionAssetIds.entries()) {
+          const units = sessionQuantities[index] ?? 1;
+          const sliceId = sessionBookingAssetIds[index];
+          if (sliceId) {
+            unitsBySliceId.set(
+              sliceId,
+              (unitsBySliceId.get(sliceId) ?? 0) + units
+            );
+          } else {
+            untaggedUnitsByAsset.set(
+              assetId,
+              (untaggedUnitsByAsset.get(assetId) ?? 0) + units
+            );
+          }
+        }
+        for (const [assetId, total] of untaggedUnitsByAsset) {
+          let left = total;
+          const slices = bookingFound.bookingAssets
+            .filter((ba) => ba.asset.id === assetId)
+            .sort(compareSlicesForGreedyFill);
+          for (const slice of slices) {
+            if (left <= 0) break;
+            const take = Math.min(slice.quantity, left);
+            unitsBySliceId.set(
+              slice.id,
+              (unitsBySliceId.get(slice.id) ?? 0) + take
+            );
+            left -= take;
+          }
+        }
+        for (const [sliceId, units] of unitsBySliceId) {
+          if (units <= 0) continue;
+          await tx.bookingAsset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: slice ids come from this booking's own rows, loaded org-scoped by this action's booking lookup
+            where: { id: sliceId, bookingId: id },
+            data: { checkedOutQuantity: { increment: units } },
           });
         }
 
