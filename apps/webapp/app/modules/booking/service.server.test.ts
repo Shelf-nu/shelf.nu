@@ -24,6 +24,7 @@ import {
 } from "@shelf/labels";
 
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
 import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
@@ -35,6 +36,7 @@ import { ShelfError } from "~/utils/error";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
+import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import {
   createBooking,
   partialCheckinBooking,
@@ -443,6 +445,14 @@ vitest.mock("~/modules/organization/service.server", () => ({
       displayName: null,
     },
   ]),
+}));
+
+// why: recipient resolution has its own tests
+// (notification-recipients.server.test.ts). Mocking the resolver lets each
+// test control the resolved list so the email fan-out can be asserted without
+// real org-settings lookups. Default: nobody resolves, so no emails fire.
+vitest.mock("./notification-recipients.server", () => ({
+  getBookingNotificationRecipients: vitest.fn().mockResolvedValue([]),
 }));
 
 // why: preventing actual job scheduling and queue operations during tests
@@ -7249,11 +7259,13 @@ describe("revertBookingToDraft", () => {
     const result = await revertBookingToDraft({
       id: "booking-1",
       organizationId: "org-1",
+      hints: mockClientHints,
     });
 
     expect(db.booking.update).toHaveBeenCalledWith({
       where: { id: "booking-1" },
       data: { status: BookingStatus.DRAFT },
+      include: expect.any(Object),
     });
     expect(result).toEqual(draftBooking);
   });
@@ -7266,8 +7278,86 @@ describe("revertBookingToDraft", () => {
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     await expect(
-      revertBookingToDraft({ id: "booking-1", organizationId: "org-1" })
+      revertBookingToDraft({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+      })
     ).rejects.toThrow(ShelfError);
+  });
+
+  // why: regression — reverting a reservation used to be silent. The custodian
+  // submitted a request, an admin sent it back, and no email went out (every
+  // other lifecycle transition emails). This pins the notification in place.
+  it("emails the resolved recipients when a reservation is reverted", async () => {
+    const custodianUser = {
+      id: "user-2",
+      email: "custodian@example.com",
+      firstName: "Custodian",
+      lastName: "User",
+      displayName: null,
+      dateFormat: null,
+      timeFormat: null,
+      weekStart: null,
+      timeZone: null,
+    };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      custodianUserId: "user-2",
+    };
+    const draftBooking = {
+      ...mockBooking,
+      status: BookingStatus.DRAFT,
+      custodianUser,
+      custodianTeamMember: null,
+      creator: custodianUser,
+      notificationRecipients: [],
+      organization: {
+        name: "Test Org",
+        customEmailFooter: null,
+        owner: { email: "owner@example.com" },
+      },
+      _count: { bookingAssets: mockBooking.bookingAssets.length },
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(draftBooking);
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: custodianUser.email,
+        firstName: custodianUser.firstName,
+        lastName: custodianUser.lastName,
+        userId: custodianUser.id,
+        dateFormat: null,
+        timeFormat: null,
+        weekStart: null,
+        timeZone: null,
+        reason: "custodian",
+      },
+    ]);
+
+    await revertBookingToDraft({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "admin-1",
+      hints: mockClientHints,
+    });
+
+    expect(getBookingNotificationRecipients).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "REVERT_TO_DRAFT",
+        editorUserId: "admin-1",
+      })
+    );
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "custodian@example.com",
+        subject: expect.stringContaining("reverted to draft"),
+      })
+    );
   });
 });
 

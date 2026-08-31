@@ -2022,7 +2022,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "revert-to-draft": {
-        await revertBookingToDraft({ id, organizationId, userId });
+        await revertBookingToDraft({
+          id,
+          organizationId,
+          userId,
+          hints: getClientHint(request),
+        });
 
         sendNotification({
           title: "Booking reverted",
