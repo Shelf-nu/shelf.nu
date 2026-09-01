@@ -18,6 +18,7 @@ export const ASSET_MAX_IMAGE_UPLOAD_SIZE = 8 * 1024 * 1024; // 8MB in bytes
 
 /** For asset attachment uploads (invoices, manuals, certificates - PDF only) */
 export const ASSET_ATTACHMENT_MAX_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+/** HTML `accept` attribute value for PDF-only attachment file inputs. */
 export const ACCEPT_SUPPORTED_ATTACHMENTS = "application/pdf,.pdf";
 
 /** Default date format */
