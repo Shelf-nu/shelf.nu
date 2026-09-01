@@ -139,6 +139,7 @@ import {
   attributeDispositionsByBookingAsset,
   checkoutSessionsToLogsByAsset,
   compareSlicesForGreedyFill,
+  computeDispatchedUnitsByAsset,
 } from "./checkout-attribution";
 import {
   ADDABLE_BOOKING_STATUSES,
@@ -4142,11 +4143,14 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
  * Slices never dispatched (added onto an ONGOING booking, or left behind by
  * a progressive checkout) have nothing to check in and never block.
  *
- * For `QUANTITY_TRACKED` assets: obligated units are the progressive session
- * units when any were recorded (capped by booked), otherwise the booked
- * units of stamped slices (an all-at-once stamp dispatches the whole slice).
- * Complete when every obligated unit is reconciled; units that never left
- * the warehouse carry no obligation.
+ * For `QUANTITY_TRACKED` assets: obligated units are judged PER SLICE and
+ * summed — a slice's session-attributed units when any exist (capped by its
+ * booked quantity), otherwise its whole booked quantity when its marker is
+ * stamped (an all-at-once stamp dispatches the full slice). One asset can
+ * mix both across its slices, so neither source alone may answer for the
+ * asset (see `computeDispatchedUnitsByAsset`). Complete when every obligated
+ * unit is reconciled; units that never left the warehouse carry no
+ * obligation.
  *
  * Called by both `partialCheckinBooking` and `checkinBooking` to decide
  * the ONGOING/OVERDUE → COMPLETE transition. Keeping this in one place
@@ -4164,8 +4168,13 @@ export async function isBookingFullyCheckedIn(
     tx.bookingAsset.findMany({
       where: { bookingId },
       select: {
+        // `id` + `assetKitId` feed the per-slice session attribution in
+        // `computeDispatchedUnitsByAsset` (tagged claims name a slice; greedy
+        // fill orders by the discriminator).
+        id: true,
         assetId: true,
         quantity: true,
+        assetKitId: true,
         // The slice markers are the per-booking dispatch record — stamped by
         // the all-at-once checkout (which writes no PartialBookingCheckout
         // rows) and by progressive scans alike. They are the same source the
@@ -4198,56 +4207,40 @@ export async function isBookingFullyCheckedIn(
     }
   }
 
-  // Aggregate per-asset checked-out units across every PartialBookingCheckout
-  // session for this booking through the shared positional parser. `quantities`
-  // is positional with `assetIds`: INDIVIDUAL rows record `1`, QUANTITY_TRACKED
-  // rows record the unit count; legacy rows (pre-Wave-B) with an empty
-  // `quantities[]` fall back to 1 per entry — all handled inside the parser.
-  // Completion is an ASSET-level obligation, so the per-slice `bookingAssetId`
-  // tags are irrelevant here; we only need the per-asset unit totals, which
-  // set the QT obligation below (INDIVIDUAL reconciliation reads the slice
-  // markers and checkin sessions instead). The `() => true` predicate keeps
-  // both asset types in the parse.
-  const logsByAsset = checkoutSessionsToLogsByAsset(
-    partialCheckouts as Array<{
-      assetIds: string[];
-      quantities: number[];
-      bookingAssetIds: string[];
-    }>,
-    () => true
-  );
-  const checkedOutUnitsByAsset = new Map<string, number>();
-  for (const [assetId, logs] of logsByAsset) {
-    checkedOutUnitsByAsset.set(
-      assetId,
-      logs.reduce((sum, log) => sum + log.quantity, 0)
-    );
-  }
-
   type SliceRow = {
+    id: string;
     assetId: string;
     quantity: number;
+    assetKitId: string | null;
     checkedOutAt: Date | null;
     checkedInAt: Date | null;
     asset: { id: string; type: AssetType } | null;
   };
   const slices = bookingAssets as SliceRow[];
 
-  // Booked and dispatched-by-stamp units summed per ASSET across all of its
-  // slices (standalone + kit-driven) — reconciliation below is asset-level.
+  // Dispatched units per ASSET, judged slice by slice: a slice's progressive
+  // session units when any were attributed to it, otherwise its whole booked
+  // quantity when its marker is stamped. One asset can mix both across its
+  // slices (a button-checked-out slice plus a progressively-scanned sibling),
+  // so neither sessions nor stamps alone may answer for the asset — see
+  // `computeDispatchedUnitsByAsset`.
+  const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
+    slices,
+    checkoutSessions: partialCheckouts as Array<{
+      assetIds: string[];
+      quantities: number[];
+      bookingAssetIds: string[];
+    }>,
+  });
+
+  // Booked units summed per ASSET across all of its slices (standalone +
+  // kit-driven) — reconciliation below is asset-level.
   const bookedUnitsByAsset = new Map<string, number>();
-  const stampedUnitsByAsset = new Map<string, number>();
   for (const s of slices) {
     bookedUnitsByAsset.set(
       s.assetId,
       (bookedUnitsByAsset.get(s.assetId) ?? 0) + s.quantity
     );
-    if (s.checkedOutAt) {
-      stampedUnitsByAsset.set(
-        s.assetId,
-        (stampedUnitsByAsset.get(s.assetId) ?? 0) + s.quantity
-      );
-    }
   }
 
   /** QT assets already judged — an asset's slices are evaluated as one. */
@@ -4275,18 +4268,17 @@ export async function isBookingFullyCheckedIn(
     if (qtyAssetIdsEvaluated.has(ba.assetId)) continue;
     qtyAssetIdsEvaluated.add(ba.assetId);
 
-    // Obligated units, from this asset's OWN records: progressive sessions
-    // recorded exact unit counts → those units (capped by booked); no
-    // session units but stamped slices → the stamp came from the
-    // all-at-once checkout, which dispatches every unit of the slices it
-    // stamps. Judging this per asset keeps one scanned-out asset from
-    // stripping the return obligation off every button-checked-out asset
+    // Obligated units = what actually went out for this asset, judged slice
+    // by slice (session-attributed units per slice, else the stamped slice's
+    // booked quantity). Judging per slice keeps one progressively-scanned
+    // sibling from erasing a button-checked-out slice's obligation, and one
+    // scanned-out asset from stripping the obligation off every other asset
     // on the booking.
-    const sessionUnits = checkedOutUnitsByAsset.get(ba.assetId) ?? 0;
     const booked = bookedUnitsByAsset.get(ba.assetId) ?? 0;
-    const stampedUnits = stampedUnitsByAsset.get(ba.assetId) ?? 0;
-    const obligatedUnits =
-      sessionUnits > 0 ? Math.min(sessionUnits, booked) : stampedUnits;
+    const obligatedUnits = Math.min(
+      dispatchedUnitsByAsset.get(ba.assetId) ?? 0,
+      booked
+    );
     if (obligatedUnits === 0) {
       // Never dispatched in any form — nothing to reconcile.
       continue;

@@ -43,6 +43,11 @@ import { assertIsDataWithResponseInit } from "@helpers/assertions";
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
+    // why: the lifecycle-progress roll-up reads the slice markers
+    // (BookingAsset.checkedOutAt/checkedInAt) plus the checkout sessions to
+    // judge dispatched units per asset; stub both to empty — orthogonal to
+    // the slices/merged-kit serialization contract under test.
+    bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));

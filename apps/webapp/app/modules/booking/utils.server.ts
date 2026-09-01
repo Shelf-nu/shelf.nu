@@ -379,11 +379,22 @@ type LifecycleAsset = {
    * truth: the all-at-once checkout stamps them but writes NO
    * `PartialBookingCheckout` rows, so session-derived inputs alone cannot
    * tell a button-checked-out row from a never-checked-out one on a booking
-   * that also has scan records. Callers without slice rows omit them and the
-   * session-based fallbacks apply.
+   * that also has scan records. Callers without slice rows omit them
+   * (`undefined`) and the session-based fallbacks apply — pass `undefined`,
+   * not `false`, when marker data is absent, or the legacy collapse for
+   * record-less bookings is disabled.
    */
   sliceCheckedOut?: boolean;
   sliceCheckedIn?: boolean;
+  /**
+   * Units actually dispatched for this row/asset, judged slice by slice
+   * (session-attributed units per slice, else the stamped slice's booked
+   * quantity — `computeDispatchedUnitsByAsset`). QT rows only. When provided
+   * it outranks the `checkedOutQuantity`/`sliceCheckedOut` approximations,
+   * which cannot express an asset mixing button-checked-out and
+   * progressively-scanned slices.
+   */
+  dispatchedQuantity?: number;
 };
 
 /**
@@ -584,26 +595,35 @@ export function calculateBookingLifecycleProgress({
     let C = Math.max(0, a.checkedOutQuantity ?? 0);
     const D = Math.max(0, a.dispositionedQuantity ?? 0);
     // Quick checkout: a checkout that recorded no per-unit sessions still put
-    // this row's booked units out — signalled per row by its slice marker
-    // (the button checkout stamps `checkedOutAt` but writes no session rows),
-    // or booking-wide by the empty-records convention when no slice info was
-    // supplied. Only ever raises C toward B, so progressive partial counts
-    // are untouched.
-    if (
-      !isFinal &&
-      D === 0 &&
-      C < B &&
-      (a.sliceCheckedOut === true || wasAllAtOnceCheckout)
-    ) {
-      C = B;
+    // this row's booked units out — signalled by the caller-computed
+    // `dispatchedQuantity` when provided, per row by the slice marker (the
+    // button checkout stamps `checkedOutAt` but writes no session rows), or
+    // booking-wide by the empty-records convention when no slice info was
+    // supplied. Only ever raises C toward the dispatched count, so
+    // progressive partial counts are untouched.
+    if (!isFinal && D === 0 && C < B) {
+      const dispatchedNow =
+        a.dispatchedQuantity !== undefined
+          ? Math.min(a.dispatchedQuantity, B)
+          : a.sliceCheckedOut === true || wasAllAtOnceCheckout
+          ? B
+          : C;
+      if (dispatchedNow > C) C = dispatchedNow;
     }
     if (isFinal) {
-      // Dispatched units for this row: the session counter when units were
+      // Dispatched units for this row: the caller-computed per-slice count
+      // when provided; otherwise the session counter when units were
       // recorded, otherwise the whole row if its slice was stamped (an
       // all-at-once stamp dispatches the full slice). Never-dispatched rows
       // stay Booked.
       const dispatchedUnits =
-        C > 0 ? Math.min(C, B) : a.sliceCheckedOut === true ? B : 0;
+        a.dispatchedQuantity !== undefined
+          ? Math.min(a.dispatchedQuantity, B)
+          : C > 0
+          ? Math.min(C, B)
+          : a.sliceCheckedOut === true
+          ? B
+          : 0;
       if (dispatchedUnits === 0) {
         // No per-row dispatch evidence. Pure legacy data (no records
         // anywhere) keeps the old collapse to Returned.

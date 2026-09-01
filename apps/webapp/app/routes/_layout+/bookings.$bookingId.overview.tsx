@@ -1126,24 +1126,44 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           .map((ba) => ba.assetId)
       ),
     ];
+    // With no stamped slice anywhere, pass `undefined` markers (not `false`)
+    // so the calculation's legacy collapse for record-less bookings stays
+    // reachable — `false` means "this row was verifiably never dispatched".
+    const bookingHasSliceMarkers = sliceCheckedOutAssetIds.length > 0;
     const lifecycleProgress = calculateBookingLifecycleProgress({
       bookingAssets: enrichedAssetsForView.map((a) => {
         const isQty = a.type === "QUANTITY_TRACKED";
         const marker = sliceMarkersByBookingAssetId.get(a.bookingAssetId);
+        const rowCheckedOutUnits = isQty
+          ? checkedOutByBookingAsset.get(a.bookingAssetId) ?? 0
+          : 0;
         return {
           id: a.id,
           kitId: a.kitId,
           status: a.status,
           assetType: a.type,
           bookedQuantity: a.bookedQuantity,
-          checkedOutQuantity: isQty
-            ? checkedOutByBookingAsset.get(a.bookingAssetId) ?? 0
-            : 0,
+          checkedOutQuantity: rowCheckedOutUnits,
           dispositionedQuantity: isQty
             ? dispositionedByBookingAsset.get(a.bookingAssetId) ?? 0
             : 0,
-          sliceCheckedOut: marker?.out ?? false,
-          sliceCheckedIn: marker?.in ?? false,
+          sliceCheckedOut: bookingHasSliceMarkers
+            ? marker?.out ?? false
+            : undefined,
+          sliceCheckedIn: bookingHasSliceMarkers
+            ? marker?.in ?? false
+            : undefined,
+          // Rows here are per slice, so the row's dispatched units are exact:
+          // its session-attributed units when any exist, else the whole row
+          // when its slice is stamped.
+          dispatchedQuantity:
+            isQty && bookingHasSliceMarkers
+              ? rowCheckedOutUnits > 0
+                ? Math.min(rowCheckedOutUnits, a.bookedQuantity ?? 0)
+                : marker?.out
+                ? a.bookedQuantity ?? 0
+                : 0
+              : undefined,
         };
       }),
       checkedInAssetIds,

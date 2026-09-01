@@ -685,6 +685,30 @@ describe("calculateBookingLifecycleProgress (quantity-tracked)", () => {
     expect(p.bookedCount).toBe(0);
   });
 
+  it("COMPLETE collapsed QT row honors dispatchedQuantity over its session counter", () => {
+    // Asset-collapsed rows (the mobile shape) can mix a button-checked-out
+    // slice with a progressively-scanned sibling: 9 units dispatched (8
+    // stamped + 1 session-recorded) but C only carries the session unit.
+    // The caller-computed dispatchedQuantity must outrank C — judged by C
+    // alone (1 out, 1 back) the row would wrongly read Returned.
+    const p = calculateBookingLifecycleProgress({
+      bookingAssets: [
+        {
+          ...QT("mixed", 9, 1, 1),
+          sliceCheckedOut: true,
+          sliceCheckedIn: false,
+          dispatchedQuantity: 9,
+        },
+      ],
+      checkedInAssetIds: [],
+      checkedOutAssetIds: ["mixed"],
+      bookingStatus: BookingStatus.COMPLETE,
+    });
+    expect(p.partialCount).toBe(1); // 1 of 9 dispatched units back on record
+    expect(p.returnedCount).toBe(0);
+    expect(p.bookedCount).toBe(0);
+  });
+
   it("qty asset with two slices (kit-driven + standalone) — each slice is its own asset count", () => {
     // Slice 1: QT in K1, 0 < C(2) < B(5) → Partial.
     // Slice 2: QT standalone, C=0, D=0 → Booked.

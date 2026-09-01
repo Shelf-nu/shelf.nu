@@ -15,6 +15,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { computeDispatchedUnitsByAsset } from "~/modules/booking/checkout-attribution";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
@@ -517,10 +518,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // (`BookingAsset.checkedOutAt`/`checkedInAt`): the Check out button
     // stamps them but writes NO PartialBookingCheckout rows, so session
     // records cannot tell a button-checked-out asset from a
-    // never-checked-out one on a booking that also has scan records.
-    const sliceRows = await db.bookingAsset.findMany({
-      where: { bookingId: booking.id },
-      select: { assetId: true, checkedOutAt: true, checkedInAt: true },
+    // never-checked-out one on a booking that also has scan records. The
+    // sessions are still fetched: per-asset dispatched units are judged
+    // slice by slice from stamps + session attribution (an asset can mix a
+    // button-checked-out slice with a progressively-scanned sibling — see
+    // `computeDispatchedUnitsByAsset`).
+    const [sliceRows, checkoutSessionRows] = await Promise.all([
+      db.bookingAsset.findMany({
+        where: { bookingId: booking.id },
+        select: {
+          id: true,
+          assetId: true,
+          quantity: true,
+          assetKitId: true,
+          checkedOutAt: true,
+          checkedInAt: true,
+        },
+      }),
+      db.partialBookingCheckout.findMany({
+        where: { bookingId: booking.id },
+        select: { assetIds: true, quantities: true, bookingAssetIds: true },
+      }),
+    ]);
+    const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
+      slices: sliceRows,
+      checkoutSessions: checkoutSessionRows,
     });
     const sliceMarkersByAssetId = new Map<
       string,
@@ -540,6 +562,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const checkedOutAssetIds = [
       ...new Set(sliceRows.filter((s) => s.checkedOutAt).map((s) => s.assetId)),
     ];
+    // With no stamped slice anywhere, pass `undefined` markers (not `false`)
+    // so the calculation's legacy collapse for record-less bookings stays
+    // reachable — `false` means "this row was verifiably never dispatched".
+    const bookingHasSliceMarkers = checkedOutAssetIds.length > 0;
     const lifecycleProgress = calculateBookingLifecycleProgress({
       bookingAssets: assets.map((a) => {
         const isQty = a.type === AssetType.QUANTITY_TRACKED;
@@ -551,9 +577,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           kitId: a.kitId,
           status: a.status,
           assetType: a.type,
-          sliceCheckedOut: marker?.out ?? false,
-          sliceCheckedIn:
-            (marker?.out ?? false) && (marker?.allStampedIn ?? false),
+          sliceCheckedOut: bookingHasSliceMarkers
+            ? marker?.out ?? false
+            : undefined,
+          sliceCheckedIn: bookingHasSliceMarkers
+            ? (marker?.out ?? false) && (marker?.allStampedIn ?? false)
+            : undefined,
+          dispatchedQuantity:
+            isQty && bookingHasSliceMarkers
+              ? Math.min(dispatchedUnitsByAsset.get(a.id) ?? 0, booked)
+              : undefined,
           bookedQuantity: isQty ? booked : undefined,
           // checked-out = booked − still-to-check-out; dispositioned =
           // booked − still-to-check-in. Both from the per-asset remaining
