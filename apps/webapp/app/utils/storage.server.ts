@@ -362,6 +362,16 @@ export interface UploadOptions {
   contentType: string;
   resizeOptions?: ResizeOptions;
   upsert?: boolean;
+  /**
+   * When set, `uploadRawFile` rejects the upload unless the buffered file's
+   * leading bytes match this signature. The declared `contentType` is
+   * caller-supplied and unverified otherwise - this is the binary-level
+   * check that stands in for `uploadFile`'s Sharp-based image validation on
+   * paths that skip image processing entirely.
+   */
+  expectedMagicBytes?: Uint8Array;
+  /** User-facing message when `expectedMagicBytes` doesn't match. */
+  invalidSignatureMessage?: string;
 }
 
 export async function parseFileFormData({
@@ -502,7 +512,14 @@ export function findShelfErrorInCause(error: unknown): ShelfError | null {
  */
 export async function uploadRawFile(
   fileData: AsyncIterable<Uint8Array>,
-  { filename, contentType, bucketName, upsert = false }: UploadOptions
+  {
+    filename,
+    contentType,
+    bucketName,
+    upsert = false,
+    expectedMagicBytes,
+    invalidSignatureMessage = "Uploaded file does not match its expected format",
+  }: UploadOptions
 ): Promise<{ path: string; size: number }> {
   try {
     const chunks: Uint8Array[] = [];
@@ -510,6 +527,25 @@ export async function uploadRawFile(
       chunks.push(chunk);
     }
     const buffer = Buffer.concat(chunks);
+
+    // The declared contentType comes from the client and is not proof of
+    // the actual bytes - a request can label anything "application/pdf".
+    // Checking the magic bytes here is what actually keeps non-PDF content
+    // out of a bucket that serves files back with that content type.
+    if (
+      expectedMagicBytes &&
+      !buffer
+        .subarray(0, expectedMagicBytes.length)
+        .equals(Buffer.from(expectedMagicBytes))
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid file",
+        message: invalidSignatureMessage,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
 
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
@@ -547,6 +583,9 @@ export async function uploadRawFile(
  * `parseFileFormData` stringifies `{ originalPath, thumbnailPath }` when
  * `generateThumbnail` is set).
  */
+/** ASCII "%PDF-" - every valid PDF starts with this, regardless of version. */
+const PDF_MAGIC_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
+
 export async function parsePdfFormData({
   request,
   newFileName,
@@ -568,7 +607,9 @@ export async function parsePdfFormData({
 
       // Only process PDFs - anything else (including a same-form image
       // field, if this is ever reused on a multi-file form) is left alone.
-      if (mimeType && mimeType !== "application/pdf") {
+      // A missing/empty Content-Type is rejected outright rather than
+      // assumed to be a PDF.
+      if (!mimeType || mimeType !== "application/pdf") {
         return undefined;
       }
 
@@ -586,8 +627,10 @@ export async function parsePdfFormData({
 
       const { path, size } = await uploadRawFile(fileStream, {
         filename: targetFilename,
-        contentType: mimeType ?? "application/pdf",
+        contentType: mimeType,
         bucketName,
+        expectedMagicBytes: PDF_MAGIC_BYTES,
+        invalidSignatureMessage: "Uploaded file is not a valid PDF",
       });
 
       return JSON.stringify({ path, originalName, size });
