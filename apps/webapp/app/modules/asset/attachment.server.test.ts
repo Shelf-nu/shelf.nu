@@ -13,6 +13,11 @@ vi.mock("~/utils/storage.server", () => ({
   removeFilesByPrefix: vi.fn(),
 }));
 
+// why: these tests exercise the attachment functions' own branching and
+// error handling (existing vs. missing attachment, upload failure, delete
+// failure) - stubbing findFirstOrThrow/update lets each case set up an exact
+// "before" state and assert the exact write, without a real Postgres
+// connection or seeded rows.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: {
