@@ -503,6 +503,26 @@ export function findShelfErrorInCause(error: unknown): ShelfError | null {
  * Companion to `uploadFile()` above for non-image files (e.g. PDF asset
  * attachments) - `uploadFile()` always runs `cropImage()`, which rejects
  * anything that isn't a JPEG/PNG/GIF/WebP/BMP.
+ *
+ * Buffers the entire `fileData` stream into memory before uploading, since
+ * both the magic-byte check and the upload call need the full byte length
+ * up front.
+ *
+ * @param fileData - The file's bytes as an async iterable of chunks.
+ * @param options.filename - Destination path within the bucket.
+ * @param options.contentType - Declared MIME type stored as the object's
+ * Content-Type; not verified against the actual bytes unless
+ * `expectedMagicBytes` is also given.
+ * @param options.bucketName - Target Supabase Storage bucket.
+ * @param options.upsert - Overwrite an existing object at `filename`
+ * instead of failing. Defaults to `false`.
+ * @param options.expectedMagicBytes - When set, the upload is rejected
+ * unless the buffer's leading bytes match this signature exactly.
+ * @param options.invalidSignatureMessage - User-facing message used when
+ * `expectedMagicBytes` doesn't match.
+ * @returns The stored object's path and its size in bytes.
+ * @throws {ShelfError} When the magic-byte check fails, or the underlying
+ * Supabase Storage upload fails for any other reason.
  */
 export async function uploadRawFile(
   fileData: AsyncIterable<Uint8Array>,
@@ -565,28 +585,30 @@ export async function uploadRawFile(
   }
 }
 
-/**
- * Parses a single-PDF multipart upload (asset attachments - invoices,
- * manuals, certificates; see issue #2660). Mirrors `parseFileFormData()`'s
- * shape, but uploads via `uploadRawFile()` instead of `uploadFile()` since
- * PDFs must skip the image pipeline entirely.
- *
- * The returned FormData's entry for the file field is a JSON string
- * `{ path, originalName, size }` - callers need `originalName`/`size` for
- * display, which a bare path string can't carry (mirrors how
- * `parseFileFormData` stringifies `{ originalPath, thumbnailPath }` when
- * `generateThumbnail` is set).
- */
 /** ASCII "%PDF-" - every valid PDF starts with this, regardless of version. */
 const PDF_MAGIC_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
 
 /**
- * Parses a single-PDF upload and returns its storage metadata directly.
-
+ * Parses a single-PDF multipart upload (asset attachments - invoices,
+ * manuals, certificates; see issue #2660) and returns its storage metadata
+ * directly, rather than through the parsed FormData.
+ *
  * We intentionally don't read the result back from FormData, since
  * regular text fields can use the same "file" key and spoof the uploaded
  * file metadata. Keeping the result inside the upload handler ensures the
  * path can only come from a file actually processed by the server.
+ *
+ * @param request - The incoming multipart/form-data request.
+ * @param newFileName - Base filename (without extension) the PDF is
+ * stored under; `.pdf` is appended.
+ * @param bucketName - Target Supabase Storage bucket. Defaults to the
+ * private `"assets"` bucket.
+ * @param maxFileSize - Maximum accepted upload size in bytes.
+ * @returns The stored object's path, the client-supplied original
+ * filename (if any), and its size in bytes.
+ * @throws {ShelfError} When no upload matches the "file" field, the
+ * declared or actual content type isn't `application/pdf`, the upload
+ * exceeds `maxFileSize`, or the file was stored at an unexpected path.
  */
 export async function parsePdfFormData({
   request,
