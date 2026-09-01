@@ -137,9 +137,7 @@ describe("asset attachment", () => {
       vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue(
         mockAssetRow({ id: "asset-1", attachmentPath: null })
       );
-      // parsePdfFormData throws when no upload matched the "file" field -
-      // it no longer resolves with an empty/absent result, so simulating
-      // that means rejecting here rather than resolving with nothing.
+      // parsePdfFormData rejects when no upload matches the "file" field.
       vi.mocked(parsePdfFormData).mockRejectedValue(
         new Error("No file uploaded")
       );
