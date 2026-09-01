@@ -129,19 +129,30 @@ WHERE ba."checkedOutAt" IS NOT NULL
 -- that MORE units came back than every session together ever sent — only the
 -- button or the kit propagation could have sent the difference.
 --
--- One full-slice dispatch is added, which is the smallest history consistent
--- with the evidence; the records cannot say how many there were. Without this
--- the units are missing from the count while the returns are recorded against
--- it, so `checkedOutQuantity` minus the dispositions goes NEGATIVE and the slice
--- reports fewer units outstanding than are physically out.
+-- Adds the smallest whole number of full-slice dispatches that covers the
+-- recorded returns. Whole slices because that is the only size the button and
+-- the kit propagation ever send; the smallest number because the records cannot
+-- say how many there were, and a larger one would invent units nothing
+-- evidences. Without this the units are missing from the count while the returns
+-- are recorded against it, so `checkedOutQuantity` minus the dispositions goes
+-- NEGATIVE and the slice reports fewer units outstanding than are physically
+-- out.
 --
--- Re-running converges rather than being a no-op, and the distinction matters
--- to anyone replaying this file. Backfills 1 and 2 are true no-ops on a second
--- pass — one assigns, the other is fenced on `= 0`. This one adds a single
--- slice quantity per pass while the returns still exceed the count, so a slice
--- that saw TWO full-slice dispatches is only half reconstructed after one run
--- and a second run would add the rest. It never overshoots: the predicate stops
--- matching as soon as the count covers the returns.
+-- One pass has to be the whole reconstruction. Prisma applies a migration
+-- exactly once and records its checksum, so a statement needing a second run
+-- would simply leave the data short — and short here is not visible: the
+-- lifecycle readers clamp the negative out of sight
+-- (`calculateBookingLifecycleProgress`, `D' = min(D, C)`), turning it into
+-- quietly under-counted returns rather than an obvious fault. Hence the
+-- multiple: adding one slice quantity would strand any slice whose returns
+-- exceed the count by more than a single slice.
+--
+-- `ba.quantity > 0` guards the division. The column is NOT NULL DEFAULT 1 and
+-- nothing writes 0 today, but no constraint forbids it and a zero would abort
+-- the migration.
+--
+-- Re-running is a no-op, matching backfills 1 and 2: once the dispatches are
+-- added the returns no longer exceed the count, so the predicate stops matching.
 WITH disposed AS (
   SELECT cl."bookingAssetId" AS slice_id, SUM(cl.quantity)::int AS total
   FROM "ConsumptionLog" cl
@@ -150,8 +161,12 @@ WITH disposed AS (
   GROUP BY cl."bookingAssetId"
 )
 UPDATE "BookingAsset" ba
-SET "checkedOutQuantity" = ba."checkedOutQuantity" + ba.quantity
+SET "checkedOutQuantity" =
+      ba."checkedOutQuantity"
+      + ba.quantity
+        * CEIL((d.total - ba."checkedOutQuantity")::numeric / ba.quantity)::int
 FROM disposed d
 WHERE d.slice_id = ba.id
   AND ba."checkedOutAt" IS NOT NULL
+  AND ba.quantity > 0
   AND d.total > ba."checkedOutQuantity";
