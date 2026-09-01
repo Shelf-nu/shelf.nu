@@ -1,3 +1,11 @@
+/**
+ * Tests for the asset attachment service functions: uploading/replacing an
+ * existing asset's attachment, removing it, staging one for an asset that
+ * doesn't exist yet (the create-asset flow), clearing a staged attachment,
+ * and resolving a stored path into a display URL. Storage and DB calls are
+ * mocked - see the `why:` comments below each `vi.mock` for what's being
+ * isolated and why.
+ */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: isolate the attachment service functions from real storage/db calls,

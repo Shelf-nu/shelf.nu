@@ -1,3 +1,13 @@
+/**
+ * Upload / replace / remove endpoint for an asset's single PDF attachment.
+ *
+ * Branches on whether the asset already exists: for an existing asset it
+ * persists directly via `updateAssetAttachment` / `removeAssetAttachment`;
+ * for one that doesn't exist yet (the create-asset form's staging flow) it
+ * only touches storage via `stageAssetAttachment` / `clearStagedAssetAttachment`,
+ * and `createAsset()` persists the staged path once the rest of the form is
+ * submitted. See the `action()` doc comment below for the full behavior.
+ */
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
