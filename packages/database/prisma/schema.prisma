@@ -221,8 +221,10 @@ model Asset {
   // check rather than being a permanent public link. Resolve it to a
   // short-lived signed URL with createSignedUrl() at the point of display;
   // never persist that signed URL back to this column (it expires; the
-  // path doesn't).
-  attachmentPath         String?
+  // path doesn't). @unique closes the race between createAsset's own
+  // not-already-claimed check and the actual insert - see createAsset's
+  // attachmentPath guard in modules/asset/service.server.ts.
+  attachmentPath         String?     @unique
   attachmentOriginalName String?
   attachmentSize         Int?
   status                 AssetStatus @default(AVAILABLE)
@@ -1007,7 +1009,7 @@ model Organization {
   auditImages        AuditImage[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
-  
+
   scimTokens      ScimToken[]
   scimExternalIds UserScimExternalId[]
   roleChangeLogs  RoleChangeLog[]

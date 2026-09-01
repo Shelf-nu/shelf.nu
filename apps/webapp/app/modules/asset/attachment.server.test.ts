@@ -6,6 +6,7 @@
  * mocked - see the `why:` comments below each `vi.mock` for what's being
  * isolated and why.
  */
+import type { Asset } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: isolate the attachment service functions from real storage/db calls,
@@ -50,6 +51,16 @@ import {
   updateAssetAttachment,
 } from "./service.server";
 
+/**
+ * `db.asset.findFirstOrThrow` is mocked, but its static type is still the
+ * full Prisma `Asset` - these tests only need the two fields the code
+ * actually selects (`id`, `attachmentPath`). One cast here, instead of one
+ * per call site, keeps every other field's name/type still checked.
+ */
+function mockAssetRow(row: Pick<Asset, "id" | "attachmentPath">): Asset {
+  return row as Asset;
+}
+
 describe("asset attachment", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -57,10 +68,9 @@ describe("asset attachment", () => {
 
   describe("updateAssetAttachment", () => {
     it("uploads a new attachment and persists its storage path (not a URL)", async () => {
-      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue({
-        id: "asset-1",
-        attachmentPath: null,
-      } as any);
+      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue(
+        mockAssetRow({ id: "asset-1", attachmentPath: null })
+      );
 
       vi.mocked(parsePdfFormData).mockResolvedValue({
         path: "org-1/asset-1/attachment-123.pdf",
@@ -93,10 +103,12 @@ describe("asset attachment", () => {
     });
 
     it("deletes the previous attachment's exact path when replacing one", async () => {
-      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue({
-        id: "asset-1",
-        attachmentPath: "org-1/asset-1/attachment-old.pdf",
-      } as any);
+      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue(
+        mockAssetRow({
+          id: "asset-1",
+          attachmentPath: "org-1/asset-1/attachment-old.pdf",
+        })
+      );
 
       vi.mocked(parsePdfFormData).mockResolvedValue({
         path: "org-1/asset-1/attachment-new.pdf",
@@ -122,10 +134,9 @@ describe("asset attachment", () => {
     });
 
     it("throws and does not touch the db when no file was uploaded", async () => {
-      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue({
-        id: "asset-1",
-        attachmentPath: null,
-      } as any);
+      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue(
+        mockAssetRow({ id: "asset-1", attachmentPath: null })
+      );
       // parsePdfFormData throws when no upload matched the "file" field -
       // it no longer resolves with an empty/absent result, so simulating
       // that means rejecting here rather than resolving with nothing.
@@ -145,10 +156,12 @@ describe("asset attachment", () => {
     });
 
     it("still persists the new attachment when deleting the old file fails", async () => {
-      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue({
-        id: "asset-1",
-        attachmentPath: "org-1/asset-1/attachment-old.pdf",
-      } as any);
+      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue(
+        mockAssetRow({
+          id: "asset-1",
+          attachmentPath: "org-1/asset-1/attachment-old.pdf",
+        })
+      );
       vi.mocked(removeFileAtPath).mockRejectedValue(new Error("gone already"));
 
       vi.mocked(parsePdfFormData).mockResolvedValue({
@@ -172,10 +185,12 @@ describe("asset attachment", () => {
 
   describe("removeAssetAttachment", () => {
     it("deletes the file at its exact path and clears the attachment fields", async () => {
-      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue({
-        id: "asset-1",
-        attachmentPath: "org-1/asset-1/attachment-123.pdf",
-      } as any);
+      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue(
+        mockAssetRow({
+          id: "asset-1",
+          attachmentPath: "org-1/asset-1/attachment-123.pdf",
+        })
+      );
       // Explicit, since a previous test in this file leaves removeFileAtPath
       // rejecting - vi.clearAllMocks() (in beforeEach) resets call history
       // but not a configured mockRejectedValue/mockResolvedValue.
@@ -202,10 +217,9 @@ describe("asset attachment", () => {
     });
 
     it("is a no-op deletion when there is no existing attachment", async () => {
-      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue({
-        id: "asset-1",
-        attachmentPath: null,
-      } as any);
+      vi.mocked(db.asset.findFirstOrThrow).mockResolvedValue(
+        mockAssetRow({ id: "asset-1", attachmentPath: null })
+      );
       vi.mocked(db.asset.update).mockResolvedValue({} as any);
 
       await removeAssetAttachment({

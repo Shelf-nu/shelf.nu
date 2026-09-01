@@ -8,3 +8,9 @@
 ALTER TABLE "Asset" ADD COLUMN "attachmentPath" TEXT;
 ALTER TABLE "Asset" ADD COLUMN "attachmentOriginalName" TEXT;
 ALTER TABLE "Asset" ADD COLUMN "attachmentSize" INTEGER;
+
+-- Postgres treats every NULL as distinct under a unique index, so this
+-- does not constrain the (majority of) assets with no attachment - it only
+-- guarantees one asset per storage path, closing the race between
+-- createAsset's own not-already-claimed check and the actual insert.
+CREATE UNIQUE INDEX "Asset_attachmentPath_key" ON "Asset"("attachmentPath");
