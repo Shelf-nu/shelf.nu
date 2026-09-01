@@ -513,26 +513,47 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // web booking overview uses (`calculateBookingLifecycleProgress`), so the
     // mobile bar and the web bar can never disagree. QT rows bucket by their
     // per-asset unit counters; INDIVIDUAL rows by status + `checkedInAssetIds`.
-    // `checkedOutAssetIds` (assets with a PartialBookingCheckout record) drives
-    // the COMPLETE-branch "was it ever out?" test; an empty list means an
-    // all-at-once checkout.
-    const partialCheckoutRows = await db.partialBookingCheckout.findMany({
+    // Dispatch truth comes from the slice markers
+    // (`BookingAsset.checkedOutAt`/`checkedInAt`): the Check out button
+    // stamps them but writes NO PartialBookingCheckout rows, so session
+    // records cannot tell a button-checked-out asset from a
+    // never-checked-out one on a booking that also has scan records.
+    const sliceRows = await db.bookingAsset.findMany({
       where: { bookingId: booking.id },
-      select: { assetIds: true },
+      select: { assetId: true, checkedOutAt: true, checkedInAt: true },
     });
+    const sliceMarkersByAssetId = new Map<
+      string,
+      { out: boolean; allStampedIn: boolean }
+    >();
+    for (const s of sliceRows) {
+      const m = sliceMarkersByAssetId.get(s.assetId) ?? {
+        out: false,
+        allStampedIn: true,
+      };
+      if (s.checkedOutAt) {
+        m.out = true;
+        if (!s.checkedInAt) m.allStampedIn = false;
+      }
+      sliceMarkersByAssetId.set(s.assetId, m);
+    }
     const checkedOutAssetIds = [
-      ...new Set(partialCheckoutRows.flatMap((r) => r.assetIds)),
+      ...new Set(sliceRows.filter((s) => s.checkedOutAt).map((s) => s.assetId)),
     ];
     const lifecycleProgress = calculateBookingLifecycleProgress({
       bookingAssets: assets.map((a) => {
         const isQty = a.type === AssetType.QUANTITY_TRACKED;
         const rem = remainingByAsset.get(a.id);
         const booked = a.quantity ?? 0;
+        const marker = sliceMarkersByAssetId.get(a.id);
         return {
           id: a.id,
           kitId: a.kitId,
           status: a.status,
           assetType: a.type,
+          sliceCheckedOut: marker?.out ?? false,
+          sliceCheckedIn:
+            (marker?.out ?? false) && (marker?.allStampedIn ?? false),
           bookedQuantity: isQty ? booked : undefined,
           // checked-out = booked − still-to-check-out; dispositioned =
           // booked − still-to-check-in. Both from the per-asset remaining

@@ -354,9 +354,12 @@ export function calculateUnitCheckinProgress(
  *   checkedOut = max(0, C - D')
  *   booked     = max(0, B - C)
  *
- * For COMPLETE/ARCHIVED bookings, the `checkedOut` slice collapses into
- * `returned` (a residual C>D at COMPLETE is treated as having come back),
- * mirroring the INDIVIDUAL-side `finalBucketOf` behavior.
+ * For COMPLETE/ARCHIVED bookings, buckets follow the recorded dispatch and
+ * return evidence: rows whose dispatched units are covered by dispositions
+ * read Returned, rows dispatched with no recorded return stay visibly
+ * Checked out (or Partial when only some units came back) — a closed booking
+ * holding unreturned items says so. Only pure legacy data with no records of
+ * any kind keeps the historical collapse-to-Returned.
  */
 type LifecycleAsset = {
   id: string;
@@ -370,6 +373,17 @@ type LifecycleAsset = {
   checkedOutQuantity?: number;
   /** Units dispositioned (returned + consumed + lost + damaged); QT rows only. */
   dispositionedQuantity?: number;
+  /**
+   * Slice dispatch markers (`BookingAsset.checkedOutAt` / `checkedInAt`),
+   * when the caller has the slice rows. These are the per-booking dispatch
+   * truth: the all-at-once checkout stamps them but writes NO
+   * `PartialBookingCheckout` rows, so session-derived inputs alone cannot
+   * tell a button-checked-out row from a never-checked-out one on a booking
+   * that also has scan records. Callers without slice rows omit them and the
+   * session-based fallbacks apply.
+   */
+  sliceCheckedOut?: boolean;
+  sliceCheckedIn?: boolean;
 };
 
 /**
@@ -389,7 +403,8 @@ export type BookingLifecycleProgress = {
   bookedCount: number;
   /**
    * Items mid-flight — only QUANTITY_TRACKED rows can land here (some units
-   * out or some units returned, but not all). Always 0 at COMPLETE/ARCHIVED.
+   * out or some units returned, but not all). At COMPLETE/ARCHIVED this is
+   * non-zero only for bookings closed while holding partially-returned rows.
    */
   partialCount: number;
   checkedOutCount: number;
@@ -431,10 +446,13 @@ export type BookingLifecycleProgress = {
  * - Else if all members share a single label → that label.
  * - Else (members disagree across Booked/CheckedOut/Returned) → Booked.
  *
- * For COMPLETE/ARCHIVED bookings, every asset that was ever checked out
- * (`wasCheckedOut` for INDIVIDUAL, `checkedOutQuantity > 0` for QT) collapses
- * to Returned; QT rows that were never out stay Booked. By construction the
- * Partial and Checked-out buckets are 0 at COMPLETE/ARCHIVED.
+ * For COMPLETE/ARCHIVED bookings, an asset is Returned only when a return is
+ * recorded for it (slice `checkedInAt` / checkin session for INDIVIDUAL,
+ * dispositions covering the dispatched units for QT). Dispatched assets with
+ * no recorded return stay Checked out (or Partial for a QT row with some
+ * units back); never-dispatched rows stay Booked. Pure legacy data — no
+ * slice markers and no session records at all — collapses to Returned as it
+ * historically did.
  *
  * For pre-checkout bookings (DRAFT/RESERVED/CANCELLED) no checkout has happened
  * in THIS booking — only ONGOING/OVERDUE own a live checkout — so every unit is
@@ -505,12 +523,28 @@ export function calculateBookingLifecycleProgress({
     a: LifecycleAsset
   ): Exclude<Bucket, "partial"> => {
     if (isFinal) {
-      // Final bookings: live status is AVAILABLE for every asset at this point,
-      // so an asset is "Returned" only if it was ever checked out. CHECKED_OUT
-      // live status, if somehow present, is treated as returned defensively.
-      return a.status === AssetStatus.CHECKED_OUT || wasCheckedOut(a.id)
-        ? "returned"
-        : "booked";
+      // Final bookings: a recorded return (slice `checkedInAt`, or a
+      // partial-checkin session) is what makes an asset "Returned". An asset
+      // that went out but has no recorded return stays "Checked out" — a
+      // closed booking holding unreturned items must say so rather than
+      // report them Returned (or, worse, Booked). Never-dispatched assets
+      // stay Booked. With no per-asset records at all (pure all-at-once
+      // legacy data: empty `checkedOutAssetIds`, no sessions, no slice
+      // markers), everything collapses to Returned as before.
+      const reconciled = (a.sliceCheckedIn ?? false) || checkedInSet.has(a.id);
+      if (reconciled) return "returned";
+      // Dispatch truth: the slice marker when the caller supplied it,
+      // otherwise session records with the empty-set-means-all-at-once
+      // convention.
+      const dispatched = a.sliceCheckedOut ?? wasCheckedOut(a.id);
+      if (!dispatched) return "booked";
+      // Dispatched with no recorded return. When per-asset records exist
+      // (slice markers supplied, or session rows present) this is a real
+      // unreturned item and must show as still out. Pure legacy data — no
+      // records of any kind — keeps the old collapse to Returned.
+      const hasPerAssetRecords =
+        a.sliceCheckedOut !== undefined || !wasAllAtOnceCheckout;
+      return hasPerAssetRecords ? "checkedOut" : "returned";
     }
     if (a.status === AssetStatus.CHECKED_OUT) return "checkedOut";
     if (checkedInSet.has(a.id)) return "returned";
@@ -549,19 +583,40 @@ export function calculateBookingLifecycleProgress({
     const B = Math.max(0, a.bookedQuantity ?? 0);
     let C = Math.max(0, a.checkedOutQuantity ?? 0);
     const D = Math.max(0, a.dispositionedQuantity ?? 0);
-    // Quick checkout: an all-at-once checkout of THIS booking (no progressive
-    // records ⇒ empty checkedOutAssetIds) put every booked unit out. Only ever
-    // raises C toward B, so progressive partial counts are untouched. When
-    // records DO exist we trust the per-row counter.
-    if (!isFinal && wasAllAtOnceCheckout && D === 0 && C < B) {
+    // Quick checkout: a checkout that recorded no per-unit sessions still put
+    // this row's booked units out — signalled per row by its slice marker
+    // (the button checkout stamps `checkedOutAt` but writes no session rows),
+    // or booking-wide by the empty-records convention when no slice info was
+    // supplied. Only ever raises C toward B, so progressive partial counts
+    // are untouched.
+    if (
+      !isFinal &&
+      D === 0 &&
+      C < B &&
+      (a.sliceCheckedOut === true || wasAllAtOnceCheckout)
+    ) {
       C = B;
     }
     if (isFinal) {
-      // Any units ever checked out → Returned; otherwise still Booked. A pure
-      // all-at-once checkout leaves no records (C=0), so treat every row as
-      // Returned. When records exist, use the per-row C so a never-checked-out
-      // slice of a multi-slice QT asset correctly stays Booked.
-      return C > 0 || wasAllAtOnceCheckout ? "returned" : "booked";
+      // Dispatched units for this row: the session counter when units were
+      // recorded, otherwise the whole row if its slice was stamped (an
+      // all-at-once stamp dispatches the full slice). Never-dispatched rows
+      // stay Booked.
+      const dispatchedUnits =
+        C > 0 ? Math.min(C, B) : a.sliceCheckedOut === true ? B : 0;
+      if (dispatchedUnits === 0) {
+        // No per-row dispatch evidence. Pure legacy data (no records
+        // anywhere) keeps the old collapse to Returned.
+        return wasAllAtOnceCheckout && a.sliceCheckedOut === undefined
+          ? "returned"
+          : "booked";
+      }
+      // Recorded dispositions covering the dispatch → Returned. Otherwise
+      // the row still holds unreturned dispatched units, and a closed
+      // booking must show them: Partial when some units came back on
+      // record, Checked out when none did.
+      if (D >= dispatchedUnits) return "returned";
+      return D > 0 ? "partial" : "checkedOut";
     }
     if (B > 0 && D >= B) return "returned";
     if (B > 0 && C >= B && D < B) return "checkedOut";
@@ -634,9 +689,10 @@ export function calculateBookingLifecycleProgress({
   const totalUnits = booked + partial + checkedOut + returned;
 
   if (isFinal) {
-    // At COMPLETE/ARCHIVED the priority chain only emits Booked or Returned,
-    // so `partial` and `checkedOut` are 0 here. Progress is derived from the
-    // returned/booked split — never hard-coded to 100%.
+    // At COMPLETE/ARCHIVED most bookings emit only Booked/Returned, but a
+    // booking closed while holding unreturned items keeps those in the
+    // Checked-out/Partial buckets deliberately. Progress is derived from the
+    // actual split — never hard-coded to 100%.
     const checkoutProgressCount = partial + checkedOut + returned;
     const pctFinal = (n: number) =>
       totalUnits > 0 ? Math.round((n / totalUnits) * 100) : 0;

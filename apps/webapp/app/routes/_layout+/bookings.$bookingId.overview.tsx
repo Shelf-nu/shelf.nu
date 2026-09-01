@@ -1105,9 +1105,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // is physically out. The qty maps populated above
     // (`checkedOutByBookingAsset`, `dispositionedByBookingAsset`) supply
     // those per-row counters via the slice's `bookingAssetId`.
+    //
+    // Dispatch truth for the bar comes from the slice markers
+    // (`BookingAsset.checkedOutAt`/`checkedInAt`): the Check out button
+    // stamps them but writes NO PartialBookingCheckout rows, so the
+    // session-derived `checkedOutAssetIds` (kept for the "Checked out
+    // on/by" columns) cannot tell a button-checked-out row from a
+    // never-checked-out one on a booking that also has scan records — one
+    // scanned asset would flip every other asset's bucket at COMPLETE.
+    const sliceMarkersByBookingAssetId = new Map(
+      booking.bookingAssets.map((ba) => [
+        ba.id,
+        { out: Boolean(ba.checkedOutAt), in: Boolean(ba.checkedInAt) },
+      ])
+    );
+    const sliceCheckedOutAssetIds = [
+      ...new Set(
+        booking.bookingAssets
+          .filter((ba) => ba.checkedOutAt)
+          .map((ba) => ba.assetId)
+      ),
+    ];
     const lifecycleProgress = calculateBookingLifecycleProgress({
       bookingAssets: enrichedAssetsForView.map((a) => {
         const isQty = a.type === "QUANTITY_TRACKED";
+        const marker = sliceMarkersByBookingAssetId.get(a.bookingAssetId);
         return {
           id: a.id,
           kitId: a.kitId,
@@ -1120,10 +1142,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           dispositionedQuantity: isQty
             ? dispositionedByBookingAsset.get(a.bookingAssetId) ?? 0
             : 0,
+          sliceCheckedOut: marker?.out ?? false,
+          sliceCheckedIn: marker?.in ?? false,
         };
       }),
       checkedInAssetIds,
-      checkedOutAssetIds,
+      checkedOutAssetIds: sliceCheckedOutAssetIds,
       bookingStatus: booking.status,
       countKitsAsSingleUnit,
     });

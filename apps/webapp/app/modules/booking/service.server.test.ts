@@ -837,15 +837,35 @@ describe("partialCheckinBooking", () => {
     db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithAssets);
 
     // why: isBookingFullyCheckedIn reads tx.bookingAsset.findMany to decide
-    // the ONGOING→COMPLETE transition. Returning the 3 booking assets keeps
-    // the booking in the partial (non-complete) branch so txResult.booking
-    // resolves to bookingWithAssets (with name set) and the note block
-    // succeeds. Also feeds the post-tx "outstanding" count.
+    // the ONGOING→COMPLETE transition. All three slices carry `checkedOutAt`
+    // (as every dispatched slice does in production) and asset-3 has no
+    // recorded return, which keeps the booking in the partial (non-complete)
+    // branch so txResult.booking resolves to bookingWithAssets (with name
+    // set) and the note block succeeds. Also feeds the post-tx "outstanding"
+    // count.
     //@ts-expect-error missing vitest type
     db.bookingAsset.findMany.mockResolvedValue([
-      { assetId: "asset-1", asset: { type: AssetType.INDIVIDUAL } },
-      { assetId: "asset-2", asset: { type: AssetType.INDIVIDUAL } },
-      { assetId: "asset-3", asset: { type: AssetType.INDIVIDUAL } },
+      {
+        assetId: "asset-1",
+        quantity: 1,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+      {
+        assetId: "asset-2",
+        quantity: 1,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        asset: { id: "asset-2", type: AssetType.INDIVIDUAL },
+      },
+      {
+        assetId: "asset-3",
+        quantity: 1,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        asset: { id: "asset-3", type: AssetType.INDIVIDUAL },
+      },
     ]);
 
     // why: so isBookingFullyCheckedIn sees asset-1 and asset-2 as reconciled
@@ -9438,6 +9458,127 @@ describe("isBookingFullyCheckedIn", () => {
     db.bookingAsset.findMany.mockResolvedValue([]);
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(true);
+  });
+
+  it("keeps the booking open while button-checked-out qty units are unreturned, even with a progressive checkout row present", async () => {
+    expect.assertions(1);
+
+    // The mixed-mode shape: a button checkout stamped every slice (writing
+    // no PartialBookingCheckout rows), one late-added individual was scanned
+    // out progressively (the booking's single session row), and every
+    // individual was scanned back in — but a button-checked-out QT asset
+    // never was. One session row must not strip the return obligation off
+    // the other assets.
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([
+        {
+          assetId: "asset-ind",
+          quantity: 1,
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: new Date("2026-01-04T10:00:00.000Z"),
+          asset: { id: "asset-ind", type: AssetType.INDIVIDUAL },
+        },
+        {
+          assetId: "asset-scanned",
+          quantity: 1,
+          checkedOutAt: new Date("2026-01-01T12:00:00.000Z"),
+          checkedInAt: new Date("2026-01-04T10:05:00.000Z"),
+          asset: { id: "asset-scanned", type: AssetType.INDIVIDUAL },
+        },
+        {
+          assetId: "asset-qty",
+          quantity: 8,
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+          asset: { id: "asset-qty", type: AssetType.QUANTITY_TRACKED },
+        },
+      ])
+      .mockResolvedValueOnce([{ quantity: 8 }]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-ind", "asset-scanned"] },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      { assetIds: ["asset-scanned"], quantities: [1], bookingAssetIds: [""] },
+    ]);
+    // No returns logged for the qty asset — its 8 units are still out.
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(false);
+  });
+
+  it("completes the mixed-mode booking once the button-checked-out qty units are reconciled", async () => {
+    expect.assertions(1);
+
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([
+        {
+          assetId: "asset-scanned",
+          quantity: 1,
+          checkedOutAt: new Date("2026-01-01T12:00:00.000Z"),
+          checkedInAt: new Date("2026-01-04T10:05:00.000Z"),
+          asset: { id: "asset-scanned", type: AssetType.INDIVIDUAL },
+        },
+        {
+          assetId: "asset-qty",
+          quantity: 8,
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+          asset: { id: "asset-qty", type: AssetType.QUANTITY_TRACKED },
+        },
+      ])
+      .mockResolvedValueOnce([{ quantity: 8 }]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-scanned"] },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      { assetIds: ["asset-scanned"], quantities: [1], bookingAssetIds: [""] },
+    ]);
+    // Booked 8 − logged 8 → remaining 0.
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 8 } });
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(true);
+  });
+
+  it("ignores never-dispatched slices (added onto an ONGOING booking)", async () => {
+    expect.assertions(1);
+
+    // A slice with no `checkedOutAt` cannot be checked in (the eligibility
+    // guard reads the same marker), so it must not gate completion either.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        assetId: "asset-1",
+        quantity: 1,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: new Date("2026-01-04T10:00:00.000Z"),
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+      {
+        assetId: "asset-late",
+        quantity: 1,
+        checkedOutAt: null,
+        checkedInAt: null,
+        asset: { id: "asset-late", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      { assetIds: ["asset-1"] },
+    ]);
 
     const result = await isBookingFullyCheckedIn(db, "booking-1");
 
