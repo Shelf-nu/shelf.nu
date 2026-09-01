@@ -1961,6 +1961,40 @@ describe("createAsset cross-org guards", () => {
     // never reach the org-scope lookup.
     expect(db.category.findFirst).not.toHaveBeenCalled();
   });
+
+  it("rejects an attachmentPath outside the caller's organization folder", async () => {
+    expect.assertions(2);
+
+    await expect(
+      createAsset({
+        title: "New asset",
+        userId: "user-1",
+        organizationId: "org-A",
+        attachmentPath: "org-B/some-asset/attachment-123.pdf",
+      } as any)
+    ).rejects.toThrow(ShelfError);
+
+    // The prefix check rejects before ever looking up who owns the path.
+    expect(db.asset.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects an attachmentPath already claimed by another asset", async () => {
+    expect.assertions(1);
+    // why: a hit means some asset already persisted this exact path - a
+    // forged resubmission of it must not adopt that asset's attachment.
+    (db.asset.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-owning-it",
+    });
+
+    await expect(
+      createAsset({
+        title: "New asset",
+        userId: "user-1",
+        organizationId: "org-A",
+        attachmentPath: "org-A/asset-owning-it/attachment-123.pdf",
+      } as any)
+    ).rejects.toThrow(ShelfError);
+  });
 });
 
 describe("updateAsset custom-field writes", () => {

@@ -1257,6 +1257,28 @@ export async function createAsset({
       });
     }
   }
+  if (attachmentPath) {
+    if (!attachmentPath.startsWith(`${organizationId}/`)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid attachment",
+        label,
+        status: 400,
+      });
+    }
+    const claimedBy = await db.asset.findFirst({
+      where: { attachmentPath },
+      select: { id: true },
+    });
+    if (claimedBy) {
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid attachment",
+        label,
+        status: 400,
+      });
+    }
+  }
 
   let attempts = 0;
   const maxAttempts = 3;
