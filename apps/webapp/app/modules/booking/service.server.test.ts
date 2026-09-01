@@ -43,6 +43,7 @@ import {
   getTotalPartialCheckinCount,
   getPartiallyCheckedInAssetIds,
   getKitIdsByAssets,
+  getKitIdsByBookingSlices,
   updateBasicBooking,
   updateBookingAssets,
   buildKitSlicesForBooking,
@@ -69,6 +70,7 @@ import {
   bookingDraftVisibilityClause,
   bulkArchiveBookings,
   bulkCancelBookings,
+  bulkDeleteBookings,
   // Phase 3c helpers
   computeBookingAssetRemaining,
   computeBookingAssetSliceRemaining,
@@ -131,6 +133,7 @@ vitest.mock("~/database/db.server", () => ({
       findFirst: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
       delete: vitest.fn().mockResolvedValue({}),
+      deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       count: vitest.fn().mockResolvedValue(0),
     },
     asset: {
@@ -303,6 +306,9 @@ vitest.mock("~/database/db.server", () => ({
     custody: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       count: vitest.fn().mockResolvedValue(0),
+      // why: the booking-exit reconciler reads custody holders for a whole
+      // batch in one query rather than counting per asset.
+      findMany: vitest.fn().mockResolvedValue([]),
       // why: `getAssetAvailabilityBatch` sums in-custody units via
       // `custody.groupBy` instead of the singular primitive's `aggregate`.
       // Default to no rows — per-test overrides aren't needed unless a test
@@ -1208,20 +1214,22 @@ describe("partialCheckinBooking", () => {
       assetIds: ["asset-1"],
     });
 
-    // The progressive write is the one scoped by `assetId`; the full check-in
+    // The progressive write is the one scoped by slice id; the full check-in
     // delegate writes booking-wide, and matching that instead would test a
     // guard this code path does not own.
     const markerCall = vitest
       .mocked(db.bookingAsset.updateMany)
       .mock.calls.find(
         ([args]) =>
-          "checkedInAt" in (args?.data ?? {}) &&
-          "assetId" in (args?.where ?? {})
+          "checkedInAt" in (args?.data ?? {}) && "id" in (args?.where ?? {})
       )?.[0];
 
     expect(markerCall).toBeDefined();
     expect(markerCall?.where).toEqual(
-      expect.objectContaining({ checkedOutAt: { not: null } })
+      expect.objectContaining({
+        id: { in: ["ba-went-out"] },
+        checkedOutAt: { not: null },
+      })
     );
   });
 
@@ -5642,16 +5650,30 @@ describe("cancelBooking", () => {
       otherActiveBookingsByAssetId: Record<string, number>,
       custodyByAssetId: Record<string, number>
     ) {
+      // The reconciler reads the whole batch in two set-based queries and keys
+      // on the slice markers, so these model row PRESENCE per asset rather
+      // than a count per asset.
       (
-        db.bookingAsset.count as ReturnType<typeof vitest.fn>
-      ).mockImplementation((args?: { where?: { assetId?: string } }) => {
-        const assetId = args?.where?.assetId ?? "";
-        return Promise.resolve(otherActiveBookingsByAssetId[assetId] ?? 0);
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: any) => {
+        // Only the reconciler's read carries a `checkedOutAt` filter; every
+        // other `bookingAsset.findMany` on these paths keeps the default [].
+        if (args?.where?.checkedOutAt === undefined) return Promise.resolve([]);
+        const ids: string[] = args?.where?.assetId?.in ?? [];
+        return Promise.resolve(
+          ids
+            .filter((id) => (otherActiveBookingsByAssetId[id] ?? 0) > 0)
+            .map((assetId) => ({ assetId }))
+        );
       });
-      (db.custody.count as ReturnType<typeof vitest.fn>).mockImplementation(
-        (args?: { where?: { assetId?: string } }) => {
-          const assetId = args?.where?.assetId ?? "";
-          return Promise.resolve(custodyByAssetId[assetId] ?? 0);
+      (db.custody.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: any) => {
+          const ids: string[] = args?.where?.assetId?.in ?? [];
+          return Promise.resolve(
+            ids
+              .filter((id) => (custodyByAssetId[id] ?? 0) > 0)
+              .map((assetId) => ({ assetId }))
+          );
         }
       );
     }
@@ -5699,7 +5721,7 @@ describe("cancelBooking", () => {
       // Per-asset terminal write keeps CHECKED_OUT. NOT the blanket
       // `updateMany({status: AVAILABLE})` of the old code path.
       expect(db.asset.updateMany).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         data: { status: AssetStatus.CHECKED_OUT },
       });
       // Defence: no blanket flip to AVAILABLE on the asset list.
@@ -5750,11 +5772,11 @@ describe("cancelBooking", () => {
       });
 
       expect(db.asset.updateMany).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         data: { status: AssetStatus.IN_CUSTODY },
       });
       expect(db.asset.updateMany).not.toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         data: { status: AssetStatus.AVAILABLE },
       });
     });
@@ -5802,7 +5824,7 @@ describe("cancelBooking", () => {
       });
 
       expect(db.asset.updateMany).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         data: { status: AssetStatus.AVAILABLE },
       });
     });
@@ -5842,16 +5864,30 @@ describe("deleteBooking", () => {
       otherActiveBookingsByAssetId: Record<string, number>,
       custodyByAssetId: Record<string, number>
     ) {
+      // The reconciler reads the whole batch in two set-based queries and keys
+      // on the slice markers, so these model row PRESENCE per asset rather
+      // than a count per asset.
       (
-        db.bookingAsset.count as ReturnType<typeof vitest.fn>
-      ).mockImplementation((args?: { where?: { assetId?: string } }) => {
-        const assetId = args?.where?.assetId ?? "";
-        return Promise.resolve(otherActiveBookingsByAssetId[assetId] ?? 0);
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: any) => {
+        // Only the reconciler's read carries a `checkedOutAt` filter; every
+        // other `bookingAsset.findMany` on these paths keeps the default [].
+        if (args?.where?.checkedOutAt === undefined) return Promise.resolve([]);
+        const ids: string[] = args?.where?.assetId?.in ?? [];
+        return Promise.resolve(
+          ids
+            .filter((id) => (otherActiveBookingsByAssetId[id] ?? 0) > 0)
+            .map((assetId) => ({ assetId }))
+        );
       });
-      (db.custody.count as ReturnType<typeof vitest.fn>).mockImplementation(
-        (args?: { where?: { assetId?: string } }) => {
-          const assetId = args?.where?.assetId ?? "";
-          return Promise.resolve(custodyByAssetId[assetId] ?? 0);
+      (db.custody.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: any) => {
+          const ids: string[] = args?.where?.assetId?.in ?? [];
+          return Promise.resolve(
+            ids
+              .filter((id) => (custodyByAssetId[id] ?? 0) > 0)
+              .map((assetId) => ({ assetId }))
+          );
         }
       );
     }
@@ -5898,7 +5934,7 @@ describe("deleteBooking", () => {
       );
 
       expect(db.asset.updateMany).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         data: { status: AssetStatus.CHECKED_OUT },
       });
       // Defence: NOT the old blanket flip-to-AVAILABLE on the asset list.
@@ -5950,7 +5986,7 @@ describe("deleteBooking", () => {
       );
 
       expect(db.asset.updateMany).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         data: { status: AssetStatus.IN_CUSTODY },
       });
     });
@@ -5997,7 +6033,7 @@ describe("deleteBooking", () => {
       );
 
       expect(db.asset.updateMany).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         data: { status: AssetStatus.AVAILABLE },
       });
     });
@@ -8638,16 +8674,30 @@ describe("removeAssets", () => {
       otherActiveBookingsByAssetId: Record<string, number>,
       custodyByAssetId: Record<string, number>
     ) {
+      // The reconciler reads the whole batch in two set-based queries and keys
+      // on the slice markers, so these model row PRESENCE per asset rather
+      // than a count per asset.
       (
-        db.bookingAsset.count as ReturnType<typeof vitest.fn>
-      ).mockImplementation((args?: { where?: { assetId?: string } }) => {
-        const assetId = args?.where?.assetId ?? "";
-        return Promise.resolve(otherActiveBookingsByAssetId[assetId] ?? 0);
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: any) => {
+        // Only the reconciler's read carries a `checkedOutAt` filter; every
+        // other `bookingAsset.findMany` on these paths keeps the default [].
+        if (args?.where?.checkedOutAt === undefined) return Promise.resolve([]);
+        const ids: string[] = args?.where?.assetId?.in ?? [];
+        return Promise.resolve(
+          ids
+            .filter((id) => (otherActiveBookingsByAssetId[id] ?? 0) > 0)
+            .map((assetId) => ({ assetId }))
+        );
       });
-      (db.custody.count as ReturnType<typeof vitest.fn>).mockImplementation(
-        (args?: { where?: { assetId?: string } }) => {
-          const assetId = args?.where?.assetId ?? "";
-          return Promise.resolve(custodyByAssetId[assetId] ?? 0);
+      (db.custody.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: any) => {
+          const ids: string[] = args?.where?.assetId?.in ?? [];
+          return Promise.resolve(
+            ids
+              .filter((id) => (custodyByAssetId[id] ?? 0) > 0)
+              .map((assetId) => ({ assetId }))
+          );
         }
       );
     }
@@ -8682,7 +8732,7 @@ describe("removeAssets", () => {
       });
 
       expect(db.asset.updateMany).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         data: { status: AssetStatus.CHECKED_OUT },
       });
       // Defence: NOT the old blanket flip-to-AVAILABLE.
@@ -8722,7 +8772,7 @@ describe("removeAssets", () => {
       });
 
       expect(db.asset.updateMany).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         data: { status: AssetStatus.IN_CUSTODY },
       });
     });
@@ -8757,7 +8807,7 @@ describe("removeAssets", () => {
       });
 
       expect(db.asset.updateMany).toHaveBeenCalledWith({
-        where: { id: "asset-1", organizationId: "org-1" },
+        where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
         data: { status: AssetStatus.AVAILABLE },
       });
     });
@@ -11178,6 +11228,237 @@ describe("bulkCancelBookings", () => {
       expect.anything()
     );
   });
+
+  /**
+   * An asset can sit on two live bookings at once. Cancelling one of them says
+   * nothing about the other, so the exit has to ask what commitment is left
+   * rather than blanket-writing AVAILABLE. Marking it available while a
+   * borrower still holds it for the other booking puts it back in the pool for
+   * someone else to book.
+   */
+  it("leaves an asset CHECKED_OUT when another live booking still holds it", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "bk-ongoing",
+        name: "Ongoing booking",
+        status: BookingStatus.ONGOING,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+        bookingAssets: [{ asset: { id: "asset-shared", assetKits: [] } }],
+        from: new Date("2025-01-01T09:00:00Z"),
+        to: new Date("2025-01-02T17:00:00Z"),
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+        _count: { bookingAssets: 1 },
+      },
+    ]);
+    // The asset is still on one OTHER ONGOING booking, outside this selection.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args?: any) =>
+      Promise.resolve(
+        args?.where?.checkedOutAt === undefined
+          ? []
+          : [{ assetId: "asset-shared" }]
+      )
+    );
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await bulkCancelBookings({
+      bookingIds: ["bk-ongoing"],
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.OWNER,
+      hints: mockClientHints,
+    });
+
+    const assetWrites = (
+      db.asset.updateMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.filter((c: any) => c[0]?.data?.status !== undefined);
+
+    expect(
+      assetWrites.some((c: any) => c[0].data.status === AssetStatus.AVAILABLE),
+      "no write may free an asset another live booking still holds"
+    ).toBe(false);
+    expect(
+      assetWrites.some(
+        (c: any) => c[0].data.status === AssetStatus.CHECKED_OUT
+      ),
+      "the remaining commitment should keep it checked out"
+    ).toBe(true);
+  });
+
+  /**
+   * A live booking is not by itself evidence that it holds the asset. A slice
+   * added after that booking checked out has never left, and one already
+   * reconciled has come back. Counting either pins the asset to CHECKED_OUT
+   * with nothing in the field, and no later exit can clear it.
+   *
+   * Asserted on the query rather than the outcome: the filter is what the
+   * database applies, so a mocked result cannot demonstrate it.
+   */
+  it("counts only slices that are genuinely still out", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "bk-marker",
+        name: "Ongoing booking",
+        status: BookingStatus.ONGOING,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+        bookingAssets: [{ asset: { id: "asset-shared", assetKits: [] } }],
+        from: new Date("2025-01-01T09:00:00Z"),
+        to: new Date("2025-01-02T17:00:00Z"),
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+        _count: { bookingAssets: 1 },
+      },
+    ]);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await bulkCancelBookings({
+      bookingIds: ["bk-marker"],
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.OWNER,
+      hints: mockClientHints,
+    });
+
+    const reconcileRead = (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .map((call: any) => call[0])
+      .find((args: any) => args?.where?.assetId?.in && args?.select?.assetId);
+
+    expect(
+      reconcileRead?.where?.checkedOutAt,
+      "a slice that never left must not count as holding the asset"
+    ).toEqual({ not: null });
+    expect(
+      reconcileRead?.where?.checkedInAt,
+      "a slice already reconciled must not count as holding the asset"
+    ).toBeNull();
+  });
+
+  /**
+   * Every booking in the selection must be invisible to the reconciliation,
+   * not just one. Two bookings on their way out that share an asset would
+   * otherwise vouch for each other and pin it to CHECKED_OUT against nothing.
+   */
+  it("excludes every booking in the selection, not just one", async () => {
+    expect.assertions(1);
+
+    const twoBookings = ["bk-a", "bk-b"].map((id) => ({
+      id,
+      name: id,
+      status: BookingStatus.ONGOING,
+      custodianUserId: null,
+      activeSchedulerReference: null,
+      bookingAssets: [{ asset: { id: "asset-shared", assetKits: [] } }],
+      from: new Date("2025-01-01T09:00:00Z"),
+      to: new Date("2025-01-02T17:00:00Z"),
+      organization: { customEmailFooter: null },
+      custodianUser: null,
+      custodianTeamMember: null,
+      _count: { bookingAssets: 1 },
+    }));
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue(twoBookings);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await bulkCancelBookings({
+      bookingIds: ["bk-a", "bk-b"],
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.OWNER,
+      hints: mockClientHints,
+    });
+
+    const reconcileRead = (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .map((call: any) => call[0])
+      .find((args: any) => args?.where?.assetId?.in && args?.select?.assetId);
+
+    expect(
+      [...(reconcileRead?.where?.bookingId?.notIn ?? [])].sort(),
+      "both exiting bookings must be excluded from the held-elsewhere read"
+    ).toEqual(["bk-a", "bk-b"]);
+  });
+});
+
+describe("bulkDeleteBookings", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * Same rule as the bulk cancel: deleting a booking says nothing about the
+   * other commitments on its assets. This path deletes the bookings first, so
+   * their own rows are already gone by the time the reconciliation reads.
+   */
+  it("leaves an asset CHECKED_OUT when another live booking still holds it", async () => {
+    expect.assertions(2);
+
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "bk-del-ongoing",
+        name: "Ongoing booking",
+        status: BookingStatus.ONGOING,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+        bookingAssets: [{ asset: { id: "asset-shared", assetKits: [] } }],
+        from: new Date("2025-01-01T09:00:00Z"),
+        to: new Date("2025-01-02T17:00:00Z"),
+        organization: { customEmailFooter: null },
+        custodianUser: null,
+        custodianTeamMember: null,
+        _count: { bookingAssets: 1 },
+      },
+    ]);
+    // Still on one OTHER ONGOING booking, outside this selection.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args?: any) =>
+      Promise.resolve(
+        args?.where?.checkedOutAt === undefined
+          ? []
+          : [{ assetId: "asset-shared" }]
+      )
+    );
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await bulkDeleteBookings({
+      bookingIds: ["bk-del-ongoing"],
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.OWNER,
+      hints: mockClientHints,
+    });
+
+    const assetWrites = (
+      db.asset.updateMany as ReturnType<typeof vitest.fn>
+    ).mock.calls.filter((c: any) => c[0]?.data?.status !== undefined);
+
+    expect(
+      assetWrites.some((c: any) => c[0].data.status === AssetStatus.AVAILABLE),
+      "no write may free an asset another live booking still holds"
+    ).toBe(false);
+    expect(
+      assetWrites.some(
+        (c: any) => c[0].data.status === AssetStatus.CHECKED_OUT
+      ),
+      "the remaining commitment should keep it checked out"
+    ).toBe(true);
+  });
 });
 
 describe("addScannedAssetsToBooking", () => {
@@ -12273,5 +12554,677 @@ describe("cancelBooking — handled validation (SHELF-WEBAPP-222)", () => {
       bookingId: "booking-1",
       status: BookingStatus.COMPLETE,
     });
+  });
+});
+
+/**
+ * Kit release resolves from the booking's own slices as well as from live
+ * membership.
+ *
+ * Membership alone cannot see a kit whose member was detached while the
+ * booking ran, so nothing releases it and `Kit.status` stays CHECKED_OUT with
+ * nothing out. The booking's rows still remember the kit, so they answer where
+ * membership cannot — and the two are UNIONED, never substituted: a standalone
+ * slice carries no provenance even when its asset is a live kit member.
+ */
+describe("getKitIdsByBookingSlices", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("resolves a kit from sourceKitId with no membership left", async () => {
+    const result = await getKitIdsByBookingSlices({
+      slices: [
+        { assetId: "asset-1", assetKitId: null, sourceKitId: "kit-1" },
+        { assetId: "asset-2", assetKitId: null, sourceKitId: "kit-1" },
+        { assetId: "asset-3", assetKitId: null, sourceKitId: "kit-2" },
+      ],
+      organizationId: "org-1",
+    });
+
+    expect([...result.keys()].sort()).toEqual(["kit-1", "kit-2"]);
+    expect([...(result.get("kit-1") ?? [])].sort()).toEqual([
+      "asset-1",
+      "asset-2",
+    ]);
+    // No legacy rows, so the AssetKit hop is skipped entirely.
+    expect(db.assetKit.findMany).not.toHaveBeenCalled();
+  });
+
+  it("falls back to assetKitId for rows written before sourceKitId existed", async () => {
+    // why: the mocked delegate echoes ids back as `kit-of-<id>`, mirroring the
+    // real `assetKitId -> kitId` lookup this leg performs.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([{ id: "ak-1", kitId: "kit-9" }]);
+
+    const result = await getKitIdsByBookingSlices({
+      slices: [{ assetId: "asset-1", assetKitId: "ak-1", sourceKitId: null }],
+      organizationId: "org-1",
+    });
+
+    expect([...result.keys()]).toEqual(["kit-9"]);
+    // Org-scoped, so the lookup cannot reach another workspace's memberships.
+    expect(db.assetKit.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
+      select: { id: true, kitId: true },
+    });
+  });
+
+  it("ignores a standalone slice, which carries no kit provenance", async () => {
+    const result = await getKitIdsByBookingSlices({
+      slices: [{ assetId: "asset-1", assetKitId: null, sourceKitId: null }],
+      organizationId: "org-1",
+    });
+
+    expect(result.size).toBe(0);
+  });
+
+  it("resolves nothing rather than throwing when a membership has vanished", async () => {
+    // A concurrent detach legitimately removes the row between the two reads.
+    // That means "no kit to release", never "reject the check-in".
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([]);
+
+    const result = await getKitIdsByBookingSlices({
+      slices: [
+        { assetId: "asset-1", assetKitId: "ak-gone", sourceKitId: null },
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result.size).toBe(0);
+  });
+
+  it("prefers sourceKitId and skips the lookup when every row carries it", async () => {
+    const result = await getKitIdsByBookingSlices({
+      slices: [
+        { assetId: "asset-1", assetKitId: "ak-stale", sourceKitId: "kit-1" },
+      ],
+      organizationId: "org-1",
+    });
+
+    expect([...result.keys()]).toEqual(["kit-1"]);
+    expect(db.assetKit.findMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A kit whose members were detached while the booking ran is still released.
+ *
+ * The detach leaves the slices on the booking with their kit provenance
+ * intact, but the assets themselves no longer name the kit — so membership
+ * alone resolves nothing and the kit keeps reading CHECKED_OUT after the
+ * booking ends. A kit in that state cannot be added to a live booking and has
+ * no way out of the UI.
+ */
+describe("checkinBooking - releases a kit detached mid-booking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("releases the kit from slice provenance when membership is gone", async () => {
+    expect.assertions(1);
+
+    // why: the slices still carry `sourceKitId`, but `assetKits` is empty —
+    // exactly what a mid-booking detach leaves behind. Membership-based
+    // resolution finds no kit here, so nothing would release it.
+    const detachedKitBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-detached",
+          assetKitId: null,
+          sourceKitId: "kit-1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(detachedKitBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...detachedKitBooking,
+      status: BookingStatus.COMPLETE,
+    });
+
+    await checkinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      hints: mockClientHints,
+    });
+
+    expect(db.kit.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["kit-1"] }, organizationId: "org-1" },
+      data: { status: KitStatus.AVAILABLE },
+    });
+  });
+});
+
+/**
+ * Kit release on partial check-in is decided per `BookingAsset` SLICE.
+ *
+ * A QUANTITY_TRACKED asset holds a standalone slice plus one slice per kit it
+ * belongs to on the same booking, so an asset-keyed answer lets one kit's slice
+ * speak for its siblings: it released a kit whose units were still in the field,
+ * and stranded a kit whose units had all come back.
+ */
+describe("partialCheckinBooking — slice-grained kit release", () => {
+  const ORG = "org-1";
+  /** An instant a slice left on. */
+  const OUT = new Date("2026-01-01T10:00:00.000Z");
+  /** An instant an earlier session reconciled a slice on. */
+  const BACK = new Date("2026-01-02T10:00:00.000Z");
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.partialBookingCheckin.count as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue(1);
+    (db.consumptionLog.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.custody.aggregate as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.booking.update as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ ...mockBookingData, bookingAssets: [] });
+    // The check-in guard's title lookup. Echo the requested ids so it always
+    // describes the batch under test.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockImplementation((args?: any) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((assetId: string) => ({
+            id: assetId,
+            title: assetId,
+            status: AssetStatus.CHECKED_OUT,
+            assetKits: [],
+          }))
+        )
+      );
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-x",
+      title: "Gaffer tape",
+      quantity: 100,
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      consumptionType: ConsumptionType.TWO_WAY,
+    });
+  });
+
+  /**
+   * Routes the three `bookingAsset.findMany` shapes this path issues, which one
+   * model-shaped mock cannot tell apart:
+   *   - `where.assetId`   -> `computeBookingAssetRemaining` (asset-level booked)
+   *   - `where.checkedOutAt` -> the kit gate's still-out veto read
+   *   - otherwise         -> `isBookingFullyCheckedIn`
+   */
+  function mockSliceReads(args: { slices: any[]; stillOutNow?: any[] }) {
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockImplementation((q?: any) => {
+        // `computeBookingAssetsSliceRemainingToCheckOut`, read (1): the slices
+        // it was asked about. Keyed on `where.id.in`, which no other read here
+        // uses.
+        if (q?.where?.id?.in) {
+          return Promise.resolve(
+            args.slices
+              .filter((s) => q.where.id.in.includes(s.id))
+              .map((s) => ({
+                id: s.id,
+                assetId: s.assetId,
+                quantity: s.quantity,
+                assetKitId: s.assetKitId,
+                asset: { status: AssetStatus.CHECKED_OUT },
+              }))
+          );
+        }
+        // Same helper, read (2): every sibling slice of the involved assets, so
+        // its greedy fill sees the full set. `where.assetId` is an `in` filter
+        // here and a scalar in the asset-level read below.
+        if (q?.where?.assetId?.in) {
+          return Promise.resolve(
+            args.slices
+              .filter((s) => q.where.assetId.in.includes(s.assetId))
+              .map((s) => ({
+                id: s.id,
+                assetId: s.assetId,
+                quantity: s.quantity,
+                assetKitId: s.assetKitId,
+              }))
+          );
+        }
+        if (q?.where?.assetId) {
+          return Promise.resolve(
+            args.slices
+              .filter((s) => s.assetId === q.where.assetId)
+              .map((s) => ({ quantity: s.quantity }))
+          );
+        }
+        if (q?.where?.checkedOutAt) {
+          return Promise.resolve(args.stillOutNow ?? []);
+        }
+        // `isBookingFullyCheckedIn`: keep the booking incomplete so the test
+        // exercises the progressive path rather than the COMPLETE branch.
+        return Promise.resolve(
+          args.slices.map((s) => ({
+            assetId: s.assetId,
+            quantity: s.quantity,
+            asset: {
+              id: s.assetId,
+              type: s.asset.type,
+              status: AssetStatus.CHECKED_OUT,
+            },
+          }))
+        );
+      });
+    (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockImplementation((q?: any) =>
+        Promise.resolve(args.slices.find((s) => s.id === q?.where?.id) ?? null)
+      );
+  }
+
+  /** Kit ids the transaction released, flattened across calls. */
+  const releasedKitIds = () =>
+    (db.kit.updateMany as ReturnType<typeof vitest.fn>).mock.calls.flatMap(
+      (call: any[]) => call[0]?.where?.id?.in ?? []
+    );
+
+  const params = (overrides: Record<string, unknown>) => ({
+    id: "booking-1",
+    organizationId: ORG,
+    userId: "user-1",
+    hints: mockClientHints,
+    ...overrides,
+  });
+
+  function arrangeBooking(bookingAssets: unknown[]) {
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets,
+    });
+  }
+
+  /** One kit-driven slice of the shared qty-tracked asset. */
+  const tapeSlice = (
+    id: string,
+    kitId: string,
+    quantity: number,
+    checkedInAt: Date | null = null
+  ) => ({
+    id,
+    assetId: "asset-x",
+    quantity,
+    assetKitId: `ak-${kitId}`,
+    sourceKitId: kitId,
+    checkedOutAt: OUT,
+    checkedInAt,
+    asset: {
+      id: "asset-x",
+      type: AssetType.QUANTITY_TRACKED,
+      assetKits: [{ kitId: "kit-a" }, { kitId: "kit-b" }],
+    },
+  });
+
+  /**
+   * A loose INDIVIDUAL slice on no kit, left outstanding and out of every batch
+   * below. Without it a batch covering everything still out takes the "all
+   * remaining scanned" early exit into `checkinBooking` and never reaches the
+   * progressive gate under test.
+   */
+  const fillerSlice = {
+    id: "ba-filler",
+    assetId: "asset-filler",
+    quantity: 1,
+    assetKitId: null,
+    sourceKitId: null,
+    checkedOutAt: OUT,
+    checkedInAt: null,
+    asset: {
+      id: "asset-filler",
+      type: AssetType.INDIVIDUAL,
+      assetKits: [],
+    },
+  };
+
+  it("releases only the kit whose slice came back", async () => {
+    expect.assertions(1);
+
+    // 6 units booked through kit A, 4 through kit B. The claim names kit A's
+    // slice and returns its six; kit B's four are still in the field.
+    const slices = [
+      tapeSlice("ba-kit-a", "kit-a", 6),
+      tapeSlice("ba-kit-b", "kit-b", 4),
+      fillerSlice,
+    ];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 6 },
+        ],
+      })
+    );
+
+    expect(releasedKitIds()).toEqual(["kit-a"]);
+  });
+
+  it("stamps the returned slice and leaves its sibling out", async () => {
+    expect.assertions(1);
+
+    const slices = [
+      tapeSlice("ba-kit-a", "kit-a", 6),
+      tapeSlice("ba-kit-b", "kit-b", 4),
+      fillerSlice,
+    ];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 6 },
+        ],
+      })
+    );
+
+    const markerCall = vitest
+      .mocked(db.bookingAsset.updateMany)
+      .mock.calls.find(([q]) => "checkedInAt" in (q?.data ?? {}))?.[0];
+
+    expect(markerCall?.where).toEqual(
+      expect.objectContaining({
+        id: { in: ["ba-kit-a"] },
+        checkedOutAt: { not: null },
+        checkedInAt: null,
+      })
+    );
+  });
+
+  it("releases a kit whose last slice comes back, whatever a shared asset's other kit still owes", async () => {
+    expect.assertions(1);
+
+    // Kit A holds the tape's six units (reconciled by an earlier session) and
+    // an INDIVIDUAL stand. Kit B holds the tape's other four, still out.
+    const slices = [
+      tapeSlice("ba-kit-a", "kit-a", 6, BACK),
+      tapeSlice("ba-kit-b", "kit-b", 4),
+      {
+        id: "ba-stand",
+        assetId: "asset-stand",
+        quantity: 1,
+        assetKitId: "ak-kit-a",
+        sourceKitId: "kit-a",
+        checkedOutAt: OUT,
+        checkedInAt: null,
+        asset: {
+          id: "asset-stand",
+          type: AssetType.INDIVIDUAL,
+          assetKits: [{ kitId: "kit-a" }],
+        },
+      },
+      fillerSlice,
+    ];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+
+    await partialCheckinBooking(params({ assetIds: ["asset-stand"] }));
+
+    expect(releasedKitIds()).toEqual(["kit-a"]);
+  });
+
+  it("keeps a kit CHECKED_OUT while its slice still owes units", async () => {
+    expect.assertions(1);
+
+    // Two of kit A's six units are back; four are still out.
+    const slices = [
+      tapeSlice("ba-kit-a", "kit-a", 6),
+      tapeSlice("ba-kit-b", "kit-b", 4),
+      fillerSlice,
+    ];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 2 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 2 },
+        ],
+      })
+    );
+
+    expect(db.kit.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("holds a kit back for a slice checked out after this request loaded the booking", async () => {
+    expect.assertions(1);
+
+    const slices = [
+      tapeSlice("ba-kit-a", "kit-a", 6),
+      tapeSlice("ba-kit-b", "kit-b", 4),
+      fillerSlice,
+    ];
+    arrangeBooking(slices);
+    // `ba-added-late` is kit A's, checked out by another session while this
+    // request ran, so the pre-transaction snapshot cannot see it.
+    mockSliceReads({
+      slices,
+      stillOutNow: [
+        {
+          id: "ba-added-late",
+          assetKitId: "ak-kit-a",
+          sourceKitId: "kit-a",
+          asset: { assetKits: [{ kitId: "kit-a" }] },
+        },
+      ],
+    });
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 6 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 6 },
+        ],
+      })
+    );
+
+    expect(db.kit.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("still releases a kit whose member was detached mid-booking", async () => {
+    expect.assertions(1);
+
+    // Membership is gone, so only the slice's own `sourceKitId` names the kit.
+    // Green before this change and after it — the behaviour PR #2973 added,
+    // pinned inside `partialCheckinBooking` so the per-slice gate cannot
+    // quietly take it away.
+    const slices = [
+      {
+        id: "ba-detached",
+        assetId: "asset-d",
+        quantity: 1,
+        assetKitId: null,
+        sourceKitId: "kit-z",
+        checkedOutAt: OUT,
+        checkedInAt: null,
+        asset: {
+          id: "asset-d",
+          type: AssetType.INDIVIDUAL,
+          assetKits: [],
+        },
+      },
+      fillerSlice,
+    ];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+
+    await partialCheckinBooking(params({ assetIds: ["asset-d"] }));
+
+    expect(releasedKitIds()).toEqual(["kit-z"]);
+  });
+
+  /**
+   * Progressive checkout stamps `checkedOutAt` as soon as ANY unit leaves, so a
+   * slice booked at 10 with 3 in the field is an ordinary state, not a broken
+   * one. What settles it is those 3 coming back. Measuring against the booked
+   * 10 leaves the kit checked out with nothing of it anywhere, and once the
+   * booking completes no later check-in can release it.
+   */
+  it("releases a kit once every unit its slice actually sent out is back", async () => {
+    expect.assertions(1);
+
+    const slices = [tapeSlice("ba-kit-a", "kit-a", 10), fillerSlice];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+    // Only 3 of the booked 10 ever left.
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetIds: ["asset-x"], quantities: [3], bookingAssetIds: ["ba-kit-a"] },
+    ]);
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 3 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 3 },
+        ],
+      })
+    );
+
+    expect(releasedKitIds()).toEqual(["kit-a"]);
+  });
+
+  it("holds the kit while a unit its slice sent out is still in the field", async () => {
+    expect.assertions(1);
+
+    const slices = [tapeSlice("ba-kit-a", "kit-a", 10), fillerSlice];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetIds: ["asset-x"], quantities: [3], bookingAssetIds: ["ba-kit-a"] },
+    ]);
+    // 3 went out, 2 came back.
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: "ba-kit-a", quantity: 2 },
+    ]);
+
+    await partialCheckinBooking(
+      params({
+        checkins: [
+          { assetId: "asset-x", bookingAssetId: "ba-kit-a", returned: 2 },
+        ],
+      })
+    );
+
+    expect(db.kit.updateMany).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The mobile check-in sends no slice id, so its units are spread across the
+   * asset's slices in `compareSlicesForGreedyFill` order — standalone first.
+   * A standalone slice that never left must not absorb that return: it owes
+   * nothing, and every unit it swallows is one the kit-driven slice needs to
+   * settle. Capacity has to be what a slice SENT, the same measure the
+   * threshold uses.
+   */
+  it("does not let a slice that never left absorb an untagged return owed to a kit", async () => {
+    expect.assertions(1);
+
+    const looseSlice = {
+      id: "ba-loose",
+      assetId: "asset-x",
+      quantity: 5,
+      assetKitId: null,
+      sourceKitId: null,
+      // Never went out on this booking.
+      checkedOutAt: null,
+      checkedInAt: null,
+      asset: {
+        id: "asset-x",
+        type: AssetType.QUANTITY_TRACKED,
+        assetKits: [{ kitId: "kit-a" }, { kitId: "kit-b" }],
+      },
+    };
+    const slices = [looseSlice, tapeSlice("ba-kit-a", "kit-a", 5), fillerSlice];
+    arrangeBooking(slices);
+    mockSliceReads({ slices, stillOutNow: [] });
+    // All 5 units that left did so on the kit's slice.
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetIds: ["asset-x"], quantities: [5], bookingAssetIds: ["ba-kit-a"] },
+    ]);
+    // The mobile payload names no slice.
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetId: "asset-x", bookingAssetId: null, quantity: 5 },
+    ]);
+
+    await partialCheckinBooking(
+      params({ checkins: [{ assetId: "asset-x", returned: 5 }] })
+    );
+
+    expect(releasedKitIds()).toEqual(["kit-a"]);
   });
 });
