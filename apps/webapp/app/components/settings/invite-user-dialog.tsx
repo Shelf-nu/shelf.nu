@@ -167,6 +167,7 @@ export default function InviteUserDialog({
                             imageId={organization.imageId}
                             alt="img"
                             className="size-6 rounded-[2px] object-cover"
+                            updatedAt={organization.updatedAt}
                           />
 
                           <div className=" ml-px max-w-full truncate text-sm text-gray-900">

@@ -63,7 +63,11 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     return new Response(new Uint8Array(image.blob), {
       headers: {
         "Content-Type": image.contentType,
-        "Cache-Control": "max-age=31536000",
+        // Stored images are replaced in place (same id, same URL), so renderers
+        // version the URL with `?v=<updatedAt>` (see ~/components/shared/image.tsx)
+        // — that is what makes a long lifetime safe here. `private` because the
+        // response is authorization-gated, so shared caches must not store it.
+        "Cache-Control": "private, max-age=31536000",
       },
     });
   } catch (cause) {
