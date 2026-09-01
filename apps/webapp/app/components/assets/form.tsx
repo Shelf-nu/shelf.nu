@@ -157,6 +157,17 @@ export const NewAssetFormSchema = z.object({
       (v) => !v || !/{%|%}/.test(v),
       "Unit of measure may not contain Markdoc syntax (`{%` / `%}`)"
     ),
+
+  // Populated only when a PDF was staged via the attachment widget before
+  // this (new, not-yet-created) asset was submitted - see AssetForm's
+  // pendingId / onAttachmentUploaded. Absent entirely on the edit form,
+  // where the attachment is written directly by its own dedicated route.
+  attachmentUrl: z.string().optional(),
+  attachmentOriginalName: z.string().optional(),
+  attachmentSize: z
+    .string()
+    .optional()
+    .transform((val) => (val ? +val : undefined)),
 });
 
 /**
@@ -283,6 +294,20 @@ export const AssetForm = ({
   // about silent fallback when this asset can't satisfy the workspace preference).
   const currentOrganization = useCurrentOrganization();
   const barcodesInputRef = useRef<BarcodesInputRef>(null);
+
+  // The attachment widget always needs an id to scope its storage path by.
+  // Editing an existing asset uses its real id; creating a new one has none
+  // yet, so mint a client-side placeholder once per mount.
+  const [pendingAttachmentId] = useState(() => id ?? crypto.randomUUID());
+
+  // Lifted staged-attachment state for the create form only (see
+  // AssetAttachmentUpload's onUploaded/onRemoved doc comment) - null on the
+  // edit form, where `attachmentUrl` etc. come from loader data instead.
+  const [pendingAttachment, setPendingAttachment] = useState<{
+    attachmentUrl: string;
+    attachmentOriginalName: string | null;
+    attachmentSize: number;
+  } | null>(null);
 
   // Live mirror of BarcodesInput state — feeds PreferredBarcodeSelector so
   // removing a barcode in the section above immediately removes the matching
@@ -1098,7 +1123,12 @@ export const AssetForm = ({
           </div>
         </FormRow>
 
-        <When truthy={Boolean(id)}>
+        {/*
+          Bulk-create makes N assets from one submission - a single
+          attachment has no obvious asset to belong to, so the row is
+          hidden there. Editing and single (non-bulk) creation both show it.
+        */}
+        <When truthy={Boolean(id) || !bulkMode}>
           <FormRow
             rowLabel={"Attachment"}
             subHeading={
@@ -1110,11 +1140,43 @@ export const AssetForm = ({
             className="pt-[10px]"
           >
             <AssetAttachmentUpload
-              assetId={id as string}
-              attachmentUrl={attachmentUrl}
-              attachmentOriginalName={attachmentOriginalName}
-              attachmentSize={attachmentSize}
+              assetId={id ?? pendingAttachmentId}
+              attachmentUrl={
+                id ? attachmentUrl : pendingAttachment?.attachmentUrl
+              }
+              attachmentOriginalName={
+                id
+                  ? attachmentOriginalName
+                  : pendingAttachment?.attachmentOriginalName
+              }
+              attachmentSize={
+                id ? attachmentSize : pendingAttachment?.attachmentSize
+              }
+              onUploaded={id ? undefined : setPendingAttachment}
+              onRemoved={id ? undefined : () => setPendingAttachment(null)}
             />
+            {/*
+              Only meaningful while creating - the edit route persists
+              directly via AssetAttachmentUpload's own dedicated endpoint,
+              so there is nothing for these to carry on that form.
+            */}
+            <When truthy={!id && Boolean(pendingAttachment)}>
+              <input
+                type="hidden"
+                name="attachmentUrl"
+                value={pendingAttachment?.attachmentUrl ?? ""}
+              />
+              <input
+                type="hidden"
+                name="attachmentOriginalName"
+                value={pendingAttachment?.attachmentOriginalName ?? ""}
+              />
+              <input
+                type="hidden"
+                name="attachmentSize"
+                value={pendingAttachment?.attachmentSize ?? ""}
+              />
+            </When>
           </FormRow>
         </When>
 

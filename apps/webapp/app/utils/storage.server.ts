@@ -1031,6 +1031,53 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
 }
 
 /**
+ * Deletes every object under an org+entity storage prefix in `bucketName`.
+ * For an entity that doesn't have a DB row yet (e.g. a PDF attachment
+ * staged while a new asset is still being filled out) there is no stored
+ * URL to read the exact path from, so this removes by folder instead of
+ * by a single known key.
+ */
+export async function removeFilesByPrefix({
+  organizationId,
+  entityId,
+  bucketName = PUBLIC_BUCKET,
+}: {
+  organizationId: string;
+  entityId: string;
+  bucketName?: string;
+}) {
+  try {
+    const prefix = `${organizationId}/${entityId}`;
+    const { data: entries, error: listError } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .list(prefix);
+
+    if (listError) {
+      throw listError;
+    }
+
+    if (!entries || entries.length === 0) {
+      return;
+    }
+
+    const { error: removeError } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .remove(entries.map((entry) => `${prefix}/${entry.name}`));
+
+    if (removeError) {
+      throw removeError;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to remove staged files",
+      additionalData: { organizationId, entityId, bucketName },
+      label,
+    });
+  }
+}
+
+/**
  * Supabase can sporadically return HTML error pages (e.g., CDN/edge 50x) that the storage
  * client surfaces as StorageUnknownError due to JSON parsing. Detect that shape so callers
  * can retry instead of immediately failing user-visible flows.

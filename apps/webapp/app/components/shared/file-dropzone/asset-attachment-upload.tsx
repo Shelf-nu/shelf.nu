@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
 import {
@@ -17,11 +17,28 @@ import { formatBytes } from "~/utils/format-bytes";
 import { FileDropzone } from "./file-dropzone";
 import { TrashIcon } from "../../icons/library";
 
+type StagedAttachment = {
+  attachmentUrl: string;
+  attachmentOriginalName: string | null;
+  attachmentSize: number;
+};
+
 type AssetAttachmentUploadProps = {
   assetId: string;
   attachmentUrl?: string | null;
   attachmentOriginalName?: string | null;
   attachmentSize?: number | null;
+  /**
+   * Fires after a successful upload. The edit page doesn't need this - the
+   * asset already exists, so `attachmentUrl` (a loader-data prop) refreshes
+   * on its own via React Router's automatic revalidation after the fetcher
+   * completes. The create-asset form has no loader-backed asset yet, so it
+   * uses this to lift the staged attachment into its own form state and
+   * carry it through as hidden fields on final submit.
+   */
+  onUploaded?: (attachment: StagedAttachment) => void;
+  /** Same rationale as onUploaded, for the delete path. */
+  onRemoved?: () => void;
 };
 
 /**
@@ -35,6 +52,8 @@ export function AssetAttachmentUpload({
   attachmentUrl,
   attachmentOriginalName,
   attachmentSize,
+  onUploaded,
+  onRemoved,
 }: AssetAttachmentUploadProps) {
   const uploadFetcher = useFetcher();
   const deleteFetcher = useFetcher();
@@ -63,10 +82,38 @@ export function AssetAttachmentUpload({
     [assetId, uploadFetcher]
   );
 
-  // Both fetchers submit to a different route than the current page, but
-  // React Router revalidates the current route's loaders after any action
-  // by default - so `attachmentUrl` (a loader-data prop) refreshes on its
-  // own once upload/delete completes, same as ProfilePictureUpload.
+  useEffect(() => {
+    if (
+      uploadFetcher.state === "idle" &&
+      uploadFetcher.data &&
+      !uploadFetcher.data.error
+    ) {
+      onUploaded?.({
+        attachmentUrl: uploadFetcher.data.attachmentUrl,
+        attachmentOriginalName: uploadFetcher.data.attachmentOriginalName,
+        attachmentSize: uploadFetcher.data.attachmentSize,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadFetcher.state, uploadFetcher.data]);
+
+  useEffect(() => {
+    if (
+      deleteFetcher.state === "idle" &&
+      deleteFetcher.data &&
+      !deleteFetcher.data.error
+    ) {
+      onRemoved?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deleteFetcher.state, deleteFetcher.data]);
+
+  // Both fetchers submit to a different route than the current page. For an
+  // already-existing asset, React Router revalidates the current route's
+  // loaders after any action by default, so `attachmentUrl` (a loader-data
+  // prop) refreshes on its own - same as ProfilePictureUpload. A caller with
+  // no loader-backed asset yet (the create-asset form) relies on onUploaded /
+  // onRemoved above instead.
   if (attachmentUrl && !isDeleting) {
     return (
       <div className="flex items-center gap-3">

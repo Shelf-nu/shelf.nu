@@ -150,6 +150,7 @@ import {
   getPublicFileURL,
   parseFileFormData,
   parsePdfFormData,
+  removeFilesByPrefix,
   removePublicFile,
   uploadImageFromUrl,
 } from "~/utils/storage.server";
@@ -1180,6 +1181,9 @@ export async function createAsset({
   availableToBook = true,
   mainImage,
   mainImageExpiration,
+  attachmentUrl,
+  attachmentOriginalName,
+  attachmentSize,
   barcodes,
   id: assetId, // Add support for passing an ID
   type,
@@ -1204,6 +1208,15 @@ export async function createAsset({
   id?: Asset["id"]; // Make ID optional
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
+  /**
+   * Set when a PDF was staged (via the attachment API's no-DB-row-yet
+   * branch) while this asset was still being created - see
+   * stageAssetAttachment(). Not exposed on the edit form; an existing
+   * asset's attachment is only ever changed through updateAssetAttachment.
+   */
+  attachmentUrl?: Asset["attachmentUrl"];
+  attachmentOriginalName?: Asset["attachmentOriginalName"];
+  attachmentSize?: Asset["attachmentSize"];
   type?: Asset["type"];
   quantity?: Asset["quantity"];
   minQuantity?: Asset["minQuantity"];
@@ -1309,6 +1322,9 @@ export async function createAsset({
         availableToBook,
         mainImage,
         mainImageExpiration,
+        attachmentUrl,
+        attachmentOriginalName,
+        attachmentSize,
         type,
         quantity,
         minQuantity,
@@ -3972,6 +3988,103 @@ export async function removeAssetAttachment({
       message: isShelfError
         ? cause.message
         : "Something went wrong while removing the asset attachment",
+      additionalData: { assetId },
+      label,
+    });
+  }
+}
+
+/**
+ * Uploads a PDF attachment for an asset that doesn't exist in the DB yet -
+ * the create-asset form uses the same instant-upload widget as the edit
+ * page, but there is no row to read/write until the whole form is
+ * submitted. Storage-only: the resulting metadata is carried through the
+ * create form as hidden fields and persisted by createAsset() in the same
+ * insert as the rest of the asset.
+ *
+ * `assetId` here is a client-generated placeholder (not yet a real Asset
+ * id) used only to scope the storage path - see AssetForm's pendingId.
+ */
+export async function stageAssetAttachment({
+  request,
+  assetId,
+  organizationId,
+}: {
+  request: Request;
+  assetId: string;
+  organizationId: Organization["id"];
+}) {
+  try {
+    const formData = await parsePdfFormData({
+      request,
+      newFileName: `${organizationId}/${assetId}/attachment-${dateTimeInUnix(
+        Date.now()
+      )}`,
+    });
+
+    const raw = formData.get("file") as string | null;
+    if (!raw) {
+      throw new ShelfError({
+        cause: null,
+        title: "No file uploaded",
+        message: "Please choose a PDF file to upload.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const { path, originalName, size } = JSON.parse(raw) as {
+      path: string;
+      originalName?: string;
+      size: number;
+    };
+
+    const attachmentUrl = getPublicFileURL({
+      filename: path,
+      bucketName: PUBLIC_BUCKET,
+    });
+
+    return {
+      attachmentUrl,
+      attachmentOriginalName: originalName ?? null,
+      attachmentSize: size,
+    };
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+    throw new ShelfError({
+      cause,
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while uploading the asset attachment",
+      additionalData: { assetId },
+      label,
+    });
+  }
+}
+
+/**
+ * Removes a PDF attachment staged for an asset that doesn't exist in the DB
+ * yet. There is no `attachmentUrl` column to read the exact object key
+ * from, so this clears the whole org+placeholder-id storage folder instead
+ * of a single known path - see removeFilesByPrefix.
+ */
+export async function clearStagedAssetAttachment({
+  assetId,
+  organizationId,
+}: {
+  assetId: string;
+  organizationId: Organization["id"];
+}) {
+  try {
+    await removeFilesByPrefix({
+      organizationId,
+      entityId: assetId,
+      bucketName: PUBLIC_BUCKET,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while removing the asset attachment",
       additionalData: { assetId },
       label,
     });
