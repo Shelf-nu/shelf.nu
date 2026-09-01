@@ -160,9 +160,11 @@ export const NewAssetFormSchema = z.object({
 
   // Populated only when a PDF was staged via the attachment widget before
   // this (new, not-yet-created) asset was submitted - see AssetForm's
-  // pendingId / onAttachmentUploaded. Absent entirely on the edit form,
-  // where the attachment is written directly by its own dedicated route.
-  attachmentUrl: z.string().optional(),
+  // pendingAttachmentId / pendingAttachment. Absent entirely on the edit
+  // form, where the attachment is written directly by its own dedicated
+  // route. A bare storage path, not a URL - see Asset.attachmentPath's
+  // schema comment.
+  attachmentPath: z.string().optional(),
   attachmentOriginalName: z.string().optional(),
   attachmentSize: z
     .string()
@@ -217,7 +219,6 @@ type Props = Partial<
     | "thumbnailImage"
     | "mainImage"
     | "mainImageExpiration"
-    | "attachmentUrl"
     | "attachmentOriginalName"
     | "attachmentSize"
     | "categoryId"
@@ -236,6 +237,14 @@ type Props = Partial<
   tags?: Tag[];
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
   referer?: string | null;
+  /**
+   * NOT `Asset["attachmentPath"]` - the DB column is a bare storage path,
+   * but by the time this reaches the form it has already been resolved to
+   * a short-lived signed URL (edit: by the loader; create: staging
+   * response's `attachmentDisplayUrl`, fed through `pendingAttachment`
+   * below), so it genuinely is a URL here.
+   */
+  attachmentUrl?: string | null;
   /**
    * Location is not a column on `Asset` — it lives on the `AssetLocation`
    * pivot. Callers derive the single primary-location id via
@@ -303,8 +312,13 @@ export const AssetForm = ({
   // Lifted staged-attachment state for the create form only (see
   // AssetAttachmentUpload's onUploaded/onRemoved doc comment) - null on the
   // edit form, where `attachmentUrl` etc. come from loader data instead.
+  // `attachmentPath` here is the raw storage path submitted on final create
+  // (see Asset.attachmentPath's schema comment); `attachmentDisplayUrl` is a
+  // short-lived signed URL used only to render the link while still on
+  // this page - it is never itself submitted or persisted.
   const [pendingAttachment, setPendingAttachment] = useState<{
-    attachmentUrl: string;
+    attachmentPath: string;
+    attachmentDisplayUrl: string;
     attachmentOriginalName: string | null;
     attachmentSize: number;
   } | null>(null);
@@ -1141,8 +1155,14 @@ export const AssetForm = ({
           >
             <AssetAttachmentUpload
               assetId={id ?? pendingAttachmentId}
+              // Edit mode: attachmentUrl is already a loader-resolved signed
+              // URL (see the edit route's loader). Create mode: the widget
+              // needs something clickable NOW, before the raw path in
+              // pendingAttachment.attachmentPath has anywhere to be resolved
+              // from - attachmentDisplayUrl is the signed URL minted for
+              // exactly that, at staging-upload time.
               attachmentUrl={
-                id ? attachmentUrl : pendingAttachment?.attachmentUrl
+                id ? attachmentUrl : pendingAttachment?.attachmentDisplayUrl
               }
               attachmentOriginalName={
                 id
@@ -1163,8 +1183,8 @@ export const AssetForm = ({
             <When truthy={!id && Boolean(pendingAttachment)}>
               <input
                 type="hidden"
-                name="attachmentUrl"
-                value={pendingAttachment?.attachmentUrl ?? ""}
+                name="attachmentPath"
+                value={pendingAttachment?.attachmentPath ?? ""}
               />
               <input
                 type="hidden"

@@ -215,10 +215,14 @@ model Asset {
   thumbnailImage         String?
   mainImageExpiration    DateTime?
   // Single optional file attachment (purchase invoice, manual,
-  // calibration certificate, etc. - see issue #2660). Stored in the public
-  // `files` bucket alongside location/audit images, so `attachmentUrl` is
-  // a full public URL, not a bare storage path.
-  attachmentUrl          String?
+  // calibration certificate, etc. - see issue #2660). A bare storage path
+  // in the private `assets` bucket, not a URL - these documents can carry
+  // real business detail, so access must follow the asset's own permission
+  // check rather than being a permanent public link. Resolve it to a
+  // short-lived signed URL with createSignedUrl() at the point of display;
+  // never persist that signed URL back to this column (it expires; the
+  // path doesn't).
+  attachmentPath         String?
   attachmentOriginalName String?
   attachmentSize         Int?
   status                 AssetStatus @default(AVAILABLE)

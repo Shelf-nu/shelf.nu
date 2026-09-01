@@ -68,18 +68,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           });
           return data(payload(staged));
         }
-        const asset = await updateAssetAttachment({
-          request,
-          assetId,
-          organizationId,
-        });
-        return data(
-          payload({
-            attachmentUrl: asset.attachmentUrl,
-            attachmentOriginalName: asset.attachmentOriginalName,
-            attachmentSize: asset.attachmentSize,
-          })
-        );
+        // The response here isn't read client-side: AssetAttachmentUpload
+        // has no onUploaded callback wired for an already-existing asset
+        // (only the create form's not-yet-existing-asset path needs one),
+        // so this relies on React Router's automatic loader revalidation
+        // to pick up the new attachment instead.
+        await updateAssetAttachment({ request, assetId, organizationId });
+        return data(payload({ success: true }));
       }
       case "DELETE": {
         if (!existingAsset) {

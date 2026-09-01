@@ -202,7 +202,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       minQuantity,
       consumptionType,
       unitOfMeasure,
-      attachmentUrl,
+      attachmentPath,
       attachmentOriginalName,
       attachmentSize,
     } = payload;
@@ -300,7 +300,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       minQuantity,
       consumptionType,
       unitOfMeasure,
-      attachmentUrl,
+      attachmentPath,
       attachmentOriginalName,
       attachmentSize,
     });

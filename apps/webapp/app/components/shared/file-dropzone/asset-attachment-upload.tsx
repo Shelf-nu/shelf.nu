@@ -18,7 +18,10 @@ import { FileDropzone } from "./file-dropzone";
 import { TrashIcon } from "../../icons/library";
 
 type StagedAttachment = {
-  attachmentUrl: string;
+  /** Raw storage path (see Asset.attachmentPath's schema comment). */
+  attachmentPath: string;
+  /** Short-lived signed URL for showing/linking to the file right now. */
+  attachmentDisplayUrl: string;
   attachmentOriginalName: string | null;
   attachmentSize: number;
 };
@@ -89,7 +92,8 @@ export function AssetAttachmentUpload({
       !uploadFetcher.data.error
     ) {
       onUploaded?.({
-        attachmentUrl: uploadFetcher.data.attachmentUrl,
+        attachmentPath: uploadFetcher.data.attachmentPath,
+        attachmentDisplayUrl: uploadFetcher.data.attachmentDisplayUrl,
         attachmentOriginalName: uploadFetcher.data.attachmentOriginalName,
         attachmentSize: uploadFetcher.data.attachmentSize,
       });

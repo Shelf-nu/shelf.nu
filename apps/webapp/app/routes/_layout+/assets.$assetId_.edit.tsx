@@ -17,6 +17,7 @@ import { Button } from "~/components/shared/button";
 import {
   getAllEntriesForCreateAndEdit,
   getAsset,
+  resolveAssetAttachmentDisplayUrl,
   updateAsset,
   updateAssetMainImage,
 } from "~/modules/asset/service.server";
@@ -129,8 +130,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: asset.id,
     };
 
+    // asset.attachmentPath is a private-bucket storage path (see its schema
+    // comment) - resolve it to a short-lived signed URL now that
+    // requirePermission above gates access to this asset.
+    const attachmentDisplayUrl = await resolveAssetAttachmentDisplayUrl({
+      attachmentPath: asset.attachmentPath,
+      assetId: asset.id,
+    });
+
     return payload({
-      asset,
+      asset: { ...asset, attachmentUrl: attachmentDisplayUrl },
       header,
       categories,
       totalCategories,

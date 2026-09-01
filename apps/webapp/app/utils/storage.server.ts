@@ -597,7 +597,13 @@ const PDF_MAGIC_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
 export async function parsePdfFormData({
   request,
   newFileName,
-  bucketName = PUBLIC_BUCKET,
+  // Private by default - a PDF attachment (invoice, calibration cert,
+  // warranty doc) can carry real business/financial detail, unlike the
+  // photos this bucket's other callers store. Access to it should follow
+  // access to the asset, not be a permanent public link - see
+  // createSignedUrl() for how a caller turns this back into a fetchable
+  // URL only after its own permission check.
+  bucketName = "assets",
   maxFileSize = ASSET_ATTACHMENT_MAX_SIZE,
 }: {
   request: Request;
@@ -1105,6 +1111,41 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
       message: isLikeShelfError(cause)
         ? cause.message
         : "Failed to remove file. Please try again.",
+      label,
+    });
+  }
+}
+
+/**
+ * Deletes a single, exactly-known object from a private bucket by its raw
+ * storage path. Companion to `removePublicFile()` for buckets that aren't
+ * served through a public URL - there is no URL to parse the path out of,
+ * so the caller passes the path it already has (e.g. a value it previously
+ * stored precisely because it's the private-bucket equivalent of a public
+ * URL for that row).
+ */
+export async function removeFileAtPath({
+  path,
+  bucketName,
+}: {
+  path: string;
+  bucketName: string;
+}) {
+  try {
+    const { error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .remove([path]);
+
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to remove file. Please try again.",
+      additionalData: { path, bucketName },
       label,
     });
   }

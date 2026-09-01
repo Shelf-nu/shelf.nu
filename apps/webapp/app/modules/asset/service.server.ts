@@ -93,7 +93,6 @@ import { getLocale } from "~/utils/client-hints";
 import {
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
   LEGACY_CUID_LENGTH,
-  PUBLIC_BUCKET,
 } from "~/utils/constants";
 import {
   getFiltersFromRequest,
@@ -147,11 +146,10 @@ import {
 } from "~/utils/org-validation.server";
 import {
   createSignedUrl,
-  getPublicFileURL,
   parseFileFormData,
   parsePdfFormData,
+  removeFileAtPath,
   removeFilesByPrefix,
-  removePublicFile,
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
@@ -1181,7 +1179,7 @@ export async function createAsset({
   availableToBook = true,
   mainImage,
   mainImageExpiration,
-  attachmentUrl,
+  attachmentPath,
   attachmentOriginalName,
   attachmentSize,
   barcodes,
@@ -1214,7 +1212,7 @@ export async function createAsset({
    * stageAssetAttachment(). Not exposed on the edit form; an existing
    * asset's attachment is only ever changed through updateAssetAttachment.
    */
-  attachmentUrl?: Asset["attachmentUrl"];
+  attachmentPath?: Asset["attachmentPath"];
   attachmentOriginalName?: Asset["attachmentOriginalName"];
   attachmentSize?: Asset["attachmentSize"];
   type?: Asset["type"];
@@ -1322,7 +1320,7 @@ export async function createAsset({
         availableToBook,
         mainImage,
         mainImageExpiration,
-        attachmentUrl,
+        attachmentPath,
         attachmentOriginalName,
         attachmentSize,
         type,
@@ -3885,7 +3883,7 @@ export async function updateAssetAttachment({
   try {
     const asset = await db.asset.findFirstOrThrow({
       where: { id: assetId, organizationId },
-      select: { id: true, attachmentUrl: true },
+      select: { id: true, attachmentPath: true },
     });
 
     const { path, originalName, size } = await parsePdfFormData({
@@ -3895,16 +3893,17 @@ export async function updateAssetAttachment({
       )}`,
     });
 
-    const attachmentUrl = getPublicFileURL({
-      filename: path,
-      bucketName: PUBLIC_BUCKET,
-    });
-
-    if (asset.attachmentUrl) {
+    if (asset.attachmentPath) {
       // Best-effort cleanup of the file being replaced - an orphaned
-      // storage object isn't worth failing the new upload over.
+      // storage object isn't worth failing the new upload over. Targets the
+      // old path specifically (not a folder sweep) - the new upload above
+      // already landed in the same org/asset folder under a different,
+      // timestamped name.
       try {
-        await removePublicFile({ publicUrl: asset.attachmentUrl });
+        await removeFileAtPath({
+          path: asset.attachmentPath,
+          bucketName: "assets",
+        });
       } catch (cause) {
         Logger.error(
           new ShelfError({
@@ -3920,7 +3919,10 @@ export async function updateAssetAttachment({
     return await db.asset.update({
       where: { id: assetId, organizationId },
       data: {
-        attachmentUrl,
+        // Not a URL - see the schema comment on Asset.attachmentPath. A
+        // signed URL is minted on demand wherever this is displayed, after
+        // that caller's own permission check.
+        attachmentPath: path,
         attachmentOriginalName: originalName ?? null,
         attachmentSize: size,
       },
@@ -3949,17 +3951,20 @@ export async function removeAssetAttachment({
   try {
     const asset = await db.asset.findFirstOrThrow({
       where: { id: assetId, organizationId },
-      select: { id: true, attachmentUrl: true },
+      select: { id: true, attachmentPath: true },
     });
 
-    if (asset.attachmentUrl) {
-      await removePublicFile({ publicUrl: asset.attachmentUrl });
+    if (asset.attachmentPath) {
+      await removeFileAtPath({
+        path: asset.attachmentPath,
+        bucketName: "assets",
+      });
     }
 
     return await db.asset.update({
       where: { id: assetId, organizationId },
       data: {
-        attachmentUrl: null,
+        attachmentPath: null,
         attachmentOriginalName: null,
         attachmentSize: null,
       },
@@ -4005,13 +4010,21 @@ export async function stageAssetAttachment({
       )}`,
     });
 
-    const attachmentUrl = getPublicFileURL({
+    // The asset doesn't exist yet, so `path` (see Asset.attachmentPath's
+    // schema comment) is what eventually gets persisted, via a hidden form
+    // field, once the rest of the form is submitted. `attachmentDisplayUrl`
+    // is a short-lived signed URL for ONLY this response - the create form
+    // uses it to let the user click through to the file immediately, the
+    // same as they could on the edit page; it is never itself stored
+    // anywhere.
+    const attachmentDisplayUrl = await createSignedUrl({
       filename: path,
-      bucketName: PUBLIC_BUCKET,
+      bucketName: "assets",
     });
 
     return {
-      attachmentUrl,
+      attachmentPath: path,
+      attachmentDisplayUrl,
       attachmentOriginalName: originalName ?? null,
       attachmentSize: size,
     };
@@ -4029,8 +4042,49 @@ export async function stageAssetAttachment({
 }
 
 /**
+ * Resolves an asset's stored attachment path (see Asset.attachmentPath's
+ * schema comment) into a short-lived signed URL for display. Callers are
+ * expected to already have proven the caller may see this asset (e.g. via
+ * getAsset()/requirePermission) before reaching this - it does not perform
+ * its own permission check.
+ *
+ * Tolerates a signing failure by returning null rather than throwing,
+ * matching how refreshExpiredAssetImages treats a transient storage hiccup
+ * as "no image right now" instead of failing the whole page load.
+ */
+export async function resolveAssetAttachmentDisplayUrl({
+  attachmentPath,
+  assetId,
+}: {
+  attachmentPath: Asset["attachmentPath"];
+  assetId: Asset["id"];
+}): Promise<string | null> {
+  if (!attachmentPath) {
+    return null;
+  }
+
+  try {
+    return await createSignedUrl({
+      filename: attachmentPath,
+      bucketName: "assets",
+    });
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to create a signed URL for the asset attachment",
+        additionalData: { assetId },
+        label,
+        shouldBeCaptured: true,
+      })
+    );
+    return null;
+  }
+}
+
+/**
  * Removes a PDF attachment staged for an asset that doesn't exist in the DB
- * yet. There is no `attachmentUrl` column to read the exact object key
+ * yet. There is no `attachmentPath` column to read the exact object key
  * from, so this clears the whole org+placeholder-id storage folder instead
  * of a single known path - see removeFilesByPrefix.
  */
@@ -4045,7 +4099,7 @@ export async function clearStagedAssetAttachment({
     await removeFilesByPrefix({
       organizationId,
       entityId: assetId,
-      bucketName: PUBLIC_BUCKET,
+      bucketName: "assets",
     });
   } catch (cause) {
     throw new ShelfError({
