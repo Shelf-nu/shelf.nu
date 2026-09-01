@@ -137,6 +137,7 @@ import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import {
   attributeDispositionsByBookingAsset,
+  attributeSessionCheckoutToSlices,
   checkoutSessionsToLogsByAsset,
   compareSlicesForGreedyFill,
 } from "./checkout-attribution";
@@ -2553,6 +2554,33 @@ async function checkoutBookingWritesWithinTx(
    * keeps its own (earlier, more accurate) timestamp. Any stale check-in marker
    * is cleared: a full checkout sends the whole booking back out.
    */
+  /**
+   * The slices this call sends out, read while they are still identifiable —
+   * the marker writes below are what distinguish them, so afterwards nothing
+   * separates them from slices an earlier batch sent out.
+   *
+   * Two groups depart, and both count. A slice that never left is the obvious
+   * one. A slice that already went out and came back IN FULL is departing
+   * again: the re-out write below clears its `checkedInAt`, and its units are
+   * physically gone a second time. Counting only the first group would let the
+   * derived "still out" figure go negative, because the return that came
+   * between the two departures is already recorded against it.
+   *
+   * An all-at-once checkout sends every unit of every slice it touches, so each
+   * one's count grows by its full booked quantity.
+   */
+  const departingSlices = await tx.bookingAsset.findMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      OR: [
+        { checkedOutAt: null },
+        { checkedOutAt: { not: null }, checkedInAt: { not: null } },
+      ],
+    },
+    select: { id: true, quantity: true },
+  });
+
   await tx.bookingAsset.updateMany({
     // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
     where: { bookingId, checkedOutAt: null },
@@ -2563,6 +2591,37 @@ async function checkoutBookingWritesWithinTx(
       checkedInById: null,
     },
   });
+
+  /**
+   * Size those departures, each slice's count becoming its full booked
+   * quantity.
+   *
+   * Grouped by quantity because `updateMany`'s `data` takes literals only and
+   * cannot name another column on the row. Real bookings carry very few
+   * distinct quantities — every `INDIVIDUAL` slice is 1 — so this is a handful
+   * of statements, not one per slice.
+   *
+   * Incremented, never assigned: the column is cumulative, so a slice on its
+   * second departure adds to what its first one recorded. Only the slices read
+   * above, so a slice a progressive batch had partly sent out — still out, not
+   * yet reconciled — keeps the count that batch recorded.
+   */
+  const departingSliceIdsByQuantity = new Map<number, string[]>();
+  for (const slice of departingSlices) {
+    const ids = departingSliceIdsByQuantity.get(slice.quantity);
+    if (ids) {
+      ids.push(slice.id);
+    } else {
+      departingSliceIdsByQuantity.set(slice.quantity, [slice.id]);
+    }
+  }
+  for (const [quantity, sliceIds] of departingSliceIdsByQuantity) {
+    await tx.bookingAsset.updateMany({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these ids were read above from a bookingId the caller org-checked
+      where: { id: { in: sliceIds } },
+      data: { checkedOutQuantity: { increment: quantity } },
+    });
+  }
 
   /**
    * Slices that were already out AND reconciled return to outstanding. The
@@ -8437,6 +8496,46 @@ export async function partialCheckoutBooking({
               checkedInAt: { not: null },
             },
             data: { checkedInAt: null, checkedInById: null },
+          });
+        }
+
+        /**
+         * Size what this session sent out, per slice.
+         *
+         * The marker above says a slice is out; this says how many of its units
+         * went, which is the part a timestamp cannot carry. Read from the three
+         * positionally-aligned arrays the session row was just built from, so
+         * the count and the session can never describe different departures.
+         *
+         * {@link attributeSessionCheckoutToSlices} owns the per-slice split and
+         * the capacity rule that keeps it agreeing with the marker above.
+         *
+         * Cumulative: a slice returned in full and sent out again adds to its
+         * count rather than replacing it.
+         */
+        const unitsBySliceId = attributeSessionCheckoutToSlices({
+          sliceRows: bookingFound.bookingAssets.map((ba) => ({
+            id: ba.id,
+            assetId: ba.asset.id,
+            quantity: ba.quantity,
+            assetKitId: ba.assetKitId,
+          })),
+          committedRemainingBySlice: sliceCommittedRemainingBySlice,
+          // The session arrays are positionally aligned and carry "" for an
+          // untagged claim, which the attributor reads as "names no slice".
+          claims: sessionAssetIds.map((assetId, index) => ({
+            assetId,
+            bookingAssetId: sessionBookingAssetIds[index] || null,
+            quantity: sessionQuantities[index] ?? 1,
+          })),
+        });
+
+        for (const [sliceId, units] of unitsBySliceId) {
+          if (units <= 0) continue;
+          await tx.bookingAsset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: slice ids come from this booking's own rows, loaded org-scoped by this action's booking lookup
+            where: { id: sliceId, bookingId: id },
+            data: { checkedOutQuantity: { increment: units } },
           });
         }
 
