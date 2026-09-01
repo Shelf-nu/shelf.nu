@@ -3742,6 +3742,81 @@ describe("checkoutBooking", () => {
     expect(result).toEqual(hydratedBooking);
   });
 
+  it("records the residue of a partially-scanned qty slice as a tagged session row", async () => {
+    expect.assertions(1);
+
+    // A QT slice with 3 of 8 units already dispatched by a progressive scan
+    // (slice stamped + a 3-unit tagged session). The full checkout sends the
+    // remaining 5 out and must record them — session attribution otherwise
+    // reads the asset as 3 dispatched and completion could settle the booking
+    // with 5 units still out.
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-qty",
+            assetKits: [{ kitId: "kit-1" }],
+            title: "Cables",
+            type: AssetType.QUANTITY_TRACKED,
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-qty",
+          quantity: 8,
+          id: "ba-qty",
+          // why: kit-driven slice — keeps the free-pool availability sweep
+          // (which needs the full availability query chain) out of this test;
+          // the residue derivation itself is kit/standalone-agnostic.
+          assetKitId: "ak-1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+    // why: the residue derivation reads pre-stamped slices (checkedOutAt
+    // filter); any other bookingAsset read in the flow gets an empty list.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args?: { where?: { checkedOutAt?: unknown } }) =>
+      Promise.resolve(
+        args?.where?.checkedOutAt
+          ? [
+              {
+                id: "ba-qty",
+                assetId: "asset-qty",
+                quantity: 8,
+                assetKitId: "ak-1",
+              },
+            ]
+          : []
+      )
+    );
+    // why: the prior progressive scan recorded 3 units against this slice.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      { assetIds: ["asset-qty"], quantities: [3], bookingAssetIds: ["ba-qty"] },
+    ]);
+
+    await checkoutBooking(mockCheckoutParams);
+
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        bookingId: "booking-1",
+        assetIds: ["asset-qty"],
+        quantities: [5],
+        bookingAssetIds: ["ba-qty"],
+        checkoutCount: 1,
+      }),
+    });
+  });
+
   it("should throw error when assets have booking conflicts", async () => {
     expect.assertions(1);
 

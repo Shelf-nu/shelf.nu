@@ -2498,9 +2498,82 @@ async function checkoutBookingWritesWithinTx(
   });
 
   /**
-   * Record the checkout on each slice. This is the ONLY thing that marks an
-   * all-at-once checkout — this path writes no `PartialBookingCheckout` row —
-   * and it is what the check-in guard reads to decide eligibility.
+   * A quantity-tracked slice partially dispatched by progressive scans before
+   * this full checkout keeps its earlier stamp, but its residual units go out
+   * NOW and would otherwise leave no record of their own: dispatched units
+   * are judged from session attribution wherever a slice has session units
+   * (see `computeDispatchedUnitsByAsset`), so an unrecorded residue would let
+   * the booking complete once just the scanned units return. Read the
+   * pre-stamp state here; the matching session row is written below, after
+   * the stamps.
+   */
+  const preStampedQtySlices = (await tx.bookingAsset.findMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      checkedOutAt: { not: null },
+      asset: { type: AssetType.QUANTITY_TRACKED },
+    },
+    select: { id: true, assetId: true, quantity: true, assetKitId: true },
+  })) as Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+  }>;
+  const checkoutTopUps: Array<{
+    id: string;
+    assetId: string;
+    residue: number;
+  }> = [];
+  if (preStampedQtySlices.length > 0) {
+    const priorSessions = (await tx.partialBookingCheckout.findMany({
+      where: { bookingId },
+      select: { assetIds: true, quantities: true, bookingAssetIds: true },
+    })) as Array<{
+      assetIds: string[];
+      quantities: number[];
+      bookingAssetIds: string[];
+    }>;
+    const logsByAsset = checkoutSessionsToLogsByAsset(
+      priorSessions,
+      () => true
+    );
+    const slicesByAsset = new Map<string, typeof preStampedQtySlices>();
+    for (const s of preStampedQtySlices) {
+      const group = slicesByAsset.get(s.assetId);
+      if (group) group.push(s);
+      else slicesByAsset.set(s.assetId, [s]);
+    }
+    for (const [assetId, group] of slicesByAsset) {
+      const attributed = attributeDispositionsByBookingAsset({
+        bookingAssetRows: group.map((s) => ({
+          id: s.id,
+          quantity: s.quantity,
+          assetKitId: s.assetKitId,
+        })),
+        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      });
+      for (const s of group) {
+        const units = attributed.get(s.id) ?? 0;
+        // Only a slice with SOME session units under-reads — a stamped slice
+        // with none reads back as fully dispatched from its stamp alone.
+        if (units > 0 && units < s.quantity) {
+          checkoutTopUps.push({
+            id: s.id,
+            assetId: s.assetId,
+            residue: s.quantity - units,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Record the checkout on each slice. Together with the residue session row
+   * below, this is what marks an all-at-once checkout — the path writes no
+   * `PartialBookingCheckout` row for slices without prior session units — and
+   * it is what the check-in guard reads to decide eligibility.
    *
    * Scoped to slices not already out so a progressive batch that ran earlier
    * keeps its own (earlier, more accurate) timestamp. Any stale check-in marker
@@ -2516,6 +2589,24 @@ async function checkoutBookingWritesWithinTx(
       checkedInById: null,
     },
   });
+
+  /**
+   * The residue of partially-scanned slices, recorded as one session row so
+   * their full obligation reads back out of session attribution (tagged per
+   * slice — no greedy ambiguity).
+   */
+  if (checkoutTopUps.length > 0) {
+    await tx.partialBookingCheckout.create({
+      data: {
+        bookingId,
+        checkedOutById,
+        assetIds: checkoutTopUps.map((t) => t.assetId),
+        quantities: checkoutTopUps.map((t) => t.residue),
+        bookingAssetIds: checkoutTopUps.map((t) => t.id),
+        checkoutCount: checkoutTopUps.length,
+      },
+    });
+  }
 
   /**
    * Slices that were already out AND reconciled return to outstanding. The
