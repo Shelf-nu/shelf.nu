@@ -3890,7 +3890,7 @@ export async function updateAssetAttachment({
       request,
       newFileName: `${organizationId}/${assetId}/attachment-${dateTimeInUnix(
         Date.now()
-      )}`,
+      )}-${crypto.randomUUID()}`,
     });
 
     if (asset.attachmentPath) {
@@ -4007,7 +4007,7 @@ export async function stageAssetAttachment({
       request,
       newFileName: `${organizationId}/${assetId}/attachment-${dateTimeInUnix(
         Date.now()
-      )}`,
+      )}-${crypto.randomUUID()}`,
     });
 
     // The asset doesn't exist yet, so `path` (see Asset.attachmentPath's
