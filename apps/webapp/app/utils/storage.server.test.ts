@@ -326,10 +326,8 @@ describe("parsePdfFormData", () => {
   });
 
   it("rejects a plain text 'file' field forging an upload result", async () => {
-    // No `filename` attribute - the multipart parser treats this as an
-    // ordinary text field, not a file part, so the upload handler (and
-    // its MIME/magic-byte checks) never runs at all. Before the fix, this
-    // exact payload would have been trusted as if it had been uploaded.
+    // No `filename` attribute - multipart text fields do not invoke the upload
+    // handler and therefore cannot provide stored attachment metadata.
     const forgedPath = "other-org/other-asset/attachment-stolen.pdf";
     const request = multipartRequest([
       {
