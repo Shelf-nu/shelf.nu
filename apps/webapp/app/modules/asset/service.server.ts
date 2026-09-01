@@ -3893,9 +3893,24 @@ export async function updateAssetAttachment({
       )}-${crypto.randomUUID()}`,
     });
 
+    const updated = await db.asset.update({
+      where: { id: assetId, organizationId },
+      data: {
+        // Not a URL - see the schema comment on Asset.attachmentPath. A
+        // signed URL is minted on demand wherever this is displayed, after
+        // that caller's own permission check.
+        attachmentPath: path,
+        attachmentOriginalName: originalName ?? null,
+        attachmentSize: size,
+      },
+    });
+
     if (asset.attachmentPath) {
-      // Best-effort cleanup of the file being replaced - an orphaned
-      // storage object isn't worth failing the new upload over. Targets the
+      // Best-effort cleanup of the file being replaced, run only after the
+      // new path is persisted above: deleting the old file first and then
+      // failing to persist the new one would leave the asset pointing at a
+      // file that no longer exists. An orphaned storage object is the safer
+      // failure mode, so it isn't worth failing the upload over. Targets the
       // old path specifically (not a folder sweep) - the new upload above
       // already landed in the same org/asset folder under a different,
       // timestamped name.
@@ -3916,17 +3931,7 @@ export async function updateAssetAttachment({
       }
     }
 
-    return await db.asset.update({
-      where: { id: assetId, organizationId },
-      data: {
-        // Not a URL - see the schema comment on Asset.attachmentPath. A
-        // signed URL is minted on demand wherever this is displayed, after
-        // that caller's own permission check.
-        attachmentPath: path,
-        attachmentOriginalName: originalName ?? null,
-        attachmentSize: size,
-      },
-    });
+    return updated;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
@@ -3954,14 +3959,7 @@ export async function removeAssetAttachment({
       select: { id: true, attachmentPath: true },
     });
 
-    if (asset.attachmentPath) {
-      await removeFileAtPath({
-        path: asset.attachmentPath,
-        bucketName: "assets",
-      });
-    }
-
-    return await db.asset.update({
+    const updated = await db.asset.update({
       where: { id: assetId, organizationId },
       data: {
         attachmentPath: null,
@@ -3969,6 +3967,29 @@ export async function removeAssetAttachment({
         attachmentSize: null,
       },
     });
+
+    if (asset.attachmentPath) {
+      // Best-effort cleanup, run only after the DB is cleared - see the
+      // matching comment in updateAssetAttachment for why deleting the file
+      // before persisting the metadata change is the wrong order.
+      try {
+        await removeFileAtPath({
+          path: asset.attachmentPath,
+          bucketName: "assets",
+        });
+      } catch (cause) {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Failed to delete the removed asset attachment",
+            additionalData: { assetId },
+            label,
+          })
+        );
+      }
+    }
+
+    return updated;
   } catch (cause) {
     const isShelfError = isLikeShelfError(cause);
     throw new ShelfError({
