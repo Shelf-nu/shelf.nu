@@ -169,7 +169,15 @@ export const NewAssetFormSchema = z.object({
   attachmentSize: z
     .string()
     .optional()
-    .transform((val) => (val ? +val : undefined)),
+    .transform((val) => (val === "" || val === undefined ? undefined : +val))
+    .pipe(
+      z
+        .number({ invalid_type_error: "Attachment size must be a number" })
+        .finite("Attachment size must be finite")
+        .int("Attachment size must be a whole number")
+        .nonnegative("Attachment size must not be negative")
+        .optional()
+    ),
 });
 
 /**
