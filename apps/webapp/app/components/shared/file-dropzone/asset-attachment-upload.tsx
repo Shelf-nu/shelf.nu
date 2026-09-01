@@ -139,7 +139,7 @@ export function AssetAttachmentUpload({
   // prop) refreshes on its own - same as ProfilePictureUpload. A caller with
   // no loader-backed asset yet (the create-asset form) relies on onUploaded /
   // onRemoved above instead.
-  if (attachmentUrl && !isDeleting) {
+  if (attachmentUrl) {
     return (
       <div className="flex items-center gap-3">
         <a
