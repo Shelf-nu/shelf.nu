@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
+import { useDisabled } from "~/hooks/use-disabled";
 import { ASSET_ATTACHMENT_MAX_SIZE } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
 import { formatBytes } from "~/utils/format-bytes";
@@ -84,6 +85,10 @@ export function AssetAttachmentUpload({
 
   const isUploading = isFormProcessing(uploadFetcher.state);
   const isDeleting = isFormProcessing(deleteFetcher.state);
+  // Also disabled while the enclosing form (edit-asset save, create-asset
+  // submit) is navigating - it's a separate <Form> from this widget's own
+  // fetchers, so isUploading/isDeleting alone miss that submission.
+  const disabled = useDisabled() || isUploading || isDeleting;
 
   const onDropAccepted = useCallback(
     (acceptedFiles: File[]) => {
@@ -162,7 +167,7 @@ export function AssetAttachmentUpload({
               type="button"
               variant="secondary"
               size="sm"
-              disabled={isUploading || isDeleting}
+              disabled={disabled}
               title="Delete attachment"
             >
               <TrashIcon />
@@ -186,11 +191,7 @@ export function AssetAttachmentUpload({
             <AlertDialogFooter>
               <div className="flex justify-center gap-2">
                 <AlertDialogCancel asChild>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={isDeleting}
-                  >
+                  <Button type="button" variant="secondary" disabled={disabled}>
                     Cancel
                   </Button>
                 </AlertDialogCancel>
@@ -200,7 +201,7 @@ export function AssetAttachmentUpload({
                 >
                   <Button
                     type="submit"
-                    disabled={isDeleting}
+                    disabled={disabled}
                     className="border-error-600 bg-error-600 hover:border-error-800 hover:!bg-error-800"
                   >
                     Delete
