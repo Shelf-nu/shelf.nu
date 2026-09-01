@@ -116,10 +116,11 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
    * Self-service custodians see only the "Pending approval" badge in the
    * header. Derived client-side from the same helper the server guard uses.
    */
+  const isPendingApprovalRequired = useBookingSettings().requireBookingApproval;
   const isPendingApproval = isBookingPendingApproval({
     status,
     approvedAt: loaderBooking.approvedAt ?? null,
-    requireBookingApproval: useBookingSettings().requireBookingApproval,
+    requireBookingApproval: isPendingApprovalRequired,
   });
 
   const isProcessing = isFormProcessing(navigation.state);
@@ -368,7 +369,12 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 className="grow whitespace-nowrap"
                 size="sm"
               >
-                {isBase ? "Request reservation" : "Reserve"}
+                {/* When the workspace requires approval, a Self-service
+                    user's Reserve is a REQUEST too — the button must say so,
+                    or the pending state that follows reads as a failure. */}
+                {isBase || (isBaseOrSelfService && isPendingApprovalRequired)
+                  ? "Request reservation"
+                  : "Reserve"}
               </Button>
             ) : null}
 
