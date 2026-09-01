@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 
 import {
+  type FileUpload,
   MaxFileSizeExceededError,
   parseFormData,
 } from "@remix-run/form-data-parser";
@@ -392,23 +393,16 @@ export async function parseFileFormData({
   maxFileSize?: number;
 }) {
   try {
-    const uploadHandler = async (upload: any) => {
-      const file = upload?.file ?? upload;
-      const mimeType =
-        upload?.type ?? upload?.contentType ?? file?.type ?? undefined;
-      const originalName =
-        upload?.name ?? upload?.filename ?? file?.name ?? undefined;
+    const uploadHandler = async (upload: FileUpload) => {
+      const mimeType = upload.type;
+      const originalName = upload.name;
 
       // Only process image files
       if (mimeType && !mimeType.includes("image")) {
         return undefined;
       }
 
-      if (!file) {
-        return undefined;
-      }
-
-      const fileStream = await normalizeToAsyncIterable(file);
+      const fileStream = await normalizeToAsyncIterable(upload);
 
       if (!fileStream) {
         return undefined;
@@ -616,19 +610,16 @@ export async function parsePdfFormData({
       null;
     const targetFilename = `${newFileName}.pdf`;
 
-    const uploadHandler = async (upload: any) => {
+    const uploadHandler = async (upload: FileUpload) => {
       // `upload.fieldName` is set by the multipart parser itself from the
       // part's own Content-Disposition `name`, not from anything this
       // handler trusts
-      if (upload?.fieldName !== "file") {
+      if (upload.fieldName !== "file") {
         return undefined;
       }
 
-      const file = upload?.file ?? upload;
-      const mimeType =
-        upload?.type ?? upload?.contentType ?? file?.type ?? undefined;
-      const originalName =
-        upload?.name ?? upload?.filename ?? file?.name ?? undefined;
+      const mimeType = upload.type;
+      const originalName = upload.name;
 
       // Only process PDFs - anything else is left alone. A missing/empty
       // Content-Type is rejected outright rather than assumed to be a PDF.
@@ -636,11 +627,7 @@ export async function parsePdfFormData({
         return undefined;
       }
 
-      if (!file) {
-        return undefined;
-      }
-
-      const fileStream = await normalizeToAsyncIterable(file);
+      const fileStream = await normalizeToAsyncIterable(upload);
 
       if (!fileStream) {
         return undefined;
