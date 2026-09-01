@@ -35,6 +35,13 @@ ALTER TABLE "BookingAsset"
 -- (`compareSlicesForGreedyFill`): standalone slices before kit-driven ones,
 -- then by id.
 --
+-- `COLLATE "C"` on that id, because the comparator this has to agree with is
+-- JavaScript `<` — code-unit order. A database whose default collation is a
+-- locale one is free to order the same two ids differently, and a backfill that
+-- fills slices in a different order from the runtime attributes units to the
+-- wrong ones. Byte order is what makes the two provably identical rather than
+-- identical in the cases anyone happened to try.
+--
 -- A slice's capacity for the untagged pool is its booked quantity MINUS what
 -- tagged claims already took, exactly as `attributeDispositionsByBookingAsset`
 -- computes it. Filling to the full booked quantity and adding tagged units on
@@ -78,7 +85,7 @@ greedy AS (
          COALESCE(
            SUM(c.capacity) OVER (
              PARTITION BY c."bookingId", c."assetId"
-             ORDER BY (c."assetKitId" IS NOT NULL), c.id
+             ORDER BY (c."assetKitId" IS NOT NULL), c.id COLLATE "C"
              ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
            ), 0
          )::int AS prior
@@ -128,8 +135,13 @@ WHERE ba."checkedOutAt" IS NOT NULL
 -- it, so `checkedOutQuantity` minus the dispositions goes NEGATIVE and the slice
 -- reports fewer units outstanding than are physically out.
 --
--- Re-running is a no-op: once the dispatch is added the returns no longer exceed
--- the count, so the predicate stops matching.
+-- Re-running converges rather than being a no-op, and the distinction matters
+-- to anyone replaying this file. Backfills 1 and 2 are true no-ops on a second
+-- pass — one assigns, the other is fenced on `= 0`. This one adds a single
+-- slice quantity per pass while the returns still exceed the count, so a slice
+-- that saw TWO full-slice dispatches is only half reconstructed after one run
+-- and a second run would add the rest. It never overshoots: the predicate stops
+-- matching as soon as the count covers the returns.
 WITH disposed AS (
   SELECT cl."bookingAssetId" AS slice_id, SUM(cl.quantity)::int AS total
   FROM "ConsumptionLog" cl
