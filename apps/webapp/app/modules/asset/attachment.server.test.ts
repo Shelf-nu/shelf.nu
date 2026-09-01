@@ -41,16 +41,11 @@ describe("asset attachment", () => {
         attachmentUrl: null,
       } as any);
 
-      const returnedFormData = new FormData();
-      returnedFormData.append(
-        "file",
-        JSON.stringify({
-          path: "org-1/asset-1/attachment-123.pdf",
-          originalName: "invoice.pdf",
-          size: 1234,
-        })
-      );
-      vi.mocked(parsePdfFormData).mockResolvedValue(returnedFormData);
+      vi.mocked(parsePdfFormData).mockResolvedValue({
+        path: "org-1/asset-1/attachment-123.pdf",
+        originalName: "invoice.pdf",
+        size: 1234,
+      });
       vi.mocked(db.asset.update).mockResolvedValue({
         id: "asset-1",
         attachmentOriginalName: "invoice.pdf",
@@ -86,16 +81,11 @@ describe("asset attachment", () => {
           "https://example.supabase.co/storage/v1/object/public/files/org-1/asset-1/attachment-old.pdf",
       } as any);
 
-      const returnedFormData = new FormData();
-      returnedFormData.append(
-        "file",
-        JSON.stringify({
-          path: "org-1/asset-1/attachment-new.pdf",
-          originalName: "invoice-2.pdf",
-          size: 999,
-        })
-      );
-      vi.mocked(parsePdfFormData).mockResolvedValue(returnedFormData);
+      vi.mocked(parsePdfFormData).mockResolvedValue({
+        path: "org-1/asset-1/attachment-new.pdf",
+        originalName: "invoice-2.pdf",
+        size: 999,
+      });
       vi.mocked(db.asset.update).mockResolvedValue({} as any);
 
       await updateAssetAttachment({
@@ -115,7 +105,12 @@ describe("asset attachment", () => {
         id: "asset-1",
         attachmentUrl: null,
       } as any);
-      vi.mocked(parsePdfFormData).mockResolvedValue(new FormData());
+      // parsePdfFormData throws when no upload matched the "file" field -
+      // it no longer resolves with an empty/absent result, so simulating
+      // that means rejecting here rather than resolving with nothing.
+      vi.mocked(parsePdfFormData).mockRejectedValue(
+        new Error("No file uploaded")
+      );
 
       await expect(
         updateAssetAttachment({
@@ -136,16 +131,11 @@ describe("asset attachment", () => {
       } as any);
       vi.mocked(removePublicFile).mockRejectedValue(new Error("gone already"));
 
-      const returnedFormData = new FormData();
-      returnedFormData.append(
-        "file",
-        JSON.stringify({
-          path: "org-1/asset-1/attachment-new.pdf",
-          originalName: "invoice-2.pdf",
-          size: 999,
-        })
-      );
-      vi.mocked(parsePdfFormData).mockResolvedValue(returnedFormData);
+      vi.mocked(parsePdfFormData).mockResolvedValue({
+        path: "org-1/asset-1/attachment-new.pdf",
+        originalName: "invoice-2.pdf",
+        size: 999,
+      });
       vi.mocked(db.asset.update).mockResolvedValue({} as any);
 
       await expect(

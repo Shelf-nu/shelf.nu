@@ -3888,29 +3888,12 @@ export async function updateAssetAttachment({
       select: { id: true, attachmentUrl: true },
     });
 
-    const formData = await parsePdfFormData({
+    const { path, originalName, size } = await parsePdfFormData({
       request,
       newFileName: `${organizationId}/${assetId}/attachment-${dateTimeInUnix(
         Date.now()
       )}`,
     });
-
-    const raw = formData.get("file") as string | null;
-    if (!raw) {
-      throw new ShelfError({
-        cause: null,
-        title: "No file uploaded",
-        message: "Please choose a PDF file to upload.",
-        label,
-        shouldBeCaptured: false,
-      });
-    }
-
-    const { path, originalName, size } = JSON.parse(raw) as {
-      path: string;
-      originalName?: string;
-      size: number;
-    };
 
     const attachmentUrl = getPublicFileURL({
       filename: path,
@@ -4015,29 +3998,12 @@ export async function stageAssetAttachment({
   organizationId: Organization["id"];
 }) {
   try {
-    const formData = await parsePdfFormData({
+    const { path, originalName, size } = await parsePdfFormData({
       request,
       newFileName: `${organizationId}/${assetId}/attachment-${dateTimeInUnix(
         Date.now()
       )}`,
     });
-
-    const raw = formData.get("file") as string | null;
-    if (!raw) {
-      throw new ShelfError({
-        cause: null,
-        title: "No file uploaded",
-        message: "Please choose a PDF file to upload.",
-        label,
-        shouldBeCaptured: false,
-      });
-    }
-
-    const { path, originalName, size } = JSON.parse(raw) as {
-      path: string;
-      originalName?: string;
-      size: number;
-    };
 
     const attachmentUrl = getPublicFileURL({
       filename: path,

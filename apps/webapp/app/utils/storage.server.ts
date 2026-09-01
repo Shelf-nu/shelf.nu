@@ -586,6 +586,14 @@ export async function uploadRawFile(
 /** ASCII "%PDF-" - every valid PDF starts with this, regardless of version. */
 const PDF_MAGIC_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
 
+/**
+ * Parses a single-PDF upload and returns its storage metadata directly.
+
+ * We intentionally don't read the result back from FormData, since
+ * regular text fields can use the same "file" key and spoof the uploaded
+ * file metadata. Keeping the result inside the upload handler ensures the
+ * path can only come from a file actually processed by the server.
+ */
 export async function parsePdfFormData({
   request,
   newFileName,
@@ -596,19 +604,28 @@ export async function parsePdfFormData({
   newFileName: string;
   bucketName?: string;
   maxFileSize?: number;
-}) {
+}): Promise<{ path: string; originalName?: string; size: number }> {
   try {
+    let uploaded: { path: string; originalName?: string; size: number } | null =
+      null;
+    const targetFilename = `${newFileName}.pdf`;
+
     const uploadHandler = async (upload: any) => {
+      // `upload.fieldName` is set by the multipart parser itself from the
+      // part's own Content-Disposition `name`, not from anything this
+      // handler trusts
+      if (upload?.fieldName !== "file") {
+        return undefined;
+      }
+
       const file = upload?.file ?? upload;
       const mimeType =
         upload?.type ?? upload?.contentType ?? file?.type ?? undefined;
       const originalName =
         upload?.name ?? upload?.filename ?? file?.name ?? undefined;
 
-      // Only process PDFs - anything else (including a same-form image
-      // field, if this is ever reused on a multi-file form) is left alone.
-      // A missing/empty Content-Type is rejected outright rather than
-      // assumed to be a PDF.
+      // Only process PDFs - anything else is left alone. A missing/empty
+      // Content-Type is rejected outright rather than assumed to be a PDF.
       if (!mimeType || mimeType !== "application/pdf") {
         return undefined;
       }
@@ -623,8 +640,6 @@ export async function parsePdfFormData({
         return undefined;
       }
 
-      const targetFilename = `${newFileName}.pdf`;
-
       const { path, size } = await uploadRawFile(fileStream, {
         filename: targetFilename,
         contentType: mimeType,
@@ -633,10 +648,32 @@ export async function parsePdfFormData({
         invalidSignatureMessage: "Uploaded file is not a valid PDF",
       });
 
-      return JSON.stringify({ path, originalName, size });
+      if (path !== targetFilename) {
+        throw new ShelfError({
+          cause: null,
+          message: "Uploaded file was stored at an unexpected path",
+          additionalData: { expected: targetFilename, actual: path },
+          label,
+        });
+      }
+
+      uploaded = { path, originalName, size };
+      return undefined;
     };
 
-    return await parseFormData(request, { maxFileSize }, uploadHandler);
+    await parseFormData(request, { maxFileSize }, uploadHandler);
+
+    if (!uploaded) {
+      throw new ShelfError({
+        cause: null,
+        title: "No file uploaded",
+        message: "Please choose a PDF file to upload.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    return uploaded;
   } catch (cause) {
     const sizeLimitError = getMaxFileSizeExceededError(cause);
 
