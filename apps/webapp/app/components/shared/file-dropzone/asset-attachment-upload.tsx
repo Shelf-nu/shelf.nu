@@ -1,3 +1,24 @@
+/**
+ * Drag-and-drop uploader for an asset's single PDF attachment (purchase
+ * invoice, manual, calibration certificate, etc.).
+ *
+ * Owns two independent `useFetcher()` instances - one for upload, one for
+ * delete - both posting to the dedicated `/api/asset/:assetId/attachment`
+ * route, so a file can be added or removed instantly without touching the
+ * rest of whatever form this is embedded in. That route branches
+ * server-side on whether the asset already exists: for an existing asset it
+ * persists directly to the DB and this component relies on React Router's
+ * automatic loader revalidation to pick up the change; for an
+ * asset that doesn't exist yet (the create-asset flow) the route only
+ * touches storage, and this component surfaces the result via the
+ * `onUploaded` / `onRemoved` callbacks so the caller can lift it into its
+ * own form state and submit it once the rest of the form is ready.
+ *
+ * @see {@link file://../../../routes/api+/asset.$assetId.attachment.ts} for
+ * the route and its existing-vs-staged branching.
+ * @see {@link file://../../assets/form.tsx} (`AssetForm`) for the
+ * create-flow caller that consumes `onUploaded` / `onRemoved`.
+ */
 import { useCallback, useEffect } from "react";
 import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
