@@ -137,6 +137,7 @@ import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import {
   attributeDispositionsByBookingAsset,
+  attributeSessionCheckoutToSlices,
   checkoutSessionsToLogsByAsset,
   compareSlicesForGreedyFill,
 } from "./checkout-attribution";
@@ -663,15 +664,20 @@ export async function scheduleExpiryArchiveForExistingReservations({
  *   - **`AVAILABLE`** — no other active booking, no custody. Safe to release
  *     back onto the shelf.
  *
- * `excludeBookingId` is REQUIRED so the source booking's own
+ * `excludeBookingIds` is REQUIRED so the exiting bookings' own
  * about-to-be-removed `BookingAsset` rows (cancel / remove / delete) do not
  * count themselves as "another active booking" and pin the asset to
- * `CHECKED_OUT` forever. Callers should invoke this BEFORE deleting the source
- * booking's pivot rows so the `bookingId: { not: excludeBookingId }` filter
- * does the work — OR (equivalently) call it AFTER the deletes, in which case
- * the filter is redundant but harmless.
+ * `CHECKED_OUT` forever. Pass EVERY booking leaving in this operation: a bulk
+ * exit can drop several bookings that share an asset, and if they are not all
+ * excluded, two bookings on their way out vouch for each other. Callers should
+ * invoke this BEFORE deleting the exiting bookings' pivot rows so the
+ * `bookingId: { notIn: excludeBookingIds }` filter does the work — OR
+ * (equivalently) call it AFTER the deletes, in which case the filter is
+ * redundant but harmless.
  *
- * Use this helper on every IN-flow exit path (cancel / remove / delete). The
+ * Use this helper on every IN-flow exit path, single or bulk (cancel / remove /
+ * delete). Blanket-writing `AVAILABLE` across a selection is never correct: it
+ * frees assets that another live booking or a custody row still holds. The
  * RESERVED → ONGOING OUT-flow uses its own targeted `tx.asset.updateMany`
  * inline because every asset is unambiguously transitioning to `CHECKED_OUT`
  * there and no per-asset reconciliation is needed.
@@ -681,9 +687,9 @@ export async function scheduleExpiryArchiveForExistingReservations({
  *             and the status flip commit atomically.
  * @param args.assetIds - Assets exiting the booking. Each is reconciled
  *             independently; ordering does not matter.
- * @param args.excludeBookingId - The source booking's id. Excluded from the
- *             "other active bookings" count so the source booking's own
- *             rows do not block release.
+ * @param args.excludeBookingIds - Every exiting booking's id. Excluded from
+ *             the "other active bookings" count so those bookings' own rows
+ *             neither block release nor vouch for one another.
  * @param args.organizationId - Active org. Used to org-scope the asset write
  *             (defence-in-depth against cross-org IDOR — see
  *             `~/utils/org-validation.server`).
@@ -701,13 +707,20 @@ export async function scheduleExpiryArchiveForExistingReservations({
 async function reconcileAssetStatusForBookingExit({
   tx,
   assetIds,
-  excludeBookingId,
+  excludeBookingIds,
   organizationId,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tx: any;
   assetIds: Asset["id"][];
-  excludeBookingId: Booking["id"];
+  /**
+   * Every booking leaving in this operation, not just one. A bulk exit can
+   * cancel or delete several bookings that share an asset, and each of them
+   * must be invisible to the others' reconciliation — otherwise two bookings
+   * on their way out vouch for each other and the asset stays checked out
+   * against nothing.
+   */
+  excludeBookingIds: Booking["id"][];
   organizationId: Organization["id"];
 }): Promise<Map<Asset["id"], AssetStatus>> {
   // De-dupe up front: an asset can appear on the booking through both a kit
@@ -718,50 +731,86 @@ async function reconcileAssetStatusForBookingExit({
   if (uniqueAssetIds.length === 0) return resolvedStatuses;
 
   try {
-    for (const assetId of uniqueAssetIds) {
-      // Run both queries in parallel — each is a single indexed count, and
-      // they are independent. Scoped to the active tx snapshot so a
-      // concurrent booking write cannot race the decision.
-      const [otherActiveBookings, custodyCount] = await Promise.all([
-        tx.bookingAsset.count({
-          where: {
-            assetId,
-            // Exclude the source booking's own rows so we don't self-pin.
-            bookingId: { not: excludeBookingId },
-            booking: {
-              status: {
-                in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-              },
+    /**
+     * Two set-based reads for the whole batch, not two per asset. A bulk exit
+     * runs inside an interactive transaction and its selection is uncapped —
+     * select-all spans every page — so per-asset round trips would hold locks
+     * long enough to hit the transaction timeout and roll the booking mutation
+     * back with it.
+     *
+     * Scoped to the active tx snapshot so a concurrent booking write cannot
+     * race the decision.
+     */
+    const [slicesStillOut, custodies] = await Promise.all([
+      tx.bookingAsset.findMany({
+        where: {
+          assetId: { in: uniqueAssetIds },
+          // Exclude the exiting bookings' own rows so they cannot pin the
+          // asset, or each other.
+          bookingId: { notIn: excludeBookingIds },
+          booking: {
+            status: {
+              in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
             },
           },
-        }),
-        tx.custody.count({ where: { assetId } }),
-      ]);
+          // A live booking is not by itself evidence that it holds this asset.
+          // Only the slice's own markers say that: one added after checkout has
+          // never left, and one already reconciled has come back. Counting
+          // either would pin the asset to CHECKED_OUT with nothing in the
+          // field, and no later exit could clear it. Partially returned
+          // QUANTITY_TRACKED slices keep a null `checkedInAt` and so still
+          // count, which is correct — some of their units are still out.
+          checkedOutAt: { not: null },
+          checkedInAt: null,
+        },
+        select: { assetId: true },
+        distinct: ["assetId"],
+      }),
+      tx.custody.findMany({
+        where: { assetId: { in: uniqueAssetIds } },
+        select: { assetId: true },
+        distinct: ["assetId"],
+      }),
+    ]);
 
-      // Pick the strongest commitment first: CHECKED_OUT beats IN_CUSTODY
-      // beats AVAILABLE. See JSDoc above for the rationale on not
-      // downgrading to IN_CUSTODY when both a booking and a custody coexist.
-      let nextStatus: AssetStatus;
-      if (otherActiveBookings > 0) {
-        nextStatus = AssetStatus.CHECKED_OUT;
-      } else if (custodyCount > 0) {
-        nextStatus = AssetStatus.IN_CUSTODY;
+    const heldByAnotherBooking = new Set(
+      (slicesStillOut as Array<{ assetId: string }>).map((row) => row.assetId)
+    );
+    const heldInCustody = new Set(
+      (custodies as Array<{ assetId: string }>).map((row) => row.assetId)
+    );
+
+    // Pick the strongest commitment first: CHECKED_OUT beats IN_CUSTODY beats
+    // AVAILABLE. See JSDoc above for the rationale on not downgrading to
+    // IN_CUSTODY when both a booking and a custody coexist.
+    const assetIdsByStatus = new Map<AssetStatus, Asset["id"][]>();
+    for (const assetId of uniqueAssetIds) {
+      const nextStatus = heldByAnotherBooking.has(assetId)
+        ? AssetStatus.CHECKED_OUT
+        : heldInCustody.has(assetId)
+        ? AssetStatus.IN_CUSTODY
+        : AssetStatus.AVAILABLE;
+      const bucket = assetIdsByStatus.get(nextStatus);
+      if (bucket) {
+        bucket.push(assetId);
       } else {
-        nextStatus = AssetStatus.AVAILABLE;
+        assetIdsByStatus.set(nextStatus, [assetId]);
       }
+      resolvedStatuses.set(assetId, nextStatus);
+    }
 
-      // Use `updateMany` so we can compound `id` + `organizationId` in the
-      // where clause without depending on a `@@unique` constraint. Org-scope
-      // is defence-in-depth: even though `assetId` originated from a booking
-      // already loaded org-scoped by every caller, this filter makes the
-      // IDOR impossible to (re)introduce by a future refactor. The lint rule
-      // for `require-org-scope-on-id-queries` is exactly what this satisfies.
+    // One write per distinct status, so the whole batch costs at most three.
+    // `updateMany` compounds `id` + `organizationId` without depending on a
+    // `@@unique` constraint. Org-scope is defence-in-depth: even though the
+    // asset ids originated from a booking already loaded org-scoped by every
+    // caller, this filter makes the IDOR impossible to (re)introduce by a
+    // future refactor. The `require-org-scope-on-id-queries` lint rule is
+    // exactly what this satisfies.
+    for (const [nextStatus, idsForStatus] of assetIdsByStatus) {
       await tx.asset.updateMany({
-        where: { id: assetId, organizationId },
+        where: { id: { in: idsForStatus }, organizationId },
         data: { status: nextStatus },
       });
-
-      resolvedStatuses.set(assetId, nextStatus);
     }
 
     return resolvedStatuses;
@@ -772,7 +821,7 @@ async function reconcileAssetStatusForBookingExit({
         "Something went wrong while reconciling asset statuses after a booking exit.",
       additionalData: {
         assetIds: uniqueAssetIds,
-        excludeBookingId,
+        excludeBookingIds,
         organizationId,
       },
       label,
@@ -2505,6 +2554,33 @@ async function checkoutBookingWritesWithinTx(
    * keeps its own (earlier, more accurate) timestamp. Any stale check-in marker
    * is cleared: a full checkout sends the whole booking back out.
    */
+  /**
+   * The slices this call sends out, read while they are still identifiable —
+   * the marker writes below are what distinguish them, so afterwards nothing
+   * separates them from slices an earlier batch sent out.
+   *
+   * Two groups depart, and both count. A slice that never left is the obvious
+   * one. A slice that already went out and came back IN FULL is departing
+   * again: the re-out write below clears its `checkedInAt`, and its units are
+   * physically gone a second time. Counting only the first group would let the
+   * derived "still out" figure go negative, because the return that came
+   * between the two departures is already recorded against it.
+   *
+   * An all-at-once checkout sends every unit of every slice it touches, so each
+   * one's count grows by its full booked quantity.
+   */
+  const departingSlices = await tx.bookingAsset.findMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      OR: [
+        { checkedOutAt: null },
+        { checkedOutAt: { not: null }, checkedInAt: { not: null } },
+      ],
+    },
+    select: { id: true, quantity: true },
+  });
+
   await tx.bookingAsset.updateMany({
     // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
     where: { bookingId, checkedOutAt: null },
@@ -2515,6 +2591,37 @@ async function checkoutBookingWritesWithinTx(
       checkedInById: null,
     },
   });
+
+  /**
+   * Size those departures, each slice's count becoming its full booked
+   * quantity.
+   *
+   * Grouped by quantity because `updateMany`'s `data` takes literals only and
+   * cannot name another column on the row. Real bookings carry very few
+   * distinct quantities — every `INDIVIDUAL` slice is 1 — so this is a handful
+   * of statements, not one per slice.
+   *
+   * Incremented, never assigned: the column is cumulative, so a slice on its
+   * second departure adds to what its first one recorded. Only the slices read
+   * above, so a slice a progressive batch had partly sent out — still out, not
+   * yet reconciled — keeps the count that batch recorded.
+   */
+  const departingSliceIdsByQuantity = new Map<number, string[]>();
+  for (const slice of departingSlices) {
+    const ids = departingSliceIdsByQuantity.get(slice.quantity);
+    if (ids) {
+      ids.push(slice.id);
+    } else {
+      departingSliceIdsByQuantity.set(slice.quantity, [slice.id]);
+    }
+  }
+  for (const [quantity, sliceIds] of departingSliceIdsByQuantity) {
+    await tx.bookingAsset.updateMany({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these ids were read above from a bookingId the caller org-checked
+      where: { id: { in: sliceIds } },
+      data: { checkedOutQuantity: { increment: quantity } },
+    });
+  }
 
   /**
    * Slices that were already out AND reconciled return to outstanding. The
@@ -5006,7 +5113,7 @@ export async function checkinBooking({
             await reconcileAssetStatusForBookingExit({
               tx,
               assetIds: qtyAssetIds,
-              excludeBookingId: id,
+              excludeBookingIds: [id],
               organizationId,
             });
           }
@@ -8392,6 +8499,46 @@ export async function partialCheckoutBooking({
           });
         }
 
+        /**
+         * Size what this session sent out, per slice.
+         *
+         * The marker above says a slice is out; this says how many of its units
+         * went, which is the part a timestamp cannot carry. Read from the three
+         * positionally-aligned arrays the session row was just built from, so
+         * the count and the session can never describe different departures.
+         *
+         * {@link attributeSessionCheckoutToSlices} owns the per-slice split and
+         * the capacity rule that keeps it agreeing with the marker above.
+         *
+         * Cumulative: a slice returned in full and sent out again adds to its
+         * count rather than replacing it.
+         */
+        const unitsBySliceId = attributeSessionCheckoutToSlices({
+          sliceRows: bookingFound.bookingAssets.map((ba) => ({
+            id: ba.id,
+            assetId: ba.asset.id,
+            quantity: ba.quantity,
+            assetKitId: ba.assetKitId,
+          })),
+          committedRemainingBySlice: sliceCommittedRemainingBySlice,
+          // The session arrays are positionally aligned and carry "" for an
+          // untagged claim, which the attributor reads as "names no slice".
+          claims: sessionAssetIds.map((assetId, index) => ({
+            assetId,
+            bookingAssetId: sessionBookingAssetIds[index] || null,
+            quantity: sessionQuantities[index] ?? 1,
+          })),
+        });
+
+        for (const [sliceId, units] of unitsBySliceId) {
+          if (units <= 0) continue;
+          await tx.bookingAsset.updateMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: slice ids come from this booking's own rows, loaded org-scoped by this action's booking lookup
+            where: { id: sliceId, bookingId: id },
+            data: { checkedOutQuantity: { increment: units } },
+          });
+        }
+
         // Layer 3: the per-asset fold that previously collapsed both slices of an
         // asset into one summary is gone — the checkout note pipeline now renders
         // one line PER SLICE so a slice-level action reports slice-level totals
@@ -9875,7 +10022,7 @@ export async function cancelBooking({
         await reconcileAssetStatusForBookingExit({
           tx,
           assetIds: cancelAssets.map((a) => a.id),
-          excludeBookingId: bookingFound.id,
+          excludeBookingIds: [bookingFound.id],
           organizationId,
         });
 
@@ -11405,7 +11552,7 @@ export async function removeAssets({
         await reconcileAssetStatusForBookingExit({
           tx,
           assetIds,
-          excludeBookingId: id,
+          excludeBookingIds: [id],
           organizationId,
         });
       }
@@ -11751,7 +11898,7 @@ export async function deleteBooking(
         await reconcileAssetStatusForBookingExit({
           tx,
           assetIds: activeAssetIds,
-          excludeBookingId: activeBooking.id,
+          excludeBookingIds: [activeBooking.id],
           organizationId,
         });
       }
@@ -12802,12 +12949,22 @@ export async function bulkDeleteBookings({
           ...bulkDeleteSliceKitIds.keys(),
         ]);
 
-        await tx.asset.updateMany({
-          where: {
-            id: { in: allAssets.map((asset) => asset.id) },
-            organizationId,
-          },
-          data: { status: AssetStatus.AVAILABLE },
+        /**
+         * Per asset, never a blanket flip. An asset on one of these bookings
+         * can also sit on a live booking outside the selection, or be held by
+         * a Custody row, and writing AVAILABLE across the set strips those
+         * signals — putting an asset someone is still holding back into the
+         * pool for anyone to book.
+         *
+         * Runs after the `deleteMany` above, so the selection's own pivot rows
+         * are already gone; passing their ids keeps the exclusion explicit
+         * rather than resting on that ordering.
+         */
+        await reconcileAssetStatusForBookingExit({
+          tx,
+          assetIds: allAssets.map((asset) => asset.id),
+          excludeBookingIds: bookings.map((booking) => booking.id),
+          organizationId,
         });
 
         await tx.kit.updateMany({
@@ -13216,10 +13373,22 @@ export async function bulkCancelBookings({
           ...bulkCancelSliceKitIds.keys(),
         ]);
 
-        /** Making assets available */
-        await tx.asset.updateMany({
-          where: { id: { in: allAssets.map((a) => a.id) }, organizationId },
-          data: { status: AssetStatus.AVAILABLE },
+        /**
+         * Per asset, never a blanket flip. An asset on one of these bookings
+         * can also sit on a live booking outside the selection, or be held by
+         * a Custody row, and writing AVAILABLE across the set strips those
+         * signals — putting an asset someone is still holding back into the
+         * pool for anyone to book.
+         *
+         * Runs after the status write above, so the selection is already
+         * CANCELLED and out of the ONGOING/OVERDUE count; passing the ids keeps
+         * the exclusion explicit rather than resting on that ordering.
+         */
+        await reconcileAssetStatusForBookingExit({
+          tx,
+          assetIds: allAssets.map((a) => a.id),
+          excludeBookingIds: bookings.map((b) => b.id),
+          organizationId,
         });
 
         /** Making kits available */

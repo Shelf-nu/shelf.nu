@@ -218,3 +218,79 @@ export function attributeDispositionsByBookingAsset(args: {
   }
   return out;
 }
+
+/**
+ * How many units of each slice one checkout session sent out.
+ *
+ * A session's claims arrive per asset: a tagged claim names its slice, an
+ * untagged one names only the asset and has to be spread. The spread runs
+ * through {@link attributeDispositionsByBookingAsset} — the same primitive
+ * every read site uses — once per asset, because that function's untagged pool
+ * is a single bucket across the rows it is handed and would otherwise let one
+ * asset's claim spill into another's slices.
+ *
+ * Capacity is the slice's COMMITTED REMAINING (booked total minus what earlier
+ * sessions already sent), never its booked quantity. The `checkedOutAt` marker
+ * caps the same way, and the two MUST agree: both walk
+ * {@link compareSlicesForGreedyFill}, so a different cap makes them choose
+ * different slices — leaving one slice stamped as departed with a count of zero
+ * while a sibling is counted past what it booked.
+ *
+ * A slice missing from `committedRemainingBySlice` falls back to its booked
+ * quantity. The map covers tagged and untagged-resolved `QUANTITY_TRACKED`
+ * slices only, so defaulting to zero would starve every `INDIVIDUAL` slice.
+ *
+ * Pure derivation — no DB calls.
+ *
+ * @param args.sliceRows - Every `BookingAsset` row on the booking.
+ * @param args.committedRemainingBySlice - Units each slice has still to send.
+ * @param args.claims - This session's claims, `bookingAssetId` null when untagged.
+ * @returns Map of slice id → units this session sent out, zero entries omitted.
+ */
+export function attributeSessionCheckoutToSlices(args: {
+  sliceRows: Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+  }>;
+  committedRemainingBySlice: Map<string, number>;
+  claims: Array<{
+    assetId: string;
+    bookingAssetId: string | null;
+    quantity: number;
+  }>;
+}): Map<string, number> {
+  const { sliceRows, committedRemainingBySlice, claims } = args;
+
+  const claimsByAsset = new Map<
+    string,
+    Array<{ bookingAssetId: string | null; quantity: number }>
+  >();
+  for (const claim of claims) {
+    const entries = claimsByAsset.get(claim.assetId) ?? [];
+    entries.push({
+      bookingAssetId: claim.bookingAssetId || null,
+      quantity: claim.quantity,
+    });
+    claimsByAsset.set(claim.assetId, entries);
+  }
+
+  const out = new Map<string, number>();
+  for (const [assetId, consumptionLogs] of claimsByAsset) {
+    const spread = attributeDispositionsByBookingAsset({
+      bookingAssetRows: sliceRows
+        .filter((row) => row.assetId === assetId)
+        .map((row) => ({
+          id: row.id,
+          assetKitId: row.assetKitId,
+          quantity: committedRemainingBySlice.get(row.id) ?? row.quantity,
+        })),
+      consumptionLogs,
+    });
+    for (const [sliceId, units] of spread) {
+      if (units > 0) out.set(sliceId, (out.get(sliceId) ?? 0) + units);
+    }
+  }
+  return out;
+}
