@@ -4271,6 +4271,9 @@ export async function isBookingFullyCheckedIn(
       select: {
         assetId: true,
         quantity: true,
+        // Units this slice actually sent out. Every checkout writer maintains
+        // it, so unlike the session rows it covers the all-at-once button too.
+        checkedOutQuantity: true,
         // `status` is needed to detect assets checked out via the all-at-once
         // flow (which writes no PartialBookingCheckout records but flips the
         // asset to CHECKED_OUT). This mirrors the union-with-live-status
@@ -4319,11 +4322,24 @@ export async function isBookingFullyCheckedIn(
     () => true
   );
   const checkedOutAssetIds = new Set<string>(logsByAsset.keys());
-  const checkedOutUnitsByAsset = new Map<string, number>();
-  for (const [assetId, logs] of logsByAsset) {
-    checkedOutUnitsByAsset.set(
-      assetId,
-      logs.reduce((sum, log) => sum + log.quantity, 0)
+
+  /**
+   * Units each asset actually sent out on this booking, summed over its slices.
+   *
+   * Read from the slices rather than the sessions. `PartialBookingCheckout`
+   * records progressive scan batches only, so the all-at-once button leaves no
+   * row and an asset it dispatched looks untouched there. Judging the obligation
+   * that way lets a booking close over gear that is still in the field, and a
+   * COMPLETE booking has no screen that can check anything back in.
+   */
+  const dispatchedUnitsByAsset = new Map<string, number>();
+  for (const ba of bookingAssets as Array<{
+    assetId: string;
+    checkedOutQuantity: number;
+  }>) {
+    dispatchedUnitsByAsset.set(
+      ba.assetId,
+      (dispatchedUnitsByAsset.get(ba.assetId) ?? 0) + ba.checkedOutQuantity
     );
   }
 
@@ -4372,10 +4388,10 @@ export async function isBookingFullyCheckedIn(
       continue;
     }
 
-    const checkedOutUnits = checkedOutUnitsByAsset.get(ba.assetId) ?? 0;
+    const checkedOutUnits = dispatchedUnitsByAsset.get(ba.assetId) ?? 0;
     if (checkedOutUnits === 0) {
-      // This asset was never checked out under the progressive flow — nothing
-      // to reconcile for this slice (or any other slice of the same asset).
+      // Nothing of this asset ever left on this booking, so there is nothing
+      // to bring back.
       continue;
     }
 
@@ -4383,7 +4399,8 @@ export async function isBookingFullyCheckedIn(
     // The "logged" half is what we actually care about (units already checked
     // in); recover it via `booked - remaining` where `booked` sums every slice
     // of the same asset. Cap by `checkedOutUnits` so units that never left the
-    // warehouse don't block COMPLETE.
+    // warehouse don't block COMPLETE, and by `booked` so a slice dispatched
+    // more than once is never owed more than it reserved.
     const [bookedSum, remaining] = await Promise.all([
       tx.bookingAsset.aggregate({
         where: { bookingId, assetId: ba.assetId },

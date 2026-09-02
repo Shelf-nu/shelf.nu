@@ -13228,3 +13228,180 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     expect(releasedKitIds()).toEqual(["kit-a"]);
   });
 });
+
+/**
+ * The completion gate decides whether a booking may close, by asking each asset
+ * whether anything of it is still in the field.
+ *
+ * The all-at-once Check out button writes no `PartialBookingCheckout` row, so a
+ * booking's session rows are not a record of what left. `BookingAsset.checkedOutQuantity`
+ * is, and these lock that the gate reads it. A booking that closes over a
+ * still-dispatched slice strands the asset for good: a COMPLETE booking has no
+ * screen that can check anything back in.
+ */
+describe("isBookingFullyCheckedIn — what actually left decides completion", () => {
+  /**
+   * Builds the transaction client the gate reads.
+   *
+   * @param slices - `dispatched` is the slice's `checkedOutQuantity`; `returned`
+   *   is what its dispositions account for.
+   * @param sessionAssetIds - assets named in a progressive checkout session. One
+   *   entry is enough to put the whole booking on the progressive path.
+   * @param checkedInAssetIds - assets named in a progressive check-in session.
+   */
+  function gateTx(
+    slices: Array<{
+      assetId: string;
+      quantity: number;
+      dispatched: number;
+      returned: number;
+      type?: AssetType;
+    }>,
+    sessionAssetIds: string[] = [],
+    checkedInAssetIds: string[] = []
+  ) {
+    const returnedByAsset = new Map<string, number>();
+    for (const s of slices) {
+      returnedByAsset.set(
+        s.assetId,
+        (returnedByAsset.get(s.assetId) ?? 0) + s.returned
+      );
+    }
+    return {
+      bookingAsset: {
+        // The gate reads every slice on the booking; `computeBookingAssetRemaining`
+        // reads one asset's slices through the same method, so honour the filter.
+        findMany: vitest.fn().mockImplementation((q: any) =>
+          Promise.resolve(
+            slices
+              .filter(
+                (s) => !q?.where?.assetId || s.assetId === q.where.assetId
+              )
+              .map((s) => ({
+                assetId: s.assetId,
+                quantity: s.quantity,
+                checkedOutQuantity: s.dispatched,
+                asset: {
+                  id: s.assetId,
+                  type: s.type ?? AssetType.QUANTITY_TRACKED,
+                  status: AssetStatus.CHECKED_OUT,
+                },
+              }))
+          )
+        ),
+        aggregate: vitest.fn().mockImplementation((q: any) =>
+          Promise.resolve({
+            _sum: {
+              quantity: slices
+                .filter((s) => s.assetId === q?.where?.assetId)
+                .reduce((n, s) => n + s.quantity, 0),
+            },
+          })
+        ),
+      },
+      // why: `computeBookingAssetRemaining` derives "already checked in" from
+      // the disposition sum, which is the only part of it this gate consumes.
+      consumptionLog: {
+        aggregate: vitest.fn().mockImplementation((q: any) =>
+          Promise.resolve({
+            _sum: { quantity: returnedByAsset.get(q?.where?.assetId) ?? 0 },
+          })
+        ),
+      },
+      partialBookingCheckin: {
+        findMany: vitest
+          .fn()
+          .mockResolvedValue(
+            checkedInAssetIds.length ? [{ assetIds: checkedInAssetIds }] : []
+          ),
+      },
+      partialBookingCheckout: {
+        findMany: vitest.fn().mockResolvedValue(
+          sessionAssetIds.length
+            ? [
+                {
+                  assetIds: sessionAssetIds,
+                  quantities: sessionAssetIds.map(() => 1),
+                  bookingAssetIds: sessionAssetIds.map(() => ""),
+                },
+              ]
+            : []
+        ),
+      },
+    };
+  }
+
+  /** One INDIVIDUAL asset scanned out and back, which is what puts the booking
+   *  on the progressive path without saying anything about the other assets. */
+  const scannedLateAddition = {
+    assetId: "asset-late",
+    quantity: 1,
+    dispatched: 1,
+    returned: 1,
+    type: AssetType.INDIVIDUAL,
+  };
+
+  it("holds the booking open while a button-dispatched slice is still out", async () => {
+    const complete = await isBookingFullyCheckedIn(
+      gateTx(
+        [
+          { assetId: "asset-qt", quantity: 8, dispatched: 8, returned: 0 },
+          scannedLateAddition,
+        ],
+        ["asset-late"],
+        ["asset-late"]
+      ) as never,
+      "booking-1"
+    );
+
+    expect(
+      complete,
+      "8 units are still in the field, so the booking is not finished"
+    ).toBe(false);
+  });
+
+  it("closes the booking once those units come back", async () => {
+    const complete = await isBookingFullyCheckedIn(
+      gateTx(
+        [
+          { assetId: "asset-qt", quantity: 8, dispatched: 8, returned: 8 },
+          scannedLateAddition,
+        ],
+        ["asset-late"],
+        ["asset-late"]
+      ) as never,
+      "booking-1"
+    );
+
+    expect(complete).toBe(true);
+  });
+
+  it("does not demand back units the slice never sent", async () => {
+    // Booked 10, only 3 ever dispatched, all 3 returned. Obligating the booked
+    // quantity would leave this booking impossible to close.
+    const complete = await isBookingFullyCheckedIn(
+      gateTx(
+        [{ assetId: "asset-qt", quantity: 10, dispatched: 3, returned: 3 }],
+        ["asset-qt"]
+      ) as never,
+      "booking-1"
+    );
+
+    expect(complete).toBe(true);
+  });
+
+  it("ignores a slice that never left the warehouse", async () => {
+    const complete = await isBookingFullyCheckedIn(
+      gateTx(
+        [
+          { assetId: "asset-qt", quantity: 8, dispatched: 8, returned: 8 },
+          { assetId: "asset-never", quantity: 5, dispatched: 0, returned: 0 },
+        ],
+        ["asset-qt"]
+      ) as never,
+      "booking-1"
+    );
+
+    expect(complete).toBe(true);
+  });
+});
