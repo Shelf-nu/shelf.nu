@@ -64,6 +64,13 @@ type AssetAttachmentUploadProps = {
   onUploaded?: (attachment: StagedAttachment) => void;
   /** Same rationale as onUploaded, for the delete path. */
   onRemoved?: () => void;
+  /**
+   * Same create-flow-only rationale as onUploaded/onRemoved: notifies the
+   * parent whenever this widget's own upload/delete fetchers transition
+   * between pending and idle, so the create form can hold its submit
+   * button disabled until an in-flight attachment settles.
+   */
+  onPendingChange?: (pending: boolean) => void;
 };
 
 /**
@@ -79,6 +86,7 @@ export function AssetAttachmentUpload({
   attachmentSize,
   onUploaded,
   onRemoved,
+  onPendingChange,
 }: AssetAttachmentUploadProps) {
   const uploadFetcher = useFetcher();
   const deleteFetcher = useFetcher();
@@ -89,6 +97,10 @@ export function AssetAttachmentUpload({
   // submit) is navigating - it's a separate <Form> from this widget's own
   // fetchers, so isUploading/isDeleting alone miss that submission.
   const disabled = useDisabled() || isUploading || isDeleting;
+
+  useEffect(() => {
+    onPendingChange?.(disabled);
+  }, [disabled, onPendingChange]);
 
   const onDropAccepted = useCallback(
     (acceptedFiles: File[]) => {

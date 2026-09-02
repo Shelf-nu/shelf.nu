@@ -331,6 +331,12 @@ export const AssetForm = ({
     attachmentSize: number;
   } | null>(null);
 
+  // Mirrors AssetAttachmentUpload's own pending state (create mode only) so
+  // Save can stay disabled while a drop is still mid-upload/delete - without
+  // this, submitting before onUploaded fires would post a stale/empty
+  // attachmentPath even though a file is visibly staged in the widget.
+  const [attachmentPending, setAttachmentPending] = useState(false);
+
   // Live mirror of BarcodesInput state — feeds PreferredBarcodeSelector so
   // removing a barcode in the section above immediately removes the matching
   // override option. Initial value seeded from the loader; BarcodesInput
@@ -372,6 +378,9 @@ export const AssetForm = ({
 
   const zo = useZorm("NewAssetFormScreen", FormSchema);
   const disabled = isFormProcessing(navigation.state);
+  // Only the Save action needs to wait on the attachment widget - `disabled`
+  // above stays untouched since ~20 other fields in this form share it.
+  const submitDisabled = disabled || attachmentPending;
 
   // Focus the asset Title field on mount so create/edit pages start
   // ready for typing instead of relying on the removed autoFocus prop.
@@ -743,6 +752,7 @@ export const AssetForm = ({
           <div className="hidden flex-1 justify-end gap-2 md:flex">
             <Actions
               disabled={disabled}
+              submitDisabled={submitDisabled}
               cancelTo={cancelTo}
               showAddAnother={!bulkMode}
             />
@@ -1182,6 +1192,7 @@ export const AssetForm = ({
               }
               onUploaded={id ? undefined : setPendingAttachment}
               onRemoved={id ? undefined : () => setPendingAttachment(null)}
+              onPendingChange={id ? undefined : setAttachmentPending}
             />
             {/*
               Only meaningful while creating - the edit route persists
@@ -1204,6 +1215,15 @@ export const AssetForm = ({
                 name="attachmentSize"
                 value={pendingAttachment?.attachmentSize ?? ""}
               />
+              {/* attachmentPath/attachmentOriginalName are unrefined
+                  z.string().optional() - only attachmentSize carries real
+                  Zod checks (finite/int/nonnegative), so it's the only one
+                  of the three that can fail server-side validation. */}
+              {validationErrors?.attachmentSize?.message ? (
+                <div className="text-sm text-error-500">
+                  {validationErrors.attachmentSize.message}
+                </div>
+              ) : null}
             </When>
           </FormRow>
         </When>
@@ -1505,6 +1525,7 @@ export const AssetForm = ({
           <div className="flex flex-1 justify-end gap-2">
             <Actions
               disabled={disabled}
+              submitDisabled={submitDisabled}
               cancelTo={cancelTo}
               showAddAnother={!bulkMode}
             />
@@ -1517,10 +1538,15 @@ export const AssetForm = ({
 
 const Actions = ({
   disabled,
+  submitDisabled,
   cancelTo,
   showAddAnother = true,
 }: {
   disabled: boolean;
+  /** Adds the attachment widget's own pending upload/delete state on top of
+   * `disabled` - Save alone must wait for it, since submitting while a file
+   * is still mid-upload would post a stale/empty attachmentPath. */
+  submitDisabled: boolean;
   /** Already-resolved Cancel destination. Must never be null/undefined —
    * the caller applies the fallback, because `<Button to>` degrades
    * silently (dead button on `undefined`, links to `/` on `null`). */
@@ -1533,7 +1559,7 @@ const Actions = ({
 }) => (
   <>
     {/* Save button is first in DOM order so Enter key triggers it by default */}
-    <Button type="submit" disabled={disabled} className="order-last">
+    <Button type="submit" disabled={submitDisabled} className="order-last">
       Save
     </Button>
 
