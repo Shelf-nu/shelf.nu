@@ -5,16 +5,26 @@ import {
   isSupabaseRateLimitError,
   isSupabaseServerError,
   parsePdfFormData,
+  removeFilesByPrefix,
 } from "./storage.server";
 
 // why: parsePdfFormData uploads to real Supabase Storage via
 // getSupabaseAdmin() - stub only that network boundary so the multipart
 // parsing this security test exercises runs for real, unmocked.
 const mockUpload = vi.fn();
+// why: removeFilesByPrefix paginates through Supabase Storage's list() and
+// then calls remove() - stub both so the pagination loop can be exercised
+// without a real bucket.
+const mockList = vi.fn();
+const mockRemove = vi.fn();
 vi.mock("~/integrations/supabase/client", () => ({
   getSupabaseAdmin: () => ({
     storage: {
-      from: () => ({ upload: mockUpload }),
+      from: () => ({
+        upload: mockUpload,
+        list: mockList,
+        remove: mockRemove,
+      }),
     },
   }),
 }));
@@ -385,5 +395,73 @@ describe("parsePdfFormData", () => {
     ).rejects.toThrow();
 
     expect(mockUpload).not.toHaveBeenCalled();
+  });
+});
+
+describe("removeFilesByPrefix", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("removes every entry across multiple list() pages, not just the first", async () => {
+    // Supabase Storage's list() caps a single call at `limit` entries
+    const firstPage = Array.from({ length: 100 }, (_, i) => ({
+      name: `file-${i}.pdf`,
+    }));
+    const secondPage = [{ name: "file-100.pdf" }, { name: "file-101.pdf" }];
+
+    mockList
+      .mockResolvedValueOnce({ data: firstPage, error: null })
+      .mockResolvedValueOnce({ data: secondPage, error: null });
+    mockRemove.mockResolvedValue({ data: [], error: null });
+
+    await removeFilesByPrefix({
+      organizationId: "org-1",
+      entityId: "asset-1",
+      bucketName: "attachments",
+    });
+
+    expect(mockList).toHaveBeenCalledTimes(2);
+    expect(mockList).toHaveBeenNthCalledWith(1, "org-1/asset-1", {
+      limit: 100,
+      offset: 0,
+    });
+    expect(mockList).toHaveBeenNthCalledWith(2, "org-1/asset-1", {
+      limit: 100,
+      offset: 100,
+    });
+
+    const expectedPaths = [...firstPage, ...secondPage].map(
+      (entry) => `org-1/asset-1/${entry.name}`
+    );
+    expect(mockRemove).toHaveBeenCalledOnce();
+    expect(mockRemove).toHaveBeenCalledWith(expectedPaths);
+  });
+
+  it("stops after a single page when it comes back short of the page size", async () => {
+    mockList.mockResolvedValueOnce({
+      data: [{ name: "only-file.pdf" }],
+      error: null,
+    });
+    mockRemove.mockResolvedValue({ data: [], error: null });
+
+    await removeFilesByPrefix({
+      organizationId: "org-1",
+      entityId: "asset-1",
+    });
+
+    expect(mockList).toHaveBeenCalledOnce();
+    expect(mockRemove).toHaveBeenCalledWith(["org-1/asset-1/only-file.pdf"]);
+  });
+
+  it("does nothing when the prefix has no files at all", async () => {
+    mockList.mockResolvedValueOnce({ data: [], error: null });
+
+    await removeFilesByPrefix({
+      organizationId: "org-1",
+      entityId: "asset-1",
+    });
+
+    expect(mockRemove).not.toHaveBeenCalled();
   });
 });

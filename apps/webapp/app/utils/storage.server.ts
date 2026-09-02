@@ -1178,15 +1178,32 @@ export async function removeFilesByPrefix({
 }) {
   try {
     const prefix = `${organizationId}/${entityId}`;
-    const { data: entries, error: listError } = await getSupabaseAdmin()
-      .storage.from(bucketName)
-      .list(prefix);
 
-    if (listError) {
-      throw listError;
+    // list() caps a single call at PAGE_SIZE entries (Supabase's own default),
+    // paginating via limit/offset.
+    const PAGE_SIZE = 100;
+    const entries: { name: string }[] = [];
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const { data: page, error: listError } = await getSupabaseAdmin()
+        .storage.from(bucketName)
+        .list(prefix, { limit: PAGE_SIZE, offset });
+
+      if (listError) {
+        throw listError;
+      }
+
+      if (!page || page.length === 0) {
+        break;
+      }
+
+      entries.push(...page);
+      offset += page.length;
+      hasMore = page.length === PAGE_SIZE;
     }
 
-    if (!entries || entries.length === 0) {
+    if (entries.length === 0) {
       return;
     }
 
