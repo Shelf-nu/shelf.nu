@@ -56,6 +56,16 @@ type Props = {
   onConfirm: (completionNote?: string) => void;
 };
 
+/**
+ * Confirmation sheet for completing an audit, with an optional closing note.
+ *
+ * Completion is irreversible and turns every unscanned expected asset into a
+ * missing one, so the sheet names the audit and that count before it will
+ * confirm.
+ *
+ * @param props - See {@link Props}.
+ * @returns The modal sheet element.
+ */
 export function CompleteAuditSheet({
   visible,
   auditName,

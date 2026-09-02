@@ -281,6 +281,7 @@ export default function CreateAssetScreen() {
   const hasUnsavedChanges =
     title.trim().length > 0 ||
     description.trim().length > 0 ||
+    valuation.trim().length > 0 ||
     !!selectedCategory ||
     !!selectedLocation ||
     selectedTags.length > 0 ||
