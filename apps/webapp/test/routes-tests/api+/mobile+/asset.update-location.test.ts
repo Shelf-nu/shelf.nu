@@ -84,7 +84,13 @@ async function callAction(body: unknown) {
 
 /** Tx stub handed to the `$transaction` callback. */
 const tx = {
-  assetLocation: { deleteMany: vi.fn(), create: vi.fn() },
+  assetLocation: {
+    // The route reads the placements under the asset lock, so this read is what
+    // the collapse events, the primary event and the note are all derived from.
+    findMany: vi.fn(),
+    deleteMany: vi.fn(),
+    create: vi.fn(),
+  },
   asset: { findUniqueOrThrow: vi.fn() },
 };
 
@@ -132,6 +138,11 @@ beforeEach(() => {
   vi.mocked(db.$transaction).mockImplementation((async (cb: never) =>
     (cb as (t: typeof tx) => Promise<unknown>)(tx)) as never);
   vi.mocked(lockAssetForQuantityUpdate).mockResolvedValue(qtyAsset() as never);
+  // Default locked read: the standard fixture's single placement. Tests that
+  // seed a different set of placements override this alongside `db.asset.findUnique`,
+  // because the route derives the collapse events, the primary event and the
+  // note from THIS read rather than from the pre-transaction one.
+  tx.assetLocation.findMany.mockResolvedValue(qtyAsset().assetLocations);
   tx.asset.findUniqueOrThrow.mockResolvedValue({
     id: "asset-1",
     title: "Cords",
@@ -307,6 +318,10 @@ describe("POST /api/mobile/asset/update-location", () => {
         ],
       }) as never
     );
+    tx.assetLocation.findMany.mockResolvedValue([
+      { quantity: 6, location: { id: "loc-storage", name: "Storage" } },
+      { quantity: 4, location: { id: "loc-van", name: "Van" } },
+    ]);
     vi.mocked(db.location.findFirst).mockResolvedValue({
       id: "loc-storage",
       name: "Storage",
@@ -333,6 +348,10 @@ describe("POST /api/mobile/asset/update-location", () => {
         ],
       }) as never
     );
+    tx.assetLocation.findMany.mockResolvedValue([
+      { quantity: 6, location: { id: "loc-storage", name: "Storage" } },
+      { quantity: 4, location: { id: "loc-van", name: "Van" } },
+    ]);
     vi.mocked(db.location.findFirst).mockResolvedValue({
       id: "loc-storage",
       name: "Storage",
@@ -357,6 +376,43 @@ describe("POST /api/mobile/asset/update-location", () => {
     );
   });
 
+  it("describes the placements it found under the lock, not the ones it read first", async () => {
+    // The pre-transaction read is stale by the time the lock is held: a
+    // concurrent request can have collapsed a placement already. Recording
+    // removals from the stale set would invent events for rows that no longer
+    // exist and name a primary that has since changed.
+    vi.mocked(db.asset.findUnique).mockResolvedValue(
+      qtyAsset({
+        assetLocations: [
+          { quantity: 6, location: { id: "loc-storage", name: "Storage" } },
+          { quantity: 4, location: { id: "loc-van", name: "Van" } },
+        ],
+      }) as never
+    );
+    // Under the lock, the Van row is already gone.
+    tx.assetLocation.findMany.mockResolvedValue([
+      { quantity: 6, location: { id: "loc-storage", name: "Storage" } },
+    ]);
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-van",
+      name: "Van",
+    } as never);
+
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+      quantity: 6,
+    });
+
+    const removals = vi
+      .mocked(recordEvent)
+      .mock.calls.filter((c: any) => c[0]?.toValue === null);
+    expect(
+      removals,
+      "the Van row was already collapsed, so nothing may claim to remove it"
+    ).toHaveLength(0);
+  });
+
   it("places the full pool when quantity is omitted at the current location", async () => {
     // 4 of 10 units are placed at Storage and the caller asks for Storage with
     // no quantity, which means the whole pool. Reading the omission as
@@ -368,6 +424,9 @@ describe("POST /api/mobile/asset/update-location", () => {
         ],
       }) as never
     );
+    tx.assetLocation.findMany.mockResolvedValue([
+      { quantity: 4, location: { id: "loc-storage", name: "Storage" } },
+    ]);
     vi.mocked(db.location.findFirst).mockResolvedValue({
       id: "loc-storage",
       name: "Storage",
@@ -398,6 +457,9 @@ describe("POST /api/mobile/asset/update-location", () => {
         ],
       }) as never
     );
+    tx.assetLocation.findMany.mockResolvedValue([
+      { quantity: 4, location: { id: "loc-storage", name: "Storage" } },
+    ]);
     vi.mocked(db.location.findFirst).mockResolvedValue({
       id: "loc-storage",
       name: "Storage",

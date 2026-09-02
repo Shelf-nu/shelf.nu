@@ -44,6 +44,7 @@ const dbMocks = vi.hoisted(() => ({
     findUniqueOrThrow: vi.fn(),
   },
   assetLocation: {
+    findMany: vi.fn(),
     create: vi.fn(),
     deleteMany: vi.fn(),
   },
@@ -132,6 +133,14 @@ function createRequest(body: Record<string, unknown>) {
 
 describe("POST /api/mobile/asset/update-location", () => {
   beforeEach(() => {
+    // The route reads the manual placements under the asset lock, and derives
+    // the collapse events, the primary event and the note from THAT read rather
+    // than the pre-transaction one. Default to the single old placement these
+    // tests set up; a test seeding more overrides it.
+    (dbMocks.assetLocation.findMany as any).mockResolvedValue([
+      { quantity: 1, location: { id: "loc-old", name: "Old Office" } },
+    ]);
+
     vi.clearAllMocks();
 
     (requireMobileAuth as any).mockResolvedValue({

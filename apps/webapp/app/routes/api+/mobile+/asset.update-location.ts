@@ -155,101 +155,106 @@ export async function action({ request }: ActionFunctionArgs) {
     // ASSET_LOCATION_CHANGED activity event is recorded atomically so
     // reports + activity-event aggregations include mobile-initiated
     // location changes.
-    const { refreshedAsset, placedQuantity } = await db.$transaction(
-      async (tx) => {
-        /**
-         * Row-lock the asset before writing the pivot, the same lock every
-         * stock-lowering path takes. This write RAISES the manual
-         * `AssetLocation` sum for a QUANTITY_TRACKED asset, and
-         * `enforce_asset_location_sum_within_total` validating at COMMIT only
-         * covers one interleaving: a concurrent consume can read the
-         * pre-placement rows, conclude they fit under the reduced total, and
-         * commit an `Asset` write that fires no location trigger at all.
-         *
-         * Locking also makes `quantity` trustworthy — the pre-transaction read
-         * above can be stale by the time the row is written, which would place
-         * more units than the asset owns.
-         */
-        const locked = await lockAssetForQuantityUpdate(
-          tx,
-          assetId,
-          organizationId
-        );
+    const {
+      refreshedAsset,
+      placedQuantity,
+      previousLocation,
+      previousQuantity,
+    } = await db.$transaction(async (tx) => {
+      /**
+       * Row-lock the asset before writing the pivot, the same lock every
+       * stock-lowering path takes. This write RAISES the manual
+       * `AssetLocation` sum for a QUANTITY_TRACKED asset, and
+       * `enforce_asset_location_sum_within_total` validating at COMMIT only
+       * covers one interleaving: a concurrent consume can read the
+       * pre-placement rows, conclude they fit under the reduced total, and
+       * commit an `Asset` write that fires no location trigger at all.
+       *
+       * Locking also makes `quantity` trustworthy — the pre-transaction read
+       * above can be stale by the time the row is written, which would place
+       * more units than the asset owns.
+       */
+      const locked = await lockAssetForQuantityUpdate(
+        tx,
+        assetId,
+        organizationId
+      );
 
-        // Per-placement bound: the requested units must fit the asset's
-        // total pool (measured on the locked row, mirroring the web
-        // service's in-transaction check in `updateAsset`).
-        const isQty = isQuantityTracked(locked);
-        if (isQty && quantity != null && quantity > (locked.quantity ?? 0)) {
-          throw new ShelfError({
-            cause: null,
-            title: "Quantity exceeds available pool",
-            message: `Requested ${quantity} but the asset has only ${
-              locked.quantity ?? 0
-            } units total.`,
-            additionalData: {
-              assetId,
-              organizationId,
-              quantity,
-              totalQuantity: locked.quantity,
-            },
-            label: "Assets",
-            status: 400,
-            shouldBeCaptured: false,
-          });
-        }
-
-        const pivotQuantity = isQty ? quantity ?? locked.quantity ?? 1 : 1;
-
-        // Clear MANUAL placements only — kit-driven rows
-        // (`assetKitId IS NOT NULL`) are owned by the kit's flow. The kit
-        // guard above rejects kit members outright, so this filter mirrors
-        // the web service's pivot write rather than changing behavior.
-        await tx.assetLocation.deleteMany({
-          where: { assetId, assetKitId: null },
-        });
-        await tx.assetLocation.create({
-          data: {
+      // Per-placement bound: the requested units must fit the asset's
+      // total pool (measured on the locked row, mirroring the web
+      // service's in-transaction check in `updateAsset`).
+      const isQty = isQuantityTracked(locked);
+      if (isQty && quantity != null && quantity > (locked.quantity ?? 0)) {
+        throw new ShelfError({
+          cause: null,
+          title: "Quantity exceeds available pool",
+          message: `Requested ${quantity} but the asset has only ${
+            locked.quantity ?? 0
+          } units total.`,
+          additionalData: {
             assetId,
-            locationId,
             organizationId,
-            quantity: pivotQuantity,
+            quantity,
+            totalQuantity: locked.quantity,
           },
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
         });
+      }
 
-        /**
-         * A pivot replace collapses EVERY manual placement, not just the
-         * primary one. Each of the others leaves the location it was at, and
-         * the single change event below only names the primary, so without
-         * these the asset silently stops being at a location that reports and
-         * history still show it at.
-         *
-         * Emitted as removals (`toValue: null`) because that is what happened
-         * to them; the arrival at the requested location is the event below.
-         */
-        const collapsedPlacements = asset.assetLocations.filter(
-          (al) =>
-            al.location?.id && al.location.id !== currentPrimaryLocation?.id
-        );
-        for (const placement of collapsedPlacements) {
-          await recordEvent(
-            {
-              organizationId,
-              actorUserId: user.id,
-              action: "ASSET_LOCATION_CHANGED",
-              entityType: "ASSET",
-              entityId: assetId,
-              assetId,
-              locationId: placement.location!.id,
-              field: "locationId",
-              fromValue: placement.location!.id,
-              toValue: null,
-              meta: assetQtyMeta(locked, placement.quantity ?? 1),
-            },
-            tx
-          );
-        }
+      const pivotQuantity = isQty ? quantity ?? locked.quantity ?? 1 : 1;
 
+      /**
+       * The placements as they stand under the lock, not as they looked when
+       * the request was parsed. Two requests collapsing the same asset would
+       * otherwise both describe the pre-transaction world: the second would
+       * record removals for rows the first already deleted, and name a
+       * primary location that has since changed.
+       */
+      const placementsBefore = await tx.assetLocation.findMany({
+        where: { assetId, assetKitId: null },
+        select: {
+          quantity: true,
+          location: { select: { id: true, name: true } },
+        },
+      });
+      const primaryBefore =
+        placementsBefore.find((al) => al.location)?.location ?? null;
+      const primaryQuantityBefore =
+        placementsBefore.find((al) => al.location?.id === primaryBefore?.id)
+          ?.quantity ?? null;
+
+      // Clear MANUAL placements only — kit-driven rows
+      // (`assetKitId IS NOT NULL`) are owned by the kit's flow. The kit
+      // guard above rejects kit members outright, so this filter mirrors
+      // the web service's pivot write rather than changing behavior.
+      await tx.assetLocation.deleteMany({
+        where: { assetId, assetKitId: null },
+      });
+      await tx.assetLocation.create({
+        data: {
+          assetId,
+          locationId,
+          organizationId,
+          quantity: pivotQuantity,
+        },
+      });
+
+      /**
+       * A pivot replace collapses EVERY manual placement, not just the
+       * primary one. Each of the others leaves the location it was at, and
+       * the single change event below only names the primary, so without
+       * these the asset silently stops being at a location that reports and
+       * history still show it at.
+       *
+       * Emitted as removals (`toValue: null`) because that is what happened
+       * to them; the arrival at the requested location is the event below.
+       */
+      const collapsedPlacements = placementsBefore.filter(
+        (al) => al.location?.id && al.location.id !== primaryBefore?.id
+      );
+      for (const placement of collapsedPlacements) {
         await recordEvent(
           {
             organizationId,
@@ -258,32 +263,54 @@ export async function action({ request }: ActionFunctionArgs) {
             entityType: "ASSET",
             entityId: assetId,
             assetId,
-            locationId: location.id,
+            locationId: placement.location!.id,
             field: "locationId",
-            fromValue: currentPrimaryLocation?.id ?? null,
-            toValue: location.id,
-            // Qty-tracked: the per-row AssetLocation.quantity placed at the
-            // location. No-op for INDIVIDUAL.
-            meta: assetQtyMeta(locked, pivotQuantity),
+            fromValue: placement.location!.id,
+            toValue: null,
+            meta: assetQtyMeta(locked, placement.quantity ?? 1),
           },
           tx
         );
-
-        const refreshed = await tx.asset.findUniqueOrThrow({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` already org-verified by the `db.asset.findUnique({ where: { id, organizationId } })` guard at the top of this action; this is the in-tx re-read
-          where: { id: assetId },
-          select: {
-            id: true,
-            title: true,
-            assetLocations: {
-              select: { location: { select: { id: true, name: true } } },
-            },
-          },
-        });
-
-        return { refreshedAsset: refreshed, placedQuantity: pivotQuantity };
       }
-    );
+
+      await recordEvent(
+        {
+          organizationId,
+          actorUserId: user.id,
+          action: "ASSET_LOCATION_CHANGED",
+          entityType: "ASSET",
+          entityId: assetId,
+          assetId,
+          locationId: location.id,
+          field: "locationId",
+          fromValue: primaryBefore?.id ?? null,
+          toValue: location.id,
+          // Qty-tracked: the per-row AssetLocation.quantity placed at the
+          // location. No-op for INDIVIDUAL.
+          meta: assetQtyMeta(locked, pivotQuantity),
+        },
+        tx
+      );
+
+      const refreshed = await tx.asset.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` already org-verified by the `db.asset.findUnique({ where: { id, organizationId } })` guard at the top of this action; this is the in-tx re-read
+        where: { id: assetId },
+        select: {
+          id: true,
+          title: true,
+          assetLocations: {
+            select: { location: { select: { id: true, name: true } } },
+          },
+        },
+      });
+
+      return {
+        refreshedAsset: refreshed,
+        placedQuantity: pivotQuantity,
+        previousLocation: primaryBefore,
+        previousQuantity: primaryQuantityBefore,
+      };
+    });
 
     const { assetLocations: _, ...updatedAssetRest } = refreshedAsset;
     const updatedAssetWithLocation = {
@@ -304,8 +331,6 @@ export async function action({ request }: ActionFunctionArgs) {
       location.name.trim()
     );
 
-    const previousLocation = getPrimaryLocation(asset);
-
     // Qty-tracked placements name the unit count the way the web note does
     // ("moved 4 pcs from X to Y."); INDIVIDUAL keeps the original phrasing
     // (`formatUnitCount` returns null for it).
@@ -316,7 +341,7 @@ export async function action({ request }: ActionFunctionArgs) {
       // Nothing moved: the asset stays where it is and only the placed amount
       // changed. Phrasing this as a move reads as "moved 6 pcs from Storage to
       // Storage", which describes a journey that did not happen.
-      const previousUnitCount = formatUnitCount(asset, currentPrimaryQuantity);
+      const previousUnitCount = formatUnitCount(asset, previousQuantity);
       noteContent =
         unitCount && previousUnitCount
           ? `${actor} changed the quantity at ${newLocationLink} from ${previousUnitCount} to ${unitCount} via mobile app.`
