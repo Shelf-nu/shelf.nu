@@ -1,5 +1,3 @@
-import { tw } from "~/utils/tw";
-
 /**
  * Renders an image stored in the `Image` table, served by `/api/image/:imageId`.
  *
@@ -15,6 +13,18 @@ import { tw } from "~/utils/tw";
  * first-cached copy of the bare URL for up to a year.
  *
  * @see {@link file://../../routes/api+/image.$imageId.ts}
+ */
+import { tw } from "~/utils/tw";
+
+/**
+ * Stored-image renderer. See the file-level doc above for the URL/version
+ * contract.
+ *
+ * @param imageId - `Image` row id; falls back to the placeholder when absent.
+ * @param alt - Image alt text.
+ * @param className - Extra classes for the `img` element.
+ * @param updatedAt - Timestamp of the image (or its owning entity); becomes
+ * the `?v=` cache version.
  */
 export const Image = ({
   imageId,
