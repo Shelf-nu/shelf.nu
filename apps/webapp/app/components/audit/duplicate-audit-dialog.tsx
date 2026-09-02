@@ -37,8 +37,8 @@ export function DuplicateAuditDialog() {
           <strong className="text-gray-900">{audit.name}</strong>.
         </p>
         <p>
-          A new audit will be created with the same name, description, and
-          assets. Assignments, notes, scans, images, and due date will not be
+          A new audit will be created with the same name, description, assets
+          and assignees. Notes, scans, images, and the due date will not be
           copied.
         </p>
       </div>

@@ -105,11 +105,17 @@ export default function AuditTeamMemberSelector({
   const isSelfSelected =
     !!currentUserTeamMember && selectedIds.includes(currentUserTeamMember.id);
 
+  // Toggles only the current user's own row; never touches other picks.
   const handleAssignToSelf = useCallback(() => {
-    if (currentUserTeamMember && !isSelfSelected) {
+    if (currentUserTeamMember) {
       handleTeamMemberSelect(currentUserTeamMember);
     }
-  }, [currentUserTeamMember, isSelfSelected, handleTeamMemberSelect]);
+  }, [currentUserTeamMember, handleTeamMemberSelect]);
+
+  const selectedNames = selectedIds
+    .map((id) => knownMembersRef.current.get(id)?.name)
+    .filter((name): name is string => !!name)
+    .join(", ");
 
   const teamMembers = useMemo(() => {
     if (!data) {
@@ -159,9 +165,8 @@ export default function AuditTeamMemberSelector({
             size="sm"
             className="w-full"
             onClick={handleAssignToSelf}
-            disabled={isSelfSelected}
           >
-            {isSelfSelected ? "You are assigned" : "Assign to self"}
+            {isSelfSelected ? "Remove me" : "Assign to self"}
           </Button>
         </div>
       )}
@@ -172,9 +177,8 @@ export default function AuditTeamMemberSelector({
 
       <When truthy={selectedIds.length > 0}>
         <p className="px-3 pb-2 text-sm text-gray-600">
-          {selectedIds.length === 1
-            ? "1 assignee selected"
-            : `${selectedIds.length} assignees selected`}
+          <span className="font-medium">Selected ({selectedIds.length}):</span>{" "}
+          {selectedNames}
         </p>
       </When>
 

@@ -152,6 +152,9 @@ vi.mock("~/database/db.server", () => {
       findUnique: vi.fn(),
     },
     $transaction: vi.fn(),
+    // why: updateAuditSession takes a row lock with a raw SELECT ... FOR UPDATE
+    // before reading the assignee list; the mock only needs to resolve.
+    $queryRaw: vi.fn().mockResolvedValue([]),
   };
 
   mockDb.$transaction.mockImplementation((cb: any) => cb(mockDb));
@@ -213,6 +216,7 @@ const mockDb = db as unknown as {
     findUnique: ReturnType<typeof vi.fn>;
   };
   $transaction: ReturnType<typeof vi.fn>;
+  $queryRaw: ReturnType<typeof vi.fn>;
 };
 
 describe("audit service", () => {
@@ -1674,6 +1678,7 @@ describe("audit service", () => {
         { assetId: "asset-2" },
         { assetId: "asset-3" },
       ],
+      assignments: [] as Array<{ userId: string }>,
     };
 
     beforeEach(() => {
@@ -1778,6 +1783,7 @@ describe("audit service", () => {
         where: { id: "audit-original", organizationId: "org-1" },
         include: {
           assets: { where: { expected: true }, select: { assetId: true } },
+          assignments: { select: { userId: true } },
         },
       });
 
@@ -1801,7 +1807,8 @@ describe("audit service", () => {
         }),
       });
 
-      // Due date and assignments must NOT carry over (PRD).
+      // The due date must NOT carry over (PRD); an unassigned source stays
+      // unassigned.
       const createCall = mockDb.auditSession.create.mock.calls[0][0];
       expect(createCall.data.dueDate).toBeUndefined();
       expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
@@ -1810,7 +1817,46 @@ describe("audit service", () => {
         newSession: expect.objectContaining({ id: "audit-copy" }),
         droppedAssetCount: 0,
         originalAssetCount: 3,
+        carriedOverAssigneeIds: [],
       });
+    });
+
+    it("carries the team over, minus anyone who has left the workspace", async () => {
+      mockDb.auditSession.findFirst.mockImplementation(({ where }: any) =>
+        Promise.resolve(
+          where.id === "audit-original"
+            ? {
+                ...originalAudit,
+                assignments: [{ userId: "user-2" }, { userId: "user-gone" }],
+              }
+            : {
+                id: "audit-copy",
+                name: "Hull PC Bank Audit (Copy)",
+                assignments: [],
+              }
+        )
+      );
+      // user-gone is no longer a member of org-1.
+      mockDb.userOrganization.findMany.mockResolvedValue([
+        { userId: "user-2" },
+      ]);
+
+      const result = await duplicateAuditSession(baseInput);
+
+      expect(mockDb.userOrganization.findMany).toHaveBeenCalledWith({
+        where: {
+          organizationId: "org-1",
+          userId: { in: ["user-2", "user-gone"] },
+        },
+        select: { userId: true },
+      });
+      expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
+        data: [
+          { auditSessionId: "audit-copy", userId: "user-2", role: undefined },
+        ],
+        skipDuplicates: true,
+      });
+      expect(result.carriedOverAssigneeIds).toEqual(["user-2"]);
     });
 
     it("succeeds with a non-zero droppedAssetCount when some assets no longer exist", async () => {

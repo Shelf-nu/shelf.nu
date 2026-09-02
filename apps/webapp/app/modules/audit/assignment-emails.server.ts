@@ -43,23 +43,21 @@ export async function sendAuditAssignedEmails({
       return;
     }
 
-    await Promise.all(
-      audit.assignments
-        .filter(
-          (assignment) =>
-            recipients.includes(assignment.userId) && assignment.user.email
-        )
-        .map((assignment) =>
-          sendAuditAssignedEmail({
-            audit,
-            assigneeEmail: assignment.user.email,
-            assigneeName:
-              resolveUserDisplayName(assignment.user) || "Unknown User",
-            assigneeUserId: assignment.userId,
-            hints,
-          })
-        )
-    );
+    // Sequential on purpose: each send resolves the recipient's format
+    // preferences and hands the mail to a single unpooled transport, so a
+    // large team must not burst N lookups and N connections at once.
+    for (const assignment of audit.assignments) {
+      if (!recipients.includes(assignment.userId) || !assignment.user.email) {
+        continue;
+      }
+      await sendAuditAssignedEmail({
+        audit,
+        assigneeEmail: assignment.user.email,
+        assigneeName: resolveUserDisplayName(assignment.user) || "Unknown User",
+        assigneeUserId: assignment.userId,
+        hints,
+      });
+    }
   } catch (cause) {
     Logger.error(
       new ShelfError({

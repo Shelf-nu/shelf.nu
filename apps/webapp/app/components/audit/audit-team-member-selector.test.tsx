@@ -114,7 +114,9 @@ describe("AuditTeamMemberSelector", () => {
         value: { id: "tm-3", userId: "user-3", name: "Cy Count" },
       },
     ]);
-    expect(screen.getByText("2 assignees selected")).toBeTruthy();
+    expect(screen.getByText("Selected (2):").parentElement?.textContent).toBe(
+      "Selected (2): Ben Scan, Cy Count"
+    );
   });
 
   it("clicking a selected member again removes them and re-indexes the rest", () => {
@@ -161,7 +163,25 @@ describe("AuditTeamMemberSelector", () => {
       "user-2",
       "user-1",
     ]);
-    expect(screen.getByText("You are assigned")).toBeTruthy();
+    expect(screen.getByText("Remove me")).toBeTruthy();
+  });
+
+  it("'Remove me' takes only the current user out of the selection", () => {
+    const { container } = render(
+      <AuditTeamMemberSelector
+        defaultSelected={[
+          { id: "tm-2", userId: "user-2", name: "Ben Scan" },
+          { id: "tm-1", userId: "user-1", name: "Ana Lead" },
+        ]}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Remove me"));
+
+    expect(hiddenInputs(container).map((i) => i.value.userId)).toEqual([
+      "user-2",
+    ]);
+    expect(screen.getByText("Assign to self")).toBeTruthy();
   });
 
   it("still submits a selected member when the search filter hides their row", () => {

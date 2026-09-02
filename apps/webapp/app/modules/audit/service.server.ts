@@ -483,6 +483,12 @@ export async function updateAuditSession({
   // Use transaction to ensure atomicity
   return db.$transaction(
     async (tx) => {
+      // Serialise concurrent edits of the same audit: a second editor waits
+      // here and then reads the list the first one committed, so a person
+      // both admins added is inserted, noted and emailed exactly once instead
+      // of the second insert failing on the unique assignment.
+      await tx.$queryRaw`SELECT id FROM "AuditSession" WHERE id = ${id} FOR UPDATE`;
+
       // Fetch the current audit to track changes
       const currentAudit = await tx.auditSession.findUnique({
         where: { id, organizationId },
@@ -4188,6 +4194,8 @@ export type DuplicateAuditResult = {
   droppedAssetCount: number;
   /** Total number of assets in the original audit. */
   originalAssetCount: number;
+  /** Assignees carried over from the original (still workspace members). */
+  carriedOverAssigneeIds: string[];
 };
 
 /**
@@ -4205,7 +4213,8 @@ export type DuplicateAuditResult = {
  * gate is client-side, so the service owns the contract for any caller
  * (route action, background jobs, future internal callers).
  *
- * Assignments, notes, scans, images, and the due date are NOT copied — the
+ * Assignees carry over (those still in the workspace); notes, scans, images,
+ * and the due date are NOT copied — the
  * new audit starts clean. Creator is set to `userId`.
  *
  * @param auditSessionId - ID of the audit to duplicate
@@ -4232,6 +4241,9 @@ export async function duplicateAuditSession({
         // also include unexpected scans (`expected: false`) — those must
         // not be promoted to expected in the duplicate.
         assets: { where: { expected: true }, select: { assetId: true } },
+        // The team carries over: with several assignees, a copy without them
+        // locks every base member out until an admin re-picks each one.
+        assignments: { select: { userId: true } },
       },
     });
 
@@ -4285,12 +4297,28 @@ export async function duplicateAuditSession({
       });
     }
 
+    // Only people who are still workspace members can be assigned; anyone
+    // who left since the original audit ran is dropped here rather than
+    // failing the whole duplicate on the membership guard.
+    const originalAssigneeIds = originalAudit.assignments.map(
+      (assignment) => assignment.userId
+    );
+    const activeMembers =
+      originalAssigneeIds.length > 0
+        ? await db.userOrganization.findMany({
+            where: { organizationId, userId: { in: originalAssigneeIds } },
+            select: { userId: true },
+          })
+        : [];
+    const carriedOverAssigneeIds = activeMembers.map((member) => member.userId);
+
     const { session: newSession } = await createAuditSession({
       name: `${originalAudit.name} (Copy)`,
       description: originalAudit.description,
       assetIds: resolvedAssetIds,
       organizationId,
       createdById: userId,
+      assigneeIds: carriedOverAssigneeIds,
       // PRD: scopeMeta copied as-is. The DB column is Json?, the typed surface
       // is AuditScopeMeta — cast through and let createAuditSession persist it.
       scopeMeta: (originalAudit.scopeMeta ?? null) as AuditScopeMeta | null,
@@ -4300,6 +4328,7 @@ export async function duplicateAuditSession({
       newSession,
       droppedAssetCount,
       originalAssetCount,
+      carriedOverAssigneeIds,
     };
   } catch (cause) {
     if (isLikeShelfError(cause)) throw cause;
