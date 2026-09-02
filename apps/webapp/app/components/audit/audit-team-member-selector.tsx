@@ -5,6 +5,7 @@ import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import When from "~/components/when/when";
 import useApiQuery from "~/hooks/use-api-query";
+import { useDisabled } from "~/hooks/use-disabled";
 import { useUserData } from "~/hooks/use-user-data";
 import { AUDIT_ASSIGNEES_FIELD } from "~/modules/audit/assignee-form";
 import type { AuditTeamMember } from "~/routes/api+/audits.team-members";
@@ -71,6 +72,9 @@ export default function AuditTeamMemberSelector({
   );
 
   const user = useUserData();
+  // The picker lives inside a form; while that form submits, the self toggle
+  // must not change the selection under the request.
+  const isSubmitting = useDisabled();
 
   const { isLoading, data } = useApiQuery<{
     teamMembers: AuditTeamMember[];
@@ -112,8 +116,15 @@ export default function AuditTeamMemberSelector({
     }
   }, [currentUserTeamMember, handleTeamMemberSelect]);
 
+  // Prefer the loaded row's display name (what the list itself renders); the
+  // remembered name is the fallback until the member list has arrived.
   const selectedNames = selectedIds
-    .map((id) => knownMembersRef.current.get(id)?.name)
+    .map((id) => {
+      const loaded = data?.teamMembers.find((tm) => tm.id === id);
+      return loaded
+        ? resolveTeamMemberName(loaded)
+        : knownMembersRef.current.get(id)?.name;
+    })
     .filter((name): name is string => !!name)
     .join(", ");
 
@@ -165,6 +176,7 @@ export default function AuditTeamMemberSelector({
             size="sm"
             className="w-full"
             onClick={handleAssignToSelf}
+            disabled={isSubmitting}
           >
             {isSelfSelected ? "Remove me" : "Assign to self"}
           </Button>

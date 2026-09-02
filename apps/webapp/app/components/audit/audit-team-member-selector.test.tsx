@@ -1,3 +1,4 @@
+import type { ComponentPropsWithoutRef } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,7 +31,15 @@ vi.mock("~/hooks/use-user-data", () => ({
 // why: the shared Button pulls in router-aware rendering; a plain button is
 // all the picker needs here.
 vi.mock("~/components/shared/button", () => ({
-  Button: ({ children, ...rest }: any) => <button {...rest}>{children}</button>,
+  Button: ({ children, ...rest }: ComponentPropsWithoutRef<"button">) => (
+    <button {...rest}>{children}</button>
+  ),
+}));
+
+// why: the picker disables its self toggle while the enclosing form submits;
+// no form or navigation exists in this test, so it is never submitting.
+vi.mock("~/hooks/use-disabled", () => ({
+  useDisabled: () => false,
 }));
 
 const members = [
