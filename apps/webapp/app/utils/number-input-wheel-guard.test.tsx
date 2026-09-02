@@ -75,6 +75,7 @@ describe("numberInputWheelGuard", () => {
 
 describe("withNumberInputWheelGuard", () => {
   it("keeps the caller's focus handlers and still guards the wheel", () => {
+    // why: spies prove the caller's own focus handlers still run after the guard wraps them
     const onFocus = vi.fn();
     const onBlur = vi.fn();
     const { getByLabelText } = render(

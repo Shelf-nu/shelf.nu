@@ -49,6 +49,7 @@ describe("Input wheel guard", () => {
   });
 
   it("keeps caller focus handlers on number inputs", () => {
+    // why: spies prove the caller's own focus handlers still run after Input wires the guard in
     const onFocus = vi.fn();
     const onBlur = vi.fn();
     const { getByLabelText } = render(
