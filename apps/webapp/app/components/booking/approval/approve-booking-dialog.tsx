@@ -1,3 +1,12 @@
+/**
+ * Confirmation dialog for approving a booking request.
+ *
+ * Posts intent `approve-booking` to the booking route. Approval does not move
+ * the booking out of RESERVED; it only clears the gate that keeps a pending
+ * request from being checked out.
+ *
+ * @see {@link file://./../../../routes/_layout+/bookings.$bookingId.tsx}
+ */
 import { useState, type ReactNode } from "react";
 import { BookingStatus, type Booking } from "@prisma/client";
 import { useDisabled } from "~/hooks/use-disabled";
@@ -11,6 +20,19 @@ type ApproveBookingDialogProps = {
   trigger?: (openDialog: () => void) => ReactNode;
 };
 
+/**
+ * Renders the approval trigger and its confirmation dialog.
+ *
+ * The built-in trigger only renders for a RESERVED booking, since nothing else
+ * can be approved. Callers that need a different affordance (a dropdown row
+ * rather than a header button) pass `trigger` and own that gating themselves.
+ *
+ * @param props.booking - The booking being approved; its name is shown for
+ *   confirmation and its status gates the default trigger.
+ * @param props.trigger - Optional render prop receiving a function that opens
+ *   the dialog.
+ * @returns The trigger and dialog elements.
+ */
 export default function ApproveBookingDialog({
   booking,
   trigger,

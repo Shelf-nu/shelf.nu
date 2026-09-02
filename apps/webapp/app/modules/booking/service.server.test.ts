@@ -7363,9 +7363,16 @@ describe("approveBooking", () => {
       hints: mockClientHints,
     });
 
+    // The write is guarded on the state it expects to find, so a second
+    // approver racing the first matches no row instead of sending the custodian
+    // a duplicate email.
     expect(db.booking.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "booking-1" },
+        where: {
+          id: "booking-1",
+          status: BookingStatus.RESERVED,
+          approvedAt: null,
+        },
         data: expect.objectContaining({
           approvedAt: expect.any(Date),
           approvedBy: { connect: { id: "admin-1" } },
@@ -7384,6 +7391,28 @@ describe("approveBooking", () => {
         subject: expect.stringContaining("Booking approved"),
       })
     );
+  });
+
+  it("refuses a second approver instead of approving twice", async () => {
+    mockApprovalContext({});
+    // Both approvers read an unapproved reservation, so the pre-checks pass for
+    // each. The first commits; the guarded write then matches no row for the
+    // second, which is what Prisma reports as a failed update.
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      new Error("Record to update not found.")
+    );
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-2",
+        hints: mockClientHints,
+      })
+    ).rejects.toThrow(/approved by someone else/i);
+
+    // The custodian must not be told twice that their booking was approved.
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it("refuses when the workspace does not require approval", async () => {

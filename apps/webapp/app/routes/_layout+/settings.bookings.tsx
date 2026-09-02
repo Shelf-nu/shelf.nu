@@ -244,18 +244,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
           }
         );
 
+        // Captured before the setting commits. The two writes are separate, so
+        // a reservation made in between is a real pending request; without this
+        // bound the sweep below would stamp it approved with nobody reviewing it.
+        const approvalCutoff = new Date();
+
         await updateBookingSettings({
           organizationId,
           requireBookingApproval,
         });
 
         // Enabling must not retro-flag existing reservations as pending:
-        // stamp everything currently RESERVED as approved so approval only
-        // applies to requests made from this point on.
+        // stamp everything RESERVED at the moment of the switch as approved, so
+        // approval only applies to requests made from this point on.
         if (requireBookingApproval) {
           await markExistingReservationsApproved({
             organizationId,
             userId: authSession.userId,
+            createdBefore: approvalCutoff,
           });
         }
 

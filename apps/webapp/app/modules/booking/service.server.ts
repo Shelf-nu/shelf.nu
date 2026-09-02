@@ -9768,15 +9768,6 @@ export async function cancelBooking({
 }
 
 /**
- * Approves a pending booking reservation request.
- *
- * Only meaningful in orgs with `requireBookingApproval` on: stamps
- * `approvedAt`/`approvedById` on a RESERVED booking whose approval is still
- * missing, writes an activity note, and emails the custodian (and other
- * configured recipients). Status does not change — RESERVED already holds
- * the assets; approval only unlocks checkout.
- */
-/**
  * Stamps every currently-RESERVED, not-yet-approved booking in the org as
  * approved. Run when the org ENABLES `requireBookingApproval`, so the toggle
  * only applies to NEW requests: without this, every pre-existing reservation
@@ -9786,9 +9777,17 @@ export async function cancelBooking({
 export async function markExistingReservationsApproved({
   organizationId,
   userId,
+  createdBefore,
 }: {
   organizationId: Organization["id"];
   userId: User["id"];
+  /**
+   * Only sweep reservations that already existed when the setting was turned
+   * on. Callers capture this BEFORE persisting the toggle: the setting commits
+   * first, so a request made in the gap is genuinely pending and must not be
+   * stamped approved without anyone seeing it.
+   */
+  createdBefore: Date;
 }) {
   try {
     return await db.booking.updateMany({
@@ -9796,6 +9795,7 @@ export async function markExistingReservationsApproved({
         organizationId,
         status: BookingStatus.RESERVED,
         approvedAt: null,
+        createdAt: { lte: createdBefore },
       },
       data: { approvedAt: new Date(), approvedById: userId },
     });
@@ -9810,6 +9810,22 @@ export async function markExistingReservationsApproved({
   }
 }
 
+/**
+ * Approves a pending booking reservation request.
+ *
+ * Only meaningful in orgs with `requireBookingApproval` on: stamps
+ * `approvedAt`/`approvedById` on a RESERVED booking whose approval is still
+ * missing, writes an activity note, and emails the custodian (and other
+ * configured recipients). Status does not change — RESERVED already holds
+ * the assets; approval only unlocks checkout.
+ *
+ * @param args.id - Booking to approve; must be RESERVED and unapproved.
+ * @param args.organizationId - Org the booking must belong to.
+ * @param args.userId - The approver, recorded on the booking and the note.
+ * @param args.hints - Client hints, used to render dates in the email.
+ * @throws {ShelfError} 400 when the booking is not an unapproved reservation,
+ *   including when another approver got there first.
+ */
 export async function approveBooking({
   id,
   organizationId,
@@ -9874,18 +9890,8 @@ export async function approveBooking({
       });
     }
 
-    const approvedBooking = await db.booking.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
-      where: { id: bookingFound.id },
-      data: {
-        approvedAt: new Date(),
-        approvedBy: { connect: { id: userId } },
-      },
-      include: BOOKING_INCLUDE_FOR_EMAIL,
-    });
-
-    // Activity note: who approved the request. Not a status transition —
-    // the booking stays RESERVED — so this writes a plain system note.
+    // Resolved before the write so the note can be composed inside the same
+    // transaction as the approval.
     const approver = await getUserByID(userId, {
       select: {
         id: true,
@@ -9894,14 +9900,68 @@ export async function approveBooking({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    await createSystemBookingNote({
-      bookingId: approvedBooking.id,
-      organizationId,
-      content: `${wrapUserLinkForNote({
-        ...approver,
-        id: userId,
-      })} approved the booking request`,
-    });
+
+    /**
+     * Approval and its audit note commit together, and the write only matches a
+     * booking that is still an unapproved reservation.
+     *
+     * The status and `approvedAt` predicates are what serialise two approvers
+     * acting at once: the checks above are a read, so both callers can pass
+     * them, and an unconditional write would send the custodian two approval
+     * emails and leave two "approved the booking request" notes. Mirrors
+     * `archiveBooking`'s conditional write.
+     *
+     * The note is inside the transaction because a note failure after a
+     * committed approval is unrecoverable: checkout is already unlocked, the
+     * error reports the approval as failed, and a retry is refused by the
+     * already-approved guard above, so the audit trail loses the record
+     * permanently.
+     */
+    const approvedBooking = await db
+      .$transaction(async (tx) => {
+        const updated = await tx.booking.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+          where: {
+            id: bookingFound.id,
+            status: BookingStatus.RESERVED,
+            approvedAt: null,
+          },
+          data: {
+            approvedAt: new Date(),
+            approvedBy: { connect: { id: userId } },
+          },
+          include: BOOKING_INCLUDE_FOR_EMAIL,
+        });
+
+        // Not a status transition — the booking stays RESERVED — so this is a
+        // plain system note.
+        await createSystemBookingNote(
+          {
+            bookingId: updated.id,
+            organizationId,
+            content: `${wrapUserLinkForNote({
+              ...approver,
+              id: userId,
+            })} approved the booking request`,
+          },
+          tx
+        );
+
+        return updated;
+      })
+      .catch(() => null);
+
+    if (!approvedBooking) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "This booking was approved by someone else just now. Please refresh to see its current state.",
+        additionalData: { bookingId: id, organizationId },
+        shouldBeCaptured: false,
+        status: 400,
+      });
+    }
 
     // The approval is committed; a notification failure must not report a
     // failed approval (mirrors the revert-to-draft email isolation).
