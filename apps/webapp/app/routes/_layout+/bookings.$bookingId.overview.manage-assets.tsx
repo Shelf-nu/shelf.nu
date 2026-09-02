@@ -112,6 +112,7 @@ import {
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import {
   PermissionAction,
   PermissionEntity,
@@ -1636,6 +1637,7 @@ const RowComponent = ({
               <input
                 id={`qty-${item.id}`}
                 type="number"
+                {...numberInputWheelGuard}
                 min={1}
                 max={item.availableQuantity ?? item.quantity ?? undefined}
                 value={extraProps?.quantities?.[item.id] ?? 1}
