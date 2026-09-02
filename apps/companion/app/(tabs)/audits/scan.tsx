@@ -245,6 +245,7 @@ function AuditScannerContent() {
 
   const [evidenceModalVisible, setEvidenceModalVisible] = useState(false);
   const [showCompleteSheet, setShowCompleteSheet] = useState(false);
+  const isCompletingRef = useRef(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ScannedItem | null>(null);
   // Opening the sheet once proves the user found evidence capture, which
@@ -890,17 +891,16 @@ function AuditScannerContent() {
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playScanSound();
-      Alert.alert("Audit Complete", `"${auditName}" has been completed.`, [
-        {
-          text: "OK",
-          onPress: () => {
-            router.back();
-            // Completing an audit is a clear "value delivered" moment — a good
-            // (throttled, OS-gated) time to ask a happy user for a review.
-            void maybeAskForReview();
-          },
-        },
-      ]);
+
+      // Leave the scanner before confirming, and never from an alert callback.
+      // The queues and the persisted snapshot are already cleared by this
+      // point, so a confirmation the user never gets to tap would strand them
+      // on a scanner with no recoverable state.
+      router.back();
+      // Completing an audit is a clear "value delivered" moment — a good
+      // (throttled, OS-gated) time to ask a happy user for a review.
+      void maybeAskForReview();
+      Alert.alert("Audit Complete", `"${auditName}" has been completed.`);
     },
     [
       auditId,
@@ -927,12 +927,24 @@ function AuditScannerContent() {
   // cannot fire.
   const handleSheetConfirm = useCallback(
     async (completionNote?: string) => {
+      // Re-entry guard: the sheet is dismissed immediately below, so it cannot
+      // confirm twice, but the ref is set synchronously and covers the gap
+      // before React applies that state.
+      if (isCompletingRef.current) return;
+      isCompletingRef.current = true;
       setIsCompleting(true);
+
+      // Dismissed BEFORE the request. `runCompletion` reports its outcome with
+      // `Alert.alert`, and an alert presented from a modal that is then torn
+      // down can be dismissed along with it — taking the message, and any
+      // action attached to it, with it.
+      setShowCompleteSheet(false);
+
       try {
         await runCompletion(completionNote);
       } finally {
+        isCompletingRef.current = false;
         setIsCompleting(false);
-        setShowCompleteSheet(false);
       }
     },
     [runCompletion]
