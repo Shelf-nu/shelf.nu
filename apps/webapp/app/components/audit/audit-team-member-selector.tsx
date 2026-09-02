@@ -1,40 +1,74 @@
 import type { CSSProperties } from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { CheckIcon, UserIcon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import { Separator } from "~/components/shared/separator";
 import When from "~/components/when/when";
 import useApiQuery from "~/hooks/use-api-query";
 import { useUserData } from "~/hooks/use-user-data";
+import { AUDIT_ASSIGNEES_FIELD } from "~/modules/audit/assignee-form";
 import type { AuditTeamMember } from "~/routes/api+/audits.team-members";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
+/** A team member the dialog wants pre-selected, with the user id it maps to. */
+export type AuditAssigneeDefault = {
+  /** TeamMember id (what the list renders and toggles on). */
+  id: string;
+  /** The member's user id (what the server stores on the assignment). */
+  userId: string;
+  name: string;
+};
+
 type AuditTeamMemberSelectorProps = {
   className?: string;
   style?: CSSProperties;
   error?: string;
-  defaultValue?: string;
+  /**
+   * Members to pre-select (edit dialog). Carries the user id so the hidden
+   * inputs are complete before the member list has loaded — otherwise a save
+   * during that window would submit an empty selection and remove everyone.
+   */
+  defaultSelected?: AuditAssigneeDefault[];
 };
+
+type KnownMember = { userId: string; name: string };
 
 /**
  * Team member selector for audit assignment.
- * Single selection mode - only one assignee can be chosen.
+ *
+ * Multi-select: every selected member becomes an assignee, and any assignee
+ * may scan, annotate and complete the audit. Each selection is submitted as
+ * its own bracket-indexed hidden input (`assignees[0]`, `assignees[1]`, …)
+ * because the server's form parser collapses repeated same-name fields but
+ * turns bracket indices into an array — the convention `assetIds[i]` uses.
+ *
  * Only shows team members with user accounts (excludes NRMs).
  */
 export default function AuditTeamMemberSelector({
   className,
   style,
   error,
-  defaultValue,
+  defaultSelected,
 }: AuditTeamMemberSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   // Lazy initializer avoids a false-positive derived-state lint: after mount this
   // state is user-controlled via the selector, so it must NOT re-sync with the prop.
-  const [selectedTeamMember, setSelectedTeamMember] = useState<
-    string | undefined
-  >(() => defaultValue);
+  const [selectedIds, setSelectedIds] = useState<string[]>(
+    () => defaultSelected?.map((member) => member.id) ?? []
+  );
+  // Everything ever selected, keyed by team member id. Seeded from the
+  // defaults and extended from the loaded list, so a hidden input can always
+  // name the user id even when the search filter hides the row.
+  const knownMembersRef = useRef<Map<string, KnownMember>>(
+    new Map(
+      (defaultSelected ?? []).map((member) => [
+        member.id,
+        { userId: member.userId, name: member.name },
+      ])
+    )
+  );
 
   const user = useUserData();
 
@@ -49,11 +83,33 @@ export default function AuditTeamMemberSelector({
     return data.teamMembers.find((tm) => tm.user?.id === user.id);
   }, [data, user?.id]);
 
+  const remember = useCallback((teamMember: AuditTeamMember) => {
+    knownMembersRef.current.set(teamMember.id, {
+      userId: teamMember.user?.id ?? "",
+      name: teamMember.name,
+    });
+  }, []);
+
+  const handleTeamMemberSelect = useCallback(
+    (teamMember: AuditTeamMember) => {
+      remember(teamMember);
+      setSelectedIds((prev) =>
+        prev.includes(teamMember.id)
+          ? prev.filter((id) => id !== teamMember.id)
+          : [...prev, teamMember.id]
+      );
+    },
+    [remember]
+  );
+
+  const isSelfSelected =
+    !!currentUserTeamMember && selectedIds.includes(currentUserTeamMember.id);
+
   const handleAssignToSelf = useCallback(() => {
-    if (currentUserTeamMember) {
-      setSelectedTeamMember(currentUserTeamMember.id);
+    if (currentUserTeamMember && !isSelfSelected) {
+      handleTeamMemberSelect(currentUserTeamMember);
     }
-  }, [currentUserTeamMember]);
+  }, [currentUserTeamMember, isSelfSelected, handleTeamMemberSelect]);
 
   const teamMembers = useMemo(() => {
     if (!data) {
@@ -76,16 +132,6 @@ export default function AuditTeamMemberSelector({
         tm.user?.email?.includes(normalizedQuery)
     );
   }, [data, searchQuery]);
-
-  const handleTeamMemberSelect = useCallback((teamMember: AuditTeamMember) => {
-    setSelectedTeamMember((prev) => {
-      // Toggle selection: if already selected, deselect
-      if (prev === teamMember.id) {
-        return undefined;
-      }
-      return teamMember.id;
-    });
-  }, []);
 
   return (
     <div
@@ -113,11 +159,9 @@ export default function AuditTeamMemberSelector({
             size="sm"
             className="w-full"
             onClick={handleAssignToSelf}
-            disabled={selectedTeamMember === currentUserTeamMember.id}
+            disabled={isSelfSelected}
           >
-            {selectedTeamMember === currentUserTeamMember.id
-              ? "Assigned to self"
-              : "Assign to self"}
+            {isSelfSelected ? "You are assigned" : "Assign to self"}
           </Button>
         </div>
       )}
@@ -126,24 +170,32 @@ export default function AuditTeamMemberSelector({
         <p className="px-3 pb-2 text-error-500">{error}</p>
       </When>
 
+      <When truthy={selectedIds.length > 0}>
+        <p className="px-3 pb-2 text-sm text-gray-600">
+          {selectedIds.length === 1
+            ? "1 assignee selected"
+            : `${selectedIds.length} assignees selected`}
+        </p>
+      </When>
+
       <Separator />
 
-      {/* Hidden input field for form submission */}
-      {selectedTeamMember && (
-        <input
-          type="hidden"
-          name="assignee"
-          value={JSON.stringify({
-            id: selectedTeamMember,
-            name:
-              teamMembers.find((tm) => tm.id === selectedTeamMember)?.name ??
-              "",
-            userId:
-              teamMembers.find((tm) => tm.id === selectedTeamMember)?.user
-                ?.id ?? "",
-          })}
-        />
-      )}
+      {/* One hidden input per selection, bracket-indexed so the server sees an array */}
+      {selectedIds.map((id, index) => {
+        const known = knownMembersRef.current.get(id);
+        return (
+          <input
+            key={id}
+            type="hidden"
+            name={`${AUDIT_ASSIGNEES_FIELD}[${index}]`}
+            value={JSON.stringify({
+              id,
+              name: known?.name ?? "",
+              userId: known?.userId ?? "",
+            })}
+          />
+        );
+      })}
 
       <When truthy={isLoading}>
         {Array.from({ length: 6 }).map((_, i) => (
@@ -158,7 +210,7 @@ export default function AuditTeamMemberSelector({
           </div>
         ) : (
           teamMembers.map((teamMember) => {
-            const isTeamMemberSelected = selectedTeamMember === teamMember.id;
+            const isTeamMemberSelected = selectedIds.includes(teamMember.id);
 
             return (
               <div
@@ -167,7 +219,8 @@ export default function AuditTeamMemberSelector({
                   "flex cursor-pointer items-center justify-between gap-4 border-b px-6 py-4 hover:bg-gray-100",
                   isTeamMemberSelected && "bg-gray-100"
                 )}
-                role="button"
+                role="checkbox"
+                aria-checked={isTeamMemberSelected}
                 tabIndex={0}
                 onClick={() => handleTeamMemberSelect(teamMember)}
                 onKeyDown={handleActivationKeyPress(() =>

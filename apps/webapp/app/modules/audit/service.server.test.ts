@@ -7,6 +7,7 @@ import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { sendAuditCancelledEmails } from "./email-helpers";
 import {
+  createAssigneesChangedNote,
   createAuditResumedNote,
   createAuditStartedNote,
 } from "./helpers.server";
@@ -26,6 +27,7 @@ import {
   getAuditScans,
   recordAuditScan,
   requireAuditAssignee,
+  updateAuditSession,
 } from "./service.server";
 
 // why: storage.server calls Supabase over HTTP; mock so delete tests stay offline
@@ -42,6 +44,9 @@ vi.mock("./helpers.server", () => ({
   createAssetsAddedToAuditNote: vi.fn(),
   createAssetRemovedFromAuditNote: vi.fn(),
   createAssetsRemovedFromAuditNote: vi.fn(),
+  createAssigneesChangedNote: vi.fn(),
+  createAuditUpdateNote: vi.fn(),
+  createDueDateChangedNote: vi.fn(),
 }));
 
 // why: deterministic note content for assertions; real impl returns markdoc syntax
@@ -126,6 +131,12 @@ vi.mock("~/database/db.server", () => {
     },
     auditAssignment: {
       createMany: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    // why: assignees are checked against workspace membership before they
+    // are written; the default below makes every id a member.
+    userOrganization: {
+      findMany: vi.fn(),
     },
     auditImage: {
       findMany: vi.fn(),
@@ -183,6 +194,10 @@ const mockDb = db as unknown as {
   };
   auditAssignment: {
     createMany: ReturnType<typeof vi.fn>;
+    deleteMany: ReturnType<typeof vi.fn>;
+  };
+  userOrganization: {
+    findMany: ReturnType<typeof vi.fn>;
   };
   auditImage: {
     findMany: ReturnType<typeof vi.fn>;
@@ -207,7 +222,7 @@ describe("audit service", () => {
     assetIds: ["asset-1", "asset-2"],
     organizationId: "org-1",
     createdById: "user-1",
-    assignee: "user-2",
+    assigneeIds: ["user-2"],
     scopeMeta: {
       contextType: "SELECTION",
       contextName: "Quarterly warehouse audit",
@@ -216,6 +231,10 @@ describe("audit service", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Every requested assignee is a workspace member unless a test says otherwise.
+    mockDb.userOrganization.findMany.mockImplementation(({ where }: any) =>
+      Promise.resolve(where.userId.in.map((userId: string) => ({ userId })))
+    );
     mockDb.asset.findMany.mockResolvedValue([
       { id: "asset-1", title: "Camera A" },
       { id: "asset-2", title: "Camera B" },
@@ -324,6 +343,7 @@ describe("audit service", () => {
 
     expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
       data: [{ auditSessionId: "audit-1", userId: "user-2", role: undefined }],
+      skipDuplicates: true,
     });
 
     expect(result.expectedAssets).toEqual([
@@ -372,6 +392,191 @@ describe("audit service", () => {
 
     expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
       data: [{ auditSessionId: "audit-1", userId: "user-2", role: undefined }],
+      skipDuplicates: true,
+    });
+  });
+
+  it("assigns every selected member once, in order", async () => {
+    await createAuditSession({
+      ...defaultInput,
+      assigneeIds: ["user-2", "user-3", "user-2", "user-4"],
+    });
+
+    expect(mockDb.userOrganization.findMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        userId: { in: ["user-2", "user-3", "user-4"] },
+      },
+      select: { userId: true },
+    });
+    expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
+      data: [
+        { auditSessionId: "audit-1", userId: "user-2", role: undefined },
+        { auditSessionId: "audit-1", userId: "user-3", role: undefined },
+        { auditSessionId: "audit-1", userId: "user-4", role: undefined },
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  it("creates no assignments and skips the membership check when nobody is assigned", async () => {
+    await createAuditSession({ ...defaultInput, assigneeIds: [] });
+
+    expect(mockDb.userOrganization.findMany).not.toHaveBeenCalled();
+    expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects an assignee who is not a member of the workspace with a 400", async () => {
+    mockDb.userOrganization.findMany.mockResolvedValue([{ userId: "user-2" }]);
+
+    await expect(
+      createAuditSession({
+        ...defaultInput,
+        assigneeIds: ["user-2", "user-from-another-org"],
+      })
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(mockDb.auditSession.create).not.toHaveBeenCalled();
+  });
+
+  describe("updateAuditSession — assignees as a set", () => {
+    const currentAudit = {
+      name: "Q4 audit",
+      description: null,
+      status: AuditStatus.PENDING,
+      dueDate: null,
+      assignments: [{ userId: "user-2" }, { userId: "user-3" }],
+    };
+
+    beforeEach(() => {
+      mockDb.auditSession.findUnique.mockResolvedValue(currentAudit);
+      mockDb.auditSession.update.mockResolvedValue({
+        id: "audit-1",
+        name: "Q4 audit",
+      });
+      mockDb.auditAssignment.deleteMany.mockResolvedValue({ count: 1 });
+      mockDb.auditAssignment.createMany.mockResolvedValue({ count: 1 });
+    });
+
+    it("adds the newcomers, removes the departed, keeps the rest, and reports both", async () => {
+      const result = await updateAuditSession({
+        id: "audit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        data: {
+          name: "Q4 audit",
+          assigneeUserIds: ["user-3", "user-4", "user-4"],
+        },
+      });
+
+      expect(result.addedAssigneeIds).toEqual(["user-4"]);
+      expect(result.removedAssigneeIds).toEqual(["user-2"]);
+      expect(mockDb.auditAssignment.deleteMany).toHaveBeenCalledWith({
+        where: { auditSessionId: "audit-1", userId: { in: ["user-2"] } },
+      });
+      expect(mockDb.auditAssignment.createMany).toHaveBeenCalledWith({
+        data: [{ auditSessionId: "audit-1", userId: "user-4" }],
+        skipDuplicates: true,
+      });
+      expect(createAssigneesChangedNote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          auditSessionId: "audit-1",
+          userId: "user-1",
+          addedUserIds: ["user-4"],
+          removedUserIds: ["user-2"],
+        })
+      );
+      expect(recordEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "AUDIT_ASSIGNEE_ADDED",
+          targetUserId: "user-4",
+          auditSessionId: "audit-1",
+        }),
+        mockDb
+      );
+      expect(recordEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "AUDIT_ASSIGNEE_REMOVED",
+          targetUserId: "user-2",
+        }),
+        mockDb
+      );
+    });
+
+    it("only checks membership for the people being added", async () => {
+      await updateAuditSession({
+        id: "audit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        data: { assigneeUserIds: ["user-2", "user-3", "user-5"] },
+      });
+
+      expect(mockDb.userOrganization.findMany).toHaveBeenCalledWith({
+        where: { organizationId: "org-1", userId: { in: ["user-5"] } },
+        select: { userId: true },
+      });
+    });
+
+    it("removes everyone when the set is empty", async () => {
+      const result = await updateAuditSession({
+        id: "audit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        data: { assigneeUserIds: [] },
+      });
+
+      expect(result.removedAssigneeIds).toEqual(["user-2", "user-3"]);
+      expect(mockDb.auditAssignment.deleteMany).toHaveBeenCalledWith({
+        where: {
+          auditSessionId: "audit-1",
+          userId: { in: ["user-2", "user-3"] },
+        },
+      });
+      expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
+    });
+
+    it("leaves assignments untouched when the field is omitted", async () => {
+      const result = await updateAuditSession({
+        id: "audit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        data: { name: "Renamed" },
+      });
+
+      expect(result.addedAssigneeIds).toEqual([]);
+      expect(result.removedAssigneeIds).toEqual([]);
+      expect(mockDb.auditAssignment.deleteMany).not.toHaveBeenCalled();
+      expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
+      expect(createAssigneesChangedNote).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing for the assignees when the same set is submitted again", async () => {
+      await updateAuditSession({
+        id: "audit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        data: { assigneeUserIds: ["user-3", "user-2"] },
+      });
+
+      expect(mockDb.auditAssignment.deleteMany).not.toHaveBeenCalled();
+      expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
+      expect(createAssigneesChangedNote).not.toHaveBeenCalled();
+      expect(recordEvent).not.toHaveBeenCalled();
+    });
+
+    it("refuses a newcomer who is not a workspace member", async () => {
+      mockDb.userOrganization.findMany.mockResolvedValue([]);
+
+      await expect(
+        updateAuditSession({
+          id: "audit-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          data: { assigneeUserIds: ["user-2", "user-3", "outsider"] },
+        })
+      ).rejects.toMatchObject({ status: 400 });
+
+      expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
     });
   });
 

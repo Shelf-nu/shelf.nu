@@ -30,6 +30,30 @@ vitest.mock("~/modules/audit/service.server", () => ({
 const base = { name: "Quarterly audit" };
 
 describe("StartAuditSchema", () => {
+  it("accepts several assignees as an array of picker blobs", () => {
+    const result = StartAuditSchema.safeParse({
+      ...base,
+      assetIds: ["a1"],
+      assignees: [
+        JSON.stringify({ id: "tm-1", name: "Ana", userId: "user-1" }),
+        JSON.stringify({ id: "tm-2", name: "Ben", userId: "user-2" }),
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.assignees).toHaveLength(2);
+    }
+  });
+
+  it("still accepts the pre-multi-assign singular assignee field", () => {
+    const result = StartAuditSchema.safeParse({
+      ...base,
+      assetIds: ["a1"],
+      assignee: JSON.stringify({ id: "tm-1", name: "Ana", userId: "user-1" }),
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("accepts a location multi-selection (contextType=location + locationIds)", () => {
     const result = StartAuditSchema.safeParse({
       ...base,
