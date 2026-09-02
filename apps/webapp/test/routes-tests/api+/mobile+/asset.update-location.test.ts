@@ -1,3 +1,13 @@
+/**
+ * Tests for POST /api/mobile/asset/update-location — the mobile twin of the
+ * web asset-overview "Update location" dialog. Asserts observable behavior:
+ * the per-placement `quantity` handling for QUANTITY_TRACKED assets (partial
+ * placement, pool bound, INDIVIDUAL ignoring it), the no-op short-circuit,
+ * and the quantity-aware event meta + note phrasing.
+ *
+ * @see {@link file://../../../../app/routes/api+/mobile+/asset.update-location.ts}
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: the route pre-reads the asset + location and opens an interactive
@@ -32,6 +42,9 @@ vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
 vi.mock("~/modules/activity-event/service.server", () => ({
   recordEvent: vi.fn(),
 }));
+// why: `createNote` writes through the real Prisma client. The note's wording
+// is the observable output under test, so the writer is stubbed and the content
+// asserted from the call.
 vi.mock("~/modules/note/service.server", () => ({
   createNote: vi.fn(),
 }));
@@ -46,16 +59,6 @@ import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-l
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { action } from "~/routes/api+/mobile+/asset.update-location";
-
-/**
- * Tests for POST /api/mobile/asset/update-location — the mobile twin of the
- * web asset-overview "Update location" dialog. Asserts observable behavior:
- * the per-placement `quantity` handling for QUANTITY_TRACKED assets (partial
- * placement, pool bound, INDIVIDUAL ignoring it), the no-op short-circuit,
- * and the quantity-aware event meta + note phrasing.
- *
- * @see {@link file://../../../../app/routes/api+/mobile+/asset.update-location.ts}
- */
 
 /** Shape of the `data()` result the route action returns. */
 type DataResult<T> = { data: T; init: ResponseInit | null };
@@ -319,5 +322,103 @@ describe("POST /api/mobile/asset/update-location", () => {
     // exists — the replace is a real change (it collapses the other row).
     expect(status).toBe(200);
     expect(db.$transaction).toHaveBeenCalled();
+  });
+
+  it("records the placement it collapsed, not just the one it kept", async () => {
+    vi.mocked(db.asset.findUnique).mockResolvedValue(
+      qtyAsset({
+        assetLocations: [
+          { quantity: 6, location: { id: "loc-storage", name: "Storage" } },
+          { quantity: 4, location: { id: "loc-van", name: "Van" } },
+        ],
+      }) as never
+    );
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-storage",
+      name: "Storage",
+    } as never);
+
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-storage",
+      quantity: 6,
+    });
+
+    // The Van row is deleted by the pivot replace. Without its own event the
+    // asset silently stops being at the Van while reports still show it there.
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ASSET_LOCATION_CHANGED",
+        assetId: "asset-1",
+        fromValue: "loc-van",
+        toValue: null,
+      }),
+      expect.anything()
+    );
+  });
+
+  it("places the full pool when quantity is omitted at the current location", async () => {
+    // 4 of 10 units are placed at Storage and the caller asks for Storage with
+    // no quantity, which means the whole pool. Reading the omission as
+    // "unchanged" short-circuits and leaves 4 placed.
+    vi.mocked(db.asset.findUnique).mockResolvedValue(
+      qtyAsset({
+        assetLocations: [
+          { quantity: 4, location: { id: "loc-storage", name: "Storage" } },
+        ],
+      }) as never
+    );
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-storage",
+      name: "Storage",
+    } as never);
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-storage",
+    });
+
+    expect(status).toBe(200);
+    expect(
+      db.$transaction,
+      "the placement must be rewritten to 10"
+    ).toHaveBeenCalled();
+    expect(tx.assetLocation.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ quantity: 10 }),
+      })
+    );
+  });
+
+  it("describes a same-location edit as a quantity change, not a move", async () => {
+    vi.mocked(db.asset.findUnique).mockResolvedValue(
+      qtyAsset({
+        assetLocations: [
+          { quantity: 4, location: { id: "loc-storage", name: "Storage" } },
+        ],
+      }) as never
+    );
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "loc-storage",
+      name: "Storage",
+    } as never);
+    tx.asset.findUniqueOrThrow.mockResolvedValue({
+      id: "asset-1",
+      title: "Cords",
+      assetLocations: [{ location: { id: "loc-storage", name: "Storage" } }],
+    });
+
+    await callAction({
+      assetId: "asset-1",
+      locationId: "loc-storage",
+      quantity: 6,
+    });
+
+    const note = vi.mocked(createNote).mock.calls[0][0].content as string;
+    expect(
+      note,
+      "nothing moved, so the note must not describe a journey"
+    ).not.toMatch(/moved .* from .* to /);
+    expect(note).toContain("changed the quantity");
   });
 });

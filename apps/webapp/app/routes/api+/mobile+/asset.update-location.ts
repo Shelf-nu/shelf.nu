@@ -124,10 +124,16 @@ export async function action({ request }: ActionFunctionArgs) {
       asset.assetLocations.find(
         (al) => al.location?.id === currentPrimaryLocation?.id
       )?.quantity ?? null;
+    // An omitted `quantity` means the full pool, not "leave it as it is", so it
+    // has to be resolved before the comparison. Treating it as unchanged left a
+    // partially-placed asset at its old amount while the caller had asked for
+    // every unit. `pivotQuantity` inside the transaction resolves it the same
+    // way, against the locked row.
+    const requestedQuantity = isQuantityTracked(asset)
+      ? quantity ?? asset.quantity ?? 1
+      : 1;
     const quantityUnchanged =
-      !isQuantityTracked(asset) ||
-      quantity == null ||
-      quantity === currentPrimaryQuantity;
+      !isQuantityTracked(asset) || requestedQuantity === currentPrimaryQuantity;
     if (
       currentPrimaryLocation?.id === location.id &&
       asset.assetLocations.length === 1 &&
@@ -211,6 +217,39 @@ export async function action({ request }: ActionFunctionArgs) {
           },
         });
 
+        /**
+         * A pivot replace collapses EVERY manual placement, not just the
+         * primary one. Each of the others leaves the location it was at, and
+         * the single change event below only names the primary, so without
+         * these the asset silently stops being at a location that reports and
+         * history still show it at.
+         *
+         * Emitted as removals (`toValue: null`) because that is what happened
+         * to them; the arrival at the requested location is the event below.
+         */
+        const collapsedPlacements = asset.assetLocations.filter(
+          (al) =>
+            al.location?.id && al.location.id !== currentPrimaryLocation?.id
+        );
+        for (const placement of collapsedPlacements) {
+          await recordEvent(
+            {
+              organizationId,
+              actorUserId: user.id,
+              action: "ASSET_LOCATION_CHANGED",
+              entityType: "ASSET",
+              entityId: assetId,
+              assetId,
+              locationId: placement.location!.id,
+              field: "locationId",
+              fromValue: placement.location!.id,
+              toValue: null,
+              meta: assetQtyMeta(locked, placement.quantity ?? 1),
+            },
+            tx
+          );
+        }
+
         await recordEvent(
           {
             organizationId,
@@ -273,7 +312,16 @@ export async function action({ request }: ActionFunctionArgs) {
     const unitCount = formatUnitCount(asset, placedQuantity);
 
     let noteContent: string;
-    if (previousLocation) {
+    if (previousLocation && previousLocation.id === location.id) {
+      // Nothing moved: the asset stays where it is and only the placed amount
+      // changed. Phrasing this as a move reads as "moved 6 pcs from Storage to
+      // Storage", which describes a journey that did not happen.
+      const previousUnitCount = formatUnitCount(asset, currentPrimaryQuantity);
+      noteContent =
+        unitCount && previousUnitCount
+          ? `${actor} changed the quantity at ${newLocationLink} from ${previousUnitCount} to ${unitCount} via mobile app.`
+          : `${actor} updated the placement at ${newLocationLink} via mobile app.`;
+    } else if (previousLocation) {
       const currentLocationLink = wrapLinkForNote(
         `/locations/${previousLocation.id}`,
         previousLocation.name.trim()
