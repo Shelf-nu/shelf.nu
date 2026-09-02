@@ -15,6 +15,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { computeDispatchedUnitsByAsset } from "~/modules/booking/checkout-attribution";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
@@ -513,26 +514,79 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // web booking overview uses (`calculateBookingLifecycleProgress`), so the
     // mobile bar and the web bar can never disagree. QT rows bucket by their
     // per-asset unit counters; INDIVIDUAL rows by status + `checkedInAssetIds`.
-    // `checkedOutAssetIds` (assets with a PartialBookingCheckout record) drives
-    // the COMPLETE-branch "was it ever out?" test; an empty list means an
-    // all-at-once checkout.
-    const partialCheckoutRows = await db.partialBookingCheckout.findMany({
-      where: { bookingId: booking.id },
-      select: { assetIds: true },
+    // Dispatch truth comes from the slice markers
+    // (`BookingAsset.checkedOutAt`/`checkedInAt`): the Check out button
+    // stamps them but writes NO PartialBookingCheckout rows, so session
+    // records cannot tell a button-checked-out asset from a
+    // never-checked-out one on a booking that also has scan records. The
+    // sessions are still fetched: per-asset dispatched units are judged
+    // slice by slice from stamps + session attribution (an asset can mix a
+    // button-checked-out slice with a progressively-scanned sibling — see
+    // `computeDispatchedUnitsByAsset`).
+    const [sliceRows, checkoutSessionRows] = await Promise.all([
+      db.bookingAsset.findMany({
+        where: { bookingId: booking.id },
+        select: {
+          id: true,
+          assetId: true,
+          quantity: true,
+          assetKitId: true,
+          checkedOutAt: true,
+          checkedInAt: true,
+        },
+      }),
+      db.partialBookingCheckout.findMany({
+        where: { bookingId: booking.id },
+        select: { assetIds: true, quantities: true, bookingAssetIds: true },
+      }),
+    ]);
+    const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
+      slices: sliceRows,
+      checkoutSessions: checkoutSessionRows,
     });
+    const sliceMarkersByAssetId = new Map<
+      string,
+      { out: boolean; allStampedIn: boolean }
+    >();
+    for (const s of sliceRows) {
+      const m = sliceMarkersByAssetId.get(s.assetId) ?? {
+        out: false,
+        allStampedIn: true,
+      };
+      if (s.checkedOutAt) {
+        m.out = true;
+        if (!s.checkedInAt) m.allStampedIn = false;
+      }
+      sliceMarkersByAssetId.set(s.assetId, m);
+    }
     const checkedOutAssetIds = [
-      ...new Set(partialCheckoutRows.flatMap((r) => r.assetIds)),
+      ...new Set(sliceRows.filter((s) => s.checkedOutAt).map((s) => s.assetId)),
     ];
+    // With no stamped slice anywhere, pass `undefined` markers (not `false`)
+    // so the calculation's legacy collapse for record-less bookings stays
+    // reachable — `false` means "this row was verifiably never dispatched".
+    const bookingHasSliceMarkers = checkedOutAssetIds.length > 0;
     const lifecycleProgress = calculateBookingLifecycleProgress({
       bookingAssets: assets.map((a) => {
         const isQty = a.type === AssetType.QUANTITY_TRACKED;
         const rem = remainingByAsset.get(a.id);
         const booked = a.quantity ?? 0;
+        const marker = sliceMarkersByAssetId.get(a.id);
         return {
           id: a.id,
           kitId: a.kitId,
           status: a.status,
           assetType: a.type,
+          sliceCheckedOut: bookingHasSliceMarkers
+            ? marker?.out ?? false
+            : undefined,
+          sliceCheckedIn: bookingHasSliceMarkers
+            ? (marker?.out ?? false) && (marker?.allStampedIn ?? false)
+            : undefined,
+          dispatchedQuantity:
+            isQty && bookingHasSliceMarkers
+              ? Math.min(dispatchedUnitsByAsset.get(a.id) ?? 0, booked)
+              : undefined,
           bookedQuantity: isQty ? booked : undefined,
           // checked-out = booked − still-to-check-out; dispositioned =
           // booked − still-to-check-in. Both from the per-asset remaining

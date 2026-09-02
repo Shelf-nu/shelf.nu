@@ -29,10 +29,12 @@ import { assertIsDataWithResponseInit } from "@helpers/assertions";
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
-    // why: lifecycle-progress roll-up queries the partial-checkout log to
-    // decide whether an asset was ever checked out. Not relevant to the
-    // model-request serialization under test — stub to an empty log. (Survives
+    // why: the lifecycle-progress roll-up reads the slice markers
+    // (BookingAsset.checkedOutAt/checkedInAt) plus the checkout sessions to
+    // judge dispatched units per asset. Not relevant to the model-request
+    // serialization under test — stub both to empty. (Survives
     // `clearAllMocks`, which clears call history but keeps implementations.)
+    bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
