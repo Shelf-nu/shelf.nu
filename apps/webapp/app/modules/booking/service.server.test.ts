@@ -3854,11 +3854,19 @@ describe("checkoutBooking", () => {
         },
       ],
     };
+    // why: the flow reads the booking twice — once to validate, once after the
+    // status write — and the second read must come back ONGOING or the
+    // post-checkout branch takes the not-yet-started path.
     (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
       .mockResolvedValueOnce(mockBooking)
       .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    // why: the status write itself is not under test here; it only has to
+    // resolve so the transaction reaches the counter writes below.
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({ id: "booking-1" });
+    // why: the residue derivation reads pre-stamped slices via the
+    // `checkedOutAt` filter. Every other slice read in this flow gets an empty
+    // list, so only that one shapes the result.
     (
       db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
     ).mockImplementation((args?: { where?: { checkedOutAt?: unknown } }) =>
@@ -3875,6 +3883,8 @@ describe("checkoutBooking", () => {
           : []
       )
     );
+    // why: the earlier progressive scan recorded 3 of this slice's 8 units,
+    // which is what leaves a 5-unit residue for this checkout to record.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckout.findMany.mockResolvedValue([
       { assetIds: ["asset-qty"], quantities: [3], bookingAssetIds: ["ba-qty"] },
@@ -3902,6 +3912,100 @@ describe("checkoutBooking", () => {
     expect(counterWrites[0][0]).toEqual({
       where: { id: { in: ["ba-qty"] } },
       data: { checkedOutQuantity: { increment: 5 } },
+    });
+  });
+
+  it("counts a re-dispatched slice once, not its quantity plus a residue", async () => {
+    expect.assertions(2);
+
+    // 3 of 8 units scanned out earlier, then the slice came back IN FULL, and
+    // now departs again whole. The departure statement adds its 8; the residue
+    // top-up must not also add 5, or the counter claims 13 units left when 8
+    // did. The residue session row is still written — that records the
+    // dispatch, the counter records the units.
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-qty",
+            assetKits: [{ kitId: "kit-1" }],
+            title: "Cables",
+            type: AssetType.QUANTITY_TRACKED,
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-qty",
+          quantity: 8,
+          id: "ba-qty",
+          assetKitId: "ak-1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: new Date("2026-01-02T10:00:00.000Z"),
+        },
+      ],
+    };
+    // why: as above — two booking reads, the second of which must report
+    // ONGOING for the flow to continue past the status write.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    // why: the status write only has to resolve; it is not what this asserts.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+    // why: this flow issues two slice reads with different shapes — the
+    // pre-stamp scan keys on `checkedOutAt`, the departure scan on `OR`. A
+    // fully-returned slice answers BOTH, which is what creates the overlap
+    // this test pins.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation(
+      (args?: { where?: { checkedOutAt?: unknown; OR?: unknown } }) => {
+        if (args?.where?.checkedOutAt) {
+          return Promise.resolve([
+            {
+              id: "ba-qty",
+              assetId: "asset-qty",
+              quantity: 8,
+              assetKitId: "ak-1",
+            },
+          ]);
+        }
+        if (args?.where?.OR) {
+          return Promise.resolve([{ id: "ba-qty", quantity: 8 }]);
+        }
+        return Promise.resolve([]);
+      }
+    );
+    // why: the earlier progressive scan recorded 3 of this slice's 8 units, so
+    // the residue derivation sees 5 outstanding and would otherwise top up.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      { assetIds: ["asset-qty"], quantities: [3], bookingAssetIds: ["ba-qty"] },
+    ]);
+
+    await checkoutBooking(mockCheckoutParams);
+
+    const counterWrites = (
+      db.bookingAsset.updateMany as unknown as {
+        mock: {
+          calls: Array<
+            [
+              {
+                where?: { id?: { in?: string[] } };
+                data?: { checkedOutQuantity?: { increment?: number } };
+              },
+            ]
+          >;
+        };
+      }
+    ).mock.calls.filter((c) => c[0]?.data?.checkedOutQuantity !== undefined);
+
+    // Exactly one counter write, and it is the whole-slice departure.
+    expect(counterWrites).toHaveLength(1);
+    expect(counterWrites[0][0]).toEqual({
+      where: { id: { in: ["ba-qty"] } },
+      data: { checkedOutQuantity: { increment: 8 } },
     });
   });
 
@@ -12995,8 +13099,9 @@ describe("getKitIdsByBookingSlices", () => {
   });
 
   it("falls back to assetKitId for rows written before sourceKitId existed", async () => {
-    // why: the mocked delegate echoes ids back as `kit-of-<id>`, mirroring the
-    // real `assetKitId -> kitId` lookup this leg performs.
+    // why: overrides the module default, which derives a kitId from the input
+    // (`kit-of-<id>`). A fixed row instead, so the assertion names the kit this
+    // leg must resolve `ak-1` to rather than a value echoed back from the id.
     //@ts-expect-error missing vitest type
     db.assetKit.findMany.mockResolvedValue([{ id: "ak-1", kitId: "kit-9" }]);
 
@@ -13187,7 +13292,9 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
    * model-shaped mock cannot tell apart:
    *   - `where.assetId`   -> `computeBookingAssetRemaining` (asset-level booked)
    *   - `where.checkedOutAt` -> the kit gate's still-out veto read
-   *   - otherwise         -> `isBookingFullyCheckedIn`
+   *   - otherwise         -> `isBookingFullyCheckedIn`, and the post-transaction
+   *     toast read, which shares the bookingId-only shape but reads just
+   *     `assetId` and `asset.type` — the slice markers below are inert for it.
    */
   function mockSliceReads(args: { slices: any[]; stillOutNow?: any[] }) {
     (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
@@ -13236,10 +13343,21 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
         }
         // `isBookingFullyCheckedIn`: keep the booking incomplete so the test
         // exercises the progressive path rather than the COMPLETE branch.
+        //
+        // The slice markers are what make that true, so they have to be here.
+        // The helper judges dispatch per slice, and a row without
+        // `checkedOutAt` reads as never dispatched — every slice skipped, no
+        // obligation left, and the booking completes. `id` matters for the
+        // same reason: session units are attributed by slice id, so a row
+        // without one cannot be matched by a tagged checkout session either.
         return Promise.resolve(
           args.slices.map((s) => ({
+            id: s.id,
             assetId: s.assetId,
             quantity: s.quantity,
+            assetKitId: s.assetKitId,
+            checkedOutAt: s.checkedOutAt,
+            checkedInAt: s.checkedInAt,
             asset: {
               id: s.assetId,
               type: s.asset.type,
@@ -13489,9 +13607,8 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     expect.assertions(1);
 
     // Membership is gone, so only the slice's own `sourceKitId` names the kit.
-    // Green before this change and after it — the behaviour PR #2973 added,
-    // pinned inside `partialCheckinBooking` so the per-slice gate cannot
-    // quietly take it away.
+    // The per-slice release gate must still resolve it from that provenance
+    // alone: detaching a member mid-booking cannot cost the kit its release.
     const slices = [
       {
         id: "ba-detached",

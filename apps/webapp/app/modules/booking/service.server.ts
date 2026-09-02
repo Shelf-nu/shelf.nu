@@ -2724,10 +2724,23 @@ async function checkoutBookingWritesWithinTx(
       },
     });
 
+    // A slice already counted by the departure statement is skipped here.
+    // `checkoutTopUps` is derived from every stamped slice, including one that
+    // went out earlier and came back IN FULL — that slice departs again whole,
+    // so the statement above already added its entire booked quantity, and
+    // adding a residue on top would count units that never left. Only a slice
+    // still partly out reaches this loop, which is the case the residue
+    // describes. Its session row is written regardless: that row records the
+    // dispatch, while this counter records the units.
+    const departingSliceIds = new Set(
+      departingSlices.map((s: { id: string }) => s.id)
+    );
+
     // Grouped by residue for the same reason the departure statement groups by
     // quantity: `updateMany`'s `data` takes literals and cannot name a column.
     const topUpSliceIdsByResidue = new Map<number, string[]>();
     for (const topUp of checkoutTopUps) {
+      if (departingSliceIds.has(topUp.id)) continue;
       const ids = topUpSliceIdsByResidue.get(topUp.residue);
       if (ids) {
         ids.push(topUp.id);
