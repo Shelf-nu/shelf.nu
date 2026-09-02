@@ -237,6 +237,7 @@ export function AssetAttachmentUpload({
         maxSize: ASSET_ATTACHMENT_MAX_SIZE,
         maxFiles: 1,
         accept: { "application/pdf": [".pdf"] },
+        disabled,
       }}
     />
   );
