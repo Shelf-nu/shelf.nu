@@ -236,8 +236,9 @@ describe("audit service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Every requested assignee is a workspace member unless a test says otherwise.
-    mockDb.userOrganization.findMany.mockImplementation(({ where }: any) =>
-      Promise.resolve(where.userId.in.map((userId: string) => ({ userId })))
+    mockDb.userOrganization.findMany.mockImplementation(
+      ({ where }: { where: { userId: { in: string[] } } }) =>
+        Promise.resolve(where.userId.in.map((userId) => ({ userId })))
     );
     mockDb.asset.findMany.mockResolvedValue([
       { id: "asset-1", title: "Camera A" },
@@ -1822,19 +1823,20 @@ describe("audit service", () => {
     });
 
     it("carries the team over, minus anyone who has left the workspace", async () => {
-      mockDb.auditSession.findFirst.mockImplementation(({ where }: any) =>
-        Promise.resolve(
-          where.id === "audit-original"
-            ? {
-                ...originalAudit,
-                assignments: [{ userId: "user-2" }, { userId: "user-gone" }],
-              }
-            : {
-                id: "audit-copy",
-                name: "Hull PC Bank Audit (Copy)",
-                assignments: [],
-              }
-        )
+      mockDb.auditSession.findFirst.mockImplementation(
+        ({ where }: { where: { id: string } }) =>
+          Promise.resolve(
+            where.id === "audit-original"
+              ? {
+                  ...originalAudit,
+                  assignments: [{ userId: "user-2" }, { userId: "user-gone" }],
+                }
+              : {
+                  id: "audit-copy",
+                  name: "Hull PC Bank Audit (Copy)",
+                  assignments: [],
+                }
+          )
       );
       // user-gone is no longer a member of org-1.
       mockDb.userOrganization.findMany.mockResolvedValue([
