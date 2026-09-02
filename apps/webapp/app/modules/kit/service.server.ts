@@ -6137,7 +6137,17 @@ export async function updateKitAssets({
                */
               const stampable = newlyAddedAssets.flatMap((a) => {
                 const ak = akByAssetId.get(a.id);
-                return ak ? [{ assetId: a.id, assetKitId: ak.id }] : [];
+                return ak
+                  ? [
+                      {
+                        assetId: a.id,
+                        assetKitId: ak.id,
+                        // The same reading `createMany` above wrote the row
+                        // with, so the count it receives matches what it booked.
+                        quantity: ak.quantity ?? 1,
+                      },
+                    ]
+                  : [];
               });
 
               if (stampable.length > 0) {
@@ -6189,6 +6199,37 @@ export async function updateKitAssets({
                   },
                   data: { checkedOutAt: new Date(), checkedOutById: userId },
                 });
+
+                /**
+                 * Size those departures. A member joining a kit that is already
+                 * out goes out whole, so its count is its full booked quantity.
+                 *
+                 * Grouped by quantity because `updateMany`'s `data` takes
+                 * literals only and cannot name another column on the row. Same
+                 * keys as the marker above, so a slice gets a count exactly when
+                 * it got a marker — a marker without one leaves a departure
+                 * nothing can size.
+                 */
+                const assetKitIdsByQuantity = new Map<number, string[]>();
+                for (const s of stampable) {
+                  const ids = assetKitIdsByQuantity.get(s.quantity);
+                  if (ids) {
+                    ids.push(s.assetKitId);
+                  } else {
+                    assetKitIdsByQuantity.set(s.quantity, [s.assetKitId]);
+                  }
+                }
+                for (const [quantity, assetKitIds] of assetKitIdsByQuantity) {
+                  await tx.bookingAsset.updateMany({
+                    // Same two keys as the marker write above, and tenancy comes
+                    // from them the same way.
+                    where: {
+                      bookingId: { in: eligibleBookingIds },
+                      assetKitId: { in: assetKitIds },
+                    },
+                    data: { checkedOutQuantity: quantity },
+                  });
+                }
               }
             }
           }
