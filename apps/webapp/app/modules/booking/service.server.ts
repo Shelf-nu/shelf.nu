@@ -9949,7 +9949,20 @@ export async function approveBooking({
 
         return updated;
       })
-      .catch(() => null);
+      .catch((cause: unknown) => {
+        // Only "no row matched" means someone else approved first. Anything
+        // else — a lost connection, a failed note write — is a real failure and
+        // must surface as one rather than as a reassuring race message.
+        if (
+          cause &&
+          typeof cause === "object" &&
+          "code" in cause &&
+          (cause as { code?: string }).code === "P2025"
+        ) {
+          return null;
+        }
+        throw cause;
+      });
 
     if (!approvedBooking) {
       throw new ShelfError({

@@ -7399,7 +7399,7 @@ describe("approveBooking", () => {
     // each. The first commits; the guarded write then matches no row for the
     // second, which is what Prisma reports as a failed update.
     (db.booking.update as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
-      new Error("Record to update not found.")
+      Object.assign(new Error("Record to update not found."), { code: "P2025" })
     );
 
     await expect(
@@ -7413,6 +7413,25 @@ describe("approveBooking", () => {
 
     // The custodian must not be told twice that their booking was approved.
     expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not disguise a real write failure as a lost race", async () => {
+    mockApprovalContext({});
+    // Not P2025: the row is there, the write itself failed. Reporting this as
+    // "someone else approved it" would tell an admin to refresh and would hide
+    // the outage.
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      Object.assign(new Error("Connection terminated"), { code: "P1001" })
+    );
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+      })
+    ).rejects.toThrow(/something went wrong while approving/i);
   });
 
   it("refuses when the workspace does not require approval", async () => {

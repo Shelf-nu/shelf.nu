@@ -258,11 +258,28 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // stamp everything RESERVED at the moment of the switch as approved, so
         // approval only applies to requests made from this point on.
         if (requireBookingApproval) {
-          await markExistingReservationsApproved({
-            organizationId,
-            userId: authSession.userId,
-            createdBefore: approvalCutoff,
-          });
+          // The setting is already committed. A sweep failure must not report
+          // the settings update as failed, but it does leave every pre-existing
+          // reservation retro-flagged as pending, so it is logged rather than
+          // swallowed. Same handling as the auto-archive backlog below.
+          try {
+            await markExistingReservationsApproved({
+              organizationId,
+              userId: authSession.userId,
+              createdBefore: approvalCutoff,
+            });
+          } catch (cause) {
+            Logger.error(
+              new ShelfError({
+                cause,
+                message:
+                  "Booking approval was enabled, but existing reservations could not be marked approved. They will show as pending until this is re-run.",
+                additionalData: { organizationId },
+                label: "Booking Settings",
+                shouldBeCaptured: true,
+              })
+            );
+          }
         }
 
         sendNotification({
