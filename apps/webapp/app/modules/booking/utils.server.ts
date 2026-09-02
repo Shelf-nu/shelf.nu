@@ -369,7 +369,16 @@ type LifecycleAsset = {
   assetType?: AssetType;
   /** Units booked on this row (BookingAsset.quantity); QT rows only. */
   bookedQuantity?: number;
-  /** Units already checked out via PartialBookingCheckout; QT rows only. */
+  /**
+   * Units already checked out via PartialBookingCheckout; QT rows only.
+   *
+   * NOT `BookingAsset.checkedOutQuantity`, despite the matching name. This one
+   * is session-derived and counts only what scans recorded, so it reads 0 for a
+   * button checkout; the column is the stored cumulative counter every
+   * dispatch writer maintains. Passing the column here would silently change
+   * what the buckets below mean — feed `dispatchedQuantity` instead, which is
+   * the field that answers "how many units left" without qualification.
+   */
   checkedOutQuantity?: number;
   /** Units dispositioned (returned + consumed + lost + damaged); QT rows only. */
   dispositionedQuantity?: number;
@@ -393,6 +402,11 @@ type LifecycleAsset = {
    * it outranks the `checkedOutQuantity`/`sliceCheckedOut` approximations,
    * which cannot express an asset mixing button-checked-out and
    * progressively-scanned slices.
+   *
+   * Those two exist only for callers that cannot supply this one. Once every
+   * caller does, they are redundant and this becomes the single dispatch input
+   * — keep that collapse in mind rather than adding a fourth signal beside
+   * them.
    */
   dispatchedQuantity?: number;
 };

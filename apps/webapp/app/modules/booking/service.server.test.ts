@@ -3825,6 +3825,86 @@ describe("checkoutBooking", () => {
     });
   });
 
+  it("tops up checkedOutQuantity by the same residue it records as a session", async () => {
+    expect.assertions(2);
+
+    // Same shape as above: 3 of 8 units already scanned out, 5 departing now.
+    // The stored counter and the session-derived one must agree — the
+    // departure statement cannot carry this slice, because it adds a whole
+    // booked quantity while only the residue leaves here.
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-qty",
+            assetKits: [{ kitId: "kit-1" }],
+            title: "Cables",
+            type: AssetType.QUANTITY_TRACKED,
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-qty",
+          quantity: 8,
+          id: "ba-qty",
+          assetKitId: "ak-1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args?: { where?: { checkedOutAt?: unknown } }) =>
+      Promise.resolve(
+        args?.where?.checkedOutAt
+          ? [
+              {
+                id: "ba-qty",
+                assetId: "asset-qty",
+                quantity: 8,
+                assetKitId: "ak-1",
+              },
+            ]
+          : []
+      )
+    );
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      { assetIds: ["asset-qty"], quantities: [3], bookingAssetIds: ["ba-qty"] },
+    ]);
+
+    await checkoutBooking(mockCheckoutParams);
+
+    // Only the counter writes; `updateMany` also stamps the slice markers.
+    const counterWrites = (
+      db.bookingAsset.updateMany as unknown as {
+        mock: {
+          calls: Array<
+            [
+              {
+                where?: { id?: { in?: string[] } };
+                data?: { checkedOutQuantity?: { increment?: number } };
+              },
+            ]
+          >;
+        };
+      }
+    ).mock.calls.filter((c) => c[0]?.data?.checkedOutQuantity !== undefined);
+
+    expect(counterWrites).toHaveLength(1);
+    expect(counterWrites[0][0]).toEqual({
+      where: { id: { in: ["ba-qty"] } },
+      data: { checkedOutQuantity: { increment: 5 } },
+    });
+  });
+
   it("should throw error when assets have booking conflicts", async () => {
     expect.assertions(1);
 

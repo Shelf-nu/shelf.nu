@@ -2677,8 +2677,9 @@ async function checkoutBookingWritesWithinTx(
    *
    * Incremented, never assigned: the column is cumulative, so a slice on its
    * second departure adds to what its first one recorded. Only the slices read
-   * above, so a slice a progressive batch had partly sent out — still out, not
-   * yet reconciled — keeps the count that batch recorded.
+   * above — a slice a progressive batch had partly sent out is not among them,
+   * because its residue rather than its whole quantity departs now; it is
+   * topped up alongside the residue session row below.
    */
   const departingSliceIdsByQuantity = new Map<number, string[]>();
   for (const slice of departingSlices) {
@@ -2698,9 +2699,18 @@ async function checkoutBookingWritesWithinTx(
   }
 
   /**
-   * The residue of partially-scanned slices, recorded as one session row so
-   * their full obligation reads back out of session attribution (tagged per
-   * slice — no greedy ambiguity).
+   * The residue of partially-scanned slices, recorded in BOTH places that
+   * answer "how many units left", because two readers ask it differently and
+   * a residue in only one of them is a disagreement rather than a record.
+   *
+   * The session row makes the slice's full obligation read back out of session
+   * attribution (tagged per slice — no greedy ambiguity), which is what
+   * completion and the lifecycle progress derive from.
+   * `BookingAsset.checkedOutQuantity` is the stored counter every quantity
+   * surface reads, and the departure statement above cannot carry these
+   * slices: it adds a whole booked quantity, while only the residue departs
+   * here. Topping it up by the same figure keeps the stored count and the
+   * derived one equal.
    */
   if (checkoutTopUps.length > 0) {
     await tx.partialBookingCheckout.create({
@@ -2713,6 +2723,25 @@ async function checkoutBookingWritesWithinTx(
         checkoutCount: checkoutTopUps.length,
       },
     });
+
+    // Grouped by residue for the same reason the departure statement groups by
+    // quantity: `updateMany`'s `data` takes literals and cannot name a column.
+    const topUpSliceIdsByResidue = new Map<number, string[]>();
+    for (const topUp of checkoutTopUps) {
+      const ids = topUpSliceIdsByResidue.get(topUp.residue);
+      if (ids) {
+        ids.push(topUp.id);
+      } else {
+        topUpSliceIdsByResidue.set(topUp.residue, [topUp.id]);
+      }
+    }
+    for (const [residue, sliceIds] of topUpSliceIdsByResidue) {
+      await tx.bookingAsset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these ids were read above from a bookingId the caller org-checked
+        where: { id: { in: sliceIds } },
+        data: { checkedOutQuantity: { increment: residue } },
+      });
+    }
   }
 
   /**
