@@ -13269,8 +13269,10 @@ describe("isBookingFullyCheckedIn — what actually left decides completion", ()
     }
     return {
       bookingAsset: {
-        // The gate reads every slice on the booking; `computeBookingAssetRemaining`
-        // reads one asset's slices through the same method, so honour the filter.
+        // why: the slices ARE the input under test — `checkedOutQuantity` is what
+        // the gate now reads to decide what is still out. The gate reads every
+        // slice on the booking and `computeBookingAssetRemaining` reads one
+        // asset's slices through the same method, so honour the filter.
         findMany: vitest.fn().mockImplementation((q: any) =>
           Promise.resolve(
             slices
@@ -13299,8 +13301,8 @@ describe("isBookingFullyCheckedIn — what actually left decides completion", ()
           })
         ),
       },
-      // why: `computeBookingAssetRemaining` derives "already checked in" from
-      // the disposition sum, which is the only part of it this gate consumes.
+      // why: dispositions are how the gate learns what came back; this models
+      // the returned half of each slice.
       consumptionLog: {
         aggregate: vitest.fn().mockImplementation((q: any) =>
           Promise.resolve({
@@ -13309,6 +13311,9 @@ describe("isBookingFullyCheckedIn — what actually left decides completion", ()
         ),
       },
       partialBookingCheckin: {
+        // why: the INDIVIDUAL branch gates on membership of a check-in session,
+        // so a scanned-back individual asset must not block the assertions about
+        // quantity-tracked slices.
         findMany: vitest
           .fn()
           .mockResolvedValue(
@@ -13316,6 +13321,9 @@ describe("isBookingFullyCheckedIn — what actually left decides completion", ()
           ),
       },
       partialBookingCheckout: {
+        // why: one session row is what flips the booking onto the progressive
+        // path. It is the trigger for this whole defect, so the tests have to
+        // control it explicitly rather than inherit a default.
         findMany: vitest.fn().mockResolvedValue(
           sessionAssetIds.length
             ? [
@@ -13388,6 +13396,24 @@ describe("isBookingFullyCheckedIn — what actually left decides completion", ()
     );
 
     expect(complete).toBe(true);
+  });
+
+  it("holds the booking open for a second departure after a full return", async () => {
+    // `checkedOutQuantity` is cumulative, so a slice booked at 10 that went out,
+    // came back in full and went out again records 20 dispatched against 10
+    // returned. Capping either side at the booked quantity hides that second
+    // departure and closes the booking over 10 units that are in the field.
+    const complete = await isBookingFullyCheckedIn(
+      gateTx(
+        [{ assetId: "asset-qt", quantity: 10, dispatched: 20, returned: 10 }],
+        ["asset-qt"]
+      ) as never,
+      "booking-1"
+    );
+
+    expect(complete, "the second dispatch of 10 units has not come back").toBe(
+      false
+    );
   });
 
   it("ignores a slice that never left the warehouse", async () => {

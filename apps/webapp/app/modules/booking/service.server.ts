@@ -4395,24 +4395,29 @@ export async function isBookingFullyCheckedIn(
       continue;
     }
 
-    // `computeBookingAssetRemaining` returns `booked − logged` clamped at 0.
-    // The "logged" half is what we actually care about (units already checked
-    // in); recover it via `booked - remaining` where `booked` sums every slice
-    // of the same asset. Cap by `checkedOutUnits` so units that never left the
-    // warehouse don't block COMPLETE, and by `booked` so a slice dispatched
-    // more than once is never owed more than it reserved.
-    const [bookedSum, remaining] = await Promise.all([
-      tx.bookingAsset.aggregate({
-        where: { bookingId, assetId: ba.assetId },
-        _sum: { quantity: true },
-      }),
-      computeBookingAssetRemaining(tx, bookingId, ba.assetId),
-    ]);
-    const booked =
-      (bookedSum as { _sum: { quantity: number | null } })._sum.quantity ?? 0;
-    const checkedInUnits = Math.max(0, booked - remaining);
-    const obligatedUnits = Math.min(checkedOutUnits, booked);
-    if (obligatedUnits - checkedInUnits > 0) return false;
+    // Outstanding = cumulative dispatched − cumulative reconciled, and neither
+    // half may be capped at the booked quantity. `checkedOutQuantity` counts
+    // every departure, so a slice sent out, fully returned and sent out again
+    // reads above what it booked; clamping either side to `booked` makes that
+    // second departure invisible and lets the booking close over it.
+    //
+    // The disposition sum is read directly rather than through
+    // `computeBookingAssetRemaining`, whose `Math.max(0, …)` return value
+    // saturates for exactly that case. `ConsumptionLog` is keyed by
+    // (bookingId, assetId) with no per-slice attribution, so this aggregate
+    // already covers every slice of the asset on this booking — which is the
+    // grain `checkedOutUnits` is summed at too.
+    const loggedSum = await tx.consumptionLog.aggregate({
+      where: {
+        assetId: ba.assetId,
+        bookingId,
+        category: { in: CHECKIN_DISPOSITION_CATEGORIES },
+      },
+      _sum: { quantity: true },
+    });
+    const reconciledUnits =
+      (loggedSum as { _sum: { quantity: number | null } })._sum.quantity ?? 0;
+    if (checkedOutUnits - reconciledUnits > 0) return false;
   }
 
   return true;
