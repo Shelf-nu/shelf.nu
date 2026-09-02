@@ -15,11 +15,14 @@ import AuditTeamMemberSelector from "./audit-team-member-selector";
  * @see {@link file://./audit-team-member-selector.tsx}
  */
 
+// why: the picker fetches /api/audits/team-members on mount; the stub feeds a
+// fixed member list and lets one test simulate the still-loading state.
 const mockUseApiQuery = vi.fn();
 vi.mock("~/hooks/use-api-query", () => ({
   default: (...args: unknown[]) => mockUseApiQuery(...args),
 }));
 
+// why: "Assign to self" needs a current user; there is no root loader here.
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),
 }));

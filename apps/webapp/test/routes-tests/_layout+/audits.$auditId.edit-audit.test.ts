@@ -27,6 +27,9 @@ import { requirePermission } from "~/utils/roles.server";
 
 // @vitest-environment node
 
+// why: these tests assert the route's wiring (parsing, guards, who gets
+// emailed), not the set diff itself, which service.server.test.ts covers; the
+// real service would also open a database transaction.
 vi.mock("~/modules/audit/service.server", () => ({
   updateAuditSession: vi.fn(),
   cancelAuditSession: vi.fn(),
@@ -36,14 +39,20 @@ vi.mock("~/modules/audit/service.server", () => ({
   getAuditSessionDetails: vi.fn(),
 }));
 
+// why: the fan-out loads the audit from the DB and sends real mail; a stub
+// lets the tests assert exactly which user ids are handed to it.
 vi.mock("~/modules/audit/assignment-emails.server", () => ({
   sendAuditAssignedEmails: vi.fn(),
 }));
 
+// why: the route imports the completion helper for a different intent; the
+// stub keeps its storage and image imports out of the node test graph.
 vi.mock("~/modules/audit/complete-audit-with-images.server", () => ({
   completeAuditWithImages: vi.fn(),
 }));
 
+// why: permission resolution is driven per test (admin vs BASE) without a
+// session or database.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
