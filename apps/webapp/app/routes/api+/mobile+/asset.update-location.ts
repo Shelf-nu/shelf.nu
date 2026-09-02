@@ -11,7 +11,8 @@ import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createNote } from "~/modules/note/service.server";
-import { makeShelfError } from "~/utils/error";
+import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
@@ -21,8 +22,19 @@ import {
 /**
  * POST /api/mobile/asset/update-location
  *
- * Updates the location of a single asset.
- * Body: { assetId: string, locationId: string }
+ * Updates the location of a single asset. Mobile twin of the web's
+ * asset-overview "Update location" dialog
+ * (`_layout+/assets.$assetId.overview.update-location.tsx`): the write is a
+ * pivot replace — every manual `AssetLocation` row is cleared and at most one
+ * new row is created at the requested location.
+ *
+ * Body: { assetId: string, locationId: string, quantity?: number }
+ *
+ * `quantity` is the per-placement `AssetLocation.quantity` for a
+ * QUANTITY_TRACKED asset (units to place at the location — NOT a change to
+ * `Asset.quantity`, the workspace stock). Omitted → the full pool is placed.
+ * Units left over stay in the unplaced pool, exactly like the web dialog.
+ * INDIVIDUAL assets ignore it (their single placement is always quantity 1).
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
@@ -36,10 +48,11 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { assetId, locationId } = await parseMobileBody(
+    const { assetId, locationId, quantity } = await parseMobileBody(
       z.object({
         assetId: z.string().min(1),
         locationId: z.string().min(1),
+        quantity: z.number().int().positive().optional(),
       }),
       request,
       "Assets"
@@ -53,8 +66,12 @@ export async function action({ request }: ActionFunctionArgs) {
         title: true,
         type: true,
         quantity: true,
+        unitOfMeasure: true,
         assetLocations: {
-          select: { location: { select: { id: true, name: true } } },
+          select: {
+            quantity: true,
+            location: { select: { id: true, name: true } },
+          },
         },
         assetKits: {
           select: { kit: { select: { id: true, name: true } } },
@@ -92,14 +109,30 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // why: short-circuit when the requested location matches the asset's
-    // current primary placement. Without this guard the route would write a
-    // no-op pivot replace, an `ASSET_LOCATION_CHANGED` event whose
-    // `fromValue === toValue`, and a misleading "updated the location from
-    // X to X" note. Mirrors the singular/bulk parity rule in
-    // `.claude/rules/bulk-event-parity.md`.
+    // why: short-circuit when the write would not change anything — same
+    // primary location, no other placements the replace would collapse, and
+    // (for QUANTITY_TRACKED) the same per-row quantity as already placed
+    // there. Without this guard the route would write a no-op pivot replace,
+    // an `ASSET_LOCATION_CHANGED` event whose `fromValue === toValue`, and a
+    // misleading "updated the location from X to X" note. Mirrors the
+    // singular/bulk parity rule in `.claude/rules/bulk-event-parity.md`.
+    // Same location with a DIFFERENT quantity falls through: re-placing a
+    // different amount at the current location is a real placement edit,
+    // exactly as the web dialog treats it.
     const currentPrimaryLocation = getPrimaryLocation(asset);
-    if (currentPrimaryLocation?.id === location.id) {
+    const currentPrimaryQuantity =
+      asset.assetLocations.find(
+        (al) => al.location?.id === currentPrimaryLocation?.id
+      )?.quantity ?? null;
+    const quantityUnchanged =
+      !isQuantityTracked(asset) ||
+      quantity == null ||
+      quantity === currentPrimaryQuantity;
+    if (
+      currentPrimaryLocation?.id === location.id &&
+      asset.assetLocations.length === 1 &&
+      quantityUnchanged
+    ) {
       return data({
         asset: {
           id: asset.id,
@@ -109,74 +142,114 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // Setting a single primary location is a pivot replace: wipe any
-    // existing AssetLocation rows then create the new link.
-    // QUANTITY_TRACKED assets place their full quantity at the location;
-    // INDIVIDUAL assets are always quantity 1. The ASSET_LOCATION_CHANGED
-    // activity event is recorded atomically so reports + activity-event
-    // aggregations include mobile-initiated location changes.
-    const updatedAsset = await db.$transaction(async (tx) => {
-      /**
-       * Row-lock the asset before writing the pivot, the same lock every
-       * stock-lowering path takes. This write RAISES the manual
-       * `AssetLocation` sum for a QUANTITY_TRACKED asset, and
-       * `enforce_asset_location_sum_within_total` validating at COMMIT only
-       * covers one interleaving: a concurrent consume can read the
-       * pre-placement rows, conclude they fit under the reduced total, and
-       * commit an `Asset` write that fires no location trigger at all.
-       *
-       * Locking also makes `quantity` trustworthy — the pre-transaction read
-       * above can be stale by the time the row is written, which would place
-       * more units than the asset owns.
-       */
-      const locked = await lockAssetForQuantityUpdate(
-        tx,
-        assetId,
-        organizationId
-      );
-      const pivotQuantity =
-        isQuantityTracked(locked) && locked.quantity != null
-          ? locked.quantity
-          : 1;
-
-      await tx.assetLocation.deleteMany({ where: { assetId } });
-      await tx.assetLocation.create({
-        data: { assetId, locationId, organizationId, quantity: pivotQuantity },
-      });
-
-      await recordEvent(
-        {
-          organizationId,
-          actorUserId: user.id,
-          action: "ASSET_LOCATION_CHANGED",
-          entityType: "ASSET",
-          entityId: assetId,
+    // Setting a single primary location is a pivot replace: wipe the manual
+    // AssetLocation rows then create the new link. QUANTITY_TRACKED assets
+    // place the requested `quantity` (or their full pool when omitted) at
+    // the location; INDIVIDUAL assets are always quantity 1. The
+    // ASSET_LOCATION_CHANGED activity event is recorded atomically so
+    // reports + activity-event aggregations include mobile-initiated
+    // location changes.
+    const { refreshedAsset, placedQuantity } = await db.$transaction(
+      async (tx) => {
+        /**
+         * Row-lock the asset before writing the pivot, the same lock every
+         * stock-lowering path takes. This write RAISES the manual
+         * `AssetLocation` sum for a QUANTITY_TRACKED asset, and
+         * `enforce_asset_location_sum_within_total` validating at COMMIT only
+         * covers one interleaving: a concurrent consume can read the
+         * pre-placement rows, conclude they fit under the reduced total, and
+         * commit an `Asset` write that fires no location trigger at all.
+         *
+         * Locking also makes `quantity` trustworthy — the pre-transaction read
+         * above can be stale by the time the row is written, which would place
+         * more units than the asset owns.
+         */
+        const locked = await lockAssetForQuantityUpdate(
+          tx,
           assetId,
-          locationId: location.id,
-          field: "locationId",
-          fromValue: currentPrimaryLocation?.id ?? null,
-          toValue: location.id,
-        },
-        tx
-      );
+          organizationId
+        );
 
-      return tx.asset.findUniqueOrThrow({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` already org-verified by the `db.asset.findUnique({ where: { id, organizationId } })` guard at the top of this action; this is the in-tx re-read
-        where: { id: assetId },
-        select: {
-          id: true,
-          title: true,
-          assetLocations: {
-            select: { location: { select: { id: true, name: true } } },
+        // Per-placement bound: the requested units must fit the asset's
+        // total pool (measured on the locked row, mirroring the web
+        // service's in-transaction check in `updateAsset`).
+        const isQty = isQuantityTracked(locked);
+        if (isQty && quantity != null && quantity > (locked.quantity ?? 0)) {
+          throw new ShelfError({
+            cause: null,
+            title: "Quantity exceeds available pool",
+            message: `Requested ${quantity} but the asset has only ${
+              locked.quantity ?? 0
+            } units total.`,
+            additionalData: {
+              assetId,
+              organizationId,
+              quantity,
+              totalQuantity: locked.quantity,
+            },
+            label: "Assets",
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+
+        const pivotQuantity = isQty ? quantity ?? locked.quantity ?? 1 : 1;
+
+        // Clear MANUAL placements only — kit-driven rows
+        // (`assetKitId IS NOT NULL`) are owned by the kit's flow. The kit
+        // guard above rejects kit members outright, so this filter mirrors
+        // the web service's pivot write rather than changing behavior.
+        await tx.assetLocation.deleteMany({
+          where: { assetId, assetKitId: null },
+        });
+        await tx.assetLocation.create({
+          data: {
+            assetId,
+            locationId,
+            organizationId,
+            quantity: pivotQuantity,
           },
-        },
-      });
-    });
+        });
 
-    const { assetLocations: _, ...updatedAssetRest } = updatedAsset;
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: user.id,
+            action: "ASSET_LOCATION_CHANGED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            locationId: location.id,
+            field: "locationId",
+            fromValue: currentPrimaryLocation?.id ?? null,
+            toValue: location.id,
+            // Qty-tracked: the per-row AssetLocation.quantity placed at the
+            // location. No-op for INDIVIDUAL.
+            meta: assetQtyMeta(locked, pivotQuantity),
+          },
+          tx
+        );
+
+        const refreshed = await tx.asset.findUniqueOrThrow({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` already org-verified by the `db.asset.findUnique({ where: { id, organizationId } })` guard at the top of this action; this is the in-tx re-read
+          where: { id: assetId },
+          select: {
+            id: true,
+            title: true,
+            assetLocations: {
+              select: { location: { select: { id: true, name: true } } },
+            },
+          },
+        });
+
+        return { refreshedAsset: refreshed, placedQuantity: pivotQuantity };
+      }
+    );
+
+    const { assetLocations: _, ...updatedAssetRest } = refreshedAsset;
     const updatedAssetWithLocation = {
       ...updatedAssetRest,
-      location: getPrimaryLocation(updatedAsset),
+      location: getPrimaryLocation(refreshedAsset),
     };
 
     // Create activity note (matches webapp format)
@@ -194,15 +267,24 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const previousLocation = getPrimaryLocation(asset);
 
+    // Qty-tracked placements name the unit count the way the web note does
+    // ("moved 4 pcs from X to Y."); INDIVIDUAL keeps the original phrasing
+    // (`formatUnitCount` returns null for it).
+    const unitCount = formatUnitCount(asset, placedQuantity);
+
     let noteContent: string;
     if (previousLocation) {
       const currentLocationLink = wrapLinkForNote(
         `/locations/${previousLocation.id}`,
         previousLocation.name.trim()
       );
-      noteContent = `${actor} updated the location from ${currentLocationLink} to ${newLocationLink} via mobile app.`;
+      noteContent = unitCount
+        ? `${actor} moved ${unitCount} from ${currentLocationLink} to ${newLocationLink} via mobile app.`
+        : `${actor} updated the location from ${currentLocationLink} to ${newLocationLink} via mobile app.`;
     } else {
-      noteContent = `${actor} set the location to ${newLocationLink} via mobile app.`;
+      noteContent = unitCount
+        ? `${actor} placed ${unitCount} at ${newLocationLink} via mobile app.`
+        : `${actor} set the location to ${newLocationLink} via mobile app.`;
     }
 
     await createNote({
@@ -213,7 +295,13 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
     });
 
-    return data({ asset: updatedAssetWithLocation });
+    return data({
+      asset: updatedAssetWithLocation,
+      // Additive: the per-row AssetLocation.quantity now placed at the
+      // location (1 for INDIVIDUAL) so the app can confirm the partial
+      // placement without a second round trip.
+      placedQuantity,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
     return data(
