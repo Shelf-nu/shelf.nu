@@ -2112,13 +2112,6 @@ export async function updateAsset({
       });
     }
 
-    /**
-     * The model being linked, when one is. Stays null on the unlink path and
-     * when the field is absent, which the note builder reads as "removed" and
-     * "no change" respectively.
-     */
-    let linkedAssetModel: { id: string; name: string } | null = null;
-
     /** If assetModelId is null, disconnect the asset model */
     if (assetModelId === null) {
       Object.assign(data, {
@@ -2134,9 +2127,7 @@ export async function updateAsset({
       // / r3350881506). Runs before the type-check below so a
       // cross-org id is rejected with the "not in your workspace"
       // 404 instead of leaking a "not allowed for qty-tracked" 400.
-      // Returns the row it had to fetch anyway, so the change note can name
-      // the model without a second round trip.
-      linkedAssetModel = await assertAssetModelBelongsToOrg({
+      await assertAssetModelBelongsToOrg({
         assetModelId,
         organizationId,
       });
@@ -2566,6 +2557,10 @@ export async function updateAsset({
           tags: true,
           category: true,
           organization: true,
+          // Carried so the model change note can compare the row before
+          // against the row after. Deriving the "after" from the request
+          // payload instead would read an absent field as a removal.
+          assetModel: { select: { id: true, name: true } },
         },
       });
 
@@ -2646,6 +2641,7 @@ export async function updateAsset({
               tags: true,
               category: true,
               organization: true,
+              assetModel: { select: { id: true, name: true } },
             },
           })
         : updated;
@@ -2904,7 +2900,7 @@ export async function updateAsset({
           organizationId,
           userId,
           previousModel: assetBeforeUpdate.assetModel,
-          newModel: linkedAssetModel,
+          newModel: asset.assetModel,
           loadUserForNotes,
         }),
         createAssetCategoryChangeNote({
@@ -7077,12 +7073,19 @@ export type BulkUpdateAssetModelResult = {
  *   Those are create-time conveniences (see `bulkCreateAssetsFromModel`);
  *   retro-applying them here would silently overwrite curated data on assets
  *   that already exist.
- * - No activity events and no notes are written. `ActivityAction` has no
- *   ASSET_MODEL action and the singular `updateAsset` path writes neither, so
- *   staying silent is what `.claude/rules/bulk-event-parity.md` requires:
- *   bulk must emit exactly what singular emits. Adding the event properly
- *   needs an additive enum migration plus the singular call site plus the
- *   model-delete SetNull cascade, which is its own change.
+ * - One `ASSET_MODEL_CHANGED` event and one note per asset that actually
+ *   changed, matching what the singular `updateAsset` path emits, as
+ *   `.claude/rules/bulk-event-parity.md` requires. Both are written inside the
+ *   transaction that makes the change: a note written after the commit can
+ *   fail while the change is already durable, and the retry finds the asset on
+ *   the target model and skips it, so that note could never be recreated. The
+ *   notes are grouped by the model being left, since that is the only part of
+ *   the sentence that varies, which keeps a large batch to a handful of
+ *   statements.
+ * - The rows are re-read inside the transaction and the events, notes and
+ *   returned counts all come from that read, not from the read taken before
+ *   it opened. Eligibility is re-checked there too, so an asset converted to
+ *   quantity-tracked in between is not linked past the guard meant to stop it.
  *
  * @param params.assetIds - Selected asset ids, possibly `[ALL_SELECTED_KEY]`
  * @param params.assetModelId - Target model, or `null`/`""` to remove the link

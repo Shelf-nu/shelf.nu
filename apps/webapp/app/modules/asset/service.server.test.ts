@@ -2009,10 +2009,68 @@ describe("updateAsset asset-model activity", () => {
       id: "asset-1",
       title: "Asset 1",
       assetModelId: "model-1",
+      // The real query includes this relation. The note reads the committed
+      // row rather than the request payload, so a stub without it would let a
+      // regression through.
+      assetModel: { id: "model-1", name: "Stream Deck XL" },
       category: null,
       tags: [],
       customFields: [],
     });
+  });
+
+  it("does not claim the model was removed when the field is absent", async () => {
+    // The inline description edit on the asset overview sends no assetModelId
+    // at all. Deriving the note's "after" value from the payload made absence
+    // look like a removal, so editing a description wrote "removed the asset
+    // model X" on an asset that still had it — the activity log lying, which
+    // is worse than the untracked field this PR set out to fix.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: any) => {
+        if (q?.select?.assetKits) return Promise.resolve({ assetKits: [] });
+        if (q?.select?.type) return Promise.resolve({ type: "INDIVIDUAL" });
+        return Promise.resolve({
+          id: "asset-1",
+          title: "Asset 1",
+          description: "before",
+          valuation: null,
+          category: null,
+          tags: [],
+          // The asset already holds a model, like the customer's did.
+          assetModel: { id: "model-1", name: "Stream Deck XL" },
+          organization: { currency: "USD" },
+        });
+      }
+    );
+
+    await updateAsset({
+      id: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      description: "after",
+      request: new Request("http://localhost/assets/asset-1/edit"),
+    } as never);
+
+    // Same model either side, so the builder returns null and no note is
+    // written. Asserting the arguments rather than the absence of a call,
+    // because the helper is always invoked and decides for itself.
+    const call = (
+      createAssetModelChangeNote as ReturnType<typeof vitest.fn>
+    ).mock.calls.at(-1)?.[0];
+    expect(call.previousModel).toEqual({
+      id: "model-1",
+      name: "Stream Deck XL",
+    });
+    expect(call.newModel).toEqual({ id: "model-1", name: "Stream Deck XL" });
+    // And no event either: the model did not change.
+    expect(
+      recordEvents as ReturnType<typeof vitest.fn>
+    ).not.toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "ASSET_MODEL_CHANGED" }),
+      ]),
+      expect.anything()
+    );
   });
 
   it("writes a note as well as an event, because the Activity tab renders notes", async () => {
