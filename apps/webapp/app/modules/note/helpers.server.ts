@@ -6,6 +6,7 @@ import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapCategoryForNote,
   wrapDescriptionForNote,
+  wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 
@@ -101,6 +102,57 @@ export function buildNameChangeNote({
   return `${userLink} updated the asset name from ${formatName(
     normalizedPrevious
   )} to ${formatName(normalizedNext)}.`;
+}
+
+/**
+ * Note content for an asset's model being set, changed, or cleared.
+ *
+ * Returns `null` when nothing actually changed, so a caller can pass the before
+ * and after unconditionally and get no note for a no-op.
+ *
+ * The model name is rendered through {@link wrapLinkForNote}, which escapes it
+ * into a quoted Markdoc attribute. Model names are user-authored and would
+ * otherwise be a stored-XSS splice, per
+ * `.claude/rules/sanitize-note-content-markdoc.md`.
+ *
+ * @param args.userLink - Rendered link to the acting user.
+ * @param args.previous - The model before the change, if any.
+ * @param args.next - The model after the change, if any.
+ * @returns Markdoc note content, or `null` when there is nothing to record.
+ */
+export function buildAssetModelChangeNote({
+  userLink,
+  previous,
+  next,
+}: {
+  userLink: string;
+  previous?: { id: string; name: string } | null;
+  next?: { id: string; name: string } | null;
+}) {
+  const hasPrevious = previous != null;
+  const hasNext = next != null;
+
+  if (!hasPrevious && !hasNext) {
+    return null;
+  }
+  if (hasPrevious && hasNext && previous.id === next.id) {
+    return null;
+  }
+
+  const formattedPrevious = hasPrevious
+    ? wrapLinkForNote(`/settings/asset-models/${previous.id}`, previous.name)
+    : null;
+  const formattedNext = hasNext
+    ? wrapLinkForNote(`/settings/asset-models/${next.id}`, next.name)
+    : null;
+
+  if (hasPrevious && hasNext) {
+    return `${userLink} changed the asset model from ${formattedPrevious} to ${formattedNext}.`;
+  }
+  if (hasNext) {
+    return `${userLink} set the asset model to ${formattedNext}.`;
+  }
+  return `${userLink} removed the asset model ${formattedPrevious}.`;
 }
 
 /**

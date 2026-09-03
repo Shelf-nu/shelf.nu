@@ -199,6 +199,7 @@ import { createKitsIfNotExists } from "../kit/service.server";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
   createAssetCategoryChangeNote,
+  createAssetModelChangeNote,
   createAssetDescriptionChangeNote,
   createAssetNameChangeNote,
   createAssetQuantityChangeNote,
@@ -215,6 +216,8 @@ const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
   title: true,
   description: true,
   preferredBarcodeId: true,
+  // The model the asset is leaving, so a change note can name both sides.
+  assetModel: { select: { id: true, name: true } },
   category: {
     select: {
       id: true,
@@ -2042,7 +2045,8 @@ export async function updateAsset({
         typeof minQuantity !== "undefined" ||
         typeof consumptionType !== "undefined" ||
         typeof unitOfMeasure !== "undefined" ||
-        typeof preferredBarcodeId !== "undefined"
+        typeof preferredBarcodeId !== "undefined" ||
+        typeof assetModelId !== "undefined"
     );
 
     const assetBeforeUpdate = await fetchAssetBeforeUpdate({
@@ -2968,6 +2972,23 @@ export async function updateAsset({
           field: "categoryId",
           fromValue: assetBeforeUpdate.category?.id ?? null,
           toValue: asset.category?.id ?? null,
+        });
+      }
+      if (
+        typeof assetModelId !== "undefined" &&
+        (assetBeforeUpdate.assetModel?.id ?? null) !==
+          (asset.assetModelId ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_MODEL_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "assetModelId",
+          fromValue: assetBeforeUpdate.assetModel?.id ?? null,
+          toValue: asset.assetModelId ?? null,
         });
       }
       if (
@@ -7112,7 +7133,14 @@ export async function bulkUpdateAssetModel({
      */
     const assetsBeforeUpdate = await db.asset.findMany({
       where: { id: { in: resolvedIds }, organizationId },
-      select: { id: true, type: true, assetModelId: true },
+      select: {
+        id: true,
+        type: true,
+        assetModelId: true,
+        // The note names the model an asset is leaving, not just the one it
+        // joins, so a reader can see what the change actually replaced.
+        assetModel: { select: { id: true, name: true } },
+      },
     });
 
     const individuals = assetsBeforeUpdate.filter(
@@ -7154,13 +7182,54 @@ export async function bulkUpdateAssetModel({
       : 0;
 
     if (assetsThatChange.length > 0) {
-      await db.asset.updateMany({
-        where: {
-          id: { in: assetsThatChange.map((asset) => asset.id) },
-          organizationId,
-        },
-        data: { assetModelId: newAssetModelId },
+      await db.$transaction(async (tx) => {
+        await tx.asset.updateMany({
+          where: {
+            id: { in: assetsThatChange.map((asset) => asset.id) },
+            organizationId,
+          },
+          data: { assetModelId: newAssetModelId },
+        });
+
+        // One event per asset that actually changed, in the same transaction as
+        // the write. A bulk model change has to leave the same trail its
+        // singular counterpart does, or the activity log reports a different
+        // history depending on which button the user pressed.
+        await recordEvents(
+          assetsThatChange.map((asset) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_MODEL_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: asset.id,
+            assetId: asset.id,
+            field: "assetModelId",
+            fromValue: asset.assetModelId ?? null,
+            toValue: newAssetModelId,
+          })),
+          tx
+        );
       });
+
+      // Notes sit outside the transaction, matching the singular flow: they are
+      // a readable trail, and the structured event above is the one reports
+      // depend on.
+      const loadUserForNotes = createLoadUserForNotes(userId);
+      await Promise.all(
+        assetsThatChange.map((asset) =>
+          createAssetModelChangeNote({
+            assetId: asset.id,
+            userId,
+            organizationId,
+            previousModel: asset.assetModel,
+            newModel:
+              newAssetModelId && modelName
+                ? { id: newAssetModelId, name: modelName }
+                : null,
+            loadUserForNotes,
+          })
+        )
+      );
     }
 
     return {

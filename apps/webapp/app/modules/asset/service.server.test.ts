@@ -297,6 +297,7 @@ vitest.mock("~/modules/user/service.server", () => ({
 vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
   createAssetCategoryChangeNote: vitest.fn().mockResolvedValue({}),
+  createAssetModelChangeNote: vitest.fn().mockResolvedValue({}),
   createAssetDescriptionChangeNote: vitest.fn().mockResolvedValue({}),
   createAssetNameChangeNote: vitest.fn().mockResolvedValue({}),
   createAssetQuantityChangeNote: vitest.fn().mockResolvedValue({}),
@@ -3320,6 +3321,52 @@ describe("bulkUpdateAssetModel", () => {
       id: "model-1",
       name: "Panasonic PT-VZ580",
     });
+  });
+
+  it("records the model change in the activity log, per asset that changed", async () => {
+    // Model changes were the one asset field that wrote no event and no note.
+    // A bulk change has to leave the same trail the singular edit does, or the
+    // history reads differently depending on which button was pressed — and a
+    // customer who cannot see who linked their asset concludes the log is
+    // unreliable, not that one field is untracked.
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-1",
+        type: "INDIVIDUAL",
+        assetModelId: null,
+        assetModel: null,
+      },
+      {
+        id: "asset-2",
+        type: "INDIVIDUAL",
+        assetModelId: "model-1",
+        assetModel: { id: "model-1", name: "Panasonic PT-VZ580" },
+      },
+    ]);
+
+    await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings shape not relevant, only pass-through is
+      settings: { mode: "SIMPLE" },
+    });
+
+    // asset-2 already points at model-1, so only asset-1 changed.
+    expect(recordEvents as ReturnType<typeof vitest.fn>).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_MODEL_CHANGED",
+          assetId: "asset-1",
+          field: "assetModelId",
+          fromValue: null,
+          toValue: "model-1",
+        }),
+      ],
+      expect.anything()
+    );
   });
 
   it("links the individually tracked assets and skips quantity-tracked ones", async () => {
