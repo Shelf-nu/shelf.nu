@@ -1,3 +1,4 @@
+import type { OrganizationRoles } from "@prisma/client";
 import { loader } from "~/routes/api+/mobile+/bookings.calendar";
 import { createLoaderArgs } from "@mocks/remix";
 
@@ -85,6 +86,7 @@ import {
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -119,7 +121,9 @@ describe("GET /api/mobile/bookings/calendar", () => {
     (requireMobileAuth as any).mockResolvedValue({ user: { id: "user-1" } });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
-    (getMobileUserContext as any).mockResolvedValue({ roles: ["ADMIN"] });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"] })
+    );
     mockDb.booking.findMany.mockResolvedValue([]);
     mockDb.booking.count.mockResolvedValue(0);
     mockDb.booking.findFirst.mockResolvedValue(null);
@@ -237,9 +241,9 @@ describe("GET /api/mobile/bookings/calendar", () => {
 
   describe("who can see what", () => {
     it("scopes a SELF_SERVICE user through the shared custodian clause", async () => {
-      (getMobileUserContext as any).mockResolvedValue({
-        roles: ["SELF_SERVICE"],
-      });
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: ["SELF_SERVICE"] })
+      );
 
       await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
 
@@ -260,12 +264,43 @@ describe("GET /api/mobile/bookings/calendar", () => {
     });
 
     it("scopes a BASE user the same way", async () => {
-      (getMobileUserContext as any).mockResolvedValue({ roles: ["BASE"] });
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: ["BASE"] })
+      );
 
       await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
 
       expect(custodianScopeClause).toHaveBeenCalled();
       expect(lastWhere().AND).toContainEqual({ __custodianClause: true });
+    });
+
+    it.each([["SELF_SERVICE"], ["BASE"]])(
+      "stops scoping a %s user once the workspace override is on",
+      async (role) => {
+        // The list lens on this same screen must answer identically: one lens
+        // showing a booking the other denies is the failure this guards.
+        (getMobileUserContext as any).mockResolvedValue(
+          mobileUserContext({
+            roles: [role as OrganizationRoles],
+            canSeeAllBookings: true,
+          })
+        );
+
+        await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
+
+        expect(resolveCustodianScope).not.toHaveBeenCalled();
+        expect(lastWhere().AND).not.toContainEqual({ __custodianClause: true });
+      }
+    );
+
+    it("keeps drafts private even when the override is on", async () => {
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: ["BASE"], canSeeAllBookings: true })
+      );
+
+      await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
+
+      expect(lastWhere().AND).toContainEqual({ __draftClause: true });
     });
 
     it("does not narrow an ADMIN to their own bookings", async () => {
@@ -294,9 +329,9 @@ describe("GET /api/mobile/bookings/calendar", () => {
       // membership stored `[SELF_SERVICE, ADMIN]` narrowed a genuine admin to
       // bookings they are custodian of - their colleagues' bookings vanished
       // from the grid while the list lens still showed them.
-      (getMobileUserContext as any).mockResolvedValue({
-        roles: ["SELF_SERVICE", "ADMIN"],
-      });
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
+      );
 
       await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));
 

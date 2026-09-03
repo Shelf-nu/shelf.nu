@@ -1,4 +1,4 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -11,7 +11,6 @@ import {
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
-import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { resolveUserDisplayName } from "~/utils/user";
 
@@ -77,23 +76,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ];
     }
 
-    // Scope to the caller's own bookings for self-service / base users, who
-    // can only see the bookings they are the custodian of (web parity — see
-    // getBookings' `isSelfServiceOrBase` branch). Owners/admins see all. This
-    // matters especially now that DRAFT bookings appear in the default view.
     /**
-     * Resolved from `roles`, not from the context's `role`, which is `roles[0]`
-     * and wrong for any privilege decision: a membership stored
-     * `[SELF_SERVICE, ADMIN]` resolves to SELF_SERVICE there, so a genuine admin
-     * was narrowed to their own bookings. The calendar lens must reach the same
-     * verdict from the same membership, or the two lenses on this screen
-     * disagree about what exists.
+     * Two independent questions, two independent workspace overrides.
+     *
+     * `canSeeAllBookings` decides WHICH ROWS exist for this caller: ADMIN and
+     * OWNER see every booking, SELF_SERVICE and BASE see only their own unless
+     * the workspace has switched their override on. Resolve it here, never
+     * from the role alone - the role does not know what the workspace decided.
+     *
+     * `canSeeAllCustody` decides whether the custodian's NAME may be shown on
+     * a row that already exists. A workspace may grant either without the
+     * other, so never let one stand in for the other.
      */
-    const { roles } = await getMobileUserContext(user.id, organizationId);
-    const role = resolveMostPrivilegedRole(roles);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    const { canSeeAllBookings, canSeeAllCustody } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     /**
      * Custodian scope (web parity). Web matches a self-service or base user's
@@ -103,9 +101,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
      * a TEAM MEMBER rather than a user was visible on the website and missing
      * from the phone, for the very user it belonged to.
      */
-    const custodianScope = isSelfServiceOrBase
-      ? await resolveCustodianScope({ userId: user.id, organizationId })
-      : null;
+    const custodianScope = canSeeAllBookings
+      ? null
+      : await resolveCustodianScope({ userId: user.id, organizationId });
 
     const where = {
       organizationId,
@@ -141,6 +139,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : {}),
     };
 
+    /**
+     * The custodian chip is visible when the workspace grants custody
+     * visibility, or when the custodian IS the caller through either custody
+     * link. Web decides it with `userCanViewSpecificCustody`; keep the two in
+     * step, or the same booking names its holder on one platform and not the
+     * other.
+     */
+    const canSeeCustodianOf = (booking: {
+      custodianUser: { id: string } | null;
+      custodianTeamMember: { userId: string | null } | null;
+    }) =>
+      canSeeAllCustody ||
+      booking.custodianUser?.id === user.id ||
+      booking.custodianTeamMember?.userId === user.id;
+
     const [bookings, totalCount] = await Promise.all([
       db.booking.findMany({
         where,
@@ -153,6 +166,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
           createdAt: true,
           custodianUser: {
             select: {
+              // Select `id` here and `userId` on the team member below:
+              // together they answer "is the custodian the caller?", which is
+              // what keeps a restricted user's own name visible to them.
+              id: true,
               firstName: true,
               lastName: true,
               displayName: true,
@@ -160,7 +177,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
           },
           custodianTeamMember: {
-            select: { name: true },
+            select: { name: true, userId: true },
           },
           _count: {
             select: {
@@ -199,11 +216,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         from: b.from,
         to: b.to,
         createdAt: b.createdAt,
-        custodianName:
-          b.custodianTeamMember?.name ||
-          resolveUserDisplayName(b.custodianUser) ||
-          null,
-        custodianImage: b.custodianUser?.profilePicture || null,
+        // "private" rather than null when the name is withheld: null already
+        // means "this booking has no custodian", and web draws the same word
+        // in place of the badge (`TeamMemberBadge`).
+        custodianName: canSeeCustodianOf(b)
+          ? b.custodianTeamMember?.name ||
+            resolveUserDisplayName(b.custodianUser) ||
+            null
+          : "private",
+        custodianImage: canSeeCustodianOf(b)
+          ? b.custodianUser?.profilePicture || null
+          : null,
         assetCount: b._count.bookingAssets,
         // Outstanding book-by-model reservations still to assign. > 0 means the
         // booking holds reserved units with no concrete assets behind them yet.

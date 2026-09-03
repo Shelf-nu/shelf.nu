@@ -1,4 +1,4 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -12,7 +12,6 @@ import {
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
-import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -186,22 +185,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       url.searchParams.get("search")?.trim().slice(0, 100) || undefined;
 
     /**
-     * `roles`, resolved to the most privileged one - NOT the context's `role`,
-     * which is `roles[0]`. A membership stored `[SELF_SERVICE, ADMIN]` resolves
-     * to SELF_SERVICE there, so a genuine admin was narrowed to bookings they
-     * are custodian of and every colleague's booking vanished from the grid
-     * while the list lens still showed them. The sibling mobile booking routes
-     * all resolve it this way.
+     * Which bookings exist for this caller, resolved from the workspace
+     * overrides and not from the role alone. The list lens on this same screen
+     * asks the same context the same question: the two must agree, or one lens
+     * shows a booking the other says is not there.
      */
-    const { roles } = await getMobileUserContext(user.id, organizationId);
-    const role = resolveMostPrivilegedRole(roles);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    const { canSeeAllBookings, canSeeAllCustody } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
-    const custodianScope = isSelfServiceOrBase
-      ? await resolveCustodianScope({ userId: user.id, organizationId })
-      : null;
+    const custodianScope = canSeeAllBookings
+      ? null
+      : await resolveCustodianScope({ userId: user.id, organizationId });
 
     /**
      * Everything except the date window, so the same filter can also answer the
@@ -265,9 +261,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
         from: true,
         to: true,
         custodianUser: {
-          select: { firstName: true, lastName: true, displayName: true },
+          // `id` here and `userId` below together answer "is the custodian
+          // the caller?", which keeps their own name visible to them.
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+          },
         },
-        custodianTeamMember: { select: { name: true } },
+        custodianTeamMember: { select: { name: true, userId: true } },
       },
       // Soonest first: a calendar is read forwards.
       orderBy: [{ from: "asc" }],
@@ -326,10 +329,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
         status: b.status,
         from: b.from,
         to: b.to,
+        // Custody visibility is its own workspace override. "private" rather
+        // than null when the name is withheld: null means "no custodian".
         custodianName:
-          b.custodianTeamMember?.name ||
-          resolveUserDisplayName(b.custodianUser) ||
-          null,
+          canSeeAllCustody ||
+          b.custodianUser?.id === user.id ||
+          b.custodianTeamMember?.userId === user.id
+            ? b.custodianTeamMember?.name ||
+              resolveUserDisplayName(b.custodianUser) ||
+              null
+            : "private",
       })),
       /**
        * True when this window holds more than one response may carry, so the
