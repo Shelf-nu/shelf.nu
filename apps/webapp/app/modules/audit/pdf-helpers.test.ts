@@ -145,7 +145,7 @@ describe("audit receipt — the printed asset code", () => {
     id: "asset-1",
     title: "Camera",
     thumbnailImage: null,
-    // Widened so a case can drop it: the fallback branch is the point.
+    // Nullable: an asset without one is what sends SAM_ID to its fallback.
     sequentialId: "SAM-0001" as string | null,
     preferredBarcodeId: null,
     qrCodes: [{ id: "qr-visible-id", version: 0, errorCorrection: "L" }],
@@ -159,13 +159,21 @@ describe("audit receipt — the printed asset code", () => {
     overrides: Partial<typeof ASSET> = {}
   ) {
     vi.clearAllMocks();
+    // why: the audit under test. A missing one is a 404 before anything else.
     mockOf(db.auditSession.findUnique).mockResolvedValue(SESSION);
+    // why: names which assets are on the audit; the helper skips the asset
+    // read entirely when this is empty, and there would be no row to check.
     mockOf(db.auditAsset.findMany).mockResolvedValue([
       { assetId: "asset-1", expected: true, status: null },
     ]);
+    // why: the receipt's photo and note sections. Empty keeps these cases
+    // about the Code column.
     mockOf(db.auditImage.findMany).mockResolvedValue([]);
     mockOf(db.auditNote.findMany).mockResolvedValue([]);
+    // why: the row the resolver runs over — its QR, barcodes and SAM id are
+    // what each case varies.
     mockOf(db.asset.findMany).mockResolvedValue([{ ...ASSET, ...overrides }]);
+    // why: carries the preference under test.
     mockOf(db.organization.findUnique).mockResolvedValue({
       id: "org-1",
       name: "Org",

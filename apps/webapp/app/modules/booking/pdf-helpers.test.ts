@@ -56,7 +56,7 @@ const ASSET = {
   mainImage: null,
   thumbnailImage: null,
   mainImageExpiration: null,
-  // Widened so a case can drop it: the fallback branch is the point.
+  // Nullable: an asset without one is what sends SAM_ID to its fallback.
   sequentialId: "SAM-0001" as string | null,
   preferredBarcodeId: null,
   qrCodes: [{ id: "qr-visible-id", version: 0, errorCorrection: "L" }],
@@ -102,6 +102,8 @@ async function run(prefs: OrgPrefs, overrides: Partial<typeof ASSET> = {}) {
 
   const asset = { ...ASSET, ...overrides };
 
+  // why: supplies the `BookingAsset` slices, which decide how many rows the
+  // render list has — two here, for one asset booked twice.
   mockOf(getBooking).mockResolvedValue({
     id: "booking-1",
     name: "Shoot",
@@ -112,8 +114,14 @@ async function run(prefs: OrgPrefs, overrides: Partial<typeof ASSET> = {}) {
     modelRequests: [],
     bookingAssets: BOOKING_ASSETS.map((ba) => ({ ...ba, asset })),
   });
+  // why: the deduped asset read the resolver runs over. One row, because the
+  // helper fetches each asset once however many slices reference it.
   mockOf(db.asset.findMany).mockResolvedValue([asset]);
+  // why: the kit-driven slice carries a `sourceKitId`, so the helper looks the
+  // kit up; an empty result would drop that slice to a standalone row.
   mockOf(db.kit.findMany).mockResolvedValue([KIT]);
+  // why: carries the preference under test. `currency` is read by the total,
+  // and a missing organization is a 404 before any of this runs.
   mockOf(db.organization.findUnique).mockResolvedValue({
     id: "org-1",
     name: "Org",
