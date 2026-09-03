@@ -177,8 +177,8 @@ export const AuditPDFContent = ({
   // why: the receipt can be downloaded at ANY point in an audit's life — the
   // Actions dropdown offers it with no status gate — so it must apply the same
   // completion rule as the screen it was printed from. `missingAssetCount` is
-  // seeded with the full expected count at creation, so a receipt for a
-  // never-started audit used to assert that every one of its assets was lost.
+  // seeded with the full expected count at creation, so it only means "lost"
+  // once the audit is complete.
   const auditIsCompleted = isAuditCompleted(session);
   const unscannedLabel = auditAssetStatusLabel("PENDING", auditIsCompleted);
 
@@ -544,11 +544,11 @@ export const AuditPDFContent = ({
                 <th className="w-20 border border-gray-300 p-2.5 text-left text-xs font-medium">
                   Status
                 </th>
-                {/* 120px, not the 80px that held only an image. This cell has
-                    no tick box, so 120px leaves the code ~100px — the same
-                    room the booking checklist gives it at 150px. Wider would
-                    only squeeze the Name column. */}
-                <th className="min-w-[120px] border border-gray-300 p-2.5 text-left text-xs font-medium">
+                {/* Sized for the code, which sits under the image: 140px gives
+                    it ~120px, enough for a 25-character legacy QR id on two
+                    lines. Below 140px those take three, and the extra line
+                    costs more table height than the Name column loses. */}
+                <th className="min-w-[140px] border border-gray-300 p-2.5 text-left text-xs font-medium">
                   Code
                 </th>
               </tr>

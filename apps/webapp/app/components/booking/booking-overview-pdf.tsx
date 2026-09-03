@@ -349,12 +349,10 @@ export const BookingPDFPreview = ({
               <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Location
               </th>
-              {/* 150px, not the 120px this column used to be. The cell holds
-                  the QR image, the tick box and the code, which left the code
-                  67px — half a pixel short of an eight-character SAM ID, so
-                  every one of them broke across two lines. 150px leaves ~98px,
-                  enough for a SAM ID or a ten-character QR id on one line;
-                  longer barcode values still wrap on `break-all`. */}
+              {/* Sized for the code, which spans the cell under the image: at
+                  150px it gets ~130px, enough for a SAM ID or a ten-character
+                  QR id on one line and a 25-character legacy QR id on two.
+                  Longer barcode values wrap further on `break-all`. */}
               <th className="min-w-[150px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Code
               </th>
@@ -398,8 +396,8 @@ export const BookingPDFPreview = ({
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     {/* why: out of this rule — the checklist prints the kit's
-                        name only; a kit code was not asked for, and kits have
-                        no `sequentialId` to print for a SAM_ID workspace. */}
+                        name only. Kits carry no `sequentialId`, so a SAM_ID
+                        workspace has no kit code to print here. */}
                     {asset?.kit?.name}
                     {/* Print-medium equivalent of the overview's
                         "Removed from kit" badge — a tooltip can't exist on
@@ -422,21 +420,27 @@ export const BookingPDFPreview = ({
                     {asset?.location?.name}
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    <div className="flex items-center gap-3">
-                      <div className="flex flex-col items-center gap-1">
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="flex items-center gap-3">
                         <img
                           src={assetIdToQrCodeMap[asset.id] || ""}
                           alt="QR Code"
                           className="size-14 object-cover"
                         />
-                        {/* Printed even when the QR image failed to generate:
-                            the code is the part a picker matches against the
-                            physical label. */}
-                        <AssetCodePrintText
-                          displayCode={assetIdToDisplayCodeMap[asset.id]}
+                        <input
+                          type="checkbox"
+                          className="block size-5 border"
                         />
                       </div>
-                      <input type="checkbox" className="block size-5 border" />
+                      {/* Printed even when the QR image failed to generate: the
+                          code is the part a picker matches against the physical
+                          label. It sits under the image and the tick box rather
+                          than beside them so it has the whole cell to wrap in —
+                          a 25-character legacy QR id needs two lines here and
+                          would need three squeezed alongside the tick box. */}
+                      <AssetCodePrintText
+                        displayCode={assetIdToDisplayCodeMap[asset.id]}
+                      />
                     </div>
                   </td>
                 </tr>

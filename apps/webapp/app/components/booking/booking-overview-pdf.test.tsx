@@ -1,9 +1,9 @@
 /**
  * The Code column of the booking checklist PDF.
  *
- * The checklist is printed and carried around a warehouse. A workspace that
- * labels its shelves with SAM IDs used to get a sheet of QR images and nothing
- * else, so every row had to be translated by hand during picking.
+ * The checklist is printed and carried around a warehouse, so each row has to
+ * carry the identifier the picker reads off the shelf. A sheet of QR images
+ * alone leaves a SAM ID workspace translating every row by hand.
  *
  * These tests are about what ends up ON PAPER: that the code is printed, that
  * it sits with the QR image rather than in some other column, and that a row
@@ -61,9 +61,13 @@ const QR_IMAGE = "data:image/png;base64,iVBORw0KGgo=";
  * full Prisma `Asset` plus the per-slice fields, and none of the ~40 columns
  * this component never reads would make the test say more.
  */
-function pdfMetaWith(
-  displayCode: PdfDbResult["assetIdToDisplayCodeMap"][string] | undefined
-): PdfDbResult {
+function pdfMetaWith({
+  displayCode,
+  qrImage = QR_IMAGE,
+}: {
+  displayCode: PdfDbResult["assetIdToDisplayCodeMap"][string] | undefined;
+  qrImage?: string | null;
+}): PdfDbResult {
   return {
     booking: {
       id: "booking-1",
@@ -100,24 +104,27 @@ function pdfMetaWith(
       },
     ],
     totalValue: "$100",
-    assetIdToQrCodeMap: { "asset-1": QR_IMAGE },
+    assetIdToQrCodeMap: qrImage ? { "asset-1": qrImage } : {},
     assetIdToDisplayCodeMap: displayCode ? { "asset-1": displayCode } : {},
     modelRequests: [],
   } as unknown as PdfDbResult;
 }
 
-function renderPreview(
-  displayCode: PdfDbResult["assetIdToDisplayCodeMap"][string] | undefined
-) {
+/** Renders the printable checklist body around a single asset row. */
+function renderPreview(args: Parameters<typeof pdfMetaWith>[0]) {
   return render(
     <BookingPDFPreview
       componentRef={{ current: null }}
-      pdfMeta={pdfMetaWith(displayCode)}
+      pdfMeta={pdfMetaWith(args)}
     />
   );
 }
 
-/** The table cell holding the row's QR image — i.e. the Code column. */
+/**
+ * The table cell holding the row's code — located by the QR `<img>`, which the
+ * checklist renders unconditionally (with an empty `src` when no image was
+ * generated), so the no-image case finds the same cell.
+ */
 function codeCell() {
   const cell = screen.getByAltText("QR Code").closest("td");
   expect(cell).not.toBeNull();
@@ -127,11 +134,13 @@ function codeCell() {
 describe("booking checklist PDF — Code column", () => {
   it("prints the workspace's preferred code beside the QR image", () => {
     renderPreview({
-      value: "SAM-0001",
-      type: "SAM_ID",
-      isFallback: false,
-      entityKind: "asset",
-      workspacePreference: "SAM_ID",
+      displayCode: {
+        value: "SAM-0001",
+        type: "SAM_ID",
+        isFallback: false,
+        entityKind: "asset",
+        workspacePreference: "SAM_ID",
+      },
     });
 
     // why: `getByText` alone would pass if the code were printed in the Name
@@ -144,11 +153,13 @@ describe("booking checklist PDF — Code column", () => {
     // hover, so an unexplained QR id where the workspace expects a SAM ID
     // reads as the feature being broken.
     renderPreview({
-      value: "qr-visible-id",
-      type: "QR_ID",
-      isFallback: true,
-      entityKind: "asset",
-      workspacePreference: "SAM_ID",
+      displayCode: {
+        value: "qr-visible-id",
+        type: "QR_ID",
+        isFallback: true,
+        entityKind: "asset",
+        workspacePreference: "SAM_ID",
+      },
     });
 
     const cell = codeCell();
@@ -158,11 +169,13 @@ describe("booking checklist PDF — Code column", () => {
 
   it("prints no caption when the code is the one the workspace asked for", () => {
     renderPreview({
-      value: "SAM-0001",
-      type: "SAM_ID",
-      isFallback: false,
-      entityKind: "asset",
-      workspacePreference: "SAM_ID",
+      displayCode: {
+        value: "SAM-0001",
+        type: "SAM_ID",
+        isFallback: false,
+        entityKind: "asset",
+        workspacePreference: "SAM_ID",
+      },
     });
 
     expect(codeCell()).not.toHaveTextContent("SAM ID");
@@ -171,19 +184,41 @@ describe("booking checklist PDF — Code column", () => {
   it("still renders the row when no code resolved", () => {
     // why: defensive. Every asset has a QR fallback, so an empty map means a
     // caller bug — which must not take the whole checklist down.
-    renderPreview(undefined);
+    renderPreview({ displayCode: undefined });
 
     expect(screen.getByText("Tripod")).toBeInTheDocument();
     expect(codeCell()).toBeInTheDocument();
   });
 
-  it("keeps the pick-off checkbox next to the code", () => {
+  it("prints the code even when no QR image was generated", () => {
+    // why: the image is signed at request time and can come back empty. The
+    // code is what a picker matches against the shelf, so it must not be
+    // rendered behind the image's presence the way the image itself is.
     renderPreview({
-      value: "SAM-0001",
-      type: "SAM_ID",
-      isFallback: false,
-      entityKind: "asset",
-      workspacePreference: "SAM_ID",
+      displayCode: {
+        value: "SAM-0001",
+        type: "SAM_ID",
+        isFallback: false,
+        entityKind: "asset",
+        workspacePreference: "SAM_ID",
+      },
+      qrImage: null,
+    });
+
+    expect(codeCell()).toHaveTextContent("SAM-0001");
+    // The `<img>` still renders, sourceless — the code is what carries the row.
+    expect(codeCell().querySelector("img")?.getAttribute("src")).toBeFalsy();
+  });
+
+  it("keeps the pick-off checkbox in the code cell", () => {
+    renderPreview({
+      displayCode: {
+        value: "SAM-0001",
+        type: "SAM_ID",
+        isFallback: false,
+        entityKind: "asset",
+        workspacePreference: "SAM_ID",
+      },
     });
 
     expect(codeCell().querySelector('input[type="checkbox"]')).not.toBeNull();

@@ -2,9 +2,9 @@
  * The Code column of the audit receipt PDF.
  *
  * The receipt is the audit's output — the sheet somebody keeps, attaches to a
- * claim, or walks the shelves with. Its asset table used to print a QR image
- * and no readable identifier, so a workspace that labels its equipment with
- * SAM IDs could not match a printed row to a physical label without a scanner.
+ * claim, or walks the shelves with. Its asset table prints the code a reader
+ * matches against a physical label, so a workspace that labels its equipment
+ * with SAM IDs can work the sheet without a scanner.
  *
  * @see {@link file://./audit-receipt-pdf.tsx}
  * @see {@link file://../assets/asset-code-print-text.tsx}
@@ -144,10 +144,10 @@ function codeCell() {
 }
 
 describe("audit receipt PDF — Code column", () => {
-  it("names the column for what it now holds", () => {
-    // why: it read "QR Code" while holding only an image. It now holds the
-    // identifier a reader matches against the shelf, and the QR is one
-    // rendering of it.
+  it('heads the column "Code"', () => {
+    // why: the column holds the identifier a reader matches against the
+    // shelf. The QR image is one rendering of that identifier, not a second
+    // thing, so the header names the code rather than the image.
     renderReceipt({ displayCode: SAM_CODE });
 
     expect(

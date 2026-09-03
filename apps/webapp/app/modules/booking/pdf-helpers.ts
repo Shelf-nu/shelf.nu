@@ -198,10 +198,8 @@ export async function fetchAllPdfRelatedData(
               name: true,
             },
           },
-          // why: out of this rule — the code-bearing-entity rule asks for a
-          // tight `qrCodes: { take: 1, select: { id } }`, but this payload is
-          // also handed to `getQrCodeMaps`, which renders the image from
-          // `Qr.version` and `Qr.errorCorrection`.
+          // why: out of this rule — `getQrCodeMaps` renders the image from
+          // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
           qrCodes: true,
           // Feeds `resolveDisplayCode` so a barcode-preference workspace gets
           // its barcode value printed instead of the QR id.

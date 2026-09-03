@@ -19,6 +19,14 @@
 import type { ResolvedDisplayCode } from "~/modules/barcode/display";
 import { labelForPreference } from "~/modules/barcode/display";
 
+/**
+ * Renders one asset's display code as a printable line, with a caption naming
+ * the code's type when it is not the type the workspace asked for.
+ *
+ * @param props.displayCode - The `ResolvedDisplayCode` this row read out of the
+ *   PDF's display-code map, or `undefined` when the map has no entry for it.
+ * @returns The code line, or `null` when there is no code to print.
+ */
 export function AssetCodePrintText({
   displayCode,
 }: {

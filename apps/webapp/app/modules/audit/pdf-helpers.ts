@@ -315,10 +315,8 @@ export async function fetchAllAuditPdfRelatedData(
                   },
                 },
               },
-              // why: out of this rule — the code-bearing-entity rule asks for
-              // a tight `qrCodes: { take: 1, select: { id } }`, but this
-              // payload is also handed to `getQrCodeMaps`, which renders the
-              // image from `Qr.version` and `Qr.errorCorrection`.
+              // why: out of this rule — `getQrCodeMaps` renders the image from
+              // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
               qrCodes: true,
               // Feeds `resolveDisplayCode` so a barcode-preference workspace
               // gets its barcode value printed instead of the QR id.
@@ -370,10 +368,11 @@ export async function fetchAllAuditPdfRelatedData(
       size: "small",
     });
 
-    // Resolve the printed code alongside the QR image, off the same raw rows:
-    // `assetsWithAuditStatus` is typed as a plain `Asset`, so resolving from it
-    // would silently hand the resolver undefined `qrCodes`/`barcodes` and print
-    // an empty string.
+    // Resolve off the same raw rows the QR map is built from, so the two maps
+    // have one source. `assetsWithAuditStatus` is typed as a plain `Asset`,
+    // which declares neither `qrCodes` nor `barcodes`, and every field on the
+    // resolver's entity type is optional — so resolving from it would still
+    // compile on the day those relations stop coming through.
     const assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode> =
       Object.fromEntries(
         assets.map((asset) => [

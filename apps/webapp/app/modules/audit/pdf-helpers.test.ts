@@ -134,9 +134,9 @@ describe("audit receipt — what it may truncate", () => {
  * that the org's preference is one of them.
  *
  * Each case sets the two preference fields EXPLICITLY. Left off, the resolver's
- * `undefined` preference falls through its `default` branch to the QR id — so a
- * QR-id assertion would pass on an org row that never carried a preference at
- * all, which is the bug this column exists to prevent.
+ * `undefined` preference falls through its `default` branch to the QR id, so a
+ * QR-id assertion passes on an org row that never carried a preference at all.
+ * The preference is the thing under test; it has to be set.
  */
 describe("audit receipt — the printed asset code", () => {
   const mockOf = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
