@@ -162,6 +162,19 @@ export const BookingOverviewPDF = ({
   );
 };
 
+/**
+ * The printable body of the booking checklist: the sheet `react-to-print`
+ * copies to paper, and what the dialog shows as its preview.
+ *
+ * Exported so it can be rendered on its own. {@link BookingOverviewPDF}, the
+ * dialog around it, needs a router for the fetcher that loads `pdfMeta`.
+ *
+ * @param props.componentRef - Ref `react-to-print` prints from. Pass
+ *   `{ current: null }` to render the sheet without printing it.
+ * @param props.pdfMeta - Everything the sheet renders, as returned by
+ *   `fetchAllPdfRelatedData`. Renders nothing until it arrives.
+ * @returns The checklist, or `null` while `pdfMeta` is still loading.
+ */
 export const BookingPDFPreview = ({
   componentRef,
   pdfMeta,
@@ -429,6 +442,9 @@ export const BookingPDFPreview = ({
                         />
                         <input
                           type="checkbox"
+                          aria-label={`Mark ${
+                            asset.title ?? asset.id
+                          } as picked`}
                           className="block size-5 border"
                         />
                       </div>

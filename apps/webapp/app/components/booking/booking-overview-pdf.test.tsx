@@ -210,7 +210,9 @@ describe("booking checklist PDF — Code column", () => {
     expect(codeCell().querySelector("img")?.getAttribute("src")).toBeFalsy();
   });
 
-  it("keeps the pick-off checkbox in the code cell", () => {
+  it("keeps a named pick-off checkbox in the code cell", () => {
+    // why: one sheet carries a checkbox per row, so the name has to say WHICH
+    // asset is being ticked or a screen reader reads a column of bare boxes.
     renderPreview({
       displayCode: {
         value: "SAM-0001",
@@ -221,6 +223,10 @@ describe("booking checklist PDF — Code column", () => {
       },
     });
 
-    expect(codeCell().querySelector('input[type="checkbox"]')).not.toBeNull();
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Mark Tripod as picked",
+    });
+
+    expect(codeCell()).toContainElement(checkbox);
   });
 });
