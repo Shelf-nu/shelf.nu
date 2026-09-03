@@ -2009,9 +2009,8 @@ describe("updateAsset asset-model activity", () => {
       id: "asset-1",
       title: "Asset 1",
       assetModelId: "model-1",
-      // The real query includes this relation. The note reads the committed
-      // row rather than the request payload, so a stub without it would let a
-      // regression through.
+      // why: the note takes its "after" value from the committed row, and the
+      // real query includes this relation. A stub without it reads as no model.
       assetModel: { id: "model-1", name: "Stream Deck XL" },
       category: null,
       tags: [],
@@ -2020,13 +2019,15 @@ describe("updateAsset asset-model activity", () => {
   });
 
   it("does not claim the model was removed when the field is absent", async () => {
-    // The inline description edit on the asset overview sends no assetModelId
-    // at all. Deriving the note's "after" value from the payload made absence
-    // look like a removal, so editing a description wrote "removed the asset
-    // model X" on an asset that still had it — the activity log lying, which
-    // is worse than the untracked field this PR set out to fix.
+    // The invariant: an omitted `assetModelId` is not a removal. The inline
+    // description, category and valuation edits and the companion asset update
+    // all send partial payloads, so the note has to compare the committed row
+    // against the before row rather than read the request.
+    // why: this path issues three `asset.findUnique` reads with different
+    // shapes (kit block, before-state, type guard), so the stub routes on the
+    // select and holds a model on the before-state row.
     (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
-      (q?: any) => {
+      (q?: { select?: Record<string, unknown> }) => {
         if (q?.select?.assetKits) return Promise.resolve({ assetKits: [] });
         if (q?.select?.type) return Promise.resolve({ type: "INDIVIDUAL" });
         return Promise.resolve({
@@ -2036,7 +2037,6 @@ describe("updateAsset asset-model activity", () => {
           valuation: null,
           category: null,
           tags: [],
-          // The asset already holds a model, like the customer's did.
           assetModel: { id: "model-1", name: "Stream Deck XL" },
           organization: { currency: "USD" },
         });
