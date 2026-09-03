@@ -117,11 +117,14 @@ async function run(prefs: OrgPrefs, overrides: Partial<typeof ASSET> = {}) {
   // why: the deduped asset read the resolver runs over. One row, because the
   // helper fetches each asset once however many slices reference it.
   mockOf(db.asset.findMany).mockResolvedValue([asset]);
-  // why: the kit-driven slice carries a `sourceKitId`, so the helper looks the
-  // kit up; an empty result would drop that slice to a standalone row.
+  // why: the helper looks up the kits named by `sourceKitId` and maps over the
+  // result, which throws on an unstubbed `vi.fn()`. It does NOT decide this
+  // slice's kit — `assetKitId` matches a live membership on the asset, so
+  // `buildPdfAssetRows` resolves the kit from that and never reads the snapshot
+  // map. The snapshot path is the detached-residue case, not covered here.
   mockOf(db.kit.findMany).mockResolvedValue([KIT]);
   // why: carries the preference under test. `currency` is read by the total,
-  // and a missing organization is a 404 before any of this runs.
+  // and the helper throws before building anything if this returns nothing.
   mockOf(db.organization.findUnique).mockResolvedValue({
     id: "org-1",
     name: "Org",
@@ -256,7 +259,15 @@ describe("booking checklist PDF — the printed asset code", () => {
     for (const row of result.assets) {
       expect(row).not.toHaveProperty("barcodes");
       expect(row).not.toHaveProperty("qrCodes");
+      expect(row).not.toHaveProperty("assetKits");
+      expect(row).not.toHaveProperty("assetLocations");
     }
+
+    // why: `getBooking` carries a SECOND copy of every asset — the code
+    // relations among them — on `bookingAssets`, once per slice. Stripping the
+    // render rows alone would leave that copy in the response, which is the
+    // larger of the two.
+    expect(result.booking).not.toHaveProperty("bookingAssets");
 
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
   });

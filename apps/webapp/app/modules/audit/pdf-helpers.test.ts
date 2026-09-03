@@ -151,7 +151,9 @@ describe("audit receipt — the printed asset code", () => {
     qrCodes: [{ id: "qr-visible-id", version: 0, errorCorrection: "L" }],
     barcodes: [{ id: "bc-1", type: "Code128", value: "128-VALUE" }],
     category: null,
-    assetLocations: [],
+    // A location so the strip can be shown NOT to take the derived
+    // `location` field with it.
+    assetLocations: [{ location: { name: "Store room" } }],
   };
 
   async function run(
@@ -159,7 +161,7 @@ describe("audit receipt — the printed asset code", () => {
     overrides: Partial<typeof ASSET> = {}
   ) {
     vi.clearAllMocks();
-    // why: the audit under test. A missing one is a 404 before anything else.
+    // why: the audit under test. The helper throws immediately without it.
     mockOf(db.auditSession.findUnique).mockResolvedValue(SESSION);
     // why: names which assets are on the audit; the helper skips the asset
     // read entirely when this is empty, and there would be no row to check.
@@ -284,7 +286,7 @@ describe("audit receipt — the printed asset code", () => {
   });
   it("keeps the code-resolution relations out of the rows it returns", async () => {
     // why: the rows are serialised to the browser, and the relations exist only
-    // to build the two maps above them.
+    // to build the two maps the helper returns alongside them.
     const result = await run({
       qrIdDisplayPreference: "SAM_ID",
       barcodesEnabled: false,
@@ -293,7 +295,12 @@ describe("audit receipt — the printed asset code", () => {
     for (const row of result.assets) {
       expect(row).not.toHaveProperty("barcodes");
       expect(row).not.toHaveProperty("qrCodes");
+      expect(row).not.toHaveProperty("assetLocations");
     }
+
+    // why: `location` is derived from `assetLocations`, so dropping the
+    // relation must not take the derived field with it.
+    expect(result.assets[0].location).toEqual({ name: "Store room" });
 
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
   });

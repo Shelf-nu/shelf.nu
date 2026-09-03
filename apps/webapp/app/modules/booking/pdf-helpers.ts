@@ -346,17 +346,30 @@ export async function fetchAllPdfRelatedData(
       },
     }));
 
-    // The code-resolution relations have done their job in the two maps above,
-    // and nothing downstream reads them off a row. Dropping them here keeps
-    // them out of the JSON the browser downloads, where they would otherwise
-    // repeat per SLICE: a QUANTITY_TRACKED asset booked standalone and through
-    // three kits ships four copies of its barcodes and its full Qr row.
+    // Everything dropped here is fetch-only. The code relations have done their
+    // job in the two maps above; `assetKits` and `assetLocations` were reduced
+    // to this row's `kit` and `location` by `buildPdfAssetRows`. Nothing reads
+    // any of them again, here or in the browser, and the render list is one row
+    // per SLICE — so a QUANTITY_TRACKED asset booked standalone and through
+    // three kits would otherwise serialise four copies of each.
     const printableAssets = sortedAssets.map(
-      ({ qrCodes: _qrCodes, barcodes: _barcodes, ...row }) => row
+      ({
+        qrCodes: _qrCodes,
+        barcodes: _barcodes,
+        assetKits: _assetKits,
+        assetLocations: _assetLocations,
+        ...row
+      }) => row
     );
 
+    // `getBooking` returns the whole booking, and its `bookingAssets` carry a
+    // second, full copy of every asset — code relations included — once per
+    // slice. The sheet reads the booking only for its name, description,
+    // custodian and tags; `assets` above is the per-slice view it renders.
+    const { bookingAssets: _bookingAssets, ...printableBooking } = booking;
+
     return {
-      booking,
+      booking: printableBooking,
       assets: printableAssets,
       // Keep the total aligned with the exported (search-filtered) rows so a
       // searched PDF doesn't show a subset of assets with a full-booking total.
