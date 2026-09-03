@@ -40,6 +40,7 @@ import type {
   AssetFromQr,
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
 import {
   createAvailabilityLabels,
@@ -1416,6 +1417,7 @@ function QuantityCheckoutBlock({
           <input
             ref={inputRef}
             type="number"
+            {...numberInputWheelGuard}
             min={1}
             max={info.remaining}
             step={1}
