@@ -4009,6 +4009,81 @@ describe("checkoutBooking", () => {
     });
   });
 
+  it("clears the stale check-in marker on a slice that departs a second time", async () => {
+    expect.assertions(3);
+
+    // Same slice as above: it went out, came back IN FULL, and departs again.
+    // The counter already counts it. The markers have to move with it, or the
+    // row still reads "checked in" while the units are gone, and the
+    // completion gate lets the booking close on an asset that is out.
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-qty",
+            assetKits: [{ kitId: "kit-1" }],
+            title: "Cables",
+            type: AssetType.QUANTITY_TRACKED,
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-qty",
+          quantity: 8,
+          id: "ba-qty",
+          assetKitId: "ak-1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: new Date("2026-01-02T10:00:00.000Z"),
+        },
+      ],
+    };
+    // why: two booking reads, the second reporting ONGOING so the flow
+    // continues past the status write.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    // why: the status write only has to resolve; it is not what this asserts.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+    // why: the departure scan keys on `OR`, and its ids are what the marker
+    // write must reuse. A fully-returned slice answers that scan.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation(
+      (args?: { where?: { checkedOutAt?: unknown; OR?: unknown } }) => {
+        if (args?.where?.OR) {
+          return Promise.resolve([{ id: "ba-qty", quantity: 8 }]);
+        }
+        return Promise.resolve([]);
+      }
+    );
+
+    await checkoutBooking(mockCheckoutParams);
+
+    const markerWrites = (
+      db.bookingAsset.updateMany as unknown as {
+        mock: {
+          calls: Array<
+            [
+              {
+                where?: unknown;
+                data?: { checkedOutAt?: unknown; checkedInAt?: unknown };
+              },
+            ]
+          >;
+        };
+      }
+    ).mock.calls.filter((c) => c[0]?.data?.checkedOutAt !== undefined);
+
+    expect(markerWrites).toHaveLength(1);
+    // Keyed on the departing ids, not on `checkedOutAt: null`, which this
+    // already-stamped slice would never match.
+    expect(markerWrites[0][0].where).toEqual({ id: { in: ["ba-qty"] } });
+    // And the check-in that answered the first trip is cleared.
+    expect(markerWrites[0][0].data).toMatchObject({ checkedInAt: null });
+  });
+
   it("should throw error when assets have booking conflicts", async () => {
     expect.assertions(1);
 
@@ -9655,6 +9730,21 @@ describe("attributeCategorizedDispositionsByBookingAsset (legacy NULL + tagged m
 describe("isBookingFullyCheckedIn", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: `clearAllMocks` clears call history but not `mockResolvedValue`
+    // implementations, and the tests here drive four shared mocks between
+    // them. Without a reset a value set by one test answers a read the next
+    // test never stubbed, which fails it for a reason that is not in it.
+    // Same pattern as the `partialCheckinBooking` block below.
+    for (const mock of [
+      db.bookingAsset.findMany,
+      db.partialBookingCheckin.findMany,
+      db.partialBookingCheckout.findMany,
+    ] as Array<ReturnType<typeof vitest.fn>>) {
+      mock.mockReset().mockResolvedValue([]);
+    }
+    (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ _sum: { quantity: 0 } });
   });
 
   it("returns true when individuals are reconciled and qty-tracked remaining is zero", async () => {
@@ -9697,6 +9787,89 @@ describe("isBookingFullyCheckedIn", () => {
     const result = await isBookingFullyCheckedIn(db, "booking-1");
 
     expect(result).toBe(true);
+  });
+
+  it("returns false when a slice went out, came back, and went out again", async () => {
+    expect.assertions(1);
+
+    // A booking that is still ONGOING can be checked out again: the guard only
+    // refuses COMPLETE, ARCHIVED and CANCELLED. So a slice can be dispatched,
+    // partially checked in, then dispatched a second time.
+    //
+    // why: this is the row the second dispatch leaves behind once the marker
+    // write covers every departing slice. The stale check-in marker is still
+    // present, because nothing deletes it, so the gate has to read the two
+    // markers against each other rather than treat any `checkedInAt` as proof
+    // the slice came back.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        // Out at 10:00, back at 12:00, out again at 14:00. The second
+        // departure refreshes `checkedOutAt`, so it now sits after the
+        // check-in that answered the first trip.
+        checkedOutAt: new Date("2026-01-01T14:00:00.000Z"),
+        checkedInAt: new Date("2026-01-01T12:00:00.000Z"),
+        checkedOutQuantity: 2,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    // The asset left the warehouse twice and came back once, so the booking
+    // cannot be complete.
+    expect(result).toBe(false);
+  });
+
+  it("returns false when qty-tracked units went out, came back, and went out again", async () => {
+    expect.assertions(1);
+
+    // Same second-departure story on the quantity-tracked side. 5 units went
+    // out, all 5 came back, then all 5 went out again.
+    //
+    // why: the marker is refreshed by the fix, so the slice reads as dispatched
+    // and not reconciled. What decides the answer is the arithmetic: obligated
+    // units are capped at the booked quantity, while the units already logged
+    // as returned are the 5 from the FIRST trip. Capped obligation minus those
+    // logged returns lands on zero, so the second departure has to be carried
+    // by the cumulative counter rather than by the booked quantity.
+    // why: one response, not a queued pair. The gate reads the slice rows and
+    // then aggregates the check-in log directly, so it makes a single
+    // `bookingAsset.findMany` call; a second queued value would go unconsumed
+    // and fire inside the next test instead.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 5,
+        assetKitId: null,
+        checkedOutAt: new Date("2026-01-02T10:00:00.000Z"),
+        checkedInAt: null,
+        checkedOutQuantity: 10,
+        asset: { id: "asset-1", type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([]);
+    // The 5 units returned from the first trip are logged.
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 5 } });
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    // 10 units have left across two trips and 5 have come back.
+    expect(result).toBe(false);
   });
 
   it("returns false when an individual asset is missing from every session", async () => {
