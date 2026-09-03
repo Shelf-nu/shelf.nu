@@ -15,6 +15,7 @@ import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AuditAssetStatusBadge } from "./audit-asset-status-badge";
 import { AuditStatusBadgeWithOverdue } from "./audit-status-badge-with-overdue";
+import { AssetCodePrintText } from "../assets/asset-code-print-text";
 import { CategoryBadge } from "../assets/category-badge";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
@@ -152,7 +153,7 @@ export const AuditReceiptPDF = ({
  * @param pdfMeta - All audit data needed for the PDF (note content is already sanitized server-side)
  */
 // react-doctor:no-giant-component — deferred for follow-up refactor
-const AuditPDFContent = ({
+export const AuditPDFContent = ({
   componentRef,
   pdfMeta,
 }: {
@@ -166,6 +167,7 @@ const AuditPDFContent = ({
     organization,
     assets,
     assetIdToQrCodeMap,
+    assetIdToDisplayCodeMap,
     generalImages,
     assetImages,
     conditionNotes,
@@ -542,8 +544,12 @@ const AuditPDFContent = ({
                 <th className="w-20 border border-gray-300 p-2.5 text-left text-xs font-medium">
                   Status
                 </th>
-                <th className="min-w-[80px] border border-gray-300 p-2.5 text-left text-xs font-medium">
-                  QR Code
+                {/* 120px, not the 80px that held only an image. This cell has
+                    no tick box, so 120px leaves the code ~100px — the same
+                    room the booking checklist gives it at 150px. Wider would
+                    only squeeze the Name column. */}
+                <th className="min-w-[120px] border border-gray-300 p-2.5 text-left text-xs font-medium">
+                  Code
                 </th>
               </tr>
             </thead>
@@ -600,13 +606,21 @@ const AuditPDFContent = ({
                       />
                     </td>
                     <td className="border border-gray-300 p-2.5 align-top">
-                      {assetIdToQrCodeMap[asset.id] && (
-                        <img
-                          src={assetIdToQrCodeMap[asset.id]}
-                          alt={`QR code for ${asset.title}`}
-                          className="size-16"
+                      <div className="flex flex-col items-center gap-1">
+                        {assetIdToQrCodeMap[asset.id] && (
+                          <img
+                            src={assetIdToQrCodeMap[asset.id]}
+                            alt={`QR code for ${asset.title}`}
+                            className="size-16"
+                          />
+                        )}
+                        {/* Printed even when the QR image is missing: the code
+                            is the part a reader matches against the physical
+                            label. */}
+                        <AssetCodePrintText
+                          displayCode={assetIdToDisplayCodeMap[asset.id]}
                         />
-                      )}
+                      </div>
                     </td>
                   </tr>
                 </Fragment>

@@ -12,6 +12,7 @@ import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
+import { AssetCodePrintText } from "../assets/asset-code-print-text";
 import { AssetImage } from "../assets/asset-image/component";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
@@ -161,7 +162,7 @@ export const BookingOverviewPDF = ({
   );
 };
 
-const BookingPDFPreview = ({
+export const BookingPDFPreview = ({
   componentRef,
   pdfMeta,
 }: {
@@ -175,6 +176,7 @@ const BookingPDFPreview = ({
     organization,
     assets,
     assetIdToQrCodeMap,
+    assetIdToDisplayCodeMap,
     totalValue,
     modelRequests,
   } = pdfMeta;
@@ -347,7 +349,13 @@ const BookingPDFPreview = ({
               <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Location
               </th>
-              <th className="min-w-[120px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              {/* 150px, not the 120px this column used to be. The cell holds
+                  the QR image, the tick box and the code, which left the code
+                  67px — half a pixel short of an eight-character SAM ID, so
+                  every one of them broke across two lines. 150px leaves ~98px,
+                  enough for a SAM ID or a ten-character QR id on one line;
+                  longer barcode values still wrap on `break-all`. */}
+              <th className="min-w-[150px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Code
               </th>
             </tr>
@@ -389,6 +397,9 @@ const BookingPDFPreview = ({
                     {asset.quantity ?? 1}
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                    {/* why: out of this rule — the checklist prints the kit's
+                        name only; a kit code was not asked for, and kits have
+                        no `sequentialId` to print for a SAM_ID workspace. */}
                     {asset?.kit?.name}
                     {/* Print-medium equivalent of the overview's
                         "Removed from kit" badge — a tooltip can't exist on
@@ -412,11 +423,19 @@ const BookingPDFPreview = ({
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     <div className="flex items-center gap-3">
-                      <img
-                        src={assetIdToQrCodeMap[asset.id] || ""}
-                        alt="QR Code"
-                        className="size-14 object-cover"
-                      />
+                      <div className="flex flex-col items-center gap-1">
+                        <img
+                          src={assetIdToQrCodeMap[asset.id] || ""}
+                          alt="QR Code"
+                          className="size-14 object-cover"
+                        />
+                        {/* Printed even when the QR image failed to generate:
+                            the code is the part a picker matches against the
+                            physical label. */}
+                        <AssetCodePrintText
+                          displayCode={assetIdToDisplayCodeMap[asset.id]}
+                        />
+                      </div>
                       <input type="checkbox" className="block size-5 border" />
                     </div>
                   </td>

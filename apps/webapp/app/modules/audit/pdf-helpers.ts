@@ -10,6 +10,8 @@ import type {
   AuditAssetStatus,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
+import type { ResolvedDisplayCode } from "~/modules/barcode/display";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { ShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
 import { getPrimaryLocation } from "../asset/utils";
@@ -66,10 +68,24 @@ export interface AuditPdfDbResult {
   // Organization details for header
   organization: Pick<
     Organization,
-    "id" | "name" | "imageId" | "currency" | "updatedAt"
+    | "id"
+    | "name"
+    | "imageId"
+    | "currency"
+    | "updatedAt"
+    // Read by `resolveDisplayCode` when building `assetIdToDisplayCodeMap`.
+    | "qrIdDisplayPreference"
+    | "barcodesEnabled"
   >;
   // QR code data URLs mapped by asset ID
   assetIdToQrCodeMap: Record<string, string>;
+  /**
+   * The code to PRINT under each QR image — the same one the workspace's
+   * on-screen asset lists show: the QR id, the SAM id, or a barcode value,
+   * with a per-asset override winning over the workspace preference. Keyed by
+   * `Asset.id`.
+   */
+  assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode>;
   // Images not linked to specific assets
   generalImages: AuditImage[];
   // Images linked to specific assets (grouped by auditAssetId)
@@ -299,7 +315,14 @@ export async function fetchAllAuditPdfRelatedData(
                   },
                 },
               },
+              // why: out of this rule — the code-bearing-entity rule asks for
+              // a tight `qrCodes: { take: 1, select: { id } }`, but this
+              // payload is also handed to `getQrCodeMaps`, which renders the
+              // image from `Qr.version` and `Qr.errorCorrection`.
               qrCodes: true,
+              // Feeds `resolveDisplayCode` so a barcode-preference workspace
+              // gets its barcode value printed instead of the QR id.
+              barcodes: { select: { id: true, type: true, value: true } },
             },
           })
         : Promise.resolve([]),
@@ -311,6 +334,9 @@ export async function fetchAllAuditPdfRelatedData(
           imageId: true,
           currency: true,
           updatedAt: true,
+          // Which code the workspace wants printed under the QR image.
+          qrIdDisplayPreference: true,
+          barcodesEnabled: true,
         },
       }),
     ]);
@@ -344,11 +370,28 @@ export async function fetchAllAuditPdfRelatedData(
       size: "small",
     });
 
+    // Resolve the printed code alongside the QR image, off the same raw rows:
+    // `assetsWithAuditStatus` is typed as a plain `Asset`, so resolving from it
+    // would silently hand the resolver undefined `qrCodes`/`barcodes` and print
+    // an empty string.
+    const assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode> =
+      Object.fromEntries(
+        assets.map((asset) => [
+          asset.id,
+          resolveDisplayCode({
+            entity: asset,
+            organization,
+            entityKind: "asset",
+          }),
+        ])
+      );
+
     return {
       session,
       assets: assetsWithAuditStatus,
       organization,
       assetIdToQrCodeMap,
+      assetIdToDisplayCodeMap,
       generalImages,
       assetImages,
       conditionNotes,
