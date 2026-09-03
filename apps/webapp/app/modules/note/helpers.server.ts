@@ -139,11 +139,16 @@ export function buildAssetModelChangeNote({
     return null;
   }
 
+  // `/edit` is the model's only route — there is no bare detail page — and it
+  // is where the asset overview links a model name too.
   const formattedPrevious = hasPrevious
-    ? wrapLinkForNote(`/settings/asset-models/${previous.id}`, previous.name)
+    ? wrapLinkForNote(
+        `/settings/asset-models/${previous.id}/edit`,
+        previous.name
+      )
     : null;
   const formattedNext = hasNext
-    ? wrapLinkForNote(`/settings/asset-models/${next.id}`, next.name)
+    ? wrapLinkForNote(`/settings/asset-models/${next.id}/edit`, next.name)
     : null;
 
   if (hasPrevious && hasNext) {
