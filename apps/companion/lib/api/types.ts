@@ -287,6 +287,14 @@ export type QrResponse = {
       /** Drives the scan-to-booking "not available to book" blocker */
       availableToBook: boolean;
       /**
+       * Quantity-tracked metadata (additive; the server has sent it since the
+       * quantities restructure). The scanner uses it in booking add mode to
+       * ask how many units to book instead of booking one per scan.
+       */
+      type?: AssetType;
+      quantity?: number | null;
+      unitOfMeasure?: string | null;
+      /**
        * Model this asset belongs to, or null. The fulfil-and-check-out scanner
        * matches it against the booking's outstanding reservations so it can
        * count only units that actually fulfil one. Absent on older servers.
@@ -348,6 +356,14 @@ export type BarcodeResponse = {
       kitId: string | null;
       /** Drives the scan-to-booking "not available to book" blocker */
       availableToBook: boolean;
+      /**
+       * Quantity-tracked metadata (additive; the server has sent it since the
+       * quantities restructure). The scanner uses it in booking add mode to
+       * ask how many units to book instead of booking one per scan.
+       */
+      type?: AssetType;
+      quantity?: number | null;
+      unitOfMeasure?: string | null;
       /**
        * Model this asset belongs to, or null. Lets the fulfil scanner tell a
        * unit that fulfils a reservation from one that does not. Absent on
@@ -840,6 +856,28 @@ export type UpdateBookingPayload = {
   tags?: string[];
 };
 
+/**
+ * Free units per quantity-tracked asset for one booking's window, this booking
+ * excluded. `bookable` is the cap for a quantity prompt.
+ */
+export type BookingAssetAvailability = {
+  assetId: string;
+  total: number;
+  bookable: number;
+  reserved: number;
+  inCustody: number;
+};
+
+export type BookingAssetAvailabilityResponse = {
+  availability: BookingAssetAvailability[];
+};
+
+export type AdjustBookingAssetQuantityResponse = {
+  success: boolean;
+  quantity: number;
+  previousQuantity: number;
+};
+
 export type RemoveBookingAssetsResponse = {
   booking: {
     id: string;
@@ -865,6 +903,18 @@ export type AvailableAsset = {
    * the exact unit. Null when the asset has no resolvable code.
    */
   displayCode?: { value: string; label: string } | null;
+  /**
+   * Quantity-tracked metadata (additive; older servers omit it). `type` gates
+   * the quantity prompt, `quantity` is the pool, `availableQuantity` is what
+   * the booking's window still has free with this booking excluded — the cap
+   * the web picker applies to its quantity input.
+   */
+  type?: "INDIVIDUAL" | "QUANTITY_TRACKED";
+  quantity?: number | null;
+  unitOfMeasure?: string | null;
+  availableQuantity?: number | null;
+  /** Units this booking already holds of the row (standalone slice), if any. */
+  bookedQuantity?: number | null;
 };
 
 export type AvailableAssetsResponse = {

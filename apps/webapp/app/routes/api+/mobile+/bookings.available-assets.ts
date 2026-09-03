@@ -22,6 +22,7 @@ import {
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
 import {
   resolveAssetImage,
   serializeImageExpiration,
@@ -62,6 +63,16 @@ const MOBILE_PICKER_MAX_PAGE_SIZE = 100;
  * Query (forwarded to the shared service):
  *   ?orgId & bookingFrom & bookingTo & hideUnavailable=true
  *   & unhideAssetsBookigIds? & s? (search) & page? & per_page? & status?
+ *
+ * Quantity-tracked rows additionally carry `type`, `quantity` (the pool),
+ * `unitOfMeasure` and `availableQuantity`: the units free to book in the
+ * requested window, computed by the same `getAssetAvailabilityBatch` the web
+ * picker uses, excluding the booking named in `unhideAssetsBookigIds` so its
+ * own reservation does not shrink what it may re-book. A quantity-tracked
+ * asset with nothing free is dropped from the page, exactly as the web picker
+ * drops it — the phone then never offers a row the server would refuse.
+ * `bookedQuantity` is what the excluded booking already holds of the row.
+ * INDIVIDUAL rows report `type: "INDIVIDUAL"` and null for the counts.
  *
  * @see {@link file://../../_layout+/bookings.$bookingId.overview.manage-assets.tsx} web twin
  */
@@ -132,63 +143,131 @@ export async function loader({ request }: LoaderFunctionArgs) {
               preferredBarcodeId: true,
               qrCodes: { select: { id: true } },
               barcodes: { select: { id: true, type: true, value: true } },
+              // Quantity fields ride the same narrow lookup so the row shape
+              // does not depend on the shared service's include.
+              type: true,
+              quantity: true,
+              unitOfMeasure: true,
             },
           })
         : Promise.resolve([]),
     ]);
     const codeByAssetId = new Map(codeRows.map((r) => [r.id, r]));
 
-    // Trim to a mobile-friendly payload (mirrors `/api/mobile/assets`).
-    return data({
-      assets: assets.map((asset) => {
-        const codeEntity = codeByAssetId.get(asset.id);
-        const resolved = codeEntity
-          ? resolveDisplayCode({
-              entity: codeEntity,
-              organization: org,
-              entityKind: "asset",
-            })
-          : null;
-        return {
-          id: asset.id,
-          title: asset.title,
-          status: asset.status,
-          // Hand-written projection, so typecheck can't catch a dropped
-          // field — resolve the model-image cascade explicitly or an asset
-          // that inherits its image shows blank in the companion's picker.
-          ...(() => {
-            const image = resolveAssetImage({
-              mainImage: asset.mainImage,
-              thumbnailImage: asset.thumbnailImage,
-              assetModel: asset.assetModel,
-            });
-            const isPlaceholder = image.source === "placeholder";
-            return {
-              mainImage: isPlaceholder ? null : image.fullUrl,
-              thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
-              imageSource: image.source,
-              mainImageExpiration: serializeImageExpiration(
-                image.source,
-                asset.mainImageExpiration
-              ),
-            };
-          })(),
-          // Kit linkage moved to the AssetKit pivot (quantities restructure);
-          // the pivot row's `kitId` FK is the legacy single-kit id the companion
-          // contract expects.
-          kitId: asset.assetKits?.[0]?.kitId ?? null,
-          // The label the operator reads off the physical tag (e.g.
-          // "QR Code ID": "w7l4c42u01"). Null when the asset has no resolvable
-          // code (older row / partial data) — the picker then just omits it.
-          displayCode:
-            resolved && resolved.value
-              ? {
-                  value: resolved.value,
-                  label: labelForPreference(resolved.type),
-                }
-              : null,
-        };
+    // Windowed availability for the quantity-tracked rows on this page, in ONE
+    // batched read (web parity: `manage-assets.tsx` does the same for its
+    // list). The booking being edited is excluded so its own reservation does
+    // not count against what it may re-book.
+    const bookingFrom = pickerParams.get("bookingFrom");
+    const bookingTo = pickerParams.get("bookingTo");
+    const excludeBookingId =
+      pickerParams.get("unhideAssetsBookigIds")?.split(",")[0]?.trim() ||
+      undefined;
+    const qtyAssetIds = codeRows
+      .filter((r) => r.type === "QUANTITY_TRACKED")
+      .map((r) => r.id);
+    const [availabilityByAsset, bookedRows] = await Promise.all([
+      getAssetAvailabilityBatch(qtyAssetIds, {
+        organizationId,
+        window:
+          bookingFrom && bookingTo
+            ? { from: new Date(bookingFrom), to: new Date(bookingTo) }
+            : null,
+        excludeBookingId,
       }),
+      // What this booking already holds of each quantity-tracked row (its
+      // standalone slice), so the app can open the quantity sheet on the
+      // current amount and say "N booked here" — the web picker's prefill.
+      excludeBookingId && qtyAssetIds.length > 0
+        ? db.bookingAsset.findMany({
+            where: {
+              bookingId: excludeBookingId,
+              assetKitId: null,
+              assetId: { in: qtyAssetIds },
+              booking: { organizationId },
+            },
+            select: { assetId: true, quantity: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    const bookedByAssetId = new Map(
+      bookedRows.map((row) => [row.assetId, row.quantity])
+    );
+
+    // Trim to a mobile-friendly payload (mirrors `/api/mobile/assets`).
+    const rows = assets.map((asset) => {
+      const codeEntity = codeByAssetId.get(asset.id);
+      const isQuantityTracked = codeEntity?.type === "QUANTITY_TRACKED";
+      const availableQuantity = isQuantityTracked
+        ? availabilityByAsset.get(asset.id)?.bookable ?? 0
+        : null;
+      const resolved = codeEntity
+        ? resolveDisplayCode({
+            entity: codeEntity,
+            organization: org,
+            entityKind: "asset",
+          })
+        : null;
+      return {
+        id: asset.id,
+        title: asset.title,
+        status: asset.status,
+        // Hand-written projection, so typecheck can't catch a dropped
+        // field — resolve the model-image cascade explicitly or an asset
+        // that inherits its image shows blank in the companion's picker.
+        ...(() => {
+          const image = resolveAssetImage({
+            mainImage: asset.mainImage,
+            thumbnailImage: asset.thumbnailImage,
+            assetModel: asset.assetModel,
+          });
+          const isPlaceholder = image.source === "placeholder";
+          return {
+            mainImage: isPlaceholder ? null : image.fullUrl,
+            thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+            imageSource: image.source,
+            mainImageExpiration: serializeImageExpiration(
+              image.source,
+              asset.mainImageExpiration
+            ),
+          };
+        })(),
+        // Kit linkage moved to the AssetKit pivot (quantities restructure);
+        // the pivot row's `kitId` FK is the legacy single-kit id the companion
+        // contract expects.
+        kitId: asset.assetKits?.[0]?.kitId ?? null,
+        // The label the operator reads off the physical tag (e.g.
+        // "QR Code ID": "w7l4c42u01"). Null when the asset has no resolvable
+        // code (older row / partial data) — the picker then just omits it.
+        displayCode:
+          resolved && resolved.value
+            ? {
+                value: resolved.value,
+                label: labelForPreference(resolved.type),
+              }
+            : null,
+        // Quantity-tracked metadata (additive). Older companion builds
+        // ignore these and keep booking one unit.
+        type: codeEntity?.type ?? "INDIVIDUAL",
+        quantity: isQuantityTracked ? codeEntity?.quantity ?? null : null,
+        unitOfMeasure: isQuantityTracked
+          ? codeEntity?.unitOfMeasure ?? null
+          : null,
+        availableQuantity,
+        bookedQuantity: isQuantityTracked
+          ? bookedByAssetId.get(asset.id) ?? null
+          : null,
+      };
+    });
+
+    return data({
+      // A quantity-tracked asset with no free unit in the window is not
+      // bookable; hide it like the web picker does instead of offering a row
+      // whose confirm can only fail.
+      assets: rows.filter(
+        (row) =>
+          row.type !== "QUANTITY_TRACKED" || (row.availableQuantity ?? 0) > 0
+      ),
       page,
       perPage,
       totalCount: totalAssets,

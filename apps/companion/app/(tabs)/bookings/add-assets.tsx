@@ -8,6 +8,12 @@
  * out for the window never appear. Selected items are added via the existing
  * `add-scanned-assets` endpoint (kits expand to their assets server-side).
  *
+ * Quantity-tracked assets book a NUMBER of units, not a scan per unit — the
+ * web picker's rule. Selecting one opens the quantity sheet, capped at the
+ * units the booking's window has free (`availableQuantity`, this booking
+ * excluded), defaulting to 1 as the web input does. The chosen amounts travel
+ * with the add call as `quantities`; the server re-checks them.
+ *
  * The non-availability path (scan a physical label) lives on the scanner; this
  * is the "browse and pick" complement. Reached via
  * `/(tabs)/bookings/add-assets?bookingId=...&bookingName=...&from=...&to=...`.
@@ -55,6 +61,18 @@ const PICKER_PAGE_SIZE = 50;
 const kitKeyExtractor = (item: AvailableKit) => item.id;
 const modelKeyExtractor = (item: AvailableModel) => item.id;
 
+/** True for a row that books a NUMBER of units rather than one unit. */
+const isQuantityTracked = (item: AvailableAsset) =>
+  item.type === "QUANTITY_TRACKED";
+
+/**
+ * Upper bound for the quantity sheet: the units free in the window (this
+ * booking excluded), which is what the web picker caps its input at. Falls
+ * back to the pool for a server that predates `availableQuantity`.
+ */
+const qtyCap = (item: AvailableAsset) =>
+  Math.max(1, item.availableQuantity ?? item.quantity ?? 1);
+
 export default function AddBookingAssetsScreen() {
   const router = useRouter();
   const {
@@ -101,6 +119,16 @@ export default function AddBookingAssetsScreen() {
     new Set()
   );
   const [selectedKitIds, setSelectedKitIds] = useState<Set<string>>(new Set());
+  /**
+   * Units to book per selected quantity-tracked asset. Only ids that are
+   * selected AND quantity-tracked ever appear here; the add call sends this
+   * map and the server books 1 for anything missing from it.
+   */
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  /** The quantity-tracked asset whose quantity sheet is open (null = closed). */
+  const [activeQtyAsset, setActiveQtyAsset] = useState<AvailableAsset | null>(
+    null
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Debounce search (mirrors the list screens)
@@ -249,14 +277,43 @@ export default function AddBookingAssetsScreen() {
     </View>
   ) : null;
 
-  const toggleAsset = useCallback((assetId: string) => {
-    setSelectedAssetIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(assetId)) next.delete(assetId);
-      else next.add(assetId);
-      return next;
-    });
-  }, []);
+  const toggleAsset = useCallback(
+    (item: AvailableAsset) => {
+      if (selectedAssetIds.has(item.id)) {
+        setSelectedAssetIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+        setQuantities((prev) => {
+          if (!(item.id in prev)) return prev;
+          const { [item.id]: _dropped, ...rest } = prev;
+          return rest;
+        });
+        return;
+      }
+      // A quantity-tracked asset is selected THROUGH the sheet: the amount is
+      // part of the choice, so the row only joins the selection on confirm.
+      if (isQuantityTracked(item)) {
+        setActiveQtyAsset(item);
+        return;
+      }
+      setSelectedAssetIds((prev) => new Set(prev).add(item.id));
+    },
+    [selectedAssetIds]
+  );
+
+  /** Confirm from the quantity sheet: select the row with that amount. */
+  const handleQuantityConfirm = useCallback(
+    (quantity: number) => {
+      if (!activeQtyAsset) return;
+      const id = activeQtyAsset.id;
+      setActiveQtyAsset(null);
+      setSelectedAssetIds((prev) => new Set(prev).add(id));
+      setQuantities((prev) => ({ ...prev, [id]: quantity }));
+    },
+    [activeQtyAsset]
+  );
 
   const toggleKit = useCallback((kitId: string) => {
     setSelectedKitIds((prev) => {
@@ -272,11 +329,15 @@ export default function AddBookingAssetsScreen() {
   const handleAdd = async () => {
     if (!currentOrg || !bookingId || totalSelected === 0) return;
     setIsSubmitting(true);
+    const selectedQuantities = Object.fromEntries(
+      Object.entries(quantities).filter(([id]) => selectedAssetIds.has(id))
+    );
     const { error: err } = await api.addScannedToBooking(
       currentOrg.id,
       bookingId,
       Array.from(selectedAssetIds),
-      Array.from(selectedKitIds)
+      Array.from(selectedKitIds),
+      selectedQuantities
     );
     setIsSubmitting(false);
     if (err) {
@@ -364,17 +425,38 @@ export default function AddBookingAssetsScreen() {
   const renderAsset = useCallback(
     ({ item }: { item: AvailableAsset }) => {
       const selected = selectedAssetIds.has(item.id);
+      const qtyTracked = isQuantityTracked(item);
+      const bookedQty = qtyTracked ? quantities[item.id] : undefined;
+      const unit = item.unitOfMeasure || "units";
       return (
         <TouchableOpacity
           style={[styles.row, selected && styles.rowSelected]}
-          onPress={() => toggleAsset(item.id)}
+          onPress={() => toggleAsset(item)}
           accessibilityRole="button"
           accessibilityState={{ selected }}
           accessibilityLabel={`${item.title}${
             item.displayCode
               ? `, ${item.displayCode.label} ${item.displayCode.value}`
               : ""
-          }${selected ? ", selected" : ""}`}
+          }${
+            qtyTracked
+              ? `, quantity tracked, ${item.availableQuantity ?? 0} of ${
+                  item.quantity ?? 0
+                } ${unit} available${
+                  item.bookedQuantity
+                    ? `, ${item.bookedQuantity} booked here`
+                    : ""
+                }`
+              : ""
+          }${
+            selected
+              ? bookedQty
+                ? `, selected, ${bookedQty} ${unit}, tap to deselect`
+                : ", selected"
+              : qtyTracked
+              ? ", tap to choose a quantity"
+              : ""
+          }`}
         >
           <View style={[styles.checkbox, selected && styles.checkboxChecked]}>
             {selected && (
@@ -414,11 +496,35 @@ export default function AddBookingAssetsScreen() {
                 </Text>
               </View>
             ) : null}
+            {/* Web parity: the picker row says "Qty tracked · N available" so
+                the operator knows a number is coming, not a unit scan. */}
+            {qtyTracked ? (
+              <Text style={styles.modelMeta} numberOfLines={1}>
+                Qty tracked · {item.availableQuantity ?? 0} of{" "}
+                {item.quantity ?? 0} {unit} available
+                {item.bookedQuantity
+                  ? ` · ${item.bookedQuantity} booked here`
+                  : ""}
+              </Text>
+            ) : null}
           </View>
+          {qtyTracked && selected && bookedQty ? (
+            <TouchableOpacity
+              style={styles.qtyChip}
+              onPress={() => setActiveQtyAsset(item)}
+              hitSlop={hitSlop.sm}
+              accessibilityRole="button"
+              accessibilityLabel={`Change quantity, currently ${bookedQty} ${unit}`}
+            >
+              <Text style={styles.qtyChipText}>
+                × {bookedQty} {unit}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </TouchableOpacity>
       );
     },
-    [selectedAssetIds, toggleAsset, colors, styles]
+    [selectedAssetIds, quantities, toggleAsset, colors, styles]
   );
 
   const renderKit = useCallback(
@@ -681,6 +787,39 @@ export default function AddBookingAssetsScreen() {
         onClose={() => setActiveModel(null)}
       />
 
+      {/* Quantity sheet for a quantity-tracked asset (select or edit) */}
+      <QuantityInputSheet
+        visible={activeQtyAsset !== null}
+        title={
+          activeQtyAsset && selectedAssetIds.has(activeQtyAsset.id)
+            ? "Change quantity"
+            : "How many to book?"
+        }
+        subtitle={
+          activeQtyAsset
+            ? `${activeQtyAsset.title} · ${
+                activeQtyAsset.availableQuantity ?? 0
+              } ${activeQtyAsset.unitOfMeasure || "units"} available`
+            : undefined
+        }
+        max={activeQtyAsset ? qtyCap(activeQtyAsset) : 1}
+        defaultValue={
+          activeQtyAsset
+            ? quantities[activeQtyAsset.id] ??
+              activeQtyAsset.bookedQuantity ??
+              1
+            : 1
+        }
+        unitOfMeasure={activeQtyAsset?.unitOfMeasure ?? null}
+        confirmLabel={
+          activeQtyAsset && selectedAssetIds.has(activeQtyAsset.id)
+            ? "Update"
+            : "Select"
+        }
+        onSubmit={handleQuantityConfirm}
+        onClose={() => setActiveQtyAsset(null)}
+      />
+
       {/* Add bar */}
       {totalSelected > 0 && (
         <View style={styles.bottomBar}>
@@ -844,6 +983,18 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   modelReserveTextDisabled: {
     color: colors.muted,
+  },
+  qtyChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.primaryBg,
+    marginLeft: spacing.sm,
+  },
+  qtyChipText: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primary,
   },
   modelRemoveButton: {
     padding: spacing.xs,
