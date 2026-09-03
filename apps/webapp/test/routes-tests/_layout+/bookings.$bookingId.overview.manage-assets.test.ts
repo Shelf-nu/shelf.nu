@@ -1,4 +1,4 @@
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
@@ -240,7 +240,8 @@ describe("manage-assets route validation", () => {
 
       // Should return error response for checked out assets
       assertIsDataWithResponseInit(response);
-      expect(response.init?.status).toBe(500);
+      // 400: a refused add is a client error, not a server fault.
+      expect(response.init?.status).toBe(400);
 
       // Should only validate newly added assets (asset3, asset4).
       // Phase 3c added bookingStatus as the 3rd arg so the helper can
@@ -389,7 +390,8 @@ describe("manage-assets route validation", () => {
       );
 
       assertIsDataWithResponseInit(response);
-      expect(response.init?.status).toBe(500);
+      // 400: a refused add is a client error, not a server fault.
+      expect(response.init?.status).toBe(400);
     });
 
     it("should allow available assets regardless of partial check-in status", async () => {
@@ -502,7 +504,8 @@ describe("manage-assets route validation", () => {
       );
 
       assertIsDataWithResponseInit(response);
-      expect(response.init?.status).toBe(500);
+      // 400: a refused add is a client error, not a server fault.
+      expect(response.init?.status).toBe(400);
     });
 
     it("should validate for OVERDUE bookings", async () => {
@@ -544,7 +547,59 @@ describe("manage-assets route validation", () => {
       );
 
       assertIsDataWithResponseInit(response);
-      expect(response.init?.status).toBe(500);
+      // 400: a refused add is a client error, not a server fault.
+      expect(response.init?.status).toBe(400);
+    });
+  });
+
+  describe("quantity-tracked assets are not judged by the row-level flag", () => {
+    /**
+     * `Asset.status` is one flag over the whole row, so a 27-unit pool with 18
+     * units out on other bookings reads CHECKED_OUT while 9 units are free.
+     * The loader lists a qty asset only while its `bookable` pool is above
+     * zero, so the row-level guard must not refuse what the picker offers —
+     * per-unit capacity is `assertAssetQuantitiesAvailable`'s job inside
+     * `updateBookingAssets`.
+     */
+    it("scopes the checked-out query to INDIVIDUAL assets", async () => {
+      const ongoingBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        assetIds: ["asset1", "asset2", "qty-asset"],
+        removedAssetIds: [],
+        redirectTo: null,
+      });
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(ongoingBooking);
+      // The guard's query returns nothing because the qty row is filtered out
+      // by `type` in the WHERE clause asserted below.
+      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+      vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      // The add goes through — a redirect, not an error payload.
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+
+      expect(db.asset.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { in: ["qty-asset"] },
+            organizationId: "org123",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+          }),
+        })
+      );
+      expect(bookingService.updateBookingAssets).toHaveBeenCalledWith(
+        expect.objectContaining({ assetIds: ["qty-asset"] })
+      );
     });
   });
 
@@ -777,7 +832,8 @@ describe("manage-assets route validation", () => {
       );
 
       assertIsDataWithResponseInit(response);
-      expect(response.init?.status).toBe(500);
+      // 400: a refused add is a client error, not a server fault.
+      expect(response.init?.status).toBe(400);
     });
   });
 

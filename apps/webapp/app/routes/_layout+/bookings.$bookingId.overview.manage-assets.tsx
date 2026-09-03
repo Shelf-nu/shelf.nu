@@ -18,6 +18,7 @@ import type {
 import {
   data,
   redirect,
+  useActionData,
   useLoaderData,
   useNavigate,
   useNavigation,
@@ -75,6 +76,7 @@ import { isQuantityTracked } from "~/modules/asset/utils";
 import { getAssetsWhereInput } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
+import { buildAddToActiveBookingBlockerWhere } from "~/modules/booking/helpers";
 import {
   getBooking,
   getDetailedPartialCheckinData,
@@ -103,6 +105,7 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
@@ -637,13 +640,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { partialCheckinDetails } =
       await getDetailedPartialCheckinData(bookingId);
 
-    // Query to get potentially checked out assets
+    /**
+     * Assets that physically block this add. INDIVIDUAL only — see
+     * {@link buildAddToActiveBookingBlockerWhere}; a qty-tracked pool's
+     * per-unit capacity is checked inside `updateBookingAssets`.
+     */
     const potentiallyCheckedOutAssets = await db.asset.findMany({
-      where: {
-        id: { in: newAssetIds },
+      where: buildAddToActiveBookingBlockerWhere({
+        assetIds: newAssetIds,
         organizationId,
-        status: AssetStatus.CHECKED_OUT,
-      },
+      }),
       select: { id: true, title: true, status: true },
     });
 
@@ -670,6 +676,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           bookingId,
           newAssetIds,
         },
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -1049,6 +1056,18 @@ export default function AddAssetsToNewBooking() {
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab") === "models" ? "models" : "assets";
   const [activeTab, setActiveTab] = useState<"assets" | "models">(initialTab);
+
+  /**
+   * A rejected save returns `data(error(reason))` instead of the redirect.
+   * Render the reason in the footer so a refused add states why in the dialog
+   * itself, rather than only in the SSE toast `error()` emits — that toast
+   * needs a live event stream, and the dialog stays open either way.
+   */
+  const actionData = useActionData<DataOrErrorResponse>();
+  const actionError =
+    actionData && "error" in actionData && actionData.error?.message
+      ? actionData.error.message
+      : null;
 
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -1448,10 +1467,15 @@ export default function AddAssetsToNewBooking() {
         )}
       >
         {activeTab === "assets" ? (
-          <p>
-            {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} assets
-            selected
-          </p>
+          <div className="min-w-0 pr-3">
+            <p>
+              {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} assets
+              selected
+            </p>
+            {actionError ? (
+              <p className="text-[12px] text-error-500">{actionError}</p>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="flex gap-3">

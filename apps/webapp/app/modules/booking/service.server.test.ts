@@ -12444,7 +12444,12 @@ describe("processBooking — checked-out guard for active bookings", () => {
    *  2. the guard — filters `status: CHECKED_OUT`; returns the offending rows.
    */
   function mockAssets(
-    rows: Array<{ id: string; title?: string; status: AssetStatus }>
+    rows: Array<{
+      id: string;
+      title?: string;
+      status: AssetStatus;
+      type?: AssetType;
+    }>
   ) {
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
       (args?: any) => {
@@ -12455,10 +12460,18 @@ describe("processBooking — checked-out guard for active bookings", () => {
           !requestedIds || requestedIds.includes(id);
 
         if (args?.where?.status === AssetStatus.CHECKED_OUT) {
+          // The guard narrows to INDIVIDUAL rows — honour that here, or a
+          // qty-tracked row would come back and the test would assert the
+          // mock's behaviour rather than the query's.
+          const typeFilter: AssetType | undefined = args?.where?.type;
           return Promise.resolve(
             rows
               .filter(
-                (r) => r.status === AssetStatus.CHECKED_OUT && inScope(r.id)
+                (r) =>
+                  r.status === AssetStatus.CHECKED_OUT &&
+                  inScope(r.id) &&
+                  (typeFilter === undefined ||
+                    (r.type ?? AssetType.INDIVIDUAL) === typeFilter)
               )
               .map((r) => ({ id: r.id, title: r.title ?? r.id }))
           );
@@ -12584,6 +12597,57 @@ describe("processBooking — checked-out guard for active bookings", () => {
       OWNER_AUTH
     );
     expect(finalAssetIds).toEqual(["asset-1"]);
+  });
+
+  it("does NOT block a QUANTITY_TRACKED asset whose pool is partly checked out", async () => {
+    // `Asset.status` is one flag for the whole row: a 27-unit pool with 18
+    // units out on other bookings reads CHECKED_OUT while 9 units are free.
+    // Per-unit capacity is `assertAssetQuantitiesAvailable`'s job inside
+    // `updateBookingAssets`, so the row-level guard must let the pool through.
+    mockBooking(BookingStatus.ONGOING);
+    mockAssets([
+      {
+        id: "asset-1",
+        title: "Compass",
+        status: AssetStatus.CHECKED_OUT,
+        type: AssetType.QUANTITY_TRACKED,
+      },
+    ]);
+
+    const { finalAssetIds } = await processBooking(
+      "booking-1",
+      ["asset-1"],
+      "org-1",
+      OWNER_AUTH
+    );
+    expect(finalAssetIds).toEqual(["asset-1"]);
+  });
+
+  it("still blocks a CHECKED_OUT INDIVIDUAL asset alongside a qty-tracked one", async () => {
+    mockBooking(BookingStatus.ONGOING);
+    mockAssets([
+      {
+        id: "asset-qt",
+        title: "Compass",
+        status: AssetStatus.CHECKED_OUT,
+        type: AssetType.QUANTITY_TRACKED,
+      },
+      {
+        id: "asset-ind",
+        title: "Camera",
+        status: AssetStatus.CHECKED_OUT,
+        type: AssetType.INDIVIDUAL,
+      },
+    ]);
+
+    await expect(
+      processBooking(
+        "booking-1",
+        ["asset-qt", "asset-ind"],
+        "org-1",
+        OWNER_AUTH
+      )
+    ).rejects.toThrow(/Camera/);
   });
 
   it("guards only NEW checked-out assets, ignoring ones already on this booking", async () => {
