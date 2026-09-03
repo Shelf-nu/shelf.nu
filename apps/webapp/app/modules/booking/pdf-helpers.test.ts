@@ -236,4 +236,20 @@ describe("booking checklist PDF — the printed asset code", () => {
       expect(result.assetIdToDisplayCodeMap[row.id]?.value).toBe("SAM-0001");
     }
   });
+  it("keeps the code-resolution relations out of the rows it returns", async () => {
+    // why: the rows are serialised to the browser, and the render list is one
+    // row per slice — so a relation left on a row ships once per slice, for a
+    // map the client already has. Both maps are built before this point.
+    const result = await run({
+      qrIdDisplayPreference: "SAM_ID",
+      barcodesEnabled: false,
+    });
+
+    for (const row of result.assets) {
+      expect(row).not.toHaveProperty("barcodes");
+      expect(row).not.toHaveProperty("qrCodes");
+    }
+
+    expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
+  });
 });

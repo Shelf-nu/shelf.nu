@@ -274,4 +274,19 @@ describe("audit receipt — the printed asset code", () => {
     expect(result.assetIdToQrCodeMap["asset-1"]).toBeUndefined();
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
   });
+  it("keeps the code-resolution relations out of the rows it returns", async () => {
+    // why: the rows are serialised to the browser, and the relations exist only
+    // to build the two maps above them.
+    const result = await run({
+      qrIdDisplayPreference: "SAM_ID",
+      barcodesEnabled: false,
+    });
+
+    for (const row of result.assets) {
+      expect(row).not.toHaveProperty("barcodes");
+      expect(row).not.toHaveProperty("qrCodes");
+    }
+
+    expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
+  });
 });

@@ -348,9 +348,14 @@ export async function fetchAllAuditPdfRelatedData(
       });
     }
 
-    // Merge audit status data into each asset
+    // Merge audit status data into each asset.
+    //
+    // The code-resolution relations are dropped here: they feed the QR and
+    // display-code maps below, off the raw rows, and nothing downstream reads
+    // them off a receipt row — so carrying them would only make the JSON the
+    // browser downloads bigger.
     const assetsWithAuditStatus: AssetWithAuditStatus[] = assets.map(
-      (asset) => ({
+      ({ qrCodes: _qrCodes, barcodes: _barcodes, ...asset }) => ({
         ...asset,
         location: getPrimaryLocation(asset),
         auditData: auditStatusMap.get(asset.id) || {

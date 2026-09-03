@@ -346,9 +346,18 @@ export async function fetchAllPdfRelatedData(
       },
     }));
 
+    // The code-resolution relations have done their job in the two maps above,
+    // and nothing downstream reads them off a row. Dropping them here keeps
+    // them out of the JSON the browser downloads, where they would otherwise
+    // repeat per SLICE: a QUANTITY_TRACKED asset booked standalone and through
+    // three kits ships four copies of its barcodes and its full Qr row.
+    const printableAssets = sortedAssets.map(
+      ({ qrCodes: _qrCodes, barcodes: _barcodes, ...row }) => row
+    );
+
     return {
       booking,
-      assets: sortedAssets,
+      assets: printableAssets,
       // Keep the total aligned with the exported (search-filtered) rows so a
       // searched PDF doesn't show a subset of assets with a full-booking total.
       totalValue: calculateTotalValueOfAssets({
