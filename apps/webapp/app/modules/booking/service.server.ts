@@ -140,6 +140,7 @@ import {
   attributeSessionCheckoutToSlices,
   checkoutSessionsToLogsByAsset,
   compareSlicesForGreedyFill,
+  computeDispatchedUnitsByAsset,
 } from "./checkout-attribution";
 import {
   ADDABLE_BOOKING_STATUSES,
@@ -2546,9 +2547,82 @@ async function checkoutBookingWritesWithinTx(
   });
 
   /**
-   * Record the checkout on each slice. This is the ONLY thing that marks an
-   * all-at-once checkout — this path writes no `PartialBookingCheckout` row —
-   * and it is what the check-in guard reads to decide eligibility.
+   * A quantity-tracked slice partially dispatched by progressive scans before
+   * this full checkout keeps its earlier stamp, but its residual units go out
+   * NOW and would otherwise leave no record of their own: dispatched units
+   * are judged from session attribution wherever a slice has session units
+   * (see `computeDispatchedUnitsByAsset`), so an unrecorded residue would let
+   * the booking complete once just the scanned units return. Read the
+   * pre-stamp state here; the matching session row is written below, after
+   * the stamps.
+   */
+  const preStampedQtySlices = (await tx.bookingAsset.findMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      checkedOutAt: { not: null },
+      asset: { type: AssetType.QUANTITY_TRACKED },
+    },
+    select: { id: true, assetId: true, quantity: true, assetKitId: true },
+  })) as Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+  }>;
+  const checkoutTopUps: Array<{
+    id: string;
+    assetId: string;
+    residue: number;
+  }> = [];
+  if (preStampedQtySlices.length > 0) {
+    const priorSessions = (await tx.partialBookingCheckout.findMany({
+      where: { bookingId },
+      select: { assetIds: true, quantities: true, bookingAssetIds: true },
+    })) as Array<{
+      assetIds: string[];
+      quantities: number[];
+      bookingAssetIds: string[];
+    }>;
+    const logsByAsset = checkoutSessionsToLogsByAsset(
+      priorSessions,
+      () => true
+    );
+    const slicesByAsset = new Map<string, typeof preStampedQtySlices>();
+    for (const s of preStampedQtySlices) {
+      const group = slicesByAsset.get(s.assetId);
+      if (group) group.push(s);
+      else slicesByAsset.set(s.assetId, [s]);
+    }
+    for (const [assetId, group] of slicesByAsset) {
+      const attributed = attributeDispositionsByBookingAsset({
+        bookingAssetRows: group.map((s) => ({
+          id: s.id,
+          quantity: s.quantity,
+          assetKitId: s.assetKitId,
+        })),
+        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      });
+      for (const s of group) {
+        const units = attributed.get(s.id) ?? 0;
+        // Only a slice with SOME session units under-reads — a stamped slice
+        // with none reads back as fully dispatched from its stamp alone.
+        if (units > 0 && units < s.quantity) {
+          checkoutTopUps.push({
+            id: s.id,
+            assetId: s.assetId,
+            residue: s.quantity - units,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Record the checkout on each slice. Together with the residue session row
+   * below, this is what marks an all-at-once checkout — the path writes no
+   * `PartialBookingCheckout` row for slices without prior session units — and
+   * it is what the check-in guard reads to decide eligibility.
    *
    * Scoped to slices not already out so a progressive batch that ran earlier
    * keeps its own (earlier, more accurate) timestamp. Any stale check-in marker
@@ -2603,8 +2677,9 @@ async function checkoutBookingWritesWithinTx(
    *
    * Incremented, never assigned: the column is cumulative, so a slice on its
    * second departure adds to what its first one recorded. Only the slices read
-   * above, so a slice a progressive batch had partly sent out — still out, not
-   * yet reconciled — keeps the count that batch recorded.
+   * above — a slice a progressive batch had partly sent out is not among them,
+   * because its residue rather than its whole quantity departs now; it is
+   * topped up alongside the residue session row below.
    */
   const departingSliceIdsByQuantity = new Map<number, string[]>();
   for (const slice of departingSlices) {
@@ -2621,6 +2696,65 @@ async function checkoutBookingWritesWithinTx(
       where: { id: { in: sliceIds } },
       data: { checkedOutQuantity: { increment: quantity } },
     });
+  }
+
+  /**
+   * The residue of partially-scanned slices, recorded in BOTH places that
+   * answer "how many units left", because two readers ask it differently and
+   * a residue in only one of them is a disagreement rather than a record.
+   *
+   * The session row makes the slice's full obligation read back out of session
+   * attribution (tagged per slice — no greedy ambiguity), which is what
+   * completion and the lifecycle progress derive from.
+   * `BookingAsset.checkedOutQuantity` is the stored counter every quantity
+   * surface reads, and the departure statement above cannot carry these
+   * slices: it adds a whole booked quantity, while only the residue departs
+   * here. Topping it up by the same figure keeps the stored count and the
+   * derived one equal.
+   */
+  if (checkoutTopUps.length > 0) {
+    await tx.partialBookingCheckout.create({
+      data: {
+        bookingId,
+        checkedOutById,
+        assetIds: checkoutTopUps.map((t) => t.assetId),
+        quantities: checkoutTopUps.map((t) => t.residue),
+        bookingAssetIds: checkoutTopUps.map((t) => t.id),
+        checkoutCount: checkoutTopUps.length,
+      },
+    });
+
+    // A slice already counted by the departure statement is skipped here.
+    // `checkoutTopUps` is derived from every stamped slice, including one that
+    // went out earlier and came back IN FULL — that slice departs again whole,
+    // so the statement above already added its entire booked quantity, and
+    // adding a residue on top would count units that never left. Only a slice
+    // still partly out reaches this loop, which is the case the residue
+    // describes. Its session row is written regardless: that row records the
+    // dispatch, while this counter records the units.
+    const departingSliceIds = new Set(
+      departingSlices.map((s: { id: string }) => s.id)
+    );
+
+    // Grouped by residue for the same reason the departure statement groups by
+    // quantity: `updateMany`'s `data` takes literals and cannot name a column.
+    const topUpSliceIdsByResidue = new Map<number, string[]>();
+    for (const topUp of checkoutTopUps) {
+      if (departingSliceIds.has(topUp.id)) continue;
+      const ids = topUpSliceIdsByResidue.get(topUp.residue);
+      if (ids) {
+        ids.push(topUp.id);
+      } else {
+        topUpSliceIdsByResidue.set(topUp.residue, [topUp.id]);
+      }
+    }
+    for (const [residue, sliceIds] of topUpSliceIdsByResidue) {
+      await tx.bookingAsset.updateMany({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these ids were read above from a bookingId the caller org-checked
+        where: { id: { in: sliceIds } },
+        data: { checkedOutQuantity: { increment: residue } },
+      });
+    }
   }
 
   /**
@@ -4234,24 +4368,29 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
  * Determines whether a booking has been fully checked in across all of
  * its assets.
  *
- * Progressive semantics (Wave B): when a booking has been through at
- * least one progressive `PartialBookingCheckout`, assets/units that were
- * NEVER checked out do not need to be reconciled. They were "left at the
- * warehouse" and there is nothing to check in. Only the slices/units that
- * actually went out the door gate the COMPLETE transition.
+ * Dispatch is judged per asset from that asset's OWN records — the slice
+ * markers (`BookingAsset.checkedOutAt`, stamped by both the all-at-once
+ * checkout and progressive scans) plus its progressive session units. There
+ * is deliberately no booking-level "has any progressive checkout" mode
+ * switch: `PartialBookingCheckout` rows record scan SESSIONS, absence proves
+ * nothing (the Check-out button writes none — see the model's doc comment),
+ * and a booking-level test would let one scanned asset strip the return
+ * obligation off every button-checked-out asset on the booking.
  *
- * Legacy (non-progressive) semantics: when there are NO PartialBookingCheckout
- * rows for this booking (e.g. all-at-once flow), the function preserves the
- * original behaviour byte-for-byte — every BookingAsset must be reconciled.
+ * For `INDIVIDUAL` assets: a slice with `checkedOutAt` must be reconciled —
+ * `checkedInAt` set, or present in a `PartialBookingCheckin.assetIds` row
+ * (rows reconciled before the marker existed carry only the session record).
+ * Slices never dispatched (added onto an ONGOING booking, or left behind by
+ * a progressive checkout) have nothing to check in and never block.
  *
- * For `INDIVIDUAL` assets: must appear in at least one
- * `PartialBookingCheckin.assetIds` row — but only if it was ever checked out
- * (recorded in a `PartialBookingCheckout` OR live `CHECKED_OUT`). Assets never
- * checked out are skipped.
- *
- * For `QUANTITY_TRACKED` assets: `min(checkedOutUnits, slice.quantity) -
- * checkedInUnits === 0` per slice. Uncheck-outed units cannot block COMPLETE
- * because there is nothing to check in.
+ * For `QUANTITY_TRACKED` assets: obligated units are judged PER SLICE and
+ * summed — a slice's session-attributed units when any exist (capped by its
+ * booked quantity), otherwise its whole booked quantity when its marker is
+ * stamped (an all-at-once stamp dispatches the full slice). One asset can
+ * mix both across its slices, so neither source alone may answer for the
+ * asset (see `computeDispatchedUnitsByAsset`). Complete when every obligated
+ * unit is reconciled; units that never left the warehouse carry no
+ * obligation.
  *
  * Called by both `partialCheckinBooking` and `checkinBooking` to decide
  * the ONGOING/OVERDUE → COMPLETE transition. Keeping this in one place
@@ -4269,14 +4408,21 @@ export async function isBookingFullyCheckedIn(
     tx.bookingAsset.findMany({
       where: { bookingId },
       select: {
+        // `id` + `assetKitId` feed the per-slice session attribution in
+        // `computeDispatchedUnitsByAsset` (tagged claims name a slice; greedy
+        // fill orders by the discriminator).
+        id: true,
         assetId: true,
         quantity: true,
-        // `status` is needed to detect assets checked out via the all-at-once
-        // flow (which writes no PartialBookingCheckout records but flips the
-        // asset to CHECKED_OUT). This mirrors the union-with-live-status
-        // fallback in `partialCheckoutBooking` so completion stays consistent
-        // whether checkout happened progressively or all-at-once.
-        asset: { select: { id: true, type: true, status: true } },
+        assetKitId: true,
+        // The slice markers are the per-booking dispatch record — stamped by
+        // the all-at-once checkout (which writes no PartialBookingCheckout
+        // rows) and by progressive scans alike. They are the same source the
+        // check-in eligibility guard reads, so an item gates completion
+        // exactly when it is checkinable.
+        checkedOutAt: true,
+        checkedInAt: true,
+        asset: { select: { id: true, type: true } },
       },
     }),
     tx.partialBookingCheckin.findMany({
@@ -4301,100 +4447,93 @@ export async function isBookingFullyCheckedIn(
     }
   }
 
-  // Aggregate per-asset checked-out units across every PartialBookingCheckout
-  // session for this booking through the shared positional parser. `quantities`
-  // is positional with `assetIds`: INDIVIDUAL rows record `1`, QUANTITY_TRACKED
-  // rows record the unit count; legacy rows (pre-Wave-B) with an empty
-  // `quantities[]` fall back to 1 per entry — all handled inside the parser.
-  // Completion is an ASSET-level obligation, so the per-slice `bookingAssetId`
-  // tags are irrelevant here; we only need the per-asset unit totals. The
-  // `() => true` predicate keeps BOTH INDIVIDUAL and QT assets (the parser's
-  // non-QT skip must not drop INDIVIDUAL ids, which gate the check-in below).
-  const logsByAsset = checkoutSessionsToLogsByAsset(
-    partialCheckouts as Array<{
+  type SliceRow = {
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+    asset: { id: string; type: AssetType } | null;
+  };
+  const slices = bookingAssets as SliceRow[];
+
+  // Dispatched units per ASSET, judged slice by slice: a slice's progressive
+  // session units when any were attributed to it, otherwise its whole booked
+  // quantity when its marker is stamped. One asset can mix both across its
+  // slices (a button-checked-out slice plus a progressively-scanned sibling),
+  // so neither sessions nor stamps alone may answer for the asset — see
+  // `computeDispatchedUnitsByAsset`.
+  const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
+    slices,
+    checkoutSessions: partialCheckouts as Array<{
       assetIds: string[];
       quantities: number[];
       bookingAssetIds: string[];
     }>,
-    () => true
-  );
-  const checkedOutAssetIds = new Set<string>(logsByAsset.keys());
-  const checkedOutUnitsByAsset = new Map<string, number>();
-  for (const [assetId, logs] of logsByAsset) {
-    checkedOutUnitsByAsset.set(
-      assetId,
-      logs.reduce((sum, log) => sum + log.quantity, 0)
+  });
+
+  // Booked units summed per ASSET across all of its slices (standalone +
+  // kit-driven) — reconciliation below is asset-level.
+  const bookedUnitsByAsset = new Map<string, number>();
+  for (const s of slices) {
+    bookedUnitsByAsset.set(
+      s.assetId,
+      (bookedUnitsByAsset.get(s.assetId) ?? 0) + s.quantity
     );
   }
 
-  // Detect whether ANY progressive checkout has occurred. If not, preserve the
-  // legacy "every BookingAsset must reconcile" semantics so all-at-once flows
-  // and pre-Wave-B bookings behave exactly as before.
-  const hasProgressiveCheckout = partialCheckouts.length > 0;
+  /** QT assets already judged — an asset's slices are evaluated as one. */
+  const qtyAssetIdsEvaluated = new Set<string>();
 
-  for (const ba of bookingAssets as Array<{
-    assetId: string;
-    quantity: number;
-    asset: { id: string; type: AssetType; status: AssetStatus } | null;
-  }>) {
+  for (const ba of slices) {
     const isQtyTrackedAsset = ba.asset?.type === AssetType.QUANTITY_TRACKED;
 
     if (!isQtyTrackedAsset) {
-      // INDIVIDUAL. Under progressive semantics: an asset that was NEVER
-      // checked out (not in any PartialBookingCheckout AND not currently
-      // CHECKED_OUT) cannot — and need not — be checked in. Under legacy
-      // semantics (no PartialBookingCheckout rows at all), the asset must
-      // appear in a partial-checkin session, preserving previous behaviour.
-      const wasCheckedOut =
-        checkedOutAssetIds.has(ba.assetId) ||
-        ba.asset?.status === AssetStatus.CHECKED_OUT;
-
-      if (hasProgressiveCheckout && !wasCheckedOut) {
-        // Never went out → nothing to reconcile.
-        continue;
-      }
-
-      if (!individuallyCheckedInIds.has(ba.assetId)) return false;
-      continue;
+      // INDIVIDUAL. The slice marker is the same source the check-in
+      // eligibility guard reads, so an asset gates completion exactly when
+      // it is checkinable. A slice never dispatched on THIS booking (added
+      // onto an ONGOING booking, or left behind by a progressive checkout)
+      // has nothing to reconcile and never blocks.
+      if (!ba.checkedOutAt) continue;
+      // Reconciled — by the slice marker, or by a partial-checkin session
+      // for rows reconciled before the marker existed.
+      if (ba.checkedInAt) continue;
+      if (individuallyCheckedInIds.has(ba.assetId)) continue;
+      return false;
     }
 
-    // QUANTITY_TRACKED. Under legacy semantics, require zero remaining
-    // (booked − logged === 0). Under progressive semantics, the cap is
-    // `min(checkedOutUnits, slice.quantity)` — uncheck-outed units have no
-    // reconciliation obligation.
-    if (!hasProgressiveCheckout) {
-      const remaining = await computeBookingAssetRemaining(
-        tx,
-        bookingId,
-        ba.assetId
-      );
-      if (remaining > 0) return false;
-      continue;
-    }
+    // QUANTITY_TRACKED — judged once per ASSET, because `remaining` and the
+    // unit sums span all of the asset's slices.
+    if (qtyAssetIdsEvaluated.has(ba.assetId)) continue;
+    qtyAssetIdsEvaluated.add(ba.assetId);
 
-    const checkedOutUnits = checkedOutUnitsByAsset.get(ba.assetId) ?? 0;
-    if (checkedOutUnits === 0) {
-      // This asset was never checked out under the progressive flow — nothing
-      // to reconcile for this slice (or any other slice of the same asset).
+    // Obligated units = what actually went out for this asset, judged slice
+    // by slice (session-attributed units per slice, else the stamped slice's
+    // booked quantity). Judging per slice keeps one progressively-scanned
+    // sibling from erasing a button-checked-out slice's obligation, and one
+    // scanned-out asset from stripping the obligation off every other asset
+    // on the booking.
+    const booked = bookedUnitsByAsset.get(ba.assetId) ?? 0;
+    const obligatedUnits = Math.min(
+      dispatchedUnitsByAsset.get(ba.assetId) ?? 0,
+      booked
+    );
+    if (obligatedUnits === 0) {
+      // Never dispatched in any form — nothing to reconcile.
       continue;
     }
 
     // `computeBookingAssetRemaining` returns `booked − logged` clamped at 0.
     // The "logged" half is what we actually care about (units already checked
-    // in); recover it via `booked - remaining` where `booked` sums every slice
-    // of the same asset. Cap by `checkedOutUnits` so units that never left the
-    // warehouse don't block COMPLETE.
-    const [bookedSum, remaining] = await Promise.all([
-      tx.bookingAsset.aggregate({
-        where: { bookingId, assetId: ba.assetId },
-        _sum: { quantity: true },
-      }),
-      computeBookingAssetRemaining(tx, bookingId, ba.assetId),
-    ]);
-    const booked =
-      (bookedSum as { _sum: { quantity: number | null } })._sum.quantity ?? 0;
+    // in); recover it via `booked - remaining`. Units that never left the
+    // warehouse don't block COMPLETE because `obligatedUnits` excludes them.
+    const remaining = await computeBookingAssetRemaining(
+      tx,
+      bookingId,
+      ba.assetId
+    );
     const checkedInUnits = Math.max(0, booked - remaining);
-    const obligatedUnits = Math.min(checkedOutUnits, booked);
     if (obligatedUnits - checkedInUnits > 0) return false;
   }
 

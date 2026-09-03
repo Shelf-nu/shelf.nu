@@ -294,3 +294,82 @@ export function attributeSessionCheckoutToSlices(args: {
   }
   return out;
 }
+
+/**
+ * Units actually dispatched per ASSET on a booking, judged slice by slice.
+ *
+ * Two dispatch writers exist and each leaves a different record: progressive
+ * scans record exact unit counts in `PartialBookingCheckout` sessions, while
+ * the all-at-once checkout stamps `BookingAsset.checkedOutAt` and writes no
+ * session rows. A single asset can mix both across its slices (an 8-unit
+ * slice out via the button plus a later sibling scanned out progressively),
+ * so neither source alone is the answer:
+ * - session units judged asset-level would erase the button slices'
+ *   obligation the moment ANY sibling has a session record;
+ * - stamps alone would inflate a partially-dispatched progressive slice to
+ *   its full booked quantity (the stamp is boolean, per slice).
+ *
+ * So per slice: session units attributed to that slice (tagged + greedy,
+ * via {@link attributeDispositionsByBookingAsset} — the same order the
+ * stamper uses) when any exist, capped by the slice's booked quantity;
+ * otherwise the whole slice when it is stamped; otherwise zero. The
+ * asset's dispatched units are the sum over its slices.
+ *
+ * Pure derivation — no DB calls; caller pre-fetches slices and sessions.
+ * Consumed by completion (`isBookingFullyCheckedIn`) and by the lifecycle
+ * progress loaders so the two can never disagree on what went out.
+ *
+ * @param args.slices - ALL of the booking's slices (`id`, `assetId`, booked
+ *   `quantity`, `assetKitId`, `checkedOutAt`).
+ * @param args.checkoutSessions - The booking's raw checkout sessions.
+ * @returns Map keyed by `assetId` → dispatched units (absent = 0).
+ */
+export function computeDispatchedUnitsByAsset(args: {
+  slices: Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+  }>;
+  checkoutSessions: CheckoutSession[];
+}): Map<string, number> {
+  const { slices, checkoutSessions } = args;
+
+  const logsByAsset = checkoutSessionsToLogsByAsset(
+    checkoutSessions,
+    () => true
+  );
+
+  const slicesByAsset = new Map<string, typeof slices>();
+  for (const s of slices) {
+    const group = slicesByAsset.get(s.assetId);
+    if (group) group.push(s);
+    else slicesByAsset.set(s.assetId, [s]);
+  }
+
+  const dispatchedByAsset = new Map<string, number>();
+  for (const [assetId, assetSlices] of slicesByAsset) {
+    const sessionUnitsBySlice = attributeDispositionsByBookingAsset({
+      bookingAssetRows: assetSlices.map((s) => ({
+        id: s.id,
+        quantity: s.quantity,
+        assetKitId: s.assetKitId,
+      })),
+      consumptionLogs: logsByAsset.get(assetId) ?? [],
+    });
+
+    let dispatched = 0;
+    for (const s of assetSlices) {
+      const sessionUnits = sessionUnitsBySlice.get(s.id) ?? 0;
+      if (sessionUnits > 0) {
+        dispatched += Math.min(sessionUnits, s.quantity);
+      } else if (s.checkedOutAt) {
+        dispatched += s.quantity;
+      }
+    }
+    if (dispatched > 0) dispatchedByAsset.set(assetId, dispatched);
+  }
+
+  return dispatchedByAsset;
+}
