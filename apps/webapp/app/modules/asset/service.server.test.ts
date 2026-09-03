@@ -18,7 +18,10 @@ import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-l
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
-import { createNote } from "~/modules/note/service.server";
+import {
+  createAssetModelChangeNote,
+  createNote,
+} from "~/modules/note/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
@@ -1961,6 +1964,74 @@ describe("createAsset cross-org guards", () => {
     // "uncategorized" is the form's empty sentinel, not an id, so it must
     // never reach the org-scope lookup.
     expect(db.category.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateAsset asset-model activity", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: this path issues three `asset.findUnique` reads with different
+    // shapes (kit block, before-state, INDIVIDUAL-only type guard). Routing on
+    // the select keeps the test independent of their order.
+    // `mockReset`, not just `clearAllMocks`: earlier suites in this file queue
+    // `mockResolvedValueOnce` values, and an unconsumed queue survives a clear
+    // and fires here instead of the implementation below.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: any) => {
+        if (q?.select?.assetKits) return Promise.resolve({ assetKits: [] });
+        if (q?.select?.type) return Promise.resolve({ type: "INDIVIDUAL" });
+        return Promise.resolve({
+          id: "asset-1",
+          title: "Asset 1",
+          description: null,
+          valuation: null,
+          category: null,
+          tags: [],
+          assetModel: null,
+          organization: { currency: "USD" },
+        });
+      }
+    );
+    // why: `org-validation.server` is not mocked in this file, so the real
+    // guard runs and reads this stub. Driving it through the guard also proves
+    // the note takes its name from the row the guard already fetched, rather
+    // than from a second query.
+    (db.assetModel.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        id: "model-1",
+        name: "Stream Deck XL",
+      }
+    );
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Asset 1",
+      assetModelId: "model-1",
+      category: null,
+      tags: [],
+      customFields: [],
+    });
+  });
+
+  it("writes a note as well as an event, because the Activity tab renders notes", async () => {
+    // An event with no note leaves the customer looking at an empty history,
+    // which is the report that prompted this work. The bulk path writes both;
+    // so must this one.
+    await updateAsset({
+      id: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      assetModelId: "model-1",
+      request: new Request("http://localhost/assets/asset-1/edit"),
+    } as never);
+
+    expect(createAssetModelChangeNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        previousModel: null,
+        newModel: { id: "model-1", name: "Stream Deck XL" },
+      })
+    );
   });
 });
 

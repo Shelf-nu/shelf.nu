@@ -2107,6 +2107,13 @@ export async function updateAsset({
       });
     }
 
+    /**
+     * The model being linked, when one is. Stays null on the unlink path and
+     * when the field is absent, which the note builder reads as "removed" and
+     * "no change" respectively.
+     */
+    let linkedAssetModel: { id: string; name: string } | null = null;
+
     /** If assetModelId is null, disconnect the asset model */
     if (assetModelId === null) {
       Object.assign(data, {
@@ -2122,7 +2129,12 @@ export async function updateAsset({
       // / r3350881506). Runs before the type-check below so a
       // cross-org id is rejected with the "not in your workspace"
       // 404 instead of leaking a "not allowed for qty-tracked" 400.
-      await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
+      // Returns the row it had to fetch anyway, so the change note can name
+      // the model without a second round trip.
+      linkedAssetModel = await assertAssetModelBelongsToOrg({
+        assetModelId,
+        organizationId,
+      });
 
       // AssetModel is INDIVIDUAL-only (see the matching guard in
       // createAsset). Block the connect for a QUANTITY_TRACKED asset
@@ -2880,6 +2892,14 @@ export async function updateAsset({
           userId,
           previousDescription: assetBeforeUpdate.description,
           newDescription: description,
+          loadUserForNotes,
+        }),
+        createAssetModelChangeNote({
+          assetId: asset.id,
+          organizationId,
+          userId,
+          previousModel: assetBeforeUpdate.assetModel,
+          newModel: linkedAssetModel,
           loadUserForNotes,
         }),
         createAssetCategoryChangeNote({
