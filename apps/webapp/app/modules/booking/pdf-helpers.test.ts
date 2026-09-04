@@ -25,8 +25,9 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: signing QR images reaches Supabase storage; the printed code is
-// resolved independently of whether an image came back.
+// why: rendering a QR per asset is real work (qrcode-generator + sharp) and
+// irrelevant here — the printed code is resolved independently of whether an
+// image came back.
 vi.mock("~/modules/qr/service.server", () => ({
   getQrCodeMaps: vi.fn().mockResolvedValue({}),
 }));
@@ -263,11 +264,16 @@ describe("booking checklist PDF — the printed asset code", () => {
       expect(row).not.toHaveProperty("assetLocations");
     }
 
-    // why: `getBooking` carries a SECOND copy of every asset — the code
-    // relations among them — on `bookingAssets`, once per slice. Stripping the
-    // render rows alone would leave that copy in the response, which is the
-    // larger of the two.
+    // why: `getBooking` carries a second, select-shaped copy of every asset —
+    // the code relations among them — on `bookingAssets`, once per slice, and
+    // `modelRequests` with full `AssetModel` rows that the sheet reads from
+    // the projected `modelRequests` instead. Stripping the render rows alone
+    // leaves both in the response.
     expect(result.booking).not.toHaveProperty("bookingAssets");
+    expect(result.booking).not.toHaveProperty("modelRequests");
+
+    // The projection the sheet actually reads is untouched.
+    expect(result.modelRequests).toEqual([]);
 
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
   });

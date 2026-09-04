@@ -606,7 +606,7 @@ export const AuditPDFContent = ({
                       />
                     </td>
                     <td className="border border-gray-300 p-2.5 align-top">
-                      <div className="flex flex-col items-center gap-1">
+                      <div className="flex flex-col items-start gap-1">
                         {assetIdToQrCodeMap[asset.id] && (
                           <img
                             src={assetIdToQrCodeMap[asset.id]}

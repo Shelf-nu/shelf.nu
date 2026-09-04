@@ -191,7 +191,8 @@ describe("booking checklist PDF — Code column", () => {
   });
 
   it("prints the code even when no QR image was generated", () => {
-    // why: the image is signed at request time and can come back empty. The
+    // why: the image is generated per request, and `getQrCodeMaps` leaves out
+    // any asset whose generation threw, so a row can arrive with no image. The
     // code is what a picker matches against the shelf, so it must not be
     // rendered behind the image's presence the way the image itself is.
     renderPreview({

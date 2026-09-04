@@ -362,11 +362,17 @@ export async function fetchAllPdfRelatedData(
       }) => row
     );
 
-    // `getBooking` returns the whole booking, and its `bookingAssets` carry a
-    // second, full copy of every asset — code relations included — once per
-    // slice. The sheet reads the booking only for its name, description,
-    // custodian and tags; `assets` above is the per-slice view it renders.
-    const { bookingAssets: _bookingAssets, ...printableBooking } = booking;
+    // `getBooking` returns the whole booking, and `BOOKING_WITH_ASSETS_INCLUDE`
+    // hangs two things off it that the sheet never reads: `bookingAssets`,
+    // carrying a second, select-shaped copy of every asset — code relations
+    // included — once per slice, and `modelRequests` with full `AssetModel`
+    // rows, which the sheet reads from the projection above instead. The
+    // booking itself is here for its name, description, custodian and tags.
+    const {
+      bookingAssets: _bookingAssets,
+      modelRequests: _bookingModelRequests,
+      ...printableBooking
+    } = booking as typeof booking & { modelRequests?: unknown };
 
     return {
       booking: printableBooking,

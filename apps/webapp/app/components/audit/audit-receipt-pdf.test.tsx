@@ -164,7 +164,8 @@ describe("audit receipt PDF — Code column", () => {
   });
 
   it("prints the code even when no QR image was generated", () => {
-    // why: the image is signed at request time and can come back empty. The
+    // why: the image is generated per request, and `getQrCodeMaps` leaves out
+    // any asset whose generation threw, so a row can arrive with no image. The
     // code is the part the receipt exists to record, so it must not be
     // conditional on the image the way the image itself is.
     renderReceipt({ displayCode: SAM_CODE, qrImage: null });

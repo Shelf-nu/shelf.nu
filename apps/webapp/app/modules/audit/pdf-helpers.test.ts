@@ -28,7 +28,8 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: signing QR images reaches Supabase storage; irrelevant to note queries
+// why: rendering a QR per asset (qrcode-generator + sharp) is real work and
+// irrelevant to note queries
 vi.mock("~/modules/qr/service.server", () => ({
   getQrCodeMaps: vi.fn().mockResolvedValue({}),
 }));
@@ -273,9 +274,10 @@ describe("audit receipt — the printed asset code", () => {
   });
 
   it("resolves a code even when no QR image could be generated", async () => {
-    // why: `getQrCodeMaps` is stubbed to return {} here, which is also what a
-    // real signing failure produces. The row still has to print something a
-    // reader can match against the shelf.
+    // why: `getQrCodeMaps` is stubbed to return {} here, which is also what
+    // the real thing produces for an asset whose image generation threw — it
+    // logs and moves on, leaving no entry. The row still has to print
+    // something a reader can match against the shelf.
     const result = await run({
       qrIdDisplayPreference: "SAM_ID",
       barcodesEnabled: false,

@@ -433,7 +433,7 @@ export const BookingPDFPreview = ({
                     {asset?.location?.name}
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    <div className="flex flex-col items-center gap-1">
+                    <div className="flex flex-col items-start gap-1">
                       <div className="flex items-center gap-3">
                         <img
                           src={assetIdToQrCodeMap[asset.id] || ""}
@@ -442,9 +442,7 @@ export const BookingPDFPreview = ({
                         />
                         <input
                           type="checkbox"
-                          aria-label={`Mark ${
-                            asset.title ?? asset.id
-                          } as picked`}
+                          aria-label={`Mark ${asset.title} as picked`}
                           className="block size-5 border"
                         />
                       </div>
