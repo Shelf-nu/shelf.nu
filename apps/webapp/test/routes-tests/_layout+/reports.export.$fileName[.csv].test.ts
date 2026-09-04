@@ -13,7 +13,12 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
-import { assetDistributionReport } from "~/modules/reports/helpers.server";
+import {
+  assetDistributionReport,
+  assetInventoryReport,
+  bookingComplianceReport,
+  custodySnapshotReport,
+} from "~/modules/reports/helpers.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -62,6 +67,9 @@ let loader: (typeof import("~/routes/_layout+/reports.export.$fileName[.csv]"))[
 
 const requirePermissionMock = vi.mocked(requirePermission);
 const assetDistributionReportMock = vi.mocked(assetDistributionReport);
+const custodySnapshotReportMock = vi.mocked(custodySnapshotReport);
+const assetInventoryReportMock = vi.mocked(assetInventoryReport);
+const bookingComplianceReportMock = vi.mocked(bookingComplianceReport);
 
 beforeAll(async () => {
   ({ loader } = await import(
@@ -109,6 +117,9 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
     vi.clearAllMocks();
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
+      // The loader threads the workspace currency into the money-KPI-bearing
+      // report functions, so the permission result must carry it.
+      currentOrganization: { currency: "USD" },
     } as any);
     assetDistributionReportMock.mockResolvedValue({
       distributionBreakdown: arabicBreakdown,
@@ -154,5 +165,79 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
     );
     expect(rows[1]).toBe("Category,حاسوب محمول,12,60.0%,24000");
     expect(rows[2]).toBe("Location,مستودع الرياض,8,40.0%,16000");
+  });
+
+  /**
+   * The export endpoint receives the page's full query string (the client
+   * forwards every current search param), and each report case must hand the
+   * params its page-loader counterpart honors to the same query function —
+   * otherwise a filtered page silently exports the unfiltered workspace.
+   */
+  describe("filter passthrough", () => {
+    const exportUrl = (query: string) =>
+      `http://localhost:3000/reports/export/report-2026-08-28.csv?${query}`;
+
+    const runLoaderWith = (query: string) =>
+      loader(
+        createLoaderArgs({
+          request: new Request(exportUrl(query)),
+          params: { fileName: "report-2026-08-28" },
+          context,
+        })
+      );
+
+    it("forwards the custody-snapshot page filters and workspace currency", async () => {
+      requirePermissionMock.mockResolvedValue({
+        organizationId: "org-1",
+        currentOrganization: { currency: "EUR" },
+      } as any);
+      custodySnapshotReportMock.mockResolvedValue({ rows: [] } as any);
+
+      await runLoaderWith(
+        "reportId=custody-snapshot&teamMember=tm-1&location=loc-1"
+      );
+
+      expect(custodySnapshotReportMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: "org-1",
+          teamMemberId: "tm-1",
+          locationId: "loc-1",
+          currency: "EUR",
+        })
+      );
+    });
+
+    it("forwards the asset-inventory page filters", async () => {
+      assetInventoryReportMock.mockResolvedValue({ rows: [] } as any);
+
+      await runLoaderWith(
+        "reportId=asset-inventory&categories=cat-1,cat-2&locations=loc-1&statuses=AVAILABLE,IN_CUSTODY"
+      );
+
+      expect(assetInventoryReportMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: "org-1",
+          categoryIds: ["cat-1", "cat-2"],
+          locationIds: ["loc-1"],
+          statuses: ["AVAILABLE", "IN_CUSTODY"],
+          currency: "USD",
+        })
+      );
+    });
+
+    it("forwards the booking-compliance sort so CSV row order matches the page", async () => {
+      bookingComplianceReportMock.mockResolvedValue({ rows: [] } as any);
+
+      await runLoaderWith(
+        "reportId=booking-compliance&sortBy=custodian&sortOrder=asc"
+      );
+
+      expect(bookingComplianceReportMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sortBy: "custodian",
+          sortOrder: "asc",
+        })
+      );
+    });
   });
 });
