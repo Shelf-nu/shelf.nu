@@ -73,14 +73,20 @@ describe("getMobileUserContext — booking visibility", () => {
 
     await getMobileUserContext("user-1", "org-1");
 
-    const select = (findUnique.mock.calls[0]?.[0] as any).select.organization
-      .select;
-    expect(select).toMatchObject({
-      selfServiceCanSeeBookings: true,
-      baseUserCanSeeBookings: true,
-      selfServiceCanSeeCustody: true,
-      baseUserCanSeeCustody: true,
-    });
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          organization: expect.objectContaining({
+            select: expect.objectContaining({
+              selfServiceCanSeeBookings: true,
+              baseUserCanSeeBookings: true,
+              selfServiceCanSeeCustody: true,
+              baseUserCanSeeCustody: true,
+            }),
+          }),
+        }),
+      })
+    );
   });
 
   it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
