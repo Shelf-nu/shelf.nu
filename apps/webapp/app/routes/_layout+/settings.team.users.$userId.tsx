@@ -181,6 +181,7 @@ export default function UserPage() {
         <AbsolutePositionedHeaderActions className="hidden w-full md:flex">
           <TeamUsersActionsDropdown
             userId={user.id}
+            name={resolveUserDisplayName(user)}
             email={user.email}
             teamMemberId={user.teamMembers?.[0]?.id}
             inviteStatus={user?.teamMembers?.[0]?.receivedInvites?.[0]?.status}
