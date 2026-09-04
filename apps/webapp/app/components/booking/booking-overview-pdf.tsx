@@ -444,9 +444,13 @@ export const BookingPDFPreview = ({
                           the same with it and without it, and gives the code the
                           whole cell to wrap in — a 25-character legacy QR id
                           needs two lines here. */}
-                      <When truthy={showQrCodesOnPdfs}>
+                      <When
+                        truthy={
+                          showQrCodesOnPdfs && !!assetIdToQrCodeMap[asset.id]
+                        }
+                      >
                         <img
-                          src={assetIdToQrCodeMap[asset.id] || ""}
+                          src={assetIdToQrCodeMap[asset.id]}
                           alt="QR Code"
                           className="size-14 object-cover"
                         />

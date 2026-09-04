@@ -124,14 +124,19 @@ function renderPreview(args: Parameters<typeof pdfMetaWith>[0]) {
 }
 
 /**
- * The table cell holding the row's code — located by the QR `<img>`, which the
- * checklist renders unconditionally (with an empty `src` when no image was
- * generated), so the no-image case finds the same cell.
+ * The table cell holding the row's code — the last cell of the asset's row.
+ *
+ * Located by the row rather than by the QR image, because the image is absent
+ * whenever there is nothing to show: no code generated, or the workspace turned
+ * QR images off.
  */
 function codeCell() {
-  const cell = screen.getByAltText("QR Code").closest("td");
-  expect(cell).not.toBeNull();
-  return cell as HTMLTableCellElement;
+  const cells = screen
+    .getByText("Tripod")
+    .closest("tr")
+    ?.querySelectorAll("td");
+  expect(cells).toBeTruthy();
+  return cells![cells!.length - 1];
 }
 
 describe("booking checklist PDF — Code column", () => {
@@ -210,8 +215,9 @@ describe("booking checklist PDF — Code column", () => {
     });
 
     expect(codeCell()).toHaveTextContent("SAM-0001");
-    // The `<img>` still renders, sourceless — the code is what carries the row.
-    expect(codeCell().querySelector("img")?.getAttribute("src")).toBeFalsy();
+    // why: no entry means no image to show, so the element is omitted rather
+    // than rendered with an empty `src`. Same as the audit receipt.
+    expect(codeCell().querySelector("img")).toBeNull();
   });
 
   it("prints no QR image when the workspace turned them off", () => {
@@ -231,7 +237,7 @@ describe("booking checklist PDF — Code column", () => {
     });
 
     expect(screen.queryByAltText("QR Code")).not.toBeInTheDocument();
-    expect(screen.getByText("SAM-0001")).toBeInTheDocument();
+    expect(codeCell()).toHaveTextContent("SAM-0001");
   });
 
   it("keeps the pick-off checkbox when the QR image is off", () => {
