@@ -97,6 +97,8 @@ export interface PdfDbResult {
     // Read by `resolveDisplayCode` when building `assetIdToDisplayCodeMap`.
     | "qrIdDisplayPreference"
     | "barcodesEnabled"
+    // Whether the sheet prints the QR image at all.
+    | "showQrCodesOnPdfs"
   >;
   assetIdToQrCodeMap: Record<string, string>;
   /**
@@ -243,9 +245,11 @@ export async function fetchAllPdfRelatedData(
           id: true,
           currency: true,
           updatedAt: true,
-          // Which code the workspace wants printed under the QR image.
+          // Which code the workspace wants printed under the QR image, and
+          // whether the QR image is printed at all.
           qrIdDisplayPreference: true,
           barcodesEnabled: true,
+          showQrCodesOnPdfs: true,
         },
       }),
       // SECURITY (cross-org IDOR): `sourceKitId`'s FK accepts a `Kit` in ANY

@@ -76,6 +76,8 @@ export interface AuditPdfDbResult {
     // Read by `resolveDisplayCode` when building `assetIdToDisplayCodeMap`.
     | "qrIdDisplayPreference"
     | "barcodesEnabled"
+    // Whether the sheet prints the QR image at all.
+    | "showQrCodesOnPdfs"
   >;
   // QR code data URLs mapped by asset ID
   assetIdToQrCodeMap: Record<string, string>;
@@ -332,9 +334,11 @@ export async function fetchAllAuditPdfRelatedData(
           imageId: true,
           currency: true,
           updatedAt: true,
-          // Which code the workspace wants printed under the QR image.
+          // Which code the workspace wants printed under the QR image, and
+          // whether the QR image is printed at all.
           qrIdDisplayPreference: true,
           barcodesEnabled: true,
+          showQrCodesOnPdfs: true,
         },
       }),
     ]);

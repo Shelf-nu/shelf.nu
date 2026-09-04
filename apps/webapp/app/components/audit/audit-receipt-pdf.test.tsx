@@ -60,9 +60,11 @@ const QR_IMAGE = "data:image/png;base64,iVBORw0KGgo=";
 function pdfMetaWith({
   displayCode,
   qrImage = QR_IMAGE,
+  showQrCodesOnPdfs = true,
 }: {
   displayCode: AuditPdfDbResult["assetIdToDisplayCodeMap"][string] | undefined;
   qrImage?: string | null;
+  showQrCodesOnPdfs?: boolean;
 }): AuditPdfDbResult {
   return {
     session: {
@@ -93,6 +95,7 @@ function pdfMetaWith({
       updatedAt: new Date("2026-01-01T00:00:00.000Z"),
       qrIdDisplayPreference: "SAM_ID",
       barcodesEnabled: false,
+      showQrCodesOnPdfs,
     },
     assets: [
       {
@@ -192,6 +195,16 @@ describe("audit receipt PDF — Code column", () => {
     const cell = codeCell();
     expect(cell).toHaveTextContent("qr-visible-id");
     expect(cell).toHaveTextContent("QR Code ID");
+  });
+
+  it("prints no QR image when the workspace turned them off", () => {
+    // why: an audit records what was physically present, so a receipt whose QR
+    // can be scanned from a desk undermines the record it is. The code stays,
+    // so the row is still matchable by eye.
+    renderReceipt({ displayCode: SAM_CODE, showQrCodesOnPdfs: false });
+
+    expect(codeCell().querySelector("img")).toBeNull();
+    expect(codeCell()).toHaveTextContent("SAM-0001");
   });
 
   it("still renders the row when no code resolved", () => {

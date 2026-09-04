@@ -64,9 +64,11 @@ const QR_IMAGE = "data:image/png;base64,iVBORw0KGgo=";
 function pdfMetaWith({
   displayCode,
   qrImage = QR_IMAGE,
+  showQrCodesOnPdfs = true,
 }: {
   displayCode: PdfDbResult["assetIdToDisplayCodeMap"][string] | undefined;
   qrImage?: string | null;
+  showQrCodesOnPdfs?: boolean;
 }): PdfDbResult {
   return {
     booking: {
@@ -85,6 +87,7 @@ function pdfMetaWith({
       updatedAt: new Date("2026-01-01T00:00:00.000Z"),
       qrIdDisplayPreference: "SAM_ID",
       barcodesEnabled: false,
+      showQrCodesOnPdfs,
     },
     assets: [
       {
@@ -209,6 +212,45 @@ describe("booking checklist PDF — Code column", () => {
     expect(codeCell()).toHaveTextContent("SAM-0001");
     // The `<img>` still renders, sourceless — the code is what carries the row.
     expect(codeCell().querySelector("img")?.getAttribute("src")).toBeFalsy();
+  });
+
+  it("prints no QR image when the workspace turned them off", () => {
+    // why: the sheet carries the same codes as the labels on the equipment, so
+    // a workspace that wants people scanning the item itself has to be able to
+    // stop the sheet being scannable. The code stays: the row still has to be
+    // matchable by eye, which is the whole point of turning the image off.
+    renderPreview({
+      displayCode: {
+        value: "SAM-0001",
+        type: "SAM_ID",
+        isFallback: false,
+        entityKind: "asset",
+        workspacePreference: "SAM_ID",
+      },
+      showQrCodesOnPdfs: false,
+    });
+
+    expect(screen.queryByAltText("QR Code")).not.toBeInTheDocument();
+    expect(screen.getByText("SAM-0001")).toBeInTheDocument();
+  });
+
+  it("keeps the pick-off checkbox when the QR image is off", () => {
+    // why: the tick box is how a picker works the sheet; hiding the image must
+    // not take it with it.
+    renderPreview({
+      displayCode: {
+        value: "SAM-0001",
+        type: "SAM_ID",
+        isFallback: false,
+        entityKind: "asset",
+        workspacePreference: "SAM_ID",
+      },
+      showQrCodesOnPdfs: false,
+    });
+
+    expect(
+      screen.getByRole("checkbox", { name: "Mark Tripod as picked" })
+    ).toBeInTheDocument();
   });
 
   it("keeps a named pick-off checkbox in the code cell", () => {

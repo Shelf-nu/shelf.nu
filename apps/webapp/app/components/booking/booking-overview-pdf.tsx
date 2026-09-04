@@ -194,6 +194,11 @@ export const BookingPDFPreview = ({
     modelRequests,
   } = pdfMeta;
 
+  // Workspaces that want people scanning the label on the item, not the sheet,
+  // turn the QR image off. The text code prints either way, so the row is still
+  // matchable by eye.
+  const showQrCodesOnPdfs = organization.showQrCodesOnPdfs ?? true;
+
   // Phase 3d (Book-by-Model): defensively re-filter here so a caller
   // that feeds pre-computed `PdfDbResult` with stale rows (e.g. after a
   // model request was fulfilled concurrently) can't leak a fulfilled
@@ -434,27 +439,31 @@ export const BookingPDFPreview = ({
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                     <div className="flex flex-col items-start gap-1">
-                      <div className="flex items-center gap-3">
+                      {/* The QR is optional; the tick box and the code are not.
+                          Keeping the image on its own line means the cell reads
+                          the same with it and without it, and gives the code the
+                          whole cell to wrap in — a 25-character legacy QR id
+                          needs two lines here. */}
+                      <When truthy={showQrCodesOnPdfs}>
                         <img
                           src={assetIdToQrCodeMap[asset.id] || ""}
                           alt="QR Code"
                           className="size-14 object-cover"
                         />
+                      </When>
+                      <div className="flex items-center gap-3">
                         <input
                           type="checkbox"
                           aria-label={`Mark ${asset.title} as picked`}
                           className="block size-5 border"
                         />
+                        {/* Printed even when the QR image failed to generate:
+                            the code is the part a picker matches against the
+                            physical label. */}
+                        <AssetCodePrintText
+                          displayCode={assetIdToDisplayCodeMap[asset.id]}
+                        />
                       </div>
-                      {/* Printed even when the QR image failed to generate: the
-                          code is the part a picker matches against the physical
-                          label. It sits under the image and the tick box rather
-                          than beside them so it has the whole cell to wrap in —
-                          a 25-character legacy QR id needs two lines here and
-                          would need three squeezed alongside the tick box. */}
-                      <AssetCodePrintText
-                        displayCode={assetIdToDisplayCodeMap[asset.id]}
-                      />
                     </div>
                   </td>
                 </tr>

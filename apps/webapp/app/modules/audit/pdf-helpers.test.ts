@@ -217,6 +217,8 @@ describe("audit receipt — the printed asset code", () => {
     ).toMatchObject({
       qrIdDisplayPreference: true,
       barcodesEnabled: true,
+      // why: the sheet cannot decide whether to print the QR image without it.
+      showQrCodesOnPdfs: true,
     });
   });
 

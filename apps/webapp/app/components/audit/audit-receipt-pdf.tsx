@@ -174,6 +174,11 @@ export const AuditPDFContent = ({
     activityNotes,
   } = pdfMeta;
 
+  // An audit is a claim about what was physically present, so a receipt whose
+  // QR can be scanned from the desk undermines the thing it records. Workspaces
+  // that care turn the image off; the text code still prints.
+  const showQrCodesOnPdfs = organization.showQrCodesOnPdfs ?? true;
+
   // why: the receipt can be downloaded at ANY point in an audit's life — the
   // Actions dropdown offers it with no status gate — so it must apply the same
   // completion rule as the screen it was printed from. `missingAssetCount` is
@@ -607,13 +612,17 @@ export const AuditPDFContent = ({
                     </td>
                     <td className="border border-gray-300 p-2.5 align-top">
                       <div className="flex flex-col items-start gap-1">
-                        {assetIdToQrCodeMap[asset.id] && (
+                        <When
+                          truthy={
+                            showQrCodesOnPdfs && !!assetIdToQrCodeMap[asset.id]
+                          }
+                        >
                           <img
                             src={assetIdToQrCodeMap[asset.id]}
                             alt={`QR code for ${asset.title}`}
                             className="size-16"
                           />
-                        )}
+                        </When>
                         {/* Printed even when the QR image is missing: the code
                             is the part a reader matches against the physical
                             label. */}
