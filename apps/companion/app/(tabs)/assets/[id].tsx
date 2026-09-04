@@ -43,6 +43,7 @@ import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
 import { AdjustQuantitySheet } from "@/components/adjust-quantity-sheet";
+import { MoveQuantitySheet } from "@/components/move-quantity-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
@@ -178,8 +179,24 @@ export default function AssetDetailScreen() {
 
   // ── Location Action ─────────────────────────────────
 
+  // Pending move target for QUANTITY_TRACKED assets. Non-null doubles as the
+  // "move sheet visible" flag AND carries the picked location, so the sheet
+  // and the confirm handler can never disagree about the destination
+  // (same pattern as `assignQtyMember`).
+  const [moveTarget, setMoveTarget] = useState<LocationType | null>(null);
+
   const handleLocationSelect = (location: LocationType) => {
     setShowLocationPicker(false);
+
+    if (isQtyTracked) {
+      // QUANTITY_TRACKED: the move sheet is the confirm step — it asks how
+      // many units to place. Re-picking the current location is allowed:
+      // placing a different quantity there is a real placement edit (web
+      // dialog parity), and the server short-circuits true no-ops.
+      setMoveTarget(location);
+      return;
+    }
+
     if (location.id === asset?.location?.id) return; // same location
 
     Alert.alert(
@@ -192,13 +209,22 @@ export default function AssetDetailScreen() {
     );
   };
 
-  const performUpdateLocation = async (locationId: string) => {
+  /**
+   * Applies the location update and refreshes the asset. `quantity` is the
+   * per-placement amount for QUANTITY_TRACKED assets (units to place at the
+   * location); INDIVIDUAL moves omit it.
+   */
+  const performUpdateLocation = async (
+    locationId: string,
+    quantity?: number
+  ) => {
     if (!currentOrg || !asset) return;
     setIsActionLoading(true);
     const { error: err } = await api.updateLocation(
       currentOrg.id,
       asset.id,
-      locationId
+      locationId,
+      quantity
     );
     if (err) Alert.alert("Error", err);
     else {
@@ -868,6 +894,28 @@ export default function AssetDetailScreen() {
               INDIVIDUAL rendering stays byte-identical. */}
           {isQtyTracked && (
             <>
+              <MoveQuantitySheet
+                visible={moveTarget != null}
+                locationName={moveTarget?.name ?? ""}
+                totalQuantity={asset.quantity ?? 1}
+                unitOfMeasure={asset.unitOfMeasure}
+                // Pre-fill: units at the current primary placement, else the
+                // full pool (web dialog parity). `locationQuantity` is the
+                // per-row placement quantity, NOT workspace stock.
+                initialQuantity={asset.locationQuantity ?? asset.quantity ?? 1}
+                // Older servers omit placementCount — fall back to what the
+                // flat `location` field implies so the warning never renders
+                // from missing data.
+                placementCount={
+                  asset.placementCount ?? (asset.location ? 1 : 0)
+                }
+                onConfirm={(quantity) => {
+                  const target = moveTarget;
+                  setMoveTarget(null);
+                  if (target) void performUpdateLocation(target.id, quantity);
+                }}
+                onClose={() => setMoveTarget(null)}
+              />
               <AdjustQuantitySheet
                 visible={showAdjustSheet}
                 // Physical removal cap (custodyAvailable chain), NOT

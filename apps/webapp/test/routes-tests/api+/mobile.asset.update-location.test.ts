@@ -44,6 +44,7 @@ const dbMocks = vi.hoisted(() => ({
     findUniqueOrThrow: vi.fn(),
   },
   assetLocation: {
+    findMany: vi.fn(),
     create: vi.fn(),
     deleteMany: vi.fn(),
   },
@@ -132,6 +133,14 @@ function createRequest(body: Record<string, unknown>) {
 
 describe("POST /api/mobile/asset/update-location", () => {
   beforeEach(() => {
+    // The route reads the manual placements under the asset lock, and derives
+    // the collapse events, the primary event and the note from THAT read rather
+    // than the pre-transaction one. Default to the single old placement these
+    // tests set up; a test seeding more overrides it.
+    (dbMocks.assetLocation.findMany as any).mockResolvedValue([
+      { quantity: 1, location: { id: "loc-old", name: "Old Office" } },
+    ]);
+
     vi.clearAllMocks();
 
     (requireMobileAuth as any).mockResolvedValue({
@@ -197,9 +206,15 @@ describe("POST /api/mobile/asset/update-location", () => {
     // `getPrimaryLocation`, so the API surface stays stable for mobile.
     expect(body.asset.location.name).toBe("New Office");
 
-    // Phase 4b: assert the pivot writes happened inside the tx.
+    // Assert the pivot writes happened inside the tx.
+    //
+    // The clear is scoped to MANUAL placements. A kit owns its members'
+    // kit-driven rows (`assetKitId IS NOT NULL`) and the two axes are bounded
+    // by separate triggers, so clearing both here would delete placement the
+    // kit flow is responsible for. Every web-side `assetLocation.deleteMany`
+    // carries the same filter.
     expect(dbMocks.assetLocation.deleteMany).toHaveBeenCalledWith({
-      where: { assetId: "asset-1" },
+      where: { assetId: "asset-1", assetKitId: null },
     });
     expect(dbMocks.assetLocation.create).toHaveBeenCalledWith({
       data: {
