@@ -10,6 +10,8 @@ import type {
   AuditAssetStatus,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
+import type { ResolvedDisplayCode } from "~/modules/barcode/display";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { ShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
 import { getPrimaryLocation } from "../asset/utils";
@@ -66,10 +68,26 @@ export interface AuditPdfDbResult {
   // Organization details for header
   organization: Pick<
     Organization,
-    "id" | "name" | "imageId" | "currency" | "updatedAt"
+    | "id"
+    | "name"
+    | "imageId"
+    | "currency"
+    | "updatedAt"
+    // Read by `resolveDisplayCode` when building `assetIdToDisplayCodeMap`.
+    | "qrIdDisplayPreference"
+    | "barcodesEnabled"
+    // Whether the sheet prints the QR image at all.
+    | "showQrCodesOnPdfs"
   >;
   // QR code data URLs mapped by asset ID
   assetIdToQrCodeMap: Record<string, string>;
+  /**
+   * The code to PRINT under each QR image — the same one the workspace's
+   * on-screen asset lists show: the QR id, the SAM id, or a barcode value,
+   * with a per-asset override winning over the workspace preference. Keyed by
+   * `Asset.id`.
+   */
+  assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode>;
   // Images not linked to specific assets
   generalImages: AuditImage[];
   // Images linked to specific assets (grouped by auditAssetId)
@@ -299,7 +317,12 @@ export async function fetchAllAuditPdfRelatedData(
                   },
                 },
               },
+              // why: out of this rule — `getQrCodeMaps` renders the image from
+              // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
               qrCodes: true,
+              // Feeds `resolveDisplayCode` so a barcode-preference workspace
+              // gets its barcode value printed instead of the QR id.
+              barcodes: { select: { id: true, type: true, value: true } },
             },
           })
         : Promise.resolve([]),
@@ -311,6 +334,11 @@ export async function fetchAllAuditPdfRelatedData(
           imageId: true,
           currency: true,
           updatedAt: true,
+          // Which code the workspace wants printed under the QR image, and
+          // whether the QR image is printed at all.
+          qrIdDisplayPreference: true,
+          barcodesEnabled: true,
+          showQrCodesOnPdfs: true,
         },
       }),
     ]);
@@ -324,17 +352,29 @@ export async function fetchAllAuditPdfRelatedData(
       });
     }
 
-    // Merge audit status data into each asset
-    const assetsWithAuditStatus: AssetWithAuditStatus[] = assets.map(
-      (asset) => ({
+    // Merge audit status data into each asset, dropping the fetch-only
+    // relations as we go: the code relations feed the two maps below, off the
+    // raw rows, and `assetLocations` is reduced to `location` here. None of
+    // them is read off a receipt row, so carrying them would only enlarge the
+    // JSON the browser downloads. `getPrimaryLocation` reads the RAW row,
+    // which still has `assetLocations`.
+    const assetsWithAuditStatus: AssetWithAuditStatus[] = assets.map((raw) => {
+      const {
+        qrCodes: _qrCodes,
+        barcodes: _barcodes,
+        assetLocations: _assetLocations,
+        ...asset
+      } = raw;
+
+      return {
         ...asset,
-        location: getPrimaryLocation(asset),
-        auditData: auditStatusMap.get(asset.id) || {
+        location: getPrimaryLocation(raw),
+        auditData: auditStatusMap.get(raw.id) || {
           expected: false,
           auditStatus: null,
         },
-      })
-    );
+      };
+    });
 
     // Generate QR code data URLs for each asset
     const assetIdToQrCodeMap = await getQrCodeMaps({
@@ -344,11 +384,29 @@ export async function fetchAllAuditPdfRelatedData(
       size: "small",
     });
 
+    // Resolve off the same raw rows the QR map is built from, so the two maps
+    // have one source. `assetsWithAuditStatus` is typed as a plain `Asset`,
+    // which declares neither `qrCodes` nor `barcodes`, and every field on the
+    // resolver's entity type is optional — so resolving from it would still
+    // compile on the day those relations stop coming through.
+    const assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode> =
+      Object.fromEntries(
+        assets.map((asset) => [
+          asset.id,
+          resolveDisplayCode({
+            entity: asset,
+            organization,
+            entityKind: "asset",
+          }),
+        ])
+      );
+
     return {
       session,
       assets: assetsWithAuditStatus,
       organization,
       assetIdToQrCodeMap,
+      assetIdToDisplayCodeMap,
       generalImages,
       assetImages,
       conditionNotes,

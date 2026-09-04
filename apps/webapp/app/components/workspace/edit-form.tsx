@@ -85,6 +85,13 @@ export const EditGeneralWorkspaceSettingsFormSchema = (
         return value === "on";
       })
       .optional(),
+    showQrCodesOnPdfs: z
+      .union([z.literal("on"), z.literal("off"), z.undefined()])
+      .transform((value) => {
+        if (value === undefined) return undefined;
+        return value === "on";
+      })
+      .optional(),
   });
 
 export const WorkspaceEditForms = ({
@@ -317,6 +324,50 @@ const WorkspaceGeneralEditForms = ({
                 className="text-[14px] text-gray-600"
               >
                 Toggle Shelf branding on downloadable QR and barcode labels.
+              </p>
+            </div>
+          </div>
+        </FormRow>
+
+        <FormRow
+          rowLabel={"QR codes on PDFs"}
+          className={"border-b-0"}
+          subHeading={
+            <p>
+              Control whether the QR image is printed on the booking checklist
+              and the audit receipt.
+            </p>
+          }
+        >
+          <div className="flex items-center gap-3">
+            <input
+              type="hidden"
+              name={zo.fields.showQrCodesOnPdfs()}
+              value="off"
+            />
+            <Switch
+              id="showQrCodesOnPdfs"
+              name={zo.fields.showQrCodesOnPdfs()}
+              defaultChecked={organization.showQrCodesOnPdfs ?? true}
+              aria-labelledby="showQrCodesOnPdfs-label"
+              aria-describedby="showQrCodesOnPdfs-desc"
+            />
+            <div>
+              <label
+                id="showQrCodesOnPdfs-label"
+                htmlFor="showQrCodesOnPdfs"
+                className="cursor-pointer text-[14px] font-medium text-gray-700"
+              >
+                Print QR codes on PDFs
+              </label>
+              <p
+                id="showQrCodesOnPdfs-desc"
+                className="text-[14px] text-gray-600"
+              >
+                Turn this off when people should scan the label on the item
+                itself. A printed sheet carries the same codes, so it can be
+                scanned instead of walking to the equipment. The code still
+                prints as text either way.
               </p>
             </div>
           </div>

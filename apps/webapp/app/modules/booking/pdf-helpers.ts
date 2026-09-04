@@ -9,6 +9,8 @@ import type {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import type { ResolvedDisplayCode } from "~/modules/barcode/display";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
@@ -87,9 +89,28 @@ export interface PdfDbResult {
   totalValue: string;
   organization: Pick<
     Organization,
-    "id" | "name" | "imageId" | "currency" | "updatedAt"
+    | "id"
+    | "name"
+    | "imageId"
+    | "currency"
+    | "updatedAt"
+    // Read by `resolveDisplayCode` when building `assetIdToDisplayCodeMap`.
+    | "qrIdDisplayPreference"
+    | "barcodesEnabled"
+    // Whether the sheet prints the QR image at all.
+    | "showQrCodesOnPdfs"
   >;
   assetIdToQrCodeMap: Record<string, string>;
+  /**
+   * The code to PRINT under each QR image — the same one the workspace's
+   * on-screen asset lists show: the QR id, the SAM id, or a barcode value,
+   * with a per-asset override winning over the workspace preference.
+   *
+   * Keyed by `Asset.id`, not by `bookingAssetId`: the render list is
+   * per-slice, so a QUANTITY_TRACKED asset booked standalone + via kits has
+   * several rows that all resolve to this one entry.
+   */
+  assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode>;
   /**
    * Outstanding model-level reservations on the booking (Phase 3d).
    * Only rows with `quantity > 0` are meaningful for the PDF — the
@@ -179,7 +200,12 @@ export async function fetchAllPdfRelatedData(
               name: true,
             },
           },
+          // why: out of this rule — `getQrCodeMaps` renders the image from
+          // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
           qrCodes: true,
+          // Feeds `resolveDisplayCode` so a barcode-preference workspace gets
+          // its barcode value printed instead of the QR id.
+          barcodes: { select: { id: true, type: true, value: true } },
           assetLocations: {
             select: {
               location: {
@@ -219,6 +245,11 @@ export async function fetchAllPdfRelatedData(
           id: true,
           currency: true,
           updatedAt: true,
+          // Which code the workspace wants printed under the QR image, and
+          // whether the QR image is printed at all.
+          qrIdDisplayPreference: true,
+          barcodesEnabled: true,
+          showQrCodesOnPdfs: true,
         },
       }),
       // SECURITY (cross-org IDOR): `sourceKitId`'s FK accepts a `Kit` in ANY
@@ -282,6 +313,23 @@ export async function fetchAllPdfRelatedData(
       size: "small",
     });
 
+    // Resolve the printed code once per unique asset, over the same deduped
+    // list the QR images are generated from. Resolving per rendered row would
+    // repeat identical work for every slice of a QUANTITY_TRACKED asset and
+    // would have to be threaded through `PdfAssetRow`; a map keyed by asset id
+    // leaves the row types untouched.
+    const assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode> =
+      Object.fromEntries(
+        uniqueAssetsForQr.map((asset) => [
+          asset.id,
+          resolveDisplayCode({
+            entity: asset,
+            organization,
+            entityKind: "asset",
+          }),
+        ])
+      );
+
     // Phase 3d (Book-by-Model): surface outstanding model-level
     // reservations so the PDF can render a dedicated "Requested models"
     // section. `getBooking` merges with `BOOKING_WITH_ASSETS_INCLUDE`
@@ -302,9 +350,37 @@ export async function fetchAllPdfRelatedData(
       },
     }));
 
+    // Everything dropped here is fetch-only. The code relations have done their
+    // job in the two maps above; `assetKits` and `assetLocations` were reduced
+    // to this row's `kit` and `location` by `buildPdfAssetRows`. Nothing reads
+    // any of them again, here or in the browser, and the render list is one row
+    // per SLICE — so a QUANTITY_TRACKED asset booked standalone and through
+    // three kits would otherwise serialise four copies of each.
+    const printableAssets = sortedAssets.map(
+      ({
+        qrCodes: _qrCodes,
+        barcodes: _barcodes,
+        assetKits: _assetKits,
+        assetLocations: _assetLocations,
+        ...row
+      }) => row
+    );
+
+    // `getBooking` returns the whole booking, and `BOOKING_WITH_ASSETS_INCLUDE`
+    // hangs two things off it that the sheet never reads: `bookingAssets`,
+    // carrying a second, select-shaped copy of every asset — code relations
+    // included — once per slice, and `modelRequests` with full `AssetModel`
+    // rows, which the sheet reads from the projection above instead. The
+    // booking itself is here for its name, description, custodian and tags.
+    const {
+      bookingAssets: _bookingAssets,
+      modelRequests: _bookingModelRequests,
+      ...printableBooking
+    } = booking as typeof booking & { modelRequests?: unknown };
+
     return {
-      booking,
-      assets: sortedAssets,
+      booking: printableBooking,
+      assets: printableAssets,
       // Keep the total aligned with the exported (search-filtered) rows so a
       // searched PDF doesn't show a subset of assets with a full-booking total.
       totalValue: calculateTotalValueOfAssets({
@@ -325,6 +401,7 @@ export async function fetchAllPdfRelatedData(
       }),
       organization,
       assetIdToQrCodeMap,
+      assetIdToDisplayCodeMap,
       modelRequests,
     };
   } catch (cause) {

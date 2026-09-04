@@ -12,6 +12,7 @@ import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
+import { AssetCodePrintText } from "../assets/asset-code-print-text";
 import { AssetImage } from "../assets/asset-image/component";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
@@ -161,7 +162,20 @@ export const BookingOverviewPDF = ({
   );
 };
 
-const BookingPDFPreview = ({
+/**
+ * The printable body of the booking checklist: the sheet `react-to-print`
+ * copies to paper, and what the dialog shows as its preview.
+ *
+ * Exported so it can be rendered on its own. {@link BookingOverviewPDF}, the
+ * dialog around it, needs a router for the fetcher that loads `pdfMeta`.
+ *
+ * @param props.componentRef - Ref `react-to-print` prints from. Pass
+ *   `{ current: null }` to render the sheet without printing it.
+ * @param props.pdfMeta - Everything the sheet renders, as returned by
+ *   `fetchAllPdfRelatedData`. Renders nothing until it arrives.
+ * @returns The checklist, or `null` while `pdfMeta` is still loading.
+ */
+export const BookingPDFPreview = ({
   componentRef,
   pdfMeta,
 }: {
@@ -175,9 +189,15 @@ const BookingPDFPreview = ({
     organization,
     assets,
     assetIdToQrCodeMap,
+    assetIdToDisplayCodeMap,
     totalValue,
     modelRequests,
   } = pdfMeta;
+
+  // Workspaces that want people scanning the label on the item, not the sheet,
+  // turn the QR image off. The text code prints either way, so the row is still
+  // matchable by eye.
+  const showQrCodesOnPdfs = organization.showQrCodesOnPdfs ?? true;
 
   // Phase 3d (Book-by-Model): defensively re-filter here so a caller
   // that feeds pre-computed `PdfDbResult` with stale rows (e.g. after a
@@ -347,7 +367,11 @@ const BookingPDFPreview = ({
               <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Location
               </th>
-              <th className="min-w-[120px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              {/* Sized for the code, which spans the cell under the image: at
+                  150px it gets ~130px, enough for a SAM ID or a ten-character
+                  QR id on one line and a 25-character legacy QR id on two.
+                  Longer barcode values wrap further on `break-all`. */}
+              <th className="min-w-[150px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Code
               </th>
             </tr>
@@ -389,6 +413,9 @@ const BookingPDFPreview = ({
                     {asset.quantity ?? 1}
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                    {/* why: out of this rule — the checklist prints the kit's
+                        name only. Kits carry no `sequentialId`, so a SAM_ID
+                        workspace has no kit code to print here. */}
                     {asset?.kit?.name}
                     {/* Print-medium equivalent of the overview's
                         "Removed from kit" badge — a tooltip can't exist on
@@ -411,13 +438,36 @@ const BookingPDFPreview = ({
                     {asset?.location?.name}
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={assetIdToQrCodeMap[asset.id] || ""}
-                        alt="QR Code"
-                        className="size-14 object-cover"
-                      />
-                      <input type="checkbox" className="block size-5 border" />
+                    <div className="flex flex-col items-start gap-1">
+                      {/* The QR is optional; the tick box and the code are not.
+                          Keeping the image on its own line means the cell reads
+                          the same with it and without it, and gives the code the
+                          whole cell to wrap in — a 25-character legacy QR id
+                          needs two lines here. */}
+                      <When
+                        truthy={
+                          showQrCodesOnPdfs && !!assetIdToQrCodeMap[asset.id]
+                        }
+                      >
+                        <img
+                          src={assetIdToQrCodeMap[asset.id]}
+                          alt="QR Code"
+                          className="size-14 object-cover"
+                        />
+                      </When>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          aria-label={`Mark ${asset.title} as picked`}
+                          className="block size-5 border"
+                        />
+                        {/* Printed even when the QR image failed to generate:
+                            the code is the part a picker matches against the
+                            physical label. */}
+                        <AssetCodePrintText
+                          displayCode={assetIdToDisplayCodeMap[asset.id]}
+                        />
+                      </div>
                     </div>
                   </td>
                 </tr>
