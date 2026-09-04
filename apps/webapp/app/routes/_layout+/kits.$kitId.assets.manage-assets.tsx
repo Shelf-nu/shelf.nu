@@ -16,6 +16,7 @@ import {
   selectedBulkItemsCountAtom,
   setDisabledBulkItemsAtom,
   setSelectedBulkItemAtom,
+  selectionIsFormStateAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
@@ -344,6 +345,7 @@ export default function ManageAssetsInKit() {
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const setSelectionIsFormState = useSetAtom(selectionIsFormStateAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
@@ -450,6 +452,11 @@ export default function ManageAssetsInKit() {
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
     setSelectedBulkItems(kitAssetsList);
+    // Here a tick means "attached to this booking or kit", not "act on this
+    // row", so it has to survive a search: unticking is how you detach
+    // something, and a clear on filter change would submit every attached
+    // item as removed.
+    setSelectionIsFormState(true);
   }
 
   /**
