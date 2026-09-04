@@ -564,15 +564,23 @@ describe("manage-assets route validation", () => {
     it("scopes the checked-out query to INDIVIDUAL assets", async () => {
       const ongoingBooking = { ...mockBooking, status: BookingStatus.ONGOING };
 
+      // why: the action reads its asset list from the parsed form body; this
+      // supplies one NEW qty asset alongside two already on the booking, which
+      // is what narrows the guard's query to `["qty-asset"]`.
       vi.mocked(httpServer.parseData).mockReturnValue({
         assetIds: ["asset1", "asset2", "qty-asset"],
         removedAssetIds: [],
         redirectTo: null,
       });
+      // why: the guard only runs for ONGOING/OVERDUE bookings, so the booking
+      // read has to return an ONGOING one for this case to exercise it at all.
       vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(ongoingBooking);
-      // The guard's query returns nothing because the qty row is filtered out
-      // by `type` in the WHERE clause asserted below.
+      // why: stands in for the guard's checked-out query. It returns nothing
+      // because the qty row is filtered out by `type` in the WHERE clause
+      // asserted below — the real query is the assertion, not this value.
       vi.mocked(db.asset.findMany).mockResolvedValue([]);
+      // why: the partial-check-in helper is exercised by its own tests; pinning
+      // it false keeps this case about the `type` predicate alone.
       vi.mocked(bookingAssets.isAssetPartiallyCheckedIn).mockReturnValue(false);
 
       const response = await action(

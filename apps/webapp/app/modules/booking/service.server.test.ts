@@ -12460,9 +12460,9 @@ describe("processBooking — checked-out guard for active bookings", () => {
           !requestedIds || requestedIds.includes(id);
 
         if (args?.where?.status === AssetStatus.CHECKED_OUT) {
-          // The guard narrows to INDIVIDUAL rows — honour that here, or a
-          // qty-tracked row would come back and the test would assert the
-          // mock's behaviour rather than the query's.
+          // why: the guard narrows to INDIVIDUAL rows, so the mock has to
+          // honour `where.type` too — otherwise a qty-tracked row comes back
+          // and the test asserts the mock's behaviour rather than the query's.
           const typeFilter: AssetType | undefined = args?.where?.type;
           return Promise.resolve(
             rows
