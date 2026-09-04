@@ -30,6 +30,7 @@ import {
   useCsvExport,
   useReportRowHandlers,
 } from "~/components/reports";
+import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import {
   resolveTimeframe,
   bookingComplianceReport,
@@ -114,7 +115,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 
   // Check permissions
-  const { organizationId } = await requirePermission({
+  const { organizationId, isSelfServiceOrBase } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.reports,
@@ -270,6 +271,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         assetId: url.searchParams.get("asset") || undefined,
         categoryId: url.searchParams.get("category") || undefined,
+        page: parseInt(url.searchParams.get("page") || "1", 10),
+        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+      });
+      break;
+
+    case "audit-completion":
+      reportData = await auditCompletionReport({
+        organizationId,
+        userId,
+        isSelfServiceOrBase,
+        timeframe,
         page: parseInt(url.searchParams.get("page") || "1", 10),
         pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
       });

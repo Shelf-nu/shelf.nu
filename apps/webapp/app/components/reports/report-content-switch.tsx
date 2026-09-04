@@ -17,6 +17,7 @@ import type {
   AssetActivityRow,
   AssetInventoryRow,
   AssetUtilizationRow,
+  AuditCompletionRow,
   BookingComplianceRow,
   ChartSeries,
   ComplianceData,
@@ -35,6 +36,7 @@ import { AssetActivityContent } from "./asset-activity-content";
 import { AssetDistributionContent } from "./asset-distribution-content";
 import { AssetInventoryContent } from "./asset-inventory-content";
 import { AssetUtilizationContent } from "./asset-utilization-content";
+import { AuditCompletionContent } from "./audit-completion-content";
 import { BookingComplianceContent } from "./booking-compliance-content";
 import { CustodySnapshotContent } from "./custody-snapshot-content";
 import { IdleAssetsContent } from "./idle-assets-content";
@@ -225,6 +227,17 @@ export function ReportContentSwitch({
         />
       );
 
+    case "audit-completion":
+      return (
+        <AuditCompletionContent
+          rows={rows as AuditCompletionRow[]}
+          kpis={kpis}
+          totalRows={totalRows}
+          timeframeLabel={timeframe.label}
+          onRowClick={handlers.onAuditRowClick}
+        />
+      );
+
     default:
       return (
         <ReportEmptyState
@@ -268,6 +281,8 @@ function getEmptyStateTitle(reportId: string): string {
       return "No utilization data";
     case "asset-activity":
       return "No activity recorded";
+    case "audit-completion":
+      return "No audits to analyze";
     default:
       return "No data in this timeframe";
   }
@@ -300,6 +315,10 @@ function getEmptyStateDescription(reportId: string): string {
       return "No booking activity within the selected timeframe. Assets need bookings to calculate utilization rates.";
     case "asset-activity":
       return "No activity has been recorded for your assets in this timeframe. Activity appears when assets are updated, booked, or custody changes.";
+    case "audit-completion":
+      // Orgs without the audits add-on simply have no sessions, so this
+      // doubles as their empty state — keep it about finding data.
+      return "No audit sessions were created within the selected timeframe. Try selecting a longer period to see completed audits and their findings.";
     default:
       return "Try selecting a different timeframe to find data for this report.";
   }
