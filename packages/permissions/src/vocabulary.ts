@@ -18,6 +18,9 @@ export enum PermissionAction {
   delete = "delete",
   checkout = "checkout",
   checkin = "checkin",
+  // Deliberately in NO role's matrix entry: only ADMIN/OWNER hold it, via the
+  // resolver short-circuit. Used for approving booking reservation requests.
+  approve = "approve",
   export = "export",
   import = "import",
   archive = "archive",

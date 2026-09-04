@@ -5,6 +5,29 @@ import { formatCurrency } from "./currency";
 import type { UserNameFields } from "./user";
 import { resolveTeamMemberName } from "./user";
 
+/**
+ * Whether a booking is a reservation request still waiting for an admin's
+ * approval. Derived — there is no PENDING status: a RESERVED booking with no
+ * `approvedAt` in an org that requires approval is pending. Client-safe; the
+ * server-side checkout guard (`assertBookingIsApproved`) derives from this
+ * same function so UI and service can never disagree.
+ */
+export function isBookingPendingApproval({
+  status,
+  approvedAt,
+  requireBookingApproval,
+}: {
+  status: BookingStatus;
+  approvedAt: Date | string | null;
+  requireBookingApproval: boolean;
+}): boolean {
+  return (
+    requireBookingApproval &&
+    status === BookingStatus.RESERVED &&
+    approvedAt === null
+  );
+}
+
 export function canUserManageBookingAssets(
   booking: Pick<Booking, "status" | "from" | "to">,
   isSelfService: boolean

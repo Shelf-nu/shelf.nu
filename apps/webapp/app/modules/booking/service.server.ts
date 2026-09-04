@@ -157,6 +157,8 @@ import type {
 } from "./constants";
 import {
   assetReservedEmailContent,
+  bookingApprovedEmailContent,
+  bookingRequestReceivedEmailContent,
   cancelledBookingEmailContent,
   completedBookingEmailContent,
   deletedBookingEmailContent,
@@ -181,6 +183,7 @@ import type {
 } from "./types";
 import {
   assertBookingIsCheckinable,
+  assertBookingIsApproved,
   assertBookingIsOpen,
   createBookingConflictConditions,
   lockBookingForStatusCheck,
@@ -1835,6 +1838,24 @@ export async function reserveBooking({
       await assertTagsBelongToOrg({ tagIds, organizationId });
     }
 
+    /**
+     * Approval: when the org requires it, a reservation made by a BASE /
+     * SELF_SERVICE user goes into RESERVED as a pending request
+     * (`approvedAt: null`) and an admin must approve it before checkout.
+     * Every other reservation is self-approved in the same write, so
+     * `approvedAt` is populated on all post-feature reservations and the
+     * pending derivation never misfires. Both fields are written explicitly
+     * (not left undefined) so re-reserving a reverted booking resets any
+     * earlier approval.
+     */
+    const approvalSettings = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: { requireBookingApproval: true },
+    });
+    const needsApproval = Boolean(
+      approvalSettings?.requireBookingApproval && isSelfServiceOrBase
+    );
+
     const dataToUpdate: Prisma.BookingUpdateInput = {
       status: BookingStatus.RESERVED,
       name,
@@ -1843,6 +1864,11 @@ export async function reserveBooking({
         set: [],
         connect: tags,
       },
+      approvedAt: needsApproval ? null : new Date(),
+      approvedBy:
+        needsApproval || !userId
+          ? { disconnect: true }
+          : { connect: { id: userId } },
     };
 
     dataToUpdate.from = from;
@@ -2145,9 +2171,13 @@ export async function reserveBooking({
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: bookingFound,
-        subject: `✅ Booking reserved (${bookingFound.name}) - shelf.nu`,
+        subject: needsApproval
+          ? `🕐 Booking request received (${bookingFound.name}) - shelf.nu`
+          : `✅ Booking reserved (${bookingFound.name}) - shelf.nu`,
         buildText: (prefs) =>
-          assetReservedEmailContent({
+          (needsApproval
+            ? bookingRequestReceivedEmailContent
+            : assetReservedEmailContent)({
             bookingName: bookingFound.name,
             assetsCount: bookingFound._count.bookingAssets,
             custodian,
@@ -2158,7 +2188,10 @@ export async function reserveBooking({
             customEmailFooter: bookingFound.organization.customEmailFooter,
             modelRequests: outstandingModelRequests,
           }),
-        buildHeading: () => `Booking reservation for ${custodian}`,
+        buildHeading: () =>
+          needsApproval
+            ? `Booking request for ${custodian} — waiting for approval`
+            : `Booking reservation for ${custodian}`,
         hints,
         templateProps: {
           assets: bookingFound.bookingAssets,
@@ -2407,6 +2440,29 @@ async function checkoutBookingWritesWithinTx(
   // Shape pinned explicitly — `tx` is typed `any` (the extended Prisma client's
   // tx type is incompatible with `Prisma.TransactionClient`), so without this
   // the helper's generic widens and `assetModel` is lost.
+  // Approval gate, re-read through `tx` so it is authoritative (same doctrine
+  // as the locked status check): a pending reservation request must not reach
+  // ONGOING through EITHER full-checkout path (checkoutBooking or
+  // fulfilModelRequestsAndCheckout), no matter what the pre-tx reads said.
+  const approvalGate = await tx.bookingSettings.findUnique({
+    where: { organizationId },
+    select: { requireBookingApproval: true },
+  });
+  if (approvalGate?.requireBookingApproval) {
+    const approvalRow = await tx.booking.findUnique({
+      where: { id: bookingId, organizationId },
+      select: { status: true, approvedAt: true },
+    });
+    if (approvalRow) {
+      assertBookingIsApproved({
+        status: approvalRow.status,
+        approvedAt: approvalRow.approvedAt,
+        requireBookingApproval: true,
+        bookingId,
+      });
+    }
+  }
+
   type GuardModelRequest = {
     quantity: number;
     fulfilledQuantity: number;
@@ -2935,6 +2991,21 @@ export async function checkoutBooking({
     assertBookingIsOpen({
       status: bookingFound.status,
       operation: "check out",
+      bookingId: id,
+    });
+
+    // Approval gate: a pending reservation request (org requires approval,
+    // no approvedAt) cannot be checked out from ANY entry point — web
+    // dialog, mobile route, stale tab or direct POST all funnel through here.
+    const checkoutApprovalSettings = await db.bookingSettings.findUnique({
+      where: { organizationId },
+      select: { requireBookingApproval: true },
+    });
+    assertBookingIsApproved({
+      status: bookingFound.status,
+      approvedAt: bookingFound.approvedAt,
+      requireBookingApproval:
+        checkoutApprovalSettings?.requireBookingApproval ?? false,
       bookingId: id,
     });
 
@@ -8743,6 +8814,21 @@ export async function partialCheckoutBooking({
         // First scan marks the booking checked out: RESERVED → ONGOING/OVERDUE.
         let bookingStatusChanged = false;
         if (bookingFound.status === BookingStatus.RESERVED) {
+          // Approval gate: a pending reservation request cannot start its
+          // checkout — this is the mobile scanner's entry point into ONGOING,
+          // so the guard must live here, not just in the web dialog.
+          const partialApprovalGate = await tx.bookingSettings.findUnique({
+            where: { organizationId },
+            select: { requireBookingApproval: true },
+          });
+          assertBookingIsApproved({
+            status: bookingFound.status,
+            approvedAt: bookingFound.approvedAt,
+            requireBookingApproval:
+              partialApprovalGate?.requireBookingApproval ?? false,
+            bookingId: id,
+          });
+
           const expired = bookingFound.to
             ? isBookingExpired({ to: bookingFound.to })
             : false;
@@ -10265,6 +10351,274 @@ export async function cancelBooking({
   }
 }
 
+/**
+ * Stamps every currently-RESERVED, not-yet-approved booking in the org as
+ * approved. Run when the org ENABLES `requireBookingApproval`, so the toggle
+ * only applies to NEW requests: without this, every pre-existing reservation
+ * (including ones admins made before the feature existed, which have no
+ * `approvedAt`) would flip to pending the moment the setting turns on.
+ */
+export async function markExistingReservationsApproved({
+  organizationId,
+  userId,
+  createdBefore,
+}: {
+  organizationId: Organization["id"];
+  userId: User["id"];
+  /**
+   * Only sweep reservations that already existed when the setting was turned
+   * on. Callers capture this BEFORE persisting the toggle: the setting commits
+   * first, so a request made in the gap is genuinely pending and must not be
+   * stamped approved without anyone seeing it.
+   */
+  createdBefore: Date;
+}) {
+  try {
+    return await db.booking.updateMany({
+      where: {
+        organizationId,
+        status: BookingStatus.RESERVED,
+        approvedAt: null,
+        createdAt: { lte: createdBefore },
+      },
+      data: { approvedAt: new Date(), approvedById: userId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message:
+        "Something went wrong while marking existing reservations as approved.",
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
+ * Approves a pending booking reservation request.
+ *
+ * Only meaningful in orgs with `requireBookingApproval` on: stamps
+ * `approvedAt`/`approvedById` on a RESERVED booking whose approval is still
+ * missing, writes an activity note, and emails the custodian (and other
+ * configured recipients). Status does not change — RESERVED already holds
+ * the assets; approval only unlocks checkout.
+ *
+ * @param args.id - Booking to approve; must be RESERVED and unapproved.
+ * @param args.organizationId - Org the booking must belong to.
+ * @param args.userId - The approver, recorded on the booking and the note.
+ * @param args.hints - Client hints, used to render dates in the email.
+ * @throws {ShelfError} 400 when the booking is not an unapproved reservation,
+ *   including when another approver got there first.
+ */
+export async function approveBooking({
+  id,
+  organizationId,
+  userId,
+  hints,
+}: Pick<Booking, "id" | "organizationId"> & {
+  userId: User["id"];
+  hints: ClientHint;
+}) {
+  try {
+    const [settings, bookingFound] = await Promise.all([
+      db.bookingSettings.findUnique({
+        where: { organizationId },
+        select: { requireBookingApproval: true },
+      }),
+      db.booking
+        .findUniqueOrThrow({
+          where: { id, organizationId },
+          select: { id: true, status: true, approvedAt: true },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            label,
+            message:
+              "Booking not found, are you sure it exists in current workspace?",
+            shouldBeCaptured: !isNotFoundError(cause),
+          });
+        }),
+    ]);
+
+    if (!settings?.requireBookingApproval) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message:
+          "This workspace does not require booking approval, so there is nothing to approve.",
+      });
+    }
+
+    if (bookingFound.status !== BookingStatus.RESERVED) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message: `Only reserved bookings can be approved. This booking is ${bookingFound.status.toLowerCase()}.`,
+        additionalData: { bookingId: id, status: bookingFound.status },
+      });
+    }
+
+    if (bookingFound.approvedAt !== null) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+        message: "This booking request has already been approved.",
+        additionalData: { bookingId: id },
+      });
+    }
+
+    // Resolved before the write so the note can be composed inside the same
+    // transaction as the approval.
+    const approver = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      } satisfies Prisma.UserSelect,
+    });
+
+    /**
+     * Approval and its audit note commit together, and the write only matches a
+     * booking that is still an unapproved reservation.
+     *
+     * The status and `approvedAt` predicates are what serialise two approvers
+     * acting at once: the checks above are a read, so both callers can pass
+     * them, and an unconditional write would send the custodian two approval
+     * emails and leave two "approved the booking request" notes. Mirrors
+     * `archiveBooking`'s conditional write.
+     *
+     * The note is inside the transaction because a note failure after a
+     * committed approval is unrecoverable: checkout is already unlocked, the
+     * error reports the approval as failed, and a retry is refused by the
+     * already-approved guard above, so the audit trail loses the record
+     * permanently.
+     */
+    const approvedBooking = await db
+      .$transaction(async (tx) => {
+        const updated = await tx.booking.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+          where: {
+            id: bookingFound.id,
+            status: BookingStatus.RESERVED,
+            approvedAt: null,
+          },
+          data: {
+            approvedAt: new Date(),
+            approvedBy: { connect: { id: userId } },
+          },
+          include: BOOKING_INCLUDE_FOR_EMAIL,
+        });
+
+        // Not a status transition — the booking stays RESERVED — so this is a
+        // plain system note.
+        await createSystemBookingNote(
+          {
+            bookingId: updated.id,
+            organizationId,
+            content: `${wrapUserLinkForNote({
+              ...approver,
+              id: userId,
+            })} approved the booking request`,
+          },
+          tx
+        );
+
+        return updated;
+      })
+      .catch((cause: unknown) => {
+        // Only "no row matched" means someone else approved first. Anything
+        // else — a lost connection, a failed note write — is a real failure and
+        // must surface as one rather than as a reassuring race message.
+        if (
+          cause &&
+          typeof cause === "object" &&
+          "code" in cause &&
+          (cause as { code?: string }).code === "P2025"
+        ) {
+          return null;
+        }
+        throw cause;
+      });
+
+    if (!approvedBooking) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "This booking was approved by someone else just now. Please refresh to see its current state.",
+        additionalData: { bookingId: id, organizationId },
+        shouldBeCaptured: false,
+        status: 400,
+      });
+    }
+
+    // The approval is committed; a notification failure must not report a
+    // failed approval (mirrors the revert-to-draft email isolation).
+    try {
+      const recipients = await getBookingNotificationRecipients({
+        booking: approvedBooking,
+        eventType: "APPROVED",
+        organizationId,
+        editorUserId: userId,
+      });
+
+      if (recipients.length > 0) {
+        const custodian = approvedBooking.custodianUser
+          ? resolveUserDisplayName(approvedBooking.custodianUser)
+          : approvedBooking.custodianTeamMember?.name ?? "";
+
+        await sendBookingEmailToAllRecipients({
+          recipients,
+          booking: approvedBooking,
+          subject: `✅ Booking approved (${approvedBooking.name}) - shelf.nu`,
+          buildText: (prefs) =>
+            bookingApprovedEmailContent({
+              bookingName: approvedBooking.name,
+              assetsCount: approvedBooking._count.bookingAssets,
+              custodian,
+              from: approvedBooking.from!,
+              to: approvedBooking.to!,
+              bookingId: approvedBooking.id,
+              prefs,
+              customEmailFooter: approvedBooking.organization.customEmailFooter,
+            }),
+          buildHeading: () =>
+            `Your booking request has been approved: "${approvedBooking.name}"`,
+          hints,
+        });
+      }
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to send the booking-approved notification emails. The booking itself was approved successfully.",
+          additionalData: { bookingId: approvedBooking.id, organizationId },
+          label,
+        })
+      );
+    }
+
+    return approvedBooking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while approving the booking.",
+    });
+  }
+}
+
 export async function revertBookingToDraft({
   id,
   organizationId,
@@ -10300,7 +10654,13 @@ export async function revertBookingToDraft({
     const cancelledBooking = await db.booking.update({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2773; this is the write on that same proven id
       where: { id: booking.id },
-      data: { status: BookingStatus.DRAFT },
+      // Clear any earlier approval: a reverted request must be re-approved
+      // after it is edited and re-reserved.
+      data: {
+        status: BookingStatus.DRAFT,
+        approvedAt: null,
+        approvedById: null,
+      },
     });
 
     // Add activity log for booking revert to draft
@@ -12301,6 +12661,8 @@ export async function getBookingHeaderData({
         to: true,
         custodianUserId: true,
         organizationId: true,
+        // Feeds the derived "Pending approval" badge in the booking header.
+        approvedAt: true,
       },
     });
 

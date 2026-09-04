@@ -24,6 +24,7 @@ import {
 } from "@shelf/labels";
 
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
 import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
@@ -35,6 +36,7 @@ import { ShelfError } from "~/utils/error";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
+import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import {
   createBooking,
   partialCheckinBooking,
@@ -58,6 +60,7 @@ import {
   duplicateBooking,
   computeBookingKitDrift,
   revertBookingToDraft,
+  approveBooking,
   extendBooking,
   removeAssets,
   addScannedAssetsToBooking,
@@ -449,6 +452,14 @@ vitest.mock("~/modules/organization/service.server", () => ({
       displayName: null,
     },
   ]),
+}));
+
+// why: recipient resolution has its own tests
+// (notification-recipients.server.test.ts). Mocking the resolver lets each
+// test control the resolved list so the email fan-out can be asserted without
+// real org-settings lookups. Default: nobody resolves, so no emails fire.
+vitest.mock("./notification-recipients.server", () => ({
+  getBookingNotificationRecipients: vitest.fn().mockResolvedValue([]),
 }));
 
 // why: preventing actual job scheduling and queue operations during tests
@@ -7568,7 +7579,13 @@ describe("revertBookingToDraft", () => {
 
     expect(db.booking.update).toHaveBeenCalledWith({
       where: { id: "booking-1" },
-      data: { status: BookingStatus.DRAFT },
+      // Reverting also clears any earlier approval — a re-reserved request
+      // must be approved again.
+      data: {
+        status: BookingStatus.DRAFT,
+        approvedAt: null,
+        approvedById: null,
+      },
     });
     expect(result).toEqual(draftBooking);
   });
@@ -7583,6 +7600,194 @@ describe("revertBookingToDraft", () => {
     await expect(
       revertBookingToDraft({ id: "booking-1", organizationId: "org-1" })
     ).rejects.toThrow(ShelfError);
+  });
+});
+
+describe("approveBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  const custodianUser = {
+    id: "user-2",
+    email: "custodian@example.com",
+    firstName: "Custodian",
+    lastName: "User",
+    displayName: null,
+    dateFormat: null,
+    timeFormat: null,
+    weekStart: null,
+    timeZone: null,
+  };
+
+  function mockApprovalContext({
+    requireBookingApproval = true,
+    status = BookingStatus.RESERVED,
+    approvedAt = null,
+  }: {
+    requireBookingApproval?: boolean;
+    status?: BookingStatus;
+    approvedAt?: Date | null;
+  }) {
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.findUnique.mockResolvedValue({ requireBookingApproval });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      id: "booking-1",
+      status,
+      approvedAt,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBookingData,
+      status,
+      approvedAt: new Date("2026-08-31T12:00:00.000Z"),
+      custodianUser,
+      custodianTeamMember: null,
+      creator: custodianUser,
+      notificationRecipients: [],
+      organization: {
+        name: "Test Org",
+        customEmailFooter: null,
+        owner: { email: "owner@example.com" },
+      },
+      _count: { bookingAssets: 1 },
+    });
+  }
+
+  it("stamps approvedAt/approvedBy and emails the resolved recipients", async () => {
+    mockApprovalContext({});
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: custodianUser.email,
+        firstName: custodianUser.firstName,
+        lastName: custodianUser.lastName,
+        userId: custodianUser.id,
+        dateFormat: null,
+        timeFormat: null,
+        weekStart: null,
+        timeZone: null,
+        reason: "custodian",
+      },
+    ]);
+
+    await approveBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "admin-1",
+      hints: mockClientHints,
+    });
+
+    // The write is guarded on the state it expects to find, so a second
+    // approver racing the first matches no row instead of sending the custodian
+    // a duplicate email.
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          status: BookingStatus.RESERVED,
+          approvedAt: null,
+        },
+        data: expect.objectContaining({
+          approvedAt: expect.any(Date),
+          approvedBy: { connect: { id: "admin-1" } },
+        }),
+      })
+    );
+    expect(getBookingNotificationRecipients).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "APPROVED",
+        editorUserId: "admin-1",
+      })
+    );
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "custodian@example.com",
+        subject: expect.stringContaining("Booking approved"),
+      })
+    );
+  });
+
+  it("refuses a second approver instead of approving twice", async () => {
+    mockApprovalContext({});
+    // Both approvers read an unapproved reservation, so the pre-checks pass for
+    // each. The first commits; the guarded write then matches no row for the
+    // second, which is what Prisma reports as a failed update.
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      Object.assign(new Error("Record to update not found."), { code: "P2025" })
+    );
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-2",
+        hints: mockClientHints,
+      })
+    ).rejects.toThrow(/approved by someone else/i);
+
+    // The custodian must not be told twice that their booking was approved.
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not disguise a real write failure as a lost race", async () => {
+    mockApprovalContext({});
+    // Not P2025: the row is there, the write itself failed. Reporting this as
+    // "someone else approved it" would tell an admin to refresh and would hide
+    // the outage.
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockRejectedValueOnce(
+      Object.assign(new Error("Connection terminated"), { code: "P1001" })
+    );
+
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+      })
+    ).rejects.toThrow(/something went wrong while approving/i);
+  });
+
+  it("refuses when the workspace does not require approval", async () => {
+    mockApprovalContext({ requireBookingApproval: false });
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+      })
+    ).rejects.toThrow(/does not require booking approval/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a non-RESERVED booking", async () => {
+    mockApprovalContext({ status: BookingStatus.ONGOING });
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+      })
+    ).rejects.toThrow(/Only reserved bookings/);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an already-approved booking", async () => {
+    mockApprovalContext({
+      approvedAt: new Date("2026-08-30T09:00:00.000Z"),
+    });
+    await expect(
+      approveBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        userId: "admin-1",
+        hints: mockClientHints,
+      })
+    ).rejects.toThrow(/already been approved/);
+    expect(db.booking.update).not.toHaveBeenCalled();
   });
 });
 

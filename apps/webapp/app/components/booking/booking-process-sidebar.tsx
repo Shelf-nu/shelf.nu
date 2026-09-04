@@ -1,6 +1,7 @@
 import { Close } from "@radix-ui/react-dialog";
 import type { LucideIcon } from "lucide-react";
 import { ArrowLeft, ArrowRight, ClockIcon, InfoIcon } from "lucide-react";
+import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -53,9 +54,26 @@ const ITEMS: Array<ProcessItem> = [
   },
 ];
 
+/**
+ * Copy for the Admin Review step when the workspace requires explicit
+ * approval: the reservation is a REQUEST until an admin approves it, and the
+ * user is told by email either way — so the sidebar must describe that, not
+ * the softer review-at-will flow.
+ */
+const ADMIN_REVIEW_WITH_APPROVAL =
+  "Your booking is a request until an admin approves it. You will receive an email when it is approved, or when it is sent back to draft for changes. It cannot be checked out before approval.";
+
 export default function BookingProcessSidebar({
   className,
 }: BookingProcessSidebarProps) {
+  const { requireBookingApproval } = useBookingSettings();
+
+  const items = ITEMS.map((item) =>
+    item.id === "admin-review" && requireBookingApproval
+      ? { ...item, description: ADMIN_REVIEW_WITH_APPROVAL }
+      : item
+  );
+
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -91,7 +109,7 @@ export default function BookingProcessSidebar({
           </p>
 
           <div className="mb-8 flex flex-col gap-4">
-            {ITEMS.map((item, i) => (
+            {items.map((item, i) => (
               <div key={item.id} className="flex items-start gap-4">
                 <div
                   className={tw(
