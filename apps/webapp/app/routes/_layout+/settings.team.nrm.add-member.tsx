@@ -44,7 +44,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export const NewOrEditMemberSchema = z.object({
-  name: z.string().min(1, "Name is required"),
+  // Trim BEFORE the length check: `" "` is one character, so it satisfies
+  // `min(1)` and is then stored as the empty string.
+  name: z.string().trim().min(1, "Name is required"),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {

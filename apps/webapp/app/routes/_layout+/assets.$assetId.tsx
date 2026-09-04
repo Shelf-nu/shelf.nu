@@ -352,7 +352,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           z.object({ mainImageUrl: z.string().optional() })
         );
 
-        await deleteAsset({ organizationId, id });
+        // Name the actor, or the activity event records the deletion as
+        // "System" — the mobile delete route already passes it, so the same
+        // action read differently depending on where it was performed.
+        await deleteAsset({ organizationId, id, actorUserId: userId });
 
         if (mainImageUrl) {
           // as it is deletion operation giving hardcoded path(to make sure all the images were deleted)

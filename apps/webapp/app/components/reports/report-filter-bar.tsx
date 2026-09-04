@@ -25,6 +25,7 @@ import type {
   TimeframePreset,
 } from "~/modules/reports/types";
 
+import { getIntParam } from "~/utils/search-params-number";
 import { IdleThresholdSelector } from "./idle-threshold-selector";
 import { TimeframePicker } from "./timeframe-picker";
 import { TimeframeRangeIndicator } from "./timeframe-range-indicator";
@@ -83,7 +84,7 @@ export function ReportFilterBar({ reportId, timeframe, isLoading }: Props) {
     return (
       <div className="flex items-center justify-between rounded border border-gray-200 bg-white px-4 py-3">
         <IdleThresholdSelector
-          value={parseInt(searchParams.get("days") || "30", 10)}
+          value={getIntParam(searchParams, "days", 30)}
           onChange={handleIdleThresholdChange}
           disabled={isLoading}
         />

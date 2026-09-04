@@ -399,8 +399,34 @@ export async function deleteBookingNote({
         booking: { id: bookingId, organizationId },
       },
     });
+
+    /**
+     * The predicate carries the authorization: a note that is not the caller's,
+     * or not on a booking in their organization, simply does not match. Zero
+     * rows is therefore a refusal, not a quiet success — and the caller has no
+     * other way to tell, so reporting it here is what stops a non-author being
+     * told their delete worked. Mirrors `deleteNote`, `deleteTeamMemberNote`
+     * and `deleteLocationNote`.
+     */
+    if (result.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Note not found or you don't have permission to delete it.",
+        additionalData: { id, bookingId, userId, organizationId },
+        label,
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
     return result;
   } catch (cause) {
+    // The refusal above is a deliberate 4xx; re-wrapping it would replace a
+    // message written for the user with "something went wrong".
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting the booking note",

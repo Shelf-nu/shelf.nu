@@ -1,6 +1,6 @@
 import { MapPinIcon } from "lucide-react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { redirect, Form, useLoaderData } from "react-router";
+import { data, redirect, Form, useLoaderData } from "react-router";
 import { z } from "zod";
 import { LocationSelect } from "~/components/location/location-select";
 import { Button } from "~/components/shared/button";
@@ -10,7 +10,7 @@ import { getKit, updateKitLocation } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { payload, getParams, parseData } from "~/utils/http.server";
+import { payload, getParams, parseData, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -61,7 +61,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    throw reason;
+    throw data(error(reason), { status: reason.status });
   }
 }
 
@@ -98,7 +98,7 @@ export async function action({ params, request, context }: ActionFunctionArgs) {
     return redirect(`/kits/${kitId}/assets`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return reason;
+    return data(error(reason), { status: reason.status });
   }
 }
 
