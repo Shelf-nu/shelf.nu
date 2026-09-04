@@ -95,24 +95,38 @@ import {
 const request = () =>
   new Request("http://localhost/api/mobile/bookings?orgId=org-1");
 
-/** The `where` the list query actually ran with. */
-function lastWhere(): any {
-  return (db.booking.findMany as any).mock.calls.at(-1)?.[0]?.where;
+/**
+ * The `where` the list query actually ran with.
+ *
+ * Typed as a plain record rather than `Prisma.BookingWhereInput`: the generated
+ * `Exact<>` wrapper on the call signature does not assign back to the bare
+ * input type, and the assertions here only read keys.
+ */
+function lastWhere(): Record<string, unknown> {
+  const where = vi.mocked(db.booking.findMany).mock.calls.at(-1)?.[0]?.where;
+  if (!where) {
+    throw new Error("the list query never ran");
+  }
+  return where;
 }
 
 describe("GET /api/mobile/bookings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (db.booking.findMany as any).mockResolvedValue([]);
-    (db.booking.count as any).mockResolvedValue(0);
+    vi.mocked(db.booking.findMany).mockResolvedValue([]);
+    vi.mocked(db.booking.count).mockResolvedValue(0);
     vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({ roles: ["ADMIN"] })
     );
-    (resolveCustodianScope as any).mockResolvedValue({
+    vi.mocked(resolveCustodianScope).mockResolvedValue({
       userId: "user-1",
       teamMemberIds: ["tm-1", "tm-2"],
     });
-    (custodianScopeClause as any).mockReturnValue({ __custodianClause: true });
+    // A sentinel, not a real clause: the assertions are about whether the
+    // route delegates to the helper, not about the helper's own output.
+    vi.mocked(custodianScopeClause).mockReturnValue({
+      __custodianClause: true,
+    } as never);
   });
 
   it("scopes a SELF_SERVICE user through the shared custodian clause", async () => {
@@ -189,7 +203,7 @@ describe("GET /api/mobile/bookings", () => {
         canSeeAllCustody: false,
       })
     );
-    (db.booking.findMany as any).mockResolvedValue([
+    vi.mocked(db.booking.findMany).mockResolvedValue([
       {
         id: "b-1",
         name: "Someone else's booking",
@@ -202,8 +216,8 @@ describe("GET /api/mobile/bookings", () => {
         _count: { bookingAssets: 1, modelRequests: 0 },
         modelRequests: [],
       },
-    ]);
-    (db.booking.count as any).mockResolvedValue(1);
+    ] as never);
+    vi.mocked(db.booking.count).mockResolvedValue(1);
 
     const response = (await loader(
       createLoaderArgs({ request: request() })
@@ -224,7 +238,7 @@ describe("GET /api/mobile/bookings", () => {
         canSeeAllCustody: false,
       })
     );
-    (db.booking.findMany as any).mockResolvedValue([
+    vi.mocked(db.booking.findMany).mockResolvedValue([
       {
         id: "b-3",
         name: "Unassigned booking",
@@ -237,8 +251,8 @@ describe("GET /api/mobile/bookings", () => {
         _count: { bookingAssets: 0, modelRequests: 0 },
         modelRequests: [],
       },
-    ]);
-    (db.booking.count as any).mockResolvedValue(1);
+    ] as never);
+    vi.mocked(db.booking.count).mockResolvedValue(1);
 
     const response = (await loader(
       createLoaderArgs({ request: request() })
@@ -256,7 +270,7 @@ describe("GET /api/mobile/bookings", () => {
         canSeeAllCustody: false,
       })
     );
-    (db.booking.findMany as any).mockResolvedValue([
+    vi.mocked(db.booking.findMany).mockResolvedValue([
       {
         id: "b-2",
         name: "My booking",
@@ -271,8 +285,8 @@ describe("GET /api/mobile/bookings", () => {
         _count: { bookingAssets: 1, modelRequests: 0 },
         modelRequests: [],
       },
-    ]);
-    (db.booking.count as any).mockResolvedValue(1);
+    ] as never);
+    vi.mocked(db.booking.count).mockResolvedValue(1);
 
     const response = (await loader(
       createLoaderArgs({ request: request() })
@@ -311,8 +325,8 @@ describe("GET /api/mobile/bookings", () => {
       OrganizationRoles.BASE,
     ]) {
       vi.clearAllMocks();
-      (db.booking.findMany as any).mockResolvedValue([]);
-      (db.booking.count as any).mockResolvedValue(0);
+      vi.mocked(db.booking.findMany).mockResolvedValue([]);
+      vi.mocked(db.booking.count).mockResolvedValue(0);
       vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileUserContext({ roles: [role] })
       );
