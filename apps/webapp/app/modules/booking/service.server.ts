@@ -2656,8 +2656,14 @@ async function checkoutBookingWritesWithinTx(
   });
 
   await tx.bookingAsset.updateMany({
-    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
-    where: { bookingId, checkedOutAt: null },
+    // Keyed on the ids read above, not on `checkedOutAt: null`, so the marker
+    // write and the counter increment below cover the SAME slices. A slice
+    // that went out, came back in full and is departing again has a stamped
+    // `checkedOutAt`, so a `checkedOutAt: null` filter skipped it: its counter
+    // grew while its `checkedInAt` stayed set, and the completion gate reads
+    // that stale marker as "already reconciled" while the units are out.
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: these ids were read above from a bookingId the caller org-checked
+    where: { id: { in: departingSlices.map((s: { id: string }) => s.id) } },
     data: {
       checkedOutAt: new Date(),
       checkedOutById,
@@ -4422,12 +4428,19 @@ export async function isBookingFullyCheckedIn(
         // exactly when it is checkinable.
         checkedOutAt: true,
         checkedInAt: true,
+        // Cumulative units this slice has sent out, across every departure.
+        // The markers say WHETHER a slice is out; only this says HOW MANY
+        // units have left in total, which is what a second departure changes.
+        checkedOutQuantity: true,
         asset: { select: { id: true, type: true } },
       },
     }),
     tx.partialBookingCheckin.findMany({
       where: { bookingId },
-      select: { assetIds: true },
+      // The timestamp is what ties a session to the departure it answers. A
+      // slice can depart twice, and a session from the first trip must not
+      // reconcile the second.
+      select: { assetIds: true, checkinTimestamp: true },
     }),
     tx.partialBookingCheckout.findMany({
       where: { bookingId },
@@ -4440,10 +4453,22 @@ export async function isBookingFullyCheckedIn(
     return true;
   }
 
-  const individuallyCheckedInIds = new Set<string>();
-  for (const row of partialCheckins as Array<{ assetIds: string[] }>) {
+  /**
+   * The most recent check-in session naming each asset. Kept as a time rather
+   * than a flag: a slice that departed twice has a session for the first trip
+   * whose asset id never leaves this set, and a bare set of ids would let that
+   * session reconcile the second departure too.
+   */
+  const latestSessionCheckinByAsset = new Map<string, Date>();
+  for (const row of partialCheckins as Array<{
+    assetIds: string[];
+    checkinTimestamp: Date | null;
+  }>) {
     for (const id of row.assetIds) {
-      individuallyCheckedInIds.add(id);
+      const at = row.checkinTimestamp;
+      if (!at) continue;
+      const seen = latestSessionCheckinByAsset.get(id);
+      if (!seen || at > seen) latestSessionCheckinByAsset.set(id, at);
     }
   }
 
@@ -4454,6 +4479,7 @@ export async function isBookingFullyCheckedIn(
     assetKitId: string | null;
     checkedOutAt: Date | null;
     checkedInAt: Date | null;
+    checkedOutQuantity: number | null;
     asset: { id: string; type: AssetType } | null;
   };
   const slices = bookingAssets as SliceRow[];
@@ -4476,10 +4502,16 @@ export async function isBookingFullyCheckedIn(
   // Booked units summed per ASSET across all of its slices (standalone +
   // kit-driven) — reconciliation below is asset-level.
   const bookedUnitsByAsset = new Map<string, number>();
+  /** Cumulative units sent out per asset, summed across its slices. */
+  const countedOutUnitsByAsset = new Map<string, number>();
   for (const s of slices) {
     bookedUnitsByAsset.set(
       s.assetId,
       (bookedUnitsByAsset.get(s.assetId) ?? 0) + s.quantity
+    );
+    countedOutUnitsByAsset.set(
+      s.assetId,
+      (countedOutUnitsByAsset.get(s.assetId) ?? 0) + (s.checkedOutQuantity ?? 0)
     );
   }
 
@@ -4498,8 +4530,19 @@ export async function isBookingFullyCheckedIn(
       if (!ba.checkedOutAt) continue;
       // Reconciled — by the slice marker, or by a partial-checkin session
       // for rows reconciled before the marker existed.
-      if (ba.checkedInAt) continue;
-      if (individuallyCheckedInIds.has(ba.assetId)) continue;
+      //
+      // The check-in has to be no older than the departure it answers. A slice
+      // that came back and then went out again carries both markers, and the
+      // refreshed `checkedOutAt` is what says it is out now; reading
+      // `checkedInAt` alone would report the second trip as already returned.
+      if (ba.checkedInAt && ba.checkedInAt >= ba.checkedOutAt) continue;
+      // Session fallback, for rows reconciled before the marker existed. It is
+      // held to the same test as the marker: the session has to be no older
+      // than the departure it claims to answer. Without that, a second
+      // departure clears `checkedInAt` and the FIRST trip's session — whose
+      // asset id is still listed — silently reconciles the new one.
+      const sessionAt = latestSessionCheckinByAsset.get(ba.assetId);
+      if (sessionAt && sessionAt >= ba.checkedOutAt) continue;
       return false;
     }
 
@@ -4515,26 +4558,36 @@ export async function isBookingFullyCheckedIn(
     // scanned-out asset from stripping the obligation off every other asset
     // on the booking.
     const booked = bookedUnitsByAsset.get(ba.assetId) ?? 0;
-    const obligatedUnits = Math.min(
-      dispatchedUnitsByAsset.get(ba.assetId) ?? 0,
-      booked
+    // Whichever record accounts for more units. The marker-and-session figure
+    // is capped at the booked quantity, which is right for one trip and wrong
+    // for two: an asset that went out, came back and went out again has sent
+    // out more units than it ever booked, and only the cumulative counter
+    // carries that. Taking the larger keeps every single-trip booking judged
+    // exactly as before.
+    const obligatedUnits = Math.max(
+      Math.min(dispatchedUnitsByAsset.get(ba.assetId) ?? 0, booked),
+      countedOutUnitsByAsset.get(ba.assetId) ?? 0
     );
     if (obligatedUnits === 0) {
       // Never dispatched in any form — nothing to reconcile.
       continue;
     }
 
-    // `computeBookingAssetRemaining` returns `booked − logged` clamped at 0.
-    // The "logged" half is what we actually care about (units already checked
-    // in); recover it via `booked - remaining`. Units that never left the
-    // warehouse don't block COMPLETE because `obligatedUnits` excludes them.
-    const remaining = await computeBookingAssetRemaining(
-      tx,
-      bookingId,
-      ba.assetId
-    );
-    const checkedInUnits = Math.max(0, booked - remaining);
-    if (obligatedUnits - checkedInUnits > 0) return false;
+    // Reconciled units, uncapped. `computeBookingAssetRemaining` clamps to the
+    // booked quantity, which would hide returns from a second trip the same
+    // way the cap above hid the departure, so read the log directly.
+    const reconciledSum = await tx.consumptionLog.aggregate({
+      where: {
+        assetId: ba.assetId,
+        bookingId,
+        category: { in: CHECKIN_DISPOSITION_CATEGORIES },
+      },
+      _sum: { quantity: true },
+    });
+    const reconciledUnits =
+      (reconciledSum as { _sum?: { quantity: number | null } })._sum
+        ?.quantity ?? 0;
+    if (obligatedUnits - reconciledUnits > 0) return false;
   }
 
   return true;
