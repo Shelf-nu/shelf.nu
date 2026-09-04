@@ -9778,7 +9778,10 @@ describe("isBookingFullyCheckedIn", () => {
     // why: asset-1 is in a session → individual-side reconciled.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-1"] },
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
     // Booked 10 − logged 10 → remaining 0 for asset-2.
     //@ts-expect-error missing vitest type
@@ -9796,11 +9799,12 @@ describe("isBookingFullyCheckedIn", () => {
     // refuses COMPLETE, ARCHIVED and CANCELLED. So a slice can be dispatched,
     // partially checked in, then dispatched a second time.
     //
-    // why: this is the row the second dispatch leaves behind once the marker
-    // write covers every departing slice. The stale check-in marker is still
-    // present, because nothing deletes it, so the gate has to read the two
-    // markers against each other rather than treat any `checkedInAt` as proof
-    // the slice came back.
+    // why: a legacy row. Checkout now clears `checkedInAt` when a slice
+    // re-departs, so new rows do not look like this — but rows written before
+    // that, and any left by a path that stamps a departure without clearing
+    // the marker, still do. The gate reads the two markers against each other
+    // so those rows are judged correctly too, rather than trusting any
+    // `checkedInAt` as proof the slice came back.
     //@ts-expect-error missing vitest type
     db.bookingAsset.findMany.mockResolvedValue([
       {
@@ -9827,6 +9831,73 @@ describe("isBookingFullyCheckedIn", () => {
     // The asset left the warehouse twice and came back once, so the booking
     // cannot be complete.
     expect(result).toBe(false);
+  });
+
+  it("does not let a first-trip check-in session reconcile a second departure", async () => {
+    expect.assertions(1);
+
+    // The asset was checked in through a scan session on its first trip, so
+    // its id is in that session's `assetIds` for good. It then departed again,
+    // which clears the slice's `checkedInAt`. The session is the only record
+    // left claiming a return, and it answers a trip that already ended.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        // Second departure, stamped after the session below.
+        checkedOutAt: new Date("2026-01-03T09:00:00.000Z"),
+        checkedInAt: null,
+        checkedOutQuantity: 2,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // why: the session names the asset but predates the current departure.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-02T17:00:00.000Z"),
+      },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(false);
+  });
+
+  it("still accepts a check-in session that answers the current departure", async () => {
+    expect.assertions(1);
+
+    // The mirror of the case above, so the guard cannot be satisfied by simply
+    // refusing every session. Here the session comes AFTER the departure, so it
+    // is the record of this trip's return.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: new Date("2026-01-02T09:00:00.000Z"),
+        checkedInAt: null,
+        checkedOutQuantity: 1,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-02T17:00:00.000Z"),
+      },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(true);
   });
 
   it("returns false when qty-tracked units went out, came back, and went out again", async () => {
@@ -9897,7 +9968,10 @@ describe("isBookingFullyCheckedIn", () => {
     // why: only asset-1 is reconciled; asset-2 is still pending.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-1"] },
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
 
     const result = await isBookingFullyCheckedIn(db, "booking-1");
@@ -9984,7 +10058,10 @@ describe("isBookingFullyCheckedIn", () => {
     // qty asset's outstanding units can (and must) block completion.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-ind", "asset-scanned"] },
+      {
+        assetIds: ["asset-ind", "asset-scanned"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
     // why: the booking's single progressive session — the row that used to
     // flip completion into session-only accounting for every asset.
@@ -10124,7 +10201,10 @@ describe("isBookingFullyCheckedIn", () => {
     // why: the individual is reconciled via its checkin session.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-scanned"] },
+      {
+        assetIds: ["asset-scanned"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
     // why: the same single progressive session as the blocking case above.
     //@ts-expect-error missing vitest type
@@ -10166,7 +10246,10 @@ describe("isBookingFullyCheckedIn", () => {
     // one has nothing to reconcile and must not be waited for.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-1"] },
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
 
     const result = await isBookingFullyCheckedIn(db, "booking-1");

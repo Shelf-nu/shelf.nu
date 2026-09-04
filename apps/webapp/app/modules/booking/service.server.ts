@@ -4437,7 +4437,10 @@ export async function isBookingFullyCheckedIn(
     }),
     tx.partialBookingCheckin.findMany({
       where: { bookingId },
-      select: { assetIds: true },
+      // The timestamp is what ties a session to the departure it answers. A
+      // slice can depart twice, and a session from the first trip must not
+      // reconcile the second.
+      select: { assetIds: true, checkinTimestamp: true },
     }),
     tx.partialBookingCheckout.findMany({
       where: { bookingId },
@@ -4450,10 +4453,22 @@ export async function isBookingFullyCheckedIn(
     return true;
   }
 
-  const individuallyCheckedInIds = new Set<string>();
-  for (const row of partialCheckins as Array<{ assetIds: string[] }>) {
+  /**
+   * The most recent check-in session naming each asset. Kept as a time rather
+   * than a flag: a slice that departed twice has a session for the first trip
+   * whose asset id never leaves this set, and a bare set of ids would let that
+   * session reconcile the second departure too.
+   */
+  const latestSessionCheckinByAsset = new Map<string, Date>();
+  for (const row of partialCheckins as Array<{
+    assetIds: string[];
+    checkinTimestamp: Date | null;
+  }>) {
     for (const id of row.assetIds) {
-      individuallyCheckedInIds.add(id);
+      const at = row.checkinTimestamp;
+      if (!at) continue;
+      const seen = latestSessionCheckinByAsset.get(id);
+      if (!seen || at > seen) latestSessionCheckinByAsset.set(id, at);
     }
   }
 
@@ -4521,7 +4536,13 @@ export async function isBookingFullyCheckedIn(
       // refreshed `checkedOutAt` is what says it is out now; reading
       // `checkedInAt` alone would report the second trip as already returned.
       if (ba.checkedInAt && ba.checkedInAt >= ba.checkedOutAt) continue;
-      if (!ba.checkedInAt && individuallyCheckedInIds.has(ba.assetId)) continue;
+      // Session fallback, for rows reconciled before the marker existed. It is
+      // held to the same test as the marker: the session has to be no older
+      // than the departure it claims to answer. Without that, a second
+      // departure clears `checkedInAt` and the FIRST trip's session — whose
+      // asset id is still listed — silently reconciles the new one.
+      const sessionAt = latestSessionCheckinByAsset.get(ba.assetId);
+      if (sessionAt && sessionAt >= ba.checkedOutAt) continue;
       return false;
     }
 
