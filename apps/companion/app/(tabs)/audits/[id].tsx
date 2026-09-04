@@ -28,6 +28,7 @@ import {
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import { CompleteAuditSheet } from "@/components/audit/complete-audit-sheet";
 import { EvidenceViewer } from "@/components/audit/evidence-viewer";
 import {
   AUDIT_ASSET_STATUS_LABELS,
@@ -330,6 +331,7 @@ function AuditDetailContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
+  const [showCompleteSheet, setShowCompleteSheet] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assetFilter, setAssetFilter] = useState<AssetFilterValue>("ALL");
 
@@ -433,53 +435,43 @@ function AuditDetailContent() {
   const handleCompleteAudit = () => {
     if (!audit || !currentOrg) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setShowCompleteSheet(true);
+  };
 
-    const pendingCount = audit.expectedAssetCount - audit.foundAssetCount;
+  /**
+   * Finish the audit, carrying the closing note when one was written.
+   *
+   * The sheet's own button is the confirmation and states the consequence for
+   * unscanned assets, so nothing is stacked on top of this.
+   */
+  const performCompleteAudit = async (completionNote?: string) => {
+    if (!audit || !currentOrg) return;
+    setIsActioning(true);
+    const timeZone = (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      } catch {
+        return "UTC";
+      }
+    })();
 
-    Alert.alert(
-      "Complete Audit",
-      pendingCount > 0
-        ? `Complete "${audit.name}"?\n\n${pendingCount} unscanned ${
-            pendingCount === 1 ? "asset" : "assets"
-          } will be marked as missing.`
-        : `Complete "${audit.name}"?\n\nAll expected assets have been found.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Complete",
-          onPress: async () => {
-            setIsActioning(true);
-            const timeZone = (() => {
-              try {
-                return (
-                  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-                );
-              } catch {
-                return "UTC";
-              }
-            })();
+    const { error: err } = await api.completeAudit(currentOrg.id, {
+      sessionId: audit.id,
+      timeZone,
+      completionNote,
+    });
+    setIsActioning(false);
 
-            const { error: err } = await api.completeAudit(currentOrg.id, {
-              sessionId: audit.id,
-              timeZone,
-            });
-            setIsActioning(false);
+    if (err) {
+      Alert.alert("Error", err);
+      return;
+    }
 
-            if (err) {
-              Alert.alert("Error", err);
-              return;
-            }
-
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            Alert.alert(
-              "Audit Complete",
-              `"${audit.name}" has been completed.`,
-              [{ text: "OK", onPress: () => fetchAudit() }]
-            );
-          },
-        },
-      ]
-    );
+    setShowCompleteSheet(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Alert.alert("Audit Complete", `"${audit.name}" has been completed.`, [
+      { text: "OK", onPress: () => fetchAudit() },
+    ]);
   };
 
   // ── Build display assets list ─────────────────────────
@@ -853,6 +845,17 @@ function AuditDetailContent() {
 
   return (
     <View style={styles.container}>
+      {audit ? (
+        <CompleteAuditSheet
+          visible={showCompleteSheet}
+          auditName={audit.name}
+          pendingCount={audit.expectedAssetCount - audit.foundAssetCount}
+          isSubmitting={isActioning}
+          onClose={() => setShowCompleteSheet(false)}
+          onConfirm={(note) => void performCompleteAudit(note)}
+        />
+      ) : null}
+
       {isActioning && (
         <View style={styles.overlay}>
           <ActivityIndicator size="large" color="#fff" />

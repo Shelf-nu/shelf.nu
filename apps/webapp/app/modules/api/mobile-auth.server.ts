@@ -166,6 +166,10 @@ export async function getUserOrganizations(userId: string) {
           imageId: true,
           barcodesEnabled: true,
           auditsEnabled: true,
+          // The workspace currency. Any screen that shows or collects money
+          // needs it before an asset exists to read it from — asset create,
+          // for one, which has no asset yet.
+          currency: true,
         },
       },
     },
