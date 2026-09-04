@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -8,7 +7,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
-import { getBookings } from "~/modules/booking/service.server";
+import {
+  getBookings,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
@@ -35,12 +37,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // (canUseAudits, surfaced through getMobileUserContext) so the
     // dashboard never serves activeAudits to non-add-on workspaces — a
     // paywall bypass / data leak even with the client cards hidden.
-    // The same call yields the caller's `role`, which gates booking
-    // visibility below.
-    const { canUseAudits, role } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    // The same call yields `canSeeAllBookings`, which decides which bookings
+    // the sections may draw from, and `canSeeAllCustody` for their names.
+    const { canUseAudits, canSeeAllBookings, canSeeAllCustody } =
+      await getMobileUserContext(user.id, organizationId);
 
     // Scope the booking sections to the caller's own bookings for
     // self-service / base users, who may only see bookings they are the
@@ -59,10 +59,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // empty for both). The companion's Home tab is the app's landing screen
     // for every role, not an admin analytics surface — denying it would leave
     // those users on a permanent error state rather than a scoped dashboard.
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
-    const custodianScope = isSelfServiceOrBase ? { userId: user.id } : null;
+    //
+    // Resolved from `canSeeAllBookings`, so a workspace that lets restricted
+    // users see everyone's bookings gets the same Home tab it gets on the
+    // website. The role alone cannot answer this: it does not know what the
+    // workspace decided.
+    //
+    // `resolveCustodianScope` rather than a bare `{ userId }`: custody lives
+    // on a user link OR any of the caller's team-member links, and a bare
+    // user-link filter hides a user's own booking whenever their custody comes
+    // from a team member. The list and calendar resolve it the same way; this
+    // is the third lens on the same rows.
+    const custodianScope = canSeeAllBookings
+      ? null
+      : await resolveCustodianScope({ userId: user.id, organizationId });
 
     // Run all queries in parallel for speed
     const [
@@ -148,14 +158,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         includeAssets: false,
         extraInclude: {
           custodianUser: {
+            // `id` and the team member's `userId` together answer "is the
+            // custodian the caller?", which keeps their own name visible.
             select: {
+              id: true,
               firstName: true,
               lastName: true,
               displayName: true,
               profilePicture: true,
             },
           },
-          custodianTeamMember: { select: { name: true } },
+          custodianTeamMember: { select: { name: true, userId: true } },
           _count: { select: { bookingAssets: true } },
         },
       }),
@@ -174,14 +187,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         includeAssets: false,
         extraInclude: {
           custodianUser: {
+            // `id` and the team member's `userId` answer "is the caller the
+            // custodian?", which keeps their own name visible when the
+            // custody override is off.
             select: {
+              id: true,
               firstName: true,
               lastName: true,
               displayName: true,
               profilePicture: true,
             },
           },
-          custodianTeamMember: { select: { name: true } },
+          custodianTeamMember: { select: { name: true, userId: true } },
           _count: { select: { bookingAssets: true } },
         },
       }),
@@ -200,14 +217,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         includeAssets: false,
         extraInclude: {
           custodianUser: {
+            // `id` and the team member's `userId` answer "is the caller the
+            // custodian?", which keeps their own name visible when the
+            // custody override is off.
             select: {
+              id: true,
               firstName: true,
               lastName: true,
               displayName: true,
               profilePicture: true,
             },
           },
-          custodianTeamMember: { select: { name: true } },
+          custodianTeamMember: { select: { name: true, userId: true } },
           _count: { select: { bookingAssets: true } },
         },
       }),
@@ -268,8 +289,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
        * `displayName`, so this shape cannot drift back to naming the custodian
        * by their legal name without failing to compile.
        */
-      custodianUser?: UserNameFields | null;
-      custodianTeamMember?: { name: string } | null;
+      custodianUser?: (UserNameFields & { id?: string }) | null;
+      custodianTeamMember?: { name: string; userId?: string | null } | null;
       _count?: { bookingAssets: number };
     };
 
@@ -280,9 +301,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: b.status,
       from: b.from instanceof Date ? b.from.toISOString() : b.from,
       to: b.to instanceof Date ? b.to.toISOString() : b.to,
-      custodianName: b.custodianUser
-        ? resolveUserDisplayName(b.custodianUser) || null
-        : b.custodianTeamMember?.name || null,
+      // Custody visibility is its own workspace override. null means the
+      // booking has no custodian; "private" means it has one this caller may
+      // not see. Keep them distinct.
+      custodianName:
+        !b.custodianUser && !b.custodianTeamMember
+          ? null
+          : canSeeAllCustody ||
+            b.custodianUser?.id === user.id ||
+            b.custodianTeamMember?.userId === user.id
+          ? b.custodianUser
+            ? resolveUserDisplayName(b.custodianUser) || null
+            : b.custodianTeamMember?.name || null
+          : "private",
       assetCount: b._count?.bookingAssets ?? 0,
     });
 

@@ -10,6 +10,11 @@ import {
   type AssetImageSource,
 } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  isSelfServiceOrBaseRole,
+  resolveCanSeeAllBookings,
+  resolveMostPrivilegedRole,
+} from "~/utils/booking-authorization.server";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
@@ -304,9 +309,22 @@ export async function getMobileUserContext(
    * `resolveMostPrivilegedRole`.
    */
   roles: OrganizationRoles[];
+  /**
+   * The most privileged role on this membership, and the only one any gate
+   * here should read. `role` above is `roles[0]`.
+   */
+  effectiveRole: OrganizationRoles;
+  /** `effectiveRole` is SELF_SERVICE or BASE. */
+  isSelfServiceOrBase: boolean;
   canUseBarcodes: boolean;
   canUseAudits: boolean;
   canSeeAllCustody: boolean;
+  /**
+   * Whether the caller may READ bookings they are not the custodian of.
+   * Never widens a mutation: writes stay on `validateBookingOwnership` and
+   * the role's permission grant.
+   */
+  canSeeAllBookings: boolean;
 }> {
   const userOrg = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
@@ -321,6 +339,12 @@ export async function getMobileUserContext(
           // here keeps it one query alongside the role.
           selfServiceCanSeeCustody: true,
           baseUserCanSeeCustody: true,
+          // why: the booking twins of the two custody flags above. Every
+          // mobile booking read - list, calendar, detail, dashboard - takes
+          // its visibility answer from this row, so the columns have to be
+          // here for the workspace setting to reach them at all.
+          selfServiceCanSeeBookings: true,
+          baseUserCanSeeBookings: true,
         },
       },
     },
@@ -340,14 +364,26 @@ export async function getMobileUserContext(
   // an empty array doesn't surface as `undefined` to downstream callers.
   const role = userOrg.roles[0] ?? OrganizationRoles.BASE;
 
+  // why: gates read the most privileged role, never roles[0]. A membership
+  // ordered [SELF_SERVICE, ADMIN] reads as SELF_SERVICE by position, which
+  // refuses a genuine admin. `role` keeps the positional value for the callers
+  // that still read it.
+  const effectiveRole = resolveMostPrivilegedRole(userOrg.roles);
+
   return {
     role,
     roles: userOrg.roles,
+    effectiveRole,
+    isSelfServiceOrBase: isSelfServiceOrBaseRole(effectiveRole),
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
     canSeeAllCustody: computeCanSeeAllCustody({
-      role,
+      role: effectiveRole,
       organization: userOrg.organization,
+    }),
+    canSeeAllBookings: resolveCanSeeAllBookings({
+      role: effectiveRole,
+      currentOrganization: userOrg.organization,
     }),
   };
 }
