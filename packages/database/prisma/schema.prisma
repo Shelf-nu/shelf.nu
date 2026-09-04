@@ -208,16 +208,29 @@ model UserBusinessIntel {
 }
 
 model Asset {
-  id                  String      @id @default(cuid())
-  title               String
-  description         String?
-  mainImage           String?
-  thumbnailImage      String?
-  mainImageExpiration DateTime?
-  status              AssetStatus @default(AVAILABLE)
-  valuation           Float?      @map("value") // Field to store the monetary value of an asset
-  availableToBook     Boolean     @default(true)
-  sequentialId        String? // Sequential identifier for the asset (e.g., "SAM-0001")
+  id                     String      @id @default(cuid())
+  title                  String
+  description            String?
+  mainImage              String?
+  thumbnailImage         String?
+  mainImageExpiration    DateTime?
+  // Single optional file attachment (purchase invoice, manual,
+  // calibration certificate, etc. - see issue #2660). A bare storage path
+  // in the private `assets` bucket, not a URL - these documents can carry
+  // real business detail, so access must follow the asset's own permission
+  // check rather than being a permanent public link. Resolve it to a
+  // short-lived signed URL with createSignedUrl() at the point of display;
+  // never persist that signed URL back to this column (it expires; the
+  // path doesn't). @unique closes the race between createAsset's own
+  // not-already-claimed check and the actual insert - see createAsset's
+  // attachmentPath guard in modules/asset/service.server.ts.
+  attachmentPath         String?     @unique
+  attachmentOriginalName String?
+  attachmentSize         Int?
+  status                 AssetStatus @default(AVAILABLE)
+  valuation              Float?      @map("value") // Field to store the monetary value of an asset
+  availableToBook        Boolean     @default(true)
+  sequentialId           String? // Sequential identifier for the asset (e.g., "SAM-0001")
 
   // Tracking method & model
   type            AssetType        @default(INDIVIDUAL)
@@ -996,7 +1009,7 @@ model Organization {
   auditImages        AuditImage[]
 
   usersWithLastSelected User[] @relation("lastSelectedOrg")
-  
+
   scimTokens      ScimToken[]
   scimExternalIds UserScimExternalId[]
   roleChangeLogs  RoleChangeLog[]

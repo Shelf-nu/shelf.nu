@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 
 import {
+  type FileUpload,
   MaxFileSizeExceededError,
   parseFormData,
 } from "@remix-run/form-data-parser";
@@ -9,6 +10,7 @@ import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
+  ASSET_ATTACHMENT_MAX_SIZE,
   ASSET_MAX_IMAGE_UPLOAD_SIZE,
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
@@ -361,6 +363,16 @@ export interface UploadOptions {
   contentType: string;
   resizeOptions?: ResizeOptions;
   upsert?: boolean;
+  /**
+   * When set, `uploadRawFile` rejects the upload unless the buffered file's
+   * leading bytes match this signature. The declared `contentType` is
+   * caller-supplied and unverified otherwise - this is the binary-level
+   * check that stands in for `uploadFile`'s Sharp-based image validation on
+   * paths that skip image processing entirely.
+   */
+  expectedMagicBytes?: Uint8Array;
+  /** User-facing message when `expectedMagicBytes` doesn't match. */
+  invalidSignatureMessage?: string;
 }
 
 export async function parseFileFormData({
@@ -381,23 +393,16 @@ export async function parseFileFormData({
   maxFileSize?: number;
 }) {
   try {
-    const uploadHandler = async (upload: any) => {
-      const file = upload?.file ?? upload;
-      const mimeType =
-        upload?.type ?? upload?.contentType ?? file?.type ?? undefined;
-      const originalName =
-        upload?.name ?? upload?.filename ?? file?.name ?? undefined;
+    const uploadHandler = async (upload: FileUpload) => {
+      const mimeType = upload.type;
+      const originalName = upload.name;
 
       // Only process image files
       if (mimeType && !mimeType.includes("image")) {
         return undefined;
       }
 
-      if (!file) {
-        return undefined;
-      }
-
-      const fileStream = await normalizeToAsyncIterable(file);
+      const fileStream = await normalizeToAsyncIterable(upload);
 
       if (!fileStream) {
         return undefined;
@@ -491,6 +496,227 @@ export function findShelfErrorInCause(error: unknown): ShelfError | null {
   }
 
   return findShelfErrorInCause(cause);
+}
+
+/**
+ * Uploads a file to Supabase Storage as-is, with no image processing.
+ * Companion to `uploadFile()` above for non-image files (e.g. PDF asset
+ * attachments) - `uploadFile()` always runs `cropImage()`, which rejects
+ * anything that isn't a JPEG/PNG/GIF/WebP/BMP.
+ *
+ * Buffers the entire `fileData` stream into memory before uploading, since
+ * both the magic-byte check and the upload call need the full byte length
+ * up front.
+ *
+ * @param fileData - The file's bytes as an async iterable of chunks.
+ * @param options.filename - Destination path within the bucket.
+ * @param options.contentType - Declared MIME type stored as the object's
+ * Content-Type; not verified against the actual bytes unless
+ * `expectedMagicBytes` is also given.
+ * @param options.bucketName - Target Supabase Storage bucket.
+ * @param options.upsert - Overwrite an existing object at `filename`
+ * instead of failing. Defaults to `false`.
+ * @param options.expectedMagicBytes - When set, the upload is rejected
+ * unless the buffer's leading bytes match this signature exactly.
+ * @param options.invalidSignatureMessage - User-facing message used when
+ * `expectedMagicBytes` doesn't match.
+ * @returns The stored object's path and its size in bytes.
+ * @throws {ShelfError} When the magic-byte check fails, or the underlying
+ * Supabase Storage upload fails for any other reason.
+ */
+export async function uploadRawFile(
+  fileData: AsyncIterable<Uint8Array>,
+  {
+    filename,
+    contentType,
+    bucketName,
+    upsert = false,
+    expectedMagicBytes,
+    invalidSignatureMessage = "Uploaded file does not match its expected format",
+  }: UploadOptions
+): Promise<{ path: string; size: number }> {
+  try {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of fileData) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+
+    // The declared contentType comes from the client and is not proof of
+    // the actual bytes - a request can label anything "application/pdf".
+    // Checking the magic bytes here is what actually keeps non-PDF content
+    // out of a bucket that serves files back with that content type.
+    if (
+      expectedMagicBytes &&
+      !buffer
+        .subarray(0, expectedMagicBytes.length)
+        .equals(Buffer.from(expectedMagicBytes))
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid file",
+        message: invalidSignatureMessage,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .upload(filename, buffer, { contentType, upsert });
+
+    if (error) {
+      throw error;
+    }
+
+    return { path: data.path, size: buffer.byteLength };
+  } catch (cause) {
+    const isShelfError = isLikeShelfError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: isShelfError
+        ? cause.message
+        : "Something went wrong while uploading the file. Please try again or contact support.",
+      additionalData: { filename, contentType, bucketName },
+      label,
+      shouldBeCaptured: isShelfError ? cause.shouldBeCaptured : undefined,
+    });
+  }
+}
+
+/** ASCII "%PDF-" - every valid PDF starts with this, regardless of version. */
+const PDF_MAGIC_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
+
+/**
+ * Parses a single-PDF multipart upload (asset attachments - invoices,
+ * manuals, certificates; see issue #2660) and returns its storage metadata
+ * directly, rather than through the parsed FormData.
+ *
+ * We intentionally don't read the result back from FormData, since
+ * regular text fields can use the same "file" key and spoof the uploaded
+ * file metadata. Keeping the result inside the upload handler ensures the
+ * path can only come from a file actually processed by the server.
+ *
+ * @param request - The incoming multipart/form-data request.
+ * @param newFileName - Base filename (without extension) the PDF is
+ * stored under; `.pdf` is appended.
+ * @param bucketName - Target Supabase Storage bucket. Defaults to the
+ * private `"assets"` bucket.
+ * @param maxFileSize - Maximum accepted upload size in bytes.
+ * @returns The stored object's path, the client-supplied original
+ * filename (if any), and its size in bytes.
+ * @throws {ShelfError} When no upload matches the "file" field, the
+ * declared or actual content type isn't `application/pdf`, the upload
+ * exceeds `maxFileSize`, or the file was stored at an unexpected path.
+ */
+export async function parsePdfFormData({
+  request,
+  newFileName,
+  // Private by default - a PDF attachment (invoice, calibration cert,
+  // warranty doc) can carry real business/financial detail, unlike the
+  // photos this bucket's other callers store. Access to it should follow
+  // access to the asset, not be a permanent public link - see
+  // createSignedUrl() for how a caller turns this back into a fetchable
+  // URL only after its own permission check.
+  bucketName = "assets",
+  maxFileSize = ASSET_ATTACHMENT_MAX_SIZE,
+}: {
+  request: Request;
+  newFileName: string;
+  bucketName?: string;
+  maxFileSize?: number;
+}): Promise<{ path: string; originalName?: string; size: number }> {
+  try {
+    let uploaded: { path: string; originalName?: string; size: number } | null =
+      null;
+    const targetFilename = `${newFileName}.pdf`;
+
+    const uploadHandler = async (upload: FileUpload) => {
+      // `upload.fieldName` is set by the multipart parser itself from the
+      // part's own Content-Disposition `name`, not from anything this
+      // handler trusts
+      if (upload.fieldName !== "file") {
+        return undefined;
+      }
+
+      const mimeType = upload.type;
+      const originalName = upload.name;
+
+      // Only process PDFs - anything else is left alone. A missing/empty
+      // Content-Type is rejected outright rather than assumed to be a PDF.
+      if (!mimeType || mimeType !== "application/pdf") {
+        return undefined;
+      }
+
+      const fileStream = await normalizeToAsyncIterable(upload);
+
+      if (!fileStream) {
+        return undefined;
+      }
+
+      const { path, size } = await uploadRawFile(fileStream, {
+        filename: targetFilename,
+        contentType: mimeType,
+        bucketName,
+        expectedMagicBytes: PDF_MAGIC_BYTES,
+        invalidSignatureMessage: "Uploaded file is not a valid PDF",
+      });
+
+      if (path !== targetFilename) {
+        throw new ShelfError({
+          cause: null,
+          message: "Uploaded file was stored at an unexpected path",
+          additionalData: { expected: targetFilename, actual: path },
+          label,
+        });
+      }
+
+      uploaded = { path, originalName, size };
+      return undefined;
+    };
+
+    await parseFormData(request, { maxFileSize }, uploadHandler);
+
+    if (!uploaded) {
+      throw new ShelfError({
+        cause: null,
+        title: "No file uploaded",
+        message: "Please choose a PDF file to upload.",
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    return uploaded;
+  } catch (cause) {
+    const sizeLimitError = getMaxFileSizeExceededError(cause);
+
+    if (sizeLimitError) {
+      throw new ShelfError({
+        cause,
+        title: "File too large",
+        message: `File size exceeds maximum allowed size of ${
+          maxFileSize / (1024 * 1024)
+        }MB`,
+        additionalData: { maxFileSize },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const nestedShelfError = findShelfErrorInCause(cause);
+
+    throw new ShelfError({
+      cause,
+      message: nestedShelfError
+        ? nestedShelfError.message
+        : "Something went wrong while uploading the file. Please try again or contact support.",
+      title: nestedShelfError?.title,
+      label,
+      shouldBeCaptured: nestedShelfError?.shouldBeCaptured,
+    });
+  }
 }
 
 /**
@@ -894,6 +1120,105 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
       message: isLikeShelfError(cause)
         ? cause.message
         : "Failed to remove file. Please try again.",
+      label,
+    });
+  }
+}
+
+/**
+ * Deletes a single, exactly-known object from a private bucket by its raw
+ * storage path. Companion to `removePublicFile()` for buckets that aren't
+ * served through a public URL - there is no URL to parse the path out of,
+ * so the caller passes the path it already has (e.g. a value it previously
+ * stored precisely because it's the private-bucket equivalent of a public
+ * URL for that row).
+ */
+export async function removeFileAtPath({
+  path,
+  bucketName,
+}: {
+  path: string;
+  bucketName: string;
+}) {
+  try {
+    const { error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .remove([path]);
+
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to remove file. Please try again.",
+      additionalData: { path, bucketName },
+      label,
+    });
+  }
+}
+
+/**
+ * Deletes every object under an org+entity storage prefix in `bucketName`.
+ * For an entity that doesn't have a DB row yet (e.g. a PDF attachment
+ * staged while a new asset is still being filled out) there is no stored
+ * URL to read the exact path from, so this removes by folder instead of
+ * by a single known key.
+ */
+export async function removeFilesByPrefix({
+  organizationId,
+  entityId,
+  bucketName = PUBLIC_BUCKET,
+}: {
+  organizationId: string;
+  entityId: string;
+  bucketName?: string;
+}) {
+  try {
+    const prefix = `${organizationId}/${entityId}`;
+
+    // list() caps a single call at PAGE_SIZE entries (Supabase's own default),
+    // paginating via limit/offset.
+    const PAGE_SIZE = 100;
+    const entries: { name: string }[] = [];
+    let offset = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const { data: page, error: listError } = await getSupabaseAdmin()
+        .storage.from(bucketName)
+        .list(prefix, { limit: PAGE_SIZE, offset });
+
+      if (listError) {
+        throw listError;
+      }
+
+      if (!page || page.length === 0) {
+        break;
+      }
+
+      entries.push(...page);
+      offset += page.length;
+      hasMore = page.length === PAGE_SIZE;
+    }
+
+    if (entries.length === 0) {
+      return;
+    }
+
+    const { error: removeError } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .remove(entries.map((entry) => `${prefix}/${entry.name}`));
+
+    if (removeError) {
+      throw removeError;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to remove staged files",
+      additionalData: { organizationId, entityId, bucketName },
       label,
     });
   }

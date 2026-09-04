@@ -1895,6 +1895,17 @@ describe("createAsset cross-org guards", () => {
     vitest.clearAllMocks();
   });
 
+  // Valid defaults for createAsset's required fields; each test overrides
+  // only the field its guard actually inspects.
+  const baseCreateAssetPayload: Parameters<typeof createAsset>[0] = {
+    title: "New asset",
+    description: null,
+    categoryId: null,
+    userId: "user-1",
+    valuation: null,
+    organizationId: "org-A",
+  };
+
   it("rejects a customFieldId from a different organization", async () => {
     expect.assertions(2);
     // Foreign-org custom field → org-scoped lookup returns nothing → the guard
@@ -1905,11 +1916,18 @@ describe("createAsset cross-org guards", () => {
 
     await expect(
       createAsset({
-        title: "New asset",
-        userId: "user-1",
-        organizationId: "org-A",
-        customFieldsValues: [{ id: "cf-from-org-B", value: { raw: "x" } }],
-      } as any)
+        ...baseCreateAssetPayload,
+        customFieldsValues: [
+          {
+            id: "cf-from-org-B",
+            value: { raw: "x" },
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            assetId: "asset-new",
+            customFieldId: "cf-from-org-B",
+          },
+        ],
+      })
     ).rejects.toThrow(ShelfError);
 
     expect(db.customField.findMany).toHaveBeenCalledWith({
@@ -1930,11 +1948,9 @@ describe("createAsset cross-org guards", () => {
 
     await expect(
       createAsset({
-        title: "New asset",
-        userId: "user-1",
-        organizationId: "org-A",
+        ...baseCreateAssetPayload,
         categoryId: "cat-from-org-B",
-      } as any)
+      })
     ).rejects.toThrow(ShelfError);
 
     expect(db.category.findFirst).toHaveBeenCalledWith({
@@ -1950,16 +1966,44 @@ describe("createAsset cross-org guards", () => {
     // satisfy "findFirst was never called" without the guard ever being
     // reached, and the test would pass for the wrong reason.
     const created = await createAsset({
-      title: "New asset",
-      userId: "user-1",
-      organizationId: "org-A",
+      ...baseCreateAssetPayload,
       categoryId: "uncategorized",
-    } as any);
+    });
 
     expect(created).toEqual({ id: "asset-new" });
     // "uncategorized" is the form's empty sentinel, not an id, so it must
     // never reach the org-scope lookup.
     expect(db.category.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects an attachmentPath outside the caller's organization folder", async () => {
+    expect.assertions(2);
+
+    await expect(
+      createAsset({
+        ...baseCreateAssetPayload,
+        attachmentPath: "org-B/some-asset/attachment-123.pdf",
+      })
+    ).rejects.toThrow(ShelfError);
+
+    // The prefix check rejects before ever looking up who owns the path.
+    expect(db.asset.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects an attachmentPath already claimed by another asset", async () => {
+    expect.assertions(1);
+    // why: a hit means some asset already persisted this exact path - a
+    // forged resubmission of it must not adopt that asset's attachment.
+    (db.asset.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-owning-it",
+    });
+
+    await expect(
+      createAsset({
+        ...baseCreateAssetPayload,
+        attachmentPath: "org-A/asset-owning-it/attachment-123.pdf",
+      })
+    ).rejects.toThrow(ShelfError);
   });
 });
 
