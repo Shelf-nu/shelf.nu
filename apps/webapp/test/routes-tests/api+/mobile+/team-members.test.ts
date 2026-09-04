@@ -26,6 +26,9 @@ import { loader } from "~/routes/api+/mobile+/team-members";
 
 // @vitest-environment node
 
+// why: the module instantiates a real Prisma client at load and would try to
+// connect; the suite runs with no database. `teamMember.findMany` is a spy so
+// the tests can assert the `where` this endpoint builds.
 vi.mock("~/database/db.server", () => ({
   db: {
     teamMember: {
@@ -35,6 +38,8 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: JWT validation and org-membership resolution are out of scope here, and
+// the caller's role is the variable under test.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
@@ -43,16 +48,22 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 
 const CALLER = "user-1";
 
-/** The `where` the roster query actually ran with. */
-function lastWhere(): any {
-  return (db.teamMember.findMany as any).mock.calls.at(-1)?.[0]?.where;
+/**
+ * The `where` the roster query actually ran with.
+ *
+ * Typed as a plain record rather than `Prisma.TeamMemberWhereInput`: the
+ * generated `Exact<>` wrapper on the call signature does not assign back to
+ * the bare input type, and the assertions here only read keys.
+ */
+function lastWhere(): Record<string, unknown> | undefined {
+  return vi.mocked(db.teamMember.findMany).mock.calls.at(-1)?.[0]?.where;
 }
 
 function actAs(
   roles: OrganizationRoles[],
   { canSeeAllCustody = false }: { canSeeAllCustody?: boolean } = {}
 ) {
-  (getMobileUserContext as any).mockResolvedValue({
+  vi.mocked(getMobileUserContext).mockResolvedValue({
     role: roles[0],
     roles,
     canUseBarcodes: true,
@@ -73,10 +84,12 @@ async function get() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (db.teamMember.findMany as any).mockResolvedValue([]);
-  (db.teamMember.count as any).mockResolvedValue(0);
-  (requireMobileAuth as any).mockResolvedValue({ user: { id: CALLER } });
-  (requireOrganizationAccess as any).mockResolvedValue("org-1");
+  vi.mocked(db.teamMember.findMany).mockResolvedValue([]);
+  vi.mocked(db.teamMember.count).mockResolvedValue(0);
+  vi.mocked(requireMobileAuth).mockResolvedValue({
+    user: { id: CALLER },
+  } as Awaited<ReturnType<typeof requireMobileAuth>>);
+  vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
 });
 
 describe("GET /api/mobile/team-members — who may be listed", () => {
