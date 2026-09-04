@@ -18,7 +18,11 @@ import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-l
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
-import { createNote } from "~/modules/note/service.server";
+import {
+  createAssetModelChangeNote,
+  createNotes,
+  createNote,
+} from "~/modules/note/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
@@ -296,7 +300,9 @@ vitest.mock("~/modules/user/service.server", () => ({
 // inline-edit note helpers added by main.
 vitest.mock("~/modules/note/service.server", () => ({
   createNote: vitest.fn().mockResolvedValue({}),
+  createNotes: vitest.fn().mockResolvedValue({}),
   createAssetCategoryChangeNote: vitest.fn().mockResolvedValue({}),
+  createAssetModelChangeNote: vitest.fn().mockResolvedValue({}),
   createAssetDescriptionChangeNote: vitest.fn().mockResolvedValue({}),
   createAssetNameChangeNote: vitest.fn().mockResolvedValue({}),
   createAssetQuantityChangeNote: vitest.fn().mockResolvedValue({}),
@@ -1963,6 +1969,132 @@ describe("createAsset cross-org guards", () => {
   });
 });
 
+describe("updateAsset asset-model activity", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: this path issues three `asset.findUnique` reads with different
+    // shapes (kit block, before-state, INDIVIDUAL-only type guard). Routing on
+    // the select keeps the test independent of their order.
+    // `mockReset`, not just `clearAllMocks`: earlier suites in this file queue
+    // `mockResolvedValueOnce` values, and an unconsumed queue survives a clear
+    // and fires here instead of the implementation below.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockReset();
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: any) => {
+        if (q?.select?.assetKits) return Promise.resolve({ assetKits: [] });
+        if (q?.select?.type) return Promise.resolve({ type: "INDIVIDUAL" });
+        return Promise.resolve({
+          id: "asset-1",
+          title: "Asset 1",
+          description: null,
+          valuation: null,
+          category: null,
+          tags: [],
+          assetModel: null,
+          organization: { currency: "USD" },
+        });
+      }
+    );
+    // why: `org-validation.server` is not mocked in this file, so the real
+    // guard runs and reads this stub. Driving it through the guard also proves
+    // the note takes its name from the row the guard already fetched, rather
+    // than from a second query.
+    (db.assetModel.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        id: "model-1",
+        name: "Stream Deck XL",
+      }
+    );
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "asset-1",
+      title: "Asset 1",
+      assetModelId: "model-1",
+      // why: the note takes its "after" value from the committed row, and the
+      // real query includes this relation. A stub without it reads as no model.
+      assetModel: { id: "model-1", name: "Stream Deck XL" },
+      category: null,
+      tags: [],
+      customFields: [],
+    });
+  });
+
+  it("does not claim the model was removed when the field is absent", async () => {
+    // The invariant: an omitted `assetModelId` is not a removal. The inline
+    // description, category and valuation edits and the companion asset update
+    // all send partial payloads, so the note has to compare the committed row
+    // against the before row rather than read the request.
+    // why: this path issues three `asset.findUnique` reads with different
+    // shapes (kit block, before-state, type guard), so the stub routes on the
+    // select and holds a model on the before-state row.
+    (db.asset.findUnique as ReturnType<typeof vitest.fn>).mockImplementation(
+      (q?: { select?: Record<string, unknown> }) => {
+        if (q?.select?.assetKits) return Promise.resolve({ assetKits: [] });
+        if (q?.select?.type) return Promise.resolve({ type: "INDIVIDUAL" });
+        return Promise.resolve({
+          id: "asset-1",
+          title: "Asset 1",
+          description: "before",
+          valuation: null,
+          category: null,
+          tags: [],
+          assetModel: { id: "model-1", name: "Stream Deck XL" },
+          organization: { currency: "USD" },
+        });
+      }
+    );
+
+    await updateAsset({
+      id: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      description: "after",
+      request: new Request("http://localhost/assets/asset-1/edit"),
+    } as never);
+
+    // Same model either side, so the builder returns null and no note is
+    // written. Asserting the arguments rather than the absence of a call,
+    // because the helper is always invoked and decides for itself.
+    const call = (
+      createAssetModelChangeNote as ReturnType<typeof vitest.fn>
+    ).mock.calls.at(-1)?.[0];
+    expect(call.previousModel).toEqual({
+      id: "model-1",
+      name: "Stream Deck XL",
+    });
+    expect(call.newModel).toEqual({ id: "model-1", name: "Stream Deck XL" });
+    // And no event either: the model did not change.
+    expect(
+      recordEvents as ReturnType<typeof vitest.fn>
+    ).not.toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "ASSET_MODEL_CHANGED" }),
+      ]),
+      expect.anything()
+    );
+  });
+
+  it("writes a note as well as an event, because the Activity tab renders notes", async () => {
+    // An event with no note leaves the customer looking at an empty history,
+    // which is the report that prompted this work. The bulk path writes both;
+    // so must this one.
+    await updateAsset({
+      id: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      assetModelId: "model-1",
+      request: new Request("http://localhost/assets/asset-1/edit"),
+    } as never);
+
+    expect(createAssetModelChangeNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        previousModel: null,
+        newModel: { id: "model-1", name: "Stream Deck XL" },
+      })
+    );
+  });
+});
+
 describe("updateAsset custom-field writes", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -3313,6 +3445,11 @@ describe("bulkUpdateAssetModel", () => {
     // why: this file pins shared db mocks with sticky `mockReturnValue` in
     // other suites and `clearAllMocks` does not undo those. Re-arm the two
     // stubs this suite drives so it never reads a leaked value.
+    // `mockReset` first, because the tests below queue `mockResolvedValueOnce`
+    // values and `clearAllMocks` leaves an unconsumed queue in place — a leaked
+    // one would silently answer the next test's first read.
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockReset();
     //@ts-expect-error mock setup
     db.asset.findMany.mockResolvedValue([]);
     //@ts-expect-error mock setup
@@ -3320,6 +3457,181 @@ describe("bulkUpdateAssetModel", () => {
       id: "model-1",
       name: "Panasonic PT-VZ580",
     });
+  });
+
+  it("records the model change in the activity log, per asset that changed", async () => {
+    // Model changes were the one asset field that wrote no event and no note.
+    // A bulk change has to leave the same trail the singular edit does, or the
+    // history reads differently depending on which button was pressed — and a
+    // customer who cannot see who linked their asset concludes the log is
+    // unreliable, not that one field is untracked.
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-1",
+        type: "INDIVIDUAL",
+        assetModelId: null,
+        assetModel: null,
+      },
+      {
+        id: "asset-2",
+        type: "INDIVIDUAL",
+        assetModelId: "model-1",
+        assetModel: { id: "model-1", name: "Panasonic PT-VZ580" },
+      },
+    ]);
+
+    await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings shape not relevant, only pass-through is
+      settings: { mode: "SIMPLE" },
+    });
+
+    // asset-2 already points at model-1, so only asset-1 changed.
+    expect(recordEvents as ReturnType<typeof vitest.fn>).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_MODEL_CHANGED",
+          assetId: "asset-1",
+          field: "assetModelId",
+          fromValue: null,
+          toValue: "model-1",
+        }),
+      ],
+      expect.anything()
+    );
+  });
+
+  it("re-reads under the transaction so a concurrent change is not overwritten", async () => {
+    expect.assertions(3);
+    // The row is read once to decide what to do and again inside the
+    // transaction to do it. Between the two, someone else links the asset to
+    // the same model. The second read is the one that counts.
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValueOnce([
+      {
+        id: "asset-1",
+        type: "INDIVIDUAL",
+        assetModelId: null,
+        assetModel: null,
+      },
+    ]);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValueOnce([
+      {
+        id: "asset-1",
+        type: "INDIVIDUAL",
+        assetModelId: "model-1",
+        assetModel: { id: "model-1", name: "Panasonic PT-VZ580" },
+      },
+    ]);
+
+    const result = await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings shape not relevant, only pass-through is
+      settings: { mode: "SIMPLE" },
+    });
+
+    // Nothing left to do, so nothing is written and no trail is invented.
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+    expect(recordEvents as ReturnType<typeof vitest.fn>).not.toHaveBeenCalled();
+    expect(result.updated).toBe(0);
+  });
+
+  it("takes the from-value from the row inside the transaction, not the stale read", async () => {
+    expect.assertions(2);
+    // The asset moves from model-2 to model-3 between the two reads. Reporting
+    // model-2 would describe a change that never happened.
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValueOnce([
+      {
+        id: "asset-1",
+        type: "INDIVIDUAL",
+        assetModelId: "model-2",
+        assetModel: { id: "model-2", name: "Stale Model" },
+      },
+    ]);
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValueOnce([
+      {
+        id: "asset-1",
+        type: "INDIVIDUAL",
+        assetModelId: "model-3",
+        assetModel: { id: "model-3", name: "Actual Model" },
+      },
+    ]);
+
+    await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings shape not relevant, only pass-through is
+      settings: { mode: "SIMPLE" },
+    });
+
+    expect(recordEvents as ReturnType<typeof vitest.fn>).toHaveBeenCalledWith(
+      [expect.objectContaining({ fromValue: "model-3", toValue: "model-1" })],
+      expect.anything()
+    );
+    // And the note reads the same way the event does.
+    expect(
+      (createNotes as ReturnType<typeof vitest.fn>).mock.calls[0][0].content
+    ).toContain("Actual Model");
+  });
+
+  it("writes the notes inside the transaction, one statement per previous model", async () => {
+    expect.assertions(4);
+    // Three assets, two distinct previous models. The note body only varies by
+    // the model being left, so this is two `createMany`s and not three inserts
+    // — the cost is why they can sit inside the transaction at all.
+    const rows = [
+      {
+        id: "asset-1",
+        type: "INDIVIDUAL",
+        assetModelId: null,
+        assetModel: null,
+      },
+      {
+        id: "asset-2",
+        type: "INDIVIDUAL",
+        assetModelId: null,
+        assetModel: null,
+      },
+      {
+        id: "asset-3",
+        type: "INDIVIDUAL",
+        assetModelId: "model-2",
+        assetModel: { id: "model-2", name: "Sony PXW-Z190" },
+      },
+    ];
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue(rows);
+
+    await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings shape not relevant, only pass-through is
+      settings: { mode: "SIMPLE" },
+    });
+
+    const calls = (createNotes as ReturnType<typeof vitest.fn>).mock.calls;
+    expect(calls).toHaveLength(2);
+    // The two assets with no previous model share one note and one statement.
+    expect(calls[0][0].assetIds).toEqual(["asset-1", "asset-2"]);
+    expect(calls[1][0].assetIds).toEqual(["asset-3"]);
+    // Passed the transaction client, so the note commits with the write it
+    // describes: a note written after the commit cannot be recreated on retry,
+    // because the retry finds the asset already on the target model.
+    expect(calls[0][1]).toBe(db);
   });
 
   it("links the individually tracked assets and skips quantity-tracked ones", async () => {

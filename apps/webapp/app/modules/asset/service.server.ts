@@ -198,12 +198,18 @@ import { createConsumptionLog } from "../consumption-log/service.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
+  buildAssetModelChangeNote,
+  resolveUserLink,
+} from "../note/helpers.server";
+import {
   createAssetCategoryChangeNote,
+  createAssetModelChangeNote,
   createAssetDescriptionChangeNote,
   createAssetNameChangeNote,
   createAssetQuantityChangeNote,
   createAssetValuationChangeNote,
   createNote,
+  createNotes,
   createTagChangeNoteIfNeeded,
   type TagSummary,
 } from "../note/service.server";
@@ -215,6 +221,8 @@ const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
   title: true,
   description: true,
   preferredBarcodeId: true,
+  // The model the asset is leaving, so a change note can name both sides.
+  assetModel: { select: { id: true, name: true } },
   category: {
     select: {
       id: true,
@@ -2042,7 +2050,8 @@ export async function updateAsset({
         typeof minQuantity !== "undefined" ||
         typeof consumptionType !== "undefined" ||
         typeof unitOfMeasure !== "undefined" ||
-        typeof preferredBarcodeId !== "undefined"
+        typeof preferredBarcodeId !== "undefined" ||
+        typeof assetModelId !== "undefined"
     );
 
     const assetBeforeUpdate = await fetchAssetBeforeUpdate({
@@ -2118,7 +2127,10 @@ export async function updateAsset({
       // / r3350881506). Runs before the type-check below so a
       // cross-org id is rejected with the "not in your workspace"
       // 404 instead of leaking a "not allowed for qty-tracked" 400.
-      await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
+      await assertAssetModelBelongsToOrg({
+        assetModelId,
+        organizationId,
+      });
 
       // AssetModel is INDIVIDUAL-only (see the matching guard in
       // createAsset). Block the connect for a QUANTITY_TRACKED asset
@@ -2545,6 +2557,10 @@ export async function updateAsset({
           tags: true,
           category: true,
           organization: true,
+          // Carried so the model change note can compare the row before
+          // against the row after. Deriving the "after" from the request
+          // payload instead would read an absent field as a removal.
+          assetModel: { select: { id: true, name: true } },
         },
       });
 
@@ -2625,6 +2641,7 @@ export async function updateAsset({
               tags: true,
               category: true,
               organization: true,
+              assetModel: { select: { id: true, name: true } },
             },
           })
         : updated;
@@ -2878,6 +2895,14 @@ export async function updateAsset({
           newDescription: description,
           loadUserForNotes,
         }),
+        createAssetModelChangeNote({
+          assetId: asset.id,
+          organizationId,
+          userId,
+          previousModel: assetBeforeUpdate.assetModel,
+          newModel: asset.assetModel,
+          loadUserForNotes,
+        }),
         createAssetCategoryChangeNote({
           assetId: asset.id,
           organizationId,
@@ -2968,6 +2993,23 @@ export async function updateAsset({
           field: "categoryId",
           fromValue: assetBeforeUpdate.category?.id ?? null,
           toValue: asset.category?.id ?? null,
+        });
+      }
+      if (
+        typeof assetModelId !== "undefined" &&
+        (assetBeforeUpdate.assetModel?.id ?? null) !==
+          (asset.assetModelId ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_MODEL_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "assetModelId",
+          fromValue: assetBeforeUpdate.assetModel?.id ?? null,
+          toValue: asset.assetModelId ?? null,
         });
       }
       if (
@@ -7031,12 +7073,19 @@ export type BulkUpdateAssetModelResult = {
  *   Those are create-time conveniences (see `bulkCreateAssetsFromModel`);
  *   retro-applying them here would silently overwrite curated data on assets
  *   that already exist.
- * - No activity events and no notes are written. `ActivityAction` has no
- *   ASSET_MODEL action and the singular `updateAsset` path writes neither, so
- *   staying silent is what `.claude/rules/bulk-event-parity.md` requires:
- *   bulk must emit exactly what singular emits. Adding the event properly
- *   needs an additive enum migration plus the singular call site plus the
- *   model-delete SetNull cascade, which is its own change.
+ * - One `ASSET_MODEL_CHANGED` event and one note per asset that actually
+ *   changed, matching what the singular `updateAsset` path emits, as
+ *   `.claude/rules/bulk-event-parity.md` requires. Both are written inside the
+ *   transaction that makes the change: a note written after the commit can
+ *   fail while the change is already durable, and the retry finds the asset on
+ *   the target model and skips it, so that note could never be recreated. The
+ *   notes are grouped by the model being left, since that is the only part of
+ *   the sentence that varies, which keeps a large batch to a handful of
+ *   statements.
+ * - The rows are re-read inside the transaction and the events, notes and
+ *   returned counts all come from that read, not from the read taken before
+ *   it opened. Eligibility is re-checked there too, so an asset converted to
+ *   quantity-tracked in between is not linked past the guard meant to stop it.
  *
  * @param params.assetIds - Selected asset ids, possibly `[ALL_SELECTED_KEY]`
  * @param params.assetModelId - Target model, or `null`/`""` to remove the link
@@ -7112,7 +7161,14 @@ export async function bulkUpdateAssetModel({
      */
     const assetsBeforeUpdate = await db.asset.findMany({
       where: { id: { in: resolvedIds }, organizationId },
-      select: { id: true, type: true, assetModelId: true },
+      select: {
+        id: true,
+        type: true,
+        assetModelId: true,
+        // The note names the model an asset is leaving, not just the one it
+        // joins, so a reader can see what the change actually replaced.
+        assetModel: { select: { id: true, name: true } },
+      },
     });
 
     const individuals = assetsBeforeUpdate.filter(
@@ -7149,17 +7205,127 @@ export async function bulkUpdateAssetModel({
      * Surfaced in the toast because it is the only signal that the previous
      * model's book-by-model availability pool just shrank.
      */
-    const moved = newAssetModelId
+    let moved = newAssetModelId
       ? assetsThatChange.filter((asset) => asset.assetModelId !== null).length
       : 0;
 
+    /**
+     * Reported to the user, so it counts the rows the transaction actually
+     * wrote rather than the rows this request first read.
+     */
+    let updated = assetsThatChange.length;
+
     if (assetsThatChange.length > 0) {
-      await db.asset.updateMany({
-        where: {
-          id: { in: assetsThatChange.map((asset) => asset.id) },
-          organizationId,
-        },
-        data: { assetModelId: newAssetModelId },
+      // Resolved once, outside the transaction: it can hit the user table, and
+      // every note in this batch is written by the same person.
+      const loadUserForNotes = createLoadUserForNotes(userId);
+      const userLink = await resolveUserLink({ userId, loadUserForNotes });
+      const newModel = newAssetModelId
+        ? // Keyed on the id, never the name: a model saved with a
+          // whitespace-only name trims to "", and branching on that would
+          // report a real link as a removal.
+          { id: newAssetModelId, name: modelName ?? "" }
+        : null;
+
+      await db.$transaction(async (tx) => {
+        /**
+         * Re-read under the transaction. The rows above were read before it
+         * opened, so a concurrent change would be overwritten here while the
+         * event and note still named the model this request happened to see.
+         * The trail has to describe the write that actually happened.
+         */
+        const current = await tx.asset.findMany({
+          where: {
+            id: { in: assetsThatChange.map((asset) => asset.id) },
+            organizationId,
+          },
+          select: {
+            id: true,
+            type: true,
+            assetModelId: true,
+            assetModel: { select: { id: true, name: true } },
+          },
+        });
+        // Eligibility is re-checked too, not just the current model: an asset
+        // converted to quantity-tracked since the read above must not be
+        // linked, and the check that rejected it ran on the stale row.
+        const changing = current.filter(
+          (asset) =>
+            asset.type !== AssetType.QUANTITY_TRACKED &&
+            asset.assetModelId !== newAssetModelId
+        );
+        updated = changing.length;
+        moved = newAssetModelId
+          ? changing.filter((asset) => asset.assetModelId !== null).length
+          : 0;
+        if (changing.length === 0) {
+          return;
+        }
+
+        await tx.asset.updateMany({
+          where: {
+            id: { in: changing.map((asset) => asset.id) },
+            organizationId,
+          },
+          data: { assetModelId: newAssetModelId },
+        });
+
+        // One event per asset that actually changed. A bulk model change has to
+        // leave the same trail its singular counterpart does, or the activity
+        // log reports a different history depending on which button was pressed.
+        await recordEvents(
+          changing.map((asset) => ({
+            organizationId,
+            actorUserId: userId,
+            action: "ASSET_MODEL_CHANGED" as const,
+            entityType: "ASSET" as const,
+            entityId: asset.id,
+            assetId: asset.id,
+            field: "assetModelId",
+            fromValue: asset.assetModelId ?? null,
+            toValue: newAssetModelId,
+          })),
+          tx
+        );
+
+        /**
+         * Notes commit with the write. A note written afterwards can fail once
+         * the model change is already durable, and the retry is a no-op because
+         * the asset now points at the target — so the note could never be
+         * recreated.
+         *
+         * Grouped by the model being left, because that is the only part of the
+         * sentence that varies: each group is one `createMany`, so a large
+         * batch costs a handful of statements rather than one per asset.
+         */
+        const byPreviousModel = new Map<string, typeof changing>();
+        for (const asset of changing) {
+          const key = asset.assetModel?.id ?? "";
+          const group = byPreviousModel.get(key);
+          if (group) {
+            group.push(asset);
+          } else {
+            byPreviousModel.set(key, [asset]);
+          }
+        }
+        for (const group of byPreviousModel.values()) {
+          const content = buildAssetModelChangeNote({
+            userLink,
+            previous: group[0].assetModel,
+            next: newModel,
+          });
+          if (!content) continue;
+          await createNotes(
+            {
+              content,
+              type: "UPDATE",
+              userId,
+              assetIds: group.map((asset) => asset.id),
+              organizationId,
+            },
+            tx
+          );
+        }
       });
     }
 
@@ -7172,7 +7338,7 @@ export async function bulkUpdateAssetModel({
        * organization, when "matched no assets" is the truth.
        */
       resolved: assetsBeforeUpdate.length,
-      updated: assetsThatChange.length,
+      updated,
       moved,
       /**
        * Only meaningful when linking. On the unlink path a quantity-tracked
