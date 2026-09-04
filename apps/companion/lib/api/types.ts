@@ -1447,3 +1447,28 @@ export type CalendarBookingsResponse = {
     jumpTo: string | null;
   };
 };
+
+/**
+ * One row of an asset's booking history — the phone answer to "when is this
+ * asset out, and where has it been?".
+ *
+ * @see {@link file://../../../webapp/app/routes/api+/mobile+/assets.$assetId.bookings.ts}
+ */
+export type AssetBookingRow = {
+  id: string;
+  name: string;
+  status: BookingStatus;
+  from: string;
+  to: string;
+  custodianName: string | null;
+  custodianImage: string | null;
+};
+
+/** Paginated response of {@link AssetBookingRow}. */
+export type AssetBookingsResponse = {
+  bookings: AssetBookingRow[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+};
