@@ -5,9 +5,14 @@ import { triggerEmail } from "./email.worker.server";
 import type { EmailPayloadType } from "./types";
 
 const label = "Email";
-export const sendEmail = (payload: EmailPayloadType) => {
+/**
+ * Sends an email directly and falls back to the retrying queue when the
+ * direct send fails. Resolves once the send or the enqueue has finished, for
+ * callers that must not move on before delivery is settled.
+ */
+export const sendEmailAndWait = (payload: EmailPayloadType) =>
   // attempt to send email, push to the queue if it fails
-  triggerEmail(payload).catch((cause) => {
+  triggerEmail(payload).catch(async (cause) => {
     Logger.error(
       new ShelfError({
         cause,
@@ -21,8 +26,12 @@ export const sendEmail = (payload: EmailPayloadType) => {
         shouldBeCaptured: false, // Will be captured if all queue retries fail
       })
     );
-    void addToQueue(payload);
+    await addToQueue(payload);
   });
+
+/** Fire-and-forget form of {@link sendEmailAndWait}, for the common case. */
+export const sendEmail = (payload: EmailPayloadType) => {
+  void sendEmailAndWait(payload);
 };
 
 const addToQueue = async (payload: EmailPayloadType) => {
