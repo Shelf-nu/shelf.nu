@@ -66,7 +66,10 @@ function defaultProto(): Node | null {
 
 /**
  * Installs the guard on `proto` (defaults to the global `Node.prototype`).
- * Installing twice on the same prototype is a no-op.
+ * Installing twice on the same prototype is a no-op: the first installation
+ * owns the guard, and only its disposer restores the native methods. A repeated
+ * installation returns a disposer that does nothing, so a later caller cannot
+ * remove the protection the first caller relies on.
  *
  * @param proto - The prototype whose `removeChild` / `insertBefore` to wrap;
  *   `null` installs nothing
@@ -75,11 +78,8 @@ function defaultProto(): Node | null {
 export function installDomMutationGuard(
   proto: Node | null = defaultProto()
 ): () => void {
-  if (!proto) {
+  if (!proto || nativeMethods.has(proto)) {
     return () => {};
-  }
-  if (nativeMethods.has(proto)) {
-    return () => uninstallDomMutationGuard(proto);
   }
 
   const nativeRemoveChild = proto.removeChild;

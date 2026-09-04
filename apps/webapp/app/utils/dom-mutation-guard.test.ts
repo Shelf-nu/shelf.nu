@@ -1,3 +1,14 @@
+/**
+ * Tests for the DOM mutation guard that keeps React commits alive after page
+ * translation or a browser extension has rewritten React-owned nodes.
+ *
+ * Covers the two guarded methods (`removeChild`, `insertBefore`) against real
+ * children, translated (detached) references, reparented references, and the
+ * install / dispose lifecycle. happy-dom throws the same `NotFoundError` as the
+ * browser, which is what the unguarded baseline test relies on.
+ *
+ * @see {@link file://./dom-mutation-guard.ts}
+ */
 /* eslint-disable no-console -- the guard reports through console.warn; the tests assert on it */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,6 +47,8 @@ describe("installDomMutationGuard", () => {
   let parent: HTMLDivElement;
 
   beforeEach(() => {
+    // why: the guard reports through console.warn; silencing it keeps the test
+    // output clean while the spy still lets the tests assert on the calls.
     vi.spyOn(console, "warn").mockImplementation(() => {});
     parent = document.createElement("div");
     document.body.appendChild(parent);
@@ -174,6 +187,19 @@ describe("installDomMutationGuard", () => {
       expect(isDomMutationGuardInstalled()).toBe(false);
       expect(Node.prototype.removeChild).toBe(nativeRemoveChild);
       expect(Node.prototype.insertBefore).toBe(nativeInsertBefore);
+    });
+
+    it("keeps the guard when a repeated installation is disposed", () => {
+      const dispose = installDomMutationGuard();
+      const disposeAgain = installDomMutationGuard();
+
+      disposeAgain();
+
+      expect(isDomMutationGuardInstalled()).toBe(true);
+
+      dispose();
+
+      expect(isDomMutationGuardInstalled()).toBe(false);
     });
 
     it("installs nothing when given no prototype", () => {
