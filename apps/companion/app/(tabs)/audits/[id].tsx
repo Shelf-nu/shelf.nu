@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Alert,
   Animated,
+  type AccessibilityActionEvent,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
@@ -26,6 +27,7 @@ import {
   type AuditEvidenceImage,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { pushIntoTab } from "@/lib/navigation";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { EvidenceViewer } from "@/components/audit/evidence-viewer";
@@ -106,6 +108,11 @@ function isAssetFilterVisible(
 
 type DisplayAsset = {
   id: string; // assetId or auditAssetId
+  /**
+   * The live asset this row opens. Null for a deleted asset: the scan still
+   * lists it, but there is no asset detail left to navigate to.
+   */
+  assetId: string | null;
   name: string;
   mainImage: string | null;
   status: AuditAssetStatus;
@@ -515,6 +522,7 @@ function AuditDetailContent() {
       const scan = scanMap.get(asset.id);
       items.push({
         id: asset.id,
+        assetId: asset.id,
         name: asset.name,
         mainImage: asset.thumbnailImage || asset.mainImage,
         status: scan ? "FOUND" : notFoundStatus,
@@ -562,6 +570,7 @@ function AuditDetailContent() {
           id: isDeletedAsset
             ? `deleted:${scan.id || scan.code || scan.scannedAt}`
             : scan.assetId,
+          assetId: isDeletedAsset ? null : scan.assetId,
           name: isDeletedAsset
             ? auditDeletedAssetLabel(snapshotTitle)
             : snapshotTitle || "Untitled asset",
@@ -639,9 +648,6 @@ function AuditDetailContent() {
         metaParts.push({ icon: "qr-code-outline", text: item.scannedCode });
       }
 
-      // why: evidence is the ONE thing on this card worth opening. Everything
-      // else (image, name, location, category, custodian, status) is already
-      // shown, which is why the card is otherwise inert — see the note below.
       // why two numbers and not their sum: see scanned-items-list.tsx. The
       // sum changes for identical evidence depending on whether the auditor
       // typed a caption, so it cannot be compared between rows.
@@ -659,18 +665,32 @@ function AuditDetailContent() {
       ]
         .filter(Boolean)
         .join(", ");
-      const Card = hasEvidence ? TouchableOpacity : View;
+      // The card opens the asset, matching the web audit row where the title
+      // links to the asset page: a field worker who finds a missing or
+      // unexpected asset updates it from here. A deleted asset has no detail
+      // left to open, so that row stays an inert summary and only its
+      // evidence chip (below) is tappable.
+      const opensAsset = item.assetId !== null;
+      const Card = opensAsset ? TouchableOpacity : View;
+      const openEvidence = () =>
+        onEvidencePress({
+          auditAssetId: item.auditAssetId as string,
+          name: item.name,
+        });
 
       return (
         <Card
           style={styles.assetCard}
-          {...(hasEvidence
+          {...(opensAsset
             ? {
+                // Cross-tab: pushIntoTab anchors the Assets list beneath the
+                // detail so "back" has a target, and leaves this audit mounted
+                // in its own stack instead of pushing the asset onto it.
                 onPress: () =>
-                  onEvidencePress({
-                    auditAssetId: item.auditAssetId as string,
-                    name: item.name,
-                  }),
+                  pushIntoTab(
+                    "/(tabs)/assets",
+                    `/(tabs)/assets/${item.assetId}`
+                  ),
                 activeOpacity: 0.7,
                 accessibilityRole: "button" as const,
               }
@@ -685,21 +705,27 @@ function AuditDetailContent() {
             item.name,
             statusLabel,
             ...metaParts.map((p) => p.text),
-            hasEvidence ? `${evidenceLabel}, tap to view` : null,
+            hasEvidence ? evidenceLabel : null,
+            opensAsset ? "tap to open asset" : null,
           ]
             .filter(Boolean)
             .join(", ")}
+          // `accessible` folds the chip into the card for a screen reader, so
+          // the evidence viewer is also exposed as a custom action (VoiceOver
+          // rotor / TalkBack actions menu) on every row that has evidence.
+          {...(hasEvidence
+            ? {
+                accessibilityActions: [
+                  { name: "viewEvidence", label: "View evidence" },
+                ],
+                onAccessibilityAction: (event: AccessibilityActionEvent) => {
+                  if (event.nativeEvent.actionName === "viewEvidence") {
+                    openEvidence();
+                  }
+                },
+              }
+            : {})}
         >
-          {/*
-            why: the previous `router.push('/(tabs)/assets/...)' from
-            inside the Audits tab polluted the Assets tab's stack — the
-            Assets tab kept showing the asset detail until the user
-            manually navigated back. Removed the cross-tab navigation
-            entirely; the field worker has everything they need on this
-            card (image, name, location, category, custodian, status).
-            Full asset detail remains reachable from the Assets tab,
-            which is the correct surface for browsing.
-          */}
           {item.mainImage ? (
             <Image
               source={{ uri: item.mainImage }}
@@ -749,7 +775,16 @@ function AuditDetailContent() {
               </Text>
             </View>
             {hasEvidence ? (
-              <View style={styles.evidenceChip}>
+              <TouchableOpacity
+                style={styles.evidenceChip}
+                onPress={openEvidence}
+                activeOpacity={0.7}
+                // The chip is small; slop keeps it easy to hit without
+                // growing it visually or stealing the card's tap.
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`${evidenceLabel}, tap to view`}
+              >
                 {noteCount > 0 ? (
                   <>
                     <Ionicons
@@ -770,7 +805,7 @@ function AuditDetailContent() {
                     <Text style={styles.evidenceChipText}>{photoCount}</Text>
                   </>
                 ) : null}
-              </View>
+              </TouchableOpacity>
             ) : null}
           </View>
         </Card>
