@@ -105,7 +105,7 @@ describe("GET /api/mobile/bookings", () => {
     vi.clearAllMocks();
     (db.booking.findMany as any).mockResolvedValue([]);
     (db.booking.count as any).mockResolvedValue(0);
-    (getMobileUserContext as any).mockResolvedValue(
+    vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({ roles: ["ADMIN"] })
     );
     (resolveCustodianScope as any).mockResolvedValue({
@@ -116,7 +116,7 @@ describe("GET /api/mobile/bookings", () => {
   });
 
   it("scopes a SELF_SERVICE user through the shared custodian clause", async () => {
-    (getMobileUserContext as any).mockResolvedValue(
+    vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({ roles: ["SELF_SERVICE"] })
     );
 
@@ -138,7 +138,7 @@ describe("GET /api/mobile/bookings", () => {
   });
 
   it("scopes a BASE user the same way", async () => {
-    (getMobileUserContext as any).mockResolvedValue(
+    vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({ roles: ["BASE"] })
     );
 
@@ -153,7 +153,7 @@ describe("GET /api/mobile/bookings", () => {
     async (role) => {
       // The workspace override, not the role, is the deciding input. With it
       // on, the restriction is not merely widened — it is never resolved.
-      (getMobileUserContext as any).mockResolvedValue(
+      vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileUserContext({
           roles: [role as OrganizationRoles],
           canSeeAllBookings: true,
@@ -170,7 +170,7 @@ describe("GET /api/mobile/bookings", () => {
   it("keeps drafts private even when the override is on", async () => {
     // The override widens WHOSE bookings are visible. A draft stays private to
     // its creator either way, exactly as on web.
-    (getMobileUserContext as any).mockResolvedValue(
+    vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({ roles: ["BASE"], canSeeAllBookings: true })
     );
 
@@ -182,7 +182,7 @@ describe("GET /api/mobile/bookings", () => {
   it("hides a colleague's custodian name when only the booking override is on", async () => {
     // Two independent settings. Seeing a booking does not mean seeing who
     // holds it; web draws the literal "private" in that case.
-    (getMobileUserContext as any).mockResolvedValue(
+    vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({
         roles: ["BASE"],
         canSeeAllBookings: true,
@@ -214,8 +214,42 @@ describe("GET /api/mobile/bookings", () => {
     expect(body.bookings[0].custodianImage).toBeNull();
   });
 
+  it("reports a booking with no custodian as null, not private", async () => {
+    // Three distinct answers. "private" claims a custodian exists and is being
+    // withheld; an unassigned booking must not make that claim.
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({
+        roles: ["BASE"],
+        canSeeAllBookings: true,
+        canSeeAllCustody: false,
+      })
+    );
+    (db.booking.findMany as any).mockResolvedValue([
+      {
+        id: "b-3",
+        name: "Unassigned booking",
+        status: "DRAFT",
+        from: new Date(0),
+        to: new Date(0),
+        createdAt: new Date(0),
+        custodianUser: null,
+        custodianTeamMember: null,
+        _count: { bookingAssets: 0, modelRequests: 0 },
+        modelRequests: [],
+      },
+    ]);
+    (db.booking.count as any).mockResolvedValue(1);
+
+    const response = (await loader(
+      createLoaderArgs({ request: request() })
+    )) as unknown as Response;
+    const body = await response.json();
+
+    expect(body.bookings[0].custodianName).toBeNull();
+  });
+
   it("still shows the caller their OWN custodian name with custody off", async () => {
-    (getMobileUserContext as any).mockResolvedValue(
+    vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({
         roles: ["BASE"],
         canSeeAllBookings: true,
@@ -260,7 +294,7 @@ describe("GET /api/mobile/bookings", () => {
     // membership stored `[SELF_SERVICE, ADMIN]` resolved to SELF_SERVICE and a
     // genuine admin was narrowed to bookings they are custodian of. The
     // calendar lens shares this scoping and has to reach the same verdict.
-    (getMobileUserContext as any).mockResolvedValue(
+    vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
     );
 
@@ -279,7 +313,7 @@ describe("GET /api/mobile/bookings", () => {
       vi.clearAllMocks();
       (db.booking.findMany as any).mockResolvedValue([]);
       (db.booking.count as any).mockResolvedValue(0);
-      (getMobileUserContext as any).mockResolvedValue(
+      vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileUserContext({ roles: [role] })
       );
 

@@ -121,7 +121,7 @@ describe("GET /api/mobile/bookings/calendar", () => {
     (requireMobileAuth as any).mockResolvedValue({ user: { id: "user-1" } });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
-    (getMobileUserContext as any).mockResolvedValue(
+    vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({ roles: ["ADMIN"] })
     );
     mockDb.booking.findMany.mockResolvedValue([]);
@@ -241,7 +241,7 @@ describe("GET /api/mobile/bookings/calendar", () => {
 
   describe("who can see what", () => {
     it("scopes a SELF_SERVICE user through the shared custodian clause", async () => {
-      (getMobileUserContext as any).mockResolvedValue(
+      vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileUserContext({ roles: ["SELF_SERVICE"] })
       );
 
@@ -264,7 +264,7 @@ describe("GET /api/mobile/bookings/calendar", () => {
     });
 
     it("scopes a BASE user the same way", async () => {
-      (getMobileUserContext as any).mockResolvedValue(
+      vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileUserContext({ roles: ["BASE"] })
       );
 
@@ -279,7 +279,7 @@ describe("GET /api/mobile/bookings/calendar", () => {
       async (role) => {
         // The list lens on this same screen must answer identically: one lens
         // showing a booking the other denies is the failure this guards.
-        (getMobileUserContext as any).mockResolvedValue(
+        vi.mocked(getMobileUserContext).mockResolvedValue(
           mobileUserContext({
             roles: [role as OrganizationRoles],
             canSeeAllBookings: true,
@@ -294,7 +294,7 @@ describe("GET /api/mobile/bookings/calendar", () => {
     );
 
     it("keeps drafts private even when the override is on", async () => {
-      (getMobileUserContext as any).mockResolvedValue(
+      vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileUserContext({ roles: ["BASE"], canSeeAllBookings: true })
       );
 
@@ -329,7 +329,7 @@ describe("GET /api/mobile/bookings/calendar", () => {
       // membership stored `[SELF_SERVICE, ADMIN]` narrowed a genuine admin to
       // bookings they are custodian of - their colleagues' bookings vanished
       // from the grid while the list lens still showed them.
-      (getMobileUserContext as any).mockResolvedValue(
+      vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
       );
 

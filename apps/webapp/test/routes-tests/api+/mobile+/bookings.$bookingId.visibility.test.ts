@@ -30,6 +30,9 @@ import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
+// why: the module instantiates a real Prisma client at load and would try to
+// connect; the suite runs with no database. `booking.findFirst` is a spy so the
+// tests can assert the `where` this endpoint builds.
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
@@ -38,6 +41,9 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: JWT validation and org-membership resolution are out of scope here, and
+// the CALLER'S CONTEXT is the variable under test. The remaining exports stay
+// real (`vi.importActual`) so nothing else is silently replaced.
 vi.mock("~/modules/api/mobile-auth.server", async () => {
   const actual = await vi.importActual<typeof MobileAuthServer>(
     "~/modules/api/mobile-auth.server"
@@ -51,14 +57,16 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
   };
 });
 
-// why: booking settings and the action-permission lookup are unrelated to the
-// visibility question under test — stub them to fixed values.
+// why: the check-in policy is unrelated to the visibility question under test;
+// fixed values keep the action flags deterministic.
 vi.mock("~/modules/booking-settings/service.server", () => ({
   getBookingSettingsForOrganization: vi.fn().mockResolvedValue({
     requireExplicitCheckinForAdmin: false,
     requireExplicitCheckinForSelfService: false,
   }),
 }));
+// why: the action-availability lookup is a separate gate from the read gate
+// under test; a fixed `false` keeps it from touching the permission matrix.
 vi.mock("~/utils/permissions/permission.validator.server", () => ({
   hasPermission: vi.fn().mockResolvedValue(false),
 }));

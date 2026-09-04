@@ -301,12 +301,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: b.status,
       from: b.from instanceof Date ? b.from.toISOString() : b.from,
       to: b.to instanceof Date ? b.to.toISOString() : b.to,
-      // Custody visibility is its own workspace override. "private" rather
-      // than null when the name is withheld: null means "no custodian".
+      // Custody visibility is its own workspace override. null means the
+      // booking has no custodian; "private" means it has one this caller may
+      // not see. Keep them distinct.
       custodianName:
-        canSeeAllCustody ||
-        b.custodianUser?.id === user.id ||
-        b.custodianTeamMember?.userId === user.id
+        !b.custodianUser && !b.custodianTeamMember
+          ? null
+          : canSeeAllCustody ||
+            b.custodianUser?.id === user.id ||
+            b.custodianTeamMember?.userId === user.id
           ? b.custodianUser
             ? resolveUserDisplayName(b.custodianUser) || null
             : b.custodianTeamMember?.name || null

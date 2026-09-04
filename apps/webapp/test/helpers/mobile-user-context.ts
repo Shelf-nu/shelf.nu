@@ -1,9 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
-import {
-  isSelfServiceOrBaseRole,
-  resolveMostPrivilegedRole,
-} from "~/utils/booking-authorization.server";
-
 /**
  * Builds a `getMobileUserContext` return value for route tests.
  *
@@ -19,6 +13,13 @@ import {
  *
  *     mobileUserContext({ roles: ["BASE"], canSeeAllBookings: true })
  */
+
+import { OrganizationRoles } from "@prisma/client";
+import {
+  isSelfServiceOrBaseRole,
+  resolveMostPrivilegedRole,
+} from "~/utils/booking-authorization.server";
+
 export function mobileUserContext(
   overrides: {
     roles?: OrganizationRoles[];

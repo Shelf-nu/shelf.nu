@@ -216,14 +216,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
         from: b.from,
         to: b.to,
         createdAt: b.createdAt,
-        // "private" rather than null when the name is withheld: null already
-        // means "this booking has no custodian", and web draws the same word
-        // in place of the badge (`TeamMemberBadge`).
-        custodianName: canSeeCustodianOf(b)
-          ? b.custodianTeamMember?.name ||
-            resolveUserDisplayName(b.custodianUser) ||
-            null
-          : "private",
+        // Three distinct answers, and the app renders each differently:
+        // a name, null for "this booking has no custodian", and "private" for
+        // "it has one you may not see" - the word web draws in place of the
+        // badge (`TeamMemberBadge`). Collapsing the last two would report an
+        // unassigned booking as a withheld one.
+        custodianName:
+          !b.custodianTeamMember && !b.custodianUser
+            ? null
+            : canSeeCustodianOf(b)
+            ? b.custodianTeamMember?.name ||
+              resolveUserDisplayName(b.custodianUser) ||
+              null
+            : "private",
         custodianImage: canSeeCustodianOf(b)
           ? b.custodianUser?.profilePicture || null
           : null,
