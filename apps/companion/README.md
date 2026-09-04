@@ -22,7 +22,7 @@ A native iOS/Android companion app for [Shelf.nu](https://shelf.nu) built with *
 | **Dashboard**            | Stats overview, pull-to-refresh, quick actions                                  |
 | **Dark Mode**            | Full theme support with system preference detection                             |
 | **Offline Support**      | Network detection, cached API responses, offline audit persistence              |
-| **E2E Tests**            | 40+ Maestro test flows covering all features                                    |
+| **E2E Tests**            | 65+ Maestro test flows covering all features, runnable on iOS and Android       |
 
 ### How Authentication Works
 
@@ -261,8 +261,23 @@ All scripts can be run from the **monorepo root**:
 | `pnpm companion:build:android`    | Build native Android + run on emulator/device           |
 | `pnpm companion:prebuild`         | Regenerate native projects from Expo config             |
 | `pnpm companion:prebuild:clean`   | Clean regenerate iOS native project (wipes ios/)        |
-| `pnpm companion:test:e2e`         | Run all Maestro E2E flows                               |
+| `pnpm companion:test:e2e`         | Run all Maestro E2E flows (iOS by default)              |
 | `pnpm companion:test:e2e:suite`   | Run a specific E2E test suite                           |
+
+The runners take `PLATFORM=ios` (default) or `PLATFORM=android`, and boot the
+device for you:
+
+```bash
+PLATFORM=android pnpm companion:test:e2e
+PLATFORM=android pnpm companion:test:e2e:suite bookings
+```
+
+**Run both platforms before cutting a release.** The flows are identical, but
+the native modules under them are not: date pickers, action sheets, permission
+dialogs and the camera all take different props and fail differently on Android.
+A green iOS run tells you nothing about any of them — 1.4.0 shipped an
+Android-only crash in the booking date picker for exactly this reason.
+Override the device with `IOS_SIMULATOR` or `ANDROID_AVD`.
 
 **Typical workflow:**
 
