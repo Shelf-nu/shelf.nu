@@ -1,88 +1,58 @@
 /**
- * QrLabelSheet — the "print & cut at home" journey.
+ * QrLabelSheet — the "print on a regular printer" journey.
  *
- * Renders a print-ready, paginated sheet of vector QR labels and prints it via
- * `react-to-print` (browser print → print or Save-as-PDF) — the same mechanism
- * every other Shelf PDF uses (`booking-overview-pdf.tsx`), so no new dependency.
- * The grid is sized in real `mm`, so the printed labels are physically the chosen
- * size; the QR is inline vector, so it stays sharp on any home printer.
+ * Lays out vector QR labels on paper pages at exact millimetre positions and
+ * prints them via `react-to-print` (browser print → print or Save-as-PDF), the
+ * same mechanism every other Shelf PDF uses (`booking-overview-pdf.tsx`).
  *
- * Deliberately tiny config surface (opinionation over knobs): paper × size +
- * cut guides. No margins/paddings/stock templates — vector scales, the tail uses
- * the SVG export journey instead.
+ * Two kinds of page share one layout engine ({@link layoutSheetPages}):
+ *  - **Plain paper**: a grid of fixed-size labels with a gap for scissors; the
+ *    dashed cut guide IS the label edge.
+ *  - **Label sheet**: a pre-cut sticker template (Avery and compatibles) whose
+ *    margins and pitch put every label on its own sticker.
  *
- * @see {@link file://./qr-label-card.tsx}
+ * Every label is a {@link buildFittedLabelSvg} sized to its slot, so the same
+ * artwork prints on paper, on a sticker sheet and on a label printer.
+ *
+ * @see {@link file://./../../modules/qr/label.ts}
  * @see {@link file://./bulk-download-qr-dialog.tsx}
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useReactToPrint } from "react-to-print";
-import { QrLabelCard } from "~/components/assets/qr-label-card";
+import { QrLabelPrintTips } from "~/components/assets/qr-label-print-tips";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/forms/select";
+import { Switch } from "~/components/forms/switch";
 import { Button } from "~/components/shared/button";
-import { qrScanUrl } from "~/modules/qr/label";
-import { tw } from "~/utils/tw";
+import { SegmentedControl } from "~/components/shared/segmented-control";
+import {
+  DEFAULT_SHEET_TEMPLATE_ID,
+  fittedLabelSvgDataUrl,
+  layoutSheetPages,
+  PAPER_SIZES,
+  PLAIN_LABEL_SIZES,
+  plainSheetSpec,
+  qrScanUrl,
+  SHEET_TEMPLATES,
+  type PaperKey,
+  type PlainLabelSizeKey,
+  type SheetSpec,
+} from "~/modules/qr/label";
 
 type SheetAsset = { id: string; title: string; qrId: string; idText: string };
 
-type PaperKey = "letter" | "a4";
-type SizeKey = "small" | "medium" | "large";
+/** Plain paper you cut yourself, or a pre-cut sticker sheet. */
+type SheetMode = "plain" | "template";
 
-/** Paper presets — width/height in mm + the `@page size` keyword. */
-const PAPER: Record<
-  PaperKey,
-  { wMm: number; hMm: number; page: string; label: string }
-> = {
-  letter: { wMm: 216, hMm: 279, page: "letter", label: "Letter" },
-  a4: { wMm: 210, hMm: 297, page: "A4", label: "A4" },
-};
-
-/** Size presets — grid columns + QR size (mm) + type sizes (pt). */
-const SIZE: Record<
-  SizeKey,
-  {
-    cols: number;
-    qrMm: number;
-    gapMm: number;
-    nmPt: number;
-    idPt: number;
-    label: string;
-  }
-> = {
-  small: { cols: 6, qrMm: 14, gapMm: 3, nmPt: 6, idPt: 5, label: "Small" },
-  medium: { cols: 4, qrMm: 22, gapMm: 4, nmPt: 8, idPt: 6.5, label: "Medium" },
-  large: { cols: 3, qrMm: 32, gapMm: 5, nmPt: 10, idPt: 8, label: "Large" },
-};
-
-function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T;
-  options: Array<{ value: T; label: string }>;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-md border border-gray-300">
-      {options.map((o, i) => (
-        <button
-          key={o.value}
-          type="button"
-          aria-pressed={value === o.value}
-          onClick={() => onChange(o.value)}
-          className={tw(
-            "px-3 py-1.5 text-sm",
-            i > 0 && "border-l border-gray-300",
-            value === o.value
-              ? "bg-primary-500 text-white"
-              : "bg-white text-gray-700"
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
+/** Inset kept inside a pre-cut sticker so ink stays off the die-cut edge. */
+const TEMPLATE_INSET_MM = 1;
 
 /**
  * @param props.assets - resolved label assets
@@ -99,8 +69,12 @@ export function QrLabelSheet({
   showBranding: boolean;
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
+  const [mode, setMode] = useState<SheetMode>("plain");
   const [paper, setPaper] = useState<PaperKey>("letter");
-  const [size, setSize] = useState<SizeKey>("medium");
+  const [size, setSize] = useState<PlainLabelSizeKey>("medium");
+  const [templateId, setTemplateId] = useState<string>(
+    DEFAULT_SHEET_TEMPLATE_ID.letter
+  );
   const [guides, setGuides] = useState(true);
 
   const print = useReactToPrint({
@@ -108,142 +82,239 @@ export function QrLabelSheet({
     documentTitle: "qr-labels",
   });
 
-  const p = PAPER[paper];
-  const s = SIZE[size];
-  // Rough labels-per-page so the user can judge size against their need.
-  const perPage =
-    s.cols * Math.max(1, Math.floor((p.hMm - 24) / (s.qrMm + 12)));
+  const spec: SheetSpec = useMemo(
+    () =>
+      mode === "plain"
+        ? plainSheetSpec(paper, size)
+        : SHEET_TEMPLATES[templateId] ??
+          SHEET_TEMPLATES[DEFAULT_SHEET_TEMPLATE_ID.letter],
+    [mode, paper, size, templateId]
+  );
+  const paperSize = PAPER_SIZES[spec.paper];
+  const inset = mode === "template" ? TEMPLATE_INSET_MM : 0;
+  const labelWidthMm = spec.labelWidthMm - inset * 2;
+  const labelHeightMm = spec.labelHeightMm - inset * 2;
+  const pages = useMemo(
+    () => layoutSheetPages(spec, assets.length),
+    [spec, assets.length]
+  );
 
-  // Fit-to-width: scale the print-accurate sheet down on narrow screens so the
-  // whole page is visible (no horizontal scrolling). Print targets sheetRef
-  // directly — the zoom is on a wrapper — so the printed output stays real-mm.
+  // One data URL per label, sized to the slot; re-rendered only when the slot
+  // size changes, not on every page-layout change.
+  const labels = useMemo(
+    () =>
+      assets.map((a) =>
+        fittedLabelSvgDataUrl({
+          url: qrScanUrl(qrBaseUrl, a.qrId),
+          title: a.title,
+          idText: a.idText,
+          showBranding,
+          stock: { widthMm: labelWidthMm, heightMm: labelHeightMm },
+        })
+      ),
+    [assets, qrBaseUrl, showBranding, labelWidthMm, labelHeightMm]
+  );
+
+  // Fit-to-width: scale the print-accurate pages down on narrow screens so a
+  // whole page is visible. Print targets sheetRef directly — the zoom is on a
+  // wrapper — so the printed output stays real-mm.
   const previewRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   useEffect(() => {
     const el = previewRef.current;
     if (!el) return;
-    const sheetPx = (p.wMm * 96) / 25.4; // CSS px width of the sheet
+    const sheetPx = (paperSize.wMm * 96) / 25.4; // CSS px width of a page
     const fit = () => setScale(Math.min(1, (el.clientWidth - 32) / sheetPx));
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [p.wMm]);
+  }, [paperSize.wMm]);
+
+  const perPage = spec.cols * spec.rows;
+  const templatesByPaper = (p: PaperKey) =>
+    Object.values(SHEET_TEMPLATES).filter((t) => t.paper === p);
 
   return (
     <div className="flex h-full flex-col">
-      {/* Controls — paper × size + guides. That is the entire surface. */}
-      <div className="flex flex-wrap items-end gap-6 border-b border-gray-200 px-1 pb-4">
-        <div>
-          <div className="mb-1.5 text-xs font-semibold text-gray-700">
-            Paper
-          </div>
-          <Segmented
-            value={paper}
-            onChange={setPaper}
+      {/* One control row: what you print on, then the print button. */}
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3 border-b border-gray-200 px-1 pb-4">
+        <Field label="Paper">
+          <SegmentedControl
+            ariaLabel="Paper"
+            value={mode}
+            onChange={setMode}
             options={[
-              { value: "letter", label: "Letter" },
-              { value: "a4", label: "A4" },
+              { value: "plain", label: "Plain paper" },
+              { value: "template", label: "Label sheet" },
             ]}
           />
+        </Field>
+        {mode === "plain" ? (
+          <>
+            <Field label="Paper size">
+              <SegmentedControl
+                ariaLabel="Paper size"
+                value={paper}
+                onChange={setPaper}
+                options={(["letter", "a4"] as PaperKey[]).map((k) => ({
+                  value: k,
+                  label: PAPER_SIZES[k].label,
+                }))}
+              />
+            </Field>
+            <Field label="Label size">
+              <SegmentedControl
+                ariaLabel="Label size"
+                value={size}
+                onChange={setSize}
+                options={(
+                  ["small", "medium", "large"] as PlainLabelSizeKey[]
+                ).map((k) => ({
+                  value: k,
+                  label: `${PLAIN_LABEL_SIZES[k].label} (${PLAIN_LABEL_SIZES[k].widthMm} × ${PLAIN_LABEL_SIZES[k].heightMm} mm)`,
+                }))}
+              />
+            </Field>
+            <div className="flex items-center gap-2 pb-1.5 text-sm text-gray-700">
+              <Switch
+                id="qr-sheet-cut-guides"
+                checked={guides}
+                onCheckedChange={setGuides}
+                aria-label="Cut guides"
+              />
+              <label htmlFor="qr-sheet-cut-guides">Cut guides</label>
+            </div>
+          </>
+        ) : (
+          <Field label="Template">
+            <Select value={templateId} onValueChange={setTemplateId}>
+              <SelectTrigger
+                className="h-9 w-[360px] max-w-full whitespace-nowrap"
+                aria-label="Label sheet template"
+              >
+                <SelectValue>
+                  <span className="truncate">{spec.label}</span>
+                  <span className="ml-2 hidden text-gray-500 sm:inline">
+                    {spec.detail}
+                  </span>
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {(["a4", "letter"] as PaperKey[]).map((p) => (
+                  <SelectGroup key={p}>
+                    <SelectLabel>{PAPER_SIZES[p].label}</SelectLabel>
+                    {templatesByPaper(p).map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        <span className="block">{t.label}</span>
+                        <span className="block text-xs text-gray-500">
+                          {t.detail}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
+        <div className="ml-auto">
+          <Button type="button" onClick={() => print()}>
+            Print / Save as PDF
+          </Button>
         </div>
-        <div>
-          <div className="mb-1.5 text-xs font-semibold text-gray-700">
-            QR size
-          </div>
-          <Segmented
-            value={size}
-            onChange={setSize}
-            options={(["small", "medium", "large"] as SizeKey[]).map((k) => ({
-              value: k,
-              label: `${SIZE[k].label} (${SIZE[k].qrMm} mm)`,
-            }))}
-          />
-        </div>
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={guides}
-            onChange={(e) => setGuides(e.target.checked)}
-          />
-          Cut guides
-        </label>
-        <div className="grow" />
-        <Button type="button" onClick={() => print()}>
-          Print / Save as PDF
-        </Button>
       </div>
 
-      <div className="px-1 pt-2 text-xs text-gray-500">
-        <p>
-          {s.label} · {s.qrMm} mm QR · ~{perPage} per {p.label} page · prints on
-          plain paper — cut to size (not for pre-cut label sheets).
-        </p>
-        <p className="mt-1">
-          <strong className="text-gray-700">Before you print:</strong> in the
-          print box, set <strong className="text-gray-700">Scale 100%</strong>{" "}
-          and <strong className="text-gray-700">Margins: None</strong> so labels
-          come out the exact size.
-        </p>
-        {scale < 0.999 ? (
-          <p className="mt-1 text-primary-600">
-            The preview is shrunk to fit your screen — your labels still print
-            at the size shown above.
-          </p>
-        ) : null}
-      </div>
+      {/* One line of context, then the tips folded away. */}
+      <p className="px-1 pt-2 text-xs text-gray-500">
+        {assets.length} {assets.length === 1 ? "label" : "labels"} · {perPage}{" "}
+        per {paperSize.label} page · {pages.length}{" "}
+        {pages.length === 1 ? "page" : "pages"} ·{" "}
+        {mode === "plain"
+          ? `${spec.labelWidthMm} × ${spec.labelHeightMm} mm, cut along the guides`
+          : `${spec.labelWidthMm} × ${spec.labelHeightMm} mm stickers`}
+        {scale < 0.999 ? " · preview shrunk to fit, prints at real size" : ""}
+      </p>
+      <QrLabelPrintTips
+        items={[
+          <>
+            In the print box set{" "}
+            <strong className="text-gray-700">Scale: 100%</strong> and{" "}
+            <strong className="text-gray-700">Margins: None</strong>, so labels
+            come out at the exact size.
+          </>,
+          mode === "plain"
+            ? "Cut along the dashed guides; each label is the size shown above."
+            : "Print one page first and check that the labels sit on the stickers before printing the rest.",
+          'Choose "Save as PDF" as the printer to get a file instead of a print.',
+        ]}
+      />
 
-      {/* Scrollable preview; on narrow screens the whole sheet scales to fit. */}
-      <div ref={previewRef} className="grow overflow-auto bg-gray-100 p-4">
+      {/* Scrollable preview; on narrow screens the pages scale to fit. */}
+      <div
+        ref={previewRef}
+        className="mt-3 grow overflow-auto rounded-md bg-gray-100 p-4"
+      >
         <div style={{ zoom: scale }}>
-          <div
-            ref={sheetRef}
-            className="mx-auto bg-white"
-            style={{
-              width: `${p.wMm}mm`,
-              minHeight: `${p.hMm}mm`,
-              padding: "12mm 10mm",
-              display: "grid",
-              gridTemplateColumns: `repeat(${s.cols}, 1fr)`,
-              gap: `${s.gapMm}mm`,
-              alignContent: "start",
-            }}
-          >
+          <div ref={sheetRef}>
             <style>
-              {`@media print { @page { size: ${p.page}; margin: 0; } }`}
+              {`@media print { @page { size: ${paperSize.page}; margin: 0; } }`}
             </style>
-            {assets.map((a) => (
+            {pages.map((slots, pageIndex) => (
               <div
-                key={a.id}
+                key={pageIndex}
+                data-testid="sheet-page"
+                className="relative mx-auto mb-[8mm] bg-white shadow-sm print:mb-0 print:shadow-none"
                 style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  textAlign: "center",
-                  padding: "3mm",
-                  border: guides
-                    ? "0.25mm dashed #C9CDD4"
-                    : "0.25mm solid transparent",
-                  borderRadius: "1mm",
-                  breakInside: "avoid",
+                  width: `${paperSize.wMm}mm`,
+                  height: `${paperSize.hMm}mm`,
+                  breakAfter: "page",
                 }}
               >
-                {/* The ONE label template (same as the download/zip), sized in
-                    mm for print but capped to the column on screen. */}
-                <QrLabelCard
-                  url={qrScanUrl(qrBaseUrl, a.qrId)}
-                  title={a.title}
-                  idText={a.idText}
-                  showBranding={showBranding}
-                  width={`${s.qrMm}mm`}
-                  style={{ maxWidth: "100%" }}
-                />
+                {slots.map((slot) => (
+                  <div
+                    key={slot.index}
+                    data-testid="sheet-slot"
+                    style={{
+                      position: "absolute",
+                      left: `${slot.xMm}mm`,
+                      top: `${slot.yMm}mm`,
+                      width: `${spec.labelWidthMm}mm`,
+                      height: `${spec.labelHeightMm}mm`,
+                      padding: `${inset}mm`,
+                      boxSizing: "border-box",
+                      border:
+                        mode === "plain" && guides
+                          ? "0.25mm dashed #C9CDD4"
+                          : "none",
+                    }}
+                  >
+                    <img
+                      src={labels[slot.index]}
+                      alt={`QR label for ${assets[slot.index].title}`}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "block",
+                      }}
+                    />
+                  </div>
+                ))}
               </div>
             ))}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A labelled control in the control row. */
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <div className="mb-1.5 text-xs font-semibold text-gray-700">{label}</div>
+      {children}
     </div>
   );
 }

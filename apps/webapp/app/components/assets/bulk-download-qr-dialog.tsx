@@ -1,22 +1,23 @@
 /**
- * Bulk QR Export dialog — the two-journey hub.
+ * Bulk QR export dialog — the hub of the two print journeys.
  *
  * Opened from Actions ▸ "Export QR labels" on the asset index. Fetches the
- * selected assets' resolved label data, then offers two opinionated journeys:
- *  - **Print labels** — `<QrLabelSheet>` (react-to-print) plain-paper sheet. Most users.
- *  - **Export for my label printer** — a zip of vector `.svg` labels + a
- *    `manifest.csv`, built from {@link buildLabelZipEntries}. Label-printer users.
+ * selected assets' resolved label data, then offers:
+ *  - **Print on a regular printer** — `<QrLabelSheet>`: plain paper you cut,
+ *    or a pre-cut sticker sheet template.
+ *  - **Print on a label printer** — `<QrLabelStockSheet>`: one label per
+ *    print on die-cut stock, or the SVG files for label software.
  *
- * Replaces the old raster path entirely: no `html-to-image`, no `changedpi`, no
- * `.jpg`, no 100-item cap. Labels are vector and the codes are resolver-driven.
+ * Paid feature: gated by the asset-export entitlement (same as CSV export);
+ * free workspaces see the upgrade prompt instead of fetching.
  *
  * @see {@link file://./qr-label-sheet.tsx}
- * @see {@link file://./../../modules/qr/label.ts}
+ * @see {@link file://./qr-label-stock-sheet.tsx}
  * @see {@link file://./../../routes/api+/assets.get-assets-for-bulk-qr-download.ts}
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useAtomValue } from "jotai";
-import { DownloadIcon, Printer, Tags, Sparkles } from "lucide-react";
+import { DownloadIcon, Printer, Sparkles, Tags } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { QrLabelSheet } from "~/components/assets/qr-label-sheet";
@@ -26,7 +27,6 @@ import { useSearchParams } from "~/hooks/search-params";
 import useApiQuery from "~/hooks/use-api-query";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import type { BulkQrDownloadLoaderData } from "~/routes/api+/assets.get-assets-for-bulk-qr-download";
-import { isSelectingAllItems } from "~/utils/list";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
@@ -38,7 +38,7 @@ type BulkDownloadQrDialogProps = {
 };
 
 /** Which screen of the dialog is showing. */
-type DialogView = "choose" | "pdf" | "stock";
+type DialogView = "choose" | "sheet" | "stock";
 
 /**
  * @param props.isDialogOpen - controls visibility
@@ -56,7 +56,6 @@ export default function BulkDownloadQrDialog({
   const { canExportAssets } = useLoaderData<AssetIndexLoaderData>();
 
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
-  const allAssetsSelected = isSelectingAllItems(selectedAssets);
 
   // Build the query: current filters + each selected asset id (ALL_SELECTED_KEY
   // included when selecting all, so the loader re-applies the index filters).
@@ -79,28 +78,31 @@ export default function BulkDownloadQrDialog({
     onClose();
   }
 
-  // The print journeys (cut sheet + label printer) need the roomy dialog.
-  const isFullScreen = view === "pdf" || view === "stock";
+  // The print journeys need the roomy dialog.
+  const isFullScreen = view === "sheet" || view === "stock";
 
   // The loader can return an error payload (e.g. a select-all over the export
   // limit). useApiQuery surfaces it as `data` without an `assets` array, so
   // guard before reading `data.assets` instead of crashing.
   const hasAssets = Array.isArray((data as { assets?: unknown })?.assets);
 
-  // Only read `data.assets.length` once we know `data` is a success payload —
-  // an error payload is truthy but has no `assets`, so `data?.assets` alone
-  // would throw on `.length` before the `hasAssets` guard below can apply.
-  const count = allAssetsSelected
-    ? hasAssets
-      ? data!.assets.length
-      : 0
-    : selectedAssets.length;
-
   const apiErrorMessage =
     data && !hasAssets
       ? (data as { error?: { message?: string } }).error?.message ??
         "Something went wrong preparing the labels."
       : null;
+
+  const title = !canExportAssets
+    ? "Printing QR labels is a premium feature"
+    : view === "sheet"
+    ? "Print on a regular printer"
+    : view === "stock"
+    ? "Print on a label printer"
+    : hasAssets
+    ? `Make QR labels for ${data!.assets.length} ${
+        data!.assets.length === 1 ? "asset" : "assets"
+      }`
+    : "Make QR labels";
 
   return (
     <DialogPortal>
@@ -113,8 +115,11 @@ export default function BulkDownloadQrDialog({
             : className
         }
         title={
-          <div className="flex items-center justify-center rounded-full border-8 border-primary-50 bg-primary-100 p-2 text-primary-600">
-            <DownloadIcon />
+          <div className="w-full">
+            <div className="mb-2 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
+              {canExportAssets ? <DownloadIcon /> : <Sparkles />}
+            </div>
+            <h4>{title}</h4>
           </div>
         }
       >
@@ -124,16 +129,11 @@ export default function BulkDownloadQrDialog({
           }
         >
           {!canExportAssets ? (
-            <div className="flex flex-col items-center gap-3 py-4 text-center">
-              <div className="flex items-center justify-center rounded-full border-8 border-primary-50 bg-primary-100 p-2 text-primary-600">
-                <Sparkles />
-              </div>
-              <h4>Printing QR labels is a premium feature</h4>
+            <div className="flex flex-col gap-3">
               <p className="text-gray-600">
                 Upgrade to make sharp, scannable QR labels for your whole
-                inventory at once — print a ready-to-cut sheet on a regular
-                printer, or download files for a label printer.{" "}
-                <UpgradeMessage />
+                inventory at once: print a sheet on a regular printer, or send
+                one label at a time to a label printer. <UpgradeMessage />
               </p>
               <div className="mt-4 flex w-full justify-center gap-3">
                 <Button
@@ -152,7 +152,9 @@ export default function BulkDownloadQrDialog({
           ) : isLoading || !data ? (
             <div className="mb-6 flex flex-col items-center gap-4 py-6">
               <Spinner />
-              <h3>Preparing {count > 0 ? count : ""} QR codes…</h3>
+              <p className="font-medium text-gray-700">
+                Preparing your labels…
+              </p>
             </div>
           ) : apiErrorMessage ? (
             <div className="py-6 text-center">
@@ -161,7 +163,7 @@ export default function BulkDownloadQrDialog({
                 Close
               </Button>
             </div>
-          ) : view === "pdf" || view === "stock" ? (
+          ) : isFullScreen ? (
             <>
               <button
                 type="button"
@@ -171,7 +173,7 @@ export default function BulkDownloadQrDialog({
                 ← Back
               </button>
               <div className="min-h-0 grow">
-                {view === "pdf" ? (
+                {view === "sheet" ? (
                   <QrLabelSheet
                     assets={data.assets}
                     qrBaseUrl={data.qrBaseUrl}
@@ -188,60 +190,37 @@ export default function BulkDownloadQrDialog({
             </>
           ) : (
             <>
-              <h4 className="mb-1">
-                Make QR labels for {data.assets.length}{" "}
-                {data.assets.length === 1 ? "asset" : "assets"}
-              </h4>
               <p className="mb-4 text-gray-600">
                 Pick the option that matches your printer. Each code is already
-                linked to its asset — nothing to set up.
+                linked to its asset, so there is nothing to set up.
               </p>
 
               {data.skippedAssetCount > 0 ? (
                 <p className="mb-4 rounded-md border border-warning-300 bg-warning-50 p-3 text-sm text-warning-800">
-                  {data.skippedAssetCount}{" "}
-                  {data.skippedAssetCount === 1 ? "asset was" : "assets were"}{" "}
-                  skipped — no QR code yet, so there's nothing to print for{" "}
-                  {data.skippedAssetCount === 1 ? "it" : "them"}.
+                  {data.skippedAssetCount} of the selected assets{" "}
+                  {data.skippedAssetCount === 1 ? "has" : "have"} no QR code
+                  yet, so {data.skippedAssetCount === 1 ? "it is" : "they are"}{" "}
+                  not included.
                 </p>
               ) : null}
 
               <div className="flex flex-col gap-3">
-                <button
-                  type="button"
-                  onClick={() => setView("pdf")}
-                  className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 text-left hover:border-gray-300"
-                >
-                  <Printer className="mt-0.5 size-5 shrink-0 text-primary-600" />
-                  <span>
-                    <span className="block font-medium">
-                      Print on a regular printer
-                    </span>
-                    <span className="block text-sm text-gray-500">
-                      Inkjet or laser. Prints a sheet of labels you cut out by
-                      hand — no special label printer needed. Easiest way to
-                      start.
-                    </span>
-                  </span>
-                </button>
-
-                <button
-                  type="button"
+                <JourneyCard
+                  icon={
+                    <Printer className="mt-0.5 size-5 shrink-0 text-primary-600" />
+                  }
+                  title="Print on a regular printer"
+                  body="Inkjet or laser. Plain paper you cut by hand, or Avery-style label sheets."
+                  onClick={() => setView("sheet")}
+                />
+                <JourneyCard
+                  icon={
+                    <Tags className="mt-0.5 size-5 shrink-0 text-primary-600" />
+                  }
+                  title="Print on a label printer"
+                  body="WASP, Brother, Dymo and similar. One ready-to-stick label per print, or download the files for your label software."
                   onClick={() => setView("stock")}
-                  className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 text-left hover:border-gray-300"
-                >
-                  <Tags className="mt-0.5 size-5 shrink-0 text-primary-600" />
-                  <span>
-                    <span className="block font-medium">
-                      Print on a label printer
-                    </span>
-                    <span className="block text-sm text-gray-500">
-                      For WASP, Brother, Dymo and similar. Pick your label size
-                      and print one ready-to-stick label per page — or download
-                      the files for your label software.
-                    </span>
-                  </span>
-                </button>
+                />
               </div>
 
               <div className="mt-6 flex justify-end">
@@ -254,5 +233,32 @@ export default function BulkDownloadQrDialog({
         </div>
       </Dialog>
     </DialogPortal>
+  );
+}
+
+/** One journey option on the choose screen. */
+function JourneyCard({
+  icon,
+  title,
+  body,
+  onClick,
+}: {
+  icon: ReactNode;
+  title: string;
+  body: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 text-left hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
+    >
+      {icon}
+      <span>
+        <span className="block font-medium">{title}</span>
+        <span className="block text-sm text-gray-500">{body}</span>
+      </span>
+    </button>
   );
 }
