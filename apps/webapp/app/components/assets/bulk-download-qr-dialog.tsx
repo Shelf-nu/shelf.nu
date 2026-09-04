@@ -14,17 +14,16 @@
  * @see {@link file://./../../modules/qr/label.ts}
  * @see {@link file://./../../routes/api+/assets.get-assets-for-bulk-qr-download.ts}
  */
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
-import JSZip from "jszip";
-import { DownloadIcon, FileText, Printer, Sparkles } from "lucide-react";
+import { DownloadIcon, Printer, Tags, Sparkles } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { QrLabelSheet } from "~/components/assets/qr-label-sheet";
+import { QrLabelStockSheet } from "~/components/assets/qr-label-stock-sheet";
 import { UpgradeMessage } from "~/components/marketing/upgrade-message";
 import { useSearchParams } from "~/hooks/search-params";
 import useApiQuery from "~/hooks/use-api-query";
-import { buildLabelZipEntries } from "~/modules/qr/label";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import type { BulkQrDownloadLoaderData } from "~/routes/api+/assets.get-assets-for-bulk-qr-download";
 import { isSelectingAllItems } from "~/utils/list";
@@ -38,11 +37,8 @@ type BulkDownloadQrDialogProps = {
   onClose: () => void;
 };
 
-type ZipState =
-  | { status: "idle" }
-  | { status: "building" }
-  | { status: "done" }
-  | { status: "error"; error: string };
+/** Which screen of the dialog is showing. */
+type DialogView = "choose" | "pdf" | "stock";
 
 /**
  * @param props.isDialogOpen - controls visibility
@@ -53,8 +49,7 @@ export default function BulkDownloadQrDialog({
   isDialogOpen,
   onClose,
 }: BulkDownloadQrDialogProps) {
-  const [view, setView] = useState<"choose" | "pdf">("choose");
-  const [zip, setZip] = useState<ZipState>({ status: "idle" });
+  const [view, setView] = useState<DialogView>("choose");
   const [searchParams] = useSearchParams();
 
   // Paid feature: gated behind the asset-export entitlement (same as CSV export).
@@ -79,46 +74,13 @@ export default function BulkDownloadQrDialog({
     enabled: isDialogOpen && canExportAssets && !!apiSearchParams,
   });
 
-  // Bumped on every close so an in-flight zip build that resolves AFTER the
-  // dialog was dismissed can't trigger a stray download or flip state to "done".
-  const buildTokenRef = useRef(0);
-
   function handleClose() {
-    buildTokenRef.current += 1;
     setView("choose");
-    setZip({ status: "idle" });
     onClose();
   }
 
-  async function downloadSvgZip() {
-    if (!data) return;
-    const token = buildTokenRef.current;
-    setZip({ status: "building" });
-    try {
-      const archive = new JSZip();
-      buildLabelZipEntries({
-        assets: data.assets,
-        qrBaseUrl: data.qrBaseUrl,
-        showBranding: data.showBranding,
-      }).forEach((entry) => archive.file(entry.path, entry.content));
-
-      const blob = await archive.generateAsync({ type: "blob" });
-      // Closed mid-build: abandon silently rather than download after dismissal.
-      if (token !== buildTokenRef.current) return;
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `qr-codes-${Date.now()}.zip`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(link.href), 4e4);
-      setZip({ status: "done" });
-    } catch (cause) {
-      if (token !== buildTokenRef.current) return;
-      setZip({
-        status: "error",
-        error: cause instanceof Error ? cause.message : "Something went wrong.",
-      });
-    }
-  }
+  // The print journeys (cut sheet + label printer) need the roomy dialog.
+  const isFullScreen = view === "pdf" || view === "stock";
 
   // The loader can return an error payload (e.g. a select-all over the export
   // limit). useApiQuery surfaces it as `data` without an `assets` array, so
@@ -146,7 +108,7 @@ export default function BulkDownloadQrDialog({
         open={isDialogOpen}
         onClose={handleClose}
         className={
-          view === "pdf"
+          isFullScreen
             ? "h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:py-0"
             : className
         }
@@ -158,7 +120,7 @@ export default function BulkDownloadQrDialog({
       >
         <div
           className={
-            view === "pdf" ? "flex h-full flex-col px-4 pb-4" : "px-6 py-4"
+            isFullScreen ? "flex h-full flex-col px-4 pb-4" : "px-6 py-4"
           }
         >
           {!canExportAssets ? (
@@ -199,7 +161,7 @@ export default function BulkDownloadQrDialog({
                 Close
               </Button>
             </div>
-          ) : view === "pdf" ? (
+          ) : view === "pdf" || view === "stock" ? (
             <>
               <button
                 type="button"
@@ -209,11 +171,19 @@ export default function BulkDownloadQrDialog({
                 ← Back
               </button>
               <div className="min-h-0 grow">
-                <QrLabelSheet
-                  assets={data.assets}
-                  qrBaseUrl={data.qrBaseUrl}
-                  showBranding={data.showBranding}
-                />
+                {view === "pdf" ? (
+                  <QrLabelSheet
+                    assets={data.assets}
+                    qrBaseUrl={data.qrBaseUrl}
+                    showBranding={data.showBranding}
+                  />
+                ) : (
+                  <QrLabelStockSheet
+                    assets={data.assets}
+                    qrBaseUrl={data.qrBaseUrl}
+                    showBranding={data.showBranding}
+                  />
+                )}
               </div>
             </>
           ) : (
@@ -226,6 +196,15 @@ export default function BulkDownloadQrDialog({
                 Pick the option that matches your printer. Each code is already
                 linked to its asset — nothing to set up.
               </p>
+
+              {data.skippedAssetCount > 0 ? (
+                <p className="mb-4 rounded-md border border-warning-300 bg-warning-50 p-3 text-sm text-warning-800">
+                  {data.skippedAssetCount}{" "}
+                  {data.skippedAssetCount === 1 ? "asset was" : "assets were"}{" "}
+                  skipped — no QR code yet, so there's nothing to print for{" "}
+                  {data.skippedAssetCount === 1 ? "it" : "them"}.
+                </p>
+              ) : null}
 
               <div className="flex flex-col gap-3">
                 <button
@@ -248,34 +227,22 @@ export default function BulkDownloadQrDialog({
 
                 <button
                   type="button"
-                  onClick={downloadSvgZip}
-                  disabled={zip.status === "building"}
-                  className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 text-left hover:border-gray-300 disabled:opacity-60"
+                  onClick={() => setView("stock")}
+                  className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 text-left hover:border-gray-300"
                 >
-                  <FileText className="mt-0.5 size-5 shrink-0 text-primary-600" />
+                  <Tags className="mt-0.5 size-5 shrink-0 text-primary-600" />
                   <span>
                     <span className="block font-medium">
-                      Use a label printer or sticker sheets
-                      {zip.status === "building" ? " — preparing…" : ""}
+                      Print on a label printer
                     </span>
                     <span className="block text-sm text-gray-500">
-                      For Brother, Dymo, Avery and similar. Downloads the codes
-                      plus a step-by-step how-to (README) inside the zip. A bit
-                      more setup.
+                      For WASP, Brother, Dymo and similar. Pick your label size
+                      and print one ready-to-stick label per page — or download
+                      the files for your label software.
                     </span>
                   </span>
                 </button>
               </div>
-
-              {zip.status === "done" ? (
-                <p className="mt-4 text-success-500">
-                  Downloaded. Open <strong>README.txt</strong> in the zip for
-                  the next steps.
-                </p>
-              ) : null}
-              {zip.status === "error" ? (
-                <p className="mt-4 text-error-500">{zip.error}</p>
-              ) : null}
 
               <div className="mt-6 flex justify-end">
                 <Button type="button" variant="secondary" onClick={handleClose}>

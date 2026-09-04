@@ -66,6 +66,12 @@ export type BulkQrDownloadLoaderData = {
   qrBaseUrl: string;
   /** Effective branding flag AFTER the tier gate (never a raw org toggle). */
   showBranding: boolean;
+  /**
+   * How many selected assets were excluded because they have no QR code (data
+   * drift). Surfaced so the UI can tell the user "N skipped" instead of silently
+   * dropping them — a silent drop is discovered too late, in the field.
+   */
+  skippedAssetCount: number;
 };
 
 /**
@@ -197,6 +203,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         assets,
         qrBaseUrl: getQrBaseUrl(),
         showBranding,
+        // rows that resolved to null above were missing a QR code.
+        skippedAssetCount: rows.length - assets.length,
       })
     );
   } catch (cause) {

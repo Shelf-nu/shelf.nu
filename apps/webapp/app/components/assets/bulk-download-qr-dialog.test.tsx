@@ -70,6 +70,7 @@ const fetchControl = {
 /** Builds a valid loader payload whose assets match the requested ids. */
 function payloadFor(assetIds: string[]): BulkQrDownloadLoaderData {
   return {
+    skippedAssetCount: 0,
     assets: assetIds.map((id) => ({
       id,
       title: `Asset ${id}`,

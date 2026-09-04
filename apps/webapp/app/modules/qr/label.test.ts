@@ -10,12 +10,17 @@
 import jsQR from "jsqr";
 import { describe, expect, it } from "vitest";
 import {
+  assessLabelScannability,
+  buildFittedLabelSvg,
+  buildFittedLabelZipEntries,
   buildLabelSvg,
   buildLabelZipEntries,
   buildManifestCsv,
+  LABEL_STOCKS,
   MANIFEST_HEADERS,
   qrModuleCount,
   qrScanUrl,
+  wrapLabelText,
   type LabelAsset,
 } from "./label";
 
@@ -176,6 +181,182 @@ describe("buildManifestCsv (A12–A14)", () => {
   });
 });
 
+describe("buildFittedLabelSvg — stock-aware, fills the label (Jenny's 2×1)", () => {
+  const stock2x1 = LABEL_STOCKS["2x1"];
+  const square = LABEL_STOCKS["square-25"];
+
+  it("the viewBox + width/height match the physical stock (no letterbox/stretch)", () => {
+    const svg = buildFittedLabelSvg({
+      url: "https://eam.sh/x",
+      title: "SimMan 3G",
+      idText: "AS10528",
+      showBranding: true,
+      stock: stock2x1,
+    });
+    // viewBox aspect == stock aspect, and the SVG carries real mm dimensions so
+    // it prints at the exact label size instead of being scaled to fit.
+    expect(svg).toContain(
+      `viewBox="0 0 ${stock2x1.widthMm} ${stock2x1.heightMm}"`
+    );
+    expect(svg).toContain(`width="${stock2x1.widthMm}mm"`);
+    expect(svg).toContain(`height="${stock2x1.heightMm}mm"`);
+  });
+
+  it("decodes back to the exact URL on a wide 2×1 (landscape layout)", async () => {
+    const url = "https://eam.sh/kQ7m2aX";
+    const svg = buildFittedLabelSvg({
+      url,
+      title: "SimMan 3G Manikin",
+      idText: "AS10528",
+      showBranding: true,
+      stock: stock2x1,
+    });
+    await expect(decodeQrFromSvg(svg)).resolves.toBe(url);
+  });
+
+  it("decodes back to the exact URL on a square stock (stacked layout)", async () => {
+    const url = "https://eam.sh/p3Rn9bY";
+    const svg = buildFittedLabelSvg({
+      url,
+      title: "Nursing Anne",
+      idText: "AS10529",
+      showBranding: false,
+      stock: square,
+    });
+    await expect(decodeQrFromSvg(svg)).resolves.toBe(url);
+  });
+
+  it("honors the branding tier-gate on the fitted label too (revenue surface)", () => {
+    const base = {
+      url: "u",
+      title: "t",
+      idText: "i",
+      stock: stock2x1,
+    } as const;
+    expect(buildFittedLabelSvg({ ...base, showBranding: false })).not.toContain(
+      "shelf.nu"
+    );
+    expect(buildFittedLabelSvg({ ...base, showBranding: true })).toContain(
+      "Powered by shelf.nu"
+    );
+  });
+
+  it("renders every blessed stock at its own aspect without throwing", () => {
+    for (const stock of Object.values(LABEL_STOCKS)) {
+      const svg = buildFittedLabelSvg({
+        url: "https://eam.sh/x",
+        title: "Two-Way Radio (Midland), OR Control",
+        idText: "10642B",
+        showBranding: true,
+        stock,
+      });
+      expect(svg).toContain(`viewBox="0 0 ${stock.widthMm} ${stock.heightMm}"`);
+    }
+  });
+});
+
+describe("buildFittedLabelSvg — id-only mode (escape hatch)", () => {
+  it("omits the name but keeps the id when showName is false", () => {
+    const args = {
+      url: "https://eam.sh/x",
+      idText: "AS10528",
+      showBranding: false,
+      stock: LABEL_STOCKS["2x1"],
+    };
+    // Short name so it isn't truncated by the narrow 2×1 text column.
+    const withName = buildFittedLabelSvg({ ...args, title: "Widget" });
+    const idOnly = buildFittedLabelSvg({
+      ...args,
+      title: "Widget",
+      showName: false,
+    });
+    expect(withName).toContain("Widget");
+    expect(idOnly).not.toContain("Widget");
+    expect(idOnly).toContain("AS10528"); // id is preserved
+  });
+
+  it("id-only grows the QR on a square label (more room without the name)", () => {
+    // Count QR <rect> module size: with no name, the square QR side is larger.
+    const args = {
+      url: "https://eam.sh/x",
+      title: "Nursing Anne Geriatric",
+      idText: "AS10529",
+      showBranding: false,
+      stock: LABEL_STOCKS["square-25"],
+    };
+    const widthOf = (svg: string) =>
+      Number(/<rect x="[^"]*" y="[^"]*" width="([\d.]+)"/.exec(svg)?.[1] ?? 0);
+    expect(
+      widthOf(buildFittedLabelSvg({ ...args, showName: false }))
+    ).toBeGreaterThan(
+      widthOf(buildFittedLabelSvg({ ...args, showName: true }))
+    );
+  });
+});
+
+describe("assessLabelScannability — honest, device-aware grading", () => {
+  const url = "https://eam.sh/kQ7m2aX";
+
+  it("a 2×1 label scans comfortably (phone-friendly)", () => {
+    expect(assessLabelScannability(url, LABEL_STOCKS["2x1"]).level).toBe(
+      "good"
+    );
+  });
+
+  it("a 15 mm square is flagged risky (QR too small for phones)", () => {
+    expect(assessLabelScannability(url, LABEL_STOCKS["square-15"]).level).toBe(
+      "risky"
+    );
+  });
+
+  it("reports a real physical module size in mm", () => {
+    const a = assessLabelScannability(url, LABEL_STOCKS["2x1"]);
+    expect(a.moduleMm).toBeGreaterThan(0);
+    expect(a.moduleCount).toBeGreaterThan(0);
+    // Smaller stock ⇒ smaller modules.
+    expect(
+      assessLabelScannability(url, LABEL_STOCKS["square-15"]).moduleMm
+    ).toBeLessThan(a.moduleMm);
+  });
+});
+
+describe("wrapLabelText", () => {
+  it("keeps a short string on a single line", () => {
+    expect(wrapLabelText("SimMan 3G", 40, 4, 2)).toEqual(["SimMan 3G"]);
+  });
+
+  it("never returns more than maxLines", () => {
+    const lines = wrapLabelText(
+      "Two-Way Radio Midland Immersive Control Unit Spare",
+      18,
+      4,
+      2
+    );
+    expect(lines.length).toBeLessThanOrEqual(2);
+  });
+
+  it("ellipsizes when content overflows the last allowed line", () => {
+    const lines = wrapLabelText(
+      "Crestron AV Over IP DM 4K Net Encoder Decoder With Inputs",
+      14,
+      4,
+      2
+    );
+    expect(lines.length).toBe(2);
+    expect(lines.join(" ")).toContain("…");
+  });
+
+  it("hard-truncates a single word wider than the column", () => {
+    const [line] = wrapLabelText(
+      "Supercalifragilisticexpialidocious",
+      12,
+      4,
+      1
+    );
+    expect(line.endsWith("…")).toBe(true);
+  });
+});
+
 describe("buildLabelZipEntries (A22)", () => {
   it("one .svg per asset under qr-codes/, plus a root manifest.csv — never .jpg", () => {
     const entries = buildLabelZipEntries({
@@ -190,5 +371,18 @@ describe("buildLabelZipEntries (A22)", () => {
     expect(svgs).toHaveLength(2);
     expect(svgs.every((p) => p.startsWith("qr-codes/"))).toBe(true);
     expect(paths.some((p) => p.endsWith(".jpg"))).toBe(false);
+  });
+
+  it("fitted zip entries carry the chosen stock's mm dimensions", () => {
+    const stock = LABEL_STOCKS["2x1"];
+    const entries = buildFittedLabelZipEntries({
+      assets: [asset({ id: "a1" })],
+      qrBaseUrl: "https://eam.sh",
+      showBranding: true,
+      stock,
+    });
+    const svg = entries.find((e) => e.path.endsWith(".svg"));
+    expect(svg?.content).toContain(`width="${stock.widthMm}mm"`);
+    expect(entries.some((e) => e.path === "manifest.csv")).toBe(true);
   });
 });
