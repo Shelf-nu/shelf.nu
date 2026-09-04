@@ -53,6 +53,7 @@ import type {
   IdleAssetRow,
   MonthlyBookingTrendRow,
   OverdueItemRow,
+  ReportFilter,
   ReportKpi,
   ReportPayload,
   ResolvedTimeframe,
@@ -279,7 +280,33 @@ export async function bookingComplianceReport(
       },
       filters: {
         timeframe,
-        filters: [], // TODO: Populate from args
+        filters: [
+          ...(statusFilter?.map(
+            (status): ReportFilter => ({
+              type: "status" as const,
+              value: status,
+              label: formatStatusLabel(status),
+            })
+          ) ?? []),
+          ...(custodianId
+            ? [
+                {
+                  type: "team_member" as const,
+                  value: custodianId,
+                  label: custodianId,
+                },
+              ]
+            : []),
+          ...(locationId
+            ? [
+                {
+                  type: "location" as const,
+                  value: locationId,
+                  label: locationId,
+                },
+              ]
+            : []),
+        ],
       },
       kpis,
       rows: rowsResult.rows,
