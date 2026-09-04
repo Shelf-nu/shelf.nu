@@ -165,6 +165,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import {
+  buildAddToActiveBookingBlockerWhere,
   hasAssetBookingConflicts,
   isBookingArchivable,
   isBookingEarlyCheckin,
@@ -14694,6 +14695,11 @@ export async function processBooking(
     // CHECKED_OUT status can be owned by this same booking (progressive
     // checkout), and re-submitting them is handled downstream by the
     // duplicate / "add only the rest" flow — not by this guard.
+    //
+    // Scoped to INDIVIDUAL assets by `buildAddToActiveBookingBlockerWhere`: a
+    // QUANTITY_TRACKED pool reads CHECKED_OUT while one unit is out and the
+    // rest is free to stage, so per-unit capacity is
+    // `assertAssetQuantitiesAvailable`'s job inside `updateBookingAssets`.
     if (
       bookingInfo.status === BookingStatus.ONGOING ||
       bookingInfo.status === BookingStatus.OVERDUE
@@ -14708,11 +14714,10 @@ export async function processBooking(
       const checkedOutAssets =
         newAssetIdsToCheck.length > 0
           ? await db.asset.findMany({
-              where: {
-                id: { in: newAssetIdsToCheck },
+              where: buildAddToActiveBookingBlockerWhere({
+                assetIds: newAssetIdsToCheck,
                 organizationId,
-                status: AssetStatus.CHECKED_OUT,
-              },
+              }),
               select: { id: true, title: true },
             })
           : [];
