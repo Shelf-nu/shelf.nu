@@ -24,6 +24,13 @@ export declare const ASSET_BOOKING_PSEUDO_STATUS_LABELS: {
   readonly PARTIALLY_CHECKED_OUT: "Partially checked out";
 };
 
+export declare const KIT_STATUS_LABELS: {
+  readonly AVAILABLE: "Available";
+  readonly IN_CUSTODY: "In custody";
+  readonly CHECKED_OUT: "Checked out";
+  readonly PARTIALLY_CHECKED_IN: "Already checked in";
+};
+
 export declare const BOOKING_STATUS_LABELS: {
   readonly DRAFT: "Draft";
   readonly RESERVED: "Reserved";

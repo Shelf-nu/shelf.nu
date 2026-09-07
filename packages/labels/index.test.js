@@ -20,11 +20,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  ASSET_BOOKING_PSEUDO_STATUS_LABELS,
   AUDIT_ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_TONES,
   AUDIT_DELETED_ASSET_LABELS,
   AUDIT_STATUS_LABELS,
   AUDIT_STATUS_TONES,
+  KIT_STATUS_LABELS,
   auditAssetStatusLabel,
   auditDeletedAssetLabel,
   isAuditCompleted,
@@ -61,6 +63,25 @@ test("AUDIT_ASSET_STATUS_LABELS covers the AuditAssetStatus enum", () => {
     "MISSING",
     "UNEXPECTED",
   ]);
+});
+
+test("KIT_STATUS_LABELS covers the KitStatus enum", () => {
+  // enum KitStatus { AVAILABLE, IN_CUSTODY, CHECKED_OUT }
+  // PARTIALLY_CHECKED_IN is not persisted: a booking derives it when every
+  // member it holds has been checked back in.
+  assertSameKeys(KIT_STATUS_LABELS, [
+    "AVAILABLE",
+    "IN_CUSTODY",
+    "CHECKED_OUT",
+    "PARTIALLY_CHECKED_IN",
+  ]);
+});
+
+test("a kit and an asset say the same thing about being back", () => {
+  assert.equal(
+    KIT_STATUS_LABELS.PARTIALLY_CHECKED_IN,
+    ASSET_BOOKING_PSEUDO_STATUS_LABELS.ALREADY_CHECKED_IN
+  );
 });
 
 // ---------------------------------------------------------------------------

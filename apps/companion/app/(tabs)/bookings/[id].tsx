@@ -3,7 +3,7 @@ import {
   BOOKING_RESERVE_BLOCKED_LABELS,
   BOOKING_STATUS_LABELS,
 } from "@shelf/labels";
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -50,8 +50,18 @@ import {
 } from "@/components/checkin-disposition-sheet";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
-
-const bookingAssetKeyExtractor = (item: BookingAsset) => item.id;
+import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
+import {
+  bookingRowKey,
+  buildBookingRows,
+  describeBookingRows,
+  describeRemoval,
+  isBookingAssetSelectable,
+  resolveBookingKitBadge,
+  resolveKitSelectionState,
+  splitRemovalSelection,
+  type BookingRow,
+} from "@/lib/booking-kit-rows";
 
 /**
  * Booking-scoped lifecycle state for a QUANTITY_TRACKED asset row. The asset's
@@ -120,6 +130,11 @@ export default function BookingDetailScreen() {
 
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [checkedInAssetIds, setCheckedInAssetIds] = useState<string[]>([]);
+  // Which assets this booking sent out. Empty on a booking checked out in one
+  // action, which writes no per-slice markers — and on an older server, which
+  // sends the field not at all. Both mean the same thing to a kit badge: the
+  // whole booking went out.
+  const [checkedOutAssetIds, setCheckedOutAssetIds] = useState<string[]>([]);
   const [canCheckout, setCanCheckout] = useState(false);
   const [canCheckin, setCanCheckin] = useState(false);
   // False when the workspace requires explicit (scan/select) check-in for this
@@ -165,6 +180,9 @@ export default function BookingDetailScreen() {
     "checkin" | "checkout" | "remove" | null
   >(null);
   const isSelectMode = selectMode !== null;
+  // Kits open collapsed, as on the website: a booking of several kits should
+  // read as a short list of cases, not as every asset inside them.
+  const [expandedKitIds, setExpandedKitIds] = useState<Set<string>>(new Set());
 
   // Sequential quantity picker for checking out QUANTITY_TRACKED assets: the
   // user selects the rows, then we walk each QT asset asking "how many units?"
@@ -199,6 +217,7 @@ export default function BookingDetailScreen() {
     setError(null);
     setBooking(data.booking);
     setCheckedInAssetIds(data.checkedInAssetIds);
+    setCheckedOutAssetIds(data.checkedOutAssetIds ?? []);
     setCanCheckout(data.canCheckout);
     setCanCheckin(data.canCheckin);
     setCanQuickCheckin(data.canQuickCheckin);
@@ -513,12 +532,19 @@ export default function BookingDetailScreen() {
 
   const handleRemoveAssets = () => {
     if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
-    const count = selectedAssetIds.size;
+    // A kit whose whole membership is on this booking and fully selected is
+    // removed as a kit, which is what writes the kit-level note. Everything
+    // else goes by asset id.
+    const { assetIds, kitIds } = splitRemovalSelection({
+      rows,
+      selectedAssetIds,
+    });
     Alert.alert(
       "Remove Selected",
-      `Remove ${count} selected ${
-        count === 1 ? "asset" : "assets"
-      } from this booking?`,
+      `Remove ${describeRemoval({
+        assetCount: assetIds.length,
+        kitCount: kitIds.length,
+      })} from "${booking.name}"?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -529,7 +555,8 @@ export default function BookingDetailScreen() {
             const { error: err } = await api.removeAssets(
               currentOrg.id,
               booking.id,
-              Array.from(selectedAssetIds)
+              assetIds,
+              kitIds
             );
             setIsActioning(false);
             if (err) {
@@ -752,8 +779,78 @@ export default function BookingDetailScreen() {
     });
   }, []);
 
+  /**
+   * The list's rows: one header per kit, its members beneath when open, and
+   * every ungrouped asset where the server put it.
+   */
+  const rows = useMemo(
+    () =>
+      buildBookingRows({
+        assets: booking?.assets ?? [],
+        kits: booking?.kits,
+        expandedKitIds,
+      }),
+    [booking?.assets, booking?.kits, expandedKitIds]
+  );
+
+  const toggleKitExpansion = useCallback((kitId: string) => {
+    setExpandedKitIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(kitId)) next.delete(kitId);
+      else next.add(kitId);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Picks or drops a kit's members in one tap. Only the ones the current mode
+   * can act on move, so a header in check-in mode leaves an already-returned
+   * member alone rather than selecting something the submit would drop.
+   */
+  const toggleKitSelection = useCallback(
+    (members: BookingAsset[]) => {
+      const selectable = members.filter((member) =>
+        isBookingAssetSelectable(member, selectMode, checkedInAssetIds)
+      );
+      if (selectable.length === 0) return;
+      setSelectedAssetIds((prev) => {
+        const next = new Set(prev);
+        const allPicked = selectable.every((member) => next.has(member.id));
+        for (const member of selectable) {
+          if (allPicked) next.delete(member.id);
+          else next.add(member.id);
+        }
+        return next;
+      });
+    },
+    [selectMode, checkedInAssetIds]
+  );
+
+  /**
+   * Enters or leaves a selection mode.
+   *
+   * Entering opens every kit: the members are what a mode acts on, and a
+   * collapsed kit would hide rows from a selection the user is building.
+   * Leaving keeps the groups as the user left them.
+   */
+  const setSelectModeAndReveal = useCallback(
+    (mode: "checkin" | "checkout" | "remove") => {
+      setSelectMode((prev) => (prev === mode ? null : mode));
+      setSelectedAssetIds(new Set());
+      setExpandedKitIds((prev) => {
+        if (selectMode === mode) return prev;
+        const next = new Set(prev);
+        for (const row of rows) {
+          if (row.type === "kit") next.add(row.kitId);
+        }
+        return next;
+      });
+    },
+    [rows, selectMode]
+  );
+
   const renderAsset = useCallback(
-    ({ item }: { item: BookingAsset }) => {
+    (item: BookingAsset, inKit: boolean) => {
       const fallbackBadge = {
         bg: colors.backgroundTertiary,
         text: colors.muted,
@@ -775,37 +872,21 @@ export default function BookingDetailScreen() {
         : statusBadge[item.status] ?? fallbackBadge;
       const stateLabel = qtState ? qtState.label : formatStatus(item.status);
       const isCheckedIn = checkedInAssetIds.includes(item.id);
-      const isCheckedOut = item.status === "CHECKED_OUT";
       const isSelected = selectedAssetIds.has(item.id);
-      // QUANTITY_TRACKED selectability is quantity-based, not status-based: a
-      // partially-checked-out QT asset stays AVAILABLE while units remain, so
-      // the global-status test wrongly excluded it. Check-in = booked units
-      // still to reconcile (remainingToCheckIn, the SAME "remaining" the web
-      // check-in drawer caps at); check-out = units still to take
-      // (remainingToCheckOut).
-      const isQt = item.type === "QUANTITY_TRACKED";
-      const qtRemainingIn = isQt ? item.remainingToCheckIn ?? 0 : 0;
-      const qtRemainingOut = isQt ? item.remainingToCheckOut ?? 0 : 0;
-      // What's selectable depends on the mode. A returned INDIVIDUAL asset is
-      // back to AVAILABLE, so `!isCheckedOut` alone would re-offer it for
-      // check-out — exclude the already-returned ones with `!isCheckedIn`.
-      const selectable =
-        selectMode === "checkin"
-          ? isQt
-            ? qtRemainingIn > 0
-            : isCheckedOut && !isCheckedIn
-          : selectMode === "checkout"
-          ? isQt
-            ? qtRemainingOut > 0
-            : !isCheckedOut && !isCheckedIn
-          : selectMode === "remove"
-          ? true
-          : false;
+      // One definition of selectability, shared with the kit header — a header
+      // that selected a different set from the rows under it would hand the
+      // submit rows the user never saw offered.
+      const selectable = isBookingAssetSelectable(
+        item,
+        selectMode,
+        checkedInAssetIds
+      );
 
       return (
         <TouchableOpacity
           style={[
             styles.assetCard,
+            inKit && styles.assetCardInKit,
             isSelected && styles.assetCardSelected,
             isCheckedIn && styles.assetCardCheckedIn,
           ]}
@@ -888,7 +969,9 @@ export default function BookingDetailScreen() {
                     label="booked"
                   />
                 )}
-                {item.kit && (
+                {/* Under a kit header the name is already on screen; naming
+                    it again on every member is noise. */}
+                {item.kit && !inKit && (
                   <Text style={styles.assetKit} numberOfLines={1}>
                     Kit: {item.kit.name}
                   </Text>
@@ -927,6 +1010,60 @@ export default function BookingDetailScreen() {
     ]
   );
 
+  const renderKit = useCallback(
+    (row: Extract<BookingRow, { type: "kit" }>) => (
+      <BookingKitHeader
+        kit={row.kit}
+        name={row.name}
+        memberCount={row.members.length}
+        badge={resolveBookingKitBadge({
+          kit: row.kit,
+          members: row.members,
+          bookingStatus: booking?.status ?? "",
+          checkedInAssetIds,
+          checkedOutAssetIds,
+        })}
+        expanded={expandedKitIds.has(row.kitId)}
+        selectionState={
+          selectMode === null
+            ? null
+            : resolveKitSelectionState({
+                members: row.members,
+                selectMode,
+                selectedAssetIds,
+                checkedInAssetIds,
+              })
+        }
+        onToggleExpand={() => toggleKitExpansion(row.kitId)}
+        onToggleSelection={() => toggleKitSelection(row.members)}
+      />
+    ),
+    [
+      booking?.status,
+      checkedInAssetIds,
+      checkedOutAssetIds,
+      expandedKitIds,
+      selectMode,
+      selectedAssetIds,
+      toggleKitExpansion,
+      toggleKitSelection,
+    ]
+  );
+
+  const renderRow = useCallback(
+    ({ item: row }: { item: BookingRow }) => {
+      switch (row.type) {
+        case "kit":
+          return renderKit(row);
+        case "kit-end":
+          return <View style={styles.kitEndBand} />;
+        default:
+          return renderAsset(row.item, row.inKit);
+      }
+    },
+    [renderKit, renderAsset, styles]
+  );
+
   if (isLoading) {
     return <BookingDetailSkeleton />;
   }
@@ -952,6 +1089,9 @@ export default function BookingDetailScreen() {
     bg: colors.backgroundTertiary,
     text: colors.muted,
   };
+
+  /** How many kit groups the list holds; 0 means nothing is grouped. */
+  const kitRowCount = rows.filter((row) => row.type === "kit").length;
 
   /**
    * Why Reserve is unavailable, or null when it is fine. Mirrors all THREE of
@@ -1070,9 +1210,9 @@ export default function BookingDetailScreen() {
       )}
 
       <FlatList
-        data={booking.assets}
-        renderItem={renderAsset}
-        keyExtractor={bookingAssetKeyExtractor}
+        data={rows}
+        renderItem={renderRow}
+        keyExtractor={bookingRowKey}
         contentContainerStyle={styles.list}
         removeClippedSubviews
         maxToRenderPerBatch={10}
@@ -1445,8 +1585,7 @@ export default function BookingDetailScreen() {
                     selectMode === "remove" && styles.actionButtonOutlineActive,
                   ]}
                   onPress={() => {
-                    setSelectMode(selectMode === "remove" ? null : "remove");
-                    setSelectedAssetIds(new Set());
+                    setSelectModeAndReveal("remove");
                   }}
                   accessibilityLabel={
                     selectMode === "remove"
@@ -1505,8 +1644,7 @@ export default function BookingDetailScreen() {
                   selectMode === "checkout" && styles.actionButtonOutlineActive,
                 ]}
                 onPress={() => {
-                  setSelectMode(selectMode === "checkout" ? null : "checkout");
-                  setSelectedAssetIds(new Set());
+                  setSelectModeAndReveal("checkout");
                 }}
                 accessibilityLabel={
                   selectMode === "checkout"
@@ -1638,8 +1776,7 @@ export default function BookingDetailScreen() {
                       styles.actionButtonOutlineActive,
                   ]}
                   onPress={() => {
-                    setSelectMode(selectMode === "checkin" ? null : "checkin");
-                    setSelectedAssetIds(new Set());
+                    setSelectModeAndReveal("checkin");
                   }}
                   accessibilityLabel={
                     selectMode === "checkin"
@@ -1772,10 +1909,26 @@ export default function BookingDetailScreen() {
               </View>
             )}
 
-            {/* Assets section header */}
-            <Text style={styles.sectionTitle}>
-              Assets ({booking.assetCount})
-            </Text>
+            {/* Assets section header. A booking holding kits counts them
+                separately, the way the website's does — the assets figure is
+                the ungrouped rows, so expanding a kit never changes it. */}
+            {kitRowCount > 0 ? (
+              <View>
+                <Text style={styles.sectionTitle}>Assets &amp; Kits</Text>
+                <Text style={styles.sectionSubtitle}>
+                  {describeBookingRows({
+                    standaloneAssetCount: booking.assets.filter(
+                      (a) => a.kitId == null
+                    ).length,
+                    kitCount: kitRowCount,
+                  })}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.sectionTitle}>
+                Assets ({booking.assetCount})
+              </Text>
+            )}
           </View>
         }
       />
@@ -2238,6 +2391,11 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.foreground,
     marginTop: spacing.xs,
   },
+  sectionSubtitle: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    marginTop: 2,
+  },
 
   // Reserved-models (book-by-model) section
   modelsSection: {
@@ -2317,6 +2475,22 @@ const useStyles = createStyles((colors, shadows) => ({
     borderWidth: 1,
     borderColor: colors.border,
     gap: spacing.sm,
+  },
+  // A member of a kit: the thick left edge is the gutter that ties the card to
+  // the header above it, and the softer fill sets the group apart from the
+  // ungrouped assets around it.
+  assetCardInKit: {
+    borderLeftWidth: 8,
+    borderLeftColor: colors.backgroundTertiary,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  // Closes an expanded kit, so the last member and the next ungrouped asset
+  // are not simply two cards in a row.
+  kitEndBand: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.backgroundTertiary,
+    marginBottom: spacing.sm,
   },
   assetCardSelected: {
     borderColor: colors.primary,

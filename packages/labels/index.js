@@ -46,6 +46,18 @@ export const ASSET_BOOKING_PSEUDO_STATUS_LABELS = Object.freeze({
   PARTIALLY_CHECKED_OUT: "Partially checked out",
 });
 
+// Kit status enum (KitStatus in the Prisma schema) plus the booking-context
+// pseudo-status a kit row shows while every one of its members on an active
+// booking has been checked back in. Only three of these four are persisted;
+// PARTIALLY_CHECKED_IN is derived per booking and reuses the asset wording so
+// a kit and its members never read differently on the same screen.
+export const KIT_STATUS_LABELS = Object.freeze({
+  AVAILABLE: "Available",
+  IN_CUSTODY: "In custody",
+  CHECKED_OUT: "Checked out",
+  PARTIALLY_CHECKED_IN: ASSET_BOOKING_PSEUDO_STATUS_LABELS.ALREADY_CHECKED_IN,
+});
+
 // Booking status enum (BookingStatus in the Prisma schema).
 export const BOOKING_STATUS_LABELS = Object.freeze({
   DRAFT: "Draft",
