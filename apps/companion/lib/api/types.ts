@@ -20,6 +20,11 @@ export type Organization = {
    * every mobile audit endpoint returns 403.
    */
   auditsEnabled: boolean;
+  /**
+   * ISO currency code for the workspace. Absent on servers older than the
+   * field, so callers fall back rather than rendering an empty prefix.
+   */
+  currency?: string;
 };
 
 export type MeResponse = {
