@@ -25,6 +25,13 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
+// why: same as the helpers mock below — the audit report builder queries
+// Prisma, and importing it for real loads `~/database/db.server`, whose
+// module-level `$connect()` rejects (unhandled) with no database around.
+vi.mock("~/modules/reports/audit-completion.server", () => ({
+  auditCompletionReport: vi.fn(),
+}));
+
 // why: the report builders query Prisma; the loader only needs their shape
 vi.mock("~/modules/reports/helpers.server", () => ({
   resolveTimeframe: vi.fn(() => ({

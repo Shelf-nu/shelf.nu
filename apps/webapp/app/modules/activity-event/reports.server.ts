@@ -118,53 +118,6 @@ export async function bookingStatusTransitionCounts({
   }
 }
 
-/** Audit completion event with its counters (expected/found/missing/unexpected) in `meta`. */
-export type AuditCompletionRow = {
-  auditSessionId: string;
-  actorUserId: string | null;
-  occurredAt: Date;
-  meta: Prisma.JsonValue;
-};
-
-/**
- * All `AUDIT_COMPLETED` events within a timeframe. `meta` holds the counters
- * written by the audit service — consumer formats them for display.
- */
-export async function auditCompletionStats({
-  organizationId,
-  from,
-  to,
-}: ReportScope): Promise<AuditCompletionRow[]> {
-  try {
-    const rows = await db.activityEvent.findMany({
-      where: {
-        organizationId,
-        action: "AUDIT_COMPLETED",
-        occurredAt: { gte: from, lte: to },
-      },
-      select: {
-        auditSessionId: true,
-        actorUserId: true,
-        occurredAt: true,
-        meta: true,
-      },
-      orderBy: { occurredAt: "desc" },
-    });
-    return rows
-      .filter((r): r is typeof r & { auditSessionId: string } =>
-        Boolean(r.auditSessionId)
-      )
-      .map((r) => ({
-        auditSessionId: r.auditSessionId,
-        actorUserId: r.actorUserId,
-        occurredAt: r.occurredAt,
-        meta: r.meta as Prisma.JsonValue,
-      }));
-  } catch (cause) {
-    throw wrap(cause, "auditCompletionStats", { organizationId });
-  }
-}
-
 /** One custody window — assigned at `heldFrom`, released at `heldTo` (null if still held). */
 export type CustodyWindow = {
   assetId: string;

@@ -200,6 +200,22 @@ export const REPORTS: ReportDefinition[] = [
     hasChart: false,
     exportable: true,
   },
+
+  // -------------------------------------------------------------------------
+  // Audit Reports
+  // -------------------------------------------------------------------------
+  {
+    id: "audit-completion",
+    title: "Audit Completion",
+    description:
+      "Track audit sessions: completion rate, overdue audits, and assets found missing.",
+    category: "audits",
+    icon: "ClipboardCheck",
+    enabled: true,
+    filters: [],
+    hasChart: false,
+    exportable: true,
+  },
 ];
 
 /**
