@@ -114,6 +114,19 @@ export default function AddBookingAssetsScreen() {
   const requestIdRef = useRef(0);
   /** Highest page currently held, so `loadMore` knows what to ask for next. */
   const pageRef = useRef(1);
+  /**
+   * Whether a page is in flight, as a ref rather than the `isLoading` state.
+   *
+   * `loadMore` runs from `onEndReached`, which the list fires while it is still
+   * laying out — in the same tick as the reset effect that starts page 1. The
+   * state it would read there is the state from the render it closed over, so
+   * `isLoading` is still false and a second page goes out beside the first.
+   * That is fatal rather than merely wasteful: each request bumps
+   * `requestIdRef`, so the newer page-2 response makes the guard below discard
+   * page 1 — the tab then shows nothing at all until something forces a reload.
+   * A ref settles before the next line runs, which is what the guard needs.
+   */
+  const isFetchingRef = useRef(false);
 
   /**
    * Fetch one page for the active tab.
@@ -131,6 +144,7 @@ export default function AddBookingAssetsScreen() {
     async (targetPage: number, append: boolean) => {
       if (!currentOrg || !from || !to) return;
       const reqId = ++requestIdRef.current;
+      isFetchingRef.current = true;
       if (append) {
         setIsLoadingMore(true);
       } else {
@@ -205,6 +219,7 @@ export default function AddBookingAssetsScreen() {
         }
       }
       if (reqId === requestIdRef.current) {
+        isFetchingRef.current = false;
         setIsLoading(false);
         setIsLoadingMore(false);
       }
@@ -222,9 +237,9 @@ export default function AddBookingAssetsScreen() {
 
   /** Pull the next page in when the list nears its end. */
   const loadMore = useCallback(() => {
-    if (isLoading || isLoadingMore || !hasMore) return;
+    if (isFetchingRef.current || !hasMore) return;
     void fetchPage(pageRef.current + 1, true);
-  }, [isLoading, isLoadingMore, hasMore, fetchPage]);
+  }, [hasMore, fetchPage]);
 
   /**
    * Reload the active tab from page 1. Used after a mutation (reserving or
