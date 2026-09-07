@@ -1,3 +1,4 @@
+import type { Mock } from "vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
@@ -70,11 +71,28 @@ function resolveArgs(qrId = "abcdefghij") {
 
 const qrFindUnique = vi.mocked(db.qr.findUnique);
 const membershipFindUnique = vi.mocked(db.userOrganization.findUnique);
-const assetFindFirst = vi.mocked(db.asset.findFirst);
-const organizationFindUnique = vi.mocked(db.organization.findUnique);
 const requireOrgAccess = vi.mocked(requireOrganizationAccess);
 const barcodeByValue = vi.mocked(getBarcodeByValue);
 const barcodesCapability = vi.mocked(canUseBarcodes);
+
+/**
+ * The two handles the SAM tests drive, narrowed to the shape the resolver
+ * actually reads.
+ *
+ * Both queries use `select`, so Prisma hands the resolver a few columns and
+ * never a whole row — but the mocked client's signature still asks for one.
+ * Widening happens once, here, instead of at every fixture: building full
+ * Prisma rows would describe data the resolver never sees, and a per-fixture
+ * cast would switch off checking on the values under test. With the handle
+ * typed, a mistyped column (`barcodeEnabled`) fails the build rather than
+ * silently flipping a gate at runtime.
+ */
+const assetFindFirst = db.asset.findFirst as unknown as Mock<
+  () => Promise<{ id: string; title: string } | null>
+>;
+const organizationFindUnique = db.organization.findUnique as unknown as Mock<
+  () => Promise<{ barcodesEnabled: boolean } | null>
+>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -223,7 +241,7 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
     requireOrgAccess.mockResolvedValue(ORG_ID);
     // Default posture: the workspace holds the add-on, so each test only has
     // to state what it changes.
-    organizationFindUnique.mockResolvedValue({ barcodesEnabled: true } as any);
+    organizationFindUnique.mockResolvedValue({ barcodesEnabled: true });
     barcodesCapability.mockReturnValue(true);
   });
 
@@ -289,7 +307,7 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
     // why: the barcode table is add-on data — a workspace without the add-on
     // must not resolve through it, and must not be told the row exists.
     assetFindFirst.mockResolvedValue(null);
-    organizationFindUnique.mockResolvedValue({ barcodesEnabled: false } as any);
+    organizationFindUnique.mockResolvedValue({ barcodesEnabled: false });
     barcodesCapability.mockReturnValue(false);
 
     const result = await resolveMobileScannedCode(resolveArgs(SAM_SHAPED));
@@ -327,10 +345,7 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
   it("resolves a real SAM id without touching the barcode table", async () => {
     // why: the SAM id is the core identifier — a value that is both a SAM id
     // and a barcode resolves as the SAM, and costs no extra query.
-    assetFindFirst.mockResolvedValue({
-      id: "asset-9",
-      title: "Asset nine",
-    } as any);
+    assetFindFirst.mockResolvedValue({ id: "asset-9", title: "Asset nine" });
 
     const result = await resolveMobileScannedCode(resolveArgs(SAM_SHAPED));
 
