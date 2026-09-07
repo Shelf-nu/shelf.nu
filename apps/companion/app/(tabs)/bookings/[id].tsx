@@ -1044,6 +1044,20 @@ export default function BookingDetailScreen() {
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
   /**
+   * Whether the server would scope this user's booking writes to their own
+   * bookings.
+   *
+   * Roles are a set, and the server judges a request by the most privileged
+   * one it contains, so someone holding both SELF_SERVICE and ADMIN writes to
+   * any booking. `isRestrictedRole` asks the opposite question — whether ANY
+   * restricted role is present — which is the right test for the DRAFT-only
+   * editing rules above but would hide controls from a multi-role admin here.
+   */
+  const isRestrictedToOwnBookings =
+    isRestrictedRole &&
+    !currentOrg?.roles?.some((r) => r === "OWNER" || r === "ADMIN");
+
+  /**
    * Whether to offer the progressive check-out affordances (scan and select).
    *
    * Both submit to the same endpoint, so they share one gate. It mirrors what
@@ -1059,7 +1073,7 @@ export default function BookingDetailScreen() {
       entity: "booking",
       action: "checkout",
     }) &&
-    (!isRestrictedRole ||
+    (!isRestrictedToOwnBookings ||
       (!!user?.id &&
         (booking.creator.id === user.id ||
           booking.custodianUser?.id === user.id)));

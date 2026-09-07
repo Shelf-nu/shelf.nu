@@ -111,6 +111,37 @@ test("rejects a quantity-tracked asset with no units left to take", () => {
   assert.match(blocker!.message, /no units left/);
 });
 
+test("takes remaining units even when some were already returned here", () => {
+  // A partial check-in records the whole asset id, so the returned set says
+  // nothing about how many units are still reserved.
+  const ctx = ctxOf(
+    [
+      row({
+        id: "qt1",
+        status: "AVAILABLE",
+        type: "QUANTITY_TRACKED",
+        remainingToCheckOut: 2,
+      }),
+    ],
+    ["qt1"]
+  );
+  assert.equal(checkoutBlocker({ id: "qt1", title: "Cable" }, ctx), null);
+});
+
+test("takes remaining units of a quantity-tracked asset held in custody", () => {
+  // Custody on a pooled asset allocates some units to an operator; the server
+  // rejects custody only for individual assets.
+  const ctx = ctxOf([
+    row({
+      id: "qt1",
+      status: "IN_CUSTODY",
+      type: "QUANTITY_TRACKED",
+      remainingToCheckOut: 4,
+    }),
+  ]);
+  assert.equal(checkoutBlocker({ id: "qt1", title: "Cable" }, ctx), null);
+});
+
 test("falls back to status when a quantity-tracked row carries no count", () => {
   const ctx = ctxOf([
     row({ id: "qt1", status: "CHECKED_OUT", type: "QUANTITY_TRACKED" }),

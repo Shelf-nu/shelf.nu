@@ -61,6 +61,29 @@ export function checkoutBlocker(
     };
   }
 
+  // A quantity-tracked asset is judged by its remaining booked units and by
+  // nothing else. Every rule below reads a GLOBAL, asset-level fact, and none
+  // of them describe one booking's slice of a pooled asset: units can be out
+  // on another booking, partly returned here, or allocated to an operator by a
+  // Custody row, while this booking still has units left to take. The server
+  // agrees — it caps by remaining units and exempts quantity-tracked assets
+  // from its blanket custody rejection.
+  //
+  // An older server omits the count. Then the asset-level rules below are the
+  // best answer available, which is what the booking screen and the web helper
+  // also fall back to.
+  if (
+    row.type === "QUANTITY_TRACKED" &&
+    typeof row.remainingToCheckOut === "number"
+  ) {
+    return row.remainingToCheckOut <= 0
+      ? {
+          title: "Already Checked Out",
+          message: `"${scanned.title}" has no units left to check out on this booking.`,
+        }
+      : null;
+  }
+
   if (ctx.checkedInAssetIds.has(scanned.id)) {
     return {
       title: "Already Returned",
@@ -73,23 +96,6 @@ export function checkoutBlocker(
       title: "In Custody",
       message: `"${scanned.title}" is in custody — release custody first.`,
     };
-  }
-
-  // A quantity-tracked asset is judged by its remaining booked units, not by a
-  // global status that says nothing about this booking's slice. An older
-  // server omits the count; then the status rule below is the best available
-  // answer, which is what the booking screen and the web helper also fall back
-  // to.
-  if (
-    row.type === "QUANTITY_TRACKED" &&
-    typeof row.remainingToCheckOut === "number"
-  ) {
-    return row.remainingToCheckOut <= 0
-      ? {
-          title: "Already Checked Out",
-          message: `"${scanned.title}" has no units left to check out on this booking.`,
-        }
-      : null;
   }
 
   if (row.status === "CHECKED_OUT") {
