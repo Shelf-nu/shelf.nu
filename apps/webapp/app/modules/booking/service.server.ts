@@ -161,6 +161,7 @@ import {
   completedBookingEmailContent,
   deletedBookingEmailContent,
   extendBookingEmailContent,
+  revertedToDraftEmailContent,
   sendBookingUpdatedEmail,
   sendCheckinReminder,
 } from "./email-helpers";
@@ -10322,8 +10323,11 @@ export async function revertBookingToDraft({
   id,
   organizationId,
   userId,
+  hints,
 }: Pick<Booking, "id" | "organizationId"> & {
   userId?: User["id"];
+  /** Acting user's client hints — fallback prefs for the notification emails. */
+  hints: ClientHint;
 }) {
   try {
     const booking = await db.booking
@@ -10350,37 +10354,95 @@ export async function revertBookingToDraft({
       });
     }
 
-    const cancelledBooking = await db.booking.update({
+    const draftBooking = await db.booking.update({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2773; this is the write on that same proven id
       where: { id: booking.id },
       data: { status: BookingStatus.DRAFT },
+      // The custodian (and other notification recipients) are emailed below,
+      // so pull the same payload the other lifecycle emails use.
+      include: BOOKING_INCLUDE_FOR_EMAIL,
     });
 
     // Add activity log for booking revert to draft
     if (userId) {
       await createStatusTransitionNote({
-        bookingId: cancelledBooking.id,
+        bookingId: draftBooking.id,
         organizationId,
         fromStatus: booking.status,
         toStatus: BookingStatus.DRAFT,
         userId,
-        custodianUserId: cancelledBooking.custodianUserId || undefined,
+        custodianUserId: draftBooking.custodianUserId || undefined,
       });
     } else {
       // System-initiated revert (fallback)
       await createStatusTransitionNote({
-        bookingId: cancelledBooking.id,
+        bookingId: draftBooking.id,
         organizationId,
         fromStatus: booking.status,
         toStatus: BookingStatus.DRAFT,
-        custodianUserId: cancelledBooking.custodianUserId || undefined,
+        custodianUserId: draftBooking.custodianUserId || undefined,
       });
     }
 
     /** Cancels all scheduled events */
-    await cancelScheduler(cancelledBooking);
+    await cancelScheduler(draftBooking);
 
-    return cancelledBooking;
+    // Notify the custodian (and other configured recipients) that their
+    // reservation went back to draft — the same fan-out every other booking
+    // lifecycle transition (reserve, cancel, check-in, …) already does. The
+    // admin broadcast doesn't apply to this event type, and the acting user
+    // is excluded by the resolver.
+    //
+    // The status write above is already committed, so a notification failure
+    // must not fail the revert: it would report an error for a transition
+    // that happened, and a retry would trip the RESERVED-only guard. Log and
+    // return instead.
+    try {
+      const recipients = await getBookingNotificationRecipients({
+        booking: draftBooking,
+        eventType: "REVERT_TO_DRAFT",
+        organizationId,
+        editorUserId: userId,
+      });
+
+      if (recipients.length > 0) {
+        const custodian = draftBooking.custodianUser
+          ? resolveUserDisplayName(draftBooking.custodianUser)
+          : draftBooking.custodianTeamMember?.name ?? "";
+
+        await sendBookingEmailToAllRecipients({
+          recipients,
+          booking: draftBooking,
+          subject: `↩️ Booking reverted to draft (${draftBooking.name}) - shelf.nu`,
+          buildText: (prefs) =>
+            revertedToDraftEmailContent({
+              bookingName: draftBooking.name,
+              assetsCount: draftBooking._count.bookingAssets,
+              custodian,
+              from: draftBooking.from!,
+              to: draftBooking.to!,
+              bookingId: draftBooking.id,
+              prefs,
+              customEmailFooter: draftBooking.organization.customEmailFooter,
+            }),
+          buildHeading: () =>
+            `Your booking has been reverted to draft: "${draftBooking.name}"`,
+          hints,
+        });
+      }
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to send the reverted-to-draft notification emails. The booking itself was reverted successfully.",
+          additionalData: { bookingId: draftBooking.id, organizationId },
+          label,
+        })
+      );
+    }
+
+    return draftBooking;
   } catch (cause) {
     throw new ShelfError({
       cause,
