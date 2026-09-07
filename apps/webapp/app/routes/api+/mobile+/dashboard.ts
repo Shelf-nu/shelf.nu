@@ -42,34 +42,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { canUseAudits, canSeeAllBookings, canSeeAllCustody } =
       await getMobileUserContext(user.id, organizationId);
 
-    // Scope the booking sections to the caller's own bookings for
-    // self-service / base users, who may only see bookings they are the
-    // custodian of. `requireOrganizationAccess` above proves membership but
-    // performs NO role check, so without this restriction any member could
-    // read every booking in the workspace — with custodian names attached —
-    // straight off the dashboard.
+    // Which bookings the Home sections may draw from.
+    // `requireOrganizationAccess` above proves membership and performs NO role
+    // check, so without a restriction here any member could read every booking
+    // in the workspace — with custodian names attached — straight off the
+    // dashboard.
     //
-    // Mirrors the mobile bookings list (`bookings.ts`), which draws the same
-    // line for the same roles. Passed as `custodianScope` — a restriction
-    // `getBookings` ANDs into the query, so it can only ever narrow. Left
-    // `null` for owners/admins, who see all bookings.
+    // `canSeeAllBookings` is that decision: ADMIN and OWNER see every booking,
+    // SELF_SERVICE and BASE see only the ones they hold unless the workspace
+    // has switched their override on. The role alone cannot answer it — it does
+    // not know what the workspace decided — so Home reads the same flag the
+    // website does and lands on the same set of bookings.
+    //
+    // `resolveCustodianScope` rather than a bare `{ userId }`: custody lives
+    // on a user link OR any of the caller's team-member links, and a bare
+    // user-link filter hides a user's own booking whenever their custody comes
+    // from a team member. The list and calendar resolve it the same way; this
+    // is the third lens on the same rows. It reaches `getBookings` as
+    // `custodianScope`, a restriction ANDed into the query, so it can only ever
+    // narrow — and `null` lifts it entirely.
     //
     // NOTE: this deliberately does not mirror the web dashboard, which denies
     // self-service/base the page outright (`PermissionEntity.dashboard` is
     // empty for both). The companion's Home tab is the app's landing screen
     // for every role, not an admin analytics surface — denying it would leave
     // those users on a permanent error state rather than a scoped dashboard.
-    //
-    // Resolved from `canSeeAllBookings`, so a workspace that lets restricted
-    // users see everyone's bookings gets the same Home tab it gets on the
-    // website. The role alone cannot answer this: it does not know what the
-    // workspace decided.
-    //
-    // `resolveCustodianScope` rather than a bare `{ userId }`: custody lives
-    // on a user link OR any of the caller's team-member links, and a bare
-    // user-link filter hides a user's own booking whenever their custody comes
-    // from a team member. The list and calendar resolve it the same way; this
-    // is the third lens on the same rows.
     const custodianScope = canSeeAllBookings
       ? null
       : await resolveCustodianScope({ userId: user.id, organizationId });

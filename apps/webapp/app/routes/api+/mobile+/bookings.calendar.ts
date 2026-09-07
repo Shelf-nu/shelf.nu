@@ -46,8 +46,9 @@ const MAX_BOOKINGS_PER_WINDOW = 500;
  * cannot use. The SCOPING is what matters and is mirrored exactly from the
  * mobile bookings list:
  *   - organisation scoped
- *   - SELF_SERVICE / BASE see only bookings they are custodian of
- *   - DRAFT bookings stay private to their creator
+ *   - SELF_SERVICE / BASE see only bookings they hold, unless the workspace
+ *     grants them the booking-visibility override
+ *   - DRAFT bookings stay private to their creator, override or not
  *
  * Overlap, not containment: a booking running 28 Jul to 3 Aug belongs on the
  * August calendar too. Filtering on `from` alone would hide it.

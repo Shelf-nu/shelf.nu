@@ -283,18 +283,28 @@ export async function requireMobilePermission({
 }
 
 /**
- * Fetches the user's role and org capability flags (barcodes, audits) for
- * a given organization. `canUseAudits`/`canUseBarcodes` reuse the canonical
- * subscription.server predicates so mobile matches webapp gating exactly.
+ * Fetches the caller's roles and the org capability and visibility flags that
+ * every mobile route gates on. `canUseAudits`/`canUseBarcodes` reuse the
+ * canonical subscription.server predicates so mobile matches webapp gating
+ * exactly.
  *
- * Also returns `canSeeAllCustody` — the mobile twin of the flag the web's
- * `requirePermission` returns (roles.server.ts:113-122): ADMIN/OWNER always
- * see all custody; SELF_SERVICE/BASE only when the matching org override
- * (`selfServiceCanSeeCustody` / `baseUserCanSeeCustody`) is enabled.
+ * Two visibility answers come off the same organization row, and they are
+ * independent — a workspace may grant either without the other:
+ *
+ * - `canSeeAllBookings` — whether the caller may READ a booking they do not
+ *   hold (`selfServiceCanSeeBookings` / `baseUserCanSeeBookings`).
+ * - `canSeeAllCustody` — whether the caller may see WHO holds something
+ *   (`selfServiceCanSeeCustody` / `baseUserCanSeeCustody`).
+ *
+ * ADMIN and OWNER get both. Both are the mobile twins of the flags web's
+ * `requirePermission` returns, resolved through the same shared helpers so the
+ * two platforms cannot disagree about what a workspace has granted. Neither
+ * widens a MUTATION: writes stay on the role's permission grant plus
+ * `validateBookingOwnership`.
  *
  * Used by mobile routes that call service layer functions requiring
- * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody) and
- * by routes that must gate custody visibility server-side.
+ * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody) and by
+ * every route that must gate booking or custody visibility server-side.
  */
 export async function getMobileUserContext(
   userId: string,
@@ -305,8 +315,8 @@ export async function getMobileUserContext(
    * Every role on this membership. `role` is `roles[0]`, which is wrong for
    * any authorization decision: a membership ordered `[SELF_SERVICE, ADMIN]`
    * resolves to SELF_SERVICE and an actual admin gets treated as restricted.
-   * Callers making a privilege decision should use this with
-   * `resolveMostPrivilegedRole`.
+   * Read `effectiveRole` for a privilege decision; this array is for callers
+   * that pass the whole membership on, such as `hasPermission`.
    */
   roles: OrganizationRoles[];
   /**
