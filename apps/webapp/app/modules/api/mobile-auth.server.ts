@@ -10,6 +10,11 @@ import {
   type AssetImageSource,
 } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  isSelfServiceOrBaseRole,
+  resolveCanSeeAllBookings,
+  resolveMostPrivilegedRole,
+} from "~/utils/booking-authorization.server";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
@@ -278,18 +283,28 @@ export async function requireMobilePermission({
 }
 
 /**
- * Fetches the user's role and org capability flags (barcodes, audits) for
- * a given organization. `canUseAudits`/`canUseBarcodes` reuse the canonical
- * subscription.server predicates so mobile matches webapp gating exactly.
+ * Fetches the caller's roles and the org capability and visibility flags that
+ * every mobile route gates on. `canUseAudits`/`canUseBarcodes` reuse the
+ * canonical subscription.server predicates so mobile matches webapp gating
+ * exactly.
  *
- * Also returns `canSeeAllCustody` — the mobile twin of the flag the web's
- * `requirePermission` returns (roles.server.ts:113-122): ADMIN/OWNER always
- * see all custody; SELF_SERVICE/BASE only when the matching org override
- * (`selfServiceCanSeeCustody` / `baseUserCanSeeCustody`) is enabled.
+ * Two visibility answers come off the same organization row, and they are
+ * independent — a workspace may grant either without the other:
+ *
+ * - `canSeeAllBookings` — whether the caller may READ a booking they do not
+ *   hold (`selfServiceCanSeeBookings` / `baseUserCanSeeBookings`).
+ * - `canSeeAllCustody` — whether the caller may see WHO holds something
+ *   (`selfServiceCanSeeCustody` / `baseUserCanSeeCustody`).
+ *
+ * ADMIN and OWNER get both. Both are the mobile twins of the flags web's
+ * `requirePermission` returns, resolved through the same shared helpers so the
+ * two platforms cannot disagree about what a workspace has granted. Neither
+ * widens a MUTATION: writes stay on the role's permission grant plus
+ * `validateBookingOwnership`.
  *
  * Used by mobile routes that call service layer functions requiring
- * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody) and
- * by routes that must gate custody visibility server-side.
+ * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody) and by
+ * every route that must gate booking or custody visibility server-side.
  */
 export async function getMobileUserContext(
   userId: string,
@@ -300,13 +315,26 @@ export async function getMobileUserContext(
    * Every role on this membership. `role` is `roles[0]`, which is wrong for
    * any authorization decision: a membership ordered `[SELF_SERVICE, ADMIN]`
    * resolves to SELF_SERVICE and an actual admin gets treated as restricted.
-   * Callers making a privilege decision should use this with
-   * `resolveMostPrivilegedRole`.
+   * Read `effectiveRole` for a privilege decision; this array is for callers
+   * that pass the whole membership on, such as `hasPermission`.
    */
   roles: OrganizationRoles[];
+  /**
+   * The most privileged role on this membership, and the only one any gate
+   * here should read. `role` above is `roles[0]`.
+   */
+  effectiveRole: OrganizationRoles;
+  /** `effectiveRole` is SELF_SERVICE or BASE. */
+  isSelfServiceOrBase: boolean;
   canUseBarcodes: boolean;
   canUseAudits: boolean;
   canSeeAllCustody: boolean;
+  /**
+   * Whether the caller may READ bookings they are not the custodian of.
+   * Never widens a mutation: writes stay on `validateBookingOwnership` and
+   * the role's permission grant.
+   */
+  canSeeAllBookings: boolean;
 }> {
   const userOrg = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
@@ -321,6 +349,12 @@ export async function getMobileUserContext(
           // here keeps it one query alongside the role.
           selfServiceCanSeeCustody: true,
           baseUserCanSeeCustody: true,
+          // why: the booking twins of the two custody flags above. Every
+          // mobile booking read - list, calendar, detail, dashboard - takes
+          // its visibility answer from this row, so the columns have to be
+          // here for the workspace setting to reach them at all.
+          selfServiceCanSeeBookings: true,
+          baseUserCanSeeBookings: true,
         },
       },
     },
@@ -340,14 +374,26 @@ export async function getMobileUserContext(
   // an empty array doesn't surface as `undefined` to downstream callers.
   const role = userOrg.roles[0] ?? OrganizationRoles.BASE;
 
+  // why: gates read the most privileged role, never roles[0]. A membership
+  // ordered [SELF_SERVICE, ADMIN] reads as SELF_SERVICE by position, which
+  // refuses a genuine admin. `role` keeps the positional value for the callers
+  // that still read it.
+  const effectiveRole = resolveMostPrivilegedRole(userOrg.roles);
+
   return {
     role,
     roles: userOrg.roles,
+    effectiveRole,
+    isSelfServiceOrBase: isSelfServiceOrBaseRole(effectiveRole),
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
     canSeeAllCustody: computeCanSeeAllCustody({
-      role,
+      role: effectiveRole,
       organization: userOrg.organization,
+    }),
+    canSeeAllBookings: resolveCanSeeAllBookings({
+      role: effectiveRole,
+      currentOrganization: userOrg.organization,
     }),
   };
 }
