@@ -36,6 +36,7 @@ vi.mock("~/modules/qr/service.server", () => ({
 
 import { db } from "~/database/db.server";
 import { fetchAllAuditPdfRelatedData } from "~/modules/audit/pdf-helpers";
+import { getQrCodeMaps } from "~/modules/qr/service.server";
 
 const SESSION = {
   id: "audit-1",
@@ -158,7 +159,12 @@ describe("audit receipt — the printed asset code", () => {
   };
 
   async function run(
-    prefs: { qrIdDisplayPreference: string; barcodesEnabled: boolean },
+    prefs: {
+      qrIdDisplayPreference: string;
+      barcodesEnabled: boolean;
+      /** Defaults to the column default (`true`) when a case doesn't set it. */
+      showQrCodesOnPdfs?: boolean;
+    },
     overrides: Partial<typeof ASSET> = {}
   ) {
     vi.clearAllMocks();
@@ -183,6 +189,9 @@ describe("audit receipt — the printed asset code", () => {
       imageId: null,
       currency: "USD",
       updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      // Matches the column default, so a case that says nothing about the
+      // switch exercises the path that prints the image.
+      showQrCodesOnPdfs: true,
       ...prefs,
     });
 
@@ -306,6 +315,27 @@ describe("audit receipt — the printed asset code", () => {
     // relation must not take the derived field with it.
     expect(result.assets[0].location).toEqual({ name: "Store room" });
 
+    expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
+  });
+
+  it("encodes a QR per asset when the workspace prints them", async () => {
+    await run({ qrIdDisplayPreference: "QR_ID", barcodesEnabled: false });
+
+    expect(mockOf(getQrCodeMaps)).toHaveBeenCalledTimes(1);
+  });
+
+  it("encodes nothing when the workspace prints no QR image", async () => {
+    // The receipt renders no image in this case, so encoding one would cost a
+    // QR per asset and carry a data URL per asset to a browser that drops it.
+    // The printed code is resolved independently, so the row stays matchable.
+    const result = await run({
+      qrIdDisplayPreference: "SAM_ID",
+      barcodesEnabled: false,
+      showQrCodesOnPdfs: false,
+    });
+
+    expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+    expect(result.assetIdToQrCodeMap).toEqual({});
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
   });
 });

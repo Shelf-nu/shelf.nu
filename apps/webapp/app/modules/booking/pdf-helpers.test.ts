@@ -42,6 +42,7 @@ import type { QrIdDisplayPreference } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
+import { getQrCodeMaps } from "~/modules/qr/service.server";
 
 import { getBooking } from "./service.server";
 
@@ -96,6 +97,8 @@ const BOOKING_ASSETS = [
 type OrgPrefs = {
   qrIdDisplayPreference: QrIdDisplayPreference;
   barcodesEnabled: boolean;
+  /** Defaults to the column default (`true`) when a case doesn't set it. */
+  showQrCodesOnPdfs?: boolean;
 };
 
 async function run(prefs: OrgPrefs, overrides: Partial<typeof ASSET> = {}) {
@@ -132,6 +135,9 @@ async function run(prefs: OrgPrefs, overrides: Partial<typeof ASSET> = {}) {
     imageId: null,
     currency: "USD",
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    // Matches the column default, so a case that says nothing about the switch
+    // exercises the path that prints the image.
+    showQrCodesOnPdfs: true,
     ...prefs,
   });
 
@@ -278,5 +284,24 @@ describe("booking checklist PDF — the printed asset code", () => {
     expect(result.modelRequests).toEqual([]);
 
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
+  });
+
+  it("encodes a QR per asset when the workspace prints them", async () => {
+    await run(QR_ORG);
+
+    expect(mockOf(getQrCodeMaps)).toHaveBeenCalledTimes(1);
+  });
+
+  it("encodes nothing when the workspace prints no QR image", async () => {
+    // The sheet renders no image in this case, so encoding one would cost a
+    // QR per asset and carry a data URL per asset to a browser that drops it.
+    // The printed code is resolved independently, so the row stays matchable.
+    const result = await run({ ...QR_ORG, showQrCodesOnPdfs: false });
+
+    expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+    expect(result.assetIdToQrCodeMap).toEqual({});
+    expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe(
+      "qr-visible-id"
+    );
   });
 });

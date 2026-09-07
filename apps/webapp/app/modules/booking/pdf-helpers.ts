@@ -306,12 +306,19 @@ export async function fetchAllPdfRelatedData(
     const uniqueAssetsForQr = Array.from(
       new Map(sortedAssets.map((asset) => [asset.id, asset])).values()
     );
-    const assetIdToQrCodeMap = await getQrCodeMaps({
-      assets: uniqueAssetsForQr,
-      userId,
-      organizationId,
-      size: "small",
-    });
+    // Encoded only when the sheet will print them. A workspace with the QR
+    // image turned off renders nothing from this map, so generating it would
+    // cost a QR encode per asset and put a data URL per asset in the response
+    // that nothing reads. The renderer already treats a missing entry as
+    // "no image", so an empty map needs no handling of its own.
+    const assetIdToQrCodeMap = organization.showQrCodesOnPdfs
+      ? await getQrCodeMaps({
+          assets: uniqueAssetsForQr,
+          userId,
+          organizationId,
+          size: "small",
+        })
+      : {};
 
     // Resolve the printed code once per unique asset, over the same deduped
     // list the QR images are generated from. Resolving per rendered row would

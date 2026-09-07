@@ -376,13 +376,19 @@ export async function fetchAllAuditPdfRelatedData(
       };
     });
 
-    // Generate QR code data URLs for each asset
-    const assetIdToQrCodeMap = await getQrCodeMaps({
-      assets,
-      userId,
-      organizationId,
-      size: "small",
-    });
+    // QR data URLs per asset, encoded only when the receipt will print them.
+    // A workspace with the QR image turned off renders nothing from this map,
+    // so generating it would cost a QR encode per asset and put a data URL per
+    // asset in the response that nothing reads. The renderer already treats a
+    // missing entry as "no image", so an empty map needs no handling of its own.
+    const assetIdToQrCodeMap = organization.showQrCodesOnPdfs
+      ? await getQrCodeMaps({
+          assets,
+          userId,
+          organizationId,
+          size: "small",
+        })
+      : {};
 
     // Resolve off the same raw rows the QR map is built from, so the two maps
     // have one source. `assetsWithAuditStatus` is typed as a plain `Asset`,
