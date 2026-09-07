@@ -37,6 +37,8 @@ import {
   type CheckinDisposition,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { useAuth } from "@/lib/auth-context";
+import { userHasPermission } from "@/lib/permissions";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
@@ -114,6 +116,9 @@ export default function BookingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { currentOrg } = useOrg();
+  // Current auth user — the booking's creator/custodian ids are compared
+  // against it to mirror the server's ownership gate for restricted roles.
+  const { user } = useAuth();
   const { colors, statusBadge, bookingStatusBadge } = useTheme();
   const styles = useStyles();
   const { formatDateTime } = useDateFormatter();
@@ -1038,6 +1043,27 @@ export default function BookingDetailScreen() {
     !hasOutstandingModelRequests &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
+  /**
+   * Whether to offer the progressive check-out affordances (scan and select).
+   *
+   * Both submit to the same endpoint, so they share one gate. It mirrors what
+   * the server will accept: the `booking:checkout` permission, and — for a
+   * restricted role, whose writes are scoped to their own bookings — being the
+   * booking's creator or its custodian. Offering either to someone the server
+   * would reject just trades a visible button for a 403.
+   */
+  const canUseProgressiveCheckout =
+    canPartialCheckout &&
+    userHasPermission({
+      roles: currentOrg?.roles,
+      entity: "booking",
+      action: "checkout",
+    }) &&
+    (!isRestrictedRole ||
+      (!!user?.id &&
+        (booking.creator.id === user.id ||
+          booking.custodianUser?.id === user.id)));
+
   // Same gate the manage buttons use: an editable booking, and self-service
   // users only on their own DRAFTs (server re-checks ownership + status).
   const canManageModels =
@@ -1497,8 +1523,36 @@ export default function BookingDetailScreen() {
 
             {/* Progressive check-out persists while reserved assets remain, even
                 after the booking has gone ONGOING (canPartialCheckout, not
-                canCheckout) so the user can keep taking the rest. */}
-            {canPartialCheckout && (
+                canCheckout) so the user can keep taking the rest. Scanning is
+                the twin of "Scan to Check In" below: one asset at a time,
+                batched, submitted to the partial-checkout endpoint. */}
+            {canUseProgressiveCheckout && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/scanner?bookingId=${
+                      booking.id
+                    }&bookingName=${encodeURIComponent(
+                      booking.name
+                    )}&bookingAction=checkout`
+                  )
+                }
+                accessibilityLabel="Scan assets to check out"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="scan"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>
+                  Scan to Check Out
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {canUseProgressiveCheckout && (
               <TouchableOpacity
                 style={[
                   styles.actionButtonOutline,
