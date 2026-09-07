@@ -117,6 +117,15 @@ export function BookingKitHeader({
       disabled={isSelecting && !isSelectable}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      // The row is one element to a screen reader, so the chevron rendered
+      // inside it during selection cannot be reached by swiping. This exposes
+      // the same toggle as a rotor action, which is the only route to it.
+      accessibilityActions={[
+        { name: "expand", label: expanded ? "Collapse kit" : "Expand kit" },
+      ]}
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === "expand") onToggleExpand();
+      }}
     >
       {isSelecting ? (
         <View

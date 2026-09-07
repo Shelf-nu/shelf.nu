@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { AssetType, OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -90,10 +90,18 @@ export async function action({ request }: ActionFunctionArgs) {
         from: true,
         to: true,
         custodianUserId: true,
-        // Which kit memberships the booking already holds, so re-adding a kit
-        // that is partly on it adds only the missing members instead of
-        // colliding with the rows already there.
-        bookingAssets: { select: { assetKitId: true } },
+        // What the booking already holds. `assetKitId` says which kit
+        // memberships are on it, so re-adding a partly-present kit tops it up
+        // instead of colliding with the rows already there; `assetId` and the
+        // asset's `type` say which INDIVIDUAL assets already sit on it loose,
+        // which a kit must not then book a second time.
+        bookingAssets: {
+          select: {
+            assetId: true,
+            assetKitId: true,
+            asset: { select: { type: true } },
+          },
+        },
       },
     });
 
@@ -159,7 +167,7 @@ export async function action({ request }: ActionFunctionArgs) {
      * memberships. The mobile client sends kit ids only — the web drawer
      * resolves the same slices in the browser and posts them.
      */
-    const kitSlices = await buildKitSlicesForBooking({
+    const resolvedKitSlices = await buildKitSlicesForBooking({
       kitIds,
       organizationId,
       existingAssetKitIds: new Set(
@@ -168,6 +176,29 @@ export async function action({ request }: ActionFunctionArgs) {
           .filter((id): id is string => id !== null)
       ),
     });
+
+    /**
+     * An INDIVIDUAL asset can be on the booking once. If it already sits there
+     * loose, a kit that contains it must not book it a second time — the two
+     * partial uniques permit one standalone row and one kit-driven row for the
+     * same asset, so nothing at the database level would stop it, and the
+     * booking would silently hold one physical asset twice. The same net
+     * `updateBookingAssets` applies.
+     *
+     * QUANTITY_TRACKED assets are deliberately not covered: a free-pool slice
+     * legitimately coexists with kit-driven ones.
+     */
+    const individualAssetIdsAlreadyLoose = new Set(
+      booking.bookingAssets
+        .filter(
+          (row) =>
+            row.assetKitId === null && row.asset.type === AssetType.INDIVIDUAL
+        )
+        .map((row) => row.assetId)
+    );
+    const kitSlices = resolvedKitSlices.filter(
+      (slice) => !individualAssetIdsAlreadyLoose.has(slice.assetId)
+    );
 
     // An asset can be scanned on its own AND as part of a kit in the same
     // batch. The kit slice is the more specific of the two, so it takes the
@@ -182,10 +213,15 @@ export async function action({ request }: ActionFunctionArgs) {
       ...new Set(assetIds.filter((id) => !kitSliceAssetIds.has(id))),
     ];
 
+    // Only kits that actually put something on the booking are named. A kit
+    // whose every member was already there contributes no slice, and naming it
+    // would write a note saying it had been added when nothing was.
+    const kitIdsAdded = [...new Set(kitSlices.map((slice) => slice.kitId))];
+
     await addScannedAssetsToBooking({
       assetIds: standaloneAssetIds,
       kitSlices,
-      kitIds,
+      kitIds: kitIdsAdded,
       bookingId,
       organizationId,
       userId: user.id,

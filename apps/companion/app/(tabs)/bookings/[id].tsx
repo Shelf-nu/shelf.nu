@@ -130,10 +130,9 @@ export default function BookingDetailScreen() {
 
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [checkedInAssetIds, setCheckedInAssetIds] = useState<string[]>([]);
-  // Which assets this booking sent out. Empty on a booking checked out in one
-  // action, which writes no per-slice markers — and on an older server, which
-  // sends the field not at all. Both mean the same thing to a kit badge: the
-  // whole booking went out.
+  // Which assets this booking sent out, from the per-slice check-out markers.
+  // Empty when the server does not send the field — an older one does not — and
+  // a kit badge reads that as "no record either way" rather than "nothing left".
   const [checkedOutAssetIds, setCheckedOutAssetIds] = useState<string[]>([]);
   const [canCheckout, setCanCheckout] = useState(false);
   const [canCheckin, setCanCheckin] = useState(false);

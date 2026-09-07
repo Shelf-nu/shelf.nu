@@ -486,6 +486,110 @@ test("standalone assets picked alongside a kit keep their own ids", () => {
   assert.deepEqual(assetIds, ["loose-1"]);
 });
 
+test("a member of an unnamed kit stops any kit being named", () => {
+  // Naming a kit makes the endpoint read the bare ids beside it as
+  // "delete the row with no kit". A member of a kit that is NOT named has no
+  // such row, so it would be reported removed and quietly stay. The whole
+  // selection travels as bare ids instead, which removes every slice.
+  const audio = [
+    inKit("a1", "kit-1", "Camera Kit"),
+    inKit("a2", "kit-1", "Camera Kit"),
+  ];
+  const rig = [
+    inKit("b1", "kit-2", "Rig"),
+    inKit("b2", "kit-2", "Rig"),
+    inKit("b3", "kit-2", "Rig"),
+  ];
+  const rows: BookingRow[] = [
+    {
+      type: "kit",
+      kitId: "kit-1",
+      name: "Camera Kit",
+      kit: cameraKit,
+      members: audio,
+    },
+    {
+      type: "kit",
+      kitId: "kit-2",
+      name: "Rig",
+      kit: { ...cameraKit, id: "kit-2", name: "Rig", assetCount: 3 },
+      members: rig,
+    },
+  ];
+
+  // Whole of kit-1 picked, plus ONE member of kit-2.
+  const { assetIds, kitIds } = splitRemovalSelection({
+    rows,
+    selectedAssetIds: new Set(["a1", "a2", "b1"]),
+  });
+
+  assert.deepEqual(kitIds, []);
+  assert.deepEqual(assetIds.sort(), ["a1", "a2", "b1"]);
+});
+
+test("a standalone asset beside a whole kit still lets the kit be named", () => {
+  // The guard above must not fire for a genuinely loose asset — it has the
+  // row the endpoint looks for.
+  const members = [
+    inKit("m1", "kit-1", "Camera Kit"),
+    inKit("m2", "kit-1", "Camera Kit"),
+  ];
+  const rows: BookingRow[] = [
+    ...rowsFor(members, cameraKit),
+    { type: "asset", item: asset({ id: "loose-1" }), inKit: false },
+  ];
+
+  const { assetIds, kitIds } = splitRemovalSelection({
+    rows,
+    selectedAssetIds: new Set(["m1", "m2", "loose-1"]),
+  });
+
+  assert.deepEqual(kitIds, ["kit-1"]);
+  assert.deepEqual(assetIds, ["loose-1"]);
+});
+
+// ---------------------------------------------------------------------------
+// Selectability, remaining branches
+// ---------------------------------------------------------------------------
+
+test("nothing is selectable outside a selection mode", () => {
+  assert.equal(isBookingAssetSelectable(asset({ id: "a1" }), null, []), false);
+});
+
+test("check-in offers a quantity-tracked asset with units still to reconcile", () => {
+  assert.equal(
+    isBookingAssetSelectable(
+      asset({ id: "a1", type: "QUANTITY_TRACKED", remainingToCheckIn: 4 }),
+      "checkin",
+      []
+    ),
+    true
+  );
+});
+
+test("check-in skips a quantity-tracked asset with nothing left to reconcile", () => {
+  assert.equal(
+    isBookingAssetSelectable(
+      asset({ id: "a1", type: "QUANTITY_TRACKED", remainingToCheckIn: 0 }),
+      "checkin",
+      []
+    ),
+    false
+  );
+});
+
+test("a header with nothing picked reads as none", () => {
+  assert.equal(
+    resolveKitSelectionState({
+      members: [asset({ id: "m1" }), asset({ id: "m2" })],
+      selectMode: "remove",
+      selectedAssetIds: new Set(),
+      checkedInAssetIds: [],
+    }),
+    "none"
+  );
+});
+
 test("a removal names the kits before the assets", () => {
   assert.equal(
     describeRemoval({ assetCount: 2, kitCount: 1 }),

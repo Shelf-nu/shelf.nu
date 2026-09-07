@@ -102,15 +102,36 @@ beforeEach(() => {
   addScannedAssetsToBookingMock.mockResolvedValue(undefined as never);
 });
 
-/** A DRAFT booking already holding the given kit memberships. */
-function bookingHolding(assetKitIds: (string | null)[]) {
+/**
+ * A DRAFT booking already holding the given rows. A bare string is a
+ * kit-driven row; an object describes a row in full.
+ */
+function bookingHolding(
+  rows: (
+    | string
+    | null
+    | { assetId: string; assetKitId: string | null; type?: string }
+  )[]
+) {
   findFirstMock.mockResolvedValue({
     id: BOOKING_ID,
     status: "DRAFT",
     from: new Date("2026-01-01T00:00:00.000Z"),
     to: new Date("2026-01-02T00:00:00.000Z"),
     custodianUserId: "user-1",
-    bookingAssets: assetKitIds.map((assetKitId) => ({ assetKitId })),
+    bookingAssets: rows.map((row) =>
+      row === null || typeof row === "string"
+        ? {
+            assetId: `held-${row ?? "loose"}`,
+            assetKitId: row,
+            asset: { type: "INDIVIDUAL" },
+          }
+        : {
+            assetId: row.assetId,
+            assetKitId: row.assetKitId,
+            asset: { type: row.type ?? "INDIVIDUAL" },
+          }
+    ),
   } as never);
 }
 
@@ -232,6 +253,61 @@ describe("POST /api/mobile/bookings/add-scanned-assets — kit provenance", () =
     const call = serviceCall();
     expect(call.assetIds).toEqual(["asset-9"]);
     expect(call.kitSlices).toHaveLength(1);
+  });
+
+  it("will not book an individual asset a second time through its kit", async () => {
+    // The asset is already on the booking loose. The two partial uniques would
+    // happily accept a kit-driven row beside it, leaving the booking holding
+    // one physical asset twice.
+    bookingHolding([
+      { assetId: "asset-1", assetKitId: null, type: "INDIVIDUAL" },
+    ]);
+    assetsExist([]);
+    assetKitFindManyMock.mockResolvedValue([
+      { id: "ak1", assetId: "asset-1", quantity: 1, kitId: "kit-1" },
+      { id: "ak2", assetId: "asset-2", quantity: 1, kitId: "kit-1" },
+    ] as never);
+
+    await post({ kitIds: ["kit-1"] });
+
+    const call = serviceCall();
+    expect(call.kitSlices).toEqual([
+      { assetId: "asset-2", assetKitId: "ak2", kitId: "kit-1", quantity: 1 },
+    ]);
+  });
+
+  it("still books a quantity-tracked asset through its kit alongside a loose row", async () => {
+    // Units of a quantity-tracked asset can legitimately sit in the free pool
+    // and in a kit at once, so the guard above must not catch it.
+    bookingHolding([
+      { assetId: "asset-1", assetKitId: null, type: "QUANTITY_TRACKED" },
+    ]);
+    assetsExist([]);
+    assetKitFindManyMock.mockResolvedValue([
+      { id: "ak1", assetId: "asset-1", quantity: 4, kitId: "kit-1" },
+    ] as never);
+
+    await post({ kitIds: ["kit-1"] });
+
+    expect(serviceCall().kitSlices).toEqual([
+      { assetId: "asset-1", assetKitId: "ak1", kitId: "kit-1", quantity: 4 },
+    ]);
+  });
+
+  it("does not claim a kit was added when every member was already there", async () => {
+    // `kitIds` is what the note is written from, so naming a kit that put
+    // nothing on the booking records an addition that never happened.
+    bookingHolding(["ak1"]);
+    assetsExist([]);
+    assetKitFindManyMock.mockResolvedValue([
+      { id: "ak1", assetId: "asset-1", quantity: 1, kitId: "kit-1" },
+    ] as never);
+
+    await post({ kitIds: ["kit-1"] });
+
+    const call = serviceCall();
+    expect(call.kitSlices).toEqual([]);
+    expect(call.kitIds).toEqual([]);
   });
 
   it("adds only the members a partly-present kit is still missing", async () => {

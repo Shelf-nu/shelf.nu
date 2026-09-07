@@ -200,8 +200,9 @@ function isMemberBackIn(
  *
  * Three cases, in order: every member is back while the booking is still
  * running; the booking is over and the kit went out on it; otherwise the kit's
- * own status. A booking whose check-out left no per-slice markers is one that
- * went out in a single action, so its members all went out.
+ * own status. An empty marker list means the booking cannot say which assets
+ * left — an older server does not send the field at all — so a finished
+ * booking is read as having sent everything out rather than nothing.
  *
  * Returns null without a kit record: an older server sends no `booking.kits`,
  * and a status invented from the rows alone would be a guess.
@@ -331,13 +332,21 @@ export function resolveKitSelectionState({
  * ALL of them: the remove endpoint expands a kit to every asset in it and
  * deletes each one's kit-driven rows, so a kit that is only partly on this
  * booking — or one with a member shown standalone because its slices disagree
- * — would lose rows nobody selected. Everything that fails that test travels
- * as plain asset ids, which is what the screen sent before kits were grouped.
+ * — would lose rows nobody selected.
+ *
+ * Naming ANY kit also changes how the endpoint reads the plain asset ids
+ * beside it: they then delete only a row with no kit of its own
+ * (`assetKitId IS NULL`). An asset picked from a kit that is NOT being named
+ * has no such row, so it would be reported as removed and quietly stay on the
+ * booking. When the selection contains one of those, no kit is named and the
+ * whole selection travels as plain ids, which removes every slice of each.
  *
  * @param args.rows - the rendered rows, which carry the kit groupings
  * @param args.selectedAssetIds - the current selection
  * @returns the two id lists to post
  * @see ../../../apps/webapp/app/routes/api+/mobile+/bookings.remove-assets.ts
+ * @see ../../../apps/webapp/app/modules/booking/service.server.ts — `removeAssets`,
+ *   whose delete clause is what the fallback above exists for
  */
 export function splitRemovalSelection({
   rows,
@@ -348,9 +357,13 @@ export function splitRemovalSelection({
 }): { assetIds: string[]; kitIds: string[] } {
   const kitIds: string[] = [];
   const coveredByKit = new Set<string>();
+  /** Every asset the booking holds through a kit, named or not. */
+  const kitDrivenAssetIds = new Set<string>();
 
   for (const row of rows) {
-    if (row.type !== "kit" || !row.kit) continue;
+    if (row.type !== "kit") continue;
+    for (const member of row.members) kitDrivenAssetIds.add(member.id);
+    if (!row.kit) continue;
     const wholeKitIsHere = row.members.length === row.kit.assetCount;
     const everyMemberPicked = row.members.every((member) =>
       selectedAssetIds.has(member.id)
@@ -360,10 +373,13 @@ export function splitRemovalSelection({
     for (const member of row.members) coveredByKit.add(member.id);
   }
 
-  return {
-    assetIds: [...selectedAssetIds].filter((id) => !coveredByKit.has(id)),
-    kitIds,
-  };
+  const leftover = [...selectedAssetIds].filter((id) => !coveredByKit.has(id));
+  const leftoverHoldsAKitRow = leftover.some((id) => kitDrivenAssetIds.has(id));
+  if (leftoverHoldsAKitRow) {
+    return { assetIds: [...selectedAssetIds], kitIds: [] };
+  }
+
+  return { assetIds: leftover, kitIds };
 }
 
 /**
