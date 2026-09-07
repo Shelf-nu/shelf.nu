@@ -20,15 +20,13 @@ import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
-  custodianScopeClause,
-  resolveCustodianScope,
   computeBookingAssetRemainingToCheckOut,
   getBookingFlags,
   getPartiallyCheckedInAssetIds,
 } from "~/modules/booking/service.server";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -52,18 +50,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // details, assets, tags and action flags via mobile.
     await assertMobileCanUseBookings(organizationId);
 
-    // Self-service / base users may only read their OWN bookings. Scope the
-    // lookup by custodian like the list endpoint (bookings.ts) does, so a
-    // booking they don't own 404s instead of leaking across the workspace.
-    const { roles } = await getMobileUserContext(user.id, organizationId);
-    // `getMobileUserContext` also returns `role`, but that is `roles[0]` — a
-    // membership stored `[SELF_SERVICE, ADMIN]` reads as SELF_SERVICE and a
-    // real admin is treated as restricted. Every decision below resolves the
-    // most privileged role instead, matching what the mutation endpoints do.
-    const role = resolveMostPrivilegedRole(roles);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    // `canSeeAllBookings` answers who may READ a booking they do not custody:
+    // ADMIN/OWNER always, SELF_SERVICE/BASE only where the workspace override
+    // allows it. `isSelfServiceOrBase` is the narrower, role-only question of
+    // which ACTIONS the caller may take, and must stay role-only: the override
+    // widens reading and never writing.
+    const { canSeeAllBookings, isSelfServiceOrBase, effectiveRole, roles } =
+      await getMobileUserContext(user.id, organizationId);
 
     const { bookingId } = getParams(
       params,
@@ -78,28 +71,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
          * Draft privacy (web parity). A DRAFT booking is private to its
          * creator — web gates the detail route on the same shared clause, so
          * without it a direct GET here returns a colleague's unfinished draft
-         * even though the list would (now) hide it. The list fix alone is not
-         * enough: booking ids are guessable-adjacent and the detail endpoint
-         * is reachable directly.
+         * even though the list hides it. The list fix alone is not enough:
+         * booking ids are guessable-adjacent and this endpoint is reachable
+         * directly. The booking override does NOT widen this: an unfinished
+         * draft stays private to its creator either way, exactly as on web.
          *
-         * The custodian restriction joins the same AND rather than sitting
-         * beside it: custody lives on the user link OR a team-member link, so
-         * the clause is itself an OR and merging it in at this level would
-         * collide with the one above.
+         * Custody is deliberately NOT a clause here. It is a gate on the
+         * loaded row instead (`canSeeBooking`, just past the 404 below), so
+         * "you may not see this" answers 403 rather than reporting the row as
+         * missing. Putting it back in the `where` also silently re-decides
+         * visibility before the row is read, which is where it stops being
+         * able to honour the workspace override.
          */
-        AND: [
-          bookingDraftVisibilityClause(user.id),
-          ...(isSelfServiceOrBase
-            ? [
-                custodianScopeClause(
-                  await resolveCustodianScope({
-                    userId: user.id,
-                    organizationId,
-                  })
-                ),
-              ]
-            : []),
-        ],
+        AND: [bookingDraftVisibilityClause(user.id)],
       },
       select: {
         id: true,
@@ -118,6 +102,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             lastName: true,
           },
         },
+        // why: `canSeeBooking` reads BOTH custody links, so the scalar is
+        // required even though the relation below covers display. A booking
+        // assigned to a team member with no user attached carries
+        // `custodianUserId = NULL`; matching one link alone refuses the user
+        // the booking belongs to.
+        custodianUserId: true,
         custodianUser: {
           select: {
             id: true,
@@ -131,6 +121,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           select: {
             id: true,
             name: true,
+            userId: true,
           },
         },
         tags: {
@@ -215,6 +206,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     if (!booking) {
       return data({ error: { message: "Booking not found" } }, { status: 404 });
+    }
+
+    /**
+     * The custody gate. Runs on the loaded row so the answer can account for
+     * the workspace override, and refuses with 403 rather than reporting the
+     * booking as missing. Web gates its overview route with this same helper
+     * and this same status, so a booking that opens on one platform opens on
+     * the other.
+     */
+    if (!canSeeBooking({ canSeeAllBookings, booking, userId: user.id })) {
+      return data(
+        { error: { message: "You are not authorized to view this booking" } },
+        { status: 403 }
+      );
     }
 
     // Get partial check-in data for ONGOING/OVERDUE bookings
@@ -376,9 +381,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const canQuickCheckin = !(
-      (role === OrganizationRoles.ADMIN &&
+      (effectiveRole === OrganizationRoles.ADMIN &&
         bookingSettings.requireExplicitCheckinForAdmin) ||
-      (role === OrganizationRoles.SELF_SERVICE &&
+      (effectiveRole === OrganizationRoles.SELF_SERVICE &&
         bookingSettings.requireExplicitCheckinForSelfService)
     );
 
