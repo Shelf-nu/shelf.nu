@@ -62,7 +62,11 @@ export async function action({ request }: ActionFunctionArgs) {
         // an empty `assetIds`. INDIVIDUAL rows still flow through `assetIds`. The
         // service 400s if BOTH are empty, so we don't require a minimum here
         // (mirrors the partial-checkin route).
-        assetIds: z.array(z.string().cuid()).optional(),
+        // Any non-empty id: asset ids come in more than one shape (imported
+        // and seeded rows carry ids that no single format check describes),
+        // and the id is proven against the booking downstream anyway. The
+        // check-in twin takes the same shape.
+        assetIds: z.array(z.string().min(1)).optional(),
         /**
          * Optional per-asset checkout payload mirroring the webapp check-in
          * JSON shape. When present, the service uses it to perform partial
@@ -73,8 +77,8 @@ export async function action({ request }: ActionFunctionArgs) {
         checkouts: z
           .array(
             z.object({
-              assetId: z.string().cuid(),
-              bookingAssetId: z.string().cuid().nullable().optional(),
+              assetId: z.string().min(1),
+              bookingAssetId: z.string().nullish(),
               quantity: z.number().int().positive(),
             })
           )
