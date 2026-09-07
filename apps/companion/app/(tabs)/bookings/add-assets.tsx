@@ -55,6 +55,20 @@ const PICKER_PAGE_SIZE = 50;
 const kitKeyExtractor = (item: AvailableKit) => item.id;
 const modelKeyExtractor = (item: AvailableModel) => item.id;
 
+/**
+ * The picker screen itself: three tabs over one paginated loader.
+ *
+ * Assets and Kits multi-select and add in one call; Models reserves a count
+ * against an `AssetModel` instead, so its rows write straight through rather
+ * than joining the selection. All three page through their whole result set —
+ * a capped list would hide inventory the operator has to be able to reach.
+ *
+ * Route params carry the booking and its window: everything shown is filtered
+ * to what is available for those dates, which is why the screen cannot be
+ * opened without them.
+ *
+ * @returns The picker for the booking named in the route params.
+ */
 export default function AddBookingAssetsScreen() {
   const router = useRouter();
   const {
