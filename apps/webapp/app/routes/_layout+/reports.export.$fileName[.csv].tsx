@@ -23,6 +23,7 @@ import {
   assetActivityReport,
   assetDistributionReport,
   monthlyBookingTrendsReport,
+  type BookingComplianceSortColumn,
 } from "~/modules/reports/helpers.server";
 import { getReportById } from "~/modules/reports/registry";
 import type {
@@ -60,12 +61,15 @@ export const loader = async ({
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    // `currentOrganization` supplies the workspace currency for the reports
+    // whose KPI strings carry money values.
+    const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.reports,
       action: PermissionAction.export,
     });
+    const currency = currentOrganization.currency;
 
     const searchParams = getCurrentSearchParams(request);
     const reportId = searchParams.get("reportId");
@@ -119,11 +123,22 @@ export const loader = async ({
       formatPrefs
     );
 
-    // Generate CSV based on report type
+    // Generate CSV based on report type. Each case parses the same filter
+    // params its page-loader counterpart honors (see reports.$reportId.tsx)
+    // and hands them to the same query function — the client forwards the
+    // page's full query string, so the CSV contains exactly the rows the
+    // filtered page shows. Paging is the one deliberate difference: exports
+    // always read page 1 with a 10k page size.
     let csvString: string;
 
     switch (reportId) {
       case "booking-compliance": {
+        // Sort params mirror the page so the CSV row order matches the table.
+        const sortBy = (searchParams.get("sortBy") ||
+          "scheduledEnd") as BookingComplianceSortColumn;
+        const sortOrder = (searchParams.get("sortOrder") || "desc") as
+          | "asc"
+          | "desc";
         const reportData = await bookingComplianceReport({
           organizationId,
           timeframe,
@@ -131,6 +146,8 @@ export const loader = async ({
           timeZone: formatPrefs.timeZone,
           page: 1,
           pageSize: 10000, // Export up to 10k rows
+          sortBy,
+          sortOrder,
         });
         csvString = generateBookingComplianceCsv(
           reportData.rows as BookingComplianceRow[],
@@ -142,6 +159,9 @@ export const loader = async ({
       case "custody-snapshot": {
         const reportData = await custodySnapshotReport({
           organizationId,
+          currency,
+          teamMemberId: searchParams.get("teamMember") || undefined,
+          locationId: searchParams.get("location") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -155,6 +175,8 @@ export const loader = async ({
       case "overdue-items": {
         const reportData = await overdueItemsReport({
           organizationId,
+          currency,
+          custodianId: searchParams.get("custodian") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -169,7 +191,10 @@ export const loader = async ({
         const idleThreshold = parseInt(searchParams.get("days") || "30", 10);
         const reportData = await idleAssetsReport({
           organizationId,
+          currency,
           idleThresholdDays: idleThreshold,
+          categoryId: searchParams.get("category") || undefined,
+          locationId: searchParams.get("location") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -184,6 +209,8 @@ export const loader = async ({
         const reportData = await topBookedAssetsReport({
           organizationId,
           timeframe,
+          categoryId: searchParams.get("category") || undefined,
+          locationId: searchParams.get("location") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -209,6 +236,16 @@ export const loader = async ({
       case "asset-inventory": {
         const reportData = await assetInventoryReport({
           organizationId,
+          currency,
+          categoryIds:
+            searchParams.get("categories")?.split(",").filter(Boolean) ||
+            undefined,
+          locationIds:
+            searchParams.get("locations")?.split(",").filter(Boolean) ||
+            undefined,
+          statuses:
+            searchParams.get("statuses")?.split(",").filter(Boolean) ||
+            undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -223,6 +260,8 @@ export const loader = async ({
         const reportData = await assetUtilizationReport({
           organizationId,
           timeframe,
+          categoryId: searchParams.get("category") || undefined,
+          locationId: searchParams.get("location") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -236,6 +275,8 @@ export const loader = async ({
         const reportData = await assetActivityReport({
           organizationId,
           timeframe,
+          assetId: searchParams.get("asset") || undefined,
+          categoryId: searchParams.get("category") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -249,6 +290,7 @@ export const loader = async ({
       case "distribution": {
         const reportData = await assetDistributionReport({
           organizationId,
+          currency,
           page: 1,
           pageSize: 10000,
         });
@@ -257,6 +299,10 @@ export const loader = async ({
       }
 
       case "monthly-booking-trends": {
+        // why: the page's category/location params are deliberately NOT
+        // forwarded — `monthlyBookingTrendsReport` accepts but ignores them,
+        // and forwarding dead filters would claim a filtering this export
+        // does not perform.
         const reportData = await monthlyBookingTrendsReport({
           organizationId,
           timeframe,
