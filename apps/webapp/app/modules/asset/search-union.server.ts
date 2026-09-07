@@ -14,11 +14,12 @@
  * a functional GIN trigram index over the concatenated searchable JSON paths;
  * the custom-field branch queries that same `COALESCE(...) || ...` expression as
  * an indexed prefilter and keeps the per-path OR as the exact filter). The one
- * remaining branch — `User.firstName`/`lastName` — has no trigram index and
- * relies on org-scoping (`tm.organizationId` gates the scan before the ILIKE, so
- * it only touches the org's team members). Measured on the 14k-asset org that
- * surfaced this: searched COUNT ~2.6s -> ~0.3s (custom-field branch 2.3s ->
- * ~15ms warm) — a measurement, not a guarantee for every term/data shape.
+ * remaining branch — `User.firstName`/`lastName`/`displayName` — has no trigram
+ * index and relies on org-scoping (`tm.organizationId` gates the scan before the
+ * ILIKE, so it only touches the org's team members). Measured on the 14k-asset
+ * org that surfaced this: searched COUNT ~2.6s -> ~0.3s (custom-field branch
+ * 2.3s -> ~15ms warm) — a measurement, not a guarantee for every term/data
+ * shape.
  *
  * The advanced index inlines this as `a.id IN (<union>)`; the simple index
  * executes it via `$queryRaw` and feeds the ids into its Prisma `where`.
@@ -117,7 +118,7 @@ function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
       JOIN public."Asset" a ON a."id" = cu."assetId"
       WHERE tm."organizationId" = ${organizationId}
         AND a."organizationId" = ${organizationId}
-        AND (tm."name" ILIKE ${like} OR u."firstName" ILIKE ${like} OR u."lastName" ILIKE ${like})
+        AND (tm."name" ILIKE ${like} OR u."firstName" ILIKE ${like} OR u."lastName" ILIKE ${like} OR u."displayName" ILIKE ${like})
     UNION
     SELECT q."assetId" FROM public."Qr" q
       JOIN public."Asset" a ON a."id" = q."assetId"

@@ -26,9 +26,13 @@ import {
   getLatenessMs,
   isOnTime,
   resolveCheckInAt,
+  resolvePlannedEnd,
+  resolvePlannedStart,
 } from "~/modules/booking/lateness";
 import { getAssetTotalValue } from "~/utils/asset-value";
 import { ShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 
 import { resolveCheckInTimes } from "./check-in-time.server";
 
@@ -61,6 +65,7 @@ import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
 import { refreshExpiredKitImages } from "../kit/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 
 // Re-export timeframe utilities for server use
 export { resolveTimeframe } from "./timeframe";
@@ -153,6 +158,35 @@ interface BookingComplianceArgs {
 }
 
 /**
+ * Timeframe predicate on the PLANNED end of a booking.
+ *
+ * Extension and check-in both rewrite `to` — to the renegotiated deadline and
+ * to the actual return moment respectively — while the planned end stays in
+ * `originalTo`. Filtering on `to` alone therefore lets a booking due inside
+ * the window escape its own period, and moves it between periods over its
+ * lifetime. `originalTo` is null only on rows predating the column, where `to`
+ * still is the planned end.
+ *
+ * This is the SQL form of `resolvePlannedEnd` — the two must stay equivalent,
+ * so a row is filtered, displayed, and measured against one date.
+ *
+ * @param windowStart - Inclusive start of the timeframe.
+ * @param windowEnd - Inclusive end of the timeframe.
+ * @returns A `where` fragment matching bookings whose planned end is in range.
+ */
+function plannedEndInWindow(
+  windowStart: Date,
+  windowEnd: Date
+): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { originalTo: { gte: windowStart, lte: windowEnd } },
+      { originalTo: null, to: { gte: windowStart, lte: windowEnd } },
+    ],
+  };
+}
+
+/**
  * Generate the Booking Compliance report (R2).
  *
  * This report tracks booking lifecycle compliance:
@@ -160,7 +194,10 @@ interface BookingComplianceArgs {
  * - Late returns
  * - Currently overdue items
  *
- * KPIs are pre-aggregated via SQL. The chart shows status transition trends.
+ * Every axis of the report — which period a booking belongs to, the end date
+ * shown in its row, and how late it was — reads the PLANNED end
+ * (`resolvePlannedEnd`), so a booking's period membership and lateness do not
+ * change when it is extended or checked in.
  *
  * @param args - Report parameters
  * @returns Complete report payload
@@ -188,13 +225,14 @@ export async function bookingComplianceReport(
   try {
     // Build the where clause for bookings
     // Compliance can only be measured on bookings that:
-    // 1. Had a due date (scheduledEnd/to) within the selected timeframe
+    // 1. Were planned to end within the selected timeframe
     // 2. Have a measurable outcome (COMPLETE, OVERDUE, or ARCHIVED). ARCHIVED
     //    bookings are returned bookings that have aged out of the active list,
     //    so they belong in the table just like COMPLETE rows.
     const where: Prisma.BookingWhereInput = {
       organizationId,
-      to: { gte: timeframe.from, lte: timeframe.to }, // Due date in timeframe
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
       status: {
         in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[],
       },
@@ -312,8 +350,8 @@ export async function bookingComplianceReport(
  *
  * Remaining KPIs:
  * - `total_bookings` — count of measurable bookings (COMPLETE + OVERDUE +
- *   ARCHIVED) whose due date falls in the timeframe.
- * - `currently_overdue` — count of OVERDUE bookings with a due date in the
+ *   ARCHIVED) whose planned end falls in the timeframe.
+ * - `currently_overdue` — count of OVERDUE bookings with a planned end in the
  *   timeframe. Consumed by the PDF generator's hero overdue tile.
  */
 async function computeBookingComplianceKpis(
@@ -379,11 +417,12 @@ async function fetchBookingComplianceRows(
       // (legacy bookings, partial check-ins that recorded a custom note,
       // or rare event-write failures). See `resolveCheckInAt`.
       updatedAt: true,
+      // The planned period. `from`/`to` are rewritten by extension and by
+      // check-out/check-in with the adjust-date intent; these two are not.
+      originalFrom: true,
+      originalTo: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMember: {
         select: {
@@ -421,13 +460,15 @@ async function fetchBookingComplianceRows(
       fromEvent: checkInTimes.get(b.id) ?? null,
     });
 
-    // Lateness via the canonical helper:
-    // - OVERDUE → `now − to`
-    // - COMPLETE/ARCHIVED with a recorded check-in → `checkInAt − to`
+    // Compliance asks whether the agreed plan was honoured, so every row is
+    // measured against the planned end — the same date `plannedEndInWindow`
+    // filtered on and the row displays as `scheduledEnd`.
+    // - OVERDUE → `now − plannedEnd`
+    // - COMPLETE/ARCHIVED with a recorded check-in → `checkInAt − plannedEnd`
     // - otherwise null (no measurable lateness)
     const latenessMs = getLatenessMs({
       status: b.status,
-      to: b.to,
+      scheduledEnd: resolvePlannedEnd(b),
       checkInAt,
       now,
     });
@@ -438,17 +479,16 @@ async function fetchBookingComplianceRows(
       bookingName: b.name || `Booking ${b.id.slice(0, 8)}`,
       status: b.status,
       custodian: b.custodianUser
-        ? stripNameSuffix(
-            `${b.custodianUser.firstName || ""} ${
-              b.custodianUser.lastName || ""
-            }`.trim()
-          )
+        ? stripNameSuffix(resolveUserDisplayName(b.custodianUser))
         : b.custodianTeamMember
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
       assetCount: b._count.bookingAssets,
-      scheduledStart: b.from!,
-      scheduledEnd: b.to!,
+      // Both ends of the period the booking was PLANNED to run for — an early
+      // check-out rewrites `from` and a check-in rewrites `to`, so the raw
+      // columns would label a "scheduled" period with actual moments.
+      scheduledStart: resolvePlannedStart(b)!,
+      scheduledEnd: resolvePlannedEnd(b)!,
       actualCheckout: null,
       actualCheckin: checkInAt,
       isOnTime: isOnTime({ status: b.status, latenessMs }),
@@ -549,11 +589,17 @@ function formatStatusLabel(status: BookingStatus): string {
 // -----------------------------------------------------------------------------
 
 /**
- * Calculate compliance rate for completed bookings in the timeframe.
+ * Calculate the compliance rate for the timeframe, plus the prior period's
+ * rate for the trend comparison.
  *
- * A booking is "on-time" if it was marked COMPLETE and doesn't have OVERDUE
- * in its history. For now, we use a simplified heuristic based on whether
- * the booking ever had OVERDUE status.
+ * A booking counts as on-time when `getLatenessMs` — measured against its
+ * planned end — lands within `COMPLIANCE_GRACE_PERIOD_MS`. OVERDUE bookings
+ * are never on-time. The same helpers back the table, the trend chart and the
+ * custodian breakdown, so every number on the report agrees.
+ *
+ * @param organizationId - Workspace whose bookings are measured.
+ * @param timeframe - Resolved reporting window (planned end must fall inside).
+ * @returns On-time/late counts, the rate, and the prior-period comparison.
  */
 async function computeComplianceRate(
   organizationId: string,
@@ -569,8 +615,8 @@ async function computeComplianceRate(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
       archivedWithoutCheckin: false,
-      // Bookings scheduled to end within the timeframe
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -579,6 +625,7 @@ async function computeComplianceRate(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -606,8 +653,8 @@ async function computeComplianceRate(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
       archivedWithoutCheckin: false,
-      // Filter by scheduled end date for consistency with main query
-      to: { gte: priorFrom, lte: priorTo },
+      // Planned end (originalTo ?? to), consistent with the main query.
+      ...plannedEndInWindow(priorFrom, priorTo),
     },
     select: {
       id: true,
@@ -615,6 +662,7 @@ async function computeComplianceRate(
       to: true,
       status: true,
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -653,8 +701,8 @@ async function computeComplianceRate(
  * are treated as on-time per `isOnTime`.
  *
  * @param bookings - Measurable bookings (COMPLETE / OVERDUE / ARCHIVED) with
- *   their `id`, scheduled return (`to`), `updatedAt`, and current `status`
- *   selected.
+ *   their `id`, planned end (`originalTo`), live end (`to`), `updatedAt`, and
+ *   current `status` selected.
  * @param checkInTimes - Map from `bookingId` to the canonical check-in moment
  *   produced by `resolveCheckInTimes`. Missing entries trigger the fallback.
  * @returns Counts of on-time and late bookings; the sum equals `bookings.length`.
@@ -663,6 +711,7 @@ function categorizeBookings(
   bookings: {
     id: string;
     to: Date | null;
+    originalTo: Date | null;
     status: BookingStatus;
     updatedAt: Date | null;
   }[],
@@ -679,7 +728,7 @@ function categorizeBookings(
     });
     const latenessMs = getLatenessMs({
       status: booking.status,
-      to: booking.to,
+      scheduledEnd: resolvePlannedEnd(booking),
       checkInAt,
       now,
     });
@@ -760,7 +809,7 @@ async function computeComplianceTrend(
     )
   );
 
-  // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with due date
+  // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with planned end
   // in the timeframe. ARCHIVED is included so finished-then-archived bookings
   // still count toward the trend.
   const measurableBookings = await db.booking.findMany({
@@ -769,7 +818,8 @@ async function computeComplianceTrend(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from the trend.
       archivedWithoutCheckin: false,
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -777,6 +827,7 @@ async function computeComplianceTrend(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -802,9 +853,10 @@ async function computeComplianceTrend(
       Math.min(bucketStartAt(i + 1).toMillis() - 1, timeframe.to.getTime())
     );
 
-    // Filter bookings with due date in this bucket
+    // Filter bookings whose planned end falls in this bucket
     const bucketBookings = measurableBookings.filter((b) => {
-      const dueDate = b.to?.getTime() || 0;
+      // Bucket by the planned end, matching the window filter and the table.
+      const dueDate = resolvePlannedEnd(b)?.getTime() || 0;
       return dueDate >= bucketStart.getTime() && dueDate <= bucketEnd.getTime();
     });
 
@@ -821,7 +873,7 @@ async function computeComplianceTrend(
       });
       const latenessMs = getLatenessMs({
         status: b.status,
-        to: b.to,
+        scheduledEnd: resolvePlannedEnd(b),
         checkInAt,
         now,
       });
@@ -940,8 +992,8 @@ async function computeCustodianPerformance(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
       archivedWithoutCheckin: false,
-      // Filter by scheduled end date for consistency with main compliance query
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Planned end (originalTo ?? to), consistent with the main compliance query.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -949,12 +1001,10 @@ async function computeCustodianPerformance(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
       custodianUserId: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMemberId: true,
       custodianTeamMember: {
@@ -987,11 +1037,7 @@ async function computeCustodianPerformance(
     const key =
       booking.custodianUserId || booking.custodianTeamMemberId || "__none__";
     const name = booking.custodianUser
-      ? stripNameSuffix(
-          `${booking.custodianUser.firstName || ""} ${
-            booking.custodianUser.lastName || ""
-          }`.trim()
-        )
+      ? stripNameSuffix(resolveUserDisplayName(booking.custodianUser))
       : booking.custodianTeamMember
       ? stripNameSuffix(booking.custodianTeamMember.name)
       : "No Custodian";
@@ -1013,7 +1059,7 @@ async function computeCustodianPerformance(
     });
     const latenessMs = getLatenessMs({
       status: booking.status,
-      to: booking.to,
+      scheduledEnd: resolvePlannedEnd(booking),
       checkInAt,
       now,
     });
@@ -1154,20 +1200,20 @@ async function fetchOverdueRows(
       to: true,
       custodianUserId: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMember: {
         select: {
           name: true,
         },
       },
-      // Phase 3a: walk the BookingAsset pivot to reach the asset for
-      // valuation, and count pivot rows for asset count.
+      // Walk the BookingAsset pivot for valuation and booked units, and
+      // count pivot rows for asset count.
       bookingAssets: {
         select: {
+          // Booked units — the value-at-risk multiplier for this surface
+          // (see .claude/rules/quantity-semantics-per-surface.md).
+          quantity: true,
           asset: {
             select: { id: true, valuation: true },
           },
@@ -1188,6 +1234,11 @@ async function fetchOverdueRows(
   });
 
   return bookings.map((b) => {
+    // why: this is a live operational list — "what is late right now, and by
+    // how much" — so it measures against the CURRENT deadline. An extension
+    // moves that date and this report must follow it. Booking Compliance asks
+    // whether the agreed plan was honoured and reads the planned end instead,
+    // so the two reports can legitimately disagree for an extended booking.
     const scheduledEnd = b.to!;
     const msOverdue = now.getTime() - scheduledEnd.getTime();
     const daysOverdue = Math.max(
@@ -1215,20 +1266,17 @@ async function fetchOverdueRows(
      * Sum valuations only for assets still outstanding (not yet checked in),
      * walking the Phase 3a `BookingAsset` pivot.
      */
+    // Per-unit valuation × booked units, matching the hero KPI's math.
     const valueAtRisk = b.bookingAssets
       .filter((ba) => !checkedInAssetIds.has(ba.asset.id))
-      .reduce((sum, ba) => sum + (ba.asset.valuation || 0), 0);
+      .reduce((sum, ba) => sum + (ba.asset.valuation ?? 0) * ba.quantity, 0);
 
     return {
       id: b.id,
       bookingId: b.id,
       bookingName: b.name || `Booking ${b.id.slice(0, 8)}`,
       custodian: b.custodianUser
-        ? stripNameSuffix(
-            `${b.custodianUser.firstName || ""} ${
-              b.custodianUser.lastName || ""
-            }`.trim()
-          )
+        ? stripNameSuffix(resolveUserDisplayName(b.custodianUser))
         : b.custodianTeamMember
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
@@ -2909,12 +2957,17 @@ export async function assetDistributionReport(
   const startTime = performance.now();
 
   try {
-    // Fetch all distribution data in parallel.
-    const [byCategory, byLocation, byStatus, kpis] = await Promise.all([
-      computeDistributionByCategory(organizationId),
-      computeDistributionByLocation(organizationId),
-      computeDistributionByStatus(organizationId),
+    // One asset read feeds all three breakdowns — each bucket builder is a
+    // pure reduction over the same rows, so a large inventory is scanned
+    // once instead of three times.
+    const [assets, kpis] = await Promise.all([
+      fetchDistributionAssets(organizationId),
       computeDistributionKpis(organizationId),
+    ]);
+    const [byCategory, byLocation, byStatus] = await Promise.all([
+      computeDistributionByCategory(assets, organizationId),
+      Promise.resolve(computeDistributionByLocation(assets)),
+      Promise.resolve(computeDistributionByStatus(assets)),
     ]);
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -2965,96 +3018,141 @@ export async function assetDistributionReport(
   }
 }
 
-async function computeDistributionByCategory(
+/** The shared asset row every distribution breakdown reduces over. */
+type DistributionAsset = {
+  id: string;
+  categoryId: string | null;
+  status: string;
+  valuation: number | null;
+  quantity: number | null;
+  assetLocations: {
+    quantity: number;
+    location: { id: string; name: string };
+  }[];
+};
+
+/**
+ * One asset read shared by all three distribution breakdowns.
+ *
+ * Bucket values are per-unit valuation × the surface's quantity, matching
+ * the headline Total Value KPI, so the builders need raw rows rather than a
+ * database groupBy (which cannot multiply columns).
+ */
+async function fetchDistributionAssets(
   organizationId: string
-): Promise<AssetDistributionRow[]> {
-  const assets = await db.asset.groupBy({
-    by: ["categoryId"],
-    where: { organizationId },
-    _count: { id: true },
-    _sum: { valuation: true },
-  });
-
-  const totalAssets = assets.reduce((sum, a) => sum + a._count.id, 0);
-
-  // Fetch category names
-  const categoryIds = assets
-    .map((a) => a.categoryId)
-    .filter((id): id is string => id !== null);
-
-  const categories = await db.category.findMany({
-    where: { id: { in: categoryIds }, organizationId },
-    select: { id: true, name: true },
-  });
-
-  const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
-
-  return assets
-    .map((a) => ({
-      id: a.categoryId || "uncategorized",
-      groupName: a.categoryId
-        ? categoryMap.get(a.categoryId) || "Unknown"
-        : "Uncategorized",
-      assetCount: a._count.id,
-      percentage:
-        totalAssets > 0 ? Math.round((a._count.id / totalAssets) * 100) : 0,
-      totalValue: a._sum.valuation,
-    }))
-    .sort((a, b) => b.assetCount - a.assetCount);
-}
-
-async function computeDistributionByLocation(
-  organizationId: string
-): Promise<AssetDistributionRow[]> {
-  // Pull every asset with its AssetLocation pivot rows (+ location name)
-  // so we can bucket each asset under each location it occupies. A
-  // QUANTITY_TRACKED asset can span multiple locations, so it may
-  // contribute to several buckets; assets with no pivot rows fall into
-  // "No Location".
-  const assets = await db.asset.findMany({
+): Promise<DistributionAsset[]> {
+  return db.asset.findMany({
     where: { organizationId },
     select: {
       id: true,
+      categoryId: true,
+      status: true,
       valuation: true,
+      quantity: true,
       assetLocations: {
         select: {
+          quantity: true,
           location: { select: { id: true, name: true } },
         },
       },
     },
   });
+}
 
-  // bucketKey → { name, assetCount, totalValue }. Counts are per
-  // (asset, location) pair to mirror the previous groupBy semantics.
+async function computeDistributionByCategory(
+  assets: DistributionAsset[],
+  organizationId: string
+): Promise<AssetDistributionRow[]> {
+  const totalAssets = assets.length;
+
+  const buckets = new Map<
+    string,
+    { assetCount: number; totalValue: number | null }
+  >();
+  for (const a of assets) {
+    const key = a.categoryId || "uncategorized";
+    const bucket = buckets.get(key) ?? { assetCount: 0, totalValue: null };
+    bucket.assetCount += 1;
+    if (a.valuation !== null) {
+      // Per-unit valuation × workspace stock, matching the headline KPI.
+      bucket.totalValue =
+        (bucket.totalValue ?? 0) + a.valuation * (a.quantity ?? 1);
+    }
+    buckets.set(key, bucket);
+  }
+
+  // Resolve category names for the buckets that have one.
+  const categoryIds = Array.from(buckets.keys()).filter(
+    (id) => id !== "uncategorized"
+  );
+  const categories = await db.category.findMany({
+    where: { id: { in: categoryIds }, organizationId },
+    select: { id: true, name: true },
+  });
+  const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
+
+  return Array.from(buckets.entries())
+    .map(([id, b]) => ({
+      id,
+      groupName:
+        id === "uncategorized"
+          ? "Uncategorized"
+          : categoryMap.get(id) || "Unknown",
+      assetCount: b.assetCount,
+      percentage:
+        totalAssets > 0 ? Math.round((b.assetCount / totalAssets) * 100) : 0,
+      totalValue: b.totalValue,
+    }))
+    .sort((a, b) => b.assetCount - a.assetCount);
+}
+
+function computeDistributionByLocation(
+  assets: DistributionAsset[]
+): AssetDistributionRow[] {
+  // A QUANTITY_TRACKED asset can span multiple locations, so it may
+  // contribute to several buckets; value weighs the per-unit valuation by
+  // the UNITS AT THAT LOCATION (`AssetLocation.quantity`).
+  //
+  // "No Location" holds only assets with no placement rows at all: the
+  // donut slice drills down to `/assets?location=without-location`, whose
+  // filter matches `assetLocations: { none: {} }`, so the bucket must
+  // describe exactly that population. Unplaced remainders of partially
+  // placed assets are deliberately not attributed here.
   const buckets = new Map<
     string,
     { name: string; assetCount: number; totalValue: number | null }
   >();
 
-  const addToBucket = (key: string, name: string, valuation: number | null) => {
-    const existing = buckets.get(key);
-    if (existing) {
-      existing.assetCount += 1;
-      existing.totalValue =
-        valuation === null
-          ? existing.totalValue
-          : (existing.totalValue ?? 0) + valuation;
-    } else {
-      buckets.set(key, {
-        name,
-        assetCount: 1,
-        totalValue: valuation,
-      });
+  const addToBucket = (key: string, name: string, value: number | null) => {
+    const existing = buckets.get(key) ?? {
+      name,
+      assetCount: 0,
+      totalValue: null,
+    };
+    existing.assetCount += 1;
+    if (value !== null) {
+      existing.totalValue = (existing.totalValue ?? 0) + value;
     }
+    buckets.set(key, existing);
   };
 
   for (const asset of assets) {
     if (asset.assetLocations.length === 0) {
-      addToBucket("without-location", "No Location", asset.valuation);
+      addToBucket(
+        "without-location",
+        "No Location",
+        asset.valuation === null
+          ? null
+          : asset.valuation * (asset.quantity ?? 1)
+      );
       continue;
     }
     for (const pivot of asset.assetLocations) {
-      addToBucket(pivot.location.id, pivot.location.name, asset.valuation);
+      addToBucket(
+        pivot.location.id,
+        pivot.location.name,
+        asset.valuation === null ? null : asset.valuation * pivot.quantity
+      );
     }
   }
 
@@ -3075,17 +3173,10 @@ async function computeDistributionByLocation(
     .sort((a, b) => b.assetCount - a.assetCount);
 }
 
-async function computeDistributionByStatus(
-  organizationId: string
-): Promise<AssetDistributionRow[]> {
-  const assets = await db.asset.groupBy({
-    by: ["status"],
-    where: { organizationId },
-    _count: { id: true },
-    _sum: { valuation: true },
-  });
-
-  const totalAssets = assets.reduce((sum, a) => sum + a._count.id, 0);
+function computeDistributionByStatus(
+  assets: DistributionAsset[]
+): AssetDistributionRow[] {
+  const totalAssets = assets.length;
 
   const statusLabels: Record<string, string> = {
     AVAILABLE: "Available",
@@ -3093,14 +3184,32 @@ async function computeDistributionByStatus(
     CHECKED_OUT: "Checked Out",
   };
 
-  return assets
-    .map((a) => ({
-      id: a.status,
-      groupName: statusLabels[a.status] || a.status,
-      assetCount: a._count.id,
+  const buckets = new Map<
+    string,
+    { assetCount: number; totalValue: number | null }
+  >();
+  for (const a of assets) {
+    const bucket = buckets.get(a.status) ?? {
+      assetCount: 0,
+      totalValue: null,
+    };
+    bucket.assetCount += 1;
+    if (a.valuation !== null) {
+      // Per-unit valuation × workspace stock, matching the headline KPI.
+      bucket.totalValue =
+        (bucket.totalValue ?? 0) + a.valuation * (a.quantity ?? 1);
+    }
+    buckets.set(a.status, bucket);
+  }
+
+  return Array.from(buckets.entries())
+    .map(([status, b]) => ({
+      id: status,
+      groupName: statusLabels[status] || status,
+      assetCount: b.assetCount,
       percentage:
-        totalAssets > 0 ? Math.round((a._count.id / totalAssets) * 100) : 0,
-      totalValue: a._sum.valuation,
+        totalAssets > 0 ? Math.round((b.assetCount / totalAssets) * 100) : 0,
+      totalValue: b.totalValue,
     }))
     .sort((a, b) => b.assetCount - a.assetCount);
 }
@@ -4138,11 +4247,7 @@ export async function assetActivityReport(
     // Map events to rows
     const rows: AssetActivityRow[] = events.map((event) => {
       const asset = event.assetId ? assetMap.get(event.assetId) : null;
-      const actorSnapshot = event.actorSnapshot as {
-        firstName?: string;
-        lastName?: string;
-        displayName?: string;
-      } | null;
+      const actorSnapshot = event.actorSnapshot as UserNameFields | null;
 
       return {
         id: event.id,
@@ -4155,12 +4260,7 @@ export async function assetActivityReport(
         description: buildActivityDescription(event),
         occurredAt: event.occurredAt,
         performedBy: actorSnapshot
-          ? stripNameSuffix(
-              actorSnapshot.displayName ||
-                `${actorSnapshot.firstName || ""} ${
-                  actorSnapshot.lastName || ""
-                }`.trim()
-            )
+          ? stripNameSuffix(resolveUserDisplayName(actorSnapshot))
           : null,
         context: null,
       };

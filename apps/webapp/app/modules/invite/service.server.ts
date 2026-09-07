@@ -549,10 +549,13 @@ export async function getPaginatedAndFilterableSettingInvites({
           },
         },
         {
+          // `displayName` replaces first/last name in the UI for users who set
+          // one, so it is the name a searcher can actually see on the row.
           inviteeUser: {
             OR: [
               { firstName: { contains: search, mode: "insensitive" } },
               { lastName: { contains: search, mode: "insensitive" } },
+              { displayName: { contains: search, mode: "insensitive" } },
             ],
           },
         },

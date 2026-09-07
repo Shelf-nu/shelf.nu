@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -8,8 +7,13 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
-import { getBookings } from "~/modules/booking/service.server";
+import {
+  getBookings,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
+import { resolveBookingCustodianName } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
 
 /**
  * GET /api/mobile/dashboard
@@ -33,34 +37,39 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // (canUseAudits, surfaced through getMobileUserContext) so the
     // dashboard never serves activeAudits to non-add-on workspaces — a
     // paywall bypass / data leak even with the client cards hidden.
-    // The same call yields the caller's `role`, which gates booking
-    // visibility below.
-    const { canUseAudits, role } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    // The same call yields `canSeeAllBookings`, which decides which bookings
+    // the sections may draw from, and `canSeeAllCustody` for their names.
+    const { canUseAudits, canSeeAllBookings, canSeeAllCustody } =
+      await getMobileUserContext(user.id, organizationId);
 
-    // Scope the booking sections to the caller's own bookings for
-    // self-service / base users, who may only see bookings they are the
-    // custodian of. `requireOrganizationAccess` above proves membership but
-    // performs NO role check, so without this restriction any member could
-    // read every booking in the workspace — with custodian names attached —
-    // straight off the dashboard.
+    // Which bookings the Home sections may draw from.
+    // `requireOrganizationAccess` above proves membership and performs NO role
+    // check, so without a restriction here any member could read every booking
+    // in the workspace — with custodian names attached — straight off the
+    // dashboard.
     //
-    // Mirrors the mobile bookings list (`bookings.ts`), which draws the same
-    // line for the same roles. Passed as `custodianScope` — a restriction
-    // `getBookings` ANDs into the query, so it can only ever narrow. Left
-    // `null` for owners/admins, who see all bookings.
+    // `canSeeAllBookings` is that decision: ADMIN and OWNER see every booking,
+    // SELF_SERVICE and BASE see only the ones they hold unless the workspace
+    // has switched their override on. The role alone cannot answer it — it does
+    // not know what the workspace decided — so Home reads the same flag the
+    // website does and lands on the same set of bookings.
+    //
+    // `resolveCustodianScope` rather than a bare `{ userId }`: custody lives
+    // on a user link OR any of the caller's team-member links, and a bare
+    // user-link filter hides a user's own booking whenever their custody comes
+    // from a team member. The list and calendar resolve it the same way; this
+    // is the third lens on the same rows. It reaches `getBookings` as
+    // `custodianScope`, a restriction ANDed into the query, so it can only ever
+    // narrow — and `null` lifts it entirely.
     //
     // NOTE: this deliberately does not mirror the web dashboard, which denies
     // self-service/base the page outright (`PermissionEntity.dashboard` is
     // empty for both). The companion's Home tab is the app's landing screen
     // for every role, not an admin analytics surface — denying it would leave
     // those users on a permanent error state rather than a scoped dashboard.
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
-    const custodianScope = isSelfServiceOrBase ? { userId: user.id } : null;
+    const custodianScope = canSeeAllBookings
+      ? null
+      : await resolveCustodianScope({ userId: user.id, organizationId });
 
     // Run all queries in parallel for speed
     const [
@@ -140,15 +149,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
         userId: user.id,
         custodianScope,
         bookingFrom: new Date(),
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
+            // `id` and the team member's `userId` together answer "is the
+            // custodian the caller?", which keeps their own name visible.
             select: {
+              id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
-          custodianTeamMember: { select: { name: true } },
+          custodianTeamMember: { select: { name: true, userId: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -160,15 +178,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
         statuses: ["ONGOING"],
         userId: user.id,
         custodianScope,
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
+            // `id` and the team member's `userId` answer "is the caller the
+            // custodian?", which keeps their own name visible when the
+            // custody override is off.
             select: {
+              id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
-          custodianTeamMember: { select: { name: true } },
+          custodianTeamMember: { select: { name: true, userId: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -180,15 +208,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
         statuses: ["OVERDUE"],
         userId: user.id,
         custodianScope,
+        // The companion renders booking scalars, a custodian name and a count
+        // — never an asset row — so the per-booking asset payload is skipped
+        // and the count comes from the aggregate instead.
+        includeAssets: false,
         extraInclude: {
           custodianUser: {
+            // `id` and the team member's `userId` answer "is the caller the
+            // custodian?", which keeps their own name visible when the
+            // custody override is off.
             select: {
+              id: true,
               firstName: true,
               lastName: true,
+              displayName: true,
               profilePicture: true,
             },
           },
-          custodianTeamMember: { select: { name: true } },
+          custodianTeamMember: { select: { name: true, userId: true } },
+          _count: { select: { bookingAssets: true } },
         },
       }),
 
@@ -227,19 +265,54 @@ export async function loader({ request }: LoaderFunctionArgs) {
       statusCounts[group.status] = group._count.id;
     }
 
+    /**
+     * The booking row shape the three `getBookings` calls above produce, as
+     * far as this projection reads it.
+     *
+     * Spelled out instead of `any` because the field it gets wrong is
+     * invisible at runtime: the previous `b._count?.assets` named a relation
+     * that does not exist on `Booking` (it is `bookingAssets`) and no `_count`
+     * was selected at all, so every booking reported `assetCount: 0` and the
+     * `any` kept the compiler quiet about it.
+     */
+    type MobileDashboardBooking = {
+      id: string;
+      name: string;
+      status: string;
+      from: Date | string | null;
+      to: Date | string | null;
+      /**
+       * `UserNameFields` rather than the name halves spelled out: it requires
+       * `displayName`, so this shape cannot drift back to naming the custodian
+       * by their legal name without failing to compile.
+       */
+      /**
+       * `id` and the team member's `userId` are REQUIRED for the same reason
+       * `UserNameFields` is: they answer "is the custodian the caller?", so a
+       * projection that drops one silently redacts a user's own booking rather
+       * than failing to compile.
+       */
+      custodianUser?: (UserNameFields & { id: string }) | null;
+      custodianTeamMember?: { name: string; userId: string | null } | null;
+      _count?: { bookingAssets: number };
+    };
+
     // Format booking results
-    const formatBooking = (b: any) => ({
+    const formatBooking = (b: MobileDashboardBooking) => ({
       id: b.id,
       name: b.name,
       status: b.status,
-      from: b.from?.toISOString?.() ?? b.from,
-      to: b.to?.toISOString?.() ?? b.to,
-      custodianName: b.custodianUser
-        ? [b.custodianUser.firstName, b.custodianUser.lastName]
-            .filter(Boolean)
-            .join(" ") || null
-        : b.custodianTeamMember?.name || null,
-      assetCount: b._count?.assets ?? 0,
+      from: b.from instanceof Date ? b.from.toISOString() : b.from,
+      to: b.to instanceof Date ? b.to.toISOString() : b.to,
+      // Custody visibility is its own workspace override. The shared resolver
+      // is what keeps Home naming a booking's holder the same way the list and
+      // the calendar do.
+      custodianName: resolveBookingCustodianName({
+        canSeeAllCustody,
+        booking: b,
+        userId: user.id,
+      }),
+      assetCount: b._count?.bookingAssets ?? 0,
     });
 
     return data({

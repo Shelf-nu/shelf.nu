@@ -24,6 +24,7 @@ const partialCheckinStub = {
     id: "user-1",
     firstName: "Test",
     lastName: "User",
+    displayName: null,
     profilePicture: null,
   },
 };

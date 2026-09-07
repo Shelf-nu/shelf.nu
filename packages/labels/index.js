@@ -101,6 +101,34 @@ export const AUDIT_ASSET_STATUS_LABELS = Object.freeze({
 });
 
 /**
+ * Wording for an audit scan whose asset no longer exists.
+ *
+ * Deleting an asset leaves the scan row behind with nothing to name it but the
+ * title captured at scan time, so these two strings are the only thing standing
+ * between an auditor and an anonymous row. Both apps must say it the same way:
+ * an audit is a historical record, and two surfaces describing the same
+ * surviving row differently is exactly the drift this package exists to stop.
+ *
+ * `UNTITLED` covers a row scanned before the title was recorded by value —
+ * there is no name left to qualify, so the row says only what it is.
+ */
+export const AUDIT_DELETED_ASSET_LABELS = Object.freeze({
+  UNTITLED: "Deleted asset",
+});
+
+/**
+ * Names a scan whose asset has been deleted, keeping the title it had when it
+ * was scanned and marking it as gone.
+ *
+ * @param {string | null | undefined} title - the snapshotted title, if any
+ * @returns {string} the row's display name
+ */
+export function auditDeletedAssetLabel(title) {
+  const trimmed = typeof title === "string" ? title.trim() : "";
+  return trimmed ? `${trimmed} (deleted)` : AUDIT_DELETED_ASSET_LABELS.UNTITLED;
+}
+
+/**
  * The ONE derivation of the "is this audit concluded?" flag every audit label
  * depends on. Read `completedAt`, never `status`.
  *

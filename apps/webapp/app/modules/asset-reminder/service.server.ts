@@ -67,9 +67,8 @@ export async function createAssetReminder({
         userId: createdById,
         type: "UPDATE",
         content: `${wrapUserLinkForNote({
+          ...user,
           id: createdById,
-          firstName: user.firstName,
-          lastName: user.lastName,
         })} created a new reminder ${wrapLinkForNote(
           `/assets/${assetId}/reminders?${new URLSearchParams({
             s: assetReminder.name,

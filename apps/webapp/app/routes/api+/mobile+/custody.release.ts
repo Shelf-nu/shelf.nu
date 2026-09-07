@@ -116,6 +116,7 @@ export async function action({ request }: ActionFunctionArgs) {
       id: user.id,
       firstName: user.firstName,
       lastName: user.lastName,
+      displayName: user.displayName,
     });
 
     await createNote({

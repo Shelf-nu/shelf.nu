@@ -28,6 +28,7 @@ import {
   type CustomerWithSubscriptions,
 } from "~/utils/stripe.server";
 
+import { resolveUserGreetingName } from "~/utils/user";
 import {
   isAddonSubscription,
   isHigherOrEqualTier,
@@ -222,7 +223,7 @@ export async function handleSubscriptionCreated(
 
     void sendTeamTrialWelcomeEmail({
       email: trialUser.email,
-      firstName: trialUser.firstName,
+      firstName: resolveUserGreetingName(trialUser),
     });
   } else if (isTransferredSubscription) {
     // Transferred subscription: update tier but skip welcome emails
@@ -890,7 +891,7 @@ export async function handleTrialWillEnd(
       // Send 3-day warning email
       if (addonType === "audits") {
         void sendAuditTrialEndsSoonEmail({
-          firstName: user.firstName,
+          firstName: resolveUserGreetingName(user),
           email: user.email,
           hasPaymentMethod,
           trialEndDate,
@@ -898,7 +899,7 @@ export async function handleTrialWillEnd(
         });
       } else {
         void sendBarcodeTrialEndsSoonEmail({
-          firstName: user.firstName,
+          firstName: resolveUserGreetingName(user),
           email: user.email,
           hasPaymentMethod,
           trialEndDate,
@@ -916,7 +917,7 @@ export async function handleTrialWillEnd(
             addonType,
             userId: user.id,
             email: user.email,
-            firstName: user.firstName,
+            firstName: resolveUserGreetingName(user),
             customerId,
             subscriptionId: subscription.id,
             trialEndDate: trialEndDate.toISOString(),
@@ -949,7 +950,7 @@ export async function handleTrialWillEnd(
     // Format the trial-end date with the billed (recipient) user's prefs.
     const prefs = await resolveUserFormatPrefsById(user.id, null);
     void sendTrialEndsSoonEmail({
-      firstName: user.firstName,
+      firstName: resolveUserGreetingName(user),
       email: user.email,
       hasPaymentMethod,
       planName: product?.name || "Shelf",

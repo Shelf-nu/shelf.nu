@@ -4,23 +4,38 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { tw } from "~/utils/tw";
+import type { TeamMemberNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { GrayBadge } from "../shared/gray-badge";
 
-export interface TeamMemberForBadge {
-  name: string;
-  user: {
-    id: string;
-    firstName: string | null;
-    lastName?: string | null;
-    email?: string | null;
-    profilePicture?: string | null;
-  } | null;
+/**
+ * The shape this badge needs from a custodian row.
+ *
+ * Extends {@link TeamMemberNameFields}, so `user.displayName` is required here
+ * too and a loader that forgets to select it fails to compile. `user.id` is
+ * additionally required because the permission check compares it against the
+ * viewer.
+ */
+export interface TeamMemberForBadge extends TeamMemberNameFields {
+  user:
+    | (NonNullable<TeamMemberNameFields["user"]> & {
+        id: string;
+        profilePicture?: string | null;
+      })
+    | null;
 }
 
 /**
- * A badge to display a team member's name and profile picture
+ * A badge showing a team member's name and profile picture.
  *
+ * The whole `teamMember` is handed to `resolveTeamMemberName` rather than
+ * rebuilt field by field: a re-projection here silently drops `displayName`
+ * and, because a resolved user name outranks the stored `TeamMember.name`,
+ * would override a correct name supplied by the caller.
+ *
+ * @param props.teamMember - The custodian to name; renders nothing when absent
+ * @param props.hidePrivate - Hide the badge entirely, rather than showing
+ *   "private", when the viewer may not see this custodian
  */
 export function TeamMemberBadge({
   teamMember,
@@ -48,25 +63,14 @@ export function TeamMemberBadge({
           {teamMember?.user ? (
             <img
               src={
-                teamMember?.user?.profilePicture ||
+                teamMember.user.profilePicture ||
                 "/static/images/default_pfp.jpg"
               }
               className="mr-1 size-4 rounded-full"
               alt={"Team member profile"}
             />
           ) : null}
-          <span className="mt-px">
-            {resolveTeamMemberName({
-              name: teamMember.name,
-              user: teamMember?.user
-                ? {
-                    firstName: teamMember?.user?.firstName || null,
-                    lastName: teamMember?.user?.lastName || null,
-                    email: teamMember?.user?.email || "",
-                  }
-                : undefined,
-            })}
-          </span>
+          <span className="mt-px">{resolveTeamMemberName(teamMember)}</span>
         </>
       ) : !hidePrivate ? (
         "private"

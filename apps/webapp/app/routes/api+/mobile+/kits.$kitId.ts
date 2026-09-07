@@ -90,7 +90,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 // distinguish them and would have to hide both.
                 userId: true,
                 user: {
-                  select: { firstName: true, lastName: true, email: true },
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    displayName: true,
+                    email: true,
+                  },
                 },
               },
             },

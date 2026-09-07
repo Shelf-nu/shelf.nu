@@ -77,6 +77,7 @@ import type {
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
 import {
   createAvailabilityLabels,
@@ -2167,6 +2168,7 @@ function QuantityDispositionBlock({
           <input
             ref={primaryInputRef}
             type="number"
+            {...numberInputWheelGuard}
             min={0}
             max={info.remaining}
             step={1}
@@ -2201,6 +2203,7 @@ function QuantityDispositionBlock({
               <span className="text-gray-600">Returned</span>
               <input
                 type="number"
+                {...numberInputWheelGuard}
                 min={0}
                 max={info.remaining}
                 step={1}
@@ -2218,6 +2221,7 @@ function QuantityDispositionBlock({
             <span className="text-gray-600">Lost</span>
             <input
               type="number"
+              {...numberInputWheelGuard}
               min={0}
               max={info.remaining}
               step={1}
@@ -2234,6 +2238,7 @@ function QuantityDispositionBlock({
             <span className="text-gray-600">Damaged</span>
             <input
               type="number"
+              {...numberInputWheelGuard}
               min={0}
               max={info.remaining}
               step={1}

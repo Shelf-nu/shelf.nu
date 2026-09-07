@@ -22,6 +22,10 @@ export const Role2PermissionMap: {
 } = {
   BASE: {
     [PermissionEntity.asset]: [PermissionAction.read],
+    // Reports aggregate org-wide custody, booking and value data; the
+    // sidebar offers them to admins and owners only, and the server gate
+    // matches that. Empty = no access.
+    [PermissionEntity.reports]: [],
     [PermissionEntity.assetIndexSettings]: [PermissionAction.read],
     [PermissionEntity.booking]: [
       PermissionAction.create,
@@ -71,6 +75,7 @@ export const Role2PermissionMap: {
   },
   SELF_SERVICE: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
+    [PermissionEntity.reports]: [],
     [PermissionEntity.assetIndexSettings]: [PermissionAction.read],
     [PermissionEntity.booking]: [
       PermissionAction.create,
@@ -124,6 +129,10 @@ export const Role2PermissionMap: {
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
   },
   ADMIN: {
+    [PermissionEntity.reports]: [
+      PermissionAction.read,
+      PermissionAction.export,
+    ],
     [PermissionEntity.asset]: [
       PermissionAction.create,
       PermissionAction.read,
@@ -269,6 +278,10 @@ export const Role2PermissionMap: {
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
   },
   OWNER: {
+    [PermissionEntity.reports]: [
+      PermissionAction.read,
+      PermissionAction.export,
+    ],
     [PermissionEntity.asset]: [
       PermissionAction.create,
       PermissionAction.read,

@@ -29,6 +29,10 @@ function scimUserSelect(organizationId: string) {
   return {
     id: true,
     email: true,
+    // why: out of the display-name rule — these two are the SCIM protocol's
+    // `name.givenName`/`familyName`, which the IdP owns and reconciles against.
+    // SCIM's own `displayName` attribute is a separate schema decision, not a
+    // Shelf rendering surface.
     firstName: true,
     lastName: true,
     scimExternalIds: {

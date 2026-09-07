@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { reportAuditDurabilityEvent } from "./sentry";
+import { AUDIT_SCAN_KEY_PREFIX } from "./server/contract";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -35,8 +36,11 @@ export type PersistedScanState = {
 
 // ── Storage key ──────────────────────────────────────────
 
-const KEY_PREFIX = "shelf_audit_scan_";
-const storageKey = (auditId: string) => `${KEY_PREFIX}${auditId}`;
+// why: the prefix lives in server/contract.ts, not here, because the
+// server-switch teardown must clear these drafts by prefix and cannot import
+// this module (that would be a require cycle via ./sentry). Importing the
+// single definition keeps the writer and the teardown from ever drifting.
+const storageKey = (auditId: string) => `${AUDIT_SCAN_KEY_PREFIX}${auditId}`;
 
 // ── Public API ───────────────────────────────────────────
 

@@ -12,6 +12,7 @@ import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
 type BasicAuditEmailContentArgs = {
@@ -260,12 +261,7 @@ export function sendAuditCancelledEmails({
     // The four raw format-preference columns (via RawFormatPrefs) travel on
     // each recipient row so per-recipient prefs resolve from the loaded row —
     // no per-recipient DB fetch (avoids an N+1 in the bulk fan-out).
-    user: {
-      email: string;
-      firstName: string | null;
-      lastName: string | null;
-      displayName?: string | null;
-    } & RawFormatPrefs;
+    user: UserNameFields & { email: string } & RawFormatPrefs;
   }>;
   /**
    * Display name of the user who actually cancelled the audit. May differ
@@ -350,12 +346,7 @@ export function sendAuditCompletedEmail({
     userId: string;
     // Raw format-preference columns travel on each recipient row so prefs
     // resolve from the loaded row — no per-recipient DB fetch (no N+1).
-    user: {
-      email: string;
-      firstName: string | null;
-      lastName: string | null;
-      displayName?: string | null;
-    } & RawFormatPrefs;
+    user: UserNameFields & { email: string } & RawFormatPrefs;
   }>;
   hints: ClientHint;
   completedAt: Date;
@@ -439,12 +430,7 @@ export function sendAuditReminderEmail({
   audit: AuditForEmail;
   assignees: Array<{
     userId: string;
-    user: {
-      email: string;
-      firstName: string | null;
-      lastName: string | null;
-      displayName?: string | null;
-    } & RawFormatPrefs;
+    user: UserNameFields & { email: string } & RawFormatPrefs;
   }>;
   hints: ClientHint;
   timeframe: string;
@@ -528,10 +514,8 @@ export function sendAuditOverdueEmail({
       /** Recipient user id (informational; prefs resolve from the columns). */
       userId?: string;
       email: string;
-      firstName: string | null;
-      lastName: string | null;
-      displayName?: string | null;
-    } & RawFormatPrefs
+    } & UserNameFields &
+      RawFormatPrefs
   >;
   hints: ClientHint;
 }): void {

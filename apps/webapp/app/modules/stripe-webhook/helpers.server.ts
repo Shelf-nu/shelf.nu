@@ -10,13 +10,12 @@ import {
 } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { stripe } from "~/utils/stripe.server";
+import type { UserNameFields } from "~/utils/user";
 
 /** The user shape returned by the webhook's initial DB query */
-export type WebhookUser = {
+export type WebhookUser = UserNameFields & {
   id: string;
   email: string;
-  firstName: string | null;
-  lastName: string | null;
   tierId: TierId;
   warnForNoPaymentMethod: boolean;
 };
@@ -86,13 +85,7 @@ export function sendAdminInvoiceEmail({
   invoiceId,
   subject,
 }: {
-  user: {
-    id: string;
-    email: string;
-    firstName?: string | null;
-    lastName?: string | null;
-    displayName?: string | null;
-  };
+  user: UserNameFields & { id: string; email: string };
   eventType: string;
   invoiceId: string;
   subject: string;

@@ -32,6 +32,10 @@ import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
 import { Spinner } from "~/components/shared/spinner";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
+import {
+  countDeletedExpectedScans,
+  resolveScannedExpectedness,
+} from "~/utils/audit-scan-expectedness";
 import { tw } from "~/utils/tw";
 
 const AuditSchema = z.object({
@@ -260,6 +264,20 @@ function AuditDrawerEmptyState({
  * @param props.emptyStateContent - Overrides the default empty-state render.
  * @returns The audit scan drawer.
  */
+/**
+ * A scanned asset as the drawer reads it.
+ *
+ * `AssetFromQr` describes an asset fetched live by the scanner. A row restored
+ * from an audit's saved scans carries two extra facts that no live scan has —
+ * whether the asset has since been deleted, and the expectedness the server
+ * resolved from the scan's own snapshot — and a deleted row is the one case
+ * where the expected list cannot answer for it.
+ */
+type ScannedAssetData = AssetFromQr & {
+  assetDeleted?: boolean;
+  isExpected?: boolean;
+};
+
 export default function AuditDrawer({
   contextLabel,
   contextName,
@@ -332,12 +350,18 @@ export default function AuditDrawer({
       Object.values(items)
         .filter((item) => !!item && item.data && item.type === "asset")
         .map((item) => {
-          const assetData = item!.data as AssetFromQr;
+          const assetData = item!.data as ScannedAssetData;
+          const wasExpected = resolveScannedExpectedness({
+            assetId: assetData.id,
+            assetDeleted: assetData.assetDeleted,
+            isExpected: assetData.isExpected,
+            expectedAssetIds,
+          });
           return {
             id: assetData.id,
             name: assetData.title,
             type: "asset" as const,
-            auditStatus: expectedAssetIds.has(assetData.id)
+            auditStatus: wasExpected
               ? ("found" as const)
               : ("unexpected" as const),
           } satisfies AuditScannedItem;
@@ -356,6 +380,22 @@ export default function AuditDrawer({
     [items]
   );
 
+  // A deleted asset the audit expected is gone from `expectedAssets` — its
+  // AuditAsset row was cascaded away — but it is still counted as found above,
+  // and the session's own expectedAssetCount still counts it. Leaving it out of
+  // the expected total is what makes the drawer read "1 of 0 found".
+  const deletedExpectedCount = useMemo(
+    () =>
+      countDeletedExpectedScans(
+        Object.values(items).map((item) =>
+          item && item.type === "asset"
+            ? (item.data as ScannedAssetData | undefined)
+            : undefined
+        )
+      ),
+    [items]
+  );
+
   const foundAssets = scannedAssets.filter(
     (asset) => asset.auditStatus === "found"
   );
@@ -368,13 +408,14 @@ export default function AuditDrawer({
 
   const stats: AuditDrawerStats = useMemo(
     () => ({
-      totalExpected: expectedAssets.length,
+      totalExpected: expectedAssets.length + deletedExpectedCount,
       foundCount: foundAssets.length,
       missingCount: missingAssets.length,
       unexpectedCount: unexpectedAssets.length,
     }),
     [
       expectedAssets.length,
+      deletedExpectedCount,
       foundAssets.length,
       missingAssets.length,
       unexpectedAssets.length,
@@ -495,10 +536,10 @@ export default function AuditDrawer({
       showLocation,
     });
 
-  const shouldDisableSubmit =
-    hasBlockers ||
-    !auditSession ||
-    stats.foundCount + stats.unexpectedCount === 0;
+  // Completing with nothing scanned is legal — it marks every expected asset
+  // missing. The CompleteAuditDialog this drawer submits through states that
+  // outcome before anything is committed, so the button itself stays enabled.
+  const shouldDisableSubmit = hasBlockers || !auditSession;
 
   return (
     <ConfigurableDrawer

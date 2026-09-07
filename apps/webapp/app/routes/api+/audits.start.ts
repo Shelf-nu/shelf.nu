@@ -29,6 +29,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * Base schema with common audit fields shared across different entry points.
@@ -282,9 +283,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
         );
 
         if (assigneeUser?.user.email) {
-          const assigneeName = `${assigneeUser.user.firstName || "Unknown"} ${
-            assigneeUser.user.lastName || "User"
-          }`;
+          const assigneeName =
+            resolveUserDisplayName(assigneeUser.user) || "Unknown User";
 
           // Send async email (don't await to avoid blocking response).
           // `assignee` is the recipient user id — plumbed so the email helper

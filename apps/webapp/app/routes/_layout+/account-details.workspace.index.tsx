@@ -26,7 +26,7 @@ import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
-import { resolveUserDisplayName } from "~/utils/user";
+import type { UserNameFields } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -231,10 +231,8 @@ const OrganizationRow = ({
       members: number | null;
       locations: number | null;
     };
-    owner: {
+    owner: UserNameFields & {
       id: string;
-      firstName: string | null;
-      lastName: string | null;
       profilePicture: string | null;
     };
   };
@@ -284,10 +282,7 @@ const OrganizationRow = ({
         </div>
       </Td>
       <Td>
-        <UserBadge
-          img={item.owner.profilePicture}
-          name={resolveUserDisplayName(item.owner)}
-        />
+        <UserBadge user={item.owner} />
       </Td>
 
       <Td>{item.type}</Td>

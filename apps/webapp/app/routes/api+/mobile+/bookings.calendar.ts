@@ -1,4 +1,4 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -12,7 +12,7 @@ import {
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
-import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
+import { resolveBookingCustodianName } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -46,8 +46,9 @@ const MAX_BOOKINGS_PER_WINDOW = 500;
  * cannot use. The SCOPING is what matters and is mirrored exactly from the
  * mobile bookings list:
  *   - organisation scoped
- *   - SELF_SERVICE / BASE see only bookings they are custodian of
- *   - DRAFT bookings stay private to their creator
+ *   - SELF_SERVICE / BASE see only bookings they hold, unless the workspace
+ *     grants them the booking-visibility override
+ *   - DRAFT bookings stay private to their creator, override or not
  *
  * Overlap, not containment: a booking running 28 Jul to 3 Aug belongs on the
  * August calendar too. Filtering on `from` alone would hide it.
@@ -185,22 +186,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       url.searchParams.get("search")?.trim().slice(0, 100) || undefined;
 
     /**
-     * `roles`, resolved to the most privileged one - NOT the context's `role`,
-     * which is `roles[0]`. A membership stored `[SELF_SERVICE, ADMIN]` resolves
-     * to SELF_SERVICE there, so a genuine admin was narrowed to bookings they
-     * are custodian of and every colleague's booking vanished from the grid
-     * while the list lens still showed them. The sibling mobile booking routes
-     * all resolve it this way.
+     * Which bookings exist for this caller, resolved from the workspace
+     * overrides and not from the role alone. The list lens on this same screen
+     * asks the same context the same question: the two must agree, or one lens
+     * shows a booking the other says is not there.
      */
-    const { roles } = await getMobileUserContext(user.id, organizationId);
-    const role = resolveMostPrivilegedRole(roles);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    const { canSeeAllBookings, canSeeAllCustody } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
-    const custodianScope = isSelfServiceOrBase
-      ? await resolveCustodianScope({ userId: user.id, organizationId })
-      : null;
+    const custodianScope = canSeeAllBookings
+      ? null
+      : await resolveCustodianScope({ userId: user.id, organizationId });
 
     /**
      * Everything except the date window, so the same filter can also answer the
@@ -263,8 +261,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         status: true,
         from: true,
         to: true,
-        custodianUser: { select: { firstName: true, lastName: true } },
-        custodianTeamMember: { select: { name: true } },
+        custodianUser: {
+          // `id` here and `userId` below together answer "is the custodian
+          // the caller?", which keeps their own name visible to them.
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            displayName: true,
+          },
+        },
+        custodianTeamMember: { select: { name: true, userId: true } },
       },
       // Soonest first: a calendar is read forwards.
       orderBy: [{ from: "asc" }],
@@ -323,12 +330,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         status: b.status,
         from: b.from,
         to: b.to,
-        custodianName:
-          b.custodianTeamMember?.name ||
-          [b.custodianUser?.firstName, b.custodianUser?.lastName]
-            .filter(Boolean)
-            .join(" ") ||
-          null,
+        // Custody visibility is its own workspace override, and the shared
+        // resolver is what keeps this lens agreeing with the list lens on the
+        // same screen about who holds a booking.
+        custodianName: resolveBookingCustodianName({
+          canSeeAllCustody,
+          booking: b,
+          userId: user.id,
+        }),
       })),
       /**
        * True when this window holds more than one response may carry, so the

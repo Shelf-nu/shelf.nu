@@ -9,6 +9,7 @@ import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import type { OwnerSubscriptionInfo } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
+import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
@@ -35,10 +36,8 @@ import {
 import { WarningBox } from "../shared/warning-box";
 import When from "../when/when";
 
-type Admin = {
+type Admin = UserNameFields & {
   id: string;
-  firstName: string | null;
-  lastName: string | null;
   email: string;
 };
 

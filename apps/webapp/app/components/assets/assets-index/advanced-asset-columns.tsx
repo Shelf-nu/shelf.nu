@@ -892,28 +892,13 @@ function UpcomingBookingsColumn({
                         end: booking.to,
                         custodian: {
                           name: custodianName ?? "",
-                          user: booking.custodianUser
-                            ? {
-                                id: booking.custodianUser.id,
-                                firstName: booking.custodianUser.firstName,
-                                lastName: booking.custodianUser.lastName,
-                                profilePicture:
-                                  booking.custodianUser.profilePicture,
-                              }
-                            : null,
+                          user: booking.custodianUser ?? null,
                         },
                         creator: {
                           name: booking.creator
                             ? resolveUserDisplayName(booking.creator)
                             : "Unknown",
-                          user: booking.creator
-                            ? {
-                                id: booking.creator.id,
-                                firstName: booking.creator.firstName,
-                                lastName: booking.creator.lastName,
-                                profilePicture: booking.creator.profilePicture,
-                              }
-                            : null,
+                          user: booking.creator ?? null,
                         },
                       }}
                     />

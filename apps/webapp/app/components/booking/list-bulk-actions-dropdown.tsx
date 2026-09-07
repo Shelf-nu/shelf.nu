@@ -1,11 +1,10 @@
 import { useMemo, useState } from "react";
-import { BookingStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import { ChevronRight, PackageCheck, PackageMinus } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithStatus } from "~/utils/booking-assets";
@@ -57,28 +56,12 @@ function ConditionalDropdown() {
     checkedOutAssetIds = [],
     remainingToCheckOutByAsset = {},
   } = useLoaderData<BookingPageLoaderData>();
-  const bookingStatus = useBookingStatusHelpers(
-    booking.status as BookingStatus
-  );
   const actionsButtonDisabled = selectedItems.length === 0;
 
-  // Show partial check-in only for ONGOING/OVERDUE bookings.
-  const showPartialCheckin =
-    bookingStatus?.isOngoing || bookingStatus?.isOverdue;
-
-  // Show partial check-out for RESERVED/ONGOING/OVERDUE bookings. Unlike
-  // check-in, checkout can START from a RESERVED booking.
-  const showPartialCheckout =
-    bookingStatus?.isReserved ||
-    bookingStatus?.isOngoing ||
-    bookingStatus?.isOverdue;
-
-  // Finished = COMPLETE/ARCHIVED. Computed directly from status: the helper's
-  // `isFinished` flag isn't present on its undefined-status return shape, and a
-  // direct compare matches how the rest of the booking UI checks status.
-  const isFinished =
-    booking.status === BookingStatus.COMPLETE ||
-    booking.status === BookingStatus.ARCHIVED;
+  // Which of the three this user may take here. Shared with the row checkbox
+  // that feeds this menu, so the two cannot disagree.
+  const { canRemove, showPartialCheckin, showPartialCheckout, showRemove } =
+    useBookingBulkActions();
 
   // Denormalised view of `booking.bookingAssets` (the QT pivot). Project the
   // pivot rows down to the plain asset shape the shared resolver
@@ -168,9 +151,12 @@ function ConditionalDropdown() {
       : false;
 
   // Mirror per-row Remove: can't remove items from a finished booking.
-  const removeDisabled = isFinished
-    ? { reason: "Can't remove items from a completed or archived booking." }
-    : false;
+  const removeDisabled = canRemove
+    ? false
+    : {
+        reason:
+          "Can't remove items from a completed, archived or cancelled booking.",
+      };
 
   const {
     ref: dropdownRef,
@@ -188,6 +174,17 @@ function ConditionalDropdown() {
     useState(false);
   const [partialCheckoutDialogOpen, setPartialCheckoutDialogOpen] =
     useState(false);
+
+  /**
+   * Every item is now conditional, so the menu can be empty — a BASE custodian
+   * on their own RESERVED or ONGOING booking holds none of the three. Render
+   * nothing rather than an "Actions" button that opens a blank sheet. After
+   * the hooks above, deliberately: an early return before them would change
+   * hook order between renders.
+   */
+  if (!showPartialCheckout && !showPartialCheckin && !showRemove) {
+    return null;
+  }
 
   return (
     <>
@@ -296,19 +293,21 @@ function ConditionalDropdown() {
                 </Button>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem
-              className="px-4 py-1 md:p-0"
-              onSelect={(e) => {
-                e.preventDefault();
-              }}
-            >
-              <BulkUpdateDialogTrigger
-                type="trash"
-                label="Remove assets/kits"
-                onClick={closeMenu}
-                disabled={removeDisabled}
-              />
-            </DropdownMenuItem>
+            {showRemove && (
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                <BulkUpdateDialogTrigger
+                  type="trash"
+                  label="Remove assets/kits"
+                  onClick={closeMenu}
+                  disabled={removeDisabled}
+                />
+              </DropdownMenuItem>
+            )}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

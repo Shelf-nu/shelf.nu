@@ -22,8 +22,10 @@ import {
   type AssetCustodyListEntry,
   type Location as LocationType,
   type TeamMember,
+  getApiBaseUrl,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { useOrg } from "@/lib/org-context";
 import { userHasPermission } from "@/lib/permissions";
 import {
@@ -121,7 +123,7 @@ export default function AssetDetailScreen() {
     handleReleaseCustody,
     performAssignQuantity,
     performReleaseQuantity,
-  } = useCustodyActions({ asset, currentOrg, fetchAsset });
+  } = useCustodyActions({ asset, currentOrg, fetchAsset, isSelfService });
 
   // Image upload
   const { isUploadingImage, handleImagePress } = useImageUpload({
@@ -129,6 +131,30 @@ export default function AssetDetailScreen() {
     orgId: currentOrg?.id,
     fetchAsset,
   });
+
+  /**
+   * Self-service custody: resolve the caller's own team-member record and go
+   * straight to the operation — the picker would hold exactly one row (their
+   * own; the team-members endpoint is self-scoped for that role). QT assets
+   * continue into the quantity sheet; INDIVIDUAL assets confirm directly.
+   */
+  const handleTakeCustodySelf = async () => {
+    if (!currentOrg) return;
+    setIsActionLoading(true);
+    const { member, error: resolveError } = await resolveSelfTeamMember(
+      currentOrg.id
+    );
+    setIsActionLoading(false);
+    if (!member) {
+      Alert.alert("Error", resolveError ?? "Something went wrong.");
+      return;
+    }
+    if (isQtyTracked) {
+      setAssignQtyMember(member);
+    } else {
+      handleAssignCustody(member);
+    }
+  };
 
   // UI states
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
@@ -487,7 +513,13 @@ export default function AssetDetailScreen() {
           {/* ── Quick Actions ──────────────────────────── */}
           <QuickActions
             asset={asset}
-            onAssignCustody={() => setShowCustodyPicker(true)}
+            onAssignCustody={() => {
+              if (isSelfService) {
+                void handleTakeCustodySelf();
+              } else {
+                setShowCustodyPicker(true);
+              }
+            }}
             onReleaseCustody={handleReleaseCustody}
             onLocationPress={() => setShowLocationPicker(true)}
             onEditPress={() =>
@@ -503,6 +535,7 @@ export default function AssetDetailScreen() {
             canUpdate={canUpdateAsset}
             canDelete={canDeleteAsset}
             canCustody={canCustody}
+            isSelfService={isSelfService}
             isQtyTracked={isQtyTracked}
             custodyAvailable={isQtyTracked ? assignMax : undefined}
           />
@@ -698,10 +731,7 @@ export default function AssetDetailScreen() {
               <View style={styles.qrCard}>
                 {QRCode ? (
                   <QRCode
-                    value={`${
-                      process.env.EXPO_PUBLIC_QR_BASE_URL ||
-                      "https://app.shelf.nu"
-                    }/qr/${asset.qrCodes[0].id}`}
+                    value={`${getApiBaseUrl()}/qr/${asset.qrCodes[0].id}`}
                     size={160}
                     backgroundColor={colors.white}
                     color={colors.foreground}
@@ -852,16 +882,18 @@ export default function AssetDetailScreen() {
               />
               <QuantityInputSheet
                 visible={assignQtyMember != null}
-                title="Assign Quantity"
+                title={isSelfService ? "Take Quantity" : "Assign Quantity"}
                 subtitle={
                   assignQtyMember
-                    ? `Assign to ${memberDisplayName(assignQtyMember)}`
+                    ? isSelfService
+                      ? "How many units are you taking?"
+                      : `Assign to ${memberDisplayName(assignQtyMember)}`
                     : undefined
                 }
                 max={assignMax}
                 defaultValue={1}
                 unitOfMeasure={asset.unitOfMeasure}
-                confirmLabel="Assign"
+                confirmLabel={isSelfService ? "Take" : "Assign"}
                 onSubmit={(quantity) => {
                   const member = assignQtyMember;
                   setAssignQtyMember(null);

@@ -426,11 +426,7 @@ export default function AuditDetailsPage() {
             !isCancelled &&
             !isArchived &&
             canScanAndComplete && (
-              <CompleteAuditDialog
-                disabled={!hasScans}
-                auditName={session.name}
-                stats={stats}
-              />
+              <CompleteAuditDialog auditName={session.name} stats={stats} />
             )}
         </div>
       </Header>

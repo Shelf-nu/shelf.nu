@@ -36,6 +36,7 @@ import { Logger } from "~/utils/logger";
  * - `CHECKIN` — booking assets have been checked in (completed)
  * - `OVERDUE` — booking has passed its end date without checkin
  * - `CANCEL` — booking was cancelled by a user
+ * - `REVERT_TO_DRAFT` — a reserved booking was sent back to draft
  * - `EXTEND` — booking end date was extended
  * - `DELETE` — booking was permanently deleted
  * - `UPDATE` — booking fields or assets were modified
@@ -47,6 +48,7 @@ export type BookingEventType =
   | "CHECKIN"
   | "OVERDUE"
   | "CANCEL"
+  | "REVERT_TO_DRAFT"
   | "EXTEND"
   | "DELETE"
   | "UPDATE";

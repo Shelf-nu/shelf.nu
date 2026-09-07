@@ -51,7 +51,9 @@ describe("bulkDeleteNRMs", () => {
     });
 
     const { where } = dbMocks.findMany.mock.calls[0][0];
-    expect(where.OR).toHaveLength(3);
+    // The NRM's own name plus the three name columns on a linked user
+    // (first, last, display) — see `getNrmIndexWhere`.
+    expect(where.OR).toHaveLength(4);
     expect(where.deletedAt).toBeNull();
   });
 

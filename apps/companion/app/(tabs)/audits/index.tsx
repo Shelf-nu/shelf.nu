@@ -41,7 +41,10 @@ const auditKeyExtractor = (item: AuditListItem) => item.id;
 const STATUS_FILTERS: { label: string; value: string }[] = [
   { label: "Active", value: "PENDING,ACTIVE" },
   { label: AUDIT_STATUS_LABELS.COMPLETED, value: "COMPLETED" },
-  { label: "All", value: "PENDING,ACTIVE,COMPLETED,CANCELLED" },
+  { label: AUDIT_STATUS_LABELS.ARCHIVED, value: "ARCHIVED" },
+  // "All" really means all: an empty filter takes the server's
+  // everything path, which is also the correctly paginated one.
+  { label: "All", value: "" },
 ];
 
 export default function AuditsListScreen() {
@@ -615,20 +618,20 @@ function AuditsListContent() {
                 color={colors.border}
               />
               <Text style={styles.emptyTitle}>
+                {/* why the label check: "All" would interpolate to the
+                    ungrammatical "No all audits". Keyed on the label so the
+                    chip list can grow without touching this. */}
                 {assignedToMe
                   ? activeFilter === 0
                     ? "No active audits assigned to you"
-                    : activeFilter === 2
-                    ? // why: STATUS_FILTERS[2] is "All", which would
-                      // interpolate to the ungrammatical "No all
-                      // audits assigned to you". Special-case it.
-                      "No audits assigned to you"
+                    : STATUS_FILTERS[activeFilter].label === "All"
+                    ? "No audits assigned to you"
                     : `No ${STATUS_FILTERS[
                         activeFilter
                       ].label.toLowerCase()} audits assigned to you`
                   : activeFilter === 0
                   ? "No active audits"
-                  : activeFilter === 2
+                  : STATUS_FILTERS[activeFilter].label === "All"
                   ? "No audits"
                   : `No ${STATUS_FILTERS[
                       activeFilter

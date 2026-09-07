@@ -276,11 +276,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           } satisfies Prisma.UserSelect,
         });
 
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         const bookingLink = wrapLinkForNote(
           `/bookings/${bookingAsset.booking.id}`,
           bookingAsset.booking.name

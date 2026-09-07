@@ -11,6 +11,7 @@ import { config } from "~/config/shelf.config";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import { LogoForEmail } from "../logo";
 import { sendEmail } from "../mail.server";
@@ -19,13 +20,7 @@ import { styles } from "../styles";
 // --- Admin email (text-only, internal notification) ---
 
 interface AdminEmailProps {
-  user: {
-    id: string;
-    email: string;
-    firstName?: string | null;
-    lastName?: string | null;
-    displayName?: string | null;
-  };
+  user: UserNameFields & { id: string; email: string };
   eventType: string;
   invoiceId: string;
 }

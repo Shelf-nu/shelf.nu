@@ -1257,7 +1257,20 @@ export async function getTeamMembersForNotify({
           },
         },
       },
-      orderBy: [{ user: { firstName: "asc" } }, { name: "asc" }],
+      /**
+       * Order by the label the picker actually renders. `TeamMember.name` is
+       * NOT NULL and `updateUser` keeps it equal to `displayName` when set and
+       * `"firstName lastName"` otherwise — the same chain
+       * `resolveTeamMemberName` resolves — so it is already a materialised
+       * COALESCE, which Prisma's `orderBy` cannot express directly.
+       *
+       * Leading with `user.displayName` instead splits the list in two:
+       * Postgres sorts NULLs last on ASC, so every renamed user is hoisted
+       * above every un-renamed one and a display-name "Zoe" precedes a
+       * fallback "Aaron". Ordering by `name` also matches the search path in
+       * `api+/model-filters`, so the list does not re-sort as the user types.
+       */
+      orderBy: [{ name: "asc" }, { id: "asc" }],
     });
 
     return {

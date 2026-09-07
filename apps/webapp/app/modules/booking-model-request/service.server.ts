@@ -1468,13 +1468,7 @@ async function loadActor(userId: string): Promise<NoteActor> {
     } satisfies Prisma.UserSelect,
   });
   return {
-    // `displayName` is deliberately not passed: `wrapUserLinkForNote` prefers
-    // it over first/last, and these notes have always rendered the real name.
-    link: wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    }),
+    link: wrapUserLinkForNote({ ...user, id: userId }),
     snapshot: {
       firstName: user?.firstName ?? null,
       lastName: user?.lastName ?? null,

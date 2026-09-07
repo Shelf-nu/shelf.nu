@@ -19,6 +19,7 @@ import {
   assetInventoryReport,
   custodySnapshotReport,
 } from "~/modules/reports/helpers.server";
+import { sumQuantityAwareValue } from "~/modules/reports/pdf-totals";
 import { getReportById } from "~/modules/reports/registry";
 import type {
   TimeframePreset,
@@ -99,8 +100,10 @@ export const loader = async ({
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
+      entity: PermissionEntity.reports,
+      // PDF generation hands the data out of the app, like the CSV route:
+      // both are export surfaces and share the export action.
+      action: PermissionAction.export,
     });
 
     // Acting user's resolved prefs drive both the timeframe label ordering and
@@ -253,14 +256,13 @@ export const loader = async ({
           inCustody: 0,
           checkedOut: 0,
         };
-        let totalValuation = 0;
-
         for (const row of reportData.rows) {
           if (row.status === "AVAILABLE") statusBreakdown.available++;
           else if (row.status === "IN_CUSTODY") statusBreakdown.inCustody++;
           else if (row.status === "CHECKED_OUT") statusBreakdown.checkedOut++;
-          if (row.valuation) totalValuation += row.valuation;
         }
+        // Per-unit valuation × workspace stock, matching the on-screen KPI.
+        const totalValuation = sumQuantityAwareValue(reportData.rows);
 
         pdfMeta = {
           ...monetaryMeta,
@@ -282,6 +284,7 @@ export const loader = async ({
             location: row.location,
             custodian: row.custodian,
             valuation: row.valuation,
+            quantity: row.quantity,
             qrId: row.qrId,
           })),
         } satisfies AssetInventoryPdfMeta;
@@ -299,10 +302,9 @@ export const loader = async ({
         const uniqueCustodians = new Set(
           reportData.rows.map((r) => r.custodianName)
         );
-        let totalValuation = 0;
-        for (const row of reportData.rows) {
-          if (row.valuation) totalValuation += row.valuation;
-        }
+        // Per-unit valuation × units held (`Custody.quantity`), matching
+        // the on-screen KPI.
+        const totalValuation = sumQuantityAwareValue(reportData.rows);
 
         pdfMeta = {
           ...monetaryMeta,
@@ -326,6 +328,7 @@ export const loader = async ({
             assignedAt: dateFormat.format(new Date(row.assignedAt)),
             daysInCustody: row.daysInCustody,
             valuation: row.valuation,
+            quantity: row.quantity,
           })),
         } satisfies CustodySnapshotPdfMeta;
         break;

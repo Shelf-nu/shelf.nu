@@ -16,10 +16,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, type AssetListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import {
+  formatStatus,
   fontSize,
   spacing,
   borderRadius,
-  formatStatus,
   hitSlop,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";

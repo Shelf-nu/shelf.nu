@@ -10,6 +10,7 @@ import { requireAuditAssignee } from "~/modules/audit/service.server";
 import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import { resolveUserDisplayName, type UserNameFields } from "~/utils/user";
 
 /**
  * GET /api/mobile/audits/:auditId/evidence
@@ -151,7 +152,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           createdAt: true,
           auditAssetId: true,
           user: {
-            select: { firstName: true, lastName: true, profilePicture: true },
+            select: {
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
           },
         },
         orderBy: { createdAt: "desc" },
@@ -171,7 +177,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           createdAt: true,
           auditAssetId: true,
           uploadedBy: {
-            select: { firstName: true, lastName: true, profilePicture: true },
+            select: {
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
           },
         },
         orderBy: { createdAt: "desc" },
@@ -179,14 +190,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ]);
 
     /** A person's display name, or null when the account is gone. */
-    const actorName = (
-      actor: { firstName: string | null; lastName: string | null } | null
-    ) => {
+    const actorName = (actor: UserNameFields | null) => {
       if (!actor) return null;
-      const name = [actor.firstName, actor.lastName]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
+      const name = resolveUserDisplayName(actor);
       return name.length > 0 ? name : null;
     };
 

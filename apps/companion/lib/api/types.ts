@@ -1022,6 +1022,9 @@ export type AuditExpectedAsset = {
 };
 
 export type AuditScanData = {
+  /** AuditScan row id — stable across asset deletion. Absent on older
+   * servers; consumers must keep a fallback. */
+  id?: string;
   code: string;
   assetId: string;
   assetTitle: string;
@@ -1034,6 +1037,14 @@ export type AuditScanData = {
   auditNotesCount: number;
   /** Number of condition photos uploaded for this scanned asset. */
   auditImagesCount: number;
+  /**
+   * The scanned asset has since been DELETED. Distinct from an empty title,
+   * which a scan recorded before the snapshot columns existed also has.
+   *
+   * Absent on older servers, like `id` above — consumers must keep the empty
+   * `assetId` fallback rather than trusting this alone.
+   */
+  assetDeleted?: boolean;
 };
 
 export type AuditDetailResponse = {
@@ -1148,6 +1159,21 @@ export type RecordScanResponse = {
   scanId: string;
   auditAssetId: string | null;
   foundAssetCount: number;
+  unexpectedAssetCount: number;
+};
+
+/**
+ * Result of undoing a scan. The counts are recomputed server-side in the same
+ * transaction as the removal, so the screen adopts them rather than
+ * decrementing its own — an expected asset returns to "not scanned" while an
+ * unexpected one leaves the audit entirely, which move different counters.
+ */
+export type RemoveScanResponse = {
+  success: boolean;
+  /** False when the scan was already gone — the undo is idempotent. */
+  removed: boolean;
+  foundAssetCount: number;
+  missingAssetCount: number;
   unexpectedAssetCount: number;
 };
 

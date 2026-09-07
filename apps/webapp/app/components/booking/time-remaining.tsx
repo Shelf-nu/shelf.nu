@@ -36,14 +36,18 @@ export function TimeRemaining({
 
   // Handle case where time has already passed
   if (remainingMs < 0) {
-    // For OVERDUE status, show how long it's been overdue.
-    // Math is delegated to the central helper for parity with the
-    // Booking Compliance report — both surfaces must agree on lateness.
+    // For OVERDUE status, show how long it's been overdue. Math is delegated
+    // to the central helper so the duration formatting matches every other
+    // lateness surface.
     if (status === BookingStatus.OVERDUE) {
       const overdueMs =
         getLatenessMs({
           status: BookingStatus.OVERDUE,
-          to,
+          // This badge answers "how far past your CURRENT deadline are you",
+          // so it measures against the live `to` — an extension moves that
+          // date and the countdown must follow it. Compliance reporting asks
+          // the other question and measures against the planned end instead.
+          scheduledEnd: to,
           checkInAt: null,
           now: currentDate,
         }) ?? 0;

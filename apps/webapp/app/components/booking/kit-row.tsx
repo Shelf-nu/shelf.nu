@@ -2,6 +2,7 @@ import React from "react";
 import type { Barcode, BookingStatus, Category, Kit } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { LocationBadge } from "~/components/location/location-badge";
+import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -73,6 +74,7 @@ export default function KitRow({
   shouldShowCheckoutColumns,
 }: KitRowProps) {
   const { isBase } = useUserRoleHelper();
+  const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
   const { isDraft, isReserved, isInProgress, isFinished } =
     useBookingStatusHelpers(bookingStatus);
   // Workspace pref + addon entitlement — resolver short-circuits to QR when
@@ -120,7 +122,13 @@ export default function KitRow({
   return (
     <React.Fragment>
       <ListItem item={kit} className="relative bg-gray-50">
-        <BulkListItemCheckbox item={kit} bulkItems={assets} />
+        {/* Same gate the asset rows use, and the empty cell keeps the column
+            aligned with them. A checkbox is only offered when this user has a
+            bulk action to feed: selecting rows for a menu that renders nothing
+            is dead UI. */}
+        <When truthy={hasAnyBulkAction} fallback={<Td> </Td>}>
+          <BulkListItemCheckbox item={kit} bulkItems={assets} />
+        </When>
 
         <Td
           className={tw(
