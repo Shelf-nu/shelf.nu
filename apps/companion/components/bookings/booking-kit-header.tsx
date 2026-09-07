@@ -112,9 +112,14 @@ export function BookingKitHeader({
   return (
     <TouchableOpacity
       style={styles.card}
-      activeOpacity={isSelecting && !isSelectable ? 1 : 0.6}
-      onPress={isSelecting ? onToggleSelection : onToggleExpand}
-      disabled={isSelecting && !isSelectable}
+      activeOpacity={0.6}
+      // The row is never inert: opening a kit is worth doing even when the
+      // current mode can select none of its members — that is usually the
+      // moment you want to look inside it. Only the SELECTION is unavailable,
+      // so the press falls back to expanding rather than the row going
+      // `disabled`, which would also take the accessibility action below with
+      // it (RN treats a disabled touchable as one inactive element).
+      onPress={isSelecting && isSelectable ? onToggleSelection : onToggleExpand}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       // The row is one element to a screen reader, so the chevron rendered

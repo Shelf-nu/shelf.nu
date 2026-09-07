@@ -113,10 +113,10 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const { role } = await getMobileUserContext(user.id, organizationId);
-    // BASE is as restricted as SELF_SERVICE for managing booking assets (own
-    // bookings only, DRAFT only via canUserManageBookingAssets). Keying only on
-    // SELF_SERVICE let a BASE user with `booking:update` add assets to anyone's
-    // non-draft booking via this endpoint.
+    // BASE is as restricted as SELF_SERVICE for managing booking assets: own
+    // bookings only, and DRAFT only, via `canUserManageBookingAssets`. Both
+    // roles hold `booking:update`, so the permission gate above lets them
+    // through and this is what narrows them.
     const isSelfServiceOrBase =
       role === OrganizationRoles.SELF_SERVICE ||
       role === OrganizationRoles.BASE;
