@@ -1038,8 +1038,17 @@ export default function BookingDetailScreen() {
   // gates the full "Check Out All" button), so we derive our own flag for the
   // partial path — otherwise "Select to Check Out" disappears the moment the
   // first batch flips the booking to ONGOING.
+  // `reservedCount` counts whole assets, so it cannot see inside a pooled one:
+  // a partial return records the asset id, which then cancels out its own
+  // `assetCount` entry and reads as nothing left to take. Rows carry the
+  // booking-scoped remaining count when the server sends it, so trust that
+  // wherever it exists and keep the asset-level arithmetic for rows without.
+  const hasUnitsLeftToCheckOut =
+    reservedCount > 0 ||
+    booking.assets.some((a) => (a.remainingToCheckOut ?? 0) > 0);
+
   const canPartialCheckout =
-    reservedCount > 0 &&
+    hasUnitsLeftToCheckOut &&
     !hasOutstandingModelRequests &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 

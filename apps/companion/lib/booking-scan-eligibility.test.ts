@@ -200,6 +200,33 @@ test("reports a kit whose members are all already checked out", () => {
   assert.equal(reason?.title, "Already Checked Out");
 });
 
+test("reports the members' own reason when a kit is blocked for one cause", () => {
+  // Custody carries a remedy; reporting "already checked out" would send the
+  // operator looking for the wrong thing.
+  const ctx = ctxOf([row({ id: "a1", status: "IN_CUSTODY" })]);
+  const { eligible, reason } = eligibleKitMembers(kit, ctx, new Set());
+  assert.equal(eligible.length, 0);
+  assert.equal(reason?.title, "In Custody");
+  assert.match(reason!.message, /release custody first/);
+});
+
+test("falls back to a neutral reason when members are blocked differently", () => {
+  const ctx = ctxOf(
+    [
+      row({ id: "a1", status: "IN_CUSTODY" }),
+      row({ id: "a2", status: "CHECKED_OUT", kitId: "kit-1" }),
+    ],
+    []
+  );
+  const { eligible, reason } = eligibleKitMembers(
+    { id: "kit-1", name: "Camera Rig", assets: [{ id: "a1" }, { id: "a2" }] },
+    ctx,
+    new Set()
+  );
+  assert.equal(eligible.length, 0);
+  assert.equal(reason?.title, "Not Available");
+});
+
 test("reports a kit whose eligible members are already in the list", () => {
   const ctx = ctxOf([row({ id: "a1" })]);
   const { eligible, reason } = eligibleKitMembers(kit, ctx, new Set(["a1"]));

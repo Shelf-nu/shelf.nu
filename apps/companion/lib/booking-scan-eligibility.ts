@@ -159,17 +159,31 @@ export function eligibleKitMembers(
     };
   }
 
-  const checkoutable = members.filter(
-    (row) => checkoutBlocker({ id: row.id, title: row.title }, ctx) === null
+  const blockers = members.map((row) =>
+    checkoutBlocker({ id: row.id, title: row.title }, ctx)
   );
+  const checkoutable = members.filter((_, i) => blockers[i] === null);
 
   if (checkoutable.length === 0) {
+    // Report the members' own reason rather than assuming they are all out.
+    // Custody in particular carries a remedy the operator needs, and naming
+    // the wrong cause sends them looking for the wrong thing. A set that
+    // disagrees has no single true answer, so say only what is certain.
+    const blocked = blockers.filter((b): b is ScanBlockReason => b !== null);
+    const distinctTitles = new Set(blocked.map((b) => b.title));
+
     return {
       eligible: [],
-      reason: {
-        title: "Already Checked Out",
-        message: `All of "${kit.name}"'s assets in this booking are already checked out.`,
-      },
+      reason:
+        distinctTitles.size === 1
+          ? {
+              title: blocked[0].title,
+              message: `None of "${kit.name}"'s assets in this booking can be checked out. ${blocked[0].message}`,
+            }
+          : {
+              title: "Not Available",
+              message: `None of "${kit.name}"'s assets in this booking can be checked out right now.`,
+            },
     };
   }
 
