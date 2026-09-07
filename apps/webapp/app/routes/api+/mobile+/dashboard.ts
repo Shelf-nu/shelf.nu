@@ -11,9 +11,9 @@ import {
   getBookings,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import { resolveBookingCustodianName } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
-import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * GET /api/mobile/dashboard
@@ -289,8 +289,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
        * `displayName`, so this shape cannot drift back to naming the custodian
        * by their legal name without failing to compile.
        */
-      custodianUser?: (UserNameFields & { id?: string }) | null;
-      custodianTeamMember?: { name: string; userId?: string | null } | null;
+      /**
+       * `id` and the team member's `userId` are REQUIRED for the same reason
+       * `UserNameFields` is: they answer "is the custodian the caller?", so a
+       * projection that drops one silently redacts a user's own booking rather
+       * than failing to compile.
+       */
+      custodianUser?: (UserNameFields & { id: string }) | null;
+      custodianTeamMember?: { name: string; userId: string | null } | null;
       _count?: { bookingAssets: number };
     };
 
@@ -301,19 +307,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: b.status,
       from: b.from instanceof Date ? b.from.toISOString() : b.from,
       to: b.to instanceof Date ? b.to.toISOString() : b.to,
-      // Custody visibility is its own workspace override. null means the
-      // booking has no custodian; "private" means it has one this caller may
-      // not see. Keep them distinct.
-      custodianName:
-        !b.custodianUser && !b.custodianTeamMember
-          ? null
-          : canSeeAllCustody ||
-            b.custodianUser?.id === user.id ||
-            b.custodianTeamMember?.userId === user.id
-          ? b.custodianUser
-            ? resolveUserDisplayName(b.custodianUser) || null
-            : b.custodianTeamMember?.name || null
-          : "private",
+      // Custody visibility is its own workspace override. The shared resolver
+      // is what keeps Home naming a booking's holder the same way the list and
+      // the calendar do.
+      custodianName: resolveBookingCustodianName({
+        canSeeAllCustody,
+        booking: b,
+        userId: user.id,
+      }),
       assetCount: b._count?.bookingAssets ?? 0,
     });
 

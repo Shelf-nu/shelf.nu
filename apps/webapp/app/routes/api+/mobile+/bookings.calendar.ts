@@ -12,12 +12,12 @@ import {
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import { resolveBookingCustodianName } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { resolveUserDisplayName } from "~/utils/user";
 
 /** Hard ceiling on the window a single call may ask for. */
 const MAX_RANGE_DAYS = 366;
@@ -329,19 +329,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         status: b.status,
         from: b.from,
         to: b.to,
-        // Custody visibility is its own workspace override. null means the
-        // booking has no custodian; "private" means it has one this caller may
-        // not see. Keep them distinct.
-        custodianName:
-          !b.custodianTeamMember && !b.custodianUser
-            ? null
-            : canSeeAllCustody ||
-              b.custodianUser?.id === user.id ||
-              b.custodianTeamMember?.userId === user.id
-            ? b.custodianTeamMember?.name ||
-              resolveUserDisplayName(b.custodianUser) ||
-              null
-            : "private",
+        // Custody visibility is its own workspace override, and the shared
+        // resolver is what keeps this lens agreeing with the list lens on the
+        // same screen about who holds a booking.
+        custodianName: resolveBookingCustodianName({
+          canSeeAllCustody,
+          booking: b,
+          userId: user.id,
+        }),
       })),
       /**
        * True when this window holds more than one response may carry, so the

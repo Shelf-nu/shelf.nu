@@ -11,8 +11,11 @@ import {
   custodianScopeClause,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
+import {
+  canSeeBookingCustodian,
+  resolveBookingCustodianName,
+} from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
-import { resolveUserDisplayName } from "~/utils/user";
 
 /**
  * GET /api/mobile/bookings
@@ -139,21 +142,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : {}),
     };
 
-    /**
-     * The custodian chip is visible when the workspace grants custody
-     * visibility, or when the custodian IS the caller through either custody
-     * link. Web decides it with `userCanViewSpecificCustody`; keep the two in
-     * step, or the same booking names its holder on one platform and not the
-     * other.
-     */
-    const canSeeCustodianOf = (booking: {
-      custodianUser: { id: string } | null;
-      custodianTeamMember: { userId: string | null } | null;
-    }) =>
-      canSeeAllCustody ||
-      booking.custodianUser?.id === user.id ||
-      booking.custodianTeamMember?.userId === user.id;
-
     const [bookings, totalCount] = await Promise.all([
       db.booking.findMany({
         where,
@@ -216,20 +204,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
         from: b.from,
         to: b.to,
         createdAt: b.createdAt,
-        // Three distinct answers, and the app renders each differently:
-        // a name, null for "this booking has no custodian", and "private" for
-        // "it has one you may not see" - the word web draws in place of the
-        // badge (`TeamMemberBadge`). Collapsing the last two would report an
-        // unassigned booking as a withheld one.
-        custodianName:
-          !b.custodianTeamMember && !b.custodianUser
-            ? null
-            : canSeeCustodianOf(b)
-            ? b.custodianTeamMember?.name ||
-              resolveUserDisplayName(b.custodianUser) ||
-              null
-            : "private",
-        custodianImage: canSeeCustodianOf(b)
+        // Shared with the calendar and the dashboard so the three lenses on
+        // these rows cannot disagree about who holds a booking. Answers a
+        // name, null for "no custodian", or the withheld sentinel.
+        custodianName: resolveBookingCustodianName({
+          canSeeAllCustody,
+          booking: b,
+          userId: user.id,
+        }),
+        // The face is as identifying as the name, so it follows the same gate.
+        custodianImage: canSeeBookingCustodian({
+          canSeeAllCustody,
+          booking: b,
+          userId: user.id,
+        })
           ? b.custodianUser?.profilePicture || null
           : null,
         assetCount: b._count.bookingAssets,

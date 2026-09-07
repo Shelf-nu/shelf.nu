@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { ShelfError } from "./error";
 import { ROLE_PRECEDENCE } from "./role-precedence";
+import { resolveUserDisplayName, type UserNameFields } from "./user";
 
 /**
  * The minimal booking projection needed to decide whether a requester is the
@@ -269,5 +270,111 @@ export function resolveCanSeeAllBookings({
     // BASE can see all if org setting allows
     (role === OrganizationRoles.BASE &&
       currentOrganization.baseUserCanSeeBookings)
+  );
+}
+
+/**
+ * The name shown in place of a custodian the viewer may not see.
+ *
+ * The literal the web badge draws (`TeamMemberBadge`), so a booking redacted
+ * on one platform reads the same on the other. Distinct from `null`, which
+ * means the booking has no custodian at all — collapsing the two reports an
+ * unassigned booking as a withheld one.
+ */
+export const WITHHELD_CUSTODIAN_NAME = "private";
+
+/**
+ * The custody links a booking row needs for its custodian to be named.
+ *
+ * Both `custodianUser.id` and `custodianTeamMember.userId` are REQUIRED, and
+ * that is the point: they are what answer "is the custodian the caller?", so a
+ * query that omits either silently redacts a user's own booking. Required
+ * fields turn that into a compile error instead.
+ *
+ * `custodianUser` carries {@link UserNameFields} rather than the name halves
+ * spelled out, so a projection cannot drift back to naming someone by their
+ * legal name without failing to compile.
+ */
+export type BookingCustodianLinks = {
+  custodianUser?: (UserNameFields & { id: string }) | null;
+  custodianTeamMember?: { name: string; userId: string | null } | null;
+};
+
+/**
+ * Whether this viewer may see WHO holds a booking.
+ *
+ * Separate from {@link canSeeBooking}, and gated by a separate workspace
+ * override: seeing that a booking exists does not mean seeing who has it. A
+ * workspace may grant either without the other.
+ *
+ * The caller always sees their own name, through EITHER custody link — a
+ * booking assigned by picking a team member carries `custodianUserId = NULL`,
+ * so matching the user link alone hides a booking's holder from the very
+ * person holding it.
+ *
+ * @param params.canSeeAllCustody - Whether the workspace lets this role see
+ *   custody it does not hold (ADMIN/OWNER, or a granted override).
+ * @param params.booking - The booking's two custody links.
+ * @param params.userId - The viewer.
+ * @returns `true` when the custodian may be named to this viewer.
+ */
+export function canSeeBookingCustodian({
+  canSeeAllCustody,
+  booking,
+  userId,
+}: {
+  canSeeAllCustody: boolean;
+  booking: BookingCustodianLinks;
+  userId: string;
+}): boolean {
+  return (
+    canSeeAllCustody ||
+    booking.custodianUser?.id === userId ||
+    booking.custodianTeamMember?.userId === userId
+  );
+}
+
+/**
+ * The custodian name a booking row should carry for this viewer.
+ *
+ * Three distinct answers, and the app renders each differently: a name, `null`
+ * for "this booking has no custodian", and {@link WITHHELD_CUSTODIAN_NAME} for
+ * "it has one you may not see".
+ *
+ * The team-member link wins when both are set, matching the web bookings list
+ * (`list-bookings-content.tsx`). `TeamMember.name` tracks `User.displayName`,
+ * so the two normally agree — but when they do not, web's answer is the one
+ * every surface must give.
+ *
+ * Shared by the mobile list, calendar and dashboard so the three lenses on the
+ * same rows cannot disagree about who holds a booking.
+ *
+ * @param params.canSeeAllCustody - Whether custody may be shown to this viewer.
+ * @param params.booking - The booking's two custody links.
+ * @param params.userId - The viewer.
+ * @returns The custodian's name, `null` when there is none, or the withheld
+ *   sentinel when there is one this viewer may not see.
+ */
+export function resolveBookingCustodianName({
+  canSeeAllCustody,
+  booking,
+  userId,
+}: {
+  canSeeAllCustody: boolean;
+  booking: BookingCustodianLinks;
+  userId: string;
+}): string | null {
+  if (!booking.custodianUser && !booking.custodianTeamMember) {
+    return null;
+  }
+
+  if (!canSeeBookingCustodian({ canSeeAllCustody, booking, userId })) {
+    return WITHHELD_CUSTODIAN_NAME;
+  }
+
+  return (
+    booking.custodianTeamMember?.name ||
+    resolveUserDisplayName(booking.custodianUser) ||
+    null
   );
 }
