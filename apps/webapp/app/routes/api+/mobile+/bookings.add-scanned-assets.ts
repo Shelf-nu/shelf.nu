@@ -172,10 +172,15 @@ export async function action({ request }: ActionFunctionArgs) {
     // An asset can be scanned on its own AND as part of a kit in the same
     // batch. The kit slice is the more specific of the two, so it takes the
     // asset and the standalone bucket keeps only what no kit claimed.
+    //
+    // Deduplicated because one standalone row per entry is what the service
+    // writes, and a second row for the same asset breaks the partial unique on
+    // `(bookingId, assetId) WHERE assetKitId IS NULL`. The app's own callers
+    // send distinct ids, but this is a request body and cannot rely on that.
     const kitSliceAssetIds = new Set(kitSlices.map((slice) => slice.assetId));
-    const standaloneAssetIds = assetIds.filter(
-      (id) => !kitSliceAssetIds.has(id)
-    );
+    const standaloneAssetIds = [
+      ...new Set(assetIds.filter((id) => !kitSliceAssetIds.has(id))),
+    ];
 
     await addScannedAssetsToBooking({
       assetIds: standaloneAssetIds,

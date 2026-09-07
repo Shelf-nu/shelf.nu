@@ -79,8 +79,9 @@ vi.mock("~/modules/booking/service.server", async () => {
   };
 });
 
-// why: booking settings + permission checks are unrelated to the kit payload
-// under test — stub them to fixed values.
+// why: the loader reads workspace booking settings to decide the check-in and
+// kit-counting flags. They do not reach the kit payload under test, so fixed
+// values keep the response deterministic.
 vi.mock("~/modules/booking-settings/service.server", () => ({
   getBookingSettingsForOrganization: vi.fn().mockResolvedValue({
     requireExplicitCheckinForAdmin: false,
@@ -88,6 +89,11 @@ vi.mock("~/modules/booking-settings/service.server", () => ({
     countKitsAsSingleUnit: false,
   }),
 }));
+
+// why: the loader resolves six booking permissions to build its action flags.
+// Those flags are a different contract from the kit payload under test, and
+// resolving them for real would need the permission tables — so answer a fixed
+// `false` and let the tests assert on `booking.kits` alone.
 vi.mock("~/utils/permissions/permission.validator.server", () => ({
   hasPermission: vi.fn().mockResolvedValue(false),
 }));

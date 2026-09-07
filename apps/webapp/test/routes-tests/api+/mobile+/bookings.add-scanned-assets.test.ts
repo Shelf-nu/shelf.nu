@@ -218,6 +218,22 @@ describe("POST /api/mobile/bookings/add-scanned-assets — kit provenance", () =
     ]);
   });
 
+  it("sends one standalone id even when the caller repeats it", async () => {
+    // One standalone row is written per id, and a second row for the same
+    // asset breaks the partial unique on `(bookingId, assetId)`.
+    bookingHolding([]);
+    assetsExist(["asset-9"]);
+    assetKitFindManyMock.mockResolvedValue([
+      { id: "ak1", assetId: "asset-1", quantity: 1, kitId: "kit-1" },
+    ] as never);
+
+    await post({ assetIds: ["asset-9", "asset-9"], kitIds: ["kit-1"] });
+
+    const call = serviceCall();
+    expect(call.assetIds).toEqual(["asset-9"]);
+    expect(call.kitSlices).toHaveLength(1);
+  });
+
   it("adds only the members a partly-present kit is still missing", async () => {
     // Re-adding a kit the booking already holds part of must top it up, not
     // collide with the rows already there.
