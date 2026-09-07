@@ -2534,7 +2534,18 @@ function ScannerContent() {
             <View style={styles.actionPickerContainer}>
               <View style={styles.bookingModeHeader}>
                 <TouchableOpacity
-                  onPress={() => router.back()}
+                  // Anchored navigation, like the submit handlers: the scanner
+                  // is a tab screen, so router.back() unwinds the tab's own
+                  // history and lands on the start page rather than on the
+                  // booking the operator came from.
+                  onPress={() =>
+                    bookingId
+                      ? pushIntoTab(
+                          "/(tabs)/bookings",
+                          `/(tabs)/bookings/${bookingId}`
+                        )
+                      : router.back()
+                  }
                   accessibilityLabel="Go back"
                   accessibilityRole="button"
                 >
