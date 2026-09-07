@@ -24,6 +24,7 @@ import {
 } from "@shelf/labels";
 
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
 import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
@@ -35,6 +36,7 @@ import { ShelfError } from "~/utils/error";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
+import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import {
   createBooking,
   partialCheckinBooking,
@@ -449,6 +451,14 @@ vitest.mock("~/modules/organization/service.server", () => ({
       displayName: null,
     },
   ]),
+}));
+
+// why: recipient resolution has its own tests
+// (notification-recipients.server.test.ts). Mocking the resolver lets each
+// test control the resolved list so the email fan-out can be asserted without
+// real org-settings lookups. Default: nobody resolves, so no emails fire.
+vitest.mock("./notification-recipients.server", () => ({
+  getBookingNotificationRecipients: vitest.fn().mockResolvedValue([]),
 }));
 
 // why: preventing actual job scheduling and queue operations during tests
@@ -4009,6 +4019,81 @@ describe("checkoutBooking", () => {
     });
   });
 
+  it("clears the stale check-in marker on a slice that departs a second time", async () => {
+    expect.assertions(3);
+
+    // Same slice as above: it went out, came back IN FULL, and departs again.
+    // The counter already counts it. The markers have to move with it, or the
+    // row still reads "checked in" while the units are gone, and the
+    // completion gate lets the booking close on an asset that is out.
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-qty",
+            assetKits: [{ kitId: "kit-1" }],
+            title: "Cables",
+            type: AssetType.QUANTITY_TRACKED,
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-qty",
+          quantity: 8,
+          id: "ba-qty",
+          assetKitId: "ak-1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: new Date("2026-01-02T10:00:00.000Z"),
+        },
+      ],
+    };
+    // why: two booking reads, the second reporting ONGOING so the flow
+    // continues past the status write.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    // why: the status write only has to resolve; it is not what this asserts.
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+    // why: the departure scan keys on `OR`, and its ids are what the marker
+    // write must reuse. A fully-returned slice answers that scan.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation(
+      (args?: { where?: { checkedOutAt?: unknown; OR?: unknown } }) => {
+        if (args?.where?.OR) {
+          return Promise.resolve([{ id: "ba-qty", quantity: 8 }]);
+        }
+        return Promise.resolve([]);
+      }
+    );
+
+    await checkoutBooking(mockCheckoutParams);
+
+    const markerWrites = (
+      db.bookingAsset.updateMany as unknown as {
+        mock: {
+          calls: Array<
+            [
+              {
+                where?: unknown;
+                data?: { checkedOutAt?: unknown; checkedInAt?: unknown };
+              },
+            ]
+          >;
+        };
+      }
+    ).mock.calls.filter((c) => c[0]?.data?.checkedOutAt !== undefined);
+
+    expect(markerWrites).toHaveLength(1);
+    // Keyed on the departing ids, not on `checkedOutAt: null`, which this
+    // already-stamped slice would never match.
+    expect(markerWrites[0][0].where).toEqual({ id: { in: ["ba-qty"] } });
+    // And the check-in that answered the first trip is cleared.
+    expect(markerWrites[0][0].data).toMatchObject({ checkedInAt: null });
+  });
+
   it("should throw error when assets have booking conflicts", async () => {
     expect.assertions(1);
 
@@ -7564,11 +7649,13 @@ describe("revertBookingToDraft", () => {
     const result = await revertBookingToDraft({
       id: "booking-1",
       organizationId: "org-1",
+      hints: mockClientHints,
     });
 
     expect(db.booking.update).toHaveBeenCalledWith({
       where: { id: "booking-1" },
       data: { status: BookingStatus.DRAFT },
+      include: expect.any(Object),
     });
     expect(result).toEqual(draftBooking);
   });
@@ -7581,8 +7668,86 @@ describe("revertBookingToDraft", () => {
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     await expect(
-      revertBookingToDraft({ id: "booking-1", organizationId: "org-1" })
+      revertBookingToDraft({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+      })
     ).rejects.toThrow(ShelfError);
+  });
+
+  // why: regression — reverting a reservation used to be silent. The custodian
+  // submitted a request, an admin sent it back, and no email went out (every
+  // other lifecycle transition emails). This pins the notification in place.
+  it("emails the resolved recipients when a reservation is reverted", async () => {
+    const custodianUser = {
+      id: "user-2",
+      email: "custodian@example.com",
+      firstName: "Custodian",
+      lastName: "User",
+      displayName: null,
+      dateFormat: null,
+      timeFormat: null,
+      weekStart: null,
+      timeZone: null,
+    };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      custodianUserId: "user-2",
+    };
+    const draftBooking = {
+      ...mockBooking,
+      status: BookingStatus.DRAFT,
+      custodianUser,
+      custodianTeamMember: null,
+      creator: custodianUser,
+      notificationRecipients: [],
+      organization: {
+        name: "Test Org",
+        customEmailFooter: null,
+        owner: { email: "owner@example.com" },
+      },
+      _count: { bookingAssets: mockBooking.bookingAssets.length },
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(draftBooking);
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: custodianUser.email,
+        firstName: custodianUser.firstName,
+        lastName: custodianUser.lastName,
+        userId: custodianUser.id,
+        dateFormat: null,
+        timeFormat: null,
+        weekStart: null,
+        timeZone: null,
+        reason: "custodian",
+      },
+    ]);
+
+    await revertBookingToDraft({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "admin-1",
+      hints: mockClientHints,
+    });
+
+    expect(getBookingNotificationRecipients).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "REVERT_TO_DRAFT",
+        editorUserId: "admin-1",
+      })
+    );
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "custodian@example.com",
+        subject: expect.stringContaining("reverted to draft"),
+      })
+    );
   });
 });
 
@@ -9655,6 +9820,21 @@ describe("attributeCategorizedDispositionsByBookingAsset (legacy NULL + tagged m
 describe("isBookingFullyCheckedIn", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: `clearAllMocks` clears call history but not `mockResolvedValue`
+    // implementations, and the tests here drive four shared mocks between
+    // them. Without a reset a value set by one test answers a read the next
+    // test never stubbed, which fails it for a reason that is not in it.
+    // Same pattern as the `partialCheckinBooking` block below.
+    for (const mock of [
+      db.bookingAsset.findMany,
+      db.partialBookingCheckin.findMany,
+      db.partialBookingCheckout.findMany,
+    ] as Array<ReturnType<typeof vitest.fn>>) {
+      mock.mockReset().mockResolvedValue([]);
+    }
+    (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ _sum: { quantity: 0 } });
   });
 
   it("returns true when individuals are reconciled and qty-tracked remaining is zero", async () => {
@@ -9688,7 +9868,10 @@ describe("isBookingFullyCheckedIn", () => {
     // why: asset-1 is in a session → individual-side reconciled.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-1"] },
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
     // Booked 10 − logged 10 → remaining 0 for asset-2.
     //@ts-expect-error missing vitest type
@@ -9697,6 +9880,157 @@ describe("isBookingFullyCheckedIn", () => {
     const result = await isBookingFullyCheckedIn(db, "booking-1");
 
     expect(result).toBe(true);
+  });
+
+  it("returns false when a slice went out, came back, and went out again", async () => {
+    expect.assertions(1);
+
+    // A booking that is still ONGOING can be checked out again: the guard only
+    // refuses COMPLETE, ARCHIVED and CANCELLED. So a slice can be dispatched,
+    // partially checked in, then dispatched a second time.
+    //
+    // why: a legacy row. Checkout now clears `checkedInAt` when a slice
+    // re-departs, so new rows do not look like this — but rows written before
+    // that, and any left by a path that stamps a departure without clearing
+    // the marker, still do. The gate reads the two markers against each other
+    // so those rows are judged correctly too, rather than trusting any
+    // `checkedInAt` as proof the slice came back.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        // Out at 10:00, back at 12:00, out again at 14:00. The second
+        // departure refreshes `checkedOutAt`, so it now sits after the
+        // check-in that answered the first trip.
+        checkedOutAt: new Date("2026-01-01T14:00:00.000Z"),
+        checkedInAt: new Date("2026-01-01T12:00:00.000Z"),
+        checkedOutQuantity: 2,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    // The asset left the warehouse twice and came back once, so the booking
+    // cannot be complete.
+    expect(result).toBe(false);
+  });
+
+  it("does not let a first-trip check-in session reconcile a second departure", async () => {
+    expect.assertions(1);
+
+    // The asset was checked in through a scan session on its first trip, so
+    // its id is in that session's `assetIds` for good. It then departed again,
+    // which clears the slice's `checkedInAt`. The session is the only record
+    // left claiming a return, and it answers a trip that already ended.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        // Second departure, stamped after the session below.
+        checkedOutAt: new Date("2026-01-03T09:00:00.000Z"),
+        checkedInAt: null,
+        checkedOutQuantity: 2,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // why: the session names the asset but predates the current departure.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-02T17:00:00.000Z"),
+      },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(false);
+  });
+
+  it("still accepts a check-in session that answers the current departure", async () => {
+    expect.assertions(1);
+
+    // The mirror of the case above, so the guard cannot be satisfied by simply
+    // refusing every session. Here the session comes AFTER the departure, so it
+    // is the record of this trip's return.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: new Date("2026-01-02T09:00:00.000Z"),
+        checkedInAt: null,
+        checkedOutQuantity: 1,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-02T17:00:00.000Z"),
+      },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(true);
+  });
+
+  it("returns false when qty-tracked units went out, came back, and went out again", async () => {
+    expect.assertions(1);
+
+    // Same second-departure story on the quantity-tracked side. 5 units went
+    // out, all 5 came back, then all 5 went out again.
+    //
+    // why: the marker is refreshed by the fix, so the slice reads as dispatched
+    // and not reconciled. What decides the answer is the arithmetic: obligated
+    // units are capped at the booked quantity, while the units already logged
+    // as returned are the 5 from the FIRST trip. Capped obligation minus those
+    // logged returns lands on zero, so the second departure has to be carried
+    // by the cumulative counter rather than by the booked quantity.
+    // why: one response, not a queued pair. The gate reads the slice rows and
+    // then aggregates the check-in log directly, so it makes a single
+    // `bookingAsset.findMany` call; a second queued value would go unconsumed
+    // and fire inside the next test instead.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 5,
+        assetKitId: null,
+        checkedOutAt: new Date("2026-01-02T10:00:00.000Z"),
+        checkedInAt: null,
+        checkedOutQuantity: 10,
+        asset: { id: "asset-1", type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([]);
+    // The 5 units returned from the first trip are logged.
+    //@ts-expect-error missing vitest type
+    db.consumptionLog.aggregate.mockResolvedValue({ _sum: { quantity: 5 } });
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    // 10 units have left across two trips and 5 have come back.
+    expect(result).toBe(false);
   });
 
   it("returns false when an individual asset is missing from every session", async () => {
@@ -9724,7 +10058,10 @@ describe("isBookingFullyCheckedIn", () => {
     // why: only asset-1 is reconciled; asset-2 is still pending.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-1"] },
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
 
     const result = await isBookingFullyCheckedIn(db, "booking-1");
@@ -9811,7 +10148,10 @@ describe("isBookingFullyCheckedIn", () => {
     // qty asset's outstanding units can (and must) block completion.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-ind", "asset-scanned"] },
+      {
+        assetIds: ["asset-ind", "asset-scanned"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
     // why: the booking's single progressive session — the row that used to
     // flip completion into session-only accounting for every asset.
@@ -9951,7 +10291,10 @@ describe("isBookingFullyCheckedIn", () => {
     // why: the individual is reconciled via its checkin session.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-scanned"] },
+      {
+        assetIds: ["asset-scanned"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
     // why: the same single progressive session as the blocking case above.
     //@ts-expect-error missing vitest type
@@ -9993,7 +10336,10 @@ describe("isBookingFullyCheckedIn", () => {
     // one has nothing to reconcile and must not be waited for.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-1"] },
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
 
     const result = await isBookingFullyCheckedIn(db, "booking-1");

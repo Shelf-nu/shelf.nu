@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -6,6 +5,8 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -14,17 +15,35 @@ import { makeShelfError } from "~/utils/error";
  * Returns non-deleted team members for the organization.
  * Used by the mobile app's custody assignment picker.
  *
- * SELF_SERVICE callers only receive their own team member record — they may
- * only assign custody to themselves (enforced again in the custody services),
- * and the web scanner loader applies the same filter (`filterByUserId`), so
- * the full roster is never exposed to them on either platform.
+ * Every companion caller is an ASSIGNMENT picker: asset custody, kit custody,
+ * the scanner's bulk-assign sheet, and the booking custodian on create/edit.
+ * The scope therefore comes from `resolveCustodianPickerScope`, the same rule
+ * the web pickers resolve through, so the two platforms offer the same names.
+ *
+ * `booking-custodian` is the widest purpose this endpoint serves, and the one
+ * it must answer for: BASE holds `booking:create` and has to be able to put
+ * itself on a booking. Restricted roles get their own row and nothing else;
+ * ADMIN and OWNER get the roster. A caller who may not actually take asset
+ * custody is still refused by the custody services, which gate on the
+ * permission matrix rather than on this list.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const { roles, canSeeAllCustody } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+    // Resolved from the whole membership, not `roles[0]`: a membership ordered
+    // [SELF_SERVICE, ADMIN] reads as SELF_SERVICE by position, which narrows a
+    // genuine admin to their own row.
+    const scope = resolveCustodianPickerScope({
+      purpose: "booking-custodian",
+      role: resolveMostPrivilegedRole(roles),
+      canSeeAllCustody,
+      userId: user.id,
+    });
 
     const url = new URL(request.url);
     const search = url.searchParams.get("search") || "";
@@ -47,11 +66,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const where = {
       organizationId,
       deletedAt: null,
-      ...(isSelfService ? { userId: user.id } : {}),
+      // `self` narrows to the caller's own team-member rows. `none` cannot
+      // arise from `booking-custodian`, but is handled so a future purpose
+      // cannot silently widen this to the whole roster.
+      ...(scope.mode === "self" ? { userId: scope.userId } : {}),
       ...(search
         ? { name: { contains: search, mode: "insensitive" as const } }
         : {}),
     };
+
+    if (scope.mode === "none") {
+      return data({
+        teamMembers: [],
+        page,
+        perPage,
+        totalCount: 0,
+        totalPages: 1,
+      });
+    }
 
     const [teamMembers, totalCount] = await Promise.all([
       db.teamMember.findMany({
