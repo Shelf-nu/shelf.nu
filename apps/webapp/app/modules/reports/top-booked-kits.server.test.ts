@@ -11,6 +11,7 @@
  * @see {@link file://./helpers.server.ts}
  */
 
+import type { Prisma } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: Mock the Prisma client so the unit tests never touch a real database.
@@ -46,12 +47,41 @@ const TIMEFRAME: ResolvedTimeframe = {
   to: new Date("2026-04-30T23:59:59Z"),
 };
 
+/**
+ * A booking row exactly as the report's lightweight scan projects it.
+ *
+ * Declared against the query rather than cast loose: `fetchTopBookedKitData`
+ * selects `from`, `to` and each kit-driven slice's two provenance columns, so
+ * a fixture that drifts from that select stops compiling instead of quietly
+ * feeding the report a shape it never receives.
+ */
+type KitScanBooking = Prisma.BookingGetPayload<{
+  select: {
+    from: true;
+    to: true;
+    bookingAssets: { select: { sourceKitId: true; assetKitId: true } };
+  };
+}>;
+
+/** A kit row exactly as the report's hydration query projects it. */
+type KitMetaRow = Prisma.KitGetPayload<{
+  select: {
+    id: true;
+    organizationId: true;
+    name: true;
+    image: true;
+    imageExpiration: true;
+    category: { select: { name: true } };
+    location: { select: { name: true } };
+  };
+}>;
+
 /** Build a kit-metadata row as returned by the hydration `db.kit.findMany`. */
 function kitMeta(
   id: string,
   name: string,
-  overrides: Record<string, unknown> = {}
-) {
+  overrides: Partial<KitMetaRow> = {}
+): KitMetaRow {
   return {
     id,
     organizationId: "org-1",
@@ -81,7 +111,11 @@ type SliceFixture =
  * a booking whose slices are all standalone comes back with an empty
  * `bookingAssets[]`.
  */
-function booking(from: string, to: string, slices: SliceFixture[]) {
+function booking(
+  from: string,
+  to: string,
+  slices: SliceFixture[]
+): KitScanBooking {
   return {
     from: new Date(from),
     to: new Date(to),
