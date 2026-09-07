@@ -67,11 +67,6 @@ vi.mock("~/modules/booking/service.server", async () => {
   };
 });
 
-// why: rate limiting is infra, not the behaviour under test — no-op it.
-vi.mock("~/utils/rate-limit.server", () => ({
-  enforceUserRateLimit: vi.fn().mockResolvedValue(undefined),
-}));
-
 const partialCheckoutBookingMock = vi.mocked(partialCheckoutBooking);
 
 const BOOKING_ID = "booking-1";
