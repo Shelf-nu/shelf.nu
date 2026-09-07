@@ -10,7 +10,10 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
-import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
+import {
+  addScannedAssetsToBooking,
+  buildKitSlicesForBooking,
+} from "~/modules/booking/service.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
@@ -25,7 +28,11 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *
  * Adds scanned assets and/or kits to a booking — the mobile twin of the web
  * scanner's add-to-booking flow. Wraps the same `addScannedAssetsToBooking`
- * service (kit expansion, status sync, notes, events stay identical).
+ * service, so notes and events are identical on both platforms.
+ *
+ * The two clients differ in who resolves a kit's members: the web drawer sends
+ * ready-made kit slices, while the phone sends kit ids and this route resolves
+ * them, keeping the mobile client thin and the lookup org-scoped.
  *
  * Status/role gating mirrors the web (`canUserManageBookingAssets`):
  * COMPLETE / ARCHIVED / CANCELLED bookings reject; SELF_SERVICE users may
@@ -83,6 +90,10 @@ export async function action({ request }: ActionFunctionArgs) {
         from: true,
         to: true,
         custodianUserId: true,
+        // Which kit memberships the booking already holds, so re-adding a kit
+        // that is partly on it adds only the missing members instead of
+        // colliding with the rows already there.
+        bookingAssets: { select: { assetKitId: true } },
       },
     });
 
@@ -132,30 +143,43 @@ export async function action({ request }: ActionFunctionArgs) {
     // IDOR). Kit-derived asset ids are already org-scoped by the query below.
     await assertAssetsBelongToOrg({ assetIds, organizationId });
 
-    // Expand kits to their contained assets — the service only connects
-    // `assetIds` to the booking (`kitIds` drives status flags and notes).
-    // The web drawer does this expansion client-side; doing it here keeps
-    // the mobile client thin and the expansion org-scoped.
-    //
-    // Asset-Kit membership lives on the `AssetKit` pivot (no direct
-    // `Asset.kitId` field on the feat-quantities branch). Filter assets by
-    // their pivot rows; org-scoping the Asset itself keeps the query tenant-safe.
-    let expandedAssetIds = assetIds;
-    if (kitIds.length > 0) {
-      const kitAssets = await db.asset.findMany({
-        where: {
-          organizationId,
-          assetKits: { some: { kitId: { in: kitIds } } },
-        },
-        select: { id: true },
-      });
-      expandedAssetIds = [
-        ...new Set([...assetIds, ...kitAssets.map((a) => a.id)]),
-      ];
-    }
+    /**
+     * Resolve each scanned kit into one slice per `AssetKit` membership.
+     *
+     * A kit's members must reach the booking as kit-driven rows, carrying the
+     * membership they came from: `BookingAsset.assetKitId` is what every
+     * surface reads to group an asset under its kit, and `sourceKitId` is what
+     * keeps that provenance after the membership row goes away. Adding the
+     * members as loose asset ids instead puts them on the booking with no kit
+     * to belong to, so neither the phone nor the website can show the kit they
+     * were scanned as.
+     *
+     * The lookup is org-scoped by `AssetKit.organizationId`, so a foreign kit
+     * id resolves to no slices rather than reaching another workspace's
+     * memberships. The mobile client sends kit ids only — the web drawer
+     * resolves the same slices in the browser and posts them.
+     */
+    const kitSlices = await buildKitSlicesForBooking({
+      kitIds,
+      organizationId,
+      existingAssetKitIds: new Set(
+        booking.bookingAssets
+          .map((row) => row.assetKitId)
+          .filter((id): id is string => id !== null)
+      ),
+    });
+
+    // An asset can be scanned on its own AND as part of a kit in the same
+    // batch. The kit slice is the more specific of the two, so it takes the
+    // asset and the standalone bucket keeps only what no kit claimed.
+    const kitSliceAssetIds = new Set(kitSlices.map((slice) => slice.assetId));
+    const standaloneAssetIds = assetIds.filter(
+      (id) => !kitSliceAssetIds.has(id)
+    );
 
     await addScannedAssetsToBooking({
-      assetIds: expandedAssetIds,
+      assetIds: standaloneAssetIds,
+      kitSlices,
       kitIds,
       bookingId,
       organizationId,
