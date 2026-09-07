@@ -93,6 +93,19 @@ export function useSidebarNavItems() {
     };
   }, [canUseBookings, subscription]);
 
+  /**
+   * Personal workspaces can't invite registered users. Rather than hide the
+   * "Users" / "Pending invites" items, we show them disabled with an upgrade
+   * reason, mirroring how bookings are surfaced on Personal workspaces.
+   */
+  const teamInviteDisabled = useMemo(() => {
+    if (!isPersonalOrganization) {
+      return false;
+    }
+
+    return { reason: "Inviting users is available on Team workspaces" };
+  }, [isPersonalOrganization]);
+
   const topMenuItems: NavItem[] = [
     {
       type: "child",
@@ -197,12 +210,12 @@ export function useSidebarNavItems() {
         {
           title: "Users",
           to: "/settings/team/users",
-          hidden: isPersonalOrganization,
+          disabled: teamInviteDisabled,
         },
         {
           title: "Pending invites",
           to: "/settings/team/invites",
-          hidden: isPersonalOrganization,
+          disabled: teamInviteDisabled,
         },
         {
           title: "Non-registered members",

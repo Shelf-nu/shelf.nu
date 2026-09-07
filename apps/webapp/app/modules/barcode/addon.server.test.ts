@@ -185,7 +185,10 @@ describe("createBarcodeAddonTrialSubscription", () => {
       expect.objectContaining({
         trial_period_days: 7,
         default_payment_method: "pm_123",
-      })
+      }),
+      // Keyed on the workspace: a retry after a lost response returns this
+      // same subscription instead of opening a second one.
+      { idempotencyKey: "addon-trial:barcodes:org_1" }
     );
   });
 

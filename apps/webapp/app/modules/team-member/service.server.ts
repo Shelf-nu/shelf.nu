@@ -6,12 +6,16 @@ import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import type { ErrorLabel } from "~/utils/error";
-import { isNotFoundError, ShelfError } from "~/utils/error";
+import {
+  isNotFoundError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { resolveUserDisplayName } from "~/utils/user";
-import { getNrmSelectionWhere } from "./nrm-scope";
+import { getNrmIndexWhere, getNrmSelectionWhere } from "./nrm-scope";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
@@ -873,6 +877,125 @@ export async function getTeamMember({
 }
 
 /**
+ * Soft-deletes one non-registered member, refusing while they still hold
+ * custody over any asset.
+ *
+ * The custody rule is not advisory. Deleting an NRM only sets `deletedAt`, so
+ * every `Custody` row keeps pointing at the member: the assets go on naming a
+ * custodian who is gone from the NRM index and from every custodian picker,
+ * and nothing short of opening assets one at a time can find what they hold.
+ *
+ * Both halves of the `where` are load-bearing, and both belong in the write
+ * rather than in a preceding read — the list page the caller is acting from was
+ * rendered earlier, and a member can be given custody in between:
+ *
+ * - `custodies: { none: {} }` enforces the rule at the moment of the write.
+ * - the NRM scope keeps the delete on a row this index actually lists. A bare
+ *   `{ id, organizationId }` also matches the TeamMember backing a registered
+ *   user, or one holding a pending invite, neither of which is deletable here.
+ *
+ * A miss is therefore ordinary, not exceptional: it is reported as a client
+ * error, with a second read only to say which of the two reasons applied.
+ *
+ * @param params.nrmId - The member to delete
+ * @param params.organizationId - The active organization
+ * @throws {ShelfError} 400 if the member still holds custody, 404 if the id is
+ *   not a deletable NRM in this organization, 500 if the write fails
+ */
+export async function deleteNRM({
+  nrmId,
+  organizationId,
+}: {
+  nrmId: TeamMember["id"];
+  organizationId: TeamMember["organizationId"];
+}) {
+  try {
+    // Built from the index scope plus this one id. NOT `getNrmSelectionWhere`:
+    // that helper reads `ALL_SELECTED_KEY` and drops the id filter entirely for
+    // it, so a request naming that sentinel as its member would match — and
+    // soft-delete — every unencumbered NRM in the organization.
+    const scope: Prisma.TeamMemberWhereInput = {
+      ...getNrmIndexWhere({ organizationId }),
+      id: nrmId,
+    };
+
+    // Custody comes in two independent shapes and either one is enough to make
+    // a member undeletable. Assigning a kit ALWAYS writes `KitCustody`, while
+    // the inherited per-asset `Custody` rows are only written when the kit has
+    // assets to inherit them — so the custodian of an empty kit holds no
+    // `custodies` at all and would pass an asset-only guard.
+    const holdsNothing = {
+      custodies: { none: {} },
+      kitCustodies: { none: {} },
+    };
+
+    const { count } = await db.teamMember.updateMany({
+      where: { ...scope, ...holdsNothing },
+      data: { deletedAt: new Date() },
+    });
+
+    if (count > 0) {
+      return;
+    }
+
+    // Nothing matched. Read again purely to say why, so the caller gets an
+    // actionable message; the write above is what enforced.
+    const member = await db.teamMember.findFirst({
+      where: scope,
+      select: { _count: { select: { custodies: true, kitCustodies: true } } },
+    });
+
+    if (!member) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "This team member could not be found in your workspace, or is not one that can be deleted here.",
+        additionalData: { nrmId, organizationId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (member._count.custodies + member._count.kitCustodies > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "This team member has custody over some assets or kits. Please release custody or check-in those items before deleting the user.",
+        additionalData: { nrmId, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // The row is here and holds nothing, yet the guarded write passed it by:
+    // whatever it held was released between the two statements. Telling the
+    // caller to release custody would name something that no longer exists.
+    throw new ShelfError({
+      cause: null,
+      message:
+        "This team member changed while it was being deleted. Please try again.",
+      additionalData: { nrmId, organizationId },
+      label,
+      status: 409,
+      shouldBeCaptured: false,
+    });
+  } catch (cause) {
+    // The refusals above are deliberate 4xx answers; re-wrapping them would
+    // replace a message written for the user with "try again later".
+    rethrowIfClientError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: "Failed to delete team member",
+      additionalData: { nrmId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
  * Soft-deletes the selected NRMs, refusing the whole batch if any of them
  * still holds custody.
  *
@@ -901,20 +1024,31 @@ export async function bulkDeleteNRMs({
 
     const teamMembers = await db.teamMember.findMany({
       where,
-      select: { id: true, _count: { select: { custodies: true } } },
+      select: {
+        id: true,
+        _count: { select: { custodies: true, kitCustodies: true } },
+      },
     });
 
-    /** If some team members have custody, then delete is not allowed */
+    /**
+     * If some team members have custody, then delete is not allowed. Kit
+     * custody counts: assigning a kit always writes `KitCustody`, and only
+     * writes the inherited per-asset `Custody` rows when the kit has assets,
+     * so the custodian of an empty kit holds no `custodies` at all.
+     */
     const someTeamMemberHasCustodies = teamMembers.some(
-      (tm) => tm._count.custodies > 0
+      (tm) => tm._count.custodies + tm._count.kitCustodies > 0
     );
 
     if (someTeamMemberHasCustodies) {
       throw new ShelfError({
         cause: null,
         message:
-          "Some team members has custody over some assets. Please release custody or check-in those assets before deleting the user.",
+          "Some team members have custody over some assets or kits. Please release custody or check-in those items before deleting the user.",
+        additionalData: { organizationId },
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -933,18 +1067,19 @@ export async function bulkDeleteNRMs({
           organizationId,
         }),
         custodies: { none: {} },
+        kitCustodies: { none: {} },
       },
       data: { deletedAt: new Date() },
     });
   } catch (cause) {
-    const message =
-      cause instanceof ShelfError
-        ? cause.message
-        : "Something went wrong while bulk deleting non-registered members";
+    // The custody refusal above is a deliberate 4xx answer; re-wrapping it
+    // would turn a rule the user can act on into a server fault.
+    rethrowIfClientError(cause);
 
     throw new ShelfError({
       cause,
-      message,
+      message:
+        "Something went wrong while bulk deleting non-registered members",
       label,
     });
   }
@@ -1122,7 +1257,20 @@ export async function getTeamMembersForNotify({
           },
         },
       },
-      orderBy: [{ user: { firstName: "asc" } }, { name: "asc" }],
+      /**
+       * Order by the label the picker actually renders. `TeamMember.name` is
+       * NOT NULL and `updateUser` keeps it equal to `displayName` when set and
+       * `"firstName lastName"` otherwise — the same chain
+       * `resolveTeamMemberName` resolves — so it is already a materialised
+       * COALESCE, which Prisma's `orderBy` cannot express directly.
+       *
+       * Leading with `user.displayName` instead splits the list in two:
+       * Postgres sorts NULLs last on ASC, so every renamed user is hoisted
+       * above every un-renamed one and a display-name "Zoe" precedes a
+       * fallback "Aaron". Ordering by `name` also matches the search path in
+       * `api+/model-filters`, so the list does not re-sort as the user types.
+       */
+      orderBy: [{ name: "asc" }, { id: "asc" }],
     });
 
     return {

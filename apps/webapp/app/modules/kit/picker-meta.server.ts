@@ -19,6 +19,7 @@
 import { AssetType } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { getPeakReservedUnitsByAsset } from "~/modules/asset/availability-primitives.server";
 
 /**
  * Per-asset picker metadata for QUANTITY_TRACKED rows.
@@ -48,6 +49,50 @@ export type PickerAssetMeta = {
   /** Unit of measure label (passed through for the qty input suffix). */
   unitOfMeasure: string | null;
 };
+
+/**
+ * How many units of one asset a given kit may hold.
+ *
+ * Shared so the picker and the write guard cannot answer differently — the
+ * guard exists to refuse what the picker would not have offered, which only
+ * holds while both compute the same number.
+ *
+ * @param args.totalQuantity - `Asset.quantity`, the whole pool
+ * @param args.currentInThisKit - what this kit already holds
+ * @param args.otherKitsQuantity - Σ of every other kit's `AssetKit.quantity`
+ * @param args.operatorCustodyQuantity - Σ of operator-only `Custody.quantity`
+ * @param args.occupyingBookedQuantity - peak concurrent standalone booked
+ *   units, from {@link getPeakReservedUnitsByAsset}
+ * @returns `spaceWithoutMe` (the pool ignoring this kit) and the ceiling the
+ *   picker offers, which keeps an over-committed slice reducible rather than
+ *   locking the user out of fixing it
+ */
+export function computeKitClaimablePool({
+  totalQuantity,
+  currentInThisKit,
+  otherKitsQuantity,
+  operatorCustodyQuantity,
+  occupyingBookedQuantity,
+}: {
+  totalQuantity: number;
+  currentInThisKit: number;
+  otherKitsQuantity: number;
+  operatorCustodyQuantity: number;
+  occupyingBookedQuantity: number;
+}): { spaceWithoutMe: number; maxAllowedForThisKit: number } {
+  const spaceWithoutMe = Math.max(
+    0,
+    totalQuantity -
+      otherKitsQuantity -
+      operatorCustodyQuantity -
+      occupyingBookedQuantity
+  );
+
+  return {
+    spaceWithoutMe,
+    maxAllowedForThisKit: Math.max(currentInThisKit, spaceWithoutMe),
+  };
+}
 
 /**
  * Fetches and computes `PickerAssetMeta` for every QUANTITY_TRACKED
@@ -120,13 +165,13 @@ export async function getKitPickerMeta({
       // `kitCustodyId` distinguishes operator-allocated rows from rows
       // that are the materialised custody of a kit. See subtlety (1).
       custody: { select: { quantity: true, kitCustodyId: true } },
-      bookingAssets: {
-        where: {
-          booking: { status: { in: ["ONGOING", "OVERDUE"] } },
-        },
-        select: { quantity: true },
-      },
     },
+  });
+
+  const peakReservedByAsset = await getPeakReservedUnitsByAsset({
+    assetIds: rows.map((row) => row.id),
+    organizationId,
+    tx: db,
   });
 
   return new Map(
@@ -142,15 +187,17 @@ export async function getKitPickerMeta({
       const operatorCustodyTotal = row.custody
         .filter((c) => c.kitCustodyId == null)
         .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
-      const ongoingBookingTotal = row.bookingAssets.reduce(
-        (sum, ba) => sum + (ba.quantity ?? 0),
-        0
-      );
-      const spaceWithoutMe = Math.max(
-        0,
-        totalQty - otherKitsQty - operatorCustodyTotal - ongoingBookingTotal
-      );
-      const maxAllowedForThisKit = Math.max(currentInThisKit, spaceWithoutMe);
+      // Peak, not sum: a kit slice has no dates, so it competes with the
+      // highest demand at any one instant. Two reservations that never
+      // overlap never hold units together.
+      const ongoingBookingTotal = peakReservedByAsset.get(row.id) ?? 0;
+      const { maxAllowedForThisKit } = computeKitClaimablePool({
+        totalQuantity: totalQty,
+        currentInThisKit,
+        otherKitsQuantity: otherKitsQty,
+        operatorCustodyQuantity: operatorCustodyTotal,
+        occupyingBookedQuantity: ongoingBookingTotal,
+      });
 
       const meta: PickerAssetMeta = {
         assetQuantity: totalQty,

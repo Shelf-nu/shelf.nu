@@ -64,7 +64,11 @@ try {
 
 export default function CreateAssetScreen() {
   const router = useRouter();
-  const { qrId } = useLocalSearchParams<{ qrId?: string }>();
+  const { qrId: qrIdParam } = useLocalSearchParams<{ qrId?: string }>();
+  // A scanned QR links only ONE asset: the server ignores a qrId that is
+  // already claimed. Held as state so "Create Another" can drop it — the next
+  // asset is not linked, and the banner must stop saying it will be.
+  const [qrId, setQrId] = useState(qrIdParam);
   const { currentOrg } = useOrg();
   const { colors } = useTheme();
   const styles = useStyles();
@@ -528,6 +532,10 @@ export default function CreateAssetScreen() {
           setImageUri(null);
           setImageMimeType("image/jpeg");
           setCustomFieldValues({});
+          setQrId(undefined);
+          // The route still carries the old qrId; clear it too, or a screen
+          // remount would re-seed the state and resurrect the banner.
+          router.setParams({ qrId: undefined });
         },
       },
     ]);

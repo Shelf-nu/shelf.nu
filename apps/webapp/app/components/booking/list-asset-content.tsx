@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { AssetStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import { LocationBadge } from "~/components/location/location-badge";
+import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserData } from "~/hooks/use-user-data";
@@ -19,8 +20,8 @@ import {
   resolveBookingRowQtyState,
   resolveQtyStockBadgeVariant,
 } from "~/utils/booking-assets";
+import { canRoleRemoveBookingAssets } from "~/utils/bookings";
 import { tw } from "~/utils/tw";
-import { resolveUserDisplayName } from "~/utils/user";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import {
   AvailabilityLabel,
@@ -91,7 +92,8 @@ export default function ListAssetContent({
     >;
   }>();
   const currentOrganization = useCurrentOrganization();
-  const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
 
   // Resolve the asset's display code (QR id, SAM id, or barcode value) per
   // the workspace preference and per-asset override. Cheap pure call; safe
@@ -103,9 +105,7 @@ export default function ListAssetContent({
         entityKind: "asset",
       })
     : null;
-  const { isReserved, isDraft, isFinished } = useBookingStatusHelpers(
-    booking.status
-  );
+  const { isFinished } = useBookingStatusHelpers(booking.status);
   const user = useUserData();
 
   /**
@@ -149,25 +149,15 @@ export default function ListAssetContent({
 
     // Check if user is the custodian of the item
     const isUserCustodian = booking?.custodianUser?.id === user?.id;
+    if (!isUserCustodian) return false;
 
-    // Base role: can see actions if booking is Draft AND user is custodian
-    if (isBase && isDraft && isUserCustodian) return true;
-
-    // SelfService role: can see actions if (Draft OR Reserved) AND user is custodian
-    if (isSelfService && (isDraft || isReserved) && isUserCustodian)
-      return true;
-
-    return false;
-  }, [
-    isPartOfKit,
-    booking?.custodianUser?.id,
-    user?.id,
-    isBase,
-    isDraft,
-    isSelfService,
-    isReserved,
-    isBaseOrSelfService,
-  ]);
+    /**
+     * BASE stops at DRAFT, SELF_SERVICE at RESERVED. Resolved through the
+     * shared helper rather than spelled out inline, so this menu, the bulk
+     * actions menu and the two server-side remove gates cannot drift apart.
+     */
+    return canRoleRemoveBookingAssets({ roles, booking });
+  }, [isPartOfKit, booking, user?.id, roles, isBaseOrSelfService]);
 
   /**
    * Qty-tracked partial dispositioning.
@@ -279,7 +269,11 @@ export default function ListAssetContent({
 
   return (
     <>
-      <When truthy={!isKitAsset} fallback={<Td> </Td>}>
+      {/* The empty cell keeps the column aligned, exactly as it already does
+          for kit members. A checkbox is only offered when this user has a bulk
+          action to feed: a BASE custodian past DRAFT has none, and selecting
+          rows for a menu that renders nothing is dead UI. */}
+      <When truthy={!isKitAsset && hasAnyBulkAction} fallback={<Td> </Td>}>
         <BulkListItemCheckbox item={item} />
       </When>
 
@@ -603,10 +597,7 @@ export default function ListAssetContent({
           >
             {checkoutDetails ? (
               <span className="text-sm text-gray-600">
-                <UserBadge
-                  name={resolveUserDisplayName(checkoutDetails.checkedOutBy)}
-                  img={checkoutDetails.checkedOutBy.profilePicture}
-                />
+                <UserBadge user={checkoutDetails.checkedOutBy} />
               </span>
             ) : (
               <EmptyTableValue />
@@ -653,12 +644,7 @@ export default function ListAssetContent({
                 {(() => {
                   const details = partialCheckinDetails[item.id];
 
-                  return (
-                    <UserBadge
-                      name={resolveUserDisplayName(details.checkedInBy)}
-                      img={details.checkedInBy.profilePicture}
-                    />
-                  );
+                  return <UserBadge user={details.checkedInBy} />;
                 })()}
               </span>
             ) : (

@@ -288,13 +288,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
-    const bookingAsset =
-      asset.bookingAssets.length > 0 ? asset.bookingAssets[0] : undefined;
-    const currentBooking: any = null;
-
-    if (bookingAsset && bookingAsset.booking.from) {
-      asset.bookingAssets = [currentBooking];
-    }
+    // `bookingAssets` is already the asset's current booking: the query
+    // filters to ONGOING/OVERDUE and excludes bookings this asset has been
+    // partially checked in from, so the first row is the one the page shows.
+    // Nothing further is derived from it here.
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
       ? asset.customFields.filter(

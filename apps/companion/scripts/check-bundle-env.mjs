@@ -59,7 +59,8 @@ function bundlePaths() {
     const dir = join(DIST, platform);
     if (!statSync(dir).isDirectory()) continue;
     for (const file of readdirSync(dir)) {
-      if (file.endsWith(".hbc") || file.endsWith(".js")) out.push(join(dir, file));
+      if (file.endsWith(".hbc") || file.endsWith(".js"))
+        out.push(join(dir, file));
     }
   }
   return out;
@@ -75,7 +76,9 @@ function main() {
     process.exit(1);
   }
 
-  const expected = expectedUrl.match(/https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1];
+  const expected = expectedUrl.match(
+    /https:\/\/([a-z0-9]+)\.supabase\.co/
+  )?.[1];
   if (!expected) {
     console.error(
       `[bundle-env] FAILED — EXPO_PUBLIC_SUPABASE_URL is not a Supabase URL: ${expectedUrl}`
@@ -90,7 +93,9 @@ function main() {
     /* handled by the emptiness check below */
   }
   if (paths.length === 0) {
-    console.error(`[bundle-env] FAILED — no bundles under ${DIST}. Run the export first.`);
+    console.error(
+      `[bundle-env] FAILED — no bundles under ${DIST}. Run the export first.`
+    );
     process.exit(1);
   }
 
@@ -98,7 +103,11 @@ function main() {
   for (const path of paths) {
     const refs = refsIn(readFileSync(path, "latin1"));
     const ok = refs.length === 1 && refs[0] === expected;
-    console.log(`  ${ok ? "ok  " : "FAIL"} ${path}  ->  ${refs.join(" ") || "(no Supabase ref found)"}`);
+    console.log(
+      `  ${ok ? "ok  " : "FAIL"} ${path}  ->  ${
+        refs.join(" ") || "(no Supabase ref found)"
+      }`
+    );
     if (!ok) bad = true;
   }
 
@@ -117,6 +126,9 @@ function main() {
 // before comparing, or the guard never matches and this gate passes silently.
 // It is absent entirely under `node -e`, where importing this module must not
 // run the gate.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   main();
 }

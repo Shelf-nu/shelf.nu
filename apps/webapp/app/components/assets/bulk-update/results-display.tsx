@@ -5,6 +5,7 @@
  *
  * @see {@link file://./form.tsx} Parent orchestration component
  */
+import { CSV_CONTENT_TYPE, withUtf8Bom } from "~/utils/csv-utf8";
 import type { BulkUpdateResult } from "~/utils/import-update.server";
 import { escapeCsvValue } from "./helpers";
 import { SummaryPill } from "./shared";
@@ -62,7 +63,7 @@ export function ResultsDisplay({
     }
 
     const csv = lines.join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
+    const blob = new Blob([withUtf8Bom(csv)], { type: CSV_CONTENT_TYPE });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

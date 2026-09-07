@@ -142,7 +142,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
     expect(response instanceof Response).toBe(true);
     expect((response as unknown as Response).status).toBe(200);
     expect((response as unknown as Response).headers.get("content-type")).toBe(
-      "text/csv"
+      "text/csv; charset=utf-8"
     );
     expect(
       (response as unknown as Response).headers.get("content-disposition")

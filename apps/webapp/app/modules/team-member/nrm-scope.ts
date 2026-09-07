@@ -53,10 +53,13 @@ export function getNrmIndexWhere({
   };
 
   if (search) {
+    // `displayName` replaces first/last name in the UI for users who set one,
+    // so it is the name a searcher can actually see on the row.
     where.OR = [
       { name: { contains: search, mode: "insensitive" } },
       { user: { firstName: { contains: search, mode: "insensitive" } } },
       { user: { lastName: { contains: search, mode: "insensitive" } } },
+      { user: { displayName: { contains: search, mode: "insensitive" } } },
     ];
   }
 

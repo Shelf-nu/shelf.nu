@@ -63,6 +63,7 @@ function buildMockBooking(
       email: "custodian@example.com",
       firstName: "Alice",
       lastName: "Custodian",
+      displayName: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       username: "alice",
@@ -77,6 +78,7 @@ function buildMockBooking(
       email: "creator@example.com",
       firstName: "Bob",
       lastName: "Creator",
+      displayName: null,
     },
     notificationRecipients: overrides.notificationRecipients ?? [],
     organization: {
@@ -110,6 +112,7 @@ function defaultSettings() {
         email: string;
         firstName: string | null;
         lastName: string | null;
+        displayName: string | null;
         profilePicture: string | null;
         dateFormat: DateFormatPreference | null;
         timeFormat: TimeFormatPreference | null;
@@ -189,6 +192,7 @@ describe("getBookingNotificationRecipients", () => {
         email: "admin1@example.com",
         firstName: "Admin",
         lastName: "One",
+        displayName: null,
         ...nullFormatPrefs,
       },
       {
@@ -196,6 +200,7 @@ describe("getBookingNotificationRecipients", () => {
         email: "admin2@example.com",
         firstName: "Admin",
         lastName: "Two",
+        displayName: null,
         ...nullFormatPrefs,
       },
     ]);
@@ -226,6 +231,7 @@ describe("getBookingNotificationRecipients", () => {
         email: "admin@example.com",
         firstName: "Admin",
         lastName: "User",
+        displayName: null,
         ...nullFormatPrefs,
       },
     ]);
@@ -273,6 +279,7 @@ describe("getBookingNotificationRecipients", () => {
             email: "always1@example.com",
             firstName: "Always",
             lastName: "One",
+            displayName: null,
             profilePicture: null,
             ...nullFormatPrefs,
           },
@@ -285,6 +292,7 @@ describe("getBookingNotificationRecipients", () => {
             email: "always2@example.com",
             firstName: "Always",
             lastName: "Two",
+            displayName: null,
             profilePicture: null,
             ...nullFormatPrefs,
           },
@@ -319,6 +327,7 @@ describe("getBookingNotificationRecipients", () => {
             email: "booking-notif@example.com",
             firstName: "Notif",
             lastName: "User",
+            displayName: null,
             ...nullFormatPrefs,
           },
         },
@@ -350,6 +359,7 @@ describe("getBookingNotificationRecipients", () => {
             email: "custodian@example.com",
             firstName: "Duplicate",
             lastName: "User",
+            displayName: null,
             profilePicture: null,
             ...nullFormatPrefs,
           },
@@ -385,6 +395,7 @@ describe("getBookingNotificationRecipients", () => {
             email: "editor@example.com",
             firstName: "Editor",
             lastName: "User",
+            displayName: null,
             profilePicture: null,
             ...nullFormatPrefs,
           },
@@ -435,6 +446,7 @@ describe("getBookingNotificationRecipients", () => {
             email: "",
             firstName: "No",
             lastName: "Email",
+            displayName: null,
             profilePicture: null,
             ...nullFormatPrefs,
           },

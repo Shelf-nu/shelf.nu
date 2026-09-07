@@ -61,6 +61,7 @@ const admin = {
   id: "admin-1",
   firstName: "Julia",
   lastName: "Mink",
+  displayName: null,
   email: "julia@example.com",
 };
 

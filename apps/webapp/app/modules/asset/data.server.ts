@@ -30,6 +30,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canImportAssets } from "~/utils/subscription.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 import { parseFiltersWithHierarchy } from "./query.server";
 import {
@@ -61,7 +62,8 @@ interface Props {
   organizations: OrganizationFromUser[];
   role: OrganizationRoles;
   currentOrganization: OrganizationFromUser;
-  user: { firstName: string | null };
+  /** The viewer, for the personal-workspace header. */
+  user: UserNameFields;
   settings: AssetIndexSettings;
   /**
    * Resolved custody read-visibility, from `requirePermission`. Required, not

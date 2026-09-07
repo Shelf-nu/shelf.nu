@@ -757,7 +757,9 @@ export function BookingCalendar({
             rather than floating free. */}
         <View style={styles.dayHeader}>
           <Text style={styles.dayTitle}>{formatDate(selectedDay)}</Text>
-          {canCreate ? (
+          {/* Day keys are YYYY-MM-DD, so string order is date order. A day
+              already over cannot take a new booking; today still can. */}
+          {canCreate && selectedDay >= toKey(new Date(), prefs.timeZone) ? (
             <TouchableOpacity
               style={styles.newBooking}
               onPress={() =>

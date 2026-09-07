@@ -30,6 +30,7 @@ import {
 import {
   BULK_CREATE_MAX,
   bulkAssignAssetTags,
+  bulkCheckInAssets,
   bulkCheckOutAssets,
   bulkCreateAssetsFromModel,
   bulkDeleteAssets,
@@ -3793,6 +3794,14 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
 describe("bulkCheckOutAssets — status guard gates the batch", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // `clearAllMocks` clears calls but NOT implementations, so the truthy
+    // custody row the `releaseQuantity` suites install earlier in this file
+    // survives into here. `bulkCheckOutAssets` reads `custody.findFirst` to
+    // refuse kit-derived custody, and would see that leaked row and reject a
+    // batch these tests intend to be clean. Re-establish the default.
+    (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      null
+    );
     (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
     (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
       {
@@ -4844,6 +4853,137 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
       });
 
       expect(currentStatus).toBe(AssetStatus.AVAILABLE);
+    });
+  });
+});
+
+/**
+ * The kit-derived custody guard on the BULK paths.
+ *
+ * A `Custody` row carrying `kitCustodyId` exists because the asset's KIT is in
+ * custody. Both bulk paths delete custody rows, and both must leave that row to
+ * the kit: destroying it strands the `KitCustody` naming a custodian for an
+ * asset that no longer has the matching row.
+ *
+ * These live here rather than beside the single-asset cases in
+ * `custody/service.server.test.ts` because the bulk paths are a different
+ * function with a different guard placement, and the route test for the mobile
+ * endpoint mocks `bulkCheckInAssets` wholesale — so nothing else can catch a
+ * regression here.
+ */
+describe("bulk custody paths — kit-derived custody guard", () => {
+  const IN_CUSTODY_ASSETS = [
+    {
+      id: "asset-1",
+      title: "Drill",
+      status: "IN_CUSTODY",
+      type: "INDIVIDUAL",
+      custody: [{ id: "cust-1", custodian: { user: null, name: "Alice" } }],
+    },
+    {
+      id: "asset-2",
+      title: "Saw",
+      status: "IN_CUSTODY",
+      type: "INDIVIDUAL",
+      custody: [{ id: "cust-2", custodian: { user: null, name: "Alice" } }],
+    },
+  ];
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // `clearAllMocks` keeps implementations, so re-establish every default the
+    // guard path reads — otherwise a truthy `findFirst` left by the rejection
+    // case below answers the next test's guard and it passes for the wrong
+    // reason.
+    (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      null
+    );
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 2,
+    });
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      IN_CUSTODY_ASSETS
+    );
+  });
+
+  it("scopes the release delete to operator rows, never the kit's", async () => {
+    // why this is asserted on the WHERE and not on an outcome: the scope is the
+    // whole protection. An unscoped delete removes the kit-derived row before
+    // the guard below can see it, and by then the evidence is gone — nothing
+    // downstream can tell the two cases apart.
+    await bulkCheckInAssets({
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      settings: ASSET_INDEX_SETTINGS,
+      allowedTeamMemberIds: "all" as const,
+    }).catch(() => undefined);
+
+    expect(db.custody.deleteMany).toHaveBeenCalledWith({
+      where: { assetId: { in: ["asset-1", "asset-2"] }, kitCustodyId: null },
+    });
+  });
+
+  it("refuses the whole release batch when any asset's custody came from a kit", async () => {
+    (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      assetId: "asset-2",
+    });
+
+    await expect(
+      bulkCheckInAssets({
+        userId: "user-1",
+        role: OrganizationRoles.ADMIN,
+        assetIds: ["asset-1", "asset-2"],
+        organizationId: "org-1",
+        settings: ASSET_INDEX_SETTINGS,
+        allowedTeamMemberIds: "all" as const,
+      })
+    ).rejects.toThrow(/release the kit/i);
+  });
+
+  it("scopes the assign path's stale-custody cleanup to operator rows", async () => {
+    // why this path matters even though `assetsNotAvailable` rejects an
+    // IN_CUSTODY asset: this cleanup exists precisely for rows whose status and
+    // custody have already drifted apart. A kit-derived row on an AVAILABLE
+    // asset is exactly that case, and deleting it makes the drift permanent.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Custodian",
+        user: {
+          id: "custodian-user",
+          firstName: "Cust",
+          lastName: "Odian",
+          displayName: null,
+        },
+      }
+    );
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+
+    await bulkCheckOutAssets({
+      allowedTeamMemberIds: "all" as const,
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      custodianId: "tm-1",
+      custodianName: "Custodian",
+      organizationId: "org-1",
+      settings: ASSET_INDEX_SETTINGS,
+      role: OrganizationRoles.ADMIN,
+    }).catch(() => undefined);
+
+    expect(db.custody.deleteMany).toHaveBeenCalledWith({
+      where: { assetId: { in: ["asset-1"] }, kitCustodyId: null },
     });
   });
 });

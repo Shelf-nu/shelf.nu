@@ -52,6 +52,7 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
+import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { QuantityCustodyDialog } from "./quantity-custody-dialog";
 
@@ -71,9 +72,9 @@ interface CustodyRecord {
     id: string;
     name: string;
     userId?: string | null;
-    user?: Partial<
-      Pick<User, "firstName" | "lastName" | "profilePicture" | "email">
-    > | null;
+    user?:
+      | (UserNameFields & Partial<Pick<User, "profilePicture" | "email">>)
+      | null;
   };
 }
 

@@ -171,7 +171,10 @@ export async function getPaginatedAndFilterableSettingTeamMembers({
         take,
         skip,
         include: {
-          _count: { select: { custodies: true } },
+          // Both custody shapes: a kit custodian may hold no per-asset
+          // `Custody` rows at all (an empty kit inherits none), and the row
+          // and its delete dialog must still show them as encumbered.
+          _count: { select: { custodies: true, kitCustodies: true } },
         },
       }),
       db.teamMember.count({ where }),

@@ -1,5 +1,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { csvResponse } from "~/utils/csv-utf8";
 import { exportBookingsFromIndexToCsv } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getCurrentSearchParams } from "~/utils/http.server";
@@ -49,12 +50,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       organizationId,
     });
 
-    return new Response(csvString, {
-      status: 200,
-      headers: {
-        "content-type": "text/csv",
-      },
-    });
+    return csvResponse(csvString);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

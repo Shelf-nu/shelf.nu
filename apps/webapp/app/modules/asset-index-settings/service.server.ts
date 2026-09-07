@@ -9,6 +9,7 @@ import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
 import type { Column, ColumnLabelKey } from "./helpers";
+import { syncCustomFieldColumn } from "./helpers";
 import {
   barcodeFields,
   defaultFields,
@@ -274,35 +275,15 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
     });
 
     const updates = settings.map((entry) => {
-      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
-      const cfIndex = columns.findIndex(
-        (col) => col?.name === `cf_${oldField.name}`
-      );
-
-      if (newField.active) {
-        /** Field is missing so we add it */
-        if (cfIndex === -1) {
-          const prevHighestPosition = columns.reduce(
-            (acc, col) => (col.position > acc ? col.position : acc),
-            0
-          );
-          columns.push({
-            name: `cf_${newField.name}`,
-            visible: true,
-            position: prevHighestPosition + 1,
-            cfType: newField.type,
-          });
-        } else {
-          columns[cfIndex] = {
-            name: `cf_${newField.name}`,
-            visible: columns[cfIndex].visible,
-            position: columns[cfIndex].position,
-            cfType: newField.type,
-          };
+      const columns = syncCustomFieldColumn(
+        Array.from(entry.columns as Prisma.JsonArray) as Column[],
+        {
+          oldName: oldField.name,
+          newName: newField.name,
+          active: newField.active,
+          cfType: newField.type,
         }
-      } else {
-        columns.splice(cfIndex, 1);
-      }
+      );
 
       return db.assetIndexSettings.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: entry.id comes from the org-scoped findMany on lines 272-274 (where organizationId)

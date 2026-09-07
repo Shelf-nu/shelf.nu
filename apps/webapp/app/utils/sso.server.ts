@@ -179,7 +179,14 @@ interface SSODomainConfig {
  */
 interface DomainCheckResult {
   isConfiguredForSSO: boolean;
-  linkedOrganization: (Organization & { ssoDetails: SsoDetails | null }) | null;
+  /**
+   * Every organization that claims the domain. Plural because a domain can
+   * legitimately belong to more than one: `SsoDetails.domain` carries no
+   * unique constraint, and one `SsoDetails` row is shared by an
+   * `Organization[]`. Collapsing this to a single organization picks an
+   * arbitrary owner and silently exempts the rest.
+   */
+  linkedOrganizations: (Organization & { ssoDetails: SsoDetails | null })[];
   ssoProviderId: string | null;
 }
 
@@ -208,15 +215,42 @@ export async function getConfiguredSSODomains(): Promise<SSODomainConfig[]> {
 }
 
 /**
- * Checks domain's SSO status and organization linkage
- * Handles multiple domains per organization and multiple SSO providers per domain
- * @param email - Email to check domain for
+ * Checks a domain's SSO status and which organizations own it.
+ *
+ * The two halves of the result mean different things and callers act on them
+ * differently:
+ *
+ * - `isConfiguredForSSO` — the domain is federated at the auth layer, so the
+ *   user signs in through an IdP rather than a password.
+ * - `linkedOrganizations` — the organizations that claim the domain in their
+ *   `ssoDetails`, which is what makes each of them **SCIM-managed**:
+ *   membership belongs to the IdP, so manual invites into them are refused.
+ *
+ * A federated domain no organization has claimed is Pure SSO, and invites into
+ * it are allowed for users who have already signed in.
+ *
+ * Callers must test the organization they care about for membership of
+ * `linkedOrganizations` rather than reading one element: several organizations
+ * can claim the same domain, and answering for only one of them exempts the
+ * others from the SCIM rule.
+ *
+ * @param email - Email whose domain is checked
+ * @returns Federation status, every owning organization, and the first SSO
+ *   provider configured for the domain
  */
 export async function checkDomainSSOStatus(
   email: string
 ): Promise<DomainCheckResult> {
   try {
     const domain = email.split("@")[1]?.toLowerCase();
+
+    if (!domain) {
+      return {
+        isConfiguredForSSO: false,
+        linkedOrganizations: [],
+        ssoProviderId: null,
+      };
+    }
 
     // Check all SSO providers configured for this domain
     const ssoConfigs = await db.$queryRaw<{ ssoProviderId: string }[]>`
@@ -228,7 +262,7 @@ export async function checkDomainSSOStatus(
     if (ssoConfigs.length === 0) {
       return {
         isConfiguredForSSO: false,
-        linkedOrganization: null,
+        linkedOrganizations: [],
         ssoProviderId: null,
       };
     }
@@ -236,12 +270,24 @@ export async function checkDomainSSOStatus(
     // Get all SSO provider IDs for this domain
     const ssoProviderIds = ssoConfigs.map((config) => config.ssoProviderId);
 
-    // Find organization where this domain is included in their comma-separated domains
-    const linkedOrg = await db.organization.findFirst({
+    // `ssoDetails.domain` is a comma-separated list, so the database can only
+    // narrow it by substring — "notacme.com" comes back for "acme.com". The
+    // candidates are therefore a superset, and `emailMatchesDomains` reduces
+    // them to the exact owners. Keep ALL of them: reducing to one row here
+    // (or before the exact match, where an unrelated substring hit shadows
+    // the real owner) reads as Pure SSO for every organization left out.
+    const candidateOrgs = await db.organization.findMany({
       where: {
         ssoDetails: {
           domain: {
             contains: domain,
+            // Nothing constrains the stored casing — the admin form lowercases
+            // what it writes, but that is one write path and no migration
+            // normalised what came before. A case-sensitive filter would drop
+            // a stored "ACME.com" before the exact match ever sees it, and the
+            // organization would read as unclaimed. The auth.sso_domains query
+            // above compares through `lower()` for the same reason.
+            mode: "insensitive" as const,
           },
         },
       },
@@ -250,16 +296,15 @@ export async function checkDomainSSOStatus(
       },
     });
 
-    // If we found an org, verify the domain is actually in their list
-    const isValidDomain = linkedOrg?.ssoDetails
-      ? emailMatchesDomains(email, linkedOrg.ssoDetails.domain)
-      : false;
+    const linkedOrganizations = candidateOrgs.filter((org) =>
+      emailMatchesDomains(domain, org.ssoDetails?.domain ?? null)
+    );
 
-    // Return the first SSO provider ID if we found multiple
-    // This maintains backward compatibility while we handle multiple domains
+    // A domain can have several SSO providers configured; callers that act on
+    // one get the first.
     return {
       isConfiguredForSSO: true,
-      linkedOrganization: isValidDomain ? linkedOrg : null,
+      linkedOrganizations,
       ssoProviderId: ssoProviderIds[0] || null,
     };
   } catch (cause) {

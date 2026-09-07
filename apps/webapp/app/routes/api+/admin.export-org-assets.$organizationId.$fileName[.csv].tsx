@@ -1,5 +1,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { csvResponse } from "~/utils/csv-utf8";
 import { exportAssetsBackupToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
@@ -22,12 +23,7 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     /** Join the rows with a new line */
     const csvString = await exportAssetsBackupToCsv({ organizationId });
 
-    return new Response(csvString, {
-      status: 200,
-      headers: {
-        "content-type": "text/csv",
-      },
-    });
+    return csvResponse(csvString);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

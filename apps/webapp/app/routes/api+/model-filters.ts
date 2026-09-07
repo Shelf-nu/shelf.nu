@@ -193,15 +193,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /**
      * When searching for teamMember, we have to search for
      * - teamMember's name
-     * - teamMember's user firstName, lastName and email
+     * - teamMember's user firstName, lastName, displayName and email
      */
     if (modelFilters.name === "teamMember") {
       searchBranches.push(
         { name: { contains: queryValue, mode: "insensitive" } },
         { user: { firstName: { contains: queryValue, mode: "insensitive" } } },
-        // Was a second `firstName` branch, so surname search silently matched
-        // nothing.
         { user: { lastName: { contains: queryValue, mode: "insensitive" } } },
+        // `displayName` replaces first/last name in the UI for users who set
+        // one, so it is the name a searcher can actually see in the option.
+        {
+          user: { displayName: { contains: queryValue, mode: "insensitive" } },
+        },
         // Matched but never RETURNED — see the registry's `teamMember` select.
         { user: { email: { contains: queryValue, mode: "insensitive" } } }
       );

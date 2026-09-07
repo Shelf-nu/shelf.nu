@@ -81,12 +81,10 @@ export const Notes = () => {
           content: onSubmissionContent,
           type: "COMMENT",
           createdAt: new Date().toISOString(),
-          user: user
-            ? {
-                firstName: user.firstName || "",
-                lastName: user.lastName || "",
-              }
-            : undefined,
+          // Pass the row through: re-listing the name fields here drops
+          // `displayName` and the author's own comment renders under their
+          // legal name until the next revalidation.
+          user: user ?? undefined,
         }
       : null;
 

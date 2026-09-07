@@ -26,6 +26,11 @@ interface QuickActionsProps {
   setShowOverflowMenu: (show: boolean) => void;
   /** Role can change custody (assign/release). Server-enforced; this hides the button. */
   canCustody: boolean;
+  /**
+   * Self-service wording (web parity): those users can only take custody
+   * themselves, so the button says "Take Custody" instead of "Assign Custody".
+   */
+  isSelfService?: boolean;
   /** Role can update the asset (location/edit). */
   canUpdate: boolean;
   /** Role can delete the asset. */
@@ -57,6 +62,7 @@ export const QuickActions = memo(function QuickActions({
   isActionLoading,
   setShowOverflowMenu,
   canCustody,
+  isSelfService = false,
   canUpdate,
   canDelete,
   isQtyTracked = false,
@@ -113,7 +119,11 @@ export const QuickActions = memo(function QuickActions({
               }}
               disabled={assignQtyDisabled}
               activeOpacity={0.7}
-              accessibilityLabel="Assign custody of asset"
+              accessibilityLabel={
+                isSelfService
+                  ? "Take custody of asset"
+                  : "Assign custody of asset"
+              }
               accessibilityRole="button"
               accessibilityState={{ disabled: assignQtyDisabled }}
             >
@@ -122,7 +132,9 @@ export const QuickActions = memo(function QuickActions({
                 size={20}
                 color={colors.primaryForeground}
               />
-              <Text style={styles.primaryActionText}>Assign Custody</Text>
+              <Text style={styles.primaryActionText}>
+                {isSelfService ? "Take Custody" : "Assign Custody"}
+              </Text>
             </TouchableOpacity>
             {assignQtyDisabled && (
               <Text style={styles.assignDisabledHint}>
@@ -156,7 +168,11 @@ export const QuickActions = memo(function QuickActions({
               onAssignCustody();
             }}
             activeOpacity={0.7}
-            accessibilityLabel="Assign custody of asset"
+            accessibilityLabel={
+              isSelfService
+                ? "Take custody of asset"
+                : "Assign custody of asset"
+            }
             accessibilityRole="button"
           >
             <Ionicons
@@ -164,7 +180,9 @@ export const QuickActions = memo(function QuickActions({
               size={20}
               color={colors.primaryForeground}
             />
-            <Text style={styles.primaryActionText}>Assign Custody</Text>
+            <Text style={styles.primaryActionText}>
+              {isSelfService ? "Take Custody" : "Assign Custody"}
+            </Text>
           </TouchableOpacity>
         ) : null)}
 

@@ -21,9 +21,10 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 /**
  * POST /api/mobile/bookings/archive
  *
- * Archives a COMPLETE booking (→ ARCHIVED) from the Companion app — the mobile
- * twin of the web "archive" intent. Wraps the shared `archiveBooking` service,
- * which enforces the COMPLETE-only status guard and cancels any scheduler.
+ * Archives a booking (→ ARCHIVED) from the Companion app — the mobile twin of
+ * the web "archive" intent. Wraps the shared `archiveBooking` service, which
+ * enforces the archivable-status rule (COMPLETE, or RESERVED already past its
+ * end date — see `isBookingArchivable`) and cancels any scheduler.
  *
  * PARITY: gate on `PermissionAction.archive` (the web ActionsDropdown shows the
  * archive action via `userHasPermission(archive)`). BASE has `booking:update`
@@ -83,7 +84,7 @@ export async function action({ request }: ActionFunctionArgs) {
       action: "archive",
     });
 
-    // archiveBooking enforces the COMPLETE-only status guard itself.
+    // archiveBooking enforces the archivable-status rule itself.
     const archived = await archiveBooking({
       id: bookingId,
       organizationId,

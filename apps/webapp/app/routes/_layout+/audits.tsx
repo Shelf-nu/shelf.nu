@@ -16,11 +16,17 @@ import {
   getAuditAddonPrices,
   getAuditSubscriptionInfo,
 } from "~/modules/audit/addon.server";
+import {
+  claimAddonTrial,
+  mayHaveCreatedSubscription,
+  releaseAddonTrial,
+} from "~/modules/billing/addon-trial-claim.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import {
   PermissionAction,
   PermissionEntity,
@@ -140,8 +146,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    const { organizationId, currentOrganization, userOrganizations } =
-      await getSelectedOrganization({ userId, request });
+    // `currentOrganization` is deliberately not taken here: the only thing the
+    // action used it for was the trial flag, and that is now decided by
+    // claiming the trial rather than by reading a value that can go stale
+    // between the read and the Stripe call.
+    const { organizationId, userOrganizations } = await getSelectedOrganization(
+      { userId, request }
+    );
 
     // `subscription:update` is not enough here. ADMIN short-circuits to
     // allow-all in `hasPermission`, so it clears that gate -- but this spends
@@ -170,8 +181,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     if (intent === "trial") {
-      // Validate organization hasn't already used trial
-      if (currentOrganization.usedAuditTrial) {
+      // Claim the one-time trial before talking to Stripe. Reading the flag
+      // and writing it after the subscription call leaves a window as wide as
+      // a network round trip, and two requests inside it both create a real
+      // subscription. The claim is the check — exactly one caller wins.
+      const claimedTrial = await claimAddonTrial({
+        organizationId,
+        addon: "audits",
+      });
+
+      if (!claimedTrial) {
         throw new ShelfError({
           cause: null,
           message: "This workspace has already used the free audit trial.",
@@ -181,33 +200,62 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
       }
 
-      // Server-side consent validation when payment method exists
-      const hasPaymentMethodOnFile = await customerHasPaymentMethod(customerId);
-      if (hasPaymentMethodOnFile && !consentAcknowledged) {
-        throw new ShelfError({
-          cause: null,
-          message:
-            "You must acknowledge the auto-charge terms before starting a trial.",
-          status: 400,
-          label: "Stripe",
-          shouldBeCaptured: false,
-        });
+      // Everything from here on can fail with the trial already claimed, so
+      // it runs under a release: a refused consent or a Stripe error must not
+      // cost the workspace a trial it never got.
+      let hasPaymentMethod: boolean;
+      try {
+        // Server-side consent validation when payment method exists
+        const hasPaymentMethodOnFile =
+          await customerHasPaymentMethod(customerId);
+        if (hasPaymentMethodOnFile && !consentAcknowledged) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "You must acknowledge the auto-charge terms before starting a trial.",
+            status: 400,
+            label: "Stripe",
+            shouldBeCaptured: false,
+          });
+        }
+
+        // Create trial subscription directly via Stripe API
+        ({ hasPaymentMethod } = await createAuditAddonTrialSubscription({
+          customerId,
+          priceId,
+          userId,
+          organizationId,
+        }));
+      } catch (cause) {
+        // A refusal Stripe never received is safe to undo. An ambiguous failure
+        // is not: the subscription may exist and only its response was lost, so
+        // handing the trial back would let a retry open a second one.
+        if (!mayHaveCreatedSubscription(cause)) {
+          await releaseAddonTrial({
+            organizationId: organizationId,
+            addon: "audits",
+          }).catch((releaseCause: unknown) => {
+            // Report why the trial did not start, not why the bookkeeping
+            // afterwards failed.
+            Logger.error(
+              new ShelfError({
+                cause: releaseCause,
+                message: "Failed to release an unclaimed audit trial",
+                additionalData: { organizationId: organizationId },
+                label: "Stripe",
+              })
+            );
+          });
+        }
+        throw cause;
       }
 
-      // Create trial subscription directly via Stripe API
-      const { hasPaymentMethod } = await createAuditAddonTrialSubscription({
-        customerId,
-        priceId,
-        userId,
-        organizationId,
-      });
-
-      // Set flags immediately on the organization (webhook also fires as backup)
+      // Enable the add-on (webhook also fires as backup). `usedAuditTrial` is
+      // owned by the claim above and deliberately not rewritten here.
       await db.organization.update({
         where: { id: organizationId },
         data: {
           auditsEnabled: true,
-          usedAuditTrial: true,
           auditsEnabledAt: new Date(),
         },
         select: { id: true },

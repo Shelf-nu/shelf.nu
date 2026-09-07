@@ -136,9 +136,19 @@ export default function BookingDetailScreen() {
   // Android overflow-menu visibility (iOS uses the native ActionSheetIOS).
   const [showActionsMenu, setShowActionsMenu] = useState(false);
 
-  // Mirrors the web's canUserManageBookingAssets: closed statuses reject;
-  // self-service users may only build their own DRAFT bookings.
-  const isSelfService = currentOrg?.roles?.includes("SELF_SERVICE") ?? false;
+  /**
+   * Mirrors the web's `canUserManageBookingAssets`: closed statuses reject, and
+   * a RESTRICTED role may only build its own DRAFT booking.
+   *
+   * BASE as well as SELF_SERVICE. The web passes both roles into that helper
+   * (its parameter is named `isSelfService` but every caller hands it
+   * `isBaseOrSelfService`), while this screen tested SELF_SERVICE alone. A BASE
+   * custodian is a custodian at every status, so the add, browse, remove and
+   * fulfil affordances below stayed on past DRAFT for them.
+   */
+  const isRestrictedRole = Boolean(
+    currentOrg?.roles?.some((r) => r === "SELF_SERVICE" || r === "BASE")
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
@@ -1032,7 +1042,7 @@ export default function BookingDetailScreen() {
   // users only on their own DRAFTs (server re-checks ownership + status).
   const canManageModels =
     !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-    (!isSelfService || booking.status === "DRAFT");
+    (!isRestrictedRole || booking.status === "DRAFT");
 
   /**
    * Open the model-reservation manager (the picker's Models tab) for this
@@ -1369,7 +1379,7 @@ export default function BookingDetailScreen() {
 
             {booking &&
               !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isSelfService || booking.status === "DRAFT") && (
+              (!isRestrictedRole || booking.status === "DRAFT") && (
                 <TouchableOpacity
                   style={styles.actionButtonOutline}
                   onPress={() =>
@@ -1397,7 +1407,7 @@ export default function BookingDetailScreen() {
 
             {/* Browse available assets/kits to add (date-aware picker) */}
             {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isSelfService || booking.status === "DRAFT") && (
+              (!isRestrictedRole || booking.status === "DRAFT") && (
                 <TouchableOpacity
                   style={styles.actionButtonOutline}
                   onPress={() =>
@@ -1427,7 +1437,7 @@ export default function BookingDetailScreen() {
 
             {/* Select assets to remove (editable bookings with assets) */}
             {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isSelfService || booking.status === "DRAFT") &&
+              (!isRestrictedRole || booking.status === "DRAFT") &&
               booking.assetCount > 0 && (
                 <TouchableOpacity
                   style={[
@@ -1538,12 +1548,12 @@ export default function BookingDetailScreen() {
                 web `fulfil-and-checkout` scanner. Scan-first IS the point of
                 book-by-model: reserve the count now, scan the items when you
                 grab them, no browse picker. (Browse to Add above stays for
-                hand-picking.) Gated `!isSelfService` to match the add/browse
-                affordances above: a self-service custodian can only edit a
+                hand-picking.) Gated `!isRestrictedRole` to match the add/browse
+                affordances above: a restricted custodian can only edit a
                 DRAFT booking, so on a RESERVED booking the assign+checkout flow
                 can't succeed for them — showing the CTA would just lead to a
                 rejected submit. */}
-            {!isSelfService &&
+            {!isRestrictedRole &&
               booking.status === "RESERVED" &&
               hasOutstandingModelRequests && (
                 <TouchableOpacity

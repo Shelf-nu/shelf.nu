@@ -61,6 +61,7 @@ import {
   createCategoriesIfNotExists,
   getCategory,
 } from "~/modules/category/service.server";
+import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import {
   createCustomFieldsIfNotExists,
@@ -655,8 +656,8 @@ export async function getAssets(params: {
         // Resolve the search to a set of matching asset ids via the shared
         // org-scoped UNION (resolveAssetSearchIds → buildAssetSearchUnion) —
         // index-driven, org-scoped branches, ~165ms vs the old multi-table OR's
-        // cross-org seq scans. The helper is retry-wrapped (a raw $queryRaw
-        // bypasses the client's auto-retry extension) and guards the id set
+        // cross-org seq scans. The helper is retry-wrapped (to claim the read
+        // semantics the client extension cannot infer) and guards the id set
         // against Postgres' ~65k bind-param ceiling, throwing a friendly 400
         // rather than letting an extreme org + very broad term hard-fail.
         // Setting where.OR here — BEFORE the category/tag/location/team-member
@@ -1080,14 +1081,17 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       paginationClause,
     });
 
-    // Retry the raw read on transient DB failures. The auto-applied client
-    // retry extension covers model operations but NOT raw escapes like
-    // `$queryRaw`, so wrap it explicitly. This heavy query trips Postgres
-    // shared-lock-table exhaustion (SQLSTATE 53200) under the per-request fan-out
-    // on large workspaces (SHELF-WEBAPP-227); the pressure is momentary, so a
-    // short backed-off retry usually succeeds. `operationIsRead: true` — this is
-    // a pure read, safe to re-run. On exhausted retries it rethrows to the catch
-    // below, which surfaces as the friendly retryable 503 (see makeShelfError).
+    // Retry the raw read on transient DB failures. The client extension retries
+    // raw SQL too, but only where the connection never opened — it cannot read
+    // a raw statement to tell a pure read from one that consumes a sequence or
+    // takes locks, so it assumes the worst. This one IS a pure read, which
+    // `operationIsRead: true` declares: safe to re-run mid-flight. That matters
+    // because this heavy query trips Postgres shared-lock-table exhaustion
+    // (SQLSTATE 53200) under the per-request fan-out on large workspaces
+    // (SHELF-WEBAPP-227), where the pressure is momentary and a short backed-off
+    // retry usually succeeds. The extension steps aside while this runs, so the
+    // attempts below are the only ones. On exhausted retries it rethrows to the
+    // catch below, which surfaces as the friendly retryable 503 (makeShelfError).
     const result = await withPrismaRetry(
       () => db.$queryRaw<AdvancedIndexQueryResult>(query),
       { operationIsRead: true }
@@ -2769,6 +2773,7 @@ export async function updateAsset({
         newLocation,
         firstName: user.firstName || "",
         lastName: user.lastName || "",
+        displayName: user.displayName,
         assetId: asset.id,
         userId,
         organizationId,
@@ -2799,11 +2804,7 @@ export async function updateAsset({
       });
 
       // Create location activity notes
-      const userLink = wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
+      const userLink = wrapUserLinkForNote({ ...user, id: userId });
       // Single-asset location-timeline note. `wrapAssetWithCountForNote`
       // prefixes the qty-tracked unit count ("50 units of {asset}");
       // INDIVIDUAL renders the bare link, so phrasing is unchanged.
@@ -3101,6 +3102,7 @@ export async function updateAsset({
               newValue: change.newValue,
               firstName: user?.firstName || "",
               lastName: user?.lastName || "",
+              displayName: user?.displayName,
               assetId: asset.id,
               userId,
               organizationId,
@@ -3662,11 +3664,7 @@ export async function replaceAssetPlacements({
         const fromCount = formatUnitCount(asset, existing.quantity);
         const toCount = formatUnitCount(asset, p.quantity);
         if (!fromCount || !toCount) return [];
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName,
-          lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         const locationLink = wrapLinkForNote(
           `/locations/${locationMeta.id}`,
           locationMeta.name.trim()
@@ -3691,6 +3689,7 @@ export async function replaceAssetPlacements({
             newLocation: location,
             firstName,
             lastName,
+            displayName: user?.displayName ?? null,
             assetId,
             userId,
             isRemoving: false,
@@ -3706,6 +3705,7 @@ export async function replaceAssetPlacements({
             newLocation: null,
             firstName,
             lastName,
+            displayName: user?.displayName ?? null,
             assetId,
             userId,
             isRemoving: true,
@@ -4428,6 +4428,7 @@ export async function createCustomFieldChangeNote({
   newValue,
   firstName,
   lastName,
+  displayName,
   assetId,
   userId,
   organizationId,
@@ -4438,6 +4439,12 @@ export async function createCustomFieldChangeNote({
   newValue?: string | null;
   firstName: string;
   lastName: string;
+  /**
+   * Acting user's `User.displayName`. It wins over first+last in the note's
+   * user link, so a caller holding the full user row must pass it or the note
+   * names the person differently from every other surface.
+   */
+  displayName?: string | null;
   assetId: Asset["id"];
   userId: User["id"];
   organizationId: Organization["id"];
@@ -4451,6 +4458,7 @@ export async function createCustomFieldChangeNote({
       userId,
       firstName,
       lastName,
+      displayName,
       isFirstTimeSet,
     });
 
@@ -4496,6 +4504,9 @@ export async function fetchAssetsForExport({
         assetModel: { select: { name: true } },
         notes: true,
         custody: {
+          // Ordered so `getPrimaryCustody` picks the same row every time — the
+          // custodian it returns is written into the exported file.
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           include: {
             custodian: true,
           },
@@ -6152,10 +6163,19 @@ export async function bulkCheckOutAssets({
 
       /** Clean up any stale custody records that may exist despite AVAILABLE status.
        * This prevents P2002 unique constraint violations when a previous
-       * release/checkin updated status but failed to delete the custody row. */
+       * release/checkin updated status but failed to delete the custody row.
+       *
+       * `kitCustodyId: null` — only operator-assigned rows are stale here. The
+       * `assetsNotAvailable` pre-check rejects an IN_CUSTODY asset, so a
+       * kit-derived row reaching this point means status and custody have
+       * already drifted apart; deleting it would orphan the KitCustody and
+       * make the drift permanent. Scoping the delete keeps it for the assert
+       * below, which refuses the assignment instead. */
       await tx.custody.deleteMany({
-        where: { assetId: { in: assets.map((a) => a.id) } },
+        where: { assetId: { in: assetIdsToCustody }, kitCustodyId: null },
       });
+
+      await assertNoKitDerivedCustody(tx, assetIdsToCustody, organizationId);
 
       /**
        * Updating status of assets to IN_CUSTODY — BEFORE the custody rows.
@@ -6210,11 +6230,7 @@ export async function bulkCheckOutAssets({
       });
 
       /** Creating notes for the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
@@ -6337,6 +6353,11 @@ export async function bulkCheckInAssets({
           title: true,
           type: true,
           custody: {
+            // Ordered so `getPrimaryCustody` picks the same row every time:
+            // the custodian it returns is written into the release note and
+            // the CUSTODY_RELEASED event, so an arbitrary pick puts the wrong
+            // name in the audit trail.
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
             select: { id: true, custodian: { include: { user: true } } },
           },
         },
@@ -6412,12 +6433,24 @@ export async function bulkCheckInAssets({
      * 2. Update status of all assets to AVAILABLE
      */
     await db.$transaction(async (tx) => {
-      /** Deleting custodies over assets */
+      /** Deleting custodies over assets. `kitCustodyId: null` — this release
+       * owns only operator-assigned rows; kit-derived custody is the kit's to
+       * remove, so it is scoped out of the delete and left for the assert
+       * below to reject.
+       * @see {@link assertNoKitDerivedCustody} for what that ordering does and
+       * does not guarantee. */
       await tx.custody.deleteMany({
         where: {
           assetId: { in: assets.map((asset) => asset.id) },
+          kitCustodyId: null,
         },
       });
+
+      await assertNoKitDerivedCustody(
+        tx,
+        assets.map((asset) => asset.id),
+        organizationId
+      );
 
       /**
        * Updating status of assets to AVAILABLE.
@@ -6702,6 +6735,7 @@ export async function bulkUpdateAssetLocation({
               userId,
               firstName: user?.firstName ?? "",
               lastName: user?.lastName ?? "",
+              displayName: user?.displayName,
               isRemoving,
             });
 
@@ -6736,11 +6770,7 @@ export async function bulkUpdateAssetLocation({
     });
 
     // Create location activity notes
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
     // Filter out assets already at the target location
     const actuallyChanged = assets.filter(
       (a) => getPrimaryLocation(a)?.id !== newLocation?.id
@@ -7556,9 +7586,8 @@ export async function relinkAssetQrCode({
         organizationId,
         type: "UPDATE",
         content: `${wrapUserLinkForNote({
+          ...user,
           id: userId,
-          firstName: user.firstName,
-          lastName: user.lastName,
         })} changed QR code ${
           oldQrCode ? `from **${oldQrCode.id}**` : ""
         } to **${qrId}**.`,
@@ -8975,6 +9004,7 @@ export async function moveAssetLocationUnits(
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.location.findFirst({
@@ -8990,6 +9020,7 @@ export async function moveAssetLocationUnits(
     if (user && fromLocation && toLocation) {
       const firstName = user.firstName ?? "";
       const lastName = user.lastName ?? "";
+      const displayName = user.displayName;
 
       // Asset-side bidirectional note. The helper recognises the
       // "current + new both set" shape and emits the "moved …" phrasing.
@@ -8998,6 +9029,7 @@ export async function moveAssetLocationUnits(
         newLocation: toLocation,
         firstName,
         lastName,
+        displayName,
         assetId,
         userId,
         isRemoving: false,
@@ -9011,6 +9043,7 @@ export async function moveAssetLocationUnits(
       // the single-location update path at ~line 2596.
       const userLink = wrapUserLinkForNote({
         id: userId,
+        displayName,
         firstName,
         lastName,
       });
@@ -9268,6 +9301,7 @@ export async function placeUnplacedUnits(
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.location.findFirst({
@@ -9279,12 +9313,14 @@ export async function placeUnplacedUnits(
     if (user && toLocation) {
       const firstName = user.firstName ?? "";
       const lastName = user.lastName ?? "";
+      const displayName = user.displayName;
 
       await createLocationChangeNote({
         currentLocation: null,
         newLocation: toLocation,
         firstName,
         lastName,
+        displayName,
         assetId,
         userId,
         isRemoving: false,
@@ -9296,6 +9332,7 @@ export async function placeUnplacedUnits(
 
       const userLink = wrapUserLinkForNote({
         id: userId,
+        displayName,
         firstName,
         lastName,
       });

@@ -19,6 +19,7 @@ export function useNprogress() {
     "archive-audit",
     "cancel-audit",
     "sidebar-toggler",
+    "team-upgrade-banner",
   ];
   // Filter out fetchers that have a key from the excludeFetchers array
   const filteredFetchers = fetchers.filter(

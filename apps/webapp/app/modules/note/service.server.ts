@@ -43,6 +43,7 @@ import {
   assertAssetsBelongToOrg,
   type OrgValidationTxClient,
 } from "~/utils/org-validation.server";
+import type { UserNameFields } from "~/utils/user";
 
 const label = "Note";
 
@@ -435,8 +436,7 @@ export async function createBulkKitChangeNotes({
         await createKitChangeNote({
           currentKit,
           newKit,
-          firstName: user.firstName ?? "",
-          lastName: user.lastName ?? "",
+          user,
           assetId: asset.id,
           userId,
           organizationId,
@@ -467,8 +467,7 @@ export async function createBulkKitChangeNotes({
 export async function createKitChangeNote({
   currentKit,
   newKit,
-  firstName,
-  lastName,
+  user,
   assetId,
   userId,
   organizationId,
@@ -479,8 +478,8 @@ export async function createKitChangeNote({
 }: {
   currentKit: Pick<Kit, "id" | "name"> | null;
   newKit: Pick<Kit, "id" | "name"> | null;
-  firstName: string;
-  lastName: string;
+  /** Acting user's name columns — names the actor in the note's user link. */
+  user: UserNameFields;
   assetId: Asset["id"];
   userId: User["id"];
   /** Caller's validated org — propagated to the note's asset ownership check */
@@ -498,11 +497,7 @@ export async function createKitChangeNote({
   quantity?: number | null;
 }) {
   try {
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName,
-      lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
     // Qty-tracked unit label ("50 units") for this kit's slice, or null
     // for INDIVIDUAL / missing quantity — in which case we keep the
     // original countless phrasing ("added asset to ...").
@@ -591,7 +586,7 @@ export async function createKitChangeNote({
  *
  * @param params.fromKit - Source kit (asset is losing units from here)
  * @param params.toKit - Destination kit (asset is gaining units here)
- * @param params.firstName / params.lastName - Acting user (for the userLink)
+ * @param params.user - Acting user's name columns (for the userLink)
  * @param params.assetId - Asset whose units are being redistributed
  * @param params.userId - Acting user — written to `Note.userId`
  * @param params.organizationId - Caller's validated organization ID
@@ -603,8 +598,7 @@ export async function createKitChangeNote({
 export async function createKitMoveNote({
   fromKit,
   toKit,
-  firstName,
-  lastName,
+  user,
   assetId,
   userId,
   organizationId,
@@ -614,8 +608,8 @@ export async function createKitMoveNote({
 }: {
   fromKit: Pick<Kit, "id" | "name">;
   toKit: Pick<Kit, "id" | "name">;
-  firstName: string;
-  lastName: string;
+  /** Acting user's name columns — names the actor in the note's user link. */
+  user: UserNameFields;
   assetId: Asset["id"];
   userId: User["id"];
   /** Caller's validated org — propagated to the note's asset ownership check */
@@ -628,11 +622,7 @@ export async function createKitMoveNote({
   quantity: number;
 }) {
   try {
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName,
-      lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
     const fromKitLink = wrapKitsWithDataForNote(
       { id: fromKit.id, name: fromKit.name.trim() },
@@ -700,11 +690,7 @@ export async function createTagChangeNoteIfNeeded({
   }
 
   const user = await loadUserForNotes();
-  const userLink = wrapUserLinkForNote({
-    id: userId,
-    firstName: user.firstName ?? "",
-    lastName: user.lastName ?? "",
-  });
+  const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
   const formatTagNames = (tagList: TagSummary[]) =>
     tagList
@@ -932,11 +918,7 @@ export async function createAssetNotesForAuditAddition({
 
     if (!user || assetIds.length === 0) return;
 
-    const userLink = wrapUserLinkForNote({
-      id: user.id,
-      firstName: user.firstName ?? "",
-      lastName: user.lastName ?? "",
-    });
+    const userLink = wrapUserLinkForNote(user);
 
     const auditLink = wrapLinkForNote(
       `/audits/${audit.id}/overview`,
@@ -986,11 +968,7 @@ export async function createAssetNotesForAuditRemoval({
 
     if (!user || assetIds.length === 0) return;
 
-    const userLink = wrapUserLinkForNote({
-      id: user.id,
-      firstName: user.firstName ?? "",
-      lastName: user.lastName ?? "",
-    });
+    const userLink = wrapUserLinkForNote(user);
 
     const auditLink = wrapLinkForNote(
       `/audits/${audit.id}/overview`,

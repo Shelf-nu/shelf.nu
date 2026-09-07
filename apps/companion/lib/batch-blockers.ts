@@ -16,10 +16,11 @@
  * - release custody — assets: not in custody / part of a kit; kits: not in
  *   custody
  * - update location — no eligibility blockers
- * - add to booking — assets: already in this booking / part of a kit / not
- *   available to book / checked out (only when the booking is
- *   ONGOING/OVERDUE); kits: contains unavailable assets / checked out
- *   (only when the booking is ONGOING/OVERDUE)
+ * - add to booking / fulfil — assets: already in this booking / part of a
+ *   kit (add only: fulfil matches concrete units, so kit membership is no
+ *   blocker there) / not available to book / checked out (only when the
+ *   booking is ONGOING/OVERDUE); kits: contains unavailable assets /
+ *   checked out (only when the booking is ONGOING/OVERDUE)
  *
  * @see {@link file://./../components/scanner/batch-blockers.tsx} UI renderer
  * @see {@link file://./../app/(tabs)/scanner.tsx} integration
@@ -30,7 +31,8 @@ export type BatchScanAction =
   | "assign_custody"
   | "release_custody"
   | "update_location"
-  | "booking_add";
+  | "booking_add"
+  | "booking_fulfil";
 
 /** The minimal item shape blocker rules need (assets and kits). */
 export type BlockableItem = {
@@ -50,7 +52,7 @@ export type BlockableItem = {
   hasUnavailableAssets?: boolean;
 };
 
-/** Booking context for the `booking_add` action's rules. */
+/** Booking context for the `booking_add` / `booking_fulfil` rules. */
 export type BookingBlockerContext = {
   /** Asset ids already in the target booking. */
   bookedAssetIds: ReadonlySet<string>;
@@ -93,7 +95,8 @@ function countNoun(n: number, noun: "asset" | "kit") {
 export function computeBlockers(
   action: BatchScanAction,
   items: BlockableItem[],
-  /** Required for the `booking_add` action; ignored otherwise. */
+  /** Required for the `booking_add` and `booking_fulfil` actions; ignored
+   * otherwise. Without it those actions produce zero blockers. */
   bookingCtx?: BookingBlockerContext
 ): BlockerGroup[] {
   const groups: BlockerGroup[] = [];
@@ -185,7 +188,10 @@ export function computeBlockers(
       (n) =>
         `${countNoun(n, "kit")} not in custody, so there is nothing to release.`
     );
-  } else if (action === "booking_add" && bookingCtx) {
+  } else if (
+    (action === "booking_add" || action === "booking_fulfil") &&
+    bookingCtx
+  ) {
     // Mirrors the web add-assets-to-booking drawer exactly — including that
     // checked-out items only block when the booking itself is checked out
     // (ONGOING/OVERDUE), and that there is no kit-already-in-booking rule.
@@ -198,15 +204,21 @@ export function computeBlockers(
       assets.filter((i) => bookingCtx.bookedAssetIds.has(i.targetId)),
       (n) => `${countNoun(n, "asset")} already in this booking.`
     );
-    push(
-      "asset-part-of-kit",
-      assets.filter((i) => i.kitId !== null),
-      (n) =>
-        `${countNoun(
-          n,
-          "asset"
-        )} part of a kit. Scan the kit to add it as a whole.`
-    );
+    // Fulfil matches CONCRETE units against the booking's model lines, so an
+    // asset that lives in a kit is a perfectly good scan there — the
+    // scan-the-kit-instead rule applies only to plain adds (web parity: the
+    // fulfil drawer has no kit-membership rule at all).
+    if (action === "booking_add") {
+      push(
+        "asset-part-of-kit",
+        assets.filter((i) => i.kitId !== null),
+        (n) =>
+          `${countNoun(
+            n,
+            "asset"
+          )} part of a kit. Scan the kit to add it as a whole.`
+      );
+    }
     push(
       "asset-not-bookable",
       assets.filter((i) => i.availableToBook === false),

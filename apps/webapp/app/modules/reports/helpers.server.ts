@@ -26,9 +26,13 @@ import {
   getLatenessMs,
   isOnTime,
   resolveCheckInAt,
+  resolvePlannedEnd,
+  resolvePlannedStart,
 } from "~/modules/booking/lateness";
 import { getAssetTotalValue } from "~/utils/asset-value";
 import { ShelfError } from "~/utils/error";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 
 import { resolveCheckInTimes } from "./check-in-time.server";
 
@@ -61,6 +65,7 @@ import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 import { refreshExpiredAssetImages } from "../asset/service.server";
 import { getPrimaryLocation } from "../asset/utils";
 import { refreshExpiredKitImages } from "../kit/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 
 // Re-export timeframe utilities for server use
 export { resolveTimeframe } from "./timeframe";
@@ -76,6 +81,41 @@ export { resolveTimeframe } from "./timeframe";
 function stripNameSuffix(name: string | null | undefined): string {
   if (!name) return "Unknown";
   return name.replace(/\s*\(Owner\)$/i, "").trim() || "Unknown";
+}
+
+// -----------------------------------------------------------------------------
+// Booking-Status Predicates
+// -----------------------------------------------------------------------------
+
+/**
+ * Prisma predicate for "this booking was completed and returned".
+ *
+ * Archiving REWRITES `status` (COMPLETE → ARCHIVED), so matching COMPLETE
+ * alone silently drops every completed booking that has aged into the
+ * archive. `archivedWithoutCheckin` separates the two archive origins:
+ * `false` = archived after a real check-in (a completed use); `true` =
+ * archived straight from RESERVED without ever being checked out (never a
+ * use).
+ */
+const RETURNED_BOOKING_WHERE = {
+  OR: [
+    { status: "COMPLETE" },
+    { status: "ARCHIVED", archivedWithoutCheckin: false },
+  ],
+} satisfies Prisma.BookingWhereInput;
+
+/**
+ * Row-level counterpart of {@link RETURNED_BOOKING_WHERE}: whether an
+ * already-fetched booking row represents a completed, returned booking.
+ */
+function isReturnedBooking(booking: {
+  status: BookingStatus;
+  archivedWithoutCheckin: boolean;
+}): boolean {
+  return (
+    booking.status === "COMPLETE" ||
+    (booking.status === "ARCHIVED" && !booking.archivedWithoutCheckin)
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -118,6 +158,35 @@ interface BookingComplianceArgs {
 }
 
 /**
+ * Timeframe predicate on the PLANNED end of a booking.
+ *
+ * Extension and check-in both rewrite `to` — to the renegotiated deadline and
+ * to the actual return moment respectively — while the planned end stays in
+ * `originalTo`. Filtering on `to` alone therefore lets a booking due inside
+ * the window escape its own period, and moves it between periods over its
+ * lifetime. `originalTo` is null only on rows predating the column, where `to`
+ * still is the planned end.
+ *
+ * This is the SQL form of `resolvePlannedEnd` — the two must stay equivalent,
+ * so a row is filtered, displayed, and measured against one date.
+ *
+ * @param windowStart - Inclusive start of the timeframe.
+ * @param windowEnd - Inclusive end of the timeframe.
+ * @returns A `where` fragment matching bookings whose planned end is in range.
+ */
+function plannedEndInWindow(
+  windowStart: Date,
+  windowEnd: Date
+): Prisma.BookingWhereInput {
+  return {
+    OR: [
+      { originalTo: { gte: windowStart, lte: windowEnd } },
+      { originalTo: null, to: { gte: windowStart, lte: windowEnd } },
+    ],
+  };
+}
+
+/**
  * Generate the Booking Compliance report (R2).
  *
  * This report tracks booking lifecycle compliance:
@@ -125,7 +194,10 @@ interface BookingComplianceArgs {
  * - Late returns
  * - Currently overdue items
  *
- * KPIs are pre-aggregated via SQL. The chart shows status transition trends.
+ * Every axis of the report — which period a booking belongs to, the end date
+ * shown in its row, and how late it was — reads the PLANNED end
+ * (`resolvePlannedEnd`), so a booking's period membership and lateness do not
+ * change when it is extended or checked in.
  *
  * @param args - Report parameters
  * @returns Complete report payload
@@ -153,13 +225,14 @@ export async function bookingComplianceReport(
   try {
     // Build the where clause for bookings
     // Compliance can only be measured on bookings that:
-    // 1. Had a due date (scheduledEnd/to) within the selected timeframe
+    // 1. Were planned to end within the selected timeframe
     // 2. Have a measurable outcome (COMPLETE, OVERDUE, or ARCHIVED). ARCHIVED
     //    bookings are returned bookings that have aged out of the active list,
     //    so they belong in the table just like COMPLETE rows.
     const where: Prisma.BookingWhereInput = {
       organizationId,
-      to: { gte: timeframe.from, lte: timeframe.to }, // Due date in timeframe
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
       status: {
         in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[],
       },
@@ -277,8 +350,8 @@ export async function bookingComplianceReport(
  *
  * Remaining KPIs:
  * - `total_bookings` — count of measurable bookings (COMPLETE + OVERDUE +
- *   ARCHIVED) whose due date falls in the timeframe.
- * - `currently_overdue` — count of OVERDUE bookings with a due date in the
+ *   ARCHIVED) whose planned end falls in the timeframe.
+ * - `currently_overdue` — count of OVERDUE bookings with a planned end in the
  *   timeframe. Consumed by the PDF generator's hero overdue tile.
  */
 async function computeBookingComplianceKpis(
@@ -344,11 +417,12 @@ async function fetchBookingComplianceRows(
       // (legacy bookings, partial check-ins that recorded a custom note,
       // or rare event-write failures). See `resolveCheckInAt`.
       updatedAt: true,
+      // The planned period. `from`/`to` are rewritten by extension and by
+      // check-out/check-in with the adjust-date intent; these two are not.
+      originalFrom: true,
+      originalTo: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMember: {
         select: {
@@ -386,13 +460,15 @@ async function fetchBookingComplianceRows(
       fromEvent: checkInTimes.get(b.id) ?? null,
     });
 
-    // Lateness via the canonical helper:
-    // - OVERDUE → `now − to`
-    // - COMPLETE/ARCHIVED with a recorded check-in → `checkInAt − to`
+    // Compliance asks whether the agreed plan was honoured, so every row is
+    // measured against the planned end — the same date `plannedEndInWindow`
+    // filtered on and the row displays as `scheduledEnd`.
+    // - OVERDUE → `now − plannedEnd`
+    // - COMPLETE/ARCHIVED with a recorded check-in → `checkInAt − plannedEnd`
     // - otherwise null (no measurable lateness)
     const latenessMs = getLatenessMs({
       status: b.status,
-      to: b.to,
+      scheduledEnd: resolvePlannedEnd(b),
       checkInAt,
       now,
     });
@@ -403,17 +479,16 @@ async function fetchBookingComplianceRows(
       bookingName: b.name || `Booking ${b.id.slice(0, 8)}`,
       status: b.status,
       custodian: b.custodianUser
-        ? stripNameSuffix(
-            `${b.custodianUser.firstName || ""} ${
-              b.custodianUser.lastName || ""
-            }`.trim()
-          )
+        ? stripNameSuffix(resolveUserDisplayName(b.custodianUser))
         : b.custodianTeamMember
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
       assetCount: b._count.bookingAssets,
-      scheduledStart: b.from!,
-      scheduledEnd: b.to!,
+      // Both ends of the period the booking was PLANNED to run for — an early
+      // check-out rewrites `from` and a check-in rewrites `to`, so the raw
+      // columns would label a "scheduled" period with actual moments.
+      scheduledStart: resolvePlannedStart(b)!,
+      scheduledEnd: resolvePlannedEnd(b)!,
       actualCheckout: null,
       actualCheckin: checkInAt,
       isOnTime: isOnTime({ status: b.status, latenessMs }),
@@ -514,11 +589,17 @@ function formatStatusLabel(status: BookingStatus): string {
 // -----------------------------------------------------------------------------
 
 /**
- * Calculate compliance rate for completed bookings in the timeframe.
+ * Calculate the compliance rate for the timeframe, plus the prior period's
+ * rate for the trend comparison.
  *
- * A booking is "on-time" if it was marked COMPLETE and doesn't have OVERDUE
- * in its history. For now, we use a simplified heuristic based on whether
- * the booking ever had OVERDUE status.
+ * A booking counts as on-time when `getLatenessMs` — measured against its
+ * planned end — lands within `COMPLIANCE_GRACE_PERIOD_MS`. OVERDUE bookings
+ * are never on-time. The same helpers back the table, the trend chart and the
+ * custodian breakdown, so every number on the report agrees.
+ *
+ * @param organizationId - Workspace whose bookings are measured.
+ * @param timeframe - Resolved reporting window (planned end must fall inside).
+ * @returns On-time/late counts, the rate, and the prior-period comparison.
  */
 async function computeComplianceRate(
   organizationId: string,
@@ -534,8 +615,8 @@ async function computeComplianceRate(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
       archivedWithoutCheckin: false,
-      // Bookings scheduled to end within the timeframe
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -544,6 +625,7 @@ async function computeComplianceRate(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -571,8 +653,8 @@ async function computeComplianceRate(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
       archivedWithoutCheckin: false,
-      // Filter by scheduled end date for consistency with main query
-      to: { gte: priorFrom, lte: priorTo },
+      // Planned end (originalTo ?? to), consistent with the main query.
+      ...plannedEndInWindow(priorFrom, priorTo),
     },
     select: {
       id: true,
@@ -580,6 +662,7 @@ async function computeComplianceRate(
       to: true,
       status: true,
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -618,8 +701,8 @@ async function computeComplianceRate(
  * are treated as on-time per `isOnTime`.
  *
  * @param bookings - Measurable bookings (COMPLETE / OVERDUE / ARCHIVED) with
- *   their `id`, scheduled return (`to`), `updatedAt`, and current `status`
- *   selected.
+ *   their `id`, planned end (`originalTo`), live end (`to`), `updatedAt`, and
+ *   current `status` selected.
  * @param checkInTimes - Map from `bookingId` to the canonical check-in moment
  *   produced by `resolveCheckInTimes`. Missing entries trigger the fallback.
  * @returns Counts of on-time and late bookings; the sum equals `bookings.length`.
@@ -628,6 +711,7 @@ function categorizeBookings(
   bookings: {
     id: string;
     to: Date | null;
+    originalTo: Date | null;
     status: BookingStatus;
     updatedAt: Date | null;
   }[],
@@ -644,7 +728,7 @@ function categorizeBookings(
     });
     const latenessMs = getLatenessMs({
       status: booking.status,
-      to: booking.to,
+      scheduledEnd: resolvePlannedEnd(booking),
       checkInAt,
       now,
     });
@@ -725,7 +809,7 @@ async function computeComplianceTrend(
     )
   );
 
-  // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with due date
+  // Fetch all measurable bookings (COMPLETE, OVERDUE, ARCHIVED) with planned end
   // in the timeframe. ARCHIVED is included so finished-then-archived bookings
   // still count toward the trend.
   const measurableBookings = await db.booking.findMany({
@@ -734,7 +818,8 @@ async function computeComplianceTrend(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from the trend.
       archivedWithoutCheckin: false,
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Planned end (originalTo ?? to) inside the timeframe.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -742,6 +827,7 @@ async function computeComplianceTrend(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
     },
   });
 
@@ -767,9 +853,10 @@ async function computeComplianceTrend(
       Math.min(bucketStartAt(i + 1).toMillis() - 1, timeframe.to.getTime())
     );
 
-    // Filter bookings with due date in this bucket
+    // Filter bookings whose planned end falls in this bucket
     const bucketBookings = measurableBookings.filter((b) => {
-      const dueDate = b.to?.getTime() || 0;
+      // Bucket by the planned end, matching the window filter and the table.
+      const dueDate = resolvePlannedEnd(b)?.getTime() || 0;
       return dueDate >= bucketStart.getTime() && dueDate <= bucketEnd.getTime();
     });
 
@@ -786,7 +873,7 @@ async function computeComplianceTrend(
       });
       const latenessMs = getLatenessMs({
         status: b.status,
-        to: b.to,
+        scheduledEnd: resolvePlannedEnd(b),
         checkInAt,
         now,
       });
@@ -905,8 +992,8 @@ async function computeCustodianPerformance(
       status: { in: MEASURABLE_BOOKING_STATUSES as unknown as BookingStatus[] },
       // Exclude never-returned archives (RESERVED→ARCHIVED) from compliance.
       archivedWithoutCheckin: false,
-      // Filter by scheduled end date for consistency with main compliance query
-      to: { gte: timeframe.from, lte: timeframe.to },
+      // Planned end (originalTo ?? to), consistent with the main compliance query.
+      ...plannedEndInWindow(timeframe.from, timeframe.to),
     },
     select: {
       id: true,
@@ -914,12 +1001,10 @@ async function computeCustodianPerformance(
       status: true,
       // COMPLETE-only fallback when the canonical event is missing.
       updatedAt: true,
+      originalTo: true,
       custodianUserId: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMemberId: true,
       custodianTeamMember: {
@@ -952,11 +1037,7 @@ async function computeCustodianPerformance(
     const key =
       booking.custodianUserId || booking.custodianTeamMemberId || "__none__";
     const name = booking.custodianUser
-      ? stripNameSuffix(
-          `${booking.custodianUser.firstName || ""} ${
-            booking.custodianUser.lastName || ""
-          }`.trim()
-        )
+      ? stripNameSuffix(resolveUserDisplayName(booking.custodianUser))
       : booking.custodianTeamMember
       ? stripNameSuffix(booking.custodianTeamMember.name)
       : "No Custodian";
@@ -978,7 +1059,7 @@ async function computeCustodianPerformance(
     });
     const latenessMs = getLatenessMs({
       status: booking.status,
-      to: booking.to,
+      scheduledEnd: resolvePlannedEnd(booking),
       checkInAt,
       now,
     });
@@ -1119,20 +1200,20 @@ async function fetchOverdueRows(
       to: true,
       custodianUserId: true,
       custodianUser: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
+        select: USER_NAME_SELECT,
       },
       custodianTeamMember: {
         select: {
           name: true,
         },
       },
-      // Phase 3a: walk the BookingAsset pivot to reach the asset for
-      // valuation, and count pivot rows for asset count.
+      // Walk the BookingAsset pivot for valuation and booked units, and
+      // count pivot rows for asset count.
       bookingAssets: {
         select: {
+          // Booked units — the value-at-risk multiplier for this surface
+          // (see .claude/rules/quantity-semantics-per-surface.md).
+          quantity: true,
           asset: {
             select: { id: true, valuation: true },
           },
@@ -1153,6 +1234,11 @@ async function fetchOverdueRows(
   });
 
   return bookings.map((b) => {
+    // why: this is a live operational list — "what is late right now, and by
+    // how much" — so it measures against the CURRENT deadline. An extension
+    // moves that date and this report must follow it. Booking Compliance asks
+    // whether the agreed plan was honoured and reads the planned end instead,
+    // so the two reports can legitimately disagree for an extended booking.
     const scheduledEnd = b.to!;
     const msOverdue = now.getTime() - scheduledEnd.getTime();
     const daysOverdue = Math.max(
@@ -1180,20 +1266,17 @@ async function fetchOverdueRows(
      * Sum valuations only for assets still outstanding (not yet checked in),
      * walking the Phase 3a `BookingAsset` pivot.
      */
+    // Per-unit valuation × booked units, matching the hero KPI's math.
     const valueAtRisk = b.bookingAssets
       .filter((ba) => !checkedInAssetIds.has(ba.asset.id))
-      .reduce((sum, ba) => sum + (ba.asset.valuation || 0), 0);
+      .reduce((sum, ba) => sum + (ba.asset.valuation ?? 0) * ba.quantity, 0);
 
     return {
       id: b.id,
       bookingId: b.id,
       bookingName: b.name || `Booking ${b.id.slice(0, 8)}`,
       custodian: b.custodianUser
-        ? stripNameSuffix(
-            `${b.custodianUser.firstName || ""} ${
-              b.custodianUser.lastName || ""
-            }`.trim()
-          )
+        ? stripNameSuffix(resolveUserDisplayName(b.custodianUser))
         : b.custodianTeamMember
         ? stripNameSuffix(b.custodianTeamMember.name)
         : null,
@@ -1542,12 +1625,13 @@ async function fetchIdleAssetRows(
           },
         },
       },
-      // Pull the most-recent COMPLETE booking via the pivot. We sort
-      // pivot rows by their related booking's `to` desc and take the
-      // first one to find the last completed booking for this asset.
+      // Pull the most-recent returned booking via the pivot (archive-aware
+      // — see `RETURNED_BOOKING_WHERE`). We sort pivot rows by their
+      // related booking's `to` desc and take the first one to find the
+      // last completed booking for this asset.
       bookingAssets: {
         where: {
-          booking: { status: "COMPLETE" },
+          booking: RETURNED_BOOKING_WHERE,
         },
         orderBy: { booking: { to: "desc" } },
         take: 1,
@@ -1629,7 +1713,7 @@ async function countIdleAssets(
       id: true,
       bookingAssets: {
         where: {
-          booking: { status: "COMPLETE" },
+          booking: RETURNED_BOOKING_WHERE,
         },
         orderBy: { booking: { to: "desc" } },
         take: 1,
@@ -1689,7 +1773,7 @@ async function computeIdleAssetsKpis(
       updatedAt: true,
       bookingAssets: {
         where: {
-          booking: { status: "COMPLETE" },
+          booking: RETURNED_BOOKING_WHERE,
         },
         orderBy: { booking: { to: "desc" } },
         take: 1,
@@ -2200,20 +2284,25 @@ async function fetchTopBookedAssetRows(
   totalCount: number;
   topAsset: TopBookedAssetRow | null;
 }> {
-  // Get all bookings in the timeframe with their assets — Phase 3a:
+  // Get all bookings overlapping the timeframe with their assets — Phase 3a:
   // walk the BookingAsset pivot. The `where: assetWhere` on the pivot
   // is expressed as a nested `asset:` filter; the same shape applies to
   // the `select` so we can pick fields off the asset. The nested asset
   // select includes `mainImage`, `mainImageExpiration`, and
   // `organizationId` so we can pipe assets through
   // `refreshExpiredAssetImages` below without an extra round-trip.
+  //
+  // Interval-overlap predicate (same as the top-booked-kits report): a
+  // booking counts if it overlaps the window at all — it starts on/before
+  // the window end AND ends on/after the window start. This deliberately
+  // covers bookings that span the entire window (start before `from`, end
+  // after `to`), which a start-OR-end-in-window test would miss (e.g. a
+  // month-long booking viewed with a one-week range).
   const bookings = await db.booking.findMany({
     where: {
       organizationId,
-      OR: [
-        { from: { gte: timeframe.from, lte: timeframe.to } },
-        { to: { gte: timeframe.from, lte: timeframe.to } },
-      ],
+      from: { lte: timeframe.to },
+      to: { gte: timeframe.from },
       status: { notIn: ["DRAFT", "CANCELLED"] },
     },
     select: {
@@ -2281,17 +2370,27 @@ async function fetchTopBookedAssetRows(
   >();
 
   for (const booking of bookings) {
-    // Clamp to at least 1 day - handles edge case where to < from (inverted dates)
+    // Days are measured on the booking's overlap with the report window —
+    // the overlap predicate admits bookings that extend far beyond it, and
+    // an unclamped duration would credit days outside the period. Floors at
+    // 1 day (also covering inverted dates).
     const bookingDays =
       booking.from && booking.to
         ? Math.max(
             1,
             Math.ceil(
-              (booking.to.getTime() - booking.from.getTime()) /
+              (Math.min(booking.to.getTime(), timeframe.to.getTime()) -
+                Math.max(booking.from.getTime(), timeframe.from.getTime())) /
                 (1000 * 60 * 60 * 24)
             )
           )
         : 1;
+
+    // One booking can hold several pivot rows for the same asset — a
+    // standalone slice plus kit-driven slices (the pivot's partial unique
+    // indexes allow it) — so bookings and days are counted once per
+    // (asset, booking), not once per pivot row.
+    const countedAssetIds = new Set<string>();
 
     for (const ba of booking.bookingAssets) {
       const asset = ba.asset;
@@ -2313,6 +2412,9 @@ async function fetchTopBookedAssetRows(
           totalDays: 0,
         });
       }
+
+      if (countedAssetIds.has(asset.id)) continue;
+      countedAssetIds.add(asset.id);
 
       const entry = assetMap.get(asset.id)!;
       entry.bookingCount++;
@@ -2376,15 +2478,21 @@ async function computeTopBookedKpis(
   assetWhere: Prisma.AssetWhereInput,
   timeframe: ResolvedTimeframe
 ): Promise<ReportKpi[]> {
-  // Get booking counts
+  // Get booking counts. Interval-overlap window predicate — identical to the
+  // rows query in `fetchTopBookedAssetRows` so the hero and the table
+  // measure the same booking set.
   const bookings = await db.booking.findMany({
     where: {
       organizationId,
-      OR: [
-        { from: { gte: timeframe.from, lte: timeframe.to } },
-        { to: { gte: timeframe.from, lte: timeframe.to } },
-      ],
+      from: { lte: timeframe.to },
+      to: { gte: timeframe.from },
       status: { notIn: ["DRAFT", "CANCELLED"] },
+      // "Total Bookings" counts the same population the rows aggregate:
+      // bookings holding at least one asset matching the report's asset
+      // filters. Without this, assetless bookings — and, when
+      // category/location filters are active, bookings with only
+      // non-matching assets — inflate the hero past what the table shows.
+      bookingAssets: { some: { asset: assetWhere } },
     },
     select: {
       bookingAssets: {
@@ -2403,9 +2511,17 @@ async function computeTopBookedKpis(
   const assetBookingCounts = new Map<string, { name: string; count: number }>();
 
   for (const booking of bookings) {
+    // Mirror of the rows aggregation: a booking can hold several pivot rows
+    // for the same asset (standalone + kit-driven slices), so per-asset
+    // booking counts increment once per (asset, booking).
+    const countedAssetIds = new Set<string>();
+
     for (const ba of booking.bookingAssets) {
       const asset = ba.asset;
       uniqueAssets.add(asset.id);
+
+      if (countedAssetIds.has(asset.id)) continue;
+      countedAssetIds.add(asset.id);
 
       if (!assetBookingCounts.has(asset.id)) {
         assetBookingCounts.set(asset.id, { name: asset.title, count: 0 });
@@ -2489,8 +2605,9 @@ interface TopBookedKitsArgs {
  *
  * The kit analogue of {@link topBookedAssetsReport}: identifies the most
  * frequently booked kits. Kits have no direct relation to bookings — a kit is
- * "booked" when its member assets (carrying its `kitId`) are added to a
- * booking, and kits move atomically (you cannot book a single item out of a
+ * "booked" when a booking holds kit-driven `BookingAsset` slices attributed
+ * to it (`sourceKitId` provenance, written when the kit is added to the
+ * booking), and kits move atomically (you cannot book a single item out of a
  * kit, see `bookings.$bookingId.overview.manage-assets.tsx`). So each kit is
  * counted **once per booking** it appears in.
  *
@@ -2555,9 +2672,10 @@ export async function topBookedKitsReport(
 }
 
 /**
- * Scans bookings in the timeframe, aggregates booking frequency per kit
- * (deduped once per booking), hydrates kit metadata in a single org-scoped
- * query, and re-signs expired kit image URLs server-side.
+ * Scans bookings in the timeframe, aggregates booking frequency per kit from
+ * each slice's own provenance (deduped once per booking), hydrates kit
+ * metadata in a single org-scoped query, and re-signs expired kit image URLs
+ * server-side.
  *
  * @returns Paginated rows, total unique-kit count, the #1 kit, and the total
  *   kit-booking incidences (sum of every kit's booking count) for the KPIs.
@@ -2573,7 +2691,7 @@ async function fetchTopBookedKitData(
   topKit: TopBookedKitRow | null;
   totalKitBookings: number;
 }> {
-  // Step 1 — lightweight scan: only each booking's assets' kitIds.
+  // Step 1 — lightweight scan: only each booking's kit-driven slices.
   // Interval-overlap predicate: a booking counts if it overlaps the window at
   // all — it starts on/before the window end AND ends on/after the window
   // start. This deliberately covers bookings that span the entire window
@@ -2589,47 +2707,83 @@ async function fetchTopBookedKitData(
     select: {
       from: true,
       to: true,
-      // Walk the BookingAsset pivot (Booking has no direct `assets` relation).
-      // Post-Phase-4a: `Asset.kitId` was replaced by the `AssetKit` pivot, so
-      // we project `assetKits[].kitId` through the BookingAsset pivot. The
-      // `where` keeps only rows whose asset has at least one kit membership.
+      // Kit attribution comes from the SLICE, not from the asset's current
+      // memberships: a standalone booking of an asset that happens to sit in
+      // a kit must not credit that kit, and editing a kit's membership must
+      // not rewrite booking history. Both provenance columns are plain FK
+      // columns (no Prisma relation — see schema.prisma on `BookingAsset`):
+      //   - `sourceKitId`: durable provenance, the Kit the slice was booked
+      //     under; survives the asset leaving the kit.
+      //   - `assetKitId`: the LIVE `AssetKit` membership row; `SET NULL`
+      //     when the membership is deleted. Legacy fallback only — used for
+      //     rows that predate `sourceKitId`.
+      // The `where` keeps only kit-driven slices (either column set).
       bookingAssets: {
-        where: { asset: { assetKits: { some: {} } } },
-        select: {
-          asset: {
-            select: { id: true, assetKits: { select: { kitId: true } } },
-          },
+        where: {
+          OR: [{ sourceKitId: { not: null } }, { assetKitId: { not: null } }],
         },
+        select: { sourceKitId: true, assetKitId: true },
       },
     },
   });
+
+  // Legacy slices carry no `sourceKitId`; resolve their kit through the live
+  // membership row in one batched query. `organizationId` is enforced
+  // explicitly (defence-in-depth per the org-scope rule). A membership that
+  // vanished between the two queries simply fails to resolve and the slice
+  // is skipped below.
+  const unresolvedAssetKitIds = new Set<string>();
+  for (const booking of bookings) {
+    for (const ba of booking.bookingAssets) {
+      if (!ba.sourceKitId && ba.assetKitId) {
+        unresolvedAssetKitIds.add(ba.assetKitId);
+      }
+    }
+  }
+  const kitIdByAssetKitId = new Map<string, string>();
+  if (unresolvedAssetKitIds.size > 0) {
+    const memberships = await db.assetKit.findMany({
+      where: { id: { in: Array.from(unresolvedAssetKitIds) }, organizationId },
+      select: { id: true, kitId: true },
+    });
+    for (const membership of memberships) {
+      kitIdByAssetKitId.set(membership.id, membership.kitId);
+    }
+  }
 
   // Aggregate booking count + total days per kit, counting each kit once per
   // booking (kits are atomic in a booking).
   const kitAgg = new Map<string, { bookingCount: number; totalDays: number }>();
   for (const booking of bookings) {
-    // Clamp to ≥1 day; handles inverted dates defensively (matches asset report).
+    // Days are measured on the booking's overlap with the report window. The
+    // overlap predicate above admits bookings that extend far beyond it, and
+    // an unclamped duration would credit days the period never contained —
+    // the Total Days column, the Avg Duration derived from it, and
+    // `timeBookedRate` all read this one number. Floors at 1 day (also
+    // covering inverted dates). Kept identical to the asset report so the
+    // same booking contributes the same days to both.
     const bookingDays =
       booking.from && booking.to
         ? Math.max(
             1,
             Math.ceil(
-              (booking.to.getTime() - booking.from.getTime()) /
+              (Math.min(booking.to.getTime(), timeframe.to.getTime()) -
+                Math.max(booking.from.getTime(), timeframe.from.getTime())) /
                 (1000 * 60 * 60 * 24)
             )
           )
         : 1;
 
-    // Distinct, non-null kitIds present in this booking — counted once each
-    // (kits are atomic in a booking). Post-Phase-4a: an asset can belong to
-    // multiple kits via `assetKits[]`; gather every kitId across all
-    // memberships so the report counts every kit the asset participates in.
-    // Mirrors `getKitIdsByAssets`; inlined to avoid pulling the booking
-    // service's heavy (scanner/lottie) import graph into this server module.
+    // Distinct kitIds present in this booking — counted once each (kits are
+    // atomic in a booking). `sourceKitId` is the primary attribution; slices
+    // without it resolve through their live membership row.
     const bookingKitIds = new Set<string>();
     for (const ba of booking.bookingAssets) {
-      for (const ak of ba.asset.assetKits) {
-        bookingKitIds.add(ak.kitId);
+      const kitId =
+        ba.sourceKitId ??
+        (ba.assetKitId ? kitIdByAssetKitId.get(ba.assetKitId) : undefined);
+      if (kitId) {
+        bookingKitIds.add(kitId);
       }
     }
     for (const kitId of bookingKitIds) {
@@ -2810,12 +2964,17 @@ export async function assetDistributionReport(
   const startTime = performance.now();
 
   try {
-    // Fetch all distribution data in parallel.
-    const [byCategory, byLocation, byStatus, kpis] = await Promise.all([
-      computeDistributionByCategory(organizationId),
-      computeDistributionByLocation(organizationId),
-      computeDistributionByStatus(organizationId),
+    // One asset read feeds all three breakdowns — each bucket builder is a
+    // pure reduction over the same rows, so a large inventory is scanned
+    // once instead of three times.
+    const [assets, kpis] = await Promise.all([
+      fetchDistributionAssets(organizationId),
       computeDistributionKpis(organizationId),
+    ]);
+    const [byCategory, byLocation, byStatus] = await Promise.all([
+      computeDistributionByCategory(assets, organizationId),
+      Promise.resolve(computeDistributionByLocation(assets)),
+      Promise.resolve(computeDistributionByStatus(assets)),
     ]);
 
     const computedMs = Math.round(performance.now() - startTime);
@@ -2866,96 +3025,141 @@ export async function assetDistributionReport(
   }
 }
 
-async function computeDistributionByCategory(
+/** The shared asset row every distribution breakdown reduces over. */
+type DistributionAsset = {
+  id: string;
+  categoryId: string | null;
+  status: string;
+  valuation: number | null;
+  quantity: number | null;
+  assetLocations: {
+    quantity: number;
+    location: { id: string; name: string };
+  }[];
+};
+
+/**
+ * One asset read shared by all three distribution breakdowns.
+ *
+ * Bucket values are per-unit valuation × the surface's quantity, matching
+ * the headline Total Value KPI, so the builders need raw rows rather than a
+ * database groupBy (which cannot multiply columns).
+ */
+async function fetchDistributionAssets(
   organizationId: string
-): Promise<AssetDistributionRow[]> {
-  const assets = await db.asset.groupBy({
-    by: ["categoryId"],
-    where: { organizationId },
-    _count: { id: true },
-    _sum: { valuation: true },
-  });
-
-  const totalAssets = assets.reduce((sum, a) => sum + a._count.id, 0);
-
-  // Fetch category names
-  const categoryIds = assets
-    .map((a) => a.categoryId)
-    .filter((id): id is string => id !== null);
-
-  const categories = await db.category.findMany({
-    where: { id: { in: categoryIds }, organizationId },
-    select: { id: true, name: true },
-  });
-
-  const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
-
-  return assets
-    .map((a) => ({
-      id: a.categoryId || "uncategorized",
-      groupName: a.categoryId
-        ? categoryMap.get(a.categoryId) || "Unknown"
-        : "Uncategorized",
-      assetCount: a._count.id,
-      percentage:
-        totalAssets > 0 ? Math.round((a._count.id / totalAssets) * 100) : 0,
-      totalValue: a._sum.valuation,
-    }))
-    .sort((a, b) => b.assetCount - a.assetCount);
-}
-
-async function computeDistributionByLocation(
-  organizationId: string
-): Promise<AssetDistributionRow[]> {
-  // Pull every asset with its AssetLocation pivot rows (+ location name)
-  // so we can bucket each asset under each location it occupies. A
-  // QUANTITY_TRACKED asset can span multiple locations, so it may
-  // contribute to several buckets; assets with no pivot rows fall into
-  // "No Location".
-  const assets = await db.asset.findMany({
+): Promise<DistributionAsset[]> {
+  return db.asset.findMany({
     where: { organizationId },
     select: {
       id: true,
+      categoryId: true,
+      status: true,
       valuation: true,
+      quantity: true,
       assetLocations: {
         select: {
+          quantity: true,
           location: { select: { id: true, name: true } },
         },
       },
     },
   });
+}
 
-  // bucketKey → { name, assetCount, totalValue }. Counts are per
-  // (asset, location) pair to mirror the previous groupBy semantics.
+async function computeDistributionByCategory(
+  assets: DistributionAsset[],
+  organizationId: string
+): Promise<AssetDistributionRow[]> {
+  const totalAssets = assets.length;
+
+  const buckets = new Map<
+    string,
+    { assetCount: number; totalValue: number | null }
+  >();
+  for (const a of assets) {
+    const key = a.categoryId || "uncategorized";
+    const bucket = buckets.get(key) ?? { assetCount: 0, totalValue: null };
+    bucket.assetCount += 1;
+    if (a.valuation !== null) {
+      // Per-unit valuation × workspace stock, matching the headline KPI.
+      bucket.totalValue =
+        (bucket.totalValue ?? 0) + a.valuation * (a.quantity ?? 1);
+    }
+    buckets.set(key, bucket);
+  }
+
+  // Resolve category names for the buckets that have one.
+  const categoryIds = Array.from(buckets.keys()).filter(
+    (id) => id !== "uncategorized"
+  );
+  const categories = await db.category.findMany({
+    where: { id: { in: categoryIds }, organizationId },
+    select: { id: true, name: true },
+  });
+  const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
+
+  return Array.from(buckets.entries())
+    .map(([id, b]) => ({
+      id,
+      groupName:
+        id === "uncategorized"
+          ? "Uncategorized"
+          : categoryMap.get(id) || "Unknown",
+      assetCount: b.assetCount,
+      percentage:
+        totalAssets > 0 ? Math.round((b.assetCount / totalAssets) * 100) : 0,
+      totalValue: b.totalValue,
+    }))
+    .sort((a, b) => b.assetCount - a.assetCount);
+}
+
+function computeDistributionByLocation(
+  assets: DistributionAsset[]
+): AssetDistributionRow[] {
+  // A QUANTITY_TRACKED asset can span multiple locations, so it may
+  // contribute to several buckets; value weighs the per-unit valuation by
+  // the UNITS AT THAT LOCATION (`AssetLocation.quantity`).
+  //
+  // "No Location" holds only assets with no placement rows at all: the
+  // donut slice drills down to `/assets?location=without-location`, whose
+  // filter matches `assetLocations: { none: {} }`, so the bucket must
+  // describe exactly that population. Unplaced remainders of partially
+  // placed assets are deliberately not attributed here.
   const buckets = new Map<
     string,
     { name: string; assetCount: number; totalValue: number | null }
   >();
 
-  const addToBucket = (key: string, name: string, valuation: number | null) => {
-    const existing = buckets.get(key);
-    if (existing) {
-      existing.assetCount += 1;
-      existing.totalValue =
-        valuation === null
-          ? existing.totalValue
-          : (existing.totalValue ?? 0) + valuation;
-    } else {
-      buckets.set(key, {
-        name,
-        assetCount: 1,
-        totalValue: valuation,
-      });
+  const addToBucket = (key: string, name: string, value: number | null) => {
+    const existing = buckets.get(key) ?? {
+      name,
+      assetCount: 0,
+      totalValue: null,
+    };
+    existing.assetCount += 1;
+    if (value !== null) {
+      existing.totalValue = (existing.totalValue ?? 0) + value;
     }
+    buckets.set(key, existing);
   };
 
   for (const asset of assets) {
     if (asset.assetLocations.length === 0) {
-      addToBucket("without-location", "No Location", asset.valuation);
+      addToBucket(
+        "without-location",
+        "No Location",
+        asset.valuation === null
+          ? null
+          : asset.valuation * (asset.quantity ?? 1)
+      );
       continue;
     }
     for (const pivot of asset.assetLocations) {
-      addToBucket(pivot.location.id, pivot.location.name, asset.valuation);
+      addToBucket(
+        pivot.location.id,
+        pivot.location.name,
+        asset.valuation === null ? null : asset.valuation * pivot.quantity
+      );
     }
   }
 
@@ -2976,17 +3180,10 @@ async function computeDistributionByLocation(
     .sort((a, b) => b.assetCount - a.assetCount);
 }
 
-async function computeDistributionByStatus(
-  organizationId: string
-): Promise<AssetDistributionRow[]> {
-  const assets = await db.asset.groupBy({
-    by: ["status"],
-    where: { organizationId },
-    _count: { id: true },
-    _sum: { valuation: true },
-  });
-
-  const totalAssets = assets.reduce((sum, a) => sum + a._count.id, 0);
+function computeDistributionByStatus(
+  assets: DistributionAsset[]
+): AssetDistributionRow[] {
+  const totalAssets = assets.length;
 
   const statusLabels: Record<string, string> = {
     AVAILABLE: "Available",
@@ -2994,14 +3191,32 @@ async function computeDistributionByStatus(
     CHECKED_OUT: "Checked Out",
   };
 
-  return assets
-    .map((a) => ({
-      id: a.status,
-      groupName: statusLabels[a.status] || a.status,
-      assetCount: a._count.id,
+  const buckets = new Map<
+    string,
+    { assetCount: number; totalValue: number | null }
+  >();
+  for (const a of assets) {
+    const bucket = buckets.get(a.status) ?? {
+      assetCount: 0,
+      totalValue: null,
+    };
+    bucket.assetCount += 1;
+    if (a.valuation !== null) {
+      // Per-unit valuation × workspace stock, matching the headline KPI.
+      bucket.totalValue =
+        (bucket.totalValue ?? 0) + a.valuation * (a.quantity ?? 1);
+    }
+    buckets.set(a.status, bucket);
+  }
+
+  return Array.from(buckets.entries())
+    .map(([status, b]) => ({
+      id: status,
+      groupName: statusLabels[status] || status,
+      assetCount: b.assetCount,
       percentage:
-        totalAssets > 0 ? Math.round((a._count.id / totalAssets) * 100) : 0,
-      totalValue: a._sum.valuation,
+        totalAssets > 0 ? Math.round((b.assetCount / totalAssets) * 100) : 0,
+      totalValue: b.totalValue,
     }))
     .sort((a, b) => b.assetCount - a.assetCount);
 }
@@ -3380,7 +3595,10 @@ export async function monthlyBookingTrendsReport(
   const startTime = performance.now();
 
   try {
-    // Fetch all bookings in the timeframe
+    // Fetch all bookings created in the timeframe. DRAFT and CANCELLED are
+    // excluded so "Total Bookings" means the same thing it means in the
+    // top-booked reports: real bookings, not plans or bookings that never
+    // happened.
     const bookings = await db.booking.findMany({
       where: {
         organizationId,
@@ -3388,11 +3606,17 @@ export async function monthlyBookingTrendsReport(
           gte: timeframe.from,
           lte: timeframe.to,
         },
+        status: { notIn: ["DRAFT", "CANCELLED"] },
       },
       select: {
         id: true,
         createdAt: true,
         status: true,
+        // Distinguishes checked-in archives (completed bookings) from
+        // never-checked-out ones — see `isReturnedBooking`.
+        archivedWithoutCheckin: true,
+        // Pivot asset ids feed each month's unique-assets count.
+        bookingAssets: { select: { assetId: true } },
       },
     });
 
@@ -3431,8 +3655,13 @@ export async function monthlyBookingTrendsReport(
 
       const data = monthlyData.get(monthKey)!;
       data.created++;
-      if (booking.status === "COMPLETE") {
+      // Archive-aware: archiving rewrites status, so a checked-in archive
+      // still counts as completed.
+      if (isReturnedBooking(booking)) {
         data.completed++;
+      }
+      for (const ba of booking.bookingAssets) {
+        data.assetIds.add(ba.assetId);
       }
     }
 
@@ -3627,6 +3856,38 @@ interface AssetUtilizationArgs {
 }
 
 /**
+ * Total covered milliseconds of a set of `[start, end]` intervals, counting
+ * overlapping stretches once (union, not sum). Empty and inverted intervals
+ * contribute nothing.
+ */
+function sumMergedIntervalsMs(
+  intervals: Array<{ start: number; end: number }>
+): number {
+  const sorted = intervals
+    .filter((interval) => interval.end > interval.start)
+    .sort((a, b) => a.start - b.start);
+
+  let coveredMs = 0;
+  let currentStart: number | null = null;
+  let currentEnd = 0;
+
+  for (const interval of sorted) {
+    if (currentStart === null || interval.start > currentEnd) {
+      // Disjoint from the running stretch: bank it and start a new one.
+      if (currentStart !== null) coveredMs += currentEnd - currentStart;
+      currentStart = interval.start;
+      currentEnd = interval.end;
+    } else if (interval.end > currentEnd) {
+      // Overlaps/touches the running stretch: extend it.
+      currentEnd = interval.end;
+    }
+  }
+  if (currentStart !== null) coveredMs += currentEnd - currentStart;
+
+  return coveredMs;
+}
+
+/**
  * Generate the Asset Utilization report (R8).
  *
  * Measures how effectively assets are being used based on booking time.
@@ -3663,9 +3924,12 @@ export async function assetUtilizationReport(
     // Fetch assets with their bookings in the timeframe — Phase 3a:
     // walk the BookingAsset pivot. Filter pivot rows by their related
     // booking's date window so utilization only counts in-window
-    // bookings. `mainImage`, `mainImageExpiration`, `organizationId` are
-    // selected so we can pipe assets through `refreshExpiredAssetImages`
-    // below without an extra round-trip.
+    // bookings, and by status so only bookings representing real usage
+    // count — a DRAFT booking is a plan and a CANCELLED one never
+    // happened (same exclusion as the top-booked reports). `mainImage`,
+    // `mainImageExpiration`, `organizationId` are selected so we can pipe
+    // assets through `refreshExpiredAssetImages` below without an extra
+    // round-trip.
     const assets = await db.asset.findMany({
       where: assetWhere,
       select: {
@@ -3692,6 +3956,7 @@ export async function assetUtilizationReport(
             booking: {
               from: { lte: timeframe.to },
               to: { gte: timeframe.from },
+              status: { notIn: ["DRAFT", "CANCELLED"] },
             },
           },
           select: {
@@ -3713,30 +3978,35 @@ export async function assetUtilizationReport(
 
     // Calculate utilization for each asset
     const rows: AssetUtilizationRow[] = assets.map((asset) => {
-      let daysInUse = 0;
+      // One booking can hold several pivot rows for the same asset
+      // (standalone + kit-driven slices — the pivot's partial unique indexes
+      // allow it), so both aggregates key on the BOOKING: `bookingIds`
+      // dedupes the count, and each booking contributes its in-window
+      // interval once.
       const bookingIds = new Set<string>();
+      const inUseIntervals: Array<{ start: number; end: number }> = [];
 
       for (const ba of asset.bookingAssets) {
         const booking = ba.booking;
         if (!booking.from || !booking.to) continue;
+        if (bookingIds.has(booking.id)) continue;
         bookingIds.add(booking.id);
 
-        // Calculate overlap with timeframe
-        const overlapStart = Math.max(
-          booking.from.getTime(),
-          timeframe.from.getTime()
-        );
-        const overlapEnd = Math.min(
-          booking.to.getTime(),
-          timeframe.to.getTime()
-        );
-
-        if (overlapEnd > overlapStart) {
-          daysInUse += Math.ceil(
-            (overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)
-          );
-        }
+        // Clamp to the report window.
+        inUseIntervals.push({
+          start: Math.max(booking.from.getTime(), timeframe.from.getTime()),
+          end: Math.min(booking.to.getTime(), timeframe.to.getTime()),
+        });
       }
+
+      // In-use time is the UNION of the clamped intervals, not their sum:
+      // concurrent bookings of the same asset cover the same calendar time,
+      // so coverage can never exceed the window and utilization stays ≤100%.
+      // Exact milliseconds are summed and converted to days once, so
+      // per-booking rounding cannot compound.
+      const daysInUse = Math.ceil(
+        sumMergedIntervalsMs(inUseIntervals) / (1000 * 60 * 60 * 24)
+      );
 
       const utilizationRate =
         totalDays > 0 ? Math.round((daysInUse / totalDays) * 100) : 0;
@@ -3984,11 +4254,7 @@ export async function assetActivityReport(
     // Map events to rows
     const rows: AssetActivityRow[] = events.map((event) => {
       const asset = event.assetId ? assetMap.get(event.assetId) : null;
-      const actorSnapshot = event.actorSnapshot as {
-        firstName?: string;
-        lastName?: string;
-        displayName?: string;
-      } | null;
+      const actorSnapshot = event.actorSnapshot as UserNameFields | null;
 
       return {
         id: event.id,
@@ -4001,12 +4267,7 @@ export async function assetActivityReport(
         description: buildActivityDescription(event),
         occurredAt: event.occurredAt,
         performedBy: actorSnapshot
-          ? stripNameSuffix(
-              actorSnapshot.displayName ||
-                `${actorSnapshot.firstName || ""} ${
-                  actorSnapshot.lastName || ""
-                }`.trim()
-            )
+          ? stripNameSuffix(resolveUserDisplayName(actorSnapshot))
           : null,
         context: null,
       };

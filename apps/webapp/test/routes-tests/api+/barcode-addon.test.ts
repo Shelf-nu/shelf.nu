@@ -17,6 +17,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { ShelfError } from "~/utils/error";
 
 // why: mocking Remix's data() so the action's error path returns a Response
 // whose status we can assert (React Router v7 single fetch)
@@ -37,10 +38,17 @@ vi.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
-// why: preventing Prisma from connecting to a real database
-const { mockOrgUpdate } = vi.hoisted(() => ({ mockOrgUpdate: vi.fn() }));
+// why: preventing Prisma from connecting to a real database. `updateMany` is
+// the trial claim — its affected-row count decides whether this request is the
+// one allowed to create a subscription, so tests drive that count directly.
+const { mockOrgUpdate, mockOrgUpdateMany } = vi.hoisted(() => ({
+  mockOrgUpdate: vi.fn(),
+  mockOrgUpdateMany: vi.fn(),
+}));
 vi.mock("~/database/db.server", () => ({
-  db: { organization: { update: mockOrgUpdate } },
+  db: {
+    organization: { update: mockOrgUpdate, updateMany: mockOrgUpdateMany },
+  },
 }));
 
 // why: the permission gate is not what's under test — we want it to PASS so
@@ -135,6 +143,8 @@ describe("POST /api/barcode-addon", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockOrgUpdate.mockResolvedValue({ id: ORG });
+    // Default: this request wins the claim.
+    mockOrgUpdateMany.mockResolvedValue({ count: 1 });
   });
 
   it("refuses an ADMIN starting the trial, and never burns the flag", async () => {
@@ -165,5 +175,88 @@ describe("POST /api/barcode-addon", () => {
 
     expect(createBarcodeAddonTrialSubscription).toHaveBeenCalledTimes(1);
     expect(mockOrgUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  describe("one trial per workspace", () => {
+    beforeEach(() => {
+      callerHolds([OrganizationRoles.OWNER]);
+    });
+
+    it("claims the trial before it creates the subscription", async () => {
+      await post("trial");
+
+      // Order is the whole fix. Claiming AFTER the Stripe call leaves the
+      // window exactly as it was: two requests both find the trial unused and
+      // both create a real subscription.
+      const claimOrder = mockOrgUpdateMany.mock.invocationCallOrder[0];
+      const stripeOrder = (
+        createBarcodeAddonTrialSubscription as ReturnType<typeof vi.fn>
+      ).mock.invocationCallOrder[0];
+
+      expect(claimOrder).toBeDefined();
+      expect(claimOrder).toBeLessThan(stripeOrder);
+    });
+
+    it("creates nothing when another request already claimed the trial", async () => {
+      // Zero rows updated is how the database reports a lost claim.
+      mockOrgUpdateMany.mockResolvedValue({ count: 0 });
+
+      const result = await post("trial");
+
+      expect((result as unknown as Response).status).toBe(400);
+      expect(createBarcodeAddonTrialSubscription).not.toHaveBeenCalled();
+    });
+
+    it("returns the claim when the failure preceded the Stripe request", async () => {
+      // The add-on helper reports that it never sent the create, so nothing
+      // can exist and the workspace keeps its trial.
+      (
+        createBarcodeAddonTrialSubscription as ReturnType<typeof vi.fn>
+      ).mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          message: "Stripe not initialized",
+          additionalData: { subscriptionCreateAttempted: false },
+          label: "Stripe",
+        })
+      );
+
+      await post("trial");
+
+      // Claim then release: the second call puts the flag back, so the
+      // workspace can try again rather than losing a trial it never received.
+      expect(mockOrgUpdateMany).toHaveBeenCalledTimes(2);
+      expect(mockOrgUpdateMany).toHaveBeenLastCalledWith({
+        where: { id: ORG, usedBarcodeTrial: true },
+        data: { usedBarcodeTrial: false },
+      });
+      // The add-on must not be switched on for a subscription that failed.
+      expect(mockOrgUpdate).not.toHaveBeenCalled();
+    });
+
+    it("keeps the claim when the create may already have succeeded", async () => {
+      // A lost response is indistinguishable from a refusal, and Stripe may
+      // hold a real subscription. Releasing here would let the user's retry
+      // open a second one — the exact outcome the claim exists to prevent.
+      (
+        createBarcodeAddonTrialSubscription as ReturnType<typeof vi.fn>
+      ).mockRejectedValueOnce(
+        new ShelfError({
+          cause: new Error("socket hang up"),
+          message: "Something went wrong while creating barcode add-on trial.",
+          additionalData: { subscriptionCreateAttempted: true },
+          label: "Stripe",
+        })
+      );
+
+      await post("trial");
+
+      // The claim, and nothing after it.
+      expect(mockOrgUpdateMany).toHaveBeenCalledTimes(1);
+      expect(mockOrgUpdateMany).toHaveBeenCalledWith({
+        where: { id: ORG, usedBarcodeTrial: false },
+        data: { usedBarcodeTrial: true },
+      });
+    });
   });
 });

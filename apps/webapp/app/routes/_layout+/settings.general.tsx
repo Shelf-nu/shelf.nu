@@ -270,8 +270,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
           additionalData: { userId, organizationId },
         });
 
-        const { name, currency, id, qrIdDisplayPreference, showShelfBranding } =
-          payload;
+        const {
+          name,
+          currency,
+          id,
+          qrIdDisplayPreference,
+          showShelfBranding,
+          showQrCodesOnPdfs,
+        } = payload;
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -326,6 +332,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           currency,
           qrIdDisplayPreference,
           showShelfBranding: nextShowShelfBranding,
+          // No tier gate and no resolver: the zod transform yields `undefined`
+          // when the switch was not part of the submit, and `updateOrganization`
+          // writes the column only for a real boolean.
+          showQrCodesOnPdfs,
         });
 
         sendNotification({

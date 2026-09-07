@@ -18,6 +18,7 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import type { Column } from "../asset-index-settings/helpers";
+import { syncCustomFieldColumn } from "../asset-index-settings/helpers";
 import {
   removeCustomFieldFromAssetIndexSettings,
   updateAssetIndexSettingsAfterCfUpdate,
@@ -26,6 +27,18 @@ import {
 
 const label: ErrorLabel = "Custom fields";
 
+/**
+ * Creates a custom field and gives it a column on the asset index.
+ *
+ * An active field gets a column in every settings row in the organization —
+ * one per user — so it is visible to everyone from the moment it exists. An
+ * inactive one gets none; activating it later adds the columns.
+ *
+ * @param args - The field's definition, its organization, and its author
+ * @returns The created CustomField
+ * @throws {ShelfError} 409 if the organization already has a field with this
+ *   name, or on any other write failure
+ */
 export async function createCustomField({
   name,
   helpText,
@@ -71,17 +84,16 @@ export async function createCustomField({
     if (customField.active) {
       await Promise.all(
         assetIndexSettingsEntries.map(async (entry) => {
-          const columns = Array.from(entry.columns as Prisma.JsonArray);
-          const prevHighestPosition = (columns as Column[]).reduce(
-            (acc, col) => (col.position > acc ? col.position : acc),
-            0
+          const columns = syncCustomFieldColumn(
+            Array.from(entry.columns as Prisma.JsonArray) as Column[],
+            {
+              // A field being created has no former name and no column yet.
+              oldName: customField.name,
+              newName: customField.name,
+              active: true,
+              cfType: customField.type,
+            }
           );
-
-          columns.push({
-            name: `cf_${customField.name}`,
-            visible: true,
-            position: prevHighestPosition + 1,
-          });
 
           await db.assetIndexSettings.update({
             where: { id: entry.id, organizationId },
@@ -650,6 +662,23 @@ export async function countActiveCustomFields({
   }
 }
 
+/**
+ * Activates or deactivates several custom fields at once, keeping the asset
+ * index in step.
+ *
+ * Every settings row in the organization is reconciled for every field in the
+ * batch, so the columns follow whichever way the fields move: activating adds
+ * the ones a row is missing and leaves the rest as the user arranged them,
+ * deactivating takes them away.
+ *
+ * @param args.customFields - The fields to move; their `name` and `type` are
+ *   read for the columns
+ * @param args.organizationId - The active organization
+ * @param args.userId - The acting user, recorded on failure
+ * @param args.active - The state to move every field in the batch to
+ * @returns The Prisma batch payload for the field update
+ * @throws {ShelfError} If the field update or any settings write fails
+ */
 export async function bulkActivateOrDeactivateCustomFields({
   customFields,
   organizationId,
@@ -676,37 +705,19 @@ export async function bulkActivateOrDeactivateCustomFields({
 
     /** Update the asset index settings for each entry */
     const updates = settings.map((entry) => {
-      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
-
-      customFields.forEach((field) => {
-        const oldField = field;
-        const newField = { ...field, active };
-        const cfIndex = columns.findIndex(
-          (col) => col?.name === `cf_${oldField.name}`
-        );
-        if (newField.active) {
-          /** Field is missing so we add it */
-          if (cfIndex === -1) {
-            const prevHighestPosition = columns.reduce(
-              (acc, col) => (col.position > acc ? col.position : acc),
-              0
-            );
-            columns.push({
-              name: `cf_${newField.name}`,
-              visible: true,
-              position: prevHighestPosition + 1,
-            });
-          } else {
-            columns[cfIndex] = {
-              name: `cf_${newField.name}`,
-              visible: columns[cfIndex].visible,
-              position: columns[cfIndex].position,
-            };
-          }
-        } else {
-          columns.splice(cfIndex, 1);
-        }
-      });
+      // Each field folds into the running column list, so a batch touching
+      // several fields on one row lands as one write.
+      const columns = customFields.reduce(
+        (acc, field) =>
+          syncCustomFieldColumn(acc, {
+            // The batch only flips `active`; names are unchanged by it.
+            oldName: field.name,
+            newName: field.name,
+            active,
+            cfType: field.type,
+          }),
+        Array.from(entry.columns as Prisma.JsonArray) as Column[]
+      );
 
       return db.assetIndexSettings.update({
         where: { id: entry.id, organizationId },

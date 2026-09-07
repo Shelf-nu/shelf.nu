@@ -26,6 +26,7 @@ import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { getPeakReservedUnitsByAsset } from "~/modules/asset/availability-primitives.server";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -67,7 +68,10 @@ import {
   assertTeamMemberBelongsToOrg,
 } from "~/utils/org-validation.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import type { UserNameFields } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
+import { computeKitClaimablePool } from "./picker-meta.server";
 import type { UpdateKitPayload } from "./types";
 import {
   GET_KIT_STATIC_INCLUDES,
@@ -93,6 +97,7 @@ import {
 } from "../asset/utils.server";
 import type { AllowedCustodianFilterIds } from "../asset/utils.server";
 import { PLANNING_BOOKING_STATUSES } from "../booking/constants";
+import { lockBookingForStatusCheck } from "../booking/utils.server";
 import {
   createSystemBookingNote,
   createSystemBookingNotes,
@@ -107,6 +112,7 @@ import {
 } from "../note/service.server";
 import { getQr } from "../qr/service.server";
 import { scopeCustodianFilterIds } from "../team-member/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -589,16 +595,14 @@ export async function removeKitSlicesFromPlanningBookings(
   // (see `user/service.server.ts`) — that would take a second pooled connection
   // while this interactive tx holds one, and add a round-trip to a tx budget
   // that has already produced P2028 on large bulk operations.
-  const actor: { firstName: string | null; lastName: string | null } | null =
-    await tx.user.findUnique({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `actorUserId` is the authenticated caller, not request input
-      where: { id: actorUserId },
-      select: { firstName: true, lastName: true },
-    });
+  const actor = await tx.user.findUnique({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `actorUserId` is the authenticated caller, not request input
+    where: { id: actorUserId },
+    select: { ...USER_NAME_SELECT },
+  });
   const actorLink = wrapUserLinkForNote({
+    ...(actor ?? { displayName: null }),
     id: actorUserId,
-    firstName: actor?.firstName,
-    lastName: actor?.lastName,
   });
 
   // One note per (booking, kit) pair — several assets leaving the same kit in
@@ -1014,23 +1018,19 @@ export async function preserveKitDrivenPlacements(
 
 export async function emitAssetKitDetachmentNotes({
   impact,
-  actorUserId,
-  actorFirstName,
-  actorLastName,
+  actor,
   organizationId,
 }: {
   impact: Awaited<ReturnType<typeof fetchAssetKitDetachmentImpact>>;
-  actorUserId: string;
-  actorFirstName: string | null;
-  actorLastName: string | null;
+  /**
+   * The acting user's row, passed through whole: the note links their id and
+   * renders whatever name they go by.
+   */
+  actor: UserNameFields & { id: string };
   organizationId: string;
 }) {
   if (impact.length === 0) return;
-  const actorLink = wrapUserLinkForNote({
-    id: actorUserId,
-    firstName: actorFirstName,
-    lastName: actorLastName,
-  });
+  const actorLink = wrapUserLinkForNote(actor);
   // One note per (booking, kit) pair. Multiple assets removed from the
   // same kit in the same delete are collapsed to a single note per
   // booking so we don't spam the booking activity feed.
@@ -2080,11 +2080,7 @@ async function performKitDeletion({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    actorLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: actor?.firstName,
-      lastName: actor?.lastName,
-    });
+    actorLink = wrapUserLinkForNote({ ...actor, id: userId });
   }
 
   // Per-asset units released by the kit-delete, sourced from the inherited
@@ -2485,11 +2481,7 @@ export async function releaseCustody({
       assets: (kitRow.assetKits ?? []).map((ak) => ak.asset),
     };
 
-    const actorLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: actor?.firstName,
-      lastName: actor?.lastName,
-    });
+    const actorLink = wrapUserLinkForNote({ ...actor, id: userId });
     const custodianDisplay = kit.custody?.custodian
       ? wrapCustodianForNote({ teamMember: kit.custody.custodian })
       : "**Unknown Custodian**";
@@ -2683,14 +2675,11 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
           ...kit,
           custody: {
             custodian: {
-              name: `${custodianUser?.firstName || ""} ${
-                custodianUser?.lastName || ""
-              }`, // Concatenate firstName and lastName to form the name property with default values
-              user: {
-                firstName: custodianUser?.firstName || "",
-                lastName: custodianUser?.lastName || "",
-                profilePicture: custodianUser?.profilePicture || null,
-              },
+              // `user` goes through whole: a registered member is named from
+              // their user row, and a re-projection that drops `displayName`
+              // renames them everywhere this custodian is rendered.
+              name: resolveUserDisplayName(custodianUser),
+              user: custodianUser,
             },
           },
         });
@@ -2731,7 +2720,7 @@ type CurrentBookingType = {
   name: string;
   custodianUser: Pick<
     User,
-    "firstName" | "lastName" | "profilePicture" | "email"
+    "firstName" | "lastName" | "displayName" | "profilePicture" | "email"
   > | null;
   custodianTeamMember: TeamMember | null;
   status: BookingStatus;
@@ -3120,11 +3109,7 @@ export async function bulkAssignKitCustody({
       );
 
       /** Creating notes for all the assets of the kit */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
         : // Free-form fallback name, rendered as literal bold text.
@@ -3453,11 +3438,7 @@ export async function bulkReleaseKitCustody({
       );
 
       /** Creating notes for all the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const custodianDisplay = custodian
         ? wrapCustodianForNote({ teamMember: custodian })
         : "**Unknown Custodian**";
@@ -4601,11 +4582,7 @@ export async function bulkUpdateKitLocation({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: userForNote?.firstName,
-      lastName: userForNote?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...userForNote, id: userId });
 
     if (newLocationId && newLocationId.trim() !== "") {
       const location = await db.location.findFirst({
@@ -4739,11 +4716,7 @@ export async function updateKitAssets({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const actor = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: userId });
 
     const kitWithRelations = await db.kit
       .findUniqueOrThrow({
@@ -4895,19 +4868,6 @@ export async function updateKitAssets({
           //   - quantity (this kit's slice for qty-change diff)
           assetKits: { select: { kitId: true, quantity: true } },
           custody: true,
-          // Ongoing/overdue booking allocations subtract from the strict-
-          // available pool checked below — pull them here so the
-          // validation pass doesn't need a second round-trip.
-          bookingAssets: {
-            where: {
-              booking: {
-                status: {
-                  in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                },
-              },
-            },
-            select: { quantity: true },
-          },
           assetLocations: {
             select: { location: { select: { id: true, name: true } } },
           },
@@ -5005,20 +4965,13 @@ export async function updateKitAssets({
      * surface as a generic 500. Re-check the strict-available pool here
      * for any qty-tracked submission and return a clean 400.
      *
-     * Strict-available formula (matches the picker loader):
-     *   spaceWithoutMe = Asset.quantity
-     *                  − sum(other kits' AssetKit.quantity)
-     *                  − sum(operator-only Custody.quantity)
-     *                  − sum(ongoing/overdue BookingAsset.quantity)
-     *   max            = max(currentInThisKit, spaceWithoutMe)
+     * The formula itself lives in `computeKitClaimablePool`, shared with the
+     * picker: a guard that computed the pool differently would refuse what
+     * the picker offered, or accept what it did not.
      *
      * `operator-only` filters by `kitCustodyId IS NULL` — kit-allocated
      * Custody rows mirror the source kit's AssetKit slice and would
      * otherwise double-count against the multi-kit + in-custody case.
-     *
-     * `max(current, spaceWithoutMe)` lets the user keep their existing
-     * slice in the overcommitted edge case (operator / booking growth
-     * pushed the pool below the kit's current allocation).
      */
     const oversubscribed: Array<{
       assetId: string;
@@ -5026,6 +4979,17 @@ export async function updateKitAssets({
       submitted: number;
       max: number;
     }> = [];
+
+    // Same booking term the picker uses: peak concurrent standalone demand
+    // across the whole timeline, because a kit slice has no dates of its own.
+    const peakReservedByAsset = await getPeakReservedUnitsByAsset({
+      assetIds: allAssetsForKit
+        .filter((asset) => asset.type === AssetType.QUANTITY_TRACKED)
+        .map((asset) => asset.id),
+      organizationId,
+      tx: db,
+    });
+
     for (const asset of allAssetsForKit) {
       if (asset.type !== AssetType.QUANTITY_TRACKED) continue;
       const submitted = assetQuantities[asset.id];
@@ -5040,16 +5004,15 @@ export async function updateKitAssets({
       const operatorOnlyCustody = (asset.custody ?? [])
         .filter((c) => c.kitCustodyId == null)
         .reduce((sum, c) => sum + (c.quantity ?? 0), 0);
-      const ongoingBookings = (asset.bookingAssets ?? []).reduce(
-        (sum, ba) => sum + (ba.quantity ?? 0),
-        0
-      );
+      const occupyingBooked = peakReservedByAsset.get(asset.id) ?? 0;
 
-      const spaceWithoutMe = Math.max(
-        0,
-        totalQty - otherKitsQty - operatorOnlyCustody - ongoingBookings
-      );
-      const max = Math.max(currentInThisKit, spaceWithoutMe);
+      const { maxAllowedForThisKit: max } = computeKitClaimablePool({
+        totalQuantity: totalQty,
+        currentInThisKit,
+        otherKitsQuantity: otherKitsQty,
+        operatorCustodyQuantity: operatorOnlyCustody,
+        occupyingBookedQuantity: occupyingBooked,
+      });
 
       if (submitted > max) {
         oversubscribed.push({
@@ -5450,9 +5413,7 @@ export async function updateKitAssets({
     // so the notes only land if the cascade actually committed.
     await emitAssetKitDetachmentNotes({
       impact: detachmentImpact,
-      actorUserId: userId,
-      actorFirstName: user?.firstName ?? null,
-      actorLastName: user?.lastName ?? null,
+      actor: { ...user, id: userId },
       organizationId,
     });
 
@@ -5936,25 +5897,26 @@ export async function updateKitAssets({
        * against an existing one, and claiming an add that did not happen would
        * make the trail lie.
        */
-      const propagatedEvents = bookingsToUpdate.flatMap((booking) =>
-        newlyAddedAssets.flatMap((asset) => {
-          const ak = akByAssetId.get(asset.id);
-          if (!ak) return [];
-          return [
-            {
-              organizationId,
-              actorUserId: userId,
-              action: "BOOKING_ASSETS_ADDED" as const,
-              entityType: "BOOKING" as const,
-              entityId: booking.id,
-              bookingId: booking.id,
-              assetId: asset.id,
-              kitId: kit.id,
-              meta: assetQtyMeta(asset, ak.quantity),
-            },
-          ];
-        })
-      );
+      const buildPropagatedEvents = (bookings: typeof bookingsToUpdate) =>
+        bookings.flatMap((booking) =>
+          newlyAddedAssets.flatMap((asset) => {
+            const ak = akByAssetId.get(asset.id);
+            if (!ak) return [];
+            return [
+              {
+                organizationId,
+                actorUserId: userId,
+                action: "BOOKING_ASSETS_ADDED" as const,
+                entityType: "BOOKING" as const,
+                entityId: booking.id,
+                bookingId: booking.id,
+                assetId: asset.id,
+                kitId: kit.id,
+                meta: assetQtyMeta(asset, ak.quantity),
+              },
+            ];
+          })
+        );
 
       /**
        * Propagated rows and their events commit together.
@@ -5985,7 +5947,79 @@ export async function updateKitAssets({
        */
       if (newlyAddedAssets.length > 0) {
         await db.$transaction(async (tx) => {
-          for (const booking of bookingsToUpdate) {
+          /**
+           * Which of those bookings is live, under a row lock, BEFORE anything
+           * in this transaction writes to them.
+           *
+           * `bookingsToUpdate` carries the status read at the top of this
+           * function — outside any transaction, and potentially seconds ago —
+           * so a check-in that has since completed still reads as ONGOING
+           * here. A plain re-read inside the transaction narrows that window;
+           * only the lock closes it. See `lockBookingForStatusCheck`.
+           *
+           * The lock has to come first, and the whole transaction has to be
+           * ordered around that. Inserting a `BookingAsset` row makes Postgres
+           * take FOR KEY SHARE on the parent `Booking` row to validate the
+           * foreign key, and FOR KEY SHARE is a SHARED mode: two callers can
+           * hold it on the same row at once. If either then asks for FOR
+           * UPDATE, which conflicts with it, each waits on the other's share
+           * and Postgres aborts one with a deadlock. Sorting cannot help — the
+           * two sides are contending for a single row, in identical order.
+           * Taking the strongest lock first means nothing is ever upgraded.
+           * `updateBookingAssets` and the scan-add path order themselves the
+           * same way.
+           *
+           * Sorted so concurrent callers take the locks in the same order and
+           * cannot deadlock across two different bookings.
+           *
+           * Sequential, not `Promise.all`: an interactive transaction runs on a
+           * single connection. The set is the bookings holding this kit, small.
+           *
+           * This does not make the stamp race-free by itself, and is not meant
+           * to. `checkinBooking` computes which assets to release BEFORE
+           * opening its own transaction, so a check-in already in flight never
+           * sees a member added after that read. Closing the remaining half
+           * belongs in the check-in path, not here.
+           */
+          const candidateBookingIds = bookingsToUpdate
+            .filter((b) => b.status === "ONGOING" || b.status === "OVERDUE")
+            .map((b) => b.id)
+            .sort();
+
+          const liveBookingIds: string[] = [];
+          for (const bookingId of candidateBookingIds) {
+            const currentStatus = await lockBookingForStatusCheck(
+              tx,
+              bookingId,
+              organizationId
+            );
+            if (
+              currentStatus === BookingStatus.ONGOING ||
+              currentStatus === BookingStatus.OVERDUE
+            ) {
+              liveBookingIds.push(bookingId);
+            }
+          }
+
+          /**
+           * The bookings this call actually writes to.
+           *
+           * A booking that is still in planning takes the member unconditionally
+           * — nothing has left the building, so there is nothing to be late for.
+           * A live one has to prove it is still live under the lock: the status
+           * on `bookingsToUpdate` was read outside any transaction, and a
+           * check-in that has since committed would otherwise gain an asset it
+           * never held, on a booking already reported as finished.
+           */
+          const liveBookingIdSet = new Set(liveBookingIds);
+          const bookingsReceivingRows = bookingsToUpdate.filter(
+            (b) =>
+              b.status === BookingStatus.DRAFT ||
+              b.status === BookingStatus.RESERVED ||
+              liveBookingIdSet.has(b.id)
+          );
+
+          for (const booking of bookingsReceivingRows) {
             await tx.bookingAsset.createMany({
               data: newlyAddedAssets.map((a) => {
                 const ak = akByAssetId.get(a.id);
@@ -6005,8 +6039,199 @@ export async function updateKitAssets({
             });
           }
 
+          // Built from the same set the rows were written to, so the trail
+          // reports exactly what persisted.
+          const propagatedEvents = buildPropagatedEvents(bookingsReceivingRows);
           if (propagatedEvents.length > 0) {
             await recordEvents(propagatedEvents, tx);
+          }
+
+          /**
+           * Is THIS kit out right now on one of those bookings?
+           *
+           * A booking's own status cannot answer that. Progressive checkout
+           * flips a booking to ONGOING on the first scan, so a booking can be
+           * live while this kit was never scanned out — partial checkout only
+           * stamps kits whose every slice went (`completeKitIds`).
+           * `BookingAsset.checkedOutAt` is the authoritative per-slice fact,
+           * so ask the slices instead.
+           *
+           * The rows created above carry a NULL `checkedOutAt`, so they are
+           * excluded by this predicate and cannot vouch for themselves.
+           *
+           * Read inside the same transaction as the writes, so a check-in
+           * completing concurrently cannot leave us stamping against a booking
+           * that has since finished.
+           */
+          if (liveBookingIds.length > 0) {
+            /**
+             * The kit's PRE-EXISTING slices on those bookings.
+             *
+             * `thisKitAssetKitIds` is read before the membership transaction,
+             * so it names only memberships that predate this call — and it has
+             * to. The `BookingAsset` rows written above carry this kit's
+             * `sourceKitId` with a NULL `checkedOutAt`, so letting them into
+             * this set would make the "did all of it leave" test below
+             * permanently unsatisfiable.
+             */
+            const preExistingAssetKitIds = [...thisKitAssetKitIds];
+
+            const priorSlices =
+              preExistingAssetKitIds.length > 0
+                ? await tx.bookingAsset.findMany({
+                    where: {
+                      bookingId: { in: liveBookingIds },
+                      // Names this kit's own membership rows, so no separate
+                      // `sourceKitId` filter is needed.
+                      assetKitId: { in: preExistingAssetKitIds },
+                    },
+                    select: {
+                      bookingId: true,
+                      checkedOutAt: true,
+                      checkedInAt: true,
+                    },
+                  })
+                : [];
+
+            /**
+             * A booking earns the stamp on its OWN evidence, and only when the
+             * whole kit left it.
+             *
+             * Per booking, because two live bookings can hold this kit and
+             * disagree: progressive checkout flips a booking to ONGOING on the
+             * first scan of anything, so the second can be live with none of
+             * this kit's slices out. One count across both would let the first
+             * vouch for the second.
+             *
+             * "Every prior slice left" is the other half. Progressive checkout
+             * stamps only the slices actually scanned, so a kit can sit half
+             * out on one booking, and a member that stayed behind is not
+             * evidence that a newcomer went anywhere.
+             *
+             * The disqualifier is `checkedOutAt` NULL — never left — not "not
+             * out right now". Check-in clears `Kit.status` only for a kit whose
+             * every member came back, so a kit returned one member at a time
+             * still reads CHECKED_OUT and the kit picker still promises that
+             * additions inherit that status. Refusing there would be stricter
+             * than the behaviour this replaces.
+             */
+            const eligibleBookingIds = liveBookingIds.filter((bookingId) => {
+              const slices = priorSlices.filter(
+                (s) => s.bookingId === bookingId
+              );
+              if (slices.length === 0) return false;
+              if (slices.some((s) => !s.checkedOutAt)) return false;
+              return slices.some((s) => !s.checkedInAt);
+            });
+
+            if (eligibleBookingIds.length > 0) {
+              /**
+               * The members whose kit-driven slice this call actually wrote.
+               *
+               * An asset with no resolved `AssetKit` fell back to a standalone
+               * row above, which `skipDuplicates` may have dropped against one
+               * that already existed — so there is no slice this call can
+               * prove it created. Stamping its status anyway would mint the
+               * status-without-a-marker state the pair below exists to avoid.
+               * Same scoping as `propagatedEvents`, for the same reason.
+               */
+              const stampable = newlyAddedAssets.flatMap((a) => {
+                const ak = akByAssetId.get(a.id);
+                return ak
+                  ? [
+                      {
+                        assetId: a.id,
+                        assetKitId: ak.id,
+                        // The same reading `createMany` above wrote the row
+                        // with, so the count it receives matches what it booked.
+                        quantity: ak.quantity ?? 1,
+                      },
+                    ]
+                  : [];
+              });
+
+              if (stampable.length > 0) {
+                /**
+                 * Status and slice marker are written together, in the SAME
+                 * transaction as the count they rest on.
+                 *
+                 * `Asset.status` alone says the member is out; only
+                 * `BookingAsset.checkedOutAt` says which booking it went out
+                 * ON, and that is what the check-in guard reads to decide
+                 * eligibility. A member handed the status without the marker
+                 * is refused at the scanner with "Cannot check in assets that
+                 * were never checked out" — every path that sends an asset out
+                 * maintains both, per
+                 * `.claude/rules/booking-checkout-is-recorded-per-slice.md`.
+                 *
+                 * Outside the tx the two could disagree with the evidence they
+                 * rest on: a check-in committing in between would release the
+                 * kit's other slices and leave these stamped against nothing.
+                 */
+                await tx.asset.updateMany({
+                  where: {
+                    id: { in: stampable.map((s) => s.assetId) },
+                    organizationId,
+                  },
+                  data: { status: AssetStatus.CHECKED_OUT },
+                });
+
+                /**
+                 * Keyed on the `AssetKit` ids the membership write just
+                 * created, never on `assetId`: a member can hold a standalone
+                 * slice on the same booking alongside its kit-driven one (the
+                 * two partial uniques allow exactly that), and the standalone
+                 * one did not go out with this kit. Those ids are new, so the
+                 * only rows they reach are the ones `createMany` wrote above.
+                 *
+                 * Scoped to `eligibleBookingIds`, so a booking this kit never
+                 * left — one still in planning, or one that is live for a
+                 * different kit's sake — keeps an unmarked slice.
+                 */
+                await tx.bookingAsset.updateMany({
+                  // `BookingAsset` carries no organization column; tenancy here
+                  // comes from both keys — the booking ids from this kit's own
+                  // org-scoped slices, the assetKit ids from the org-scoped
+                  // membership write above.
+                  where: {
+                    bookingId: { in: eligibleBookingIds },
+                    assetKitId: { in: stampable.map((s) => s.assetKitId) },
+                  },
+                  data: { checkedOutAt: new Date(), checkedOutById: userId },
+                });
+
+                /**
+                 * Size those departures. A member joining a kit that is already
+                 * out goes out whole, so its count is its full booked quantity.
+                 *
+                 * Grouped by quantity because `updateMany`'s `data` takes
+                 * literals only and cannot name another column on the row. Same
+                 * keys as the marker above, so a slice gets a count exactly when
+                 * it got a marker — a marker without one leaves a departure
+                 * nothing can size.
+                 */
+                const assetKitIdsByQuantity = new Map<number, string[]>();
+                for (const s of stampable) {
+                  const ids = assetKitIdsByQuantity.get(s.quantity);
+                  if (ids) {
+                    ids.push(s.assetKitId);
+                  } else {
+                    assetKitIdsByQuantity.set(s.quantity, [s.assetKitId]);
+                  }
+                }
+                for (const [quantity, assetKitIds] of assetKitIdsByQuantity) {
+                  await tx.bookingAsset.updateMany({
+                    // Same two keys as the marker write above, and tenancy comes
+                    // from them the same way.
+                    where: {
+                      bookingId: { in: eligibleBookingIds },
+                      assetKitId: { in: assetKitIds },
+                    },
+                    data: { checkedOutQuantity: quantity },
+                  });
+                }
+              }
+            }
           }
         });
       }
@@ -6025,18 +6250,6 @@ export async function updateKitAssets({
       //
       // Asset-bulk-remove (asset-side flow) is unaffected; it still goes
       // through `removeAssets`, which deletes the rows explicitly.
-    }
-
-    /**
-     * If the kit is part of an ONGOING booking, then we have to make all
-     * the assets CHECKED_OUT
-     */
-    if (kit.status === KitStatus.CHECKED_OUT) {
-      await db.asset.updateMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: newlyAddedAssets derived from `allAssetsForKit` loaded org-scoped at the `where: { id: { in: assetIds }, organizationId }` query (line ~2442); not raw request input
-        where: { id: { in: newlyAddedAssets.map((a) => a.id) } },
-        data: { status: AssetStatus.CHECKED_OUT },
-      });
     }
 
     return kit;
@@ -6084,11 +6297,7 @@ export async function bulkRemoveAssetsFromKits({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const actor = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: userId });
 
     // Resolve IDs (works for both simple and advanced mode).
     // Acting user's timezone: when "select all" is active the affected set is
@@ -6184,7 +6393,7 @@ export async function bulkRemoveAssetsFromKits({
       ReturnType<typeof fetchAssetKitDetachmentImpact>
     > = [];
 
-    await db.$transaction(async (tx) => {
+    const removedFromKitCount = await db.$transaction(async (tx) => {
       /**
        * If there are assets whose kits were in custody, then we have to remove
        * the custody FIRST to avoid orphaned custody records when status is set
@@ -6425,19 +6634,22 @@ export async function bulkRemoveAssetsFromKits({
           tx
         );
       }
+
+      // What the caller can honestly report: assets that were actually IN
+      // a kit, which is neither the number selected nor — under select-all —
+      // the number of ids it was given.
+      return assetsRemovedFromKit.length;
     });
 
     // Notify each affected booking that its kit-driven BookingAsset
     // slice has been converted to standalone.
     await emitAssetKitDetachmentNotes({
       impact: bulkDetachmentImpact,
-      actorUserId: userId,
-      actorFirstName: user?.firstName ?? null,
-      actorLastName: user?.lastName ?? null,
+      actor: { ...user, id: userId },
       organizationId,
     });
 
-    return true;
+    return { removedFromKitCount };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -6833,12 +7045,12 @@ export async function moveAssetKitUnits(
         tx
       );
 
-      // Load the acting user once for the post-tx note write. Reads
-      //     are part of the tx so a rolled-back move never produces a
-      //     stale `firstName`/`lastName` for the note.
+      // Load the acting user once for the post-tx note write. The read is
+      //     part of the tx, so a rolled-back move never produces a stale
+      //     name for the note.
       const user = await tx.user.findUnique({
         where: { id: userId },
-        select: { firstName: true, lastName: true },
+        select: { ...USER_NAME_SELECT },
       });
 
       return {
@@ -6849,8 +7061,7 @@ export async function moveAssetKitUnits(
         // Carry forward the data the post-tx note writer needs so it
         // can land only if the tx actually committed.
         noteContext: {
-          firstName: user?.firstName ?? "",
-          lastName: user?.lastName ?? "",
+          user: user ?? { displayName: null },
           assetType: asset.type,
           unitOfMeasure: asset.unitOfMeasure,
           fromKit,
@@ -6865,8 +7076,7 @@ export async function moveAssetKitUnits(
     await createKitMoveNote({
       fromKit: txResult.noteContext.fromKit,
       toKit: txResult.noteContext.toKit,
-      firstName: txResult.noteContext.firstName,
-      lastName: txResult.noteContext.lastName,
+      user: txResult.noteContext.user,
       assetId,
       userId,
       organizationId,

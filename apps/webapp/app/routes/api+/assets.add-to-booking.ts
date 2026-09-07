@@ -99,11 +99,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       assetIds: finalAssetIds,
     });
 
-    const actor = wrapUserLinkForNote({
-      id: authSession.userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: authSession.userId });
     const bookingLink = wrapLinkForNote(
       `/bookings/${booking.id}`,
       booking.name.trim()

@@ -116,7 +116,7 @@ export function UpdateImportForm({
       previewFetcher.reset();
       applyFetcher.reset();
 
-      // Client-side validation: read first few KB to check headers
+      // Client-side validation: read the file to check headers and count rows
       // Use a nonce to ignore stale FileReader results from a previous file
       const nonce = ++activeFileNonce.current;
       const reader = new FileReader();
@@ -126,8 +126,10 @@ export function UpdateImportForm({
         const validation = validateCsvClientSide(text);
         dispatch({ type: "client_validation", validation });
       };
-      // Read enough to get headers + a few rows
-      reader.readAsText(file.slice(0, 50_000));
+      // The whole file, not a prefix: the row count has to see every record,
+      // and a slice can cut a quoted field mid-value. The server reads the
+      // upload into memory in one piece too.
+      reader.readAsText(file);
     },
     [previewFetcher, applyFetcher]
   );

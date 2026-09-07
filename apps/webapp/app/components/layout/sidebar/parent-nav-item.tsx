@@ -103,6 +103,29 @@ function NestedRouteRenderer({
 }) {
   const isChildActive = useIsRouteActive(nested.to);
 
+  /**
+   * Disabled children (e.g. "Users" / "Pending invites" on a Personal
+   * workspace) stay visible but render muted and non-navigating, with the
+   * reason shown as a hover tooltip. This mirrors how disabled features are
+   * surfaced elsewhere instead of hiding the capability outright.
+   */
+  if (nested.disabled) {
+    const reason =
+      typeof nested.disabled === "object" ? nested.disabled.reason : undefined;
+    return (
+      <SidebarMenuSubItem key={nested.title}>
+        <SidebarMenuSubButton asChild>
+          <span
+            title={typeof reason === "string" ? reason : undefined}
+            className="cursor-not-allowed font-medium !text-gray-400"
+          >
+            {nested.title}
+          </span>
+        </SidebarMenuSubButton>
+      </SidebarMenuSubItem>
+    );
+  }
+
   return (
     <SidebarMenuSubItem key={nested.title}>
       <SidebarMenuSubButton onClick={closeIfMobile} asChild>

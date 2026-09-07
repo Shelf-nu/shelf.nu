@@ -38,12 +38,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  // For now, require asset read permission as a proxy
-  // TODO: Add PermissionEntity.reports when schema is updated
   await requirePermission({
     userId,
     request,
-    entity: PermissionEntity.asset,
+    entity: PermissionEntity.reports,
     action: PermissionAction.read,
   });
 

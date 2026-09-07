@@ -40,6 +40,7 @@ import type {
   MonthlyBookingTrendRow,
 } from "~/modules/reports/types";
 import { getClientHint } from "~/utils/client-hints";
+import { csvResponse } from "~/utils/csv-utf8";
 import { type ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -62,7 +63,7 @@ export const loader = async ({
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
+      entity: PermissionEntity.reports,
       action: PermissionAction.export,
     });
 
@@ -280,10 +281,8 @@ export const loader = async ({
     // Get filename from URL params (e.g., "booking-compliance-last_30d-2026-04-22")
     const fileName = params.fileName || `${reportId}-export`;
 
-    return new Response(csvString, {
-      status: 200,
+    return csvResponse(csvString, {
       headers: {
-        "content-type": "text/csv",
         "content-disposition": `attachment; filename="${fileName}.csv"`,
         "cache-control": "no-cache",
       },
@@ -346,7 +345,9 @@ function generateCustodySnapshotCsv(
     "Assigned To",
     "Assigned Date",
     "Days Held",
-    "Valuation",
+    "Units Held",
+    "Unit Value",
+    "Total Value",
   ];
 
   const csvRows = rows.map((row) => [
@@ -358,7 +359,13 @@ function generateCustodySnapshotCsv(
     // Datetime column: include the time part.
     formatDateForCsv(row.assignedAt, prefs, { includeTime: true }),
     row.daysInCustody.toString(),
+    // Units held in THIS custody row (`Custody.quantity`), the multiplier
+    // for this surface; null means one unit.
+    (row.quantity ?? 1).toString(),
     row.valuation?.toString() || "",
+    row.valuation == null
+      ? ""
+      : (row.valuation * (row.quantity ?? 1)).toString(),
   ]);
 
   return buildCsv(headers, csvRows);
@@ -420,18 +427,17 @@ function formatReturnStatus(
 /**
  * Assembles a CSV document, escaping EVERY cell.
  *
- * Escaping used to be applied per field, by hand, at each call site — and was
- * missed on `custodianName`, `custodian`, `performedBy`, `category` and
- * `location`, all of which are user-controlled workspace values. A name like
- * `=cmd|'/c calc'!A1` therefore reached the file as a live formula.
+ * Escaping lives here and nowhere else. Headers and body cells alike pass
+ * through {@link escapeCsvField}, so a contributor adding a column gets a safe
+ * cell with no per-field decision to make. Cells carry user-controlled
+ * workspace values — custodian and member names, categories, locations — so
+ * the guarantee has to be unconditional rather than applied where it looks
+ * needed.
  *
- * Escaping here instead means a new column is safe by default: a contributor
- * adding one cannot forget, because there is no per-field decision left to
- * make. That is the property the previous approach lacked, not the escaping
- * itself — `escapeCsvField` was already correct, just unevenly applied.
+ * Callers pass raw values: a cell escaped before it arrives is escaped twice.
  *
  * @param headers - Column headers, escaped like any other cell
- * @param rows - Row cells, already stringified and formatted
+ * @param rows - Row cells, already stringified and formatted, NOT escaped
  * @returns The complete CSV document
  */
 function buildCsv(headers: string[], rows: string[][]): string {
@@ -603,7 +609,9 @@ function generateAssetInventoryCsv(
     "Location",
     "Status",
     "Custodian",
-    "Valuation",
+    "Quantity",
+    "Unit Value",
+    "Total Value",
     "Created Date",
     "QR Code ID",
   ];
@@ -615,7 +623,12 @@ function generateAssetInventoryCsv(
     row.location || "",
     formatAssetStatus(row.status),
     row.custodian || "",
+    // Workspace stock, the value multiplier for this surface; null means one.
+    (row.quantity ?? 1).toString(),
     row.valuation?.toString() || "",
+    row.valuation == null
+      ? ""
+      : (row.valuation * (row.quantity ?? 1)).toString(),
     // Date-only column: no time part.
     formatDateForCsv(row.createdAt, prefs),
     row.qrId || "",

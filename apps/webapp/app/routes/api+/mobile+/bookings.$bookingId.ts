@@ -15,6 +15,8 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { computeDispatchedUnitsByAsset } from "~/modules/booking/checkout-attribution";
+import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
@@ -24,6 +26,7 @@ import {
 } from "~/modules/booking/service.server";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -47,13 +50,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // details, assets, tags and action flags via mobile.
     await assertMobileCanUseBookings(organizationId);
 
-    // Self-service / base users may only read their OWN bookings. Scope the
-    // lookup by custodian like the list endpoint (bookings.ts) does, so a
-    // booking they don't own 404s instead of leaking across the workspace.
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    // `canSeeAllBookings` answers who may READ a booking they do not custody:
+    // ADMIN/OWNER always, SELF_SERVICE/BASE only where the workspace override
+    // allows it. `isSelfServiceOrBase` is the narrower, role-only question of
+    // which ACTIONS the caller may take, and must stay role-only: the override
+    // widens reading and never writing.
+    const { canSeeAllBookings, isSelfServiceOrBase, effectiveRole, roles } =
+      await getMobileUserContext(user.id, organizationId);
 
     const { bookingId } = getParams(
       params,
@@ -64,14 +67,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       where: {
         id: bookingId,
         organizationId,
-        ...(isSelfServiceOrBase && { custodianUserId: user.id }),
         /**
          * Draft privacy (web parity). A DRAFT booking is private to its
          * creator — web gates the detail route on the same shared clause, so
          * without it a direct GET here returns a colleague's unfinished draft
-         * even though the list would (now) hide it. The list fix alone is not
-         * enough: booking ids are guessable-adjacent and the detail endpoint
-         * is reachable directly.
+         * even though the list hides it. The list fix alone is not enough:
+         * booking ids are guessable-adjacent and this endpoint is reachable
+         * directly. The booking override does NOT widen this: an unfinished
+         * draft stays private to its creator either way, exactly as on web.
+         *
+         * Custody is deliberately NOT a clause here. It is a gate on the
+         * loaded row instead (`canSeeBooking`, just past the 404 below), so
+         * "you may not see this" answers 403 rather than reporting the row as
+         * missing. Putting it back in the `where` also silently re-decides
+         * visibility before the row is read, which is where it stops being
+         * able to honour the workspace override.
          */
         AND: [bookingDraftVisibilityClause(user.id)],
       },
@@ -92,6 +102,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             lastName: true,
           },
         },
+        // why: `canSeeBooking` reads BOTH custody links, so the scalar is
+        // required even though the relation below covers display. A booking
+        // assigned to a team member with no user attached carries
+        // `custodianUserId = NULL`; matching one link alone refuses the user
+        // the booking belongs to.
+        custodianUserId: true,
         custodianUser: {
           select: {
             id: true,
@@ -105,6 +121,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           select: {
             id: true,
             name: true,
+            userId: true,
           },
         },
         tags: {
@@ -189,6 +206,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     if (!booking) {
       return data({ error: { message: "Booking not found" } }, { status: 404 });
+    }
+
+    /**
+     * The custody gate. Runs on the loaded row so the answer can account for
+     * the workspace override, and refuses with 403 rather than reporting the
+     * booking as missing. Web gates its overview route with this same helper
+     * and this same status, so a booking that opens on one platform opens on
+     * the other.
+     */
+    if (!canSeeBooking({ canSeeAllBookings, booking, userId: user.id })) {
+      return data(
+        { error: { message: "You are not authorized to view this booking" } },
+        { status: 403 }
+      );
     }
 
     // Get partial check-in data for ONGOING/OVERDUE bookings
@@ -314,7 +345,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // checked out. The shared checkout service hard-blocks the RESERVED →
     // ONGOING transition until every `BookingModelRequest` is assigned to
     // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // `fulfilledAt: null` row remains). Fold that into `canCheckout` so the app
+    // `fulfilledAt: null` row remains). Fold that into the state flag so the app
     // never offers a "Check Out" the server would reject — the app instead
     // guides the operator to assign the reserved units first (see the
     // booking-detail "Assign to check out" CTA).
@@ -322,7 +353,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (mr) => mr.fulfilledAt === null
     );
 
-    const canCheckout =
+    const canCheckoutByState =
       booking.status === "RESERVED" &&
       totalAssets > 0 &&
       !hasOutstandingModelRequests;
@@ -339,7 +370,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
       return a.status === AssetStatus.CHECKED_OUT;
     });
-    const canCheckin =
+    const canCheckinByState =
       (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
       hasCheckinable;
 
@@ -350,52 +381,77 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const canQuickCheckin = !(
-      (role === OrganizationRoles.ADMIN &&
+      (effectiveRole === OrganizationRoles.ADMIN &&
         bookingSettings.requireExplicitCheckinForAdmin) ||
-      (role === OrganizationRoles.SELF_SERVICE &&
+      (effectiveRole === OrganizationRoles.SELF_SERVICE &&
         bookingSettings.requireExplicitCheckinForSelfService)
     );
 
     // Per-booking lifecycle-action availability, mirroring the web
     // ActionsDropdown gating (actions-dropdown.tsx) so the app surfaces exactly
     // the actions this role/status can perform — never an option the web /
-    // role / status forbids. Passing `roles:[role]` keeps `hasPermission` a
-    // pure static-map lookup (no extra query). Server endpoints enforce these
+    // role / status forbids. Passing the membership's `roles` keeps
+    // `hasPermission` a pure static-map lookup (no extra query). Server
+    // endpoints enforce these
     // same gates regardless; this is the UI mirror.
-    const isBaseOrSelfService =
-      role === OrganizationRoles.BASE ||
-      role === OrganizationRoles.SELF_SERVICE;
-    const [canCancelPerm, canArchivePerm, canCreatePerm, canDeletePerm] =
-      await Promise.all([
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.cancel,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.archive,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.create,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.delete,
-        }),
-      ]);
+    const [
+      canCancelPerm,
+      canArchivePerm,
+      canCreatePerm,
+      canDeletePerm,
+      canCheckoutPerm,
+      canCheckinPerm,
+    ] = await Promise.all([
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.cancel,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.archive,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.delete,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkout,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkin,
+      }),
+    ]);
+    // State says the booking COULD be checked out or in; the role says whether
+    // this caller may. Both have to hold, or the app draws a button the server
+    // then refuses — the endpoints gate on these same permissions regardless,
+    // so without this the user meets the rule as a 403 instead of an absence.
+    const canCheckout = canCheckoutByState && canCheckoutPerm;
+    const canCheckin = canCheckinByState && canCheckinPerm;
+
     const bookingActions = {
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
       canCancel:
@@ -403,8 +459,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           booking.status === "ONGOING" ||
           booking.status === "OVERDUE") &&
         canCancelPerm,
-      // Archive: COMPLETE only + archive permission.
-      canArchive: booking.status === "COMPLETE" && canArchivePerm,
+      // Archive: shared web-parity rule (COMPLETE, or RESERVED already past
+      // its end date) + archive permission.
+      canArchive:
+        isBookingArchivable({ status: booking.status, to: booking.to }) &&
+        canArchivePerm,
       // Duplicate: any status; gated by create permission (web's duplicate
       // route enforces create — we hide it for those who lack it rather than
       // 403 on tap).
@@ -413,8 +472,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // self-service/base only on DRAFT). Mirrors the web client gate; the
       // server endpoint enforces ownership + the same BASE-only-DRAFT rule.
       canDelete:
-        ((isBaseOrSelfService && booking.status === "DRAFT") ||
-          !isBaseOrSelfService) &&
+        ((isSelfServiceOrBase && booking.status === "DRAFT") ||
+          !isSelfServiceOrBase) &&
         canDeletePerm,
     };
 
@@ -460,26 +519,79 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // web booking overview uses (`calculateBookingLifecycleProgress`), so the
     // mobile bar and the web bar can never disagree. QT rows bucket by their
     // per-asset unit counters; INDIVIDUAL rows by status + `checkedInAssetIds`.
-    // `checkedOutAssetIds` (assets with a PartialBookingCheckout record) drives
-    // the COMPLETE-branch "was it ever out?" test; an empty list means an
-    // all-at-once checkout.
-    const partialCheckoutRows = await db.partialBookingCheckout.findMany({
-      where: { bookingId: booking.id },
-      select: { assetIds: true },
+    // Dispatch truth comes from the slice markers
+    // (`BookingAsset.checkedOutAt`/`checkedInAt`): the Check out button
+    // stamps them but writes NO PartialBookingCheckout rows, so session
+    // records cannot tell a button-checked-out asset from a
+    // never-checked-out one on a booking that also has scan records. The
+    // sessions are still fetched: per-asset dispatched units are judged
+    // slice by slice from stamps + session attribution (an asset can mix a
+    // button-checked-out slice with a progressively-scanned sibling — see
+    // `computeDispatchedUnitsByAsset`).
+    const [sliceRows, checkoutSessionRows] = await Promise.all([
+      db.bookingAsset.findMany({
+        where: { bookingId: booking.id },
+        select: {
+          id: true,
+          assetId: true,
+          quantity: true,
+          assetKitId: true,
+          checkedOutAt: true,
+          checkedInAt: true,
+        },
+      }),
+      db.partialBookingCheckout.findMany({
+        where: { bookingId: booking.id },
+        select: { assetIds: true, quantities: true, bookingAssetIds: true },
+      }),
+    ]);
+    const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
+      slices: sliceRows,
+      checkoutSessions: checkoutSessionRows,
     });
+    const sliceMarkersByAssetId = new Map<
+      string,
+      { out: boolean; allStampedIn: boolean }
+    >();
+    for (const s of sliceRows) {
+      const m = sliceMarkersByAssetId.get(s.assetId) ?? {
+        out: false,
+        allStampedIn: true,
+      };
+      if (s.checkedOutAt) {
+        m.out = true;
+        if (!s.checkedInAt) m.allStampedIn = false;
+      }
+      sliceMarkersByAssetId.set(s.assetId, m);
+    }
     const checkedOutAssetIds = [
-      ...new Set(partialCheckoutRows.flatMap((r) => r.assetIds)),
+      ...new Set(sliceRows.filter((s) => s.checkedOutAt).map((s) => s.assetId)),
     ];
+    // With no stamped slice anywhere, pass `undefined` markers (not `false`)
+    // so the calculation's legacy collapse for record-less bookings stays
+    // reachable — `false` means "this row was verifiably never dispatched".
+    const bookingHasSliceMarkers = checkedOutAssetIds.length > 0;
     const lifecycleProgress = calculateBookingLifecycleProgress({
       bookingAssets: assets.map((a) => {
         const isQty = a.type === AssetType.QUANTITY_TRACKED;
         const rem = remainingByAsset.get(a.id);
         const booked = a.quantity ?? 0;
+        const marker = sliceMarkersByAssetId.get(a.id);
         return {
           id: a.id,
           kitId: a.kitId,
           status: a.status,
           assetType: a.type,
+          sliceCheckedOut: bookingHasSliceMarkers
+            ? marker?.out ?? false
+            : undefined,
+          sliceCheckedIn: bookingHasSliceMarkers
+            ? (marker?.out ?? false) && (marker?.allStampedIn ?? false)
+            : undefined,
+          dispatchedQuantity:
+            isQty && bookingHasSliceMarkers
+              ? Math.min(dispatchedUnitsByAsset.get(a.id) ?? 0, booked)
+              : undefined,
           bookedQuantity: isQty ? booked : undefined,
           // checked-out = booked − still-to-check-out; dispositioned =
           // booked − still-to-check-in. Both from the per-asset remaining

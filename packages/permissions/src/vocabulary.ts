@@ -58,6 +58,8 @@ export enum PermissionEntity {
   assetReminders = "assetReminders",
   audit = "audit",
   auditNote = "auditNote",
+  /** Org-wide analytics under `/reports` — pages, CSV and PDF exports. */
+  reports = "reports",
   teamMemberNote = "teamMemberNote",
   assetModel = "assetModel",
   emailSettings = "emailSettings",

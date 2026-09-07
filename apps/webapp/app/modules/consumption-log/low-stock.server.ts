@@ -212,7 +212,7 @@ function notifyInAppBestEffort(
  * @param params.organizationId - The organization owning the asset (org-scopes
  *   the lookup and resolves the email recipients)
  */
-export async function checkAndNotifyLowStock({
+async function runLowStockCheck({
   assetId,
   userId,
   organizationId,
@@ -376,4 +376,41 @@ export async function checkAndNotifyLowStock({
     });
   }
   /* else: no transition — already-notified-and-still-low, or fine-and-was-fine. */
+}
+
+/**
+ * Best-effort entry point: runs the check above and never rejects.
+ *
+ * Every caller invokes this AFTER its mutation has committed, so a failure
+ * here cannot roll anything back — but an escaping rejection still reaches
+ * the route's error handler and answers 500 for a request whose write
+ * succeeded. Clients retry a 500, and the mutations behind these calls
+ * (quantity check-out, adjustment, release) are not idempotent, so the retry
+ * allocates a second time. A missed stock notification is recoverable; a
+ * double allocation is not.
+ *
+ * This is the single place that guarantee lives, so call sites need no
+ * try/catch of their own — and adding one back per site is how a site gets
+ * missed.
+ *
+ * @param params - See {@link runLowStockCheck}
+ */
+export async function checkAndNotifyLowStock(
+  params: Parameters<typeof runLowStockCheck>[0]
+): Promise<void> {
+  try {
+    await runLowStockCheck(params);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to run the low-stock check",
+        label: "Assets",
+        additionalData: {
+          assetId: params.assetId,
+          organizationId: params.organizationId,
+        },
+      })
+    );
+  }
 }
