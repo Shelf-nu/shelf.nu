@@ -371,6 +371,12 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         "reportId=monthly-booking-trends&category=cat-1&location=loc-1"
       );
 
+      // Establish the call before reading it. The assertions below are
+      // NEGATIVE, so a report function that was never reached has to fail as
+      // "expected 1 call, got 0" rather than as a TypeError on `calls[0]` —
+      // and must never be mistaken for the absence it is checking for.
+      expect(monthlyBookingTrendsReport).toHaveBeenCalledTimes(1);
+
       const args = vi.mocked(monthlyBookingTrendsReport).mock.calls[0][0];
       expect(args).not.toHaveProperty("categoryId");
       expect(args).not.toHaveProperty("locationId");
