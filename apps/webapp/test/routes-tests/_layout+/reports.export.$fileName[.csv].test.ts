@@ -11,14 +11,28 @@
  * @see {@link file://../../../app/utils/csv-utf8.ts}
  */
 import type { LoaderFunctionArgs } from "react-router";
+import type { Mock } from "vitest";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 import {
+  assetActivityReport,
   assetDistributionReport,
   assetInventoryReport,
+  assetUtilizationReport,
   bookingComplianceReport,
   custodySnapshotReport,
+  idleAssetsReport,
+  monthlyBookingTrendsReport,
+  overdueItemsReport,
+  topBookedAssetsReport,
+  topBookedKitsReport,
 } from "~/modules/reports/helpers.server";
+import type {
+  AssetDistributionRow,
+  MonthlyBookingTrendRow,
+  ReportPayload,
+  ResolvedTimeframe,
+} from "~/modules/reports/types";
 import {
   PermissionAction,
   PermissionEntity,
@@ -168,10 +182,17 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
   });
 
   /**
-   * The export endpoint receives the page's full query string (the client
-   * forwards every current search param), and each report case must hand the
-   * params its page-loader counterpart honors to the same query function —
-   * otherwise a filtered page silently exports the unfiltered workspace.
+   * Every report case must hand the params its page-loader counterpart honors
+   * to the same query function, or a filtered page silently exports the whole
+   * workspace — the bug this table exists to keep fixed.
+   *
+   * The table is exhaustive over the loader's `switch`, and deliberately so:
+   * the params are string literals matched by convention against
+   * `reports.$reportId.tsx`, so a typo in one case is invisible to the
+   * compiler and produces no error at runtime. Only an assertion per case can
+   * catch it. Add a report to the switch, add a row here.
+   *
+   * @see {@link file://../../../app/routes/_layout+/reports.$reportId.tsx} the page loader whose params these mirror
    */
   describe("filter passthrough", () => {
     const exportUrl = (query: string) =>
@@ -186,58 +207,173 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         })
       );
 
-    it("forwards the custody-snapshot page filters and workspace currency", async () => {
-      requirePermissionMock.mockResolvedValue({
-        organizationId: "org-1",
-        currentOrganization: { currency: "EUR" },
-      } as any);
-      custodySnapshotReportMock.mockResolvedValue({ rows: [] } as any);
+    const timeframe: ResolvedTimeframe = {
+      preset: "last_30d",
+      from: new Date("2026-07-25T00:00:00.000Z"),
+      to: new Date("2026-08-24T00:00:00.000Z"),
+      label: "Last 30 days",
+    };
 
-      await runLoaderWith(
-        "reportId=custody-snapshot&teamMember=tm-1&location=loc-1"
-      );
-
-      expect(custodySnapshotReportMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          organizationId: "org-1",
-          teamMemberId: "tm-1",
-          locationId: "loc-1",
-          currency: "EUR",
-        })
-      );
+    /**
+     * A payload thin enough for the loader to reach its CSV generator. The
+     * assertions here are about the ARGUMENTS a report function receives, so
+     * the rows it returns never matter.
+     */
+    const emptyPayload = <TRow>(): ReportPayload<TRow> => ({
+      report: { id: "r", title: "R", description: "" },
+      filters: { timeframe, filters: [] },
+      kpis: [],
+      rows: [],
+      computedMs: 0,
+      totalRows: 0,
+      page: 1,
+      pageSize: 10000,
     });
 
-    it("forwards the asset-inventory page filters", async () => {
-      assetInventoryReportMock.mockResolvedValue({ rows: [] } as any);
+    type PassthroughCase = {
+      /** `reportId` param, matching a case in the loader's switch. */
+      reportId: string;
+      /** Filter params as they would appear on the page's URL. */
+      query: string;
+      /** The query function those params must reach. */
+      mock: Mock;
+      /** The argument shape the loader must build from `query`. */
+      expected: Record<string, unknown>;
+    };
 
-      await runLoaderWith(
-        "reportId=asset-inventory&categories=cat-1,cat-2&locations=loc-1&statuses=AVAILABLE,IN_CUSTODY"
-      );
-
-      expect(assetInventoryReportMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          organizationId: "org-1",
+    const cases = (): PassthroughCase[] => [
+      {
+        reportId: "booking-compliance",
+        query: "sortBy=custodian&sortOrder=asc",
+        mock: vi.mocked(bookingComplianceReport),
+        // Sort, not a filter: the CSV's row order has to match the table's.
+        expected: { sortBy: "custodian", sortOrder: "asc" },
+      },
+      {
+        reportId: "custody-snapshot",
+        query: "teamMember=tm-1&location=loc-1",
+        mock: vi.mocked(custodySnapshotReport),
+        expected: {
+          teamMemberId: "tm-1",
+          locationId: "loc-1",
+          currency: "USD",
+        },
+      },
+      {
+        reportId: "overdue-items",
+        query: "custodian=cust-1",
+        mock: vi.mocked(overdueItemsReport),
+        expected: { custodianId: "cust-1", currency: "USD" },
+      },
+      {
+        reportId: "idle-assets",
+        query: "days=60&category=cat-1&location=loc-1",
+        mock: vi.mocked(idleAssetsReport),
+        expected: {
+          idleThresholdDays: 60,
+          categoryId: "cat-1",
+          locationId: "loc-1",
+          currency: "USD",
+        },
+      },
+      {
+        reportId: "top-booked-assets",
+        query: "category=cat-1&location=loc-1",
+        mock: vi.mocked(topBookedAssetsReport),
+        expected: { categoryId: "cat-1", locationId: "loc-1" },
+      },
+      {
+        reportId: "top-booked-kits",
+        // No filter controls on this page, so the only contract is that the
+        // export stays org-scoped. Listed rather than omitted: a row here is
+        // how the next person knows the case was considered.
+        query: "",
+        mock: vi.mocked(topBookedKitsReport),
+        expected: { organizationId: "org-1" },
+      },
+      {
+        reportId: "asset-inventory",
+        query:
+          "categories=cat-1,cat-2&locations=loc-1&statuses=AVAILABLE,IN_CUSTODY",
+        mock: vi.mocked(assetInventoryReport),
+        expected: {
           categoryIds: ["cat-1", "cat-2"],
           locationIds: ["loc-1"],
           statuses: ["AVAILABLE", "IN_CUSTODY"],
           currency: "USD",
-        })
+        },
+      },
+      {
+        reportId: "asset-utilization",
+        query: "category=cat-1&location=loc-1",
+        mock: vi.mocked(assetUtilizationReport),
+        expected: { categoryId: "cat-1", locationId: "loc-1" },
+      },
+      {
+        reportId: "asset-activity",
+        query: "asset=asset-1&category=cat-1",
+        mock: vi.mocked(assetActivityReport),
+        expected: { assetId: "asset-1", categoryId: "cat-1" },
+      },
+      {
+        reportId: "distribution",
+        query: "",
+        mock: vi.mocked(assetDistributionReport),
+        expected: { organizationId: "org-1", currency: "USD" },
+      },
+    ];
+
+    beforeEach(() => {
+      for (const { mock } of cases()) {
+        mock.mockResolvedValue(emptyPayload());
+      }
+      // Distribution builds its CSV from a breakdown rather than from rows.
+      vi.mocked(assetDistributionReport).mockResolvedValue({
+        ...emptyPayload<AssetDistributionRow>(),
+        distributionBreakdown: arabicBreakdown,
+      });
+    });
+
+    it.each(cases())(
+      "$reportId forwards the page's params to its query function",
+      async ({ reportId, query, mock, expected }) => {
+        await runLoaderWith(
+          query ? `reportId=${reportId}&${query}` : `reportId=${reportId}`
+        );
+
+        expect(mock).toHaveBeenCalledWith(expect.objectContaining(expected));
+      }
+    );
+
+    it("reads the workspace currency rather than assuming the default", async () => {
+      requirePermissionMock.mockResolvedValue({
+        organizationId: "org-1",
+        currentOrganization: { currency: "EUR" },
+      } as Awaited<ReturnType<typeof requirePermission>>);
+
+      await runLoaderWith("reportId=custody-snapshot&teamMember=tm-1");
+
+      expect(custodySnapshotReportMock).toHaveBeenCalledWith(
+        expect.objectContaining({ currency: "EUR" })
       );
     });
 
-    it("forwards the booking-compliance sort so CSV row order matches the page", async () => {
-      bookingComplianceReportMock.mockResolvedValue({ rows: [] } as any);
+    it("drops monthly-trends' category and location rather than claiming to filter on them", async () => {
+      // `monthlyBookingTrendsReport` accepts both and uses neither. Forwarding
+      // them would advertise a filtering this export does not perform, so the
+      // loader deliberately omits them — pinned here so a later "consistency"
+      // edit has to confront the dead argument first.
+      vi.mocked(monthlyBookingTrendsReport).mockResolvedValue(
+        emptyPayload<MonthlyBookingTrendRow>()
+      );
 
       await runLoaderWith(
-        "reportId=booking-compliance&sortBy=custodian&sortOrder=asc"
+        "reportId=monthly-booking-trends&category=cat-1&location=loc-1"
       );
 
-      expect(bookingComplianceReportMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sortBy: "custodian",
-          sortOrder: "asc",
-        })
-      );
+      const args = vi.mocked(monthlyBookingTrendsReport).mock.calls[0][0];
+      expect(args).not.toHaveProperty("categoryId");
+      expect(args).not.toHaveProperty("locationId");
     });
   });
 });

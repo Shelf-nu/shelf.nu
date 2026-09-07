@@ -5,7 +5,13 @@
  * Returns JSON that the client renders as a styled HTML preview,
  * then converts to PDF via react-to-print.
  *
- * @see {@link file://../../components/reports/compliance-report-pdf.tsx}
+ * Serves the three reports that ship a PDF — booking compliance, asset
+ * inventory and custody snapshot. `REPORTS_WITH_PDF` in
+ * `report-export-actions.tsx` gates which pages offer the button, and the
+ * switch below must cover exactly that list.
+ *
+ * @see {@link file://../../components/reports/report-pdf.tsx} the renderer this feeds
+ * @see {@link file://../../components/reports/report-export-actions.tsx} `REPORTS_WITH_PDF`
  */
 
 import { data } from "react-router";
