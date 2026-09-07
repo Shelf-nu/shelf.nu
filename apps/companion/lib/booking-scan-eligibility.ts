@@ -32,7 +32,13 @@ export type ScanBlockReason = { title: string; message: string };
 export type CheckoutEligibilityContext = {
   /** Every asset id on the booking, including ones already checked out. */
   bookedAssetIds: ReadonlySet<string>;
-  /** Assets already returned on this booking — never checked out again. */
+  /**
+   * Assets with at least one unit checked back in on this booking. The server
+   * records a return against the whole asset id, so for a quantity-tracked
+   * asset this says only that SOME units came back, not that the booking is
+   * finished with it — which is why membership here blocks an individual
+   * asset outright but never overrides a positive remaining-unit count.
+   */
   checkedInAssetIds: ReadonlySet<string>;
   /** The booking's asset rows, carrying the booking-scoped quantity counts. */
   bookedAssets: readonly BookingAsset[];
