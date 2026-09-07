@@ -270,6 +270,7 @@ export async function updateOrganization({
   hasSequentialIdsMigrated,
   qrIdDisplayPreference,
   showShelfBranding,
+  showQrCodesOnPdfs,
   customEmailFooter,
 }: Pick<Organization, "id"> & {
   currency?: Organization["currency"];
@@ -284,6 +285,7 @@ export async function updateOrganization({
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
   showShelfBranding?: Organization["showShelfBranding"];
+  showQrCodesOnPdfs?: Organization["showQrCodesOnPdfs"];
   customEmailFooter?: string | null;
 }) {
   try {
@@ -296,6 +298,9 @@ export async function updateOrganization({
       }),
       ...(typeof showShelfBranding === "boolean" && {
         showShelfBranding,
+      }),
+      ...(typeof showQrCodesOnPdfs === "boolean" && {
+        showQrCodesOnPdfs,
       }),
       ...(customEmailFooter !== undefined && { customEmailFooter }),
       ...(ssoDetails && {
@@ -430,6 +435,7 @@ const ORGANIZATION_SELECT_FIELDS = {
   hasSequentialIdsMigrated: true,
   qrIdDisplayPreference: true,
   showShelfBranding: true,
+  showQrCodesOnPdfs: true,
   customEmailFooter: true,
 };
 
