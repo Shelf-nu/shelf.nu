@@ -130,6 +130,31 @@ describe("topBookedKitsReport", () => {
     expect(result.rows[0].totalDaysBooked).toBe(2);
   });
 
+  it("clamps a booking's days to the report window", async () => {
+    // The overlap predicate admits a booking extending far beyond the window,
+    // so its days must be measured on the overlap: March 15 to May 15 viewed
+    // in April contributes April's days, not 61. Total Days, the Avg Duration
+    // derived from it, and the CSV export all read this number.
+    //
+    // `timeBookedRate` cannot catch this — `Math.min(100, …)` pins an
+    // over-long booking to 100%, which is exactly why the column looked
+    // plausible while the days behind it did not.
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      booking("2026-03-15T00:00:00Z", "2026-05-15T00:00:00Z", ["kit-1"]),
+    ] as any);
+    vi.mocked(db.kit.findMany).mockResolvedValue([
+      kitMeta("kit-1", "Camera Kit"),
+    ] as any);
+
+    const result = await topBookedKitsReport({
+      organizationId: "org-1",
+      timeframe: TIMEFRAME,
+    });
+
+    // Window = April (30 days). Unclamped this would read 61.
+    expect(result.rows[0].totalDaysBooked).toBe(30);
+  });
+
   it("aggregates booking count and total days across multiple bookings", async () => {
     vi.mocked(db.booking.findMany).mockResolvedValue([
       booking("2026-04-10T00:00:00Z", "2026-04-12T00:00:00Z", ["kit-1"]), // 2 days

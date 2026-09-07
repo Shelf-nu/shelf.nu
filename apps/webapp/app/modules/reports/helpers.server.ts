@@ -2755,13 +2755,20 @@ async function fetchTopBookedKitData(
   // booking (kits are atomic in a booking).
   const kitAgg = new Map<string, { bookingCount: number; totalDays: number }>();
   for (const booking of bookings) {
-    // Clamp to ≥1 day; handles inverted dates defensively (matches asset report).
+    // Days are measured on the booking's overlap with the report window. The
+    // overlap predicate above admits bookings that extend far beyond it, and
+    // an unclamped duration would credit days the period never contained —
+    // the Total Days column, the Avg Duration derived from it, and
+    // `timeBookedRate` all read this one number. Floors at 1 day (also
+    // covering inverted dates). Kept identical to the asset report so the
+    // same booking contributes the same days to both.
     const bookingDays =
       booking.from && booking.to
         ? Math.max(
             1,
             Math.ceil(
-              (booking.to.getTime() - booking.from.getTime()) /
+              (Math.min(booking.to.getTime(), timeframe.to.getTime()) -
+                Math.max(booking.from.getTime(), timeframe.from.getTime())) /
                 (1000 * 60 * 60 * 24)
             )
           )
