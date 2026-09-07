@@ -263,7 +263,9 @@ function AssetsListContent() {
             item.sequentialId ? `, ${item.sequentialId}` : ""
           }${quantityLabel ? `, quantity ${quantityLabel}` : ""}${
             item.category ? `, ${item.category.name}` : ""
-          }${item.location ? `, ${item.location.name}` : ""}`}
+          }${item.location ? `, ${item.location.name}` : ""}${
+            item.kit ? `, kit ${item.kit.name}` : ""
+          }`}
           accessibilityRole="button"
         >
           {item.thumbnailImage || item.mainImage ? (
@@ -306,6 +308,20 @@ function AssetsListContent() {
                   />
                   <Text style={styles.assetLocation} numberOfLines={1}>
                     {item.location.name}
+                  </Text>
+                </View>
+              )}
+              {/* Which kit to look in. An asset can hold several memberships;
+                  the server sends the first, as the website's list does. */}
+              {item.kit && (
+                <View style={styles.locationRow}>
+                  <Ionicons
+                    name="albums-outline"
+                    size={11}
+                    color={colors.mutedLight}
+                  />
+                  <Text style={styles.assetLocation} numberOfLines={1}>
+                    {item.kit.name}
                   </Text>
                 </View>
               )}
