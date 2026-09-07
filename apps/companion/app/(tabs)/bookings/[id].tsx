@@ -991,17 +991,10 @@ export default function BookingDetailScreen() {
     booking.custodianTeamMember?.name ||
     formatPersonName(booking.custodianUser);
 
-  // Lifecycle counts for the progress bar: every asset is in exactly one of three
-  // states. `checkedOutCount` (status === CHECKED_OUT) already EXCLUDES returned
-  // assets — partial check-in flips them back to AVAILABLE — so it IS the live
-  // "on job" count, and returns are subtracted from the reserved bucket (not from
-  // checkedOutCount again, which would double-count them).
-  const checkedInCount = checkedInAssetIds.length; // returned
-  const onJobCount = booking.checkedOutCount; // still out
-  const reservedCount = Math.max(
-    0,
-    booking.assetCount - onJobCount - checkedInCount
-  ); // never checked out
+  // How many of the booking's assets have been returned. Drives whether the
+  // progress card is worth showing at all; the card's own segments come from
+  // the server's shared helper further down.
+  const checkedInCount = checkedInAssetIds.length;
   // Only show the bar once there's check-out activity — otherwise it's a flat,
   // single-colour bar that adds noise to a freshly-reserved booking.
   const showProgress =
@@ -1038,14 +1031,19 @@ export default function BookingDetailScreen() {
   // gates the full "Check Out All" button), so we derive our own flag for the
   // partial path — otherwise "Select to Check Out" disappears the moment the
   // first batch flips the booking to ONGOING.
-  // `reservedCount` counts whole assets, so it cannot see inside a pooled one:
-  // a partial return records the asset id, which then cancels out its own
-  // `assetCount` entry and reads as nothing left to take. Rows carry the
-  // booking-scoped remaining count when the server sends it, so trust that
-  // wherever it exists and keep the asset-level arithmetic for rows without.
-  const hasUnitsLeftToCheckOut =
-    reservedCount > 0 ||
-    booking.assets.some((a) => (a.remainingToCheckOut ?? 0) > 0);
+  // Each row answers for itself. Booking-wide arithmetic cannot: a pooled
+  // asset's remaining units and its global status are independent, so
+  // subtracting whole returned and checked-out assets from the total both
+  // hides the control while units remain (a partial return cancels the row
+  // against its own count) and shows it when none do (a spent row whose
+  // status is still AVAILABLE). A quantity-tracked row is answered by the
+  // booking-scoped count the server sends for it; every other row by whether
+  // it is still on the booking and not yet out.
+  const hasUnitsLeftToCheckOut = booking.assets.some((a) =>
+    typeof a.remainingToCheckOut === "number"
+      ? a.remainingToCheckOut > 0
+      : a.status !== "CHECKED_OUT" && !checkedInAssetIds.includes(a.id)
+  );
 
   const canPartialCheckout =
     hasUnitsLeftToCheckOut &&
