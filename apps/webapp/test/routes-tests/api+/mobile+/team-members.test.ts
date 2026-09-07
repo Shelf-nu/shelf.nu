@@ -14,6 +14,7 @@
 
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
@@ -63,13 +64,9 @@ function actAs(
   roles: OrganizationRoles[],
   { canSeeAllCustody = false }: { canSeeAllCustody?: boolean } = {}
 ) {
-  vi.mocked(getMobileUserContext).mockResolvedValue({
-    role: roles[0],
-    roles,
-    canUseBarcodes: true,
-    canUseAudits: true,
-    canSeeAllCustody,
-  });
+  vi.mocked(getMobileUserContext).mockResolvedValue(
+    mobileUserContext({ roles, canSeeAllCustody })
+  );
 }
 
 async function get() {
