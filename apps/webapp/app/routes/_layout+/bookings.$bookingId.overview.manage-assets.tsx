@@ -1472,8 +1472,13 @@ export default function AddAssetsToNewBooking() {
               {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} assets
               selected
             </p>
+            {/* `role="alert"` is what makes a submit-time rejection audible —
+                the message appears after the user has already pressed Confirm,
+                so nothing else moves focus to it. */}
             {actionError ? (
-              <p className="text-[12px] text-error-500">{actionError}</p>
+              <p role="alert" className="text-[12px] text-error-500">
+                {actionError}
+              </p>
             ) : null}
           </div>
         ) : null}

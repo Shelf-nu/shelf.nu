@@ -60,6 +60,25 @@ export const addScannedAssetsToBookingSchema = z
   });
 
 /**
+ * Free units this booking may still draw on for a scanned row, or `null` when
+ * the question doesn't apply because the row is an INDIVIDUAL asset.
+ *
+ * `pickerMeta.maxAllowed` is the booking's pool for this asset, resolved
+ * server-side by the same primitive the write guard enforces with, so a row
+ * judged here agrees with what the submit will do. It is absent only when a
+ * scan carried no picker context; the asset's own stock is the closest stand-in
+ * then, and a quantity-tracked row with no recorded stock has nothing to stage.
+ *
+ * Shared by the blocker list and the row badge so the two can never disagree
+ * about which rows are exhausted — a blocker whose row shows no badge is a
+ * count the user cannot attribute to anything.
+ */
+function resolveScannedUnitsAvailable(asset: AssetFromQr): number | null {
+  if (!isQuantityTracked(asset)) return null;
+  return asset.pickerMeta?.maxAllowed ?? asset.quantity ?? 0;
+}
+
+/**
  * Drawer component for managing scanned assets to be added to bookings
  */
 export default function AddAssetsToBookingDrawer({
@@ -216,17 +235,20 @@ export default function AddAssetsToBookingDrawer({
     checkedOutAssetsIds.length > 0 &&
     ["ONGOING", "OVERDUE"].includes(booking.status);
 
-  // Qty-tracked rows with nothing left to stage. `pickerMeta.maxAllowed` is the
-  // booking picker's free pool for this asset (total − custody − kits −
-  // windowed reservations); at 0 the row renders no qty input and the server
-  // rejects it, so it belongs in the blocker list where one tap clears it.
+  // Qty-tracked rows with nothing left to stage (see
+  // `resolveScannedUnitsAvailable`). At zero the row renders no qty input and
+  // the server would reject it, so it belongs in the blocker list where one
+  // tap clears it. Rows already on the booking are exempt: the scan is a no-op
+  // for them, and "Already added to this booking" is the badge that says so.
   const noUnitsAvailableIds = assets
-    .filter(
-      (asset) =>
-        isQuantityTracked(asset) &&
-        !booking.bookingAssets.some((ba) => ba.assetId === asset.id) &&
-        (asset.pickerMeta?.maxAllowed ?? asset.quantity ?? 0) <= 0
-    )
+    .filter((asset) => {
+      const unitsAvailable = resolveScannedUnitsAvailable(asset);
+      return (
+        unitsAvailable !== null &&
+        unitsAvailable <= 0 &&
+        !booking.bookingAssets.some((ba) => ba.assetId === asset.id)
+      );
+    })
     .map((asset) => asset.id);
 
   // Kits already checked out as current booking is checked out
@@ -420,15 +442,13 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     asset.type === AssetType.INDIVIDUAL &&
     asset.status === AssetStatus.CHECKED_OUT;
 
-  const qtyTracked = isQuantityTracked(asset) && asset.quantity != null;
+  const unitsAvailable = resolveScannedUnitsAvailable(asset);
+  const qtyTracked = unitsAvailable !== null;
   const alreadyInBooking = booking.bookingAssets.some(
     (ba) => ba.assetId === asset.id
   );
-  // `pickerMeta` is the booking picker's available pool — same
-  // formula as `bookings/$bookingId/overview/manage-assets`.
-  const pickerMeta = qtyTracked ? asset.pickerMeta ?? null : null;
-  const totalQty = qtyTracked ? (asset.quantity as number) : 0;
-  const maxAllowed = pickerMeta?.maxAllowed ?? totalQty;
+  const totalQty = asset.quantity ?? 0;
+  const maxAllowed = unitsAvailable ?? 0;
   const noUnitsAvailable = qtyTracked && !alreadyInBooking && maxAllowed <= 0;
 
   // Use a combination of standard presets and custom configurations
@@ -480,9 +500,9 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
           {qtyTracked ? (
             <span className="ml-2 text-xs font-normal text-gray-500">
               · {totalQty} {asset.unitOfMeasure || "units"}
-              {pickerMeta && pickerMeta.maxAllowed < totalQty ? (
+              {maxAllowed < totalQty ? (
                 <span className="ml-1 text-warning-700">
-                  · {pickerMeta.maxAllowed} available
+                  · {maxAllowed} available
                 </span>
               ) : null}
             </span>
