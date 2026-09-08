@@ -42,6 +42,7 @@ import {
   adjustDateToUTC,
   isDateString,
 } from "~/utils/date-fns";
+import { generateClientId } from "~/utils/id/client-id";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -59,23 +60,6 @@ function ErrorDisplay({ error }: { error?: string }) {
   return error ? (
     <div className="mt-1 text-sm text-red-500">{error}</div>
   ) : null;
-}
-
-/**
- * Generates a stable unique ID for a MultiDateInput row so React can use
- * it as a map key. `crypto.randomUUID` is preferred when available (modern
- * browsers and node), with a fallback to avoid SSR crashes.
- */
-let dateEntryCounter = 0;
-function createDateEntryId(): string {
-  if (
-    typeof globalThis.crypto !== "undefined" &&
-    typeof globalThis.crypto.randomUUID === "function"
-  ) {
-    return globalThis.crypto.randomUUID();
-  }
-  dateEntryCounter += 1;
-  return `date-entry-${dateEntryCounter}-${Date.now()}`;
 }
 
 /**
@@ -2327,9 +2311,9 @@ function MultiDateInput({
   type DateEntry = { id: string; value: string };
 
   const [dates, setDates] = useState<DateEntry[]>(() => {
-    if (!value) return [{ id: createDateEntryId(), value: "" }];
+    if (!value) return [{ id: generateClientId(), value: "" }];
     return value.split(",").map((d) => ({
-      id: createDateEntryId(),
+      id: generateClientId(),
       value: d.trim(),
     }));
   });
@@ -2353,7 +2337,7 @@ function MultiDateInput({
 
   // Add new date field
   const addDateField = () => {
-    setDates([...dates, { id: createDateEntryId(), value: "" }]);
+    setDates([...dates, { id: generateClientId(), value: "" }]);
   };
   // Remove date field at index
   const removeDateField = (indexToRemove: number) => {

@@ -340,3 +340,10 @@ div[data-radix-popper-content-wrapper] > div[data-side="bottom"] {
 .pseudo-border-bottom {
   @apply after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-gray-200 after:content-[''] hover:bg-gray-100;
 }
+
+/* Browser-support gate: the inline check in app/root.tsx sets this attribute
+   on <html> when the browser cannot run the client bundle. Revealing the
+   screen through CSS keeps the gate working before any module script runs. */
+html[data-unsupported-browser] #unsupported-browser {
+  display: block;
+}
