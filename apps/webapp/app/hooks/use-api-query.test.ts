@@ -64,7 +64,10 @@ describe("useApiQuery", () => {
     );
 
     expect(result.current.isLoading).toBe(true);
-    expect(mockFetch).toHaveBeenCalledWith("/api/test");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/test",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
 
     await waitForAsyncUpdate(() => {
       expect(result.current.isLoading).toBe(false);
@@ -93,7 +96,10 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/assets?page=1&limit=10");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/assets?page=1&limit=10",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
   });
 
@@ -134,6 +140,33 @@ describe("useApiQuery", () => {
 
     expect(result.current.error).toBe("Something went wrong.");
     expect(result.current.data).toBeUndefined();
+  });
+
+  it("clears a prior error when a refetch succeeds", async () => {
+    const mockData = { id: 1, name: "First" };
+    mockFetch
+      .mockRejectedValueOnce(new Error("Network error"))
+      .mockResolvedValueOnce({
+        json: vi.fn().mockResolvedValueOnce(mockData),
+      });
+
+    const { result } = renderHook(() =>
+      useApiQuery({ api: "/api/test", enabled: true })
+    );
+
+    await waitForAsyncUpdate(() => {
+      expect(result.current.error).toBe("Network error");
+    });
+
+    act(() => {
+      result.current.refetch();
+    });
+
+    await waitForAsyncUpdate(() => {
+      expect(result.current.data).toEqual(mockData);
+    });
+    // The stale error must not linger after a successful refetch.
+    expect(result.current.error).toBeUndefined();
   });
 
   it("should refetch when refetch is called", async () => {
@@ -191,14 +224,20 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test1");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test1",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     // Change the API endpoint
     rerender({ api: "/api/test2" });
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test2");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test2",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -229,14 +268,20 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test?page=1");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test?page=1",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     // Change search params
     rerender({ searchParams: searchParams2 });
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test?page=2");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test?page=2",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -266,7 +311,10 @@ describe("useApiQuery", () => {
     rerender({ enabled: true });
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -286,7 +334,10 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/health");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/health",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
   });
 
