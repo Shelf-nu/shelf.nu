@@ -141,10 +141,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       additionalData: { userId, kitId, organizationId },
     });
 
-    /** Extract barcode data from form */
+    /**
+     * Barcodes are only read when the workspace holds the add-on. Without it
+     * the form has no barcode section, so `undefined` leaves the kit's
+     * existing barcodes untouched: `updateKit` only reconciles a list it is
+     * given, and an empty list would read as "remove every barcode".
+     */
     const barcodes = canUseBarcodes
       ? extractBarcodesFromFormData(formData)
-      : [];
+      : undefined;
 
     // Get current kit to compare location changes
     const currentKit = await getKit({
