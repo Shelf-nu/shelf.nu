@@ -19,10 +19,11 @@
  *
  * When a probe fails, {@link UNSUPPORTED_BROWSER_ATTRIBUTE} is set on `<html>`.
  * {@link BROWSER_SUPPORT_GATE_STYLES}, inlined in the same `<head>`, keeps the
- * "browser out of date" screen (`app/root.tsx`) hidden by default and reveals
- * it for that attribute, and `entry.client.tsx` skips hydration via
- * {@link isUnsupportedBrowser}. The screen carries no `hidden` attribute, so
- * once revealed it is exposed to assistive technology like any other content.
+ * "browser out of date" screen (`app/root.tsx`) hidden by default, reveals it
+ * for that attribute and hides the rest of the body, and `entry.client.tsx`
+ * skips hydration via {@link isUnsupportedBrowser}. The screen carries no
+ * `hidden` attribute, so once revealed it is the only content exposed to
+ * assistive technology.
  */
 export const UNSUPPORTED_BROWSER_ATTRIBUTE = "data-unsupported-browser";
 
@@ -33,8 +34,16 @@ export const UNSUPPORTED_BROWSER_SCREEN_ID = "unsupported-browser";
  * Inline stylesheet for the gate. Lives in `<head>` next to the check script
  * rather than in a linked stylesheet, so the default hidden state applies
  * before any external resource loads.
+ *
+ * While the document is flagged, every other child of `<body>` is removed
+ * from rendering as well, so the server-rendered app behind the screen is
+ * neither focusable nor announced by assistive technology.
  */
-export const BROWSER_SUPPORT_GATE_STYLES = `#${UNSUPPORTED_BROWSER_SCREEN_ID}{display:none}html[${UNSUPPORTED_BROWSER_ATTRIBUTE}] #${UNSUPPORTED_BROWSER_SCREEN_ID}{display:block}`;
+export const BROWSER_SUPPORT_GATE_STYLES = [
+  `#${UNSUPPORTED_BROWSER_SCREEN_ID}{display:none}`,
+  `html[${UNSUPPORTED_BROWSER_ATTRIBUTE}] #${UNSUPPORTED_BROWSER_SCREEN_ID}{display:block}`,
+  `html[${UNSUPPORTED_BROWSER_ATTRIBUTE}] body>:not(#${UNSUPPORTED_BROWSER_SCREEN_ID}){display:none}`,
+].join("");
 
 export const BROWSER_SUPPORT_CHECK_SCRIPT = `(function () {
   var supported =

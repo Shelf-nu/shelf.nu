@@ -95,6 +95,12 @@ describe("BROWSER_SUPPORT_GATE_STYLES", () => {
       `html[${UNSUPPORTED_BROWSER_ATTRIBUTE}] #${UNSUPPORTED_BROWSER_SCREEN_ID}{display:block}`
     );
   });
+
+  it("removes the rest of the body from rendering while the document is flagged", () => {
+    expect(BROWSER_SUPPORT_GATE_STYLES).toContain(
+      `html[${UNSUPPORTED_BROWSER_ATTRIBUTE}] body>:not(#${UNSUPPORTED_BROWSER_SCREEN_ID}){display:none}`
+    );
+  });
 });
 
 describe("isUnsupportedBrowser", () => {
