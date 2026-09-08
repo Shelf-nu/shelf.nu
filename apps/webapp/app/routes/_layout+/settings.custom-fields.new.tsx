@@ -10,7 +10,10 @@ import {
 import Header from "~/components/layout/header";
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 
-import { createCustomField } from "~/modules/custom-field/service.server";
+import {
+  createCustomField,
+  getCustomFieldGroups,
+} from "~/modules/custom-field/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -37,8 +40,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    // Subscription assertion and categories lookup are independent — run in parallel
-    const [, categoriesResult] = await Promise.all([
+    // Subscription assertion, categories lookup, and groups lookup
+    const [, categoriesResult, groups] = await Promise.all([
       assertUserCanCreateMoreCustomFields({
         organizations,
         organizationId,
@@ -47,6 +50,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         request,
       }),
+      getCustomFieldGroups({ organizationId }),
     ]);
     const { categories, totalCategories } = categoriesResult;
 
@@ -58,6 +62,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       header,
       categories,
       totalCategories,
+      groups,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -96,8 +101,17 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       NewCustomFieldFormSchema
     );
 
-    const { name, helpText, required, type, active, options, categories } =
-      payload;
+    const {
+      name,
+      helpText,
+      required,
+      type,
+      active,
+      options,
+      categories,
+      groupId,
+      position,
+    } = payload;
 
     await createCustomField({
       name,
@@ -109,6 +123,8 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       userId: authSession.userId,
       options,
       categories,
+      groupId,
+      position,
     });
 
     sendNotification({
