@@ -110,12 +110,13 @@ export default defineConfig({
     include: ["./app/routes/**/*.tsx", "./app/routes/**/*.ts"],
   },
   build: {
-    // Browser floor for the client bundle: Vite's Baseline "widely available"
-    // set (Chrome 107, Edge 107, Firefox 104, Safari 16). Newer syntax is
-    // lowered at build time, so an older browser fails only on missing runtime
-    // APIs, which the inline check in `app/utils/browser-support.ts` turns
-    // into an explicit message. Raise this floor only together with that check.
-    target: "baseline-widely-available",
+    // Browser floor for the client bundle. Pinned explicitly (not a Vite alias
+    // such as "baseline-widely-available", which moves between releases) and
+    // equal to the runtime floor probed by `app/utils/browser-support.ts`:
+    // syntax newer than this set is lowered at build time, so a browser below
+    // the floor fails only on the missing runtime APIs that check detects and
+    // turns into an explicit message. Change the two together.
+    target: ["chrome98", "edge98", "firefox94", "safari15.4"],
     assetsDir: `file-assets`,
     rollupOptions: {
       output: {

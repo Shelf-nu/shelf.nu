@@ -20,6 +20,8 @@ describe("generateClientId", () => {
   });
 
   it("uses crypto.randomUUID when the runtime provides it", () => {
+    // why: the native call must be observable (called once, value passed
+    // through), which the real Web Crypto object cannot show.
     const randomUUID = vi.fn(() => "11111111-2222-4333-8444-555555555555");
     vi.stubGlobal("crypto", { randomUUID, getRandomValues: vi.fn() });
 
@@ -28,6 +30,9 @@ describe("generateClientId", () => {
   });
 
   it("builds a v4 UUID from getRandomValues when randomUUID is missing", () => {
+    // why: models a browser (or plain-HTTP origin) that has Web Crypto but no
+    // `randomUUID`, with deterministic bytes so the version/variant bit
+    // forcing can be asserted exactly.
     const getRandomValues = vi.fn((bytes: Uint8Array) => {
       for (let i = 0; i < bytes.length; i++) bytes[i] = 0xff;
       return bytes;
@@ -43,12 +48,16 @@ describe("generateClientId", () => {
   });
 
   it("still returns a v4 UUID without any crypto object", () => {
+    // why: models a runtime with no `crypto` global at all, which is the
+    // `Math.random` fallback path.
     vi.stubGlobal("crypto", undefined);
 
     expect(generateClientId()).toMatch(UUID_V4);
   });
 
   it("returns distinct ids on consecutive calls", () => {
+    // why: uniqueness matters most on the weakest (`Math.random`) path, so the
+    // test removes `crypto` to force it.
     vi.stubGlobal("crypto", undefined);
 
     const ids = new Set(Array.from({ length: 50 }, () => generateClientId()));

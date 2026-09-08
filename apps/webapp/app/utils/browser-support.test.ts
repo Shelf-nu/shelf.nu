@@ -10,8 +10,10 @@
 import { describe, expect, it } from "vitest";
 import {
   BROWSER_SUPPORT_CHECK_SCRIPT,
+  BROWSER_SUPPORT_GATE_STYLES,
   isUnsupportedBrowser,
   UNSUPPORTED_BROWSER_ATTRIBUTE,
+  UNSUPPORTED_BROWSER_SCREEN_ID,
 } from "./browser-support";
 
 type Probes = {
@@ -28,6 +30,10 @@ const MODERN: Required<Probes> = {
 
 /** Runs the inline script against a fake document and returns the html attributes it set. */
 function runCheck(overrides: Probes = {}) {
+  // why: the script reads `document`, `Object`, `structuredClone` and `Array`
+  // as free globals. Passing fakes as function parameters shadows the real
+  // ones, so each probe can be removed on its own without touching the
+  // test runtime's globals.
   const probes = { ...MODERN, ...overrides };
   const attributes = new Map<string, string>();
   const fakeDocument = {
@@ -77,6 +83,17 @@ describe("BROWSER_SUPPORT_CHECK_SCRIPT", () => {
 
   it("stays parseable by pre-ES2015 engines (no arrow functions, let/const, template literals)", () => {
     expect(BROWSER_SUPPORT_CHECK_SCRIPT).not.toMatch(/=>|\blet\b|\bconst\b|`/);
+  });
+});
+
+describe("BROWSER_SUPPORT_GATE_STYLES", () => {
+  it("hides the screen by default and reveals it for the flagged document", () => {
+    expect(BROWSER_SUPPORT_GATE_STYLES).toContain(
+      `#${UNSUPPORTED_BROWSER_SCREEN_ID}{display:none}`
+    );
+    expect(BROWSER_SUPPORT_GATE_STYLES).toContain(
+      `html[${UNSUPPORTED_BROWSER_ATTRIBUTE}] #${UNSUPPORTED_BROWSER_SCREEN_ID}{display:block}`
+    );
   });
 });
 
