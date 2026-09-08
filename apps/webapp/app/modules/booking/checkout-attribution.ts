@@ -218,3 +218,158 @@ export function attributeDispositionsByBookingAsset(args: {
   }
   return out;
 }
+
+/**
+ * How many units of each slice one checkout session sent out.
+ *
+ * A session's claims arrive per asset: a tagged claim names its slice, an
+ * untagged one names only the asset and has to be spread. The spread runs
+ * through {@link attributeDispositionsByBookingAsset} — the same primitive
+ * every read site uses — once per asset, because that function's untagged pool
+ * is a single bucket across the rows it is handed and would otherwise let one
+ * asset's claim spill into another's slices.
+ *
+ * Capacity is the slice's COMMITTED REMAINING (booked total minus what earlier
+ * sessions already sent), never its booked quantity. The `checkedOutAt` marker
+ * caps the same way, and the two MUST agree: both walk
+ * {@link compareSlicesForGreedyFill}, so a different cap makes them choose
+ * different slices — leaving one slice stamped as departed with a count of zero
+ * while a sibling is counted past what it booked.
+ *
+ * A slice missing from `committedRemainingBySlice` falls back to its booked
+ * quantity. The map covers tagged and untagged-resolved `QUANTITY_TRACKED`
+ * slices only, so defaulting to zero would starve every `INDIVIDUAL` slice.
+ *
+ * Pure derivation — no DB calls.
+ *
+ * @param args.sliceRows - Every `BookingAsset` row on the booking.
+ * @param args.committedRemainingBySlice - Units each slice has still to send.
+ * @param args.claims - This session's claims, `bookingAssetId` null when untagged.
+ * @returns Map of slice id → units this session sent out, zero entries omitted.
+ */
+export function attributeSessionCheckoutToSlices(args: {
+  sliceRows: Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+  }>;
+  committedRemainingBySlice: Map<string, number>;
+  claims: Array<{
+    assetId: string;
+    bookingAssetId: string | null;
+    quantity: number;
+  }>;
+}): Map<string, number> {
+  const { sliceRows, committedRemainingBySlice, claims } = args;
+
+  const claimsByAsset = new Map<
+    string,
+    Array<{ bookingAssetId: string | null; quantity: number }>
+  >();
+  for (const claim of claims) {
+    const entries = claimsByAsset.get(claim.assetId) ?? [];
+    entries.push({
+      bookingAssetId: claim.bookingAssetId || null,
+      quantity: claim.quantity,
+    });
+    claimsByAsset.set(claim.assetId, entries);
+  }
+
+  const out = new Map<string, number>();
+  for (const [assetId, consumptionLogs] of claimsByAsset) {
+    const spread = attributeDispositionsByBookingAsset({
+      bookingAssetRows: sliceRows
+        .filter((row) => row.assetId === assetId)
+        .map((row) => ({
+          id: row.id,
+          assetKitId: row.assetKitId,
+          quantity: committedRemainingBySlice.get(row.id) ?? row.quantity,
+        })),
+      consumptionLogs,
+    });
+    for (const [sliceId, units] of spread) {
+      if (units > 0) out.set(sliceId, (out.get(sliceId) ?? 0) + units);
+    }
+  }
+  return out;
+}
+
+/**
+ * Units actually dispatched per ASSET on a booking, judged slice by slice.
+ *
+ * Two dispatch writers exist and each leaves a different record: progressive
+ * scans record exact unit counts in `PartialBookingCheckout` sessions, while
+ * the all-at-once checkout stamps `BookingAsset.checkedOutAt` and writes no
+ * session rows. A single asset can mix both across its slices (an 8-unit
+ * slice out via the button plus a later sibling scanned out progressively),
+ * so neither source alone is the answer:
+ * - session units judged asset-level would erase the button slices'
+ *   obligation the moment ANY sibling has a session record;
+ * - stamps alone would inflate a partially-dispatched progressive slice to
+ *   its full booked quantity (the stamp is boolean, per slice).
+ *
+ * So per slice: session units attributed to that slice (tagged + greedy,
+ * via {@link attributeDispositionsByBookingAsset} — the same order the
+ * stamper uses) when any exist, capped by the slice's booked quantity;
+ * otherwise the whole slice when it is stamped; otherwise zero. The
+ * asset's dispatched units are the sum over its slices.
+ *
+ * Pure derivation — no DB calls; caller pre-fetches slices and sessions.
+ * Consumed by completion (`isBookingFullyCheckedIn`) and by the lifecycle
+ * progress loaders so the two can never disagree on what went out.
+ *
+ * @param args.slices - ALL of the booking's slices (`id`, `assetId`, booked
+ *   `quantity`, `assetKitId`, `checkedOutAt`).
+ * @param args.checkoutSessions - The booking's raw checkout sessions.
+ * @returns Map keyed by `assetId` → dispatched units (absent = 0).
+ */
+export function computeDispatchedUnitsByAsset(args: {
+  slices: Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+  }>;
+  checkoutSessions: CheckoutSession[];
+}): Map<string, number> {
+  const { slices, checkoutSessions } = args;
+
+  const logsByAsset = checkoutSessionsToLogsByAsset(
+    checkoutSessions,
+    () => true
+  );
+
+  const slicesByAsset = new Map<string, typeof slices>();
+  for (const s of slices) {
+    const group = slicesByAsset.get(s.assetId);
+    if (group) group.push(s);
+    else slicesByAsset.set(s.assetId, [s]);
+  }
+
+  const dispatchedByAsset = new Map<string, number>();
+  for (const [assetId, assetSlices] of slicesByAsset) {
+    const sessionUnitsBySlice = attributeDispositionsByBookingAsset({
+      bookingAssetRows: assetSlices.map((s) => ({
+        id: s.id,
+        quantity: s.quantity,
+        assetKitId: s.assetKitId,
+      })),
+      consumptionLogs: logsByAsset.get(assetId) ?? [],
+    });
+
+    let dispatched = 0;
+    for (const s of assetSlices) {
+      const sessionUnits = sessionUnitsBySlice.get(s.id) ?? 0;
+      if (sessionUnits > 0) {
+        dispatched += Math.min(sessionUnits, s.quantity);
+      } else if (s.checkedOutAt) {
+        dispatched += s.quantity;
+      }
+    }
+    if (dispatched > 0) dispatchedByAsset.set(assetId, dispatched);
+  }
+
+  return dispatchedByAsset;
+}

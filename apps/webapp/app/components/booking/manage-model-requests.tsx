@@ -35,6 +35,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.model-requests";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { getValidationErrors } from "~/utils/http";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
 import { AvailabilityBadge } from "./availability-label";
 
@@ -409,6 +410,7 @@ function ExistingRequestRow({
             <input
               id={`model-request-quantity-${request.assetModelId}`}
               type="number"
+              {...numberInputWheelGuard}
               name={zo.fields.quantity()}
               min={1}
               step={1}
@@ -672,6 +674,7 @@ function AddRequestRow({
           <input
             id="model-request-quantity"
             type="number"
+            {...numberInputWheelGuard}
             name={zo.fields.quantity()}
             min={1}
             step={1}
