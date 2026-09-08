@@ -145,7 +145,7 @@
     "zxing-wasm": "^3.0.2"
   },
   "devDependencies": {
-    "@faker-js/faker": "^10.4.0",
+    "@faker-js/faker": "^10.5.0",
     "@playwright/test": "^1.59.1",
     "@react-router/dev": "7.16.0",
     "@react-router/remix-routes-option-adapter": "7.16.0",
