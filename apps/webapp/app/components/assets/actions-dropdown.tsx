@@ -458,6 +458,7 @@ const ConditionalActionsDropdown = () => {
               0
             ) ?? 0)
           }
+          totalQuantity={asset.quantity}
           open={isAdjustQuantityDialogOpen}
           onOpenChange={setIsAdjustQuantityDialogOpen}
         />
