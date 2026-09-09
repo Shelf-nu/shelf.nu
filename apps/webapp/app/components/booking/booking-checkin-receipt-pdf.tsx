@@ -96,8 +96,12 @@ export const BookingCheckinReceiptPDF = ({
 
   const handleOpenDialog = () => {
     setIsDialogOpen(true);
+    // Both values come off the page's own query string unvalidated, so they are
+    // encoded rather than interpolated: one carrying `&` or `#` would otherwise
+    // rewrite or truncate the request.
+    const query = new URLSearchParams({ orderBy, orderDirection });
     void fetcher.load(
-      `/api/bookings/${booking.id}/generate-checkin-receipt?orderBy=${orderBy}&orderDirection=${orderDirection}`
+      `/api/bookings/${booking.id}/generate-checkin-receipt?${query.toString()}`
     );
   };
 
