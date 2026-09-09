@@ -138,6 +138,14 @@ vitest.mock("~/database/db.server", () => {
       // INDIVIDUAL legacy path the booked total is implicitly 1, so the
       // default echoes one slice with `quantity: 1`. Qty-tracked tests
       // override per-describe `beforeEach` to model bigger slices.
+      // why: a kit-driven slice written before `sourceKitId` existed names its
+      // kit through this hop (`getKitIdsToAcquireBySlice`). These fixtures set
+      // `assetKitId` with no `sourceKitId`, so the lookup runs; no rows means
+      // the slice resolves to no kit, which is what the note assertions here
+      // expect — kit STATUS is covered in `service.server.test.ts`.
+      assetKit: {
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
       bookingAsset: {
         findMany: vitest.fn().mockResolvedValue([{ quantity: 1 }]),
         // why: `computeBookingAssetSliceRemaining` reads a single slice's

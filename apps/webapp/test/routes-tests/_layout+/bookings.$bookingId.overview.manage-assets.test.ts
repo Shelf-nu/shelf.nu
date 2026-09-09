@@ -45,7 +45,7 @@ vi.mock("~/modules/booking/service.server", () => ({
   removeAssets: vi.fn(),
   // Loader-only — used by the F2 loader tests below.
   getBooking: vi.fn(),
-  getKitIdsByAssets: vi.fn(),
+  getKitIdsByBookingSlices: vi.fn(),
 }));
 
 // Loader-only — `getPaginatedAndFilterableAssets` backs the Assets tab list.
@@ -1198,7 +1198,9 @@ describe("manage-assets loader — Models tab payload", () => {
       mockPaginatedAssets as any
     );
     vi.mocked(bookingService.getBooking).mockResolvedValue(mockLoaderBooking);
-    vi.mocked(bookingService.getKitIdsByAssets).mockReturnValue([]);
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue(
       mockModelTabData as any
     );
