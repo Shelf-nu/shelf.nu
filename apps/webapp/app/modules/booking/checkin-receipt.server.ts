@@ -281,18 +281,30 @@ export async function fetchCheckinReceiptData(
     // receiver, and on a slice carrying both a later write-off must not date
     // the row after the moment the units actually came back.
     //
-    // Tagged logs only as well: an untagged legacy log is spread across an
-    // asset's slices by a greedy pass that carries no times, so taking a moment
-    // from one would be a guess rather than a record.
+    // A log names its slice, or names an asset that has only one. The phone
+    // sends quantity dispositions without a slice id, so untagged logs are
+    // ordinary current data rather than legacy residue, and refusing them all
+    // would leave every mobile partial return with no moment and no receiver.
+    // Where the asset has exactly one slice on the booking there is nothing to
+    // decide — the log can only describe that slice. Where it has several, the
+    // greedy pass that splits the units carries no times, so choosing one would
+    // be a guess and the row stays blank.
     const returnRecordsBySlice = new Map<
       string,
       Array<{ at: Date; byId: string }>
     >();
     for (const log of dispositionLogs) {
-      if (!log.bookingAssetId || log.category !== "RETURN") continue;
-      const forSlice = returnRecordsBySlice.get(log.bookingAssetId) ?? [];
+      if (log.category !== "RETURN") continue;
+
+      const assetSlices = slicesByAsset.get(log.assetId) ?? [];
+      const sliceId =
+        log.bookingAssetId ??
+        (assetSlices.length === 1 ? assetSlices[0].id : null);
+      if (!sliceId) continue;
+
+      const forSlice = returnRecordsBySlice.get(sliceId) ?? [];
       forSlice.push({ at: log.createdAt, byId: log.userId });
-      returnRecordsBySlice.set(log.bookingAssetId, forSlice);
+      returnRecordsBySlice.set(sliceId, forSlice);
     }
 
     // Reconcile exactly the slices the sheet prints, in the order it prints

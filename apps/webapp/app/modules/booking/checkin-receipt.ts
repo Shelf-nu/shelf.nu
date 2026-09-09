@@ -95,9 +95,10 @@ export type CheckinReceiptSlice = {
    * appear as a receiver — and a later write-off must not date the row after
    * the units actually came back.
    *
-   * Only logs that name the slice. Untagged legacy logs are spread across
-   * slices by a greedy pass that carries no times, so attributing a moment from
-   * one would be a guess.
+   * A log qualifies when it names the slice, or when it names an asset that has
+   * only one slice on the booking and so can mean nothing else. Where an asset
+   * has several slices an untagged log is split between them by a greedy pass
+   * that carries no times, and choosing one would be a guess.
    */
   returnRecords?: Array<{ at: Date; byId: string }>;
 };

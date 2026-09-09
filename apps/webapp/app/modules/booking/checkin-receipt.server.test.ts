@@ -290,4 +290,110 @@ describe("fetchCheckinReceiptData", () => {
     expect(receipt.returnedAt).toEqual(LOGGED_AT);
     expect(receipt.checkedInByNames).toEqual(["Grace Hopper"]);
   });
+
+  it("dates a mobile partial return, whose log names no slice", async () => {
+    // The phone submits quantity dispositions without a slice id, so its logs
+    // are ordinary current data rather than legacy residue. This asset has one
+    // slice on the booking, so the log can only describe that slice and its
+    // moment is a record rather than a choice.
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [pdfRow("ba-1", "asset-1", "XLR cable")],
+        BookingStatus.ONGOING
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 6,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 6,
+        checkedInAt: null,
+        checkedInById: null,
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    mockOf(db.consumptionLog.findMany).mockResolvedValue([
+      {
+        assetId: "asset-1",
+        bookingAssetId: null,
+        category: "RETURN",
+        quantity: 3,
+        createdAt: LOGGED_AT,
+        userId: "user-7",
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([
+      {
+        id: "user-7",
+        displayName: "Grace Hopper",
+        firstName: null,
+        lastName: null,
+      },
+    ]);
+
+    const receipt = await run();
+
+    expect(receipt.rows[0].checkedInAt).toEqual(LOGGED_AT);
+    expect(receipt.rows[0].checkedInByName).toBe("Grace Hopper");
+    expect(receipt.checkedInByNames).toEqual(["Grace Hopper"]);
+  });
+
+  it("leaves an untagged log undated when the asset has several slices", async () => {
+    // One asset booked standalone and through a kit. An untagged log is split
+    // between the two by a greedy pass that carries no times, so no row can
+    // claim the moment without guessing which units it describes.
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-1", "asset-1", "XLR cable"),
+          pdfRow("ba-2", "asset-1", "XLR cable"),
+        ],
+        BookingStatus.ONGOING
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue(
+      ["ba-1", "ba-2"].map((id, index) => ({
+        id,
+        assetId: "asset-1",
+        quantity: 3,
+        assetKitId: index === 1 ? "ak-1" : null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 3,
+        checkedInAt: null,
+        checkedInById: null,
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      }))
+    );
+    mockOf(db.consumptionLog.findMany).mockResolvedValue([
+      {
+        assetId: "asset-1",
+        bookingAssetId: null,
+        category: "RETURN",
+        quantity: 2,
+        createdAt: LOGGED_AT,
+        userId: "user-7",
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([
+      {
+        id: "user-7",
+        displayName: "Grace Hopper",
+        firstName: null,
+        lastName: null,
+      },
+    ]);
+
+    const receipt = await run();
+
+    for (const row of receipt.rows) {
+      expect(row.checkedInAt).toBeNull();
+      expect(row.checkedInByName).toBe("");
+    }
+    expect(receipt.checkedInByNames).toEqual([]);
+  });
 });
