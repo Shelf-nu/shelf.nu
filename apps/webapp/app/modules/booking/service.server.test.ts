@@ -10171,6 +10171,163 @@ describe("isBookingFullyCheckedIn", () => {
     expect(result).toBe(true);
   });
 
+  it("does not let a first-trip check-in session reconcile a scan re-dispatch that kept the first marker", async () => {
+    expect.assertions(1);
+
+    // A progressive check-out keeps a slice's original `checkedOutAt` ("out
+    // since" is the first departure). A slice that went out by scan, came back
+    // by scan and went out by scan again therefore carries the FIRST trip's
+    // marker, while its second departure is recorded only as a check-out
+    // session. The first trip's check-in session postdates that marker, and
+    // it must not stand in for a return that has not happened.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        // First departure; the second one did not refresh it.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        // Cleared by the second departure.
+        checkedInAt: null,
+        checkedOutQuantity: 2,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // Out at 10:00 and again at 14:00.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T10:00:00.000Z"),
+      },
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T14:00:00.000Z"),
+      },
+    ]);
+    // Back at 12:00, between the two departures.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    // The asset is out on its second trip.
+    expect(result).toBe(false);
+  });
+
+  it("accepts a check-in session that answers the latest scan departure", async () => {
+    expect.assertions(1);
+
+    // The mirror of the case above, so the guard cannot be satisfied by
+    // refusing every session on a re-dispatched slice. The slice went out
+    // twice by scan and came back twice; the marker still shows the first
+    // trip, and the latest check-in session postdates the latest departure.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        checkedOutQuantity: 2,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T10:00:00.000Z"),
+      },
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T14:00:00.000Z"),
+      },
+    ]);
+    // Back at 12:00 and again at 16:00, after the second departure.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T16:00:00.000Z"),
+      },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(true);
+  });
+
+  it("does not let first-trip markers reconcile a later scan departure", async () => {
+    expect.assertions(1);
+
+    // Both markers can predate the latest departure: rows stamped from session
+    // history carry each side's EARLIEST session, so a slice that was out,
+    // back and out again by scan reads as one complete round trip on its
+    // markers alone. The check-out sessions still record the second departure,
+    // and no check-in answers it.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: new Date("2026-01-01T12:00:00.000Z"),
+        checkedOutQuantity: 2,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T10:00:00.000Z"),
+      },
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T14:00:00.000Z"),
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(false);
+  });
+
   it("returns false when qty-tracked units went out, came back, and went out again", async () => {
     expect.assertions(1);
 
