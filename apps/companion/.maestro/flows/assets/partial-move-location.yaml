@@ -1,0 +1,67 @@
+# Partial-quantity location move on a QUANTITY_TRACKED asset (MoveQuantitySheet).
+#
+# Precondition: app foregrounded with a signed-in session (qa-admin1 /
+# GRANULAR WORKSPACE) — uses the no-login pattern, so NO launchApp/clearState.
+# Test asset: "QA Qty Test — Tripod (10 pcs)" (cmqzf1xt20001s0iitjd72rkb).
+#
+# Verifies: Location quick action -> picker -> the move sheet (replaces the
+# whole-asset alert for QUANTITY_TRACKED) -> quantity 4 of 10 -> unplaced-pool
+# hint -> Move -> detail shows the new location. DB cross-check (pivot row
+# quantity, ASSET_LOCATION_CHANGED meta, "placed/moved 4 pcs" note) happens
+# outside Maestro.
+#
+# Re-runnable: from the second run the tripod is already at Equipment Storage
+# with 4 placed; the same submission is then a server-side no-op and every
+# assertion still holds. Restoring the unplaced fixture state is a manual
+# AssetLocation delete outside Maestro.
+#
+# Maestro full-matches a11y labels, so text matchers are regex-wrapped with .*
+# per .maestro/LESSONS.md.
+appId: com.shelf.companion.carlos
+---
+# Assets tab -> find the tripod via search
+- tapOn: "Assets"
+- tapOn: ".*Search assets.*"
+- inputText: "QA Qty Test"
+- extendedWaitUntil:
+    visible: ".*QA Qty Test — Tripod.*"
+    timeout: 10000
+# First tap may be consumed dismissing the keyboard — tap twice, second optional.
+- tapOn: ".*QA Qty Test — Tripod.*"
+- tapOn:
+    text: ".*QA Qty Test — Tripod.*"
+    optional: true
+- extendedWaitUntil:
+    visible: ".*10 pcs.*"
+    timeout: 15000
+
+# Location quick action (a11y label; visible text is "Move"/"Location")
+- tapOn: "Update location"
+- extendedWaitUntil:
+    visible: "Select Location"
+    timeout: 10000
+- tapOn: ".*Equipment Storage.*"
+
+# The move sheet replaces the whole-asset alert for QUANTITY_TRACKED
+- extendedWaitUntil:
+    visible: "Quantity to place at this location:"
+    timeout: 10000
+
+# Partial: 4 of 10 -> unplaced-pool hint appears. The input seeds with the
+# current placement (or the full pool) and focuses on open, so erase first.
+- eraseText
+- inputText: "4"
+- extendedWaitUntil:
+    visible: ".*unplaced pool.*"
+    timeout: 5000
+
+# Confirm (a11y label carries qty + destination)
+- tapOn: "Move 4 pcs to Equipment Storage"
+- tapOn:
+    text: "Move 4 pcs to Equipment Storage"
+    optional: true
+
+# Detail refreshes with the new location
+- extendedWaitUntil:
+    visible: ".*Equipment Storage.*"
+    timeout: 20000
