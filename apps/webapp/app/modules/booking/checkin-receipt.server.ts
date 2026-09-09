@@ -216,22 +216,36 @@ export async function fetchCheckinReceiptData(
       }
     }
 
+    // Reconcile exactly the slices the sheet prints, in the order it prints
+    // them, so the totals can never describe a different set of rows from the
+    // table above them. Attribution above deliberately spans every slice: one
+    // missing from the print list still holds capacity that untagged logs are
+    // attributed against.
+    const markersByBookingAssetId = new Map(
+      slices.map((slice) => [slice.id, slice])
+    );
+    const printedSlices = assets.flatMap((asset) => {
+      const marker = markersByBookingAssetId.get(asset.bookingAssetId);
+      return marker
+        ? [
+            {
+              bookingAssetId: marker.id,
+              assetId: marker.assetId,
+              assetType: marker.asset.type,
+              quantity: marker.quantity,
+              checkedOutAt: marker.checkedOutAt,
+              checkedOutQuantity: marker.checkedOutQuantity,
+              checkedInAt: marker.checkedInAt,
+              checkedInById: marker.checkedInById,
+            },
+          ]
+        : [];
+    });
+
     const receipt = buildCheckinReceipt({
-      slices: slices.map((slice) => ({
-        bookingAssetId: slice.id,
-        assetId: slice.assetId,
-        assetType: slice.asset.type,
-        quantity: slice.quantity,
-        checkedOutAt: slice.checkedOutAt,
-        checkedOutQuantity: slice.checkedOutQuantity,
-        checkedInAt: slice.checkedInAt,
-        checkedInById: slice.checkedInById,
-      })),
+      slices: printedSlices,
       breakdownByBookingAsset,
     });
-    const receiptRowsById = new Map(
-      receipt.rows.map((row) => [row.bookingAssetId, row])
-    );
 
     // The first slice to leave, and the person who sent it. Both come from the
     // same slice: a booking checked out in several passes has several
@@ -246,18 +260,18 @@ export async function fetchCheckinReceiptData(
       )[0];
 
     // Distinct receivers in the order they first received something.
-    const checkedInUserIdsInOrder: string[] = [];
-    for (const slice of slices
-      .filter((s) => s.checkedInAt !== null && s.checkedInById !== null)
-      .sort(
-        (a, b) =>
-          (a.checkedInAt as Date).getTime() - (b.checkedInAt as Date).getTime()
-      )) {
-      const id = slice.checkedInById as string;
-      if (!checkedInUserIdsInOrder.includes(id)) {
-        checkedInUserIdsInOrder.push(id);
-      }
-    }
+    const checkedInUserIdsInOrder = [
+      ...new Set(
+        slices
+          .filter((s) => s.checkedInAt !== null && s.checkedInById !== null)
+          .sort(
+            (a, b) =>
+              (a.checkedInAt as Date).getTime() -
+              (b.checkedInAt as Date).getTime()
+          )
+          .map((slice) => slice.checkedInById as string)
+      ),
+    ];
 
     // Ids read off the booking's own rows, not supplied by the caller.
     const markerUserIds = [
@@ -279,35 +293,25 @@ export async function fetchCheckinReceiptData(
       markerUsers.map((user) => [user.id, resolveUserDisplayName(user)])
     );
 
-    const rows: CheckinReceiptDbRow[] = assets.map((asset) => {
-      const reconciliation = receiptRowsById.get(asset.bookingAssetId);
-      return {
-        // Defensive: the two reads are one booking apart in time, so a slice
-        // removed between them renders with nothing reconciled rather than
-        // taking the whole sheet down.
-        ...(reconciliation ?? {
-          bookingAssetId: asset.bookingAssetId,
-          assetId: asset.id,
-          isQuantityTracked: false,
-          state: "NEVER_CHECKED_OUT" as const,
-          sent: 0,
-          returned: 0,
-          consumed: 0,
-          lost: 0,
-          damaged: 0,
-          stillOut: 0,
-          checkedInAt: null,
-          checkedInById: null,
-        }),
-        title: asset.title,
-        quantity: asset.quantity,
-        kitName: asset.kit?.name ?? null,
-        isRemovedFromKit: asset.isRemovedFromKit,
-        displayCode: assetIdToDisplayCodeMap[asset.id],
-        checkedInByName: reconciliation?.checkedInById
-          ? nameByUserId.get(reconciliation.checkedInById) ?? ""
-          : "",
-      };
+    const printableAssetsById = new Map(
+      assets.map((asset) => [asset.bookingAssetId, asset])
+    );
+    const rows: CheckinReceiptDbRow[] = receipt.rows.flatMap((row) => {
+      const asset = printableAssetsById.get(row.bookingAssetId);
+      if (!asset) return [];
+      return [
+        {
+          ...row,
+          title: asset.title,
+          quantity: asset.quantity,
+          kitName: asset.kit?.name ?? null,
+          isRemovedFromKit: asset.isRemovedFromKit,
+          displayCode: assetIdToDisplayCodeMap[asset.id],
+          checkedInByName: row.checkedInById
+            ? nameByUserId.get(row.checkedInById) ?? ""
+            : "",
+        },
+      ];
     });
 
     // The recorded return: the status transition into COMPLETE. When no event
