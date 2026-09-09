@@ -1191,6 +1191,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         booking,
         modelName,
+        /**
+         * Whether any booked unit has been accounted for — returned, consumed,
+         * lost or damaged.
+         *
+         * A quantity slice returned in part keeps `BookingAsset.checkedInAt`
+         * NULL, because that marker means fully reconciled, so the slice
+         * markers alone cannot answer "has anything come back yet". The
+         * check-in receipt is offered for exactly that case, and reads this.
+         */
+        hasDispositionedUnits: dispositionLogs.length > 0,
         // Shaped view for first paint (same field names the component reads),
         // post-enriched with per-row qty disposition data (Polish-6 multi-row).
         items: enrichedItems,

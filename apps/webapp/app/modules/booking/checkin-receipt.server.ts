@@ -143,37 +143,72 @@ export async function fetchCheckinReceiptData(
     // returns, and the slice projection behind its rows keeps only the columns
     // the checklist prints — so the markers this sheet is built on need their
     // own read.
-    const [slices, dispositionLogs, checkInTimes] = await Promise.all([
-      db.bookingAsset.findMany({
-        where: { bookingId, booking: { organizationId } },
-        select: {
-          id: true,
-          assetId: true,
-          quantity: true,
-          assetKitId: true,
-          checkedOutAt: true,
-          checkedOutById: true,
-          checkedOutQuantity: true,
-          checkedInAt: true,
-          checkedInById: true,
-          asset: { select: { type: true } },
-        },
-      }),
-      db.consumptionLog.findMany({
-        where: {
-          bookingId,
-          booking: { organizationId },
-          category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
-        },
-        select: {
-          assetId: true,
-          bookingAssetId: true,
-          category: true,
-          quantity: true,
-        },
-      }),
-      resolveCheckInTimes([bookingId]),
-    ]);
+    const [slices, dispositionLogs, checkInTimes, checkinSessions] =
+      await Promise.all([
+        db.bookingAsset.findMany({
+          where: { bookingId, booking: { organizationId } },
+          select: {
+            id: true,
+            assetId: true,
+            quantity: true,
+            assetKitId: true,
+            checkedOutAt: true,
+            checkedOutById: true,
+            checkedOutQuantity: true,
+            checkedInAt: true,
+            checkedInById: true,
+            asset: { select: { type: true } },
+          },
+        }),
+        db.consumptionLog.findMany({
+          where: {
+            bookingId,
+            booking: { organizationId },
+            category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+          },
+          select: {
+            assetId: true,
+            bookingAssetId: true,
+            category: true,
+            quantity: true,
+          },
+        }),
+        resolveCheckInTimes([bookingId]),
+        // Progressive check-in sessions, for slices reconciled before the
+        // per-slice markers existed. The completion gate accepts a session at or
+        // after a slice's departure as proof an INDIVIDUAL asset came back, so
+        // the receipt reads them too — otherwise a booking the gate closed prints
+        // as still out.
+        db.partialBookingCheckin.findMany({
+          where: { bookingId, booking: { organizationId } },
+          select: {
+            assetIds: true,
+            checkinTimestamp: true,
+            checkedInById: true,
+          },
+        }),
+      ]);
+
+    // The most recent session naming each asset. Kept as a moment rather than a
+    // flag: a slice that departed twice has a session for the first trip whose
+    // asset id never leaves the list, and a bare set would let it reconcile the
+    // second departure too.
+    const latestSessionByAsset = new Map<
+      string,
+      { at: Date; byId: string | null }
+    >();
+    for (const session of checkinSessions) {
+      if (!session.checkinTimestamp) continue;
+      for (const assetId of session.assetIds) {
+        const seen = latestSessionByAsset.get(assetId);
+        if (!seen || session.checkinTimestamp > seen.at) {
+          latestSessionByAsset.set(assetId, {
+            at: session.checkinTimestamp,
+            byId: session.checkedInById ?? null,
+          });
+        }
+      }
+    }
 
     // Attribution runs once per ASSET with all four categories together:
     // capacity is shared between them, so a per-category pass would refill each
@@ -244,6 +279,10 @@ export async function fetchCheckinReceiptData(
               checkedOutQuantity: marker.checkedOutQuantity,
               checkedInAt: marker.checkedInAt,
               checkedInById: marker.checkedInById,
+              sessionCheckedInAt:
+                latestSessionByAsset.get(marker.assetId)?.at ?? null,
+              sessionCheckedInById:
+                latestSessionByAsset.get(marker.assetId)?.byId ?? null,
             },
           ]
         : [];
@@ -266,17 +305,19 @@ export async function fetchCheckinReceiptData(
           (b.checkedOutAt as Date).getTime()
       )[0];
 
-    // Distinct receivers in the order they first received something.
+    // Distinct receivers in the order they first received something, taken
+    // from the reconciled rows rather than the raw markers so the summary names
+    // exactly the people the rows below it name.
     const checkedInUserIdsInOrder = [
       ...new Set(
-        slices
-          .filter((s) => s.checkedInAt !== null && s.checkedInById !== null)
+        receipt.rows
+          .filter((row) => row.checkedInAt !== null && row.checkedInById)
           .sort(
             (a, b) =>
               (a.checkedInAt as Date).getTime() -
               (b.checkedInAt as Date).getTime()
           )
-          .map((slice) => slice.checkedInById as string)
+          .map((row) => row.checkedInById as string)
       ),
     ];
 
@@ -286,6 +327,7 @@ export async function fetchCheckinReceiptData(
         [
           earliestCheckedOutSlice?.checkedOutById ?? null,
           ...slices.map((slice) => slice.checkedInById),
+          ...[...latestSessionByAsset.values()].map((s) => s.byId),
         ].filter((id): id is string => id !== null)
       ),
     ];

@@ -183,6 +183,46 @@ describe("buildCheckinReceipt — individual slices", () => {
     expect(row.checkedInById).toBeNull();
   });
 
+  it("counts a legacy session as the return when the slice marker is absent", () => {
+    // Rows reconciled before the per-slice markers existed are proven returned
+    // by a progressive check-in session naming their asset. The completion gate
+    // accepts that session, so a booking it closed must not print as still out.
+    const result = buildCheckinReceipt({
+      slices: [
+        slice({
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedInAt: null,
+          checkedInById: null,
+          sessionCheckedInAt: CHECKED_IN_AT,
+          sessionCheckedInById: "user-9",
+        }),
+      ],
+      breakdownByBookingAsset: new Map(),
+    });
+
+    const row = rowFor(result, "ba-1");
+    expect(row.state).toBe("RETURNED");
+    expect(row.checkedInAt).toEqual(CHECKED_IN_AT);
+    expect(row.checkedInById).toBe("user-9");
+  });
+
+  it("ignores a session older than the departure it would answer", () => {
+    // The same test the marker is held to: a session from the first trip must
+    // not reconcile the trip the slice is on now.
+    const result = buildCheckinReceipt({
+      slices: [
+        slice({
+          checkedOutAt: new Date("2026-09-04T08:00:00.000Z"),
+          sessionCheckedInAt: new Date("2026-09-02T10:00:00.000Z"),
+          sessionCheckedInById: "user-9",
+        }),
+      ],
+      breakdownByBookingAsset: new Map(),
+    });
+
+    expect(rowFor(result, "ba-1").state).toBe("STILL_OUT");
+  });
+
   it("leaves the receiving user empty when the check-in marker carries no user", () => {
     // Backfilled rows carry a `checkedInAt` with no `checkedInById`. The sheet
     // prints a blank rather than the custodian or the printing user.
@@ -302,6 +342,29 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
     expect(result.totals.returned).toBe(7);
     expect(result.totals.lost).toBe(1);
     expect(result.totals.stillOut).toBe(0);
+  });
+
+  it("never settles a quantity slice from a session, which cannot express units", () => {
+    // A session names an asset, not a number of units, so it cannot say how
+    // much of a quantity slice came back. Its attributed units answer that.
+    const result = buildCheckinReceipt({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 6,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 6,
+          sessionCheckedInAt: CHECKED_IN_AT,
+          sessionCheckedInById: "user-9",
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 2 })]]),
+    });
+
+    const row = rowFor(result, "ba-1");
+    expect(row.state).toBe("STILL_OUT");
+    expect(row.stillOut).toBe(4);
+    expect(row.checkedInAt).toBeNull();
   });
 
   it("reports every sent unit as still out when the slice has no attributed dispositions", () => {

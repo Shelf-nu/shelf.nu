@@ -37,7 +37,7 @@ interface Props {
 }
 
 export const ActionsDropdown = ({ fullWidth }: Props) => {
-  const { booking } = useLoaderData<typeof loader>();
+  const { booking, hasDispositionedUnits } = useLoaderData<typeof loader>();
   // Seed the extend dialog in the RESOLVED preference zone — the same zone this
   // page displays the booking in and the extend action parses the submission in.
   // Seeding from the device clock showed a different end date than the page.
@@ -184,6 +184,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           />
           <BookingCheckinReceiptPDF
             booking={booking}
+            hasDispositionedUnits={hasDispositionedUnits}
             timeStamp={new Date().getTime()}
           />
         </DropdownMenuContent>

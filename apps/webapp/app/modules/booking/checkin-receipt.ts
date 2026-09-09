@@ -69,6 +69,19 @@ export type CheckinReceiptSlice = {
    * printing user, or any other substitute name.
    */
   checkedInById: string | null;
+  /**
+   * The most recent progressive check-in session naming this slice's ASSET, for
+   * rows reconciled before the per-slice markers existed.
+   *
+   * The completion gate accepts such a session as proof an INDIVIDUAL asset
+   * came back, so the receipt has to read it too or a legacy booking the gate
+   * closed prints as still out. Sessions are asset-grained and cannot express
+   * partial units, so they answer for INDIVIDUAL slices only; a quantity slice
+   * is settled by its attributed units instead.
+   */
+  sessionCheckedInAt?: Date | null;
+  /** Who ran that session. */
+  sessionCheckedInById?: string | null;
 };
 
 /**
@@ -311,19 +324,42 @@ const NO_DISPOSITIONS: CheckinReceiptDispositionBreakdown = {
 };
 
 /**
- * Whether a slice's recorded check-in answers the departure it is on now.
+ * The check-in that answers this slice's current departure, or `null`.
  *
  * A check-in only answers a departure, and only the one it followed. Every
  * other marker is left off the sheet: a moment beside a row this receipt calls
  * never checked out claims a return for units that never moved, and a moment
  * from an earlier trip beside a row it calls still out contradicts the row it
  * sits on. Both readings are worse than a blank cell.
+ *
+ * The slice marker answers first; then, for an INDIVIDUAL slice, the
+ * progressive session naming its asset, which is what the completion gate
+ * accepts for rows reconciled before the markers existed.
  */
-function checkInAnswersCurrentTrip(slice: CheckinReceiptSlice): boolean {
-  if (!slice.checkedInAt || !slice.checkedOutAt) {
-    return false;
+function resolveCheckIn(
+  slice: CheckinReceiptSlice
+): { at: Date; byId: string | null } | null {
+  if (!slice.checkedOutAt) {
+    return null;
   }
-  return slice.checkedInAt.getTime() >= slice.checkedOutAt.getTime();
+  const departedAt = slice.checkedOutAt.getTime();
+
+  if (slice.checkedInAt && slice.checkedInAt.getTime() >= departedAt) {
+    return { at: slice.checkedInAt, byId: slice.checkedInById };
+  }
+
+  // Sessions cannot express partial units, so they never settle a quantity
+  // slice; its attributed units do that.
+  if (slice.assetType === AssetType.QUANTITY_TRACKED) {
+    return null;
+  }
+
+  const sessionAt = slice.sessionCheckedInAt;
+  if (sessionAt && sessionAt.getTime() >= departedAt) {
+    return { at: sessionAt, byId: slice.sessionCheckedInById ?? null };
+  }
+
+  return null;
 }
 
 /**
@@ -356,7 +392,8 @@ function buildRow(
     ? 1
     : 0;
 
-  const isReconciledHere = checkInAnswersCurrentTrip(slice);
+  const reconciledBy = resolveCheckIn(slice);
+  const isReconciledHere = reconciledBy !== null;
 
   // An INDIVIDUAL slice carries no disposition units: its whole obligation is
   // the one item, and the markers alone say whether it came back.
@@ -379,7 +416,7 @@ function buildRow(
   // cap at the booked quantity, so a re-dispatched slice can settle its marker
   // and still owe units — and a row that states both a return time and an
   // outstanding count says two things at once. The unit counts are the truth.
-  const printsCheckIn = isReconciledHere && state === "RETURNED";
+  const printsCheckIn = reconciledBy !== null && state === "RETURNED";
 
   return {
     bookingAssetId: slice.bookingAssetId,
@@ -392,8 +429,8 @@ function buildRow(
     lost,
     damaged,
     stillOut,
-    checkedInAt: printsCheckIn ? slice.checkedInAt : null,
-    checkedInById: printsCheckIn ? slice.checkedInById : null,
+    checkedInAt: printsCheckIn ? reconciledBy.at : null,
+    checkedInById: printsCheckIn ? reconciledBy.byId : null,
   };
 }
 

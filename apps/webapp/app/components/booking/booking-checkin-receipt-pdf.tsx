@@ -53,6 +53,7 @@ type CheckinReceiptApiResponse = { pdfMeta: CheckinReceiptView };
  */
 export const BookingCheckinReceiptPDF = ({
   booking,
+  hasDispositionedUnits,
   timeStamp,
 }: {
   booking: {
@@ -69,6 +70,12 @@ export const BookingCheckinReceiptPDF = ({
       checkedInAt: string | Date | null;
     }>;
   };
+  /**
+   * Whether any booked unit has been accounted for. A quantity slice returned
+   * in part keeps its `checkedInAt` NULL — that marker means fully reconciled —
+   * so the markers alone cannot say whether anything has come back.
+   */
+  hasDispositionedUnits: boolean;
   timeStamp: number;
 }) => {
   const componentRef = useRef<HTMLDivElement>(null);
@@ -121,9 +128,14 @@ export const BookingCheckinReceiptPDF = ({
   // Nothing to record until something has left: a booking archived straight
   // from reserved is finished and has no check-out marker on any slice, and a
   // receipt for it would be a return document over rows that never moved.
+  //
+  // Past that, anything reconciled is enough — a partial return is exactly the
+  // case a printed record is wanted for. `checkedInAt` alone would miss one: a
+  // quantity slice returned in part keeps it NULL, so the units it sent back
+  // count too.
   const disabled = !(
     hasCheckedOutSlice &&
-    (isCompleted || isArchived || hasCheckedInSlice)
+    (isCompleted || isArchived || hasCheckedInSlice || hasDispositionedUnits)
   ) && {
     reason: hasCheckedOutSlice
       ? "Nothing has been checked in yet."

@@ -319,17 +319,21 @@ describe("booking check-in receipt — the sheet", () => {
 });
 
 /** Renders the Actions-menu entry for a booking in the given shape. */
-function renderEntry(booking: {
-  status: BookingStatus;
-  bookingAssets: Array<{
-    checkedOutAt: string | null;
-    checkedInAt: string | null;
-  }>;
-}) {
+function renderEntry(
+  booking: {
+    status: BookingStatus;
+    bookingAssets: Array<{
+      checkedOutAt: string | null;
+      checkedInAt: string | null;
+    }>;
+  },
+  hasDispositionedUnits = false
+) {
   return render(
     <MemoryRouter>
       <BookingCheckinReceiptPDF
         booking={{ id: "booking-1", name: "Shoot", ...booking }}
+        hasDispositionedUnits={hasDispositionedUnits}
         timeStamp={1757000000000}
       />
     </MemoryRouter>
@@ -371,6 +375,23 @@ describe("booking check-in receipt — when the entry is offered", () => {
         { checkedOutAt: "2026-09-01T09:00:00.000Z", checkedInAt: null },
       ],
     });
+
+    expect(entryButton()).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("offers it once a quantity slice has returned part of what it sent", () => {
+    // why: a partly-returned quantity slice keeps `checkedInAt` NULL, because
+    // that marker means fully reconciled. Reading the markers alone would
+    // withhold the receipt from the partial return it exists to record.
+    renderEntry(
+      {
+        status: BookingStatus.ONGOING,
+        bookingAssets: [
+          { checkedOutAt: "2026-09-01T09:00:00.000Z", checkedInAt: null },
+        ],
+      },
+      true
+    );
 
     expect(entryButton()).not.toHaveAttribute("aria-disabled", "true");
   });
