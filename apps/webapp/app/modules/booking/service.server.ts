@@ -8046,6 +8046,12 @@ export async function partialCheckoutBooking({
       qtyClaimsCoverFullRemaining;
 
     if (shouldDelegateToFullCheckout) {
+      // The departure this session records. A session dates the departure it
+      // describes, never a later instant: the completion gate reads the later
+      // of a session's timestamp and the slice marker as the departure a
+      // check-in has to answer, and the row below is written only after the
+      // checkout has committed and its side effects have run.
+      const departedAt = new Date();
       const fullyCheckedOut = await checkoutBooking({
         id,
         organizationId,
@@ -8094,6 +8100,9 @@ export async function partialCheckoutBooking({
           data: {
             bookingId: id,
             checkedOutById: userId,
+            // Dated from the capture above, not from the row's own default, so
+            // the session never postdates the marker it accompanies.
+            checkoutTimestamp: departedAt,
             assetIds: outstandingAssetIds,
             quantities: outstandingQuantities,
             bookingAssetIds: outstandingBookingAssetIds,
