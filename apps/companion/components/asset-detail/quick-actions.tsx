@@ -194,7 +194,9 @@ export const QuickActions = memo(function QuickActions({
               style={styles.secondaryAction}
               onPress={onLocationPress}
               activeOpacity={0.7}
-              accessibilityLabel="Update location"
+              accessibilityLabel={
+                isQtyTracked ? "Manage placements" : "Update location"
+              }
               accessibilityRole="button"
             >
               <Ionicons
@@ -202,8 +204,14 @@ export const QuickActions = memo(function QuickActions({
                 size={18}
                 color={colors.foreground}
               />
+              {/* QUANTITY_TRACKED opens the placements editor (spread across
+                  locations); INDIVIDUAL opens the single-location move flow. */}
               <Text style={styles.secondaryActionText}>
-                {asset.location ? "Move" : "Location"}
+                {isQtyTracked
+                  ? "Placements"
+                  : asset.location
+                  ? "Move"
+                  : "Location"}
               </Text>
             </TouchableOpacity>
           )}

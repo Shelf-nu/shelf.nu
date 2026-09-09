@@ -1,5 +1,5 @@
 import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -43,7 +43,7 @@ import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
 import { AdjustQuantitySheet } from "@/components/adjust-quantity-sheet";
-import { MoveQuantitySheet } from "@/components/move-quantity-sheet";
+import { ManagePlacementsSheet } from "@/components/manage-placements-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
@@ -177,25 +177,52 @@ export default function AssetDetailScreen() {
   const [noteText, setNoteText] = useState("");
   const [isPostingNote, setIsPostingNote] = useState(false);
 
-  // ── Location Action ─────────────────────────────────
+  // ── Location / Placements Actions ───────────────────
 
-  // Pending move target for QUANTITY_TRACKED assets. Non-null doubles as the
-  // "move sheet visible" flag AND carries the picked location, so the sheet
-  // and the confirm handler can never disagree about the destination
-  // (same pattern as `assignQtyMember`).
-  const [moveTarget, setMoveTarget] = useState<LocationType | null>(null);
+  // QUANTITY_TRACKED assets edit their location spread in the placements
+  // editor; INDIVIDUAL assets keep the picker + confirm-alert flow.
+  const [showPlacementsSheet, setShowPlacementsSheet] = useState(false);
 
+  /**
+   * Current placement rows for the placements card + editor seed. Prefers
+   * the server's `placements` array; a server that omits it degrades to a
+   * single synthesized row from the flat `location` field so the card and
+   * editor still reflect the primary placement.
+   */
+  const placements = useMemo(() => {
+    // why: isQuantityTracked is called directly — the screen's shared
+    // `isQtyTracked` const is declared after the loading/error returns,
+    // and hooks must run before them.
+    if (!asset || !isQuantityTracked(asset)) return [];
+    if (asset.placements) return asset.placements;
+    if (!asset.location) return [];
+    return [
+      {
+        locationId: asset.location.id,
+        locationName: asset.location.name,
+        quantity: asset.locationQuantity ?? asset.quantity ?? 1,
+        viaKit: null,
+      },
+    ];
+  }, [asset]);
+
+  /**
+   * Units not placed at any location. Manual rows only — kit-driven rows
+   * describe the same units from the kit's point of view and are bounded
+   * on their own axis, so they don't reduce the unplaced pool.
+   */
+  const unplacedUnits = useMemo(() => {
+    if (!asset || !isQuantityTracked(asset)) return 0;
+    const manualSum = placements.reduce(
+      (sum, p) => (p.viaKit === null ? sum + p.quantity : sum),
+      0
+    );
+    return Math.max(0, (asset.quantity ?? 0) - manualSum);
+  }, [asset, placements]);
+
+  /** INDIVIDUAL flow: picker selection confirms a whole-asset move. */
   const handleLocationSelect = (location: LocationType) => {
     setShowLocationPicker(false);
-
-    if (isQtyTracked) {
-      // QUANTITY_TRACKED: the move sheet is the confirm step — it asks how
-      // many units to place. Re-picking the current location is allowed:
-      // placing a different quantity there is a real placement edit (web
-      // dialog parity), and the server short-circuits true no-ops.
-      setMoveTarget(location);
-      return;
-    }
 
     if (location.id === asset?.location?.id) return; // same location
 
@@ -209,22 +236,39 @@ export default function AssetDetailScreen() {
     );
   };
 
-  /**
-   * Applies the location update and refreshes the asset. `quantity` is the
-   * per-placement amount for QUANTITY_TRACKED assets (units to place at the
-   * location); INDIVIDUAL moves omit it.
-   */
-  const performUpdateLocation = async (
-    locationId: string,
-    quantity?: number
-  ) => {
+  /** Applies an INDIVIDUAL asset's location update and refreshes. */
+  const performUpdateLocation = async (locationId: string) => {
     if (!currentOrg || !asset) return;
     setIsActionLoading(true);
     const { error: err } = await api.updateLocation(
       currentOrg.id,
       asset.id,
-      locationId,
-      quantity
+      locationId
+    );
+    if (err) Alert.alert("Error", err);
+    else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      await fetchAsset();
+    }
+    setIsActionLoading(false);
+  };
+
+  /**
+   * Replaces the manual placement set (QUANTITY_TRACKED) and refreshes.
+   * The sheet already validated the sum client-side; the server re-checks
+   * everything against the row-locked asset and reports conflicts (409)
+   * through the same error alert.
+   */
+  const performSavePlacements = async (
+    nextPlacements: { locationId: string; quantity: number }[]
+  ) => {
+    if (!currentOrg || !asset) return;
+    setShowPlacementsSheet(false);
+    setIsActionLoading(true);
+    const { error: err } = await api.managePlacements(
+      currentOrg.id,
+      asset.id,
+      nextPlacements
     );
     if (err) Alert.alert("Error", err);
     else {
@@ -547,7 +591,11 @@ export default function AssetDetailScreen() {
               }
             }}
             onReleaseCustody={handleReleaseCustody}
-            onLocationPress={() => setShowLocationPicker(true)}
+            onLocationPress={() =>
+              isQtyTracked
+                ? setShowPlacementsSheet(true)
+                : setShowLocationPicker(true)
+            }
             onEditPress={() =>
               router.push({
                 pathname: "/(tabs)/assets/edit",
@@ -575,11 +623,60 @@ export default function AssetDetailScreen() {
                 value={asset.category.name}
               />
             )}
-            {asset.location && (
+            {/* INDIVIDUAL: single flat location row. QUANTITY_TRACKED
+                renders the placement rows below instead. */}
+            {!isQtyTracked && asset.location && (
               <InfoRow
                 icon="location-outline"
                 label="Location"
                 value={asset.location.name}
+              />
+            )}
+            {/* QUANTITY_TRACKED: the full location spread. One row per
+                placement (kit-driven rows named as such), plus the unplaced
+                remainder — so a partial move's result is readable right
+                here. The first row opens the placements editor. */}
+            {isQtyTracked &&
+              placements.map((p, idx) => (
+                <InfoRow
+                  key={`${p.locationId}-${p.viaKit?.id ?? "manual"}`}
+                  icon={idx === 0 ? "location-outline" : "return-down-forward"}
+                  label={idx === 0 ? "Locations" : "Also at"}
+                  value={`${p.locationName} · ${
+                    formatQuantity(p.quantity, asset.unitOfMeasure) ??
+                    p.quantity
+                  }${p.viaKit ? ` via kit ${p.viaKit.name}` : ""}`}
+                  // The row's value IS its a11y label (default), so a screen
+                  // reader reads the location + count; role=button + the
+                  // chevron signal it opens the editor. The QuickActions
+                  // "Placements" button carries the "Manage placements" label.
+                  onPress={
+                    idx === 0 && canUpdateAsset
+                      ? () => setShowPlacementsSheet(true)
+                      : undefined
+                  }
+                />
+              ))}
+            {isQtyTracked && unplacedUnits > 0 && (
+              <InfoRow
+                icon="ellipse-outline"
+                label={placements.length > 0 ? "Unplaced" : "Locations"}
+                value={
+                  placements.length > 0
+                    ? `${
+                        formatQuantity(unplacedUnits, asset.unitOfMeasure) ??
+                        unplacedUnits
+                      }`
+                    : `Unplaced · ${
+                        formatQuantity(unplacedUnits, asset.unitOfMeasure) ??
+                        unplacedUnits
+                      }`
+                }
+                onPress={
+                  placements.length === 0 && canUpdateAsset
+                    ? () => setShowPlacementsSheet(true)
+                    : undefined
+                }
               />
             )}
             {asset.kit && (
@@ -894,27 +991,14 @@ export default function AssetDetailScreen() {
               INDIVIDUAL rendering stays byte-identical. */}
           {isQtyTracked && (
             <>
-              <MoveQuantitySheet
-                visible={moveTarget != null}
-                locationName={moveTarget?.name ?? ""}
+              <ManagePlacementsSheet
+                visible={showPlacementsSheet}
+                orgId={currentOrg.id}
                 totalQuantity={asset.quantity ?? 1}
                 unitOfMeasure={asset.unitOfMeasure}
-                // Pre-fill: units at the current primary placement, else the
-                // full pool (web dialog parity). `locationQuantity` is the
-                // per-row placement quantity, NOT workspace stock.
-                initialQuantity={asset.locationQuantity ?? asset.quantity ?? 1}
-                // Older servers omit placementCount — fall back to what the
-                // flat `location` field implies so the warning never renders
-                // from missing data.
-                placementCount={
-                  asset.placementCount ?? (asset.location ? 1 : 0)
-                }
-                onConfirm={(quantity) => {
-                  const target = moveTarget;
-                  setMoveTarget(null);
-                  if (target) void performUpdateLocation(target.id, quantity);
-                }}
-                onClose={() => setMoveTarget(null)}
+                initialPlacements={placements}
+                onSave={(next) => void performSavePlacements(next)}
+                onClose={() => setShowPlacementsSheet(false)}
               />
               <AdjustQuantitySheet
                 visible={showAdjustSheet}
