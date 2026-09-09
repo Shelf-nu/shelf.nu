@@ -20,6 +20,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { BookingCheckinReceiptPDF } from "./booking-checkin-receipt-pdf";
 import { BookingOverviewPDF } from "./booking-overview-pdf";
 import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
@@ -179,6 +180,10 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
                 (ba: { asset: { id: string } }) => ba.asset
               ),
             }}
+            timeStamp={new Date().getTime()}
+          />
+          <BookingCheckinReceiptPDF
+            booking={booking}
             timeStamp={new Date().getTime()}
           />
         </DropdownMenuContent>

@@ -1,0 +1,415 @@
+/**
+ * Check-in Receipt Reconciliation
+ *
+ * Turns a booking's `BookingAsset` slices — plus the disposition units already
+ * attributed to each of them — into the per-row states, the totals block and
+ * the status stamp that the printed check-in receipt shows.
+ *
+ * Pure: no database, no date formatting, no React. The server helper does the
+ * reading and the attribution and hands the result here, so every rule below is
+ * unit-testable on its own.
+ *
+ * **The reference is the completion gate in `checkinBooking`**, which decides
+ * whether a booking may close: it judges a slice by its own markers and by the
+ * stored `checkedOutQuantity` counter. The booking page's progress bar answers a
+ * different question — it derives "sent" from scan sessions and therefore reads
+ * 0 for a booking checked out with the button. The receipt is the paper form of
+ * what the gate judged, so it must not be aligned to the bar.
+ *
+ * @see {@link file://./checkin-receipt.server.ts}
+ * @see {@link file://./service.server.ts} — `checkinBooking`'s completion gate
+ * @see {@link file://./../../components/booking/booking-checkin-receipt-pdf.tsx}
+ */
+
+import { AssetType } from "@prisma/client";
+
+import type { ResolvedDisplayCode } from "~/modules/barcode/display";
+import { COMPLIANCE_GRACE_PERIOD_MS, formatOverdueDuration } from "./lateness";
+
+/**
+ * Units attributed to one slice, split by what happened to them.
+ *
+ * Structurally the `DispositionCategoryBreakdown` produced by
+ * `attributeCategorizedDispositionsByBookingAsset`. Restated here so this
+ * module stays free of the `.server` import that would drag the whole booking
+ * service into a pure file.
+ */
+export type CheckinReceiptDispositionBreakdown = {
+  returned: number;
+  consumed: number;
+  lost: number;
+  damaged: number;
+};
+
+/**
+ * One booked slice, as the receipt judges it.
+ *
+ * `quantity` is THIS slice's booked units (an INDIVIDUAL slice is 1), and
+ * `checkedOutQuantity` is the cumulative counter of units ever dispatched on
+ * it — never decremented, so a slice sent out twice carries more than it
+ * booked.
+ */
+export type CheckinReceiptSlice = {
+  /** `BookingAsset.id` — the receipt row's identity. */
+  bookingAssetId: string;
+  assetId: string;
+  /** Decides which of the two reconciliation rules below applies. */
+  assetType: AssetType;
+  /** THIS slice's booked units. */
+  quantity: number;
+  /** When this slice was last dispatched; `null` means it never went out. */
+  checkedOutAt: Date | null;
+  /** Cumulative units dispatched on this slice. */
+  checkedOutQuantity: number | null;
+  /** When this slice was last fully reconciled. */
+  checkedInAt: Date | null;
+  /**
+   * Who received it. NULL beside a set `checkedInAt` on rows whose markers were
+   * backfilled, so a renderer prints a blank here — never the custodian, the
+   * printing user, or any other substitute name.
+   */
+  checkedInById: string | null;
+};
+
+/**
+ * What the row's "Returned" cell states.
+ *
+ * - `NEVER_CHECKED_OUT` — nothing left on this slice, so there is nothing to
+ *   reconcile. It is not missing.
+ * - `RETURNED` — every dispatched unit is accounted for, whether it came back,
+ *   was consumed, or was written off as lost or damaged.
+ * - `STILL_OUT` — units remain unaccounted for.
+ */
+export type CheckinReceiptRowState =
+  | "NEVER_CHECKED_OUT"
+  | "RETURNED"
+  | "STILL_OUT";
+
+/** One printed line of the items table. */
+export type CheckinReceiptRow = {
+  bookingAssetId: string;
+  assetId: string;
+  /** `true` when the counts below are units rather than a single item. */
+  isQuantityTracked: boolean;
+  state: CheckinReceiptRowState;
+  /** Units this slice sent out. An INDIVIDUAL slice sends 1 or 0. */
+  sent: number;
+  returned: number;
+  consumed: number;
+  lost: number;
+  damaged: number;
+  /** `sent` minus everything accounted for, floored at 0. */
+  stillOut: number;
+  /** The recorded check-in moment, or `null` while units remain out. */
+  checkedInAt: Date | null;
+  /** The receiving user's id, or `null` when the marker records none. */
+  checkedInById: string | null;
+};
+
+/** The ledger printed under the items table. Every line prints, zeros included. */
+export type CheckinReceiptTotals = {
+  /** Rows on the sheet, not units. */
+  itemsBooked: number;
+  unitsSentOut: number;
+  returned: number;
+  consumed: number;
+  lost: number;
+  damaged: number;
+  stillOut: number;
+};
+
+/** Everything the printed sheet derives from the slice markers. */
+export type CheckinReceipt = {
+  rows: CheckinReceiptRow[];
+  totals: CheckinReceiptTotals;
+  /**
+   * The line printed in the header's stamp box. The only place on the sheet
+   * where completeness is stated — there is no status row.
+   */
+  stamp: string;
+};
+
+/** Plural-aware "3 days" / "1 hour" for the lateness note's duration. */
+function durationUnit(value: number, unit: string): string {
+  return `${value} ${unit}${value === 1 ? "" : "s"}`;
+}
+
+/** How a return compares to the planned end, as the Returned row states it. */
+export type CheckinLatenessNote = {
+  text: string;
+  /** `true` only past the grace period; the sheet marks a late return. */
+  isLate: boolean;
+};
+
+/**
+ * States how a return compares to the planned end, for the Returned row.
+ *
+ * The same 15-minute grace the Booking Compliance report applies, so the sheet
+ * and the report can never disagree about whether a booking was on time. A
+ * return earlier than the grace allows is stated as early rather than as a
+ * negative lateness.
+ *
+ * The duration prints its two most significant non-zero units. A receipt states
+ * how late a return was, not a stopwatch reading, and a lateness past the grace
+ * period is at least fifteen minutes — so there is always a unit to print.
+ *
+ * @param latenessMs - Lateness as `getLatenessMs` measures it, or `null` when
+ *   the booking has not finished or nothing recorded a return.
+ * @returns The note to append to the Returned row, or `null` when there is
+ *   nothing measurable to say.
+ */
+export function formatLatenessNote(
+  latenessMs: number | null
+): CheckinLatenessNote | null {
+  if (latenessMs === null) {
+    return null;
+  }
+
+  if (Math.abs(latenessMs) <= COMPLIANCE_GRACE_PERIOD_MS) {
+    return { text: "on time", isLate: false };
+  }
+
+  if (latenessMs < 0) {
+    return { text: "returned early", isLate: false };
+  }
+
+  const { days, hours, minutes } = formatOverdueDuration(latenessMs);
+  const parts = [
+    days > 0 ? durationUnit(days, "day") : null,
+    hours > 0 ? durationUnit(hours, "hour") : null,
+    minutes > 0 ? durationUnit(minutes, "minute") : null,
+  ].filter((part): part is string => part !== null);
+
+  return {
+    text: `${parts.slice(0, 2).join(" ")} after the planned end`,
+    isLate: true,
+  };
+}
+
+/**
+ * The asset facts each printed row carries beside its reconciliation.
+ *
+ * All of them come from the booking checklist's row list, so the two sheets
+ * name, group and identify a slice the same way.
+ */
+export type CheckinReceiptRowAsset = {
+  title: string;
+  /** THIS slice's booked units. */
+  quantity: number;
+  /** The kit this slice was booked under, when it came from one. */
+  kitName: string | null;
+  /** `true` when the slice's kit no longer contains it. */
+  isRemovedFromKit: boolean;
+  /** The code the workspace shows for this asset on screen. */
+  displayCode: ResolvedDisplayCode | undefined;
+  /**
+   * The receiving user's display name, or `""` when the marker records none.
+   * Never substituted with the custodian or the printing user.
+   */
+  checkedInByName: string;
+};
+
+/**
+ * A printed row on the wire: the check-in moment is already a formatted date,
+ * and the receiving user is a name. The user's id stays on the server — the
+ * sheet prints the name and nothing links back to the account.
+ */
+export type CheckinReceiptViewRow = Omit<
+  CheckinReceiptRow,
+  "checkedInAt" | "checkedInById"
+> &
+  CheckinReceiptRowAsset & {
+    /** The recorded check-in moment in the printing user's format. */
+    checkedInOn: string | null;
+  };
+
+/** The booking facts the sheet's header and key-value block print. */
+export type CheckinReceiptViewBooking = {
+  id: string;
+  name: string;
+  description: string | null;
+  custodianUser: {
+    displayName: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    email: string;
+  } | null;
+  custodianTeamMember: { name: string } | null;
+  tags: Array<{ id: string; name: string }>;
+};
+
+/**
+ * The whole sheet as the API loader sends it.
+ *
+ * Every moment on it is already a string, formatted once on the server in the
+ * printing user's date format — the sheet itself does no date work beyond the
+ * "Printed" line, which is the moment the paper leaves the printer.
+ */
+export type CheckinReceiptView = {
+  booking: CheckinReceiptViewBooking;
+  organization: {
+    name: string;
+    imageId: string | null;
+    /** Cache key for the workspace logo. */
+    updatedAt: string;
+  };
+  rows: CheckinReceiptViewRow[];
+  totals: CheckinReceiptTotals;
+  /** The completeness line printed in the header's stamp box. */
+  stamp: string;
+  /** The agreed period, never the live one. `null` when neither end is set. */
+  plannedFrom: string | null;
+  plannedTo: string | null;
+  /** The first moment anything left on this booking. */
+  checkedOutAt: string | null;
+  /** Who sent that first slice out; `""` when the marker records none. */
+  checkedOutByName: string;
+  /** The recorded return moment; `null` when nothing recorded one. */
+  returnedAt: string | null;
+  /** How that return compares to the planned end. */
+  latenessNote: CheckinLatenessNote | null;
+  /** Distinct receiving users, ordered by their first check-in. */
+  checkedInByNames: string[];
+};
+
+/** Arguments for {@link buildCheckinReceipt}. */
+export type BuildCheckinReceiptArgs = {
+  /** The booking's slices, in the order the sheet prints them. */
+  slices: CheckinReceiptSlice[];
+  /**
+   * Disposition units per `BookingAsset.id`, already attributed across each
+   * asset's slices with capacity shared between the four categories. A slice
+   * with no entry has had nothing attributed to it and counts as all zeros.
+   */
+  breakdownByBookingAsset: Map<string, CheckinReceiptDispositionBreakdown>;
+};
+
+const NO_DISPOSITIONS: CheckinReceiptDispositionBreakdown = {
+  returned: 0,
+  consumed: 0,
+  lost: 0,
+  damaged: 0,
+};
+
+/**
+ * Units an INDIVIDUAL slice has out.
+ *
+ * A check-in only answers the departure it followed: a slice that came back and
+ * went out again carries both markers, and the refreshed `checkedOutAt` is what
+ * says it is out now. Reading `checkedInAt` alone would report the second trip
+ * as already returned.
+ */
+function individualIsReturned(slice: CheckinReceiptSlice): boolean {
+  if (!slice.checkedOutAt || !slice.checkedInAt) {
+    return false;
+  }
+  return slice.checkedInAt.getTime() >= slice.checkedOutAt.getTime();
+}
+
+/**
+ * Units a QUANTITY_TRACKED slice sent out.
+ *
+ * The cumulative counter when it holds anything; otherwise the whole booked
+ * quantity for a slice whose marker is stamped, which is what a stamped row
+ * with a zero counter means.
+ */
+function quantitySentOut(slice: CheckinReceiptSlice): number {
+  const counted = slice.checkedOutQuantity ?? 0;
+  if (counted > 0) {
+    return counted;
+  }
+  return slice.checkedOutAt ? slice.quantity : 0;
+}
+
+/** Reconciles one slice into the row the sheet prints for it. */
+function buildRow(
+  slice: CheckinReceiptSlice,
+  breakdownByBookingAsset: Map<string, CheckinReceiptDispositionBreakdown>
+): CheckinReceiptRow {
+  const isQuantityTracked = slice.assetType === AssetType.QUANTITY_TRACKED;
+  const dispositions =
+    breakdownByBookingAsset.get(slice.bookingAssetId) ?? NO_DISPOSITIONS;
+
+  const sent = isQuantityTracked
+    ? quantitySentOut(slice)
+    : slice.checkedOutAt
+    ? 1
+    : 0;
+
+  // An INDIVIDUAL slice carries no disposition units: its whole obligation is
+  // the one item, and the markers alone say whether it came back.
+  const returned = isQuantityTracked
+    ? dispositions.returned
+    : individualIsReturned(slice)
+    ? 1
+    : 0;
+  const consumed = isQuantityTracked ? dispositions.consumed : 0;
+  const lost = isQuantityTracked ? dispositions.lost : 0;
+  const damaged = isQuantityTracked ? dispositions.damaged : 0;
+
+  const stillOut = Math.max(0, sent - (returned + consumed + lost + damaged));
+
+  const state: CheckinReceiptRowState =
+    sent === 0 ? "NEVER_CHECKED_OUT" : stillOut > 0 ? "STILL_OUT" : "RETURNED";
+
+  return {
+    bookingAssetId: slice.bookingAssetId,
+    assetId: slice.assetId,
+    isQuantityTracked,
+    state,
+    sent,
+    returned,
+    consumed,
+    lost,
+    damaged,
+    stillOut,
+    checkedInAt: slice.checkedInAt,
+    checkedInById: slice.checkedInById,
+  };
+}
+
+/**
+ * Reconciles a booking's slices into the printed check-in receipt.
+ *
+ * @param args - The booking's slices and the disposition units attributed to
+ *   each of them.
+ * @returns One row per slice in the order given, the totals ledger, and the
+ *   status stamp.
+ */
+export function buildCheckinReceipt(
+  args: BuildCheckinReceiptArgs
+): CheckinReceipt {
+  const { slices, breakdownByBookingAsset } = args;
+
+  const rows = slices.map((slice) => buildRow(slice, breakdownByBookingAsset));
+
+  const totals = rows.reduce<CheckinReceiptTotals>(
+    (sum, row) => ({
+      itemsBooked: sum.itemsBooked + 1,
+      unitsSentOut: sum.unitsSentOut + row.sent,
+      returned: sum.returned + row.returned,
+      consumed: sum.consumed + row.consumed,
+      lost: sum.lost + row.lost,
+      damaged: sum.damaged + row.damaged,
+      stillOut: sum.stillOut + row.stillOut,
+    }),
+    {
+      itemsBooked: 0,
+      unitsSentOut: 0,
+      returned: 0,
+      consumed: 0,
+      lost: 0,
+      damaged: 0,
+      stillOut: 0,
+    }
+  );
+
+  // Units, not rows: an INDIVIDUAL item counts 1, a quantity slice counts every
+  // unit it still owes.
+  const stamp =
+    totals.stillOut === 0
+      ? "All items returned"
+      : `Partial return · ${totals.stillOut} still out`;
+
+  return { rows, totals, stamp };
+}
