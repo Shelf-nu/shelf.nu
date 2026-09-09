@@ -676,6 +676,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         bookingAssetId: ba.id,
         bookedQuantity: ba.quantity ?? 1,
         isRemovedFromKit,
+        /**
+         * Live kit-driven slice (`BookingAsset.assetKitId` set): the row's
+         * units come out of the kit's allocation, not the loose pool, so the
+         * workspace-availability badges skip it (`resolveQtyStockBadgeVariant`).
+         * Derived here for the same reason as `isRemovedFromKit`: the cached
+         * row projection does not carry `assetKitId`.
+         */
+        isKitDriven: ba.assetKitId != null,
       };
     });
 
@@ -988,6 +996,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * "pending return" badge (fires on not-yet-started bookings when
      * `bookedQuantity` exceeds `.physicalNow` while still fitting within
      * `.bookable`) on the booking-overview asset row + assets sidebar.
+     * Both figures describe the LOOSE pool: kit allocations are already
+     * subtracted, so kit-driven rows (`isKitDriven`) never compare against
+     * them.
      *
      * Delegates to the shared, windowed QT availability primitive via
      * `buildAvailableUnitsByAsset` — see

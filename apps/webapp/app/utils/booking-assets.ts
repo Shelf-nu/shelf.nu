@@ -747,6 +747,13 @@ export type QtyStockAvailability = {
  * comparisons. RED is checked before AMBER — a genuine over-commit is
  * always the more actionable signal.
  *
+ * A kit-driven row (`BookingAsset.assetKitId` set) gets neither badge. Its
+ * units come out of the kit's own allocation (`AssetKit.quantity`), which
+ * `bookable` and `physicalNow` already subtract via `inKits`; measured
+ * against the loose pool it would read as short whenever the kit holds the
+ * asset's last units. The reserve and check-out guards skip these rows on
+ * the same `assetKitId IS NULL` predicate, so the badge and the guards agree.
+ *
  * @param args.rowQty - This row's booked quantity.
  * @param args.availability - The asset's workspace-availability figures, or
  *   `undefined` when the loader didn't ship the map (e.g. INDIVIDUAL assets,
@@ -755,17 +762,22 @@ export type QtyStockAvailability = {
  *   (`contextStatus` / `effectiveStatus`) — feeds
  *   {@link isQtyRowCheckedOutOrFulfilled}.
  * @param args.bookingStatus - The parent booking's status.
+ * @param args.isKitDriven - Whether the row is a kit-driven slice
+ *   (`BookingAsset.assetKitId` set). Callers that render kit members pass
+ *   it; it defaults to `false` for surfaces that only show loose rows.
  */
 export function resolveQtyStockBadgeVariant({
   rowQty,
   availability,
   contextStatus,
   bookingStatus,
+  isKitDriven = false,
 }: {
   rowQty: number;
   availability: QtyStockAvailability | undefined;
   contextStatus: string;
   bookingStatus: string;
+  isKitDriven?: boolean;
 }): "insufficient" | "pending-return" | null {
   if (!availability) return null;
 
@@ -780,6 +792,10 @@ export function resolveQtyStockBadgeVariant({
   if (isQtyRowCheckedOutOrFulfilled(contextStatus)) {
     return null;
   }
+
+  // Bounded by the kit's allocation, not by the loose pool the figures
+  // below describe.
+  if (isKitDriven) return null;
 
   // Strict inequality — at-capacity is NOT a problem.
   if (rowQty > availability.bookable) {
