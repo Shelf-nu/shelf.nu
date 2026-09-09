@@ -42,6 +42,13 @@ export function availabilityEventClassNames(
   return getStatusClasses(calendarDisplayStatus(props), oneDay, viewType);
 }
 
+/**
+ * Tailwind classes for a calendar bar of the given booking status.
+ * @param status - The status the bar is drawn as (see `calendarDisplayStatus`)
+ * @param oneDayEvent - True renders the dot-style, transparent one-day variant
+ * @param viewType - FullCalendar view type; time-grid views add the hover class
+ * @returns The class list for the bar element
+ */
 export function getStatusClasses(
   status: BookingStatus,
   oneDayEvent: boolean = false,
@@ -94,10 +101,9 @@ export function getStatusClasses(
         "md:focus:!bg-purple-100",
       ];
       break;
-    // Red, not amber. `bookingStatusColorMap` maps OVERDUE to red and every
-    // other place a booking status is shown reads from it - the badge on the
-    // bookings index, the booking detail, the asset page, the companion app.
-    // The calendar was the only surface calling an overdue booking a warning.
+    // Red, never amber: every surface that shows a booking status reads
+    // `bookingStatusColorMap`, which maps OVERDUE to the error palette, and
+    // the calendar must agree with them.
     case "OVERDUE":
       statusClasses = [
         "md:!text-error-700",
@@ -140,6 +146,10 @@ export const statusClassesOnHover: Record<BookingStatus, string> = {
   COMPLETE: "md:!bg-success-100",
 };
 
+/**
+ * Whether the two instants fall on the same calendar day (local time).
+ * @returns False when either bound is missing
+ */
 export function isOneDayEvent(
   from: Date | string | null,
   to: Date | string | null
@@ -161,7 +171,9 @@ export function isOneDayEvent(
 
 /**
  * Handles the mouse enter event for calendar events.
- * It applies a hover effect based on the event's status and the allowed view type.
+ * Highlights every bar of the hovered booking, each in the hover colour of
+ * its own rendered state: the booking's status, or COMPLETE for a bar that
+ * carries `RETURNED_EVENT_CLASS`.
  * @param allowedViewType - The view type(s) where the hover effect should be applied.
  */
 export const handleEventMouseEnter =
@@ -244,7 +256,9 @@ function hoverClassForElement(
 
 /**
  * Handles the mouse leave event for calendar events.
- * It removes the hover effect based on the event's status and the allowed view type.
+ * Removes from every bar of the booking the hover class that
+ * `handleEventMouseEnter` added for that bar's rendered state, including
+ * the COMPLETE hover on bars carrying `RETURNED_EVENT_CLASS`.
  * @param allowedViewType - The view type(s) where the hover effect should be removed.
  */
 export const handleEventMouseLeave =

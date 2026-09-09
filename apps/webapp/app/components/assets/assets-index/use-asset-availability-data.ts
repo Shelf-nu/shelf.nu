@@ -44,6 +44,7 @@ type SimpleModeBookingAsset = {
 /** Slice markers the returned rule reads; both loader shapes carry them. */
 type SliceMarkers = Pick<BookingSlice, "checkedOutAt" | "checkedInAt">;
 
+/** Epoch milliseconds of an ISO string or Date, so both loader shapes compare alike. */
 const toMillis = (value: string | Date) => new Date(value).getTime();
 
 /** Milliseconds a returned bar spans when the check-in precedes the booking's
@@ -103,6 +104,12 @@ export function returnedBarEnd(
     : new Date(start + MIN_RETURNED_BAR_MS).toISOString();
 }
 
+/**
+ * Builds the resources (asset rows) and events (booking bars) the availability
+ * calendar renders from either loader shape.
+ * @param items - The assets index page items, simple or advanced mode
+ * @returns `resources` for the rows and `events` for the bars
+ */
 export function useAssetAvailabilityData(items: Items) {
   const { roles } = useUserRoleHelper();
   const organization = useCurrentOrganization();

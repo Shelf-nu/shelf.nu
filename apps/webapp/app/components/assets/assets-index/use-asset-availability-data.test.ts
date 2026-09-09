@@ -392,8 +392,10 @@ describe("useAssetAvailabilityData — returned slices", () => {
   const BACK = "2026-07-10T15:30:00.000Z";
   // Bar start/end go through the same zone formatter as every bar today
   // (`useHints` is pinned to UTC above), so compare against its output.
+  /** Formats an instant the way the hook formats bar bounds. */
   const iso = (d: string) => toIsoDateTimeToUserTimezone(d, "UTC");
 
+  /** An ONGOING three-day booking row, with per-slice overrides. */
   const ongoing = (overrides: Partial<AdvancedAssetBooking> = {}) =>
     makeBooking({
       id: "b1",
@@ -404,6 +406,7 @@ describe("useAssetAvailabilityData — returned slices", () => {
       ...overrides,
     });
 
+  /** Renders the hook for one asset and returns its single event. */
   const eventFor = (items: unknown) => {
     const { result } = renderHook(() =>
       useAssetAvailabilityData(items as Items)
