@@ -1,3 +1,14 @@
+/**
+ * Booking "Add assets" picker: `/bookings/:bookingId/overview/manage-assets`.
+ *
+ * The loader lists the workspace's assets for the picker (paginated and
+ * filterable) with each row's fitness for THIS booking: kit membership that
+ * blocks a direct add, overlap with other bookings, and the windowed
+ * free-unit count for quantity-tracked assets. The action writes the
+ * selection to the booking through `updateBookingAssets`, which owns the
+ * conflict and quantity guards. Also exports `AssetWithBooking`, the row
+ * shape the booking overview list renders.
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Asset,

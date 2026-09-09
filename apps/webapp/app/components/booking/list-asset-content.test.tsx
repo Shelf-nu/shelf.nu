@@ -573,6 +573,8 @@ describe("ListAssetContent", () => {
         bookedQuantity: 1,
         isKitDriven: true,
       } as unknown as AssetWithBooking;
+      // why: the loader map reports zero loose-pool units for this asset, the
+      // figure that would light the red badge on a standalone row.
       mockUseLoaderData.mockReturnValue({
         booking: {
           id: "booking-reserved-kit",

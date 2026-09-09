@@ -183,10 +183,11 @@ export default function KitRow({
           Per the code-bearing-entity-list-consistency rule, badges
           live on the expanded asset child rows (kit-row delegates to
           ListAssetContent via the loop below). A live kit-driven child
-          gets no stock badge there either: its units are bounded by
-          the kit's allocation, not the loose pool. Only a detached
-          child (`isRemovedFromKit`) is measured like a standalone
-          slice. The kit header itself only surfaces the "Already
+          (`assetKitId` set, so `isKitDriven`) gets no stock badge
+          there either: its units are bounded by the kit's allocation,
+          not the loose pool. Only a child whose slice no longer points
+          at a membership (`assetKitId` null) is measured like a
+          standalone slice. The kit header itself only surfaces the "Already
           booked" overlap signal and an asset count; it has no
           aggregate stock or per-unit booking semantics of its own,
           so no insufficient-stock badge belongs here.
