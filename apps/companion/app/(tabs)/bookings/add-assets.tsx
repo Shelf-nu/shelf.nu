@@ -55,6 +55,21 @@ const PICKER_PAGE_SIZE = 50;
 const kitKeyExtractor = (item: AvailableKit) => item.id;
 const modelKeyExtractor = (item: AvailableModel) => item.id;
 
+/**
+ * The picker screen itself: three tabs over one paginated loader.
+ *
+ * Assets and Kits multi-select and add in one call; Models reserves a count
+ * against an `AssetModel` instead, so its rows write straight through rather
+ * than joining the selection. All three page through their whole result set —
+ * a capped list would hide inventory the operator has to be able to reach.
+ *
+ * Route params carry the booking and its window: everything shown is filtered
+ * to what is available for those dates, so `from` and `to` are what make the
+ * lists mean anything. Opened without them, the screen shows its error state —
+ * no retry can supply a window the route never carried.
+ *
+ * @returns The picker for the booking named in the route params.
+ */
 export default function AddBookingAssetsScreen() {
   const router = useRouter();
   const {
@@ -71,6 +86,14 @@ export default function AddBookingAssetsScreen() {
     mode?: string;
   }>();
   const { currentOrg } = useOrg();
+  /**
+   * Whether the route arrived without the booking's window.
+   *
+   * Derived, not state: route params are fixed for the life of a mounted
+   * screen, so there is nothing to keep in sync. It marks the one error on
+   * this screen that no retry can clear.
+   */
+  const isMissingBookingWindow = !from || !to;
   const { colors } = useTheme();
   const styles = useStyles();
 
@@ -114,6 +137,19 @@ export default function AddBookingAssetsScreen() {
   const requestIdRef = useRef(0);
   /** Highest page currently held, so `loadMore` knows what to ask for next. */
   const pageRef = useRef(1);
+  /**
+   * Whether a page is in flight, as a ref rather than the `isLoading` state.
+   *
+   * `loadMore` runs from `onEndReached`, which the list fires while it is still
+   * laying out — in the same tick as the reset effect that starts page 1. The
+   * state it would read there is the state from the render it closed over, so
+   * `isLoading` is still false and a second page goes out beside the first.
+   * That is fatal rather than merely wasteful: each request bumps
+   * `requestIdRef`, so the newer page-2 response makes the guard below discard
+   * page 1 — the tab then shows nothing at all until something forces a reload.
+   * A ref settles before the next line runs, which is what the guard needs.
+   */
+  const isFetchingRef = useRef(false);
 
   /**
    * Fetch one page for the active tab.
@@ -129,8 +165,19 @@ export default function AddBookingAssetsScreen() {
    */
   const fetchPage = useCallback(
     async (targetPage: number, append: boolean) => {
-      if (!currentOrg || !from || !to) return;
+      // A missing booking window is terminal, not transient: every list here
+      // is filtered to those dates, so there is nothing to fall back to. Report
+      // it, or the initial `isLoading` spinner stays up with nothing behind it.
+      if (isMissingBookingWindow) {
+        setError(
+          "This picker needs the booking's dates. Open it from the booking."
+        );
+        setIsLoading(false);
+        return;
+      }
+      if (!currentOrg) return;
       const reqId = ++requestIdRef.current;
+      isFetchingRef.current = true;
       if (append) {
         setIsLoadingMore(true);
       } else {
@@ -205,11 +252,20 @@ export default function AddBookingAssetsScreen() {
         }
       }
       if (reqId === requestIdRef.current) {
+        isFetchingRef.current = false;
         setIsLoading(false);
         setIsLoadingMore(false);
       }
     },
-    [currentOrg, from, to, mode, debouncedSearch, bookingId]
+    [
+      currentOrg,
+      from,
+      to,
+      isMissingBookingWindow,
+      mode,
+      debouncedSearch,
+      bookingId,
+    ]
   );
 
   // Reset to page 1 whenever the tab, search or booking window changes.
@@ -220,11 +276,17 @@ export default function AddBookingAssetsScreen() {
     void fetchPage(1, false);
   }, [fetchPage]);
 
-  /** Pull the next page in when the list nears its end. */
+  /**
+   * Pull the next page in when the list nears its end.
+   *
+   * The lists pass this to `onEndReached` only while they hold rows: a list
+   * with no rows has no next page, and RN fires that callback from its
+   * content-size change even when it is empty.
+   */
   const loadMore = useCallback(() => {
-    if (isLoading || isLoadingMore || !hasMore) return;
+    if (isFetchingRef.current || !hasMore) return;
     void fetchPage(pageRef.current + 1, true);
-  }, [isLoading, isLoadingMore, hasMore, fetchPage]);
+  }, [hasMore, fetchPage]);
 
   /**
    * Reload the active tab from page 1. Used after a mutation (reserving or
@@ -585,14 +647,16 @@ export default function AddBookingAssetsScreen() {
             color={colors.error}
           />
           <Text style={styles.emptyText}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={reload}
-            accessibilityRole="button"
-            accessibilityLabel="Retry"
-          >
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+          {isMissingBookingWindow ? null : (
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={reload}
+              accessibilityRole="button"
+              accessibilityLabel="Retry"
+            >
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : mode === "assets" ? (
         <FlatList
@@ -601,7 +665,7 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={assetKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-          onEndReached={loadMore}
+          onEndReached={assets.length ? loadMore : undefined}
           onEndReachedThreshold={0.4}
           ListFooterComponent={listFooter}
           ListEmptyComponent={
@@ -624,7 +688,7 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={kitKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-          onEndReached={loadMore}
+          onEndReached={kits.length ? loadMore : undefined}
           onEndReachedThreshold={0.4}
           ListFooterComponent={listFooter}
           ListEmptyComponent={
@@ -647,7 +711,7 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={modelKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-          onEndReached={loadMore}
+          onEndReached={models.length ? loadMore : undefined}
           onEndReachedThreshold={0.4}
           ListFooterComponent={listFooter}
           ListEmptyComponent={
