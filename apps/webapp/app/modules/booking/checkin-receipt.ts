@@ -309,6 +309,17 @@ export type BuildCheckinReceiptArgs = {
   /** The booking's slices, in the order the sheet prints them. */
   slices: CheckinReceiptSlice[];
   /**
+   * Whether the booking has finished (COMPLETE or ARCHIVED).
+   *
+   * Gates the legacy-session fallback. Progressive check-out keeps a slice's
+   * ORIGINAL `checkedOutAt` and only clears the check-in pair, so on a live
+   * booking a session from an earlier trip still sorts at or after the recorded
+   * departure and would read as a return for units that are out right now. A
+   * finished booking has already passed the completion gate, which is what
+   * makes the fallback safe there and nowhere else.
+   */
+  isBookingFinished: boolean;
+  /**
    * Disposition units per `BookingAsset.id`, already attributed across each
    * asset's slices with capacity shared between the four categories. A slice
    * with no entry has had nothing attributed to it and counts as all zeros.
@@ -337,7 +348,8 @@ const NO_DISPOSITIONS: CheckinReceiptDispositionBreakdown = {
  * accepts for rows reconciled before the markers existed.
  */
 function resolveCheckIn(
-  slice: CheckinReceiptSlice
+  slice: CheckinReceiptSlice,
+  isBookingFinished: boolean
 ): { at: Date; byId: string | null } | null {
   if (!slice.checkedOutAt) {
     return null;
@@ -349,8 +361,11 @@ function resolveCheckIn(
   }
 
   // Sessions cannot express partial units, so they never settle a quantity
-  // slice; its attributed units do that.
-  if (slice.assetType === AssetType.QUANTITY_TRACKED) {
+  // slice; its attributed units do that. And on a live booking they cannot be
+  // trusted at all: progressive check-out leaves the original departure in
+  // place, so a session answering an earlier trip still passes the test above
+  // while the units are out again.
+  if (slice.assetType === AssetType.QUANTITY_TRACKED || !isBookingFinished) {
     return null;
   }
 
@@ -380,7 +395,8 @@ function quantitySentOut(slice: CheckinReceiptSlice): number {
 /** Reconciles one slice into the row the sheet prints for it. */
 function buildRow(
   slice: CheckinReceiptSlice,
-  breakdownByBookingAsset: Map<string, CheckinReceiptDispositionBreakdown>
+  breakdownByBookingAsset: Map<string, CheckinReceiptDispositionBreakdown>,
+  isBookingFinished: boolean
 ): CheckinReceiptRow {
   const isQuantityTracked = slice.assetType === AssetType.QUANTITY_TRACKED;
   const dispositions =
@@ -392,7 +408,7 @@ function buildRow(
     ? 1
     : 0;
 
-  const reconciledBy = resolveCheckIn(slice);
+  const reconciledBy = resolveCheckIn(slice, isBookingFinished);
   const isReconciledHere = reconciledBy !== null;
 
   // An INDIVIDUAL slice carries no disposition units: its whole obligation is
@@ -445,9 +461,11 @@ function buildRow(
 export function buildCheckinReceipt(
   args: BuildCheckinReceiptArgs
 ): CheckinReceipt {
-  const { slices, breakdownByBookingAsset } = args;
+  const { slices, breakdownByBookingAsset, isBookingFinished } = args;
 
-  const rows = slices.map((slice) => buildRow(slice, breakdownByBookingAsset));
+  const rows = slices.map((slice) =>
+    buildRow(slice, breakdownByBookingAsset, isBookingFinished)
+  );
 
   const totals = rows.reduce<CheckinReceiptTotals>(
     (sum, row) => ({
@@ -470,19 +488,27 @@ export function buildCheckinReceipt(
     }
   );
 
-  // A booking nothing ever left on has no return to state either way. Saying
-  // everything came back would put a return on paper that never happened —
-  // archiving a reserved booking reaches this sheet with every row never
-  // dispatched.
+  // Three things this line must never say.
   //
-  // Otherwise, units rather than rows: an INDIVIDUAL item counts 1, a quantity
-  // slice counts every unit it still owes.
+  // A booking nothing ever left on has no return to state either way: saying
+  // everything came back would put a return on paper that never happened, and
+  // archiving a reserved booking reaches this sheet exactly that way.
+  //
+  // A unit written off as consumed, lost or damaged is accounted for but was
+  // not returned. Nothing is outstanding, yet "all items returned" printed over
+  // a ledger reading "Lost 6" is a false claim on a document that gets signed
+  // and attached to a claim.
+  //
+  // The outstanding count is units rather than rows: an INDIVIDUAL item counts
+  // 1, a quantity slice counts every unit it still owes.
   const stamp =
     totals.unitsSentOut === 0
       ? "Nothing was checked out"
-      : totals.stillOut === 0
+      : totals.stillOut > 0
+      ? `Partial return · ${totals.stillOut} still out`
+      : totals.returned === totals.unitsSentOut
       ? "All items returned"
-      : `Partial return · ${totals.stillOut} still out`;
+      : "All items accounted for";
 
   return { rows, totals, stamp };
 }

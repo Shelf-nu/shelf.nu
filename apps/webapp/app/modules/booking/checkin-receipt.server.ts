@@ -246,9 +246,14 @@ export async function fetchCheckinReceiptData(
     >();
     for (const [assetId, assetSlices] of slicesByAsset) {
       const attributed = attributeCategorizedDispositionsByBookingAsset({
+        // Capacity is what the slice actually SENT, not what it booked. A
+        // slice dispatched twice has a cumulative counter above its booked
+        // quantity, and untagged logs are capped at the capacity given here —
+        // so booking quantity alone strands the second trip's returns and the
+        // sheet reports units still out that came back.
         bookingAssetRows: assetSlices.map((slice) => ({
           id: slice.id,
-          quantity: slice.quantity,
+          quantity: Math.max(slice.quantity, slice.checkedOutQuantity ?? 0),
           assetKitId: slice.assetKitId,
         })),
         consumptionLogs: logsByAsset.get(assetId) ?? [],
@@ -288,9 +293,14 @@ export async function fetchCheckinReceiptData(
         : [];
     });
 
+    const isFinished =
+      booking.status === BookingStatus.COMPLETE ||
+      booking.status === BookingStatus.ARCHIVED;
+
     const receipt = buildCheckinReceipt({
       slices: printedSlices,
       breakdownByBookingAsset,
+      isBookingFinished: isFinished,
     });
 
     // The earliest departure still on record, and the person who made it. Both
@@ -377,9 +387,6 @@ export async function fetchCheckinReceiptData(
     // Lateness is only meaningful once the booking has finished. An OVERDUE
     // booking with a partial check-in still measures against "now", which is
     // not a statement a printed record may make.
-    const isFinished =
-      booking.status === BookingStatus.COMPLETE ||
-      booking.status === BookingStatus.ARCHIVED;
     const latenessMs = isFinished
       ? getLatenessMs({
           status: booking.status,

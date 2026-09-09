@@ -16,6 +16,7 @@ import { AssetType } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import type {
+  BuildCheckinReceiptArgs,
   CheckinReceiptDispositionBreakdown,
   CheckinReceiptSlice,
 } from "./checkin-receipt";
@@ -48,6 +49,18 @@ function breakdown(
   return { returned: 0, consumed: 0, lost: 0, damaged: 0, ...values };
 }
 
+/**
+ * `buildCheckinReceipt` for a finished booking, the ordinary case these tests
+ * describe. Pass `isBookingFinished: false` to exercise a live one.
+ */
+function build(
+  args: Omit<BuildCheckinReceiptArgs, "isBookingFinished"> & {
+    isBookingFinished?: boolean;
+  }
+) {
+  return buildCheckinReceipt({ isBookingFinished: true, ...args });
+}
+
 /** The row the receipt built for `bookingAssetId`. */
 function rowFor(
   result: ReturnType<typeof buildCheckinReceipt>,
@@ -62,7 +75,7 @@ describe("buildCheckinReceipt — individual slices", () => {
   it("reports both slices returned when the booking was closed with the check-in button", () => {
     // The button stamps every dispatched slice in one `updateMany`, so both
     // markers carry the same moment and the same user.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           bookingAssetId: "ba-1",
@@ -90,7 +103,7 @@ describe("buildCheckinReceipt — individual slices", () => {
   });
 
   it("counts the unreturned slice in the stamp while a scan check-in is in progress", () => {
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           bookingAssetId: "ba-1",
@@ -115,7 +128,7 @@ describe("buildCheckinReceipt — individual slices", () => {
   it("reports a slice that never went out as never checked out, neither returned nor still out", () => {
     // Added onto an ONGOING booking, or left behind by a progressive
     // check-out: it has nothing to reconcile, so it must not read as missing.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({ bookingAssetId: "ba-1" }),
         slice({
@@ -141,7 +154,7 @@ describe("buildCheckinReceipt — individual slices", () => {
     // The check-in has to be no older than the departure it answers: a slice
     // that came back and then left again carries both markers, and the
     // refreshed `checkedOutAt` is what says it is out now.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           checkedInAt: new Date("2026-09-02T10:00:00.000Z"),
@@ -165,7 +178,7 @@ describe("buildCheckinReceipt — individual slices", () => {
     // A check-in marker beside a NULL departure claims a return for units that
     // never moved. The row states what it is — never checked out — and nothing
     // more.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           checkedOutAt: null,
@@ -187,7 +200,7 @@ describe("buildCheckinReceipt — individual slices", () => {
     // Rows reconciled before the per-slice markers existed are proven returned
     // by a progressive check-in session naming their asset. The completion gate
     // accepts that session, so a booking it closed must not print as still out.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           checkedOutAt: CHECKED_OUT_AT,
@@ -206,10 +219,34 @@ describe("buildCheckinReceipt — individual slices", () => {
     expect(row.checkedInById).toBe("user-9");
   });
 
+  it("ignores a legacy session while the booking is still running", () => {
+    // Progressive check-out keeps a slice's ORIGINAL departure and only clears
+    // the check-in pair, so on a live booking a session answering an earlier
+    // trip still sorts after the recorded departure. Trusting it would print an
+    // item that is out right now as returned.
+    const result = build({
+      slices: [
+        slice({
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedInAt: null,
+          checkedInById: null,
+          sessionCheckedInAt: CHECKED_IN_AT,
+          sessionCheckedInById: "user-9",
+        }),
+      ],
+      breakdownByBookingAsset: new Map(),
+      isBookingFinished: false,
+    });
+
+    const row = rowFor(result, "ba-1");
+    expect(row.state).toBe("STILL_OUT");
+    expect(row.checkedInAt).toBeNull();
+  });
+
   it("ignores a session older than the departure it would answer", () => {
     // The same test the marker is held to: a session from the first trip must
     // not reconcile the trip the slice is on now.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           checkedOutAt: new Date("2026-09-04T08:00:00.000Z"),
@@ -226,7 +263,7 @@ describe("buildCheckinReceipt — individual slices", () => {
   it("leaves the receiving user empty when the check-in marker carries no user", () => {
     // Backfilled rows carry a `checkedInAt` with no `checkedInById`. The sheet
     // prints a blank rather than the custodian or the printing user.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           checkedOutAt: CHECKED_OUT_AT,
@@ -245,7 +282,7 @@ describe("buildCheckinReceipt — individual slices", () => {
 
 describe("buildCheckinReceipt — quantity-tracked slices", () => {
   it("splits a partly damaged return into its categories with nothing left out", () => {
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           assetType: AssetType.QUANTITY_TRACKED,
@@ -274,7 +311,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
   it("treats a fully consumed one-way slice as reconciled", () => {
     // A one-way consumable is never returned; the units are accounted for by
     // the CONSUME disposition instead.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           assetType: AssetType.QUANTITY_TRACKED,
@@ -296,7 +333,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
   it("falls back to the booked quantity when a stamped slice carries a zero counter", () => {
     // The counter was backfilled for rows stamped before it existed, so a
     // stamped marker beside a zero counter means the whole slice went out.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           assetType: AssetType.QUANTITY_TRACKED,
@@ -312,7 +349,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
   });
 
   it("keeps each slice's numbers separate when one asset is booked standalone and inside a kit", () => {
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           bookingAssetId: "ba-standalone",
@@ -347,7 +384,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
   it("never settles a quantity slice from a session, which cannot express units", () => {
     // A session names an asset, not a number of units, so it cannot say how
     // much of a quantity slice came back. Its attributed units answer that.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           assetType: AssetType.QUANTITY_TRACKED,
@@ -368,7 +405,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
   });
 
   it("reports every sent unit as still out when the slice has no attributed dispositions", () => {
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           assetType: AssetType.QUANTITY_TRACKED,
@@ -389,7 +426,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
   it("drops a quantity slice's check-in moment once it is dispatched again", () => {
     // `checkedInAt` means fully reconciled, so a marker older than the current
     // departure describes a trip that has already been settled.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           assetType: AssetType.QUANTITY_TRACKED,
@@ -414,7 +451,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
     // logs cap at the booked quantity, so a re-dispatched slice reconciles its
     // marker while part of the second trip is unaccounted for. A row stating
     // both a return time and an outstanding count says two things at once.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           assetType: AssetType.QUANTITY_TRACKED,
@@ -449,13 +486,13 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
       ],
     };
 
-    const settled = buildCheckinReceipt({
+    const settled = build({
       ...args,
       breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 6 })]]),
     });
     expect(rowFor(settled, "ba-1").stillOut).toBe(0);
 
-    const halfway = buildCheckinReceipt({
+    const halfway = build({
       ...args,
       breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 3 })]]),
     });
@@ -468,7 +505,7 @@ describe("buildCheckinReceipt — status stamp", () => {
     // Archiving a reserved booking reaches this sheet with every row never
     // dispatched. "All items returned" would put a return on paper that never
     // happened.
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({ bookingAssetId: "ba-1" }),
         slice({ bookingAssetId: "ba-2" }),
@@ -480,8 +517,61 @@ describe("buildCheckinReceipt — status stamp", () => {
     expect(result.stamp).toBe("Nothing was checked out");
   });
 
+  it("refuses to call a write-off a return", () => {
+    // Every unit is accounted for and nothing is outstanding, but none came
+    // back. "All items returned" printed over a ledger reading "Lost 6" is a
+    // false claim on a document that gets signed.
+    const result = build({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 6,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 6,
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ lost: 6 })]]),
+    });
+
+    expect(result.totals.returned).toBe(0);
+    expect(result.totals.stillOut).toBe(0);
+    expect(result.stamp).toBe("All items accounted for");
+  });
+
+  it("says items returned only when every dispatched unit came back", () => {
+    const result = build({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 4,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 4,
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 4 })]]),
+    });
+
+    expect(result.stamp).toBe("All items returned");
+  });
+
+  it("still leads with the outstanding count when units are written off and some are out", () => {
+    const result = build({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 6,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 6,
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ damaged: 2 })]]),
+    });
+
+    expect(result.stamp).toBe("Partial return · 4 still out");
+  });
+
   it("states the outstanding total in units, not in rows", () => {
-    const result = buildCheckinReceipt({
+    const result = build({
       slices: [
         slice({
           bookingAssetId: "ba-qty",
