@@ -42,10 +42,12 @@ vi.mock("~/modules/reports/check-in-time.server", () => ({
 }));
 
 // why: importing the booking service for one pure function pulls the whole
-// module. The stub is the exact-attribution half of the real primitive, which
-// is all these cases use: every log here names its slice. The greedy pass for
-// untagged logs is covered in `service.server.test.ts`, and the receipt never
-// hands it a moment anyway.
+// module. The stub is the exact-attribution half of the real primitive: it
+// credits a log to the slice that log names, and drops a log that names none.
+// The greedy pass that spreads an untagged log across an asset's slices lives
+// in `service.server.test.ts`. So the untagged cases here print zero returned
+// units where production prints the real split, and they assert on the moment
+// and the receiver rather than on the counts.
 vi.mock("./service.server", () => ({
   attributeCategorizedDispositionsByBookingAsset: ({
     bookingAssetRows,
@@ -295,7 +297,8 @@ describe("fetchCheckinReceiptData", () => {
     // The phone submits quantity dispositions without a slice id, so its logs
     // are ordinary current data rather than legacy residue. This asset has one
     // slice on the booking, so the log can only describe that slice and its
-    // moment is a record rather than a choice.
+    // moment is a record rather than a choice. The units it carries are not
+    // asserted: the stubbed attributor credits tagged logs only.
     mockOf(fetchAllPdfRelatedData).mockResolvedValue(
       pdfResultWith(
         [pdfRow("ba-1", "asset-1", "XLR cable")],
