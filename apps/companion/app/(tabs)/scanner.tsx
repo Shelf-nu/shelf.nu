@@ -2314,8 +2314,8 @@ function ScannerContent() {
         {/* Top - Action picker or Booking header */}
         <View style={styles.overlaySection} pointerEvents="box-none">
           {isBookingMode ? (
-            <View style={styles.actionPickerContainer}>
-              <View style={styles.bookingModeHeader}>
+            <View style={styles.actionPickerContainer} pointerEvents="box-none">
+              <View style={styles.bookingModeHeader} pointerEvents="box-none">
                 <TouchableOpacity
                   onPress={() => router.back()}
                   accessibilityLabel="Go back"
@@ -2323,7 +2323,8 @@ function ScannerContent() {
                 >
                   <Ionicons name="arrow-back" size={22} color="#fff" />
                 </TouchableOpacity>
-                <View style={styles.bookingModeInfo}>
+                {/* Labels only: touches pass through to the paused layer. */}
+                <View style={styles.bookingModeInfo} pointerEvents="none">
                   <Text style={styles.bookingModeLabel}>
                     {isBookingFulfilMode
                       ? "Fulfil & Check Out"
@@ -2352,7 +2353,7 @@ function ScannerContent() {
               </View>
             </View>
           ) : (
-            <View style={styles.actionPickerContainer}>
+            <View style={styles.actionPickerContainer} pointerEvents="box-none">
               <ActionPills
                 actions={availableActions}
                 currentAction={action}
