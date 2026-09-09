@@ -269,13 +269,33 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
     });
 
+    /**
+     * How many assets actually lost a row, which is not the same as how many
+     * the caller named: `standaloneAssetIds` can narrow the delete to a subset
+     * of them, and counting the request instead of the deletion reports
+     * removals that did not happen.
+     *
+     * The two cases mirror `removeAssets`'s own scoping. With kits named it
+     * deletes the named kits' membership rows plus the kit-less rows of the
+     * standalone bucket; with no kit named it deletes every row of every asset
+     * it was given. Change that scoping and this count has to move with it.
+     */
+    const kitAssetIdSet = new Set(kitAssetIds);
+    const removedAssetIds =
+      kitIds.length > 0
+        ? new Set([
+            ...attachedAssetIds.filter((assetId) => kitAssetIdSet.has(assetId)),
+            ...standaloneAssetIds,
+          ])
+        : new Set(attachedAssetIds);
+
     return data({
       booking: {
         id: updated.id,
         name: updated.name,
         status: updated.status,
       },
-      removedCount: attachedAssetIds.length,
+      removedCount: removedAssetIds.size,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

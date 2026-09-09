@@ -213,8 +213,9 @@ export const bookingsApi = {
       `/api/mobile/bookings/remove-assets?orgId=${orgId}`,
       {
         method: "POST",
-        // `undefined` drops the key, so an app talking to an older server
-        // sends exactly the body it always did.
+        // `JSON.stringify` omits an `undefined` value, so a caller with no
+        // way to tell a standalone row from a kit member leaves the key off
+        // and the server infers the intent from kit membership instead.
         body: JSON.stringify({
           bookingId,
           assetIds,

@@ -110,7 +110,9 @@ export function BookingKitHeader({
   // is the wording the asset rows use, and a kit header is read out in the same
   // list as the rows under it.
   const pressLabel = isSelectable
-    ? "Tap to select"
+    ? selectionState === "all"
+      ? "Tap to deselect"
+      : "Tap to select"
     : expanded
     ? "Tap to collapse"
     : "Tap to expand";

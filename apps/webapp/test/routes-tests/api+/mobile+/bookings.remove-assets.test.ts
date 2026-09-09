@@ -239,6 +239,29 @@ describe("POST /api/mobile/bookings/remove-assets — the note", () => {
     expect(call.assets?.map((asset) => asset.id)).toEqual(["a1", "a2"]);
   });
 
+  it("counts what was removed, not what was named", async () => {
+    // `a2` is named but excluded from the standalone bucket, so its row stays.
+    // Counting the request instead of the deletion would report it as removed:
+    // four named, three actually gone.
+    vi.mocked(db.kit.findMany).mockResolvedValue([
+      { id: "kit-1", name: "Camera kit" },
+    ] as never);
+    world({
+      inOrg: ["a1", "a2"],
+      onBooking: ["a1", "a2", "m1", "m2"],
+      kitMembers: ["m1", "m2"],
+    });
+
+    const response = await post({
+      assetIds: ["a1", "a2"],
+      kitIds: ["kit-1"],
+      standaloneAssetIds: ["a1"],
+    });
+
+    assertIsDataWithResponseInit(response);
+    expect((response.data as { removedCount: number }).removedCount).toBe(3);
+  });
+
   it("leaves kit members out of the note, which the kit half already covers", async () => {
     // Listing them twice turns a kit removal into a note naming every member.
     vi.mocked(db.kit.findMany).mockResolvedValue([
