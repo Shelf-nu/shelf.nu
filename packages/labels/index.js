@@ -59,6 +59,15 @@ export const ASSET_BOOKING_PSEUDO_STATUS_LABELS = Object.freeze({
  * checked back in while the booking is still running. It reuses the asset
  * wording deliberately, so a kit and the members listed under it never describe
  * the same state in different words on one screen.
+ *
+ * The three enum entries are spelled out rather than spread from
+ * {@link ASSET_STATUS_LABELS}, and must stay that way: `KitStatus` and
+ * `AssetStatus` are separate database enums that happen to name the same three
+ * states, and this map's KEY SET has to track `KitStatus` alone — a member
+ * added to one enum has no business appearing on the other's badges. Their
+ * WORDING, on the other hand, must match, because a booking lists a kit and the
+ * assets inside it on one screen. The "a kit and an asset are named alike" test
+ * holds those three strings together: reword both maps, or neither.
  */
 export const KIT_STATUS_LABELS = Object.freeze({
   AVAILABLE: "Available",

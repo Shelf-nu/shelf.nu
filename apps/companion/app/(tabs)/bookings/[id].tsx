@@ -533,8 +533,9 @@ export default function BookingDetailScreen() {
     if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
     // A kit whose whole membership is on this booking and fully selected is
     // removed as a kit, which is what writes the kit-level note. Everything
-    // else goes by asset id.
-    const { assetIds, kitIds } = splitRemovalSelection({
+    // else goes by asset id, and `standaloneAssetIds` tells the server which of
+    // those ids were ticked as rows of their own rather than pulled in by a kit.
+    const { assetIds, kitIds, standaloneAssetIds } = splitRemovalSelection({
       rows,
       selectedAssetIds,
     });
@@ -555,7 +556,8 @@ export default function BookingDetailScreen() {
               currentOrg.id,
               booking.id,
               assetIds,
-              kitIds
+              kitIds,
+              standaloneAssetIds
             );
             setIsActioning(false);
             if (err) {

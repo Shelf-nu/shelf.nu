@@ -193,18 +193,34 @@ export const bookingsApi = {
       }
     ),
 
-  /** Remove assets and/or kits from a booking (kits expand server-side). */
+  /**
+   * Remove assets and/or kits from a booking (kits expand server-side).
+   *
+   * `standaloneAssetIds` is the subset of `assetIds` the user ticked as rows of
+   * their own. The server scopes those deletes to each asset's kit-less booking
+   * row instead of inferring the intent from kit membership, which cannot see
+   * an asset that holds both a loose row and kit-driven ones. Omitting it
+   * leaves the server on that inference.
+   */
   removeAssets: (
     orgId: string,
     bookingId: string,
     assetIds: string[],
-    kitIds: string[] = []
+    kitIds: string[] = [],
+    standaloneAssetIds?: string[]
   ) =>
     apiFetch<RemoveBookingAssetsResponse>(
       `/api/mobile/bookings/remove-assets?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, kitIds }),
+        // `undefined` drops the key, so an app talking to an older server
+        // sends exactly the body it always did.
+        body: JSON.stringify({
+          bookingId,
+          assetIds,
+          kitIds,
+          standaloneAssetIds,
+        }),
       }
     ),
 

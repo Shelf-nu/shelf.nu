@@ -1,11 +1,17 @@
 /**
  * BookingKitHeader — the row a booking's kit members sit under.
  *
- * A booking that holds a kit holds all of it, so the phone shows the kit as one
- * thing: its picture, its name, how many of its assets this booking took, and
- * one status for the lot. The members stay one tap away rather than scattered
- * through the list by the status sort, which is what the website does and what
- * an operator packing a case expects to see.
+ * The phone shows a kit as one thing: its picture, its name, how many of its
+ * assets this booking holds, and one status for that group. The members stay
+ * one tap away rather than scattered through the list by the status sort,
+ * which is what the website does and what an operator packing a case expects
+ * to see.
+ *
+ * A booking may hold only PART of a kit. `memberCount` is therefore the number
+ * of members on this booking and never the kit's own `assetCount`:
+ * `splitRemovalSelection` compares those two to decide whether a removal may
+ * name the kit instead of its assets, and naming a kit detaches every asset in
+ * it — including the ones this booking never held.
  *
  * Two presses live on this row and they cannot both be the whole row. Outside
  * selection the row opens and closes; inside it the row picks the members and a
@@ -52,17 +58,21 @@ type BookingKitHeaderProps = {
 /**
  * Whether a signed image URL is still worth loading.
  *
- * The app has no route to re-sign a kit's image, so an expired URL would
- * render as a broken picture with no way back. The placeholder is the better
- * answer.
+ * The app has no route to re-sign a kit's image, so an expired URL renders as
+ * a broken picture with no way back. Only positive evidence of freshness earns
+ * the image: an expiry the parser cannot read counts as expired, because an
+ * unreadable timestamp says nothing about whether the signature still holds.
+ *
+ * No expiry at all is a different answer — the server omits it for URLs that
+ * carry no signature, and those never go stale.
  *
  * @param imageExpiration - the URL's expiry, as sent by the server
- * @returns true while the URL can still be fetched
+ * @returns true only while the URL is known to still be fetchable
  */
 function isImageStillSigned(imageExpiration: string | null): boolean {
   if (!imageExpiration) return true;
   const expiresAt = Date.parse(imageExpiration);
-  return Number.isNaN(expiresAt) || expiresAt > Date.now();
+  return !Number.isNaN(expiresAt) && expiresAt > Date.now();
 }
 
 export function BookingKitHeader({
@@ -95,7 +105,17 @@ export function BookingKitHeader({
       : statusBadge[badge.tone]
     : null;
 
-  const accessibilityLabel = [
+  // A press does one of two things and there is no chevron for a screen reader
+  // to look at, so the label ends by naming the one it will do. "Tap to select"
+  // is the wording the asset rows use, and a kit header is read out in the same
+  // list as the rows under it.
+  const pressLabel = isSelectable
+    ? "Tap to select"
+    : expanded
+    ? "Tap to collapse"
+    : "Tap to expand";
+
+  const accessibilityLabel = `${[
     `Kit: ${name}`,
     `${memberCount} ${memberCount === 1 ? "asset" : "assets"}`,
     badge ? badge.label : "no status",
@@ -104,10 +124,12 @@ export function BookingKitHeader({
       ? "selected"
       : selectionState === "some"
       ? "partially selected"
+      : selectionState === "unselectable"
+      ? "not selectable"
       : null,
   ]
     .filter(Boolean)
-    .join(", ");
+    .join(", ")}. ${pressLabel}`;
 
   return (
     <TouchableOpacity

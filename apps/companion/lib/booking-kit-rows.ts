@@ -11,6 +11,13 @@
  * Everything here is pure and free of React Native so the rules can be tested
  * under Node. The screen owns the pixels; this owns the decisions.
  *
+ * `describeBookingRows` is a MIRROR of the webapp helper of the same name and
+ * is never a source of truth; its own JSDoc carries the provenance and the
+ * extraction target. The grouping, badge and removal rules are not copies —
+ * they are written against the mobile payload, which collapses a booking per
+ * asset rather than per row — but each must reach the same outcome as the web
+ * surface its `@see` names.
+ *
  * @see ../app/(tabs)/bookings/[id].tsx — the only consumer
  * @see ../../../apps/webapp/app/modules/booking/shape-booking-assets.ts — the
  *   web grouping this mirrors
@@ -83,6 +90,18 @@ export function buildBookingRows({
   const rows: BookingRow[] = [];
   const emittedKitIds = new Set<string>();
 
+  // Members are grouped once up front rather than re-scanned per kit: this
+  // runs on every expand and collapse, and a booking can hold hundreds of
+  // assets. Keyed on `kitId` alone — an id with no kit object still belongs to
+  // that group even though it renders as a row of its own below.
+  const membersByKitId = new Map<string, BookingAsset[]>();
+  for (const asset of assets) {
+    if (!asset.kitId) continue;
+    const group = membersByKitId.get(asset.kitId);
+    if (group) group.push(asset);
+    else membersByKitId.set(asset.kitId, [asset]);
+  }
+
   for (const asset of assets) {
     // Both halves are required, exactly as web keys on `asset.kitId && asset.kit`:
     // an id with no kit object has nothing to title a header with.
@@ -94,7 +113,7 @@ export function buildBookingRows({
     emittedKitIds.add(asset.kitId);
 
     const kitId = asset.kitId;
-    const members = assets.filter((candidate) => candidate.kitId === kitId);
+    const members = membersByKitId.get(kitId) ?? [];
     rows.push({
       type: "kit",
       kitId,
@@ -134,11 +153,24 @@ export function bookingRowKey(row: BookingRow): string {
 /**
  * Names what a booking holds, counting a kit as one thing.
  *
+ * MIRROR of `apps/webapp/app/utils/booking-rows.ts`, which is the source of
+ * truth for this wording; the copy exists only because the companion cannot
+ * import from `apps/webapp/app/**`. It is cosmetic — it captions a list the
+ * user is already looking at and gates nothing — so a drift between the two
+ * shows up as different words, never as different data.
+ *
+ * What is mirrored is the EFFECTIVE wording, not the code: the web helper
+ * derives its two counts from a rendered row array, while this one is handed
+ * them. The strings must stay identical, including the kits-only form that
+ * drops the asset half. Change one, change both.
+ *
+ * Extraction target: `@shelf/labels`, which both apps already consume for
+ * user-facing strings; moving it there retires this mirror.
+ *
  * @param args.standaloneAssetCount - assets that belong to no kit here
  * @param args.kitCount - kit groups
  * @returns e.g. `"18 assets and 2 kits"`, `"7 assets"`, `"2 kits"`
- * @see ../../../apps/webapp/app/utils/booking-rows.ts — `describeBookingRows`,
- *   whose wording this reproduces
+ * @see ../../../apps/webapp/app/utils/booking-rows.ts — the canonical helper
  */
 export function describeBookingRows({
   standaloneAssetCount,
@@ -200,9 +232,15 @@ function isMemberBackIn(
  *
  * Three cases, in order: every member is back while the booking is still
  * running; the booking is over and the kit went out on it; otherwise the kit's
- * own status. An empty marker list means the booking cannot say which assets
- * left — an older server does not send the field at all — so a finished
- * booking is read as having sent everything out rather than nothing.
+ * own status.
+ *
+ * Whether a kit went out is read from THIS kit's own members. Check-out
+ * markers are recorded per slice and the all-at-once Check out button records
+ * none, so their absence is not evidence a kit stayed behind: a kit no member
+ * of which carries a marker is read as having gone out, and only a kit that
+ * carries some is judged on whether every member has one. Do not reduce this
+ * to a booking-wide "are there any markers at all?" — one asset scanned out
+ * anywhere would then strip the badge off every kit that left with the button.
  *
  * Returns null without a kit record: an older server sends no `booking.kits`,
  * and a status invented from the rows alone would be a guess.
@@ -242,10 +280,17 @@ export function resolveBookingKitBadge({
   }
 
   if (FINISHED_BOOKING_STATUSES.includes(bookingStatus)) {
-    const noMarkers = !checkedOutAssetIds || checkedOutAssetIds.length === 0;
+    // An absent field (older server) and an empty one are the same statement:
+    // this kit has no markers, so it is read the legacy way.
+    // Set, not `Array.includes`: this runs once per kit row on every render,
+    // and the marker list is booking-wide, so a linear scan per member costs
+    // members x markers on a booking large enough for grouping to matter.
+    const markers = new Set(checkedOutAssetIds ?? []);
+    const markedMemberCount = members.filter((member) =>
+      markers.has(member.id)
+    ).length;
     const everyMemberWentOut =
-      noMarkers ||
-      members.every((member) => checkedOutAssetIds.includes(member.id));
+      markedMemberCount === 0 || markedMemberCount === members.length;
     if (everyMemberWentOut) return { tone: "returned", label: "Returned" };
   }
 
@@ -325,8 +370,8 @@ export function resolveKitSelectionState({
 }
 
 /**
- * Splits a removal selection into the kits it can name and the assets it
- * cannot.
+ * Splits a removal selection into the kits it can name, the assets it cannot,
+ * and which of those assets the user ticked as rows of their own.
  *
  * Naming a kit is only equivalent to naming its members when the booking holds
  * ALL of them: the remove endpoint expands a kit to every asset in it and
@@ -341,9 +386,18 @@ export function resolveKitSelectionState({
  * booking. When the selection contains one of those, no kit is named and the
  * whole selection travels as plain ids, which removes every slice of each.
  *
+ * `standaloneAssetIds` states that provenance outright instead of leaving the
+ * server to infer it from kit membership. It holds the selected ids the list
+ * rendered as rows of their own, which is what "the user ticked this asset's
+ * own row" means — a quantity-tracked asset whose slices disagree renders that
+ * way while still holding kit-driven rows, so membership alone cannot tell the
+ * two apart. It is always a subset of `assetIds`, and it is empty on the
+ * plain-ids path above, where the split has deliberately given the distinction
+ * up and every slice of every selected asset is meant to go.
+ *
  * @param args.rows - the rendered rows, which carry the kit groupings
  * @param args.selectedAssetIds - the current selection
- * @returns the two id lists to post
+ * @returns the id lists to post
  * @see ../../../apps/webapp/app/routes/api+/mobile+/bookings.remove-assets.ts
  * @see ../../../apps/webapp/app/modules/booking/service.server.ts — `removeAssets`,
  *   whose delete clause is what the fallback above exists for
@@ -354,13 +408,19 @@ export function splitRemovalSelection({
 }: {
   rows: BookingRow[];
   selectedAssetIds: ReadonlySet<string>;
-}): { assetIds: string[]; kitIds: string[] } {
+}): { assetIds: string[]; kitIds: string[]; standaloneAssetIds: string[] } {
   const kitIds: string[] = [];
   const coveredByKit = new Set<string>();
   /** Every asset the booking holds through a kit, named or not. */
   const kitDrivenAssetIds = new Set<string>();
+  /** Every asset the list gave a row of its own, rather than a kit member. */
+  const standaloneRowAssetIds = new Set<string>();
 
   for (const row of rows) {
+    if (row.type === "asset") {
+      if (!row.inKit) standaloneRowAssetIds.add(row.item.id);
+      continue;
+    }
     if (row.type !== "kit") continue;
     for (const member of row.members) kitDrivenAssetIds.add(member.id);
     if (!row.kit) continue;
@@ -376,10 +436,18 @@ export function splitRemovalSelection({
   const leftover = [...selectedAssetIds].filter((id) => !coveredByKit.has(id));
   const leftoverHoldsAKitRow = leftover.some((id) => kitDrivenAssetIds.has(id));
   if (leftoverHoldsAKitRow) {
-    return { assetIds: [...selectedAssetIds], kitIds: [] };
+    return {
+      assetIds: [...selectedAssetIds],
+      kitIds: [],
+      standaloneAssetIds: [],
+    };
   }
 
-  return { assetIds: leftover, kitIds };
+  return {
+    assetIds: leftover,
+    kitIds,
+    standaloneAssetIds: leftover.filter((id) => standaloneRowAssetIds.has(id)),
+  };
 }
 
 /**

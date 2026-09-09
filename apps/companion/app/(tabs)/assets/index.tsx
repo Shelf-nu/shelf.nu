@@ -254,6 +254,22 @@ function AssetsListContent() {
         ? formatQuantity(item.quantity, item.unitOfMeasure)
         : null;
 
+      // Memberships beyond the one the row names. `item.kit` is the primary
+      // kit of possibly several — a quantity-tracked asset can sit in more
+      // than one — so without this the row passes it off as the only one. A
+      // server that sends no `kitCount` knows of no others, hence the 1.
+      const knownKitCount = item.kitCount ?? (item.kit ? 1 : 0);
+      const extraKitCount = Math.max(0, knownKitCount - 1);
+      // The count reaches a screen reader as words, so it carries the same
+      // fact the "+N" beside the name gives a sighted user.
+      const kitSuffix =
+        extraKitCount > 0
+          ? ` and ${extraKitCount} more kit${extraKitCount === 1 ? "" : "s"}`
+          : "";
+      const kitAccessibilityLabel = item.kit
+        ? `, kit ${item.kit.name}${kitSuffix}`
+        : "";
+
       return (
         <TouchableOpacity
           style={styles.assetCard}
@@ -263,9 +279,9 @@ function AssetsListContent() {
             item.sequentialId ? `, ${item.sequentialId}` : ""
           }${quantityLabel ? `, quantity ${quantityLabel}` : ""}${
             item.category ? `, ${item.category.name}` : ""
-          }${item.location ? `, ${item.location.name}` : ""}${
-            item.kit ? `, kit ${item.kit.name}` : ""
-          }`}
+          }${
+            item.location ? `, ${item.location.name}` : ""
+          }${kitAccessibilityLabel}`}
           accessibilityRole="button"
         >
           {item.thumbnailImage || item.mainImage ? (
@@ -311,8 +327,10 @@ function AssetsListContent() {
                   </Text>
                 </View>
               )}
-              {/* Which kit to look in. An asset can hold several memberships;
-                  the server sends the first, as the website's list does. */}
+              {/* Which kit to look in. A quantity-tracked asset can belong
+                  to several kits at once, so the row names the primary one —
+                  the same one the website names — and counts the rest rather
+                  than passing it off as the only kit. */}
               {item.kit && (
                 <View style={styles.locationRow}>
                   <Ionicons
@@ -320,9 +338,17 @@ function AssetsListContent() {
                     size={11}
                     color={colors.mutedLight}
                   />
-                  <Text style={styles.assetLocation} numberOfLines={1}>
+                  <Text
+                    style={[styles.assetLocation, styles.assetKitName]}
+                    numberOfLines={1}
+                  >
                     {item.kit.name}
                   </Text>
+                  {extraKitCount > 0 && (
+                    <Text style={styles.assetKitOverflow}>
+                      +{extraKitCount}
+                    </Text>
+                  )}
                 </View>
               )}
               {/* Quantity chip — shared QuantityBadge (QUANTITY_TRACKED only).
@@ -690,6 +716,16 @@ const useStyles = createStyles((colors, shadows) => ({
   assetLocation: {
     fontSize: fontSize.xs,
     color: colors.mutedLight,
+  },
+  // Only the kit name shrinks: it shares its row with the "+N" count, which
+  // must stay legible even when the name is long enough to truncate.
+  assetKitName: {
+    flexShrink: 1,
+  },
+  assetKitOverflow: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+    flexShrink: 0,
   },
   assetSequentialId: {
     fontSize: fontSize.xs,

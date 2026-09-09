@@ -143,6 +143,28 @@ test("an asset whose slices disagree on a kit stays standalone", () => {
   assert.deepEqual(rows.map(bookingRowKey), ["asset:qt-1"]);
 });
 
+test("interleaved kits keep their members in the order the server sent", () => {
+  const rows = buildBookingRows({
+    assets: [
+      inKit("a1", "kit-1", "Camera Kit"),
+      inKit("b1", "kit-2", "Rig"),
+      inKit("a2", "kit-1", "Camera Kit"),
+    ],
+    kits: undefined,
+    expandedKitIds: new Set(["kit-1", "kit-2"]),
+  });
+
+  assert.deepEqual(rows.map(bookingRowKey), [
+    "kit:kit-1",
+    "asset:a1",
+    "asset:a2",
+    "kit-end:kit-1",
+    "kit:kit-2",
+    "asset:b1",
+    "kit-end:kit-2",
+  ]);
+});
+
 test("a kit the server did not describe still gets a header", () => {
   const [header] = buildBookingRows({
     assets: [inKit("m1", "kit-1", "Camera Kit")],
@@ -309,6 +331,25 @@ test("a finished booking reads as returned when every member went out", () => {
   );
 });
 
+test("a marker elsewhere on the booking leaves this kit's reading alone", () => {
+  // Markers are per slice and the all-at-once check-out writes none, so a kit
+  // no member of which carries one still reads as having gone out — however
+  // many the rest of the booking has picked up since.
+  assert.deepEqual(
+    resolveBookingKitBadge({
+      kit: cameraKit,
+      members: [
+        inKit("m1", "kit-1", "Camera Kit"),
+        inKit("m2", "kit-1", "Camera Kit"),
+      ],
+      bookingStatus: "COMPLETE",
+      checkedInAssetIds: [],
+      checkedOutAssetIds: ["added-later"],
+    }),
+    { tone: "returned", label: "Returned" }
+  );
+});
+
 test("a kit that never fully left a finished booking is not returned", () => {
   assert.deepEqual(
     resolveBookingKitBadge({
@@ -421,7 +462,7 @@ test("a wholly selected kit the booking holds entirely travels as a kit", () => 
       rows: rowsFor(members, cameraKit),
       selectedAssetIds: new Set(["m1", "m2"]),
     }),
-    { assetIds: [], kitIds: ["kit-1"] }
+    { assetIds: [], kitIds: ["kit-1"], standaloneAssetIds: [] }
   );
 });
 
@@ -437,7 +478,7 @@ test("a kit the booking only partly holds travels as asset ids", () => {
       rows: rowsFor(members, { ...cameraKit, assetCount: 3 }),
       selectedAssetIds: new Set(["m1", "m2"]),
     }),
-    { assetIds: ["m1", "m2"], kitIds: [] }
+    { assetIds: ["m1", "m2"], kitIds: [], standaloneAssetIds: [] }
   );
 });
 
@@ -451,7 +492,7 @@ test("a partly selected kit travels as asset ids", () => {
       rows: rowsFor(members, cameraKit),
       selectedAssetIds: new Set(["m1"]),
     }),
-    { assetIds: ["m1"], kitIds: [] }
+    { assetIds: ["m1"], kitIds: [], standaloneAssetIds: [] }
   );
 });
 
@@ -465,7 +506,7 @@ test("without kit records nothing travels as a kit", () => {
       rows: rowsFor(members, null),
       selectedAssetIds: new Set(["m1", "m2"]),
     }),
-    { assetIds: ["m1", "m2"], kitIds: [] }
+    { assetIds: ["m1", "m2"], kitIds: [], standaloneAssetIds: [] }
   );
 });
 
@@ -478,12 +519,13 @@ test("standalone assets picked alongside a kit keep their own ids", () => {
     ...rowsFor(members, cameraKit),
     { type: "asset", item: asset({ id: "loose-1" }), inKit: false },
   ];
-  const { assetIds, kitIds } = splitRemovalSelection({
+  const { assetIds, kitIds, standaloneAssetIds } = splitRemovalSelection({
     rows,
     selectedAssetIds: new Set(["m1", "m2", "loose-1"]),
   });
   assert.deepEqual(kitIds, ["kit-1"]);
   assert.deepEqual(assetIds, ["loose-1"]);
+  assert.deepEqual(standaloneAssetIds, ["loose-1"]);
 });
 
 test("a member of an unnamed kit stops any kit being named", () => {
@@ -518,13 +560,97 @@ test("a member of an unnamed kit stops any kit being named", () => {
   ];
 
   // Whole of kit-1 picked, plus ONE member of kit-2.
-  const { assetIds, kitIds } = splitRemovalSelection({
+  const { assetIds, kitIds, standaloneAssetIds } = splitRemovalSelection({
     rows,
     selectedAssetIds: new Set(["a1", "a2", "b1"]),
   });
 
   assert.deepEqual(kitIds, []);
   assert.deepEqual(assetIds.sort(), ["a1", "a2", "b1"]);
+  // The plain-ids path gives the distinction up: every slice of each is meant
+  // to go, so nothing is scoped to a kit-less row.
+  assert.deepEqual(standaloneAssetIds, []);
+});
+
+test("an asset shown standalone says so whatever else is picked", () => {
+  // A quantity-tracked asset whose slices disagree gets a row of its own while
+  // still holding kit-driven rows. Kit membership cannot see that, so the
+  // explicit list is what tells the server the user ticked the loose row —
+  // and it says the same thing whether or not an unrelated kit travels beside
+  // it.
+  const members = [
+    inKit("m1", "kit-1", "Camera Kit"),
+    inKit("m2", "kit-1", "Camera Kit"),
+  ];
+  const mixedSlices = asset({
+    id: "qt-1",
+    type: "QUANTITY_TRACKED",
+    kitId: null,
+    kit: null,
+    slices: [
+      { bookingAssetId: "ba1", quantity: 2, assetKitId: null, kit: null },
+      {
+        bookingAssetId: "ba2",
+        quantity: 3,
+        assetKitId: "ak-other",
+        kit: { id: "kit-9", name: "Lighting" },
+      },
+    ],
+  });
+  const rows: BookingRow[] = [
+    ...rowsFor(members, cameraKit),
+    { type: "asset", item: mixedSlices, inKit: false },
+  ];
+
+  assert.deepEqual(
+    splitRemovalSelection({
+      rows,
+      selectedAssetIds: new Set(["m1", "m2", "qt-1"]),
+    }),
+    { assetIds: ["qt-1"], kitIds: ["kit-1"], standaloneAssetIds: ["qt-1"] }
+  );
+
+  assert.deepEqual(
+    splitRemovalSelection({ rows, selectedAssetIds: new Set(["qt-1"]) }),
+    { assetIds: ["qt-1"], kitIds: [], standaloneAssetIds: ["qt-1"] }
+  );
+});
+
+test("expanding a kit does not change what the removal posts", () => {
+  // An expanded kit emits its members as asset rows as well. Those rows carry
+  // `inKit`, so they are never counted as rows the asset holds in its own
+  // right — a removal must read the same whether the kit is open or shut.
+  const members = [
+    inKit("m1", "kit-1", "Camera Kit"),
+    inKit("m2", "kit-1", "Camera Kit"),
+  ];
+  const looseRow = {
+    type: "asset" as const,
+    item: asset({ id: "loose-1" }),
+    inKit: false,
+  };
+  const collapsed: BookingRow[] = [...rowsFor(members, cameraKit), looseRow];
+  const expanded: BookingRow[] = [
+    ...rowsFor(members, cameraKit),
+    { type: "asset", item: members[0], inKit: true },
+    { type: "asset", item: members[1], inKit: true },
+    { type: "kit-end", kitId: "kit-1" },
+    looseRow,
+  ];
+  const selectedAssetIds = new Set(["m1", "m2", "loose-1"]);
+
+  assert.deepEqual(
+    splitRemovalSelection({ rows: expanded, selectedAssetIds }),
+    splitRemovalSelection({ rows: collapsed, selectedAssetIds })
+  );
+  assert.deepEqual(
+    splitRemovalSelection({ rows: expanded, selectedAssetIds }),
+    {
+      assetIds: ["loose-1"],
+      kitIds: ["kit-1"],
+      standaloneAssetIds: ["loose-1"],
+    }
+  );
 });
 
 test("a standalone asset beside a whole kit still lets the kit be named", () => {
@@ -539,13 +665,14 @@ test("a standalone asset beside a whole kit still lets the kit be named", () => 
     { type: "asset", item: asset({ id: "loose-1" }), inKit: false },
   ];
 
-  const { assetIds, kitIds } = splitRemovalSelection({
+  const { assetIds, kitIds, standaloneAssetIds } = splitRemovalSelection({
     rows,
     selectedAssetIds: new Set(["m1", "m2", "loose-1"]),
   });
 
   assert.deepEqual(kitIds, ["kit-1"]);
   assert.deepEqual(assetIds, ["loose-1"]);
+  assert.deepEqual(standaloneAssetIds, ["loose-1"]);
 });
 
 // ---------------------------------------------------------------------------

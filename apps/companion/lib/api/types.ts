@@ -137,12 +137,21 @@ export type AssetListItem = {
   category: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
   /**
-   * The first kit this asset belongs to, so a list row can say which kit to
-   * look in. An asset can hold several memberships; the server sends the
-   * first, matching what the web simple index shows. Absent on an older
-   * server, where the row renders without a kit line.
+   * The kit a list row names, so the reader knows where to go looking. Only
+   * INDIVIDUAL assets are capped at one membership — a QUANTITY_TRACKED asset
+   * can sit in several kits at once, and this is the one the server treats as
+   * primary: the oldest membership, the same kit the web asset index names.
+   * Read it together with `kitCount`, which says whether there are others.
+   * Absent on an older server, where the row renders without a kit line.
    */
   kit?: { id: string; name: string } | null;
+  /**
+   * How many kits the asset belongs to in total, so a row showing one of
+   * several can say so instead of presenting it as the only one. 0 when the
+   * asset is in no kit. Absent on a server that predates the field — treat
+   * that as "no others known" and show `kit` on its own, never as 0 kits.
+   */
+  kitCount?: number;
   custody: { custodian: { id: string; name: string } } | null;
 } & AssetQuantityFields;
 
