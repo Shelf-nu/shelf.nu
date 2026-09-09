@@ -375,6 +375,13 @@ export const AssetForm = ({
 
   /** Whether we are in edit mode (asset already exists). */
   const isEditMode = Boolean(id);
+
+  /** Sub-heading for the tracking-method row; repeated under the cards on
+   * narrow viewports because FormRow hides its label column there. */
+  const trackingMethodHint = isEditMode
+    ? "Tracking method cannot be changed after creation."
+    : "Choose how this asset is tracked. This cannot be changed later.";
+
   /** Track the selected asset type for conditional field rendering. */
   const [selectedAssetType, setSelectedAssetType] = useState<AssetType>(
     bulkMode ? AssetType.INDIVIDUAL : assetType ?? AssetType.INDIVIDUAL
@@ -816,32 +823,10 @@ export const AssetForm = ({
             rowLabel={"Tracking method"}
             className="border-b-0 pb-[10px]"
             subHeading={
-              isEditMode ? (
-                <p>
-                  Tracking method cannot be changed after creation.{" "}
-                  <Button
-                    to={`${TRACKING_METHOD_KB_URL}#what-you-can-and-cannot-change-later`}
-                    variant="link-gray"
-                    className="text-gray-600 underline"
-                    target="_blank"
-                  >
-                    Picked the wrong one?
-                  </Button>
-                </p>
-              ) : (
-                <p>
-                  Choose how this asset is tracked. This cannot be changed
-                  later.{" "}
-                  <Button
-                    to={TRACKING_METHOD_KB_URL}
-                    variant="link-gray"
-                    className="text-gray-600 underline"
-                    target="_blank"
-                  >
-                    Which should I pick?
-                  </Button>
-                </p>
-              )
+              <p>
+                {trackingMethodHint}{" "}
+                <TrackingMethodGuideLink isEditMode={isEditMode} />
+              </p>
             }
             required={true}
           >
@@ -852,6 +837,13 @@ export const AssetForm = ({
               disabled={disabled || isEditMode}
               isEditMode={isEditMode}
             />
+            {/* FormRow hides the label column below `lg`, so the hint and
+                guide link are repeated here for narrow viewports — same
+                pattern as the main-image row's format note. */}
+            <p className="mt-2 text-[13px] text-gray-600 lg:hidden">
+              {trackingMethodHint}{" "}
+              <TrackingMethodGuideLink isEditMode={isEditMode} />
+            </p>
           </FormRow>
         </When>
 
@@ -1509,6 +1501,28 @@ function BulkCreatePreview({ titles }: { titles: string[] }) {
  */
 const TRACKING_METHOD_KB_URL =
   "https://www.shelf.nu/knowledge-base/how-to-choose-a-tracking-method";
+
+/**
+ * Link into that guide. Create mode opens the decision guide itself; edit
+ * mode opens its "what you can and cannot change later" section, since the
+ * method is locked by then and the question is what to do about it.
+ */
+function TrackingMethodGuideLink({ isEditMode }: { isEditMode: boolean }) {
+  return (
+    <Button
+      to={
+        isEditMode
+          ? `${TRACKING_METHOD_KB_URL}#what-you-can-and-cannot-change-later`
+          : TRACKING_METHOD_KB_URL
+      }
+      variant="link-gray"
+      className="text-gray-600 underline"
+      target="_blank"
+    >
+      {isEditMode ? "Picked the wrong one?" : "Which should I pick?"}
+    </Button>
+  );
+}
 
 /** Radio card options for the tracking method selector. */
 const TRACKING_OPTIONS = [
