@@ -86,6 +86,14 @@ export default function AddBookingAssetsScreen() {
     mode?: string;
   }>();
   const { currentOrg } = useOrg();
+  /**
+   * Whether the route arrived without the booking's window.
+   *
+   * Derived, not state: route params are fixed for the life of a mounted
+   * screen, so there is nothing to keep in sync. It marks the one error on
+   * this screen that no retry can clear.
+   */
+  const isMissingBookingWindow = !from || !to;
   const { colors } = useTheme();
   const styles = useStyles();
 
@@ -160,7 +168,7 @@ export default function AddBookingAssetsScreen() {
       // A missing booking window is terminal, not transient: every list here
       // is filtered to those dates, so there is nothing to fall back to. Report
       // it, or the initial `isLoading` spinner stays up with nothing behind it.
-      if (!from || !to) {
+      if (isMissingBookingWindow) {
         setError(
           "This picker needs the booking's dates. Open it from the booking."
         );
@@ -249,7 +257,15 @@ export default function AddBookingAssetsScreen() {
         setIsLoadingMore(false);
       }
     },
-    [currentOrg, from, to, mode, debouncedSearch, bookingId]
+    [
+      currentOrg,
+      from,
+      to,
+      isMissingBookingWindow,
+      mode,
+      debouncedSearch,
+      bookingId,
+    ]
   );
 
   // Reset to page 1 whenever the tab, search or booking window changes.
@@ -631,14 +647,16 @@ export default function AddBookingAssetsScreen() {
             color={colors.error}
           />
           <Text style={styles.emptyText}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={reload}
-            accessibilityRole="button"
-            accessibilityLabel="Retry"
-          >
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+          {isMissingBookingWindow ? null : (
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={reload}
+              accessibilityRole="button"
+              accessibilityLabel="Retry"
+            >
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : mode === "assets" ? (
         <FlatList
