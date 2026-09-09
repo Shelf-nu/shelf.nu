@@ -255,6 +255,18 @@ export type AssetDetail = {
    * shows a muted "+N other(s) hold this asset" row. Absent on older servers.
    */
   custodyListOthersCount?: number;
+  /**
+   * Number of AssetLocation placements the asset currently has. A location
+   * update is a pivot REPLACE, so > 1 drives the multi-placement collapse
+   * warning in the move sheet. Absent on older servers.
+   */
+  placementCount?: number;
+  /**
+   * Units placed at the primary location (the per-row AssetLocation.quantity,
+   * NOT workspace stock) — the move sheet's pre-fill. `null` when the asset
+   * is unplaced; absent on older servers.
+   */
+  locationQuantity?: number | null;
 } & AssetQuantityFields;
 
 /**
@@ -520,6 +532,12 @@ export type UpdateLocationResponse = {
     title: string;
     location: { id: string; name: string } | null;
   };
+  /**
+   * Units now placed at the location (per-row AssetLocation.quantity; 1 for
+   * INDIVIDUAL assets). Absent on the no-op short-circuit and on older
+   * servers.
+   */
+  placedQuantity?: number;
 };
 
 export type UpdateImageResponse = {
