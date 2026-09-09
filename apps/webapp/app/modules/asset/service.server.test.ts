@@ -3634,6 +3634,37 @@ describe("bulkUpdateAssetModel", () => {
     expect(calls[0][1]).toBe(db);
   });
 
+  it("raises the transaction timeout, because select-all can span the workspace", async () => {
+    expect.assertions(1);
+    // The write, its events and its notes all run in one interactive
+    // transaction over a selection `resolveAssetIdsForBulkOperation` does not
+    // cap. Prisma's 5s default has already aborted `bulkAssignAssetTags` and
+    // `bulkDeleteAssets` in production with P2028; on this path a timeout costs
+    // the user the whole model change, not just its history.
+    //@ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "asset-1",
+        type: "INDIVIDUAL",
+        assetModelId: null,
+        assetModel: null,
+      },
+    ]);
+
+    await bulkUpdateAssetModel({
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      assetModelId: "model-1",
+      // @ts-expect-error settings shape not relevant, only pass-through is
+      settings: { mode: "SIMPLE" },
+    });
+
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
+    });
+  });
+
   it("links the individually tracked assets and skips quantity-tracked ones", async () => {
     expect.assertions(5);
     //@ts-expect-error mock setup

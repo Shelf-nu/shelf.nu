@@ -7227,106 +7227,115 @@ export async function bulkUpdateAssetModel({
           { id: newAssetModelId, name: modelName ?? "" }
         : null;
 
-      await db.$transaction(async (tx) => {
-        /**
-         * Re-read under the transaction. The rows above were read before it
-         * opened, so a concurrent change would be overwritten here while the
-         * event and note still named the model this request happened to see.
-         * The trail has to describe the write that actually happened.
-         */
-        const current = await tx.asset.findMany({
-          where: {
-            id: { in: assetsThatChange.map((asset) => asset.id) },
-            organizationId,
-          },
-          select: {
-            id: true,
-            type: true,
-            assetModelId: true,
-            assetModel: { select: { id: true, name: true } },
-          },
-        });
-        // Eligibility is re-checked too, not just the current model: an asset
-        // converted to quantity-tracked since the read above must not be
-        // linked, and the check that rejected it ran on the stale row.
-        const changing = current.filter(
-          (asset) =>
-            asset.type !== AssetType.QUANTITY_TRACKED &&
-            asset.assetModelId !== newAssetModelId
-        );
-        updated = changing.length;
-        moved = newAssetModelId
-          ? changing.filter((asset) => asset.assetModelId !== null).length
-          : 0;
-        if (changing.length === 0) {
-          return;
-        }
-
-        await tx.asset.updateMany({
-          where: {
-            id: { in: changing.map((asset) => asset.id) },
-            organizationId,
-          },
-          data: { assetModelId: newAssetModelId },
-        });
-
-        // One event per asset that actually changed. A bulk model change has to
-        // leave the same trail its singular counterpart does, or the activity
-        // log reports a different history depending on which button was pressed.
-        await recordEvents(
-          changing.map((asset) => ({
-            organizationId,
-            actorUserId: userId,
-            action: "ASSET_MODEL_CHANGED" as const,
-            entityType: "ASSET" as const,
-            entityId: asset.id,
-            assetId: asset.id,
-            field: "assetModelId",
-            fromValue: asset.assetModelId ?? null,
-            toValue: newAssetModelId,
-          })),
-          tx
-        );
-
-        /**
-         * Notes commit with the write. A note written afterwards can fail once
-         * the model change is already durable, and the retry is a no-op because
-         * the asset now points at the target — so the note could never be
-         * recreated.
-         *
-         * Grouped by the model being left, because that is the only part of the
-         * sentence that varies: each group is one `createMany`, so a large
-         * batch costs a handful of statements rather than one per asset.
-         */
-        const byPreviousModel = new Map<string, typeof changing>();
-        for (const asset of changing) {
-          const key = asset.assetModel?.id ?? "";
-          const group = byPreviousModel.get(key);
-          if (group) {
-            group.push(asset);
-          } else {
-            byPreviousModel.set(key, [asset]);
-          }
-        }
-        for (const group of byPreviousModel.values()) {
-          const content = buildAssetModelChangeNote({
-            userLink,
-            previous: group[0].assetModel,
-            next: newModel,
-          });
-          if (!content) continue;
-          await createNotes(
-            {
-              content,
-              type: "UPDATE",
-              userId,
-              assetIds: group.map((asset) => asset.id),
+      // Defense-in-depth: the write, its events and its notes all run in here,
+      // over a selection `resolveAssetIdsForBulkOperation` does not cap, so a
+      // large one can exhaust Prisma's 5s default and abort with P2028 —
+      // costing the user the model change itself, not just its history. Bump
+      // the ceiling to 15s, matching `bulkAssignAssetTags` and
+      // `bulkDeleteAssets`.
+      await db.$transaction(
+        async (tx) => {
+          /**
+           * Re-read under the transaction. The rows above were read before it
+           * opened, so a concurrent change would be overwritten here while the
+           * event and note still named the model this request happened to see.
+           * The trail has to describe the write that actually happened.
+           */
+          const current = await tx.asset.findMany({
+            where: {
+              id: { in: assetsThatChange.map((asset) => asset.id) },
               organizationId,
             },
+            select: {
+              id: true,
+              type: true,
+              assetModelId: true,
+              assetModel: { select: { id: true, name: true } },
+            },
+          });
+          // Eligibility is re-checked too, not just the current model: an asset
+          // converted to quantity-tracked since the read above must not be
+          // linked, and the check that rejected it ran on the stale row.
+          const changing = current.filter(
+            (asset) =>
+              asset.type !== AssetType.QUANTITY_TRACKED &&
+              asset.assetModelId !== newAssetModelId
+          );
+          updated = changing.length;
+          moved = newAssetModelId
+            ? changing.filter((asset) => asset.assetModelId !== null).length
+            : 0;
+          if (changing.length === 0) {
+            return;
+          }
+
+          await tx.asset.updateMany({
+            where: {
+              id: { in: changing.map((asset) => asset.id) },
+              organizationId,
+            },
+            data: { assetModelId: newAssetModelId },
+          });
+
+          // One event per asset that actually changed. A bulk model change has to
+          // leave the same trail its singular counterpart does, or the activity
+          // log reports a different history depending on which button was pressed.
+          await recordEvents(
+            changing.map((asset) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_MODEL_CHANGED" as const,
+              entityType: "ASSET" as const,
+              entityId: asset.id,
+              assetId: asset.id,
+              field: "assetModelId",
+              fromValue: asset.assetModelId ?? null,
+              toValue: newAssetModelId,
+            })),
             tx
           );
-        }
-      });
+
+          /**
+           * Notes commit with the write. A note written afterwards can fail once
+           * the model change is already durable, and the retry is a no-op because
+           * the asset now points at the target — so the note could never be
+           * recreated.
+           *
+           * Grouped by the model being left, because that is the only part of the
+           * sentence that varies: each group is one `createMany`, so a large
+           * batch costs a handful of statements rather than one per asset.
+           */
+          const byPreviousModel = new Map<string, typeof changing>();
+          for (const asset of changing) {
+            const key = asset.assetModel?.id ?? "";
+            const group = byPreviousModel.get(key);
+            if (group) {
+              group.push(asset);
+            } else {
+              byPreviousModel.set(key, [asset]);
+            }
+          }
+          for (const group of byPreviousModel.values()) {
+            const content = buildAssetModelChangeNote({
+              userLink,
+              previous: group[0].assetModel,
+              next: newModel,
+            });
+            if (!content) continue;
+            await createNotes(
+              {
+                content,
+                type: "UPDATE",
+                userId,
+                assetIds: group.map((asset) => asset.id),
+                organizationId,
+              },
+              tx
+            );
+          }
+        },
+        { timeout: 15000 }
+      );
     }
 
     return {
