@@ -816,9 +816,32 @@ export const AssetForm = ({
             rowLabel={"Tracking method"}
             className="border-b-0 pb-[10px]"
             subHeading={
-              isEditMode
-                ? "Tracking method cannot be changed after creation."
-                : "Choose how this asset is tracked. This cannot be changed later."
+              isEditMode ? (
+                <p>
+                  Tracking method cannot be changed after creation.{" "}
+                  <Button
+                    to={`${TRACKING_METHOD_KB_URL}#what-you-can-and-cannot-change-later`}
+                    variant="link-gray"
+                    className="text-gray-600 underline"
+                    target="_blank"
+                  >
+                    Picked the wrong one?
+                  </Button>
+                </p>
+              ) : (
+                <p>
+                  Choose how this asset is tracked. This cannot be changed
+                  later.{" "}
+                  <Button
+                    to={TRACKING_METHOD_KB_URL}
+                    variant="link-gray"
+                    className="text-gray-600 underline"
+                    target="_blank"
+                  >
+                    Which should I pick?
+                  </Button>
+                </p>
+              )
             }
             required={true}
           >
@@ -1479,6 +1502,13 @@ function BulkCreatePreview({ titles }: { titles: string[] }) {
     </div>
   );
 }
+
+/**
+ * Knowledge-base guide behind the tracking-method row: the individual /
+ * model / quantity decision, and what can still change after creation.
+ */
+const TRACKING_METHOD_KB_URL =
+  "https://www.shelf.nu/knowledge-base/how-to-choose-a-tracking-method";
 
 /** Radio card options for the tracking method selector. */
 const TRACKING_OPTIONS = [
