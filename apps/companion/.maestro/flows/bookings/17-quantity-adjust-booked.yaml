@@ -1,0 +1,46 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Change the booked quantity of a quantity-tracked asset"
+tags:
+  - bookings
+  - quantity
+
+---
+# Test: the booked amount of a quantity-tracked row can be changed from the
+# booking screen (web parity: the "Adjust quantity" dialog), capped at what
+# the booking's window has free, and the row shows the new amount.
+#
+# Requires: the DRAFT booking "ZZ Qty parity picker" holding 3 pcs of
+# "Companion QT Test Tripod" (left by 15-quantity-asset-picker.yaml).
+
+- runFlow: ../../shared/login.yaml
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Search bookings..."
+    timeout: 15000
+- tapOn: "Search bookings..."
+- inputText: "ZZ Qty parity"
+- extendedWaitUntil:
+    visible: ".*ZZ Qty parity picker.*"
+    timeout: 15000
+# The open keyboard swallows the first tap outside the field; close it first.
+- hideKeyboard
+- tapOn: ".*ZZ Qty parity picker.*"
+- extendedWaitUntil:
+    visible: ".*Companion QT Test Tripod.*3 pcs booked.*"
+    timeout: 15000
+# The pencil sits inside the card; reach it by its test id.
+- tapOn:
+    id: "adjust-booked-quantity-cmqzf2lnl0001s0k9rp3doxkp"
+- extendedWaitUntil:
+    visible: "Change booked quantity"
+    timeout: 10000
+- tapOn: "Increase quantity"
+- tapOn: "Increase quantity"
+- takeScreenshot: qty-adjust-sheet
+- tapOn: "Save 5 pcs"
+- extendedWaitUntil:
+    visible: ".*Companion QT Test Tripod.*5 pcs booked.*"
+    timeout: 15000
+- takeScreenshot: qty-adjust-booked

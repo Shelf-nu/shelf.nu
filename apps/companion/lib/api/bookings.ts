@@ -12,6 +12,8 @@ import type {
   UpdateBookingPayload,
   RemoveBookingAssetsResponse,
   AvailableAssetsResponse,
+  BookingAssetAvailabilityResponse,
+  AdjustBookingAssetQuantityResponse,
   AvailableKitsResponse,
   AvailableModelsResponse,
   ModelRequestMutationResponse,
@@ -69,18 +71,61 @@ export const bookingsApi = {
    * Add scanned assets and/or kits to a booking (scan-to-build flow).
    * Kits expand to their contained assets server-side, mirroring the web
    * scanner's add-to-booking drawer.
+   *
+   * `quantities` is how many units to book per QUANTITY_TRACKED asset id, the
+   * twin of the web drawer's per-row quantity input. An asset missing from the
+   * map books one unit. The server caps every entry at what the booking's
+   * window has free.
    */
   addScannedToBooking: (
     orgId: string,
     bookingId: string,
     assetIds: string[],
-    kitIds: string[]
+    kitIds: string[],
+    quantities: Record<string, number> = {}
   ) =>
     apiFetch<{ success: boolean }>(
       `/api/mobile/bookings/add-scanned-assets?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, kitIds }),
+        body: JSON.stringify({ bookingId, assetIds, kitIds, quantities }),
+      }
+    ),
+
+  /**
+   * Free units of the given quantity-tracked assets over a booking's window,
+   * with the booking itself excluded. The cap for a quantity prompt: the
+   * scanner asks it the moment a quantity-tracked asset is scanned, the
+   * booking screen before a booked quantity is edited.
+   */
+  bookingAssetAvailability: (
+    orgId: string,
+    bookingId: string,
+    assetIds: string[]
+  ) => {
+    const sp = new URLSearchParams({ orgId, bookingId });
+    sp.set("assetIds", assetIds.join(","));
+    return apiFetch<BookingAssetAvailabilityResponse>(
+      `/api/mobile/bookings/asset-availability?${sp}`
+    );
+  },
+
+  /**
+   * Change how many units of one quantity-tracked asset a booking holds (the
+   * standalone slice). A reduction always passes; an increase is checked
+   * against the window's free units server-side, same as the web dialog.
+   */
+  adjustBookingAssetQuantity: (
+    orgId: string,
+    bookingId: string,
+    assetId: string,
+    quantity: number
+  ) =>
+    apiFetch<AdjustBookingAssetQuantityResponse>(
+      `/api/mobile/bookings/adjust-asset-quantity?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bookingId, assetId, quantity }),
       }
     ),
 

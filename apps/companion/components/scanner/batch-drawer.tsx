@@ -34,6 +34,13 @@ type ScannedItem = {
   kitId: string | null;
   /** Kits only: number of contained assets (shown in the row meta line). */
   assetCount?: number;
+  /**
+   * Quantity-tracked assets scanned into a booking: the units to book. Shown
+   * as a tappable "× N" chip so the amount can be changed before submit,
+   * the way the web scan drawer's per-row quantity input can.
+   */
+  quantity?: number;
+  unitOfMeasure?: string | null;
 };
 
 type BatchDrawerProps = {
@@ -59,6 +66,11 @@ type BatchDrawerProps = {
   onResolveBlocker?: (group: BlockerGroup) => void;
   /** Removes every blocked item from the scan list. */
   onResolveAllBlockers?: () => void;
+  /**
+   * Opens the quantity prompt for a quantity-tracked row (booking add mode).
+   * When absent, quantities render as plain text.
+   */
+  onEditQuantity?: (id: string) => void;
 };
 
 /**
@@ -79,6 +91,7 @@ export function BatchDrawer({
   blockers = [],
   onResolveBlocker,
   onResolveAllBlockers,
+  onEditQuantity,
 }: BatchDrawerProps) {
   const styles = useStyles();
   const { colors } = useTheme();
@@ -146,6 +159,26 @@ export function BatchDrawer({
                 })()}
               </Text>
             </View>
+            {item.quantity != null ? (
+              <TouchableOpacity
+                style={styles.quantityChip}
+                onPress={
+                  onEditQuantity
+                    ? () => onEditQuantity(item[keyField])
+                    : undefined
+                }
+                disabled={!onEditQuantity}
+                hitSlop={hitSlop.sm}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.quantity} ${
+                  item.unitOfMeasure || "units"
+                }${onEditQuantity ? ", tap to change quantity" : ""}`}
+              >
+                <Text style={styles.quantityChipText}>
+                  × {item.quantity} {item.unitOfMeasure || "units"}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               onPress={() => onRemove(item[keyField])}
               hitSlop={hitSlop.md}
@@ -260,6 +293,18 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.xs,
     color: colors.muted,
     marginTop: 1,
+  },
+  quantityChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.primaryBg,
+    marginRight: spacing.sm,
+  },
+  quantityChipText: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.primary,
   },
   drawerSubmitBtn: {
     flexDirection: "row",

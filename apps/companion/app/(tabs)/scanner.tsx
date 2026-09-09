@@ -59,6 +59,7 @@ import type { IoniconName } from "@/components/scanner/scan-result-card";
 import { ActionPills, ModeDots } from "@/components/scanner/action-pills";
 import { ActionPillsCoachmark } from "@/components/scanner/action-pills-coachmark";
 import { BatchDrawer } from "@/components/scanner/batch-drawer";
+import { QuantityInputSheet } from "@/components/quantity-input-sheet";
 
 // ── Action Types ────────────────────────────────────────
 
@@ -135,6 +136,16 @@ type ScannedItem = {
   assetCount?: number;
   /** Kits only: true when any contained asset is individually in custody. */
   hasAssetsInCustody?: boolean;
+  /**
+   * Assets only, booking add mode: a quantity-tracked asset books a NUMBER of
+   * units (the web scan drawer's rule), so the scan carries the amount chosen
+   * in the quantity sheet, capped at `maxQuantity` — what the booking's window
+   * still has free, this booking excluded.
+   */
+  isQuantityTracked?: boolean;
+  quantity?: number;
+  maxQuantity?: number;
+  unitOfMeasure?: string | null;
 };
 
 /**
@@ -292,6 +303,16 @@ function ScannerContent() {
     []
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
+  /**
+   * The quantity sheet for a scanned quantity-tracked asset. `editing` means
+   * the row is already in the list and the amount is being changed (a
+   * re-scan or a tap on the drawer chip); otherwise confirming adds the row.
+   */
+  const [qtyPrompt, setQtyPrompt] = useState<{
+    item: ScannedItem;
+    max: number;
+    editing: boolean;
+  } | null>(null);
 
   /**
    * Clear the measured height once no drawer can be showing. The drawer host
@@ -729,6 +750,11 @@ function ScannerContent() {
           // below, which is the kit a kit-linked QR points at directly).
           kitId: string | null;
           availableToBook: boolean;
+          // Quantity-tracked metadata, sent by `MOBILE_ASSET_SELECT`; the
+          // booking add flow uses it to ask how many units to book.
+          type?: "INDIVIDUAL" | "QUANTITY_TRACKED";
+          quantity?: number | null;
+          unitOfMeasure?: string | null;
           /**
            * Model this asset belongs to, or null. Fulfil mode matches it
            * against the booking's outstanding reservations so progress counts
@@ -1370,7 +1396,21 @@ function ScannerContent() {
         // ── BOOKING modes (check-in / scan-to-add) ──
         if (isBookingMode) {
           // Check duplicate
-          if (bookingCheckinItems.some((item) => item.targetId === asset.id)) {
+          const existingItem = bookingCheckinItems.find(
+            (item) => item.targetId === asset.id
+          );
+          if (existingItem) {
+            // A quantity-tracked asset books ONE number, so scanning it again
+            // is not another unit — reopen the amount instead of refusing.
+            if (isBookingAddMode && existingItem.isQuantityTracked) {
+              setQtyPrompt({
+                item: existingItem,
+                max: existingItem.maxQuantity ?? existingItem.quantity ?? 1,
+                editing: true,
+              });
+              finalizeScan();
+              return;
+            }
             flashFrame("duplicate");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             setScanResult({
@@ -1395,11 +1435,22 @@ function ScannerContent() {
             kitId: asset.kitId ?? null,
             availableToBook: asset.availableToBook,
             assetModelId: asset.assetModelId ?? null,
+            isQuantityTracked: asset.type === "QUANTITY_TRACKED",
+            unitOfMeasure: asset.unitOfMeasure ?? null,
           };
 
           // ADD mode: no scan-time eligibility gate — the blockers handle
           // ineligible items with one-tap fixes (web parity).
           if (isBookingAddMode) {
+            // Quantity-tracked: ask how many, capped at what this booking's
+            // window still has free (web parity: the scan drawer's per-row
+            // quantity input, capped at `pickerMeta.maxAllowed`). The row joins
+            // the list only when the sheet is confirmed.
+            if (newItem.isQuantityTracked) {
+              finalizeScan();
+              void promptQuantityForScan(newItem, asset.quantity ?? null);
+              return;
+            }
             setBookingCheckinItems((prev) => [newItem, ...prev]);
             flashFrame("success");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1826,6 +1877,74 @@ function ScannerContent() {
 
   // ── Booking Check-in Actions ────────────────────────
 
+  /**
+   * Open the quantity sheet for a freshly scanned quantity-tracked asset.
+   * The cap comes from the server so the sheet cannot offer units the add
+   * call would refuse; the pool size is the fallback for an older server.
+   */
+  const promptQuantityForScan = async (
+    item: ScannedItem,
+    poolQuantity: number | null
+  ) => {
+    if (!currentOrg || !bookingId) return;
+    const { data } = await api.bookingAssetAvailability(
+      currentOrg.id,
+      bookingId,
+      [item.targetId]
+    );
+    const bookable = data?.availability?.[0]?.bookable ?? poolQuantity ?? 0;
+    if (bookable <= 0) {
+      flashFrame("error");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setScanResult({
+        type: "error",
+        title: item.title,
+        message: "No units are free for this booking's dates.",
+      });
+      return;
+    }
+    setQtyPrompt({
+      item: { ...item, maxQuantity: bookable },
+      max: bookable,
+      editing: false,
+    });
+  };
+
+  /** Confirm from the quantity sheet: add the row, or change its amount. */
+  const handleQtyPromptSubmit = (quantity: number) => {
+    if (!qtyPrompt) return;
+    const { item, editing } = qtyPrompt;
+    setQtyPrompt(null);
+    if (editing) {
+      setBookingCheckinItems((prev) =>
+        prev.map((i) => (i.targetId === item.targetId ? { ...i, quantity } : i))
+      );
+      return;
+    }
+    const added: ScannedItem = { ...item, quantity };
+    setBookingCheckinItems((prev) => [added, ...prev]);
+    flashFrame("success");
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    playScanSound();
+    setScanResult({
+      type: "success",
+      title: item.title,
+      message: `Added ${quantity} ${item.unitOfMeasure || "units"} to list`,
+    });
+    setTimeout(() => setScanResult(null), 1200);
+  };
+
+  /** Drawer chip tap: reopen the sheet for a row already in the list. */
+  const editBookingItemQuantity = (targetId: string) => {
+    const item = bookingCheckinItems.find((i) => i.targetId === targetId);
+    if (!item?.isQuantityTracked) return;
+    setQtyPrompt({
+      item,
+      max: item.maxQuantity ?? item.quantity ?? 1,
+      editing: true,
+    });
+  };
+
   const removeBookingItem = (targetId: string) => {
     setBookingCheckinItems((prev) =>
       prev.filter((i) => i.targetId !== targetId)
@@ -1871,11 +1990,18 @@ function ScannerContent() {
           text: "Add",
           onPress: async () => {
             setIsBookingSubmitting(true);
+            // Units per quantity-tracked asset; anything absent books one.
+            const quantities = Object.fromEntries(
+              bookingCheckinItems
+                .filter((i) => i.type === "asset" && i.quantity != null)
+                .map((i) => [i.targetId, i.quantity as number])
+            );
             const { error } = await api.addScannedToBooking(
               currentOrg.id,
               bookingId,
               assetIds,
-              kitIds
+              kitIds,
+              quantities
             );
             setIsBookingSubmitting(false);
 
@@ -2594,6 +2720,9 @@ function ScannerContent() {
             <BatchDrawer
               items={bookingCheckinItems}
               keyField="targetId"
+              onEditQuantity={
+                isBookingAddMode ? editBookingItemQuantity : undefined
+              }
               title={
                 isBookingAddMode
                   ? `${bookingCheckinItems.length} unit${
@@ -2668,6 +2797,28 @@ function ScannerContent() {
             onSelect={performBulkUpdateLocation}
             onClose={() => setShowLocationPicker(false)}
           />
+
+          {/* Quantity sheet for a quantity-tracked asset scanned into a booking */}
+          {qtyPrompt && (
+            <QuantityInputSheet
+              key={`${qtyPrompt.item.targetId}-${
+                qtyPrompt.editing ? "edit" : "add"
+              }`}
+              visible
+              title={
+                qtyPrompt.editing ? "Change quantity" : "How many to book?"
+              }
+              subtitle={`${qtyPrompt.item.title} · ${qtyPrompt.max} ${
+                qtyPrompt.item.unitOfMeasure || "units"
+              } available`}
+              max={qtyPrompt.max}
+              defaultValue={qtyPrompt.item.quantity ?? 1}
+              unitOfMeasure={qtyPrompt.item.unitOfMeasure ?? null}
+              confirmLabel={qtyPrompt.editing ? "Update" : "Add"}
+              onSubmit={handleQtyPromptSubmit}
+              onClose={() => setQtyPrompt(null)}
+            />
+          )}
         </>
       )}
     </View>

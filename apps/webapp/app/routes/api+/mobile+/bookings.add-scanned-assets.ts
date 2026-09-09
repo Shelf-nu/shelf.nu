@@ -10,6 +10,10 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import {
+  noteBookedQuantityChange,
+  setStandaloneBookedQuantity,
+} from "~/modules/booking/booked-quantity.server";
 import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -31,7 +35,29 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * COMPLETE / ARCHIVED / CANCELLED bookings reject; SELF_SERVICE users may
  * only modify their own DRAFT bookings.
  *
- * Body: { bookingId: string, assetIds?: string[], kitIds?: string[] }
+ * Body: {
+ *   bookingId: string,
+ *   assetIds?: string[],
+ *   kitIds?: string[],
+ *   quantities?: Record<assetId, number>   // QUANTITY_TRACKED units to book
+ * }
+ *
+ * `quantities` is the mobile twin of the web drawer's per-row quantity input:
+ * how many units of each QUANTITY_TRACKED asset to book. An asset missing from
+ * the map books 1 unit (the service default), which is also what every older
+ * companion build sends. Kit-driven slices never take a quantity here — a kit
+ * books whatever the kit holds — so keys for kit-expanded assets are ignored
+ * by the service the same way the web drawer never sends them.
+ * Availability is enforced server-side inside `addScannedAssetsToBooking`
+ * (`assertAssetQuantitiesAvailable` over the booking's own window), so an
+ * over-ask fails with the same message web shows.
+ *
+ * An asset that is ALREADY on the booking (standalone slice) is not inserted
+ * again — the service would reject the duplicate row. When the body names a
+ * quantity for it, that is a change of the booked amount and goes through the
+ * same guarded update as the adjust route; without one it is a no-op. The
+ * web picker behaves the same way: re-selecting a booked asset edits its
+ * quantity rather than failing.
  *
  * @see {@link file://../../_layout+/bookings.$bookingId.overview.scan-assets.tsx} web twin
  */
@@ -41,6 +67,13 @@ const BodySchema = z
     bookingId: z.string().min(1),
     assetIds: z.array(z.string().min(1)).optional().default([]),
     kitIds: z.array(z.string().min(1)).optional().default([]),
+    // Same bounds as the web picker's `quantitiesSchema`: a positive integer
+    // per asset id. Non-integers and zero are rejected at the edge rather than
+    // reaching the availability guard as a nonsense ask.
+    quantities: z
+      .record(z.string().min(1), z.number().int().positive().max(1_000_000))
+      .optional()
+      .default({}),
   })
   .refine((body) => body.assetIds.length > 0 || body.kitIds.length > 0, {
     message: "Scan at least one asset or kit to add.",
@@ -68,7 +101,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // bypassing the entitlement the web enforces.
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, kitIds } = await parseMobileBody(
+    const { bookingId, assetIds, kitIds, quantities } = await parseMobileBody(
       BodySchema,
       request,
       "Booking"
@@ -79,6 +112,7 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { id: bookingId, organizationId },
       select: {
         id: true,
+        name: true,
         status: true,
         from: true,
         to: true,
@@ -154,15 +188,82 @@ export async function action({ request }: ActionFunctionArgs) {
       ];
     }
 
-    await addScannedAssetsToBooking({
-      assetIds: expandedAssetIds,
-      kitIds,
-      bookingId,
-      organizationId,
-      userId: user.id,
-    });
+    // Split the standalone ids into "already on the booking" and "new". The
+    // existing ones are never re-inserted; a quantity named for one of them
+    // is applied as a change of the booked amount instead.
+    const existingSlices =
+      expandedAssetIds.length > 0
+        ? await db.bookingAsset.findMany({
+            where: {
+              bookingId,
+              assetKitId: null,
+              assetId: { in: expandedAssetIds },
+            },
+            select: {
+              id: true,
+              assetId: true,
+              quantity: true,
+              asset: {
+                select: { title: true, type: true, unitOfMeasure: true },
+              },
+            },
+          })
+        : [];
+    const existingByAssetId = new Map(
+      existingSlices.map((slice) => [slice.assetId, slice])
+    );
+    const newAssetIds = expandedAssetIds.filter(
+      (assetId) => !existingByAssetId.has(assetId)
+    );
 
-    return data({ success: true });
+    let updated = 0;
+    for (const slice of existingSlices) {
+      const requested = quantities[slice.assetId];
+      if (
+        requested === undefined ||
+        slice.asset.type !== "QUANTITY_TRACKED" ||
+        requested === slice.quantity
+      ) {
+        continue;
+      }
+      const { previousQuantity } = await setStandaloneBookedQuantity({
+        bookingAssetId: slice.id,
+        assetId: slice.assetId,
+        bookingId,
+        organizationId,
+        window:
+          booking.from && booking.to
+            ? { from: booking.from, to: booking.to }
+            : null,
+        quantity: requested,
+        assetTitle: slice.asset.title,
+        unitOfMeasure: slice.asset.unitOfMeasure ?? null,
+      });
+      await noteBookedQuantityChange({
+        userId: user.id,
+        organizationId,
+        bookingId,
+        bookingName: booking.name,
+        assetId: slice.assetId,
+        assetTitle: slice.asset.title,
+        previousQuantity,
+        quantity: requested,
+      });
+      updated += 1;
+    }
+
+    if (newAssetIds.length > 0 || kitIds.length > 0) {
+      await addScannedAssetsToBooking({
+        assetIds: newAssetIds,
+        kitIds,
+        bookingId,
+        organizationId,
+        userId: user.id,
+        quantities,
+      });
+    }
+
+    return data({ success: true, added: newAssetIds.length, updated });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(
