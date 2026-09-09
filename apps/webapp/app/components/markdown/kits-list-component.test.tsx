@@ -42,18 +42,22 @@ const apiKitsPayload = {
   ],
 };
 
-// why: the hook fetches in an effect; stubbing it keeps these tests on how the
-// component renders a known payload rather than on network behaviour.
 const { useApiQueryMock } = vi.hoisted(() => ({ useApiQueryMock: vi.fn() }));
 
+// why: the hook fetches in an effect; stubbing it keeps these tests on how the
+// component renders a known payload rather than on network behaviour.
 vi.mock("~/hooks/use-api-query", () => ({ default: useApiQueryMock }));
 
-// why: both image components open their own signed-URL refresh fetchers, which
-// need a data-router context. They have their own tests; stubbing them keeps
-// this one on the kit/asset list the popover builds.
+// why: KitImage opens its own signed-URL refresh fetcher, which needs a data
+// router context. It has its own tests; stubbing it keeps this one on the kit
+// list the popover builds.
 vi.mock("~/components/kits/kit-image", () => ({
   default: ({ kit }: { kit: { alt: string } }) => <img alt={kit.alt} />,
 }));
+
+// why: AssetImage resolves the model image cascade and refreshes signed URLs
+// through its own fetcher, which needs a data router context. Stubbing it keeps
+// this one on the member assets the popover lists.
 vi.mock("~/components/assets/asset-image/component", () => ({
   AssetImage: ({ alt }: { alt: string }) => <img alt={alt} />,
 }));
