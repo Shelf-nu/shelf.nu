@@ -155,6 +155,10 @@ describe("buildCheckinReceipt — individual slices", () => {
     const row = rowFor(result, "ba-1");
     expect(row.state).toBe("STILL_OUT");
     expect(row.stillOut).toBe(1);
+    // The recorded moment answers the first trip, not the one it is on now.
+    // Printing it beside "Still out" would put a contradiction on the sheet.
+    expect(row.checkedInAt).toBeNull();
+    expect(row.checkedInById).toBeNull();
   });
 
   it("leaves the receiving user empty when the check-in marker carries no user", () => {
@@ -297,6 +301,29 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
     expect(row.state).toBe("STILL_OUT");
   });
 
+  it("drops a quantity slice's check-in moment once it is dispatched again", () => {
+    // `checkedInAt` means fully reconciled, so a marker older than the current
+    // departure describes a trip that has already been settled.
+    const result = buildCheckinReceipt({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 4,
+          checkedInAt: new Date("2026-09-02T10:00:00.000Z"),
+          checkedInById: "user-1",
+          checkedOutAt: new Date("2026-09-04T08:00:00.000Z"),
+          checkedOutQuantity: 8,
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 4 })]]),
+    });
+
+    const row = rowFor(result, "ba-1");
+    expect(row.stillOut).toBe(4);
+    expect(row.checkedInAt).toBeNull();
+    expect(row.checkedInById).toBeNull();
+  });
+
   it("measures a re-dispatched slice against the cumulative counter, not the booked quantity", () => {
     // `checkedOutQuantity` is never decremented, so a slice that went out,
     // came back and went out again has sent more units than it booked.
@@ -326,6 +353,22 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
 });
 
 describe("buildCheckinReceipt — status stamp", () => {
+  it("refuses to state a return on a booking nothing ever left on", () => {
+    // Archiving a reserved booking reaches this sheet with every row never
+    // dispatched. "All items returned" would put a return on paper that never
+    // happened.
+    const result = buildCheckinReceipt({
+      slices: [
+        slice({ bookingAssetId: "ba-1" }),
+        slice({ bookingAssetId: "ba-2" }),
+      ],
+      breakdownByBookingAsset: new Map(),
+    });
+
+    expect(result.totals.unitsSentOut).toBe(0);
+    expect(result.stamp).toBe("Nothing was checked out");
+  });
+
   it("states the outstanding total in units, not in rows", () => {
     const result = buildCheckinReceipt({
       slices: [

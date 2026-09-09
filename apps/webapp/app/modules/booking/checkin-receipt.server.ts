@@ -72,7 +72,14 @@ export type CheckinReceiptDbResult = {
   /** The period the booking was agreed for, never the live one. */
   plannedFrom: Date | null;
   plannedTo: Date | null;
-  /** The first moment anything left on this booking. */
+  /**
+   * The earliest departure the slice markers still record, and who made it.
+   *
+   * `BookingAsset.checkedOutAt` holds a slice's CURRENT departure — sending a
+   * returned slice out again overwrites it — so on a re-dispatched booking this
+   * is the earliest departure still on record, not the first one that ever
+   * happened. The sheet labels it "Checked out" for that reason.
+   */
   checkedOutAt: Date | null;
   /** Who sent that first slice out; `""` when the marker records none. */
   checkedOutByName: string;
@@ -247,11 +254,11 @@ export async function fetchCheckinReceiptData(
       breakdownByBookingAsset,
     });
 
-    // The first slice to leave, and the person who sent it. Both come from the
-    // same slice: a booking checked out in several passes has several
-    // dispatchers, and naming one against another's moment would be a claim
-    // nothing recorded.
-    const firstCheckedOutSlice = slices
+    // The earliest departure still on record, and the person who made it. Both
+    // come from the same slice: a booking checked out in several passes has
+    // several dispatchers, and naming one against another's moment would be a
+    // claim nothing recorded.
+    const earliestCheckedOutSlice = slices
       .filter((slice) => slice.checkedOutAt !== null)
       .sort(
         (a, b) =>
@@ -277,7 +284,7 @@ export async function fetchCheckinReceiptData(
     const markerUserIds = [
       ...new Set(
         [
-          firstCheckedOutSlice?.checkedOutById ?? null,
+          earliestCheckedOutSlice?.checkedOutById ?? null,
           ...slices.map((slice) => slice.checkedInById),
         ].filter((id): id is string => id !== null)
       ),
@@ -347,9 +354,9 @@ export async function fetchCheckinReceiptData(
       stamp: receipt.stamp,
       plannedFrom: resolvePlannedStart(booking),
       plannedTo,
-      checkedOutAt: firstCheckedOutSlice?.checkedOutAt ?? null,
-      checkedOutByName: firstCheckedOutSlice?.checkedOutById
-        ? nameByUserId.get(firstCheckedOutSlice.checkedOutById) ?? ""
+      checkedOutAt: earliestCheckedOutSlice?.checkedOutAt ?? null,
+      checkedOutByName: earliestCheckedOutSlice?.checkedOutById
+        ? nameByUserId.get(earliestCheckedOutSlice.checkedOutById) ?? ""
         : "",
       returnedAt,
       latenessNote: formatLatenessNote(latenessMs),

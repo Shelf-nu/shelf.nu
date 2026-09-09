@@ -292,16 +292,19 @@ const NO_DISPOSITIONS: CheckinReceiptDispositionBreakdown = {
 };
 
 /**
- * Units an INDIVIDUAL slice has out.
+ * Whether a slice's recorded check-in answers the departure it is on now.
  *
- * A check-in only answers the departure it followed: a slice that came back and
- * went out again carries both markers, and the refreshed `checkedOutAt` is what
- * says it is out now. Reading `checkedInAt` alone would report the second trip
- * as already returned.
+ * A check-in only answers the departure it followed. The receipt states what
+ * the current trip recorded and nothing else: a moment left by an earlier trip,
+ * printed beside a row this sheet is calling still out, contradicts the row it
+ * sits on.
  */
-function individualIsReturned(slice: CheckinReceiptSlice): boolean {
-  if (!slice.checkedOutAt || !slice.checkedInAt) {
+function checkInAnswersCurrentTrip(slice: CheckinReceiptSlice): boolean {
+  if (!slice.checkedInAt) {
     return false;
+  }
+  if (!slice.checkedOutAt) {
+    return true;
   }
   return slice.checkedInAt.getTime() >= slice.checkedOutAt.getTime();
 }
@@ -336,11 +339,13 @@ function buildRow(
     ? 1
     : 0;
 
+  const isReconciledHere = checkInAnswersCurrentTrip(slice);
+
   // An INDIVIDUAL slice carries no disposition units: its whole obligation is
   // the one item, and the markers alone say whether it came back.
   const returned = isQuantityTracked
     ? dispositions.returned
-    : individualIsReturned(slice)
+    : isReconciledHere && slice.checkedOutAt
     ? 1
     : 0;
   const consumed = isQuantityTracked ? dispositions.consumed : 0;
@@ -363,8 +368,8 @@ function buildRow(
     lost,
     damaged,
     stillOut,
-    checkedInAt: slice.checkedInAt,
-    checkedInById: slice.checkedInById,
+    checkedInAt: isReconciledHere ? slice.checkedInAt : null,
+    checkedInById: isReconciledHere ? slice.checkedInById : null,
   };
 }
 
@@ -404,10 +409,17 @@ export function buildCheckinReceipt(
     }
   );
 
-  // Units, not rows: an INDIVIDUAL item counts 1, a quantity slice counts every
-  // unit it still owes.
+  // A booking nothing ever left on has no return to state either way. Saying
+  // everything came back would put a return on paper that never happened —
+  // archiving a reserved booking reaches this sheet with every row never
+  // dispatched.
+  //
+  // Otherwise, units rather than rows: an INDIVIDUAL item counts 1, a quantity
+  // slice counts every unit it still owes.
   const stamp =
-    totals.stillOut === 0
+    totals.unitsSentOut === 0
+      ? "Nothing was checked out"
+      : totals.stillOut === 0
       ? "All items returned"
       : `Partial return · ${totals.stillOut} still out`;
 
