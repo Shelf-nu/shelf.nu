@@ -110,24 +110,31 @@ export function buildNameChangeNote({
  * Returns `null` when nothing actually changed, so a caller can pass the before
  * and after unconditionally and get no note for a no-op.
  *
- * The model name is rendered through {@link wrapLinkForNote}, which escapes it
- * into a quoted Markdoc attribute. Model names are user-authored and would
- * otherwise be a stored-XSS splice, per
+ * Model names are user-authored, so both renderings sanitize: a linked name
+ * goes through {@link wrapLinkForNote}, which escapes it into a quoted Markdoc
+ * attribute, and a deleted model's name — which has no page to link to — goes
+ * through {@link stripMarkdocDelimiters} because it is spliced as literal
+ * text. Either raw would be a stored-XSS splice, per
  * `.claude/rules/sanitize-note-content-markdoc.md`.
  *
  * @param args.userLink - Rendered link to the acting user.
  * @param args.previous - The model before the change, if any.
  * @param args.next - The model after the change, if any.
+ * @param args.previousDeleted - The previous model no longer exists, because
+ *   deleting it is what unlinked the asset. Names the deletion instead of a
+ *   plain removal, and renders the name unlinked.
  * @returns Markdoc note content, or `null` when there is nothing to record.
  */
 export function buildAssetModelChangeNote({
   userLink,
   previous,
   next,
+  previousDeleted = false,
 }: {
   userLink: string;
   previous?: { id: string; name: string } | null;
   next?: { id: string; name: string } | null;
+  previousDeleted?: boolean;
 }) {
   const hasPrevious = previous != null;
   const hasNext = next != null;
@@ -140,12 +147,15 @@ export function buildAssetModelChangeNote({
   }
 
   // `/edit` is the model's only route — there is no bare detail page — and it
-  // is where the asset overview links a model name too.
+  // is where the asset overview links a model name too. A deleted model has no
+  // page left, so its name is spliced as stripped literal text instead.
   const formattedPrevious = hasPrevious
-    ? wrapLinkForNote(
-        `/settings/asset-models/${previous.id}/edit`,
-        previous.name
-      )
+    ? previousDeleted
+      ? stripMarkdocDelimiters(previous.name)
+      : wrapLinkForNote(
+          `/settings/asset-models/${previous.id}/edit`,
+          previous.name
+        )
     : null;
   const formattedNext = hasNext
     ? wrapLinkForNote(`/settings/asset-models/${next.id}/edit`, next.name)
@@ -156,6 +166,11 @@ export function buildAssetModelChangeNote({
   }
   if (hasNext) {
     return `${userLink} set the asset model to ${formattedNext}.`;
+  }
+  // The deletion is named rather than reported as a plain removal: the model is
+  // gone workspace-wide, so a reader who goes looking for it will not find it.
+  if (previousDeleted) {
+    return `${userLink} deleted the asset model ${formattedPrevious}, removing it from this asset.`;
   }
   return `${userLink} removed the asset model ${formattedPrevious}.`;
 }

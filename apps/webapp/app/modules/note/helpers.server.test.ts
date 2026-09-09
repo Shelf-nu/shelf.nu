@@ -412,6 +412,38 @@ describe("buildAssetModelChangeNote", () => {
     ).toBeNull();
   });
 
+  it("names the deletion when the model itself is gone", () => {
+    // Deleting a model unlinks every asset it held. The asset's history has to
+    // say so, or the model simply vanishes from the asset with no explanation.
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: streamDeck,
+      next: null,
+      previousDeleted: true,
+    })!;
+
+    expect(note).toContain("deleted the asset model");
+    expect(note).toContain("Stream Deck XL");
+    // No link: the model's page is gone, so linking to it would 404.
+    expect(note).not.toContain("/settings/asset-models/");
+  });
+
+  it("cannot be used to inject a Markdoc tag through a deleted model's name", () => {
+    // The deleted-model branch renders the name as literal text rather than a
+    // quoted attribute, so it needs its own delimiter strip.
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: { id: "am-4", name: '{% booking_status status="APPROVED" /%}' },
+      next: null,
+      previousDeleted: true,
+    })!;
+
+    const tags = [...Markdoc.parse(note).walk()].filter(
+      (node) => node.type === "tag" && node.tag === "booking_status"
+    );
+    expect(tags).toHaveLength(0);
+  });
+
   it("cannot be used to inject a Markdoc tag through the model name", () => {
     // Model names are user-authored and spliced into note content, which the
     // feed renders as Markdoc. See sanitize-note-content-markdoc.
