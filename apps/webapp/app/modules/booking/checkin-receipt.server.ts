@@ -90,9 +90,10 @@ export type CheckinReceiptDbResult = {
   /** The recorded return moment; `null` when nothing recorded one. */
   returnedAt: Date | null;
   /**
-   * How the return compares to the planned end — "on time", "returned early",
-   * or "N days M hours after the planned end". `null` when the booking has not
-   * finished or nothing recorded a return.
+   * How the closing moment compares to the planned end — "on time", "early", or
+   * "N days M hours after the planned end". Carries no verb, because the row it
+   * sits on is a return only when units came back. `null` when the booking has
+   * not finished or nothing recorded a moment.
    */
   latenessNote: CheckinLatenessNote | null;
   /** Distinct receiving users, ordered by their first check-in. */
@@ -276,9 +277,8 @@ export async function fetchCheckinReceiptData(
     // Moments and people for the rows the markers cannot date.
     //
     // RETURN logs only. The other three categories record a write-off, not a
-    // hand-over: whoever logged a loss did not receive anything, so naming them
-    // under "Checked in by" is the same false claim the stamp and the signature
-    // used to make. On a slice with both, a later damage log would also date
+    // hand-over: whoever logged a loss received nothing, so they are not a
+    // receiver, and on a slice carrying both a later write-off must not date
     // the row after the moment the units actually came back.
     //
     // Tagged logs only as well: an untagged legacy log is spread across an

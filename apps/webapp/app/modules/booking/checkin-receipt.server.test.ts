@@ -85,6 +85,7 @@ import { db } from "~/database/db.server";
 import { resolveCheckInTimes } from "~/modules/reports/check-in-time.server";
 
 import { fetchCheckinReceiptData } from "./checkin-receipt.server";
+import type { PdfDbResult } from "./pdf-helpers";
 import { fetchAllPdfRelatedData } from "./pdf-helpers";
 
 const mockOf = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
@@ -108,14 +109,17 @@ function pdfRow(bookingAssetId: string, assetId: string, title: string) {
 }
 
 /**
- * The shared PDF read's result. Cast rather than spelled out: the real shape is
- * a full Prisma `Asset` per row plus the booking, and none of the columns this
- * helper never reads would make the test say more.
+ * The shared PDF read's result.
+ *
+ * Cast through `unknown` rather than spelled out: the real shape is a full
+ * Prisma `Asset` per row plus the whole booking, and none of the ~40 columns
+ * this helper never reads would make the test say more. The cast is named as
+ * `PdfDbResult` so a change to the fields it DOES read still has to compile.
  */
 function pdfResultWith(
   rows: ReturnType<typeof pdfRow>[],
   status: BookingStatus
-) {
+): PdfDbResult {
   return {
     booking: {
       id: "booking-1",
@@ -138,8 +142,7 @@ function pdfResultWith(
     },
     assets: rows,
     assetIdToDisplayCodeMap: {},
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see the doc above
-  } as any;
+  } as unknown as PdfDbResult;
 }
 
 /** Runs the helper with the ordinary arguments; only the stubs vary per case. */

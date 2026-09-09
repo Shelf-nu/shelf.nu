@@ -205,8 +205,8 @@ describe("booking check-in receipt — the sheet", () => {
 
   it("does not call the closing moment a return when nothing came back", () => {
     // why: a booking whose every unit was written off closed at a moment, but
-    // nothing was returned. "Returned" on that row is the same false claim the
-    // stamp used to make.
+    // nothing came back. Calling that row a return states something the ledger
+    // beneath it contradicts.
     const { container } = renderReceipt({
       rows: [
         row({
