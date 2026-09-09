@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import {
-  useWindowDimensions,
   View,
   Text,
   TextInput,
@@ -13,6 +12,7 @@ import {
   Platform,
   Alert,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
@@ -309,30 +309,7 @@ function ScannerContent() {
     if (!anyDrawerVisible) setDrawerHeight(0);
   }, [anyDrawerVisible]);
 
-  /**
-   * Where the floating manual-entry control sits, or `null` when it cannot be
-   * placed without overlapping something.
-   *
-   * It is anchored inside the bottom strip, which is roughly half the space
-   * left over after the 240px frame. Lifting it by the full drawer height
-   * clears the drawer but can push it up INTO the frame and over the
-   * instruction text — the drawer grows to 280px (400px with blockers), so on
-   * a short viewport no offset clears both. In that case we render nothing
-   * rather than recreate the overlap this fix exists to remove: the camera and
-   * the drawer's own actions still work, and clearing an item restores the gap.
-   */
-  const { height: windowHeight } = useWindowDimensions();
-  const manualEntryBottom = useMemo(() => {
-    const DEFAULT_BOTTOM = 90;
-    const CONTROL_HEIGHT = 48;
-    if (drawerHeight <= DEFAULT_BOTTOM) return DEFAULT_BOTTOM;
-
-    // Space between the frame's bottom edge and the screen bottom.
-    const stripHeight = (windowHeight - FRAME_SIZE) / 2;
-    const desired = drawerHeight + spacing.md;
-    const maxBottom = stripHeight - CONTROL_HEIGHT - spacing.md;
-    return desired > maxBottom ? null : desired;
-  }, [drawerHeight, windowHeight]);
+  const insets = useSafeAreaInsets();
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -415,6 +392,22 @@ function ScannerContent() {
   // Dev-mode scan injection (stripped from production builds)
   const [devScanInput, setDevScanInput] = useState("");
   const [devScanVisible, setDevScanVisible] = useState(false);
+
+  /**
+   * Absolute position of the manual-entry control.
+   *
+   * The open text field always lives in the top strip, just under the status
+   * bar: the keyboard rises from the bottom and would cover a field anchored
+   * there, and the top strip is free above the header and pills. The closed
+   * pill sits low in the bottom strip while nothing else is there, and moves
+   * to the top strip as soon as a drawer opens: the drawer shares the bottom
+   * strip with the hint text and the camera controls, and no offset keeps the
+   * pill clear of all three on a short screen.
+   */
+  const manualEntryPlacement =
+    devScanVisible || drawerHeight > 0
+      ? { top: insets.top + spacing.md }
+      : { bottom: MANUAL_ENTRY_BOTTOM };
 
   // Cooldown (shared hook)
   const {
@@ -2312,10 +2305,14 @@ function ScannerContent() {
         </TouchableOpacity>
       )}
 
-      {/* Overlay with cutout */}
-      <View style={styles.overlay}>
+      {/* Overlay with cutout.
+          `box-none` on the overlay and its strips: only real controls inside
+          them are touch targets, so a tap on an empty area falls through to
+          the paused layer beneath, which is what "tap anywhere to resume"
+          relies on. */}
+      <View style={styles.overlay} pointerEvents="box-none">
         {/* Top - Action picker or Booking header */}
-        <View style={styles.overlaySection}>
+        <View style={styles.overlaySection} pointerEvents="box-none">
           {isBookingMode ? (
             <View style={styles.actionPickerContainer}>
               <View style={styles.bookingModeHeader}>
@@ -2369,8 +2366,13 @@ function ScannerContent() {
           )}
         </View>
 
-        {/* Middle row -- swipe gesture target */}
-        <View style={styles.middleRow} {...panResponder.panHandlers}>
+        {/* Middle row -- swipe gesture target. Switched off while paused so
+            the tap lands on the paused layer instead of the swipe surface. */}
+        <View
+          style={styles.middleRow}
+          pointerEvents={isPaused ? "none" : "auto"}
+          {...panResponder.panHandlers}
+        >
           <View style={styles.overlaySection} />
           <ScanFrame
             scanLineAnim={scanLineAnim}
@@ -2398,13 +2400,17 @@ function ScannerContent() {
            * it never needed the overlay to make room in the first place.
            */
           style={[styles.overlaySection, styles.bottomSection]}
+          pointerEvents="box-none"
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
-            <ModeDots actions={availableActions} currentAction={action} />
+            <View pointerEvents="none">
+              <ModeDots actions={availableActions} currentAction={action} />
+            </View>
           )}
 
-          {/* Status / instruction text -- animated for swipe transitions */}
+          {/* Status / instruction text -- animated for swipe transitions.
+              Only the result card takes touches; plain text lets them pass. */}
           <Animated.View
             style={[
               styles.instructionContainer,
@@ -2413,6 +2419,7 @@ function ScannerContent() {
                 opacity: swipeOpacity,
               },
             ]}
+            pointerEvents={scanResult ? "auto" : "none"}
           >
             {isProcessing && !scanResult ? (
               <View style={styles.statusRow}>
@@ -2435,7 +2442,7 @@ function ScannerContent() {
           </Animated.View>
 
           {/* Camera controls -- positioned in the thumb-friendly bottom zone */}
-          <View style={styles.controlButtons}>
+          <View style={styles.controlButtons} pointerEvents="box-none">
             {/* Pause/Resume toggle */}
             <TouchableOpacity
               style={[
@@ -2485,14 +2492,13 @@ function ScannerContent() {
             control's origin so the existing e2e flows stay stable. */}
         {/* Hidden while a result card is shown — the card's actions must never
             be occluded (the unclaimed card is tall enough to reach this pill). */}
-        {manualEntryBottom !== null && !scanResult && (
+        {!scanResult && (
           <View
-            style={[
-              styles.devScanContainer,
-              // Clamped so the lift never pushes the control into the scan
-              // frame; see `manualEntryBottom`.
-              { bottom: manualEntryBottom },
-            ]}
+            style={[styles.devScanContainer, manualEntryPlacement]}
+            // Full-width host: only the pill or the field inside it takes
+            // touches, so a tap beside them reaches the paused layer.
+            pointerEvents="box-none"
+            testID="manual-entry-container"
           >
             {devScanVisible ? (
               <View style={styles.devScanRow}>
@@ -2501,6 +2507,9 @@ function ScannerContent() {
                   style={styles.devScanInput}
                   value={devScanInput}
                   onChangeText={setDevScanInput}
+                  // Opens the keyboard as soon as the field appears, so one tap
+                  // on "Enter code" is enough to start typing.
+                  autoFocus
                   placeholder="Enter QR, barcode, or SAM ID"
                   placeholderTextColor="rgba(255,255,255,0.4)"
                   autoCapitalize="none"
@@ -2707,6 +2716,8 @@ export default function ScannerScreen() {
 // ── Styles ────────────────────────────────────────────────
 
 const FRAME_SIZE = 240;
+/** Distance of the closed "Enter code" pill from the bottom edge when no drawer is open. */
+const MANUAL_ENTRY_BOTTOM = 90;
 
 const useStyles = createStyles((colors) => ({
   container: {
@@ -2766,6 +2777,9 @@ const useStyles = createStyles((colors) => ({
     // why: no zIndex — the action pills / batch drawer (later siblings) must
     // win hit-testing, otherwise this full-screen touchable swallows the
     // first tap aimed at them while paused. It still covers the camera area.
+    // The overlay strips above it are `box-none` (and the swipe row `none`
+    // while paused), so a tap on anything that is not a control reaches this
+    // layer and resumes the camera.
   },
   pausedTitle: {
     color: "#fff",
@@ -2870,7 +2884,6 @@ const useStyles = createStyles((colors) => ({
   // ── Dev Scan Injection (DEV only) ───────────────
   devScanContainer: {
     position: "absolute" as const,
-    bottom: 90,
     left: spacing.md,
     right: spacing.md,
     zIndex: 999,

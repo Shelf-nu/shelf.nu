@@ -1,0 +1,59 @@
+# Scanner — a paused camera resumes on a tap anywhere on the screen
+#
+# The paused layer sits under the overlay strips. The strips are `box-none`
+# and the swipe row is `none` while paused, so a tap on any spot that is not
+# a control reaches the paused layer. Both pause paths are covered:
+#   1. the pause button, then a tap in the empty bottom strip
+#   2. the 30 s inactivity auto-pause, then a tap inside the frame area
+#
+# No login step: runs against the session already on the simulator.
+appId: com.shelf.companion.carlos
+---
+# Bring the already signed-in app to the front without clearing its state.
+- launchApp:
+    appId: com.shelf.companion.carlos
+    stopApp: false
+- tapOn: "Scan"
+- tapOn:
+    text: "Allow"
+    optional: true
+# Leftovers from an earlier run on the same session: a result card hides the
+# manual entry, and an open manual-entry row replaces the "Enter code" pill.
+- tapOn:
+    text: ".*Tap to dismiss.*"
+    optional: true
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "dev-scan-toggle"
+    timeout: 15000
+
+# ── 1. Pause with the button, resume with a tap in the empty top strip ──
+- tapOn: "Pause camera"
+- extendedWaitUntil:
+    visible: "Camera paused.*"
+    timeout: 5000
+- takeScreenshot: scanner-paused-by-button
+- tapOn:
+    point: "50%,15%"
+- extendedWaitUntil:
+    notVisible: "Camera paused.*"
+    timeout: 5000
+- takeScreenshot: scanner-resumed-by-tap-top
+
+# ── 2. Inactivity auto-pause, resume with a tap inside the frame area ──
+- extendedWaitUntil:
+    visible: "Camera paused.*"
+    timeout: 45000
+- takeScreenshot: scanner-paused-by-inactivity
+- tapOn:
+    point: "50%,50%"
+- extendedWaitUntil:
+    notVisible: "Camera paused.*"
+    timeout: 5000
+- takeScreenshot: scanner-resumed-by-tap-frame
