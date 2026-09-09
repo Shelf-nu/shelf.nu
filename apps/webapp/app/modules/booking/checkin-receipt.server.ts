@@ -379,13 +379,20 @@ export async function fetchCheckinReceiptData(
     });
 
     // The recorded return: the status transition into COMPLETE. When no event
-    // was written, the latest slice check-in is the closest recorded moment.
-    // `Booking.updatedAt` is never a fallback — any later edit moves it.
-    const latestSliceCheckIn = slices.reduce<Date | null>((latest, slice) => {
-      if (!slice.checkedInAt) return latest;
-      return !latest || slice.checkedInAt > latest ? slice.checkedInAt : latest;
+    // was written, the latest moment the printed rows carry is the closest
+    // record there is. `Booking.updatedAt` is never a fallback — any later edit
+    // moves it.
+    //
+    // Read from the reconciled rows rather than the raw markers, so the summary
+    // can never be blank above rows that show a time. A legacy booking whose
+    // return survives only as a progressive session has no marker to find and
+    // no event either, and the rows resolve that session where the summary
+    // could not see it.
+    const latestRowCheckIn = receipt.rows.reduce<Date | null>((latest, row) => {
+      if (!row.checkedInAt) return latest;
+      return !latest || row.checkedInAt > latest ? row.checkedInAt : latest;
     }, null);
-    const returnedAt = checkInTimes.get(bookingId) ?? latestSliceCheckIn;
+    const returnedAt = checkInTimes.get(bookingId) ?? latestRowCheckIn;
 
     const plannedTo = resolvePlannedEnd(booking);
 
