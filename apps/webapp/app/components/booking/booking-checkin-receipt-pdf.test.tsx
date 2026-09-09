@@ -11,7 +11,9 @@
  * @see {@link file://./booking-checkin-receipt-pdf.tsx}
  * @see {@link file://../../modules/booking/checkin-receipt.ts}
  */
+import { BookingStatus } from "@prisma/client";
 import { render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -23,7 +25,10 @@ import type {
   ResolvedFormatPrefs,
 } from "~/utils/date-format";
 
-import { BookingCheckinReceiptPreview } from "./booking-checkin-receipt-pdf";
+import {
+  BookingCheckinReceiptPDF,
+  BookingCheckinReceiptPreview,
+} from "./booking-checkin-receipt-pdf";
 
 // why: the header renders `DateS`, which reads the acting user's format prefs
 // through this hook — it reaches the root route loader, and there is no router
@@ -54,6 +59,30 @@ vi.mock("~/hooks/use-date-formatter", async () => {
     }),
   };
 });
+
+// why: the menu entry calls `useFetcher` to load the sheet, which needs a data
+// router. These tests only assert whether the entry is offered, so an idle
+// fetcher that loads nothing is enough. Same shape as
+// `calendar-feed-controls.test.tsx`.
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>("react-router");
+  return {
+    ...actual,
+    useFetcher: () => ({
+      state: "idle" as const,
+      data: undefined,
+      load: vi.fn(),
+      submit: vi.fn(),
+    }),
+  };
+});
+
+// why: the entry reads the booking page's sort out of the URL. There is no
+// router-provided query string here, and the sort plays no part in whether the
+// entry is offered.
+vi.mock("~/hooks/search-params", () => ({
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+}));
 
 /** A returned individual row, the ordinary case every override starts from. */
 function row(
@@ -286,5 +315,92 @@ describe("booking check-in receipt — the sheet", () => {
     expect(
       within(cellsFor("Tripod")[3] as HTMLElement).getByText(/Removed from kit/)
     ).toBeInTheDocument();
+  });
+});
+
+/** Renders the Actions-menu entry for a booking in the given shape. */
+function renderEntry(booking: {
+  status: BookingStatus;
+  bookingAssets: Array<{
+    checkedOutAt: string | null;
+    checkedInAt: string | null;
+  }>;
+}) {
+  return render(
+    <MemoryRouter>
+      <BookingCheckinReceiptPDF
+        booking={{ id: "booking-1", name: "Shoot", ...booking }}
+        timeStamp={1757000000000}
+      />
+    </MemoryRouter>
+  );
+}
+
+/** The desktop copy of the menu entry. */
+function entryButton() {
+  return screen.getAllByRole("button", {
+    name: /Generate check-in receipt/,
+  })[0];
+}
+
+describe("booking check-in receipt — when the entry is offered", () => {
+  it("offers the receipt once a checked-out booking has been checked in", () => {
+    renderEntry({
+      status: BookingStatus.COMPLETE,
+      bookingAssets: [
+        {
+          checkedOutAt: "2026-09-01T09:00:00.000Z",
+          checkedInAt: "2026-09-03T17:30:00.000Z",
+        },
+      ],
+    });
+
+    expect(entryButton()).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("offers it on a partial return, before the booking is finished", () => {
+    // why: a partial return is exactly the case a printed record is wanted
+    // for, so the entry must not wait for the booking to close.
+    renderEntry({
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          checkedOutAt: "2026-09-01T09:00:00.000Z",
+          checkedInAt: "2026-09-02T10:00:00.000Z",
+        },
+        { checkedOutAt: "2026-09-01T09:00:00.000Z", checkedInAt: null },
+      ],
+    });
+
+    expect(entryButton()).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("refuses a finished booking that never went out", () => {
+    // why: archiving a reserved booking finishes it without a single check-out
+    // marker. A receipt for it would be a return document over rows that never
+    // moved.
+    renderEntry({
+      status: BookingStatus.ARCHIVED,
+      bookingAssets: [{ checkedOutAt: null, checkedInAt: null }],
+    });
+
+    expect(entryButton()).toHaveAttribute("aria-disabled", "true");
+    expect(
+      screen.getAllByText("This booking was never checked out.").length
+    ).toBeGreaterThan(0);
+  });
+
+  it("says nothing has come back yet while everything is still out", () => {
+    renderEntry({
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        { checkedOutAt: "2026-09-01T09:00:00.000Z", checkedInAt: null },
+      ],
+    });
+
+    expect(entryButton()).toHaveAttribute("aria-disabled", "true");
+    expect(
+      screen.getAllByText("Nothing has been checked in yet.").length
+    ).toBeGreaterThan(0);
   });
 });

@@ -374,6 +374,13 @@ function buildRow(
   const state: CheckinReceiptRowState =
     sent === 0 ? "NEVER_CHECKED_OUT" : stillOut > 0 ? "STILL_OUT" : "RETURNED";
 
+  // A moment prints only on a row that is fully accounted for. A quantity slice
+  // can carry a stamped marker while units remain unattributed — untagged logs
+  // cap at the booked quantity, so a re-dispatched slice can settle its marker
+  // and still owe units — and a row that states both a return time and an
+  // outstanding count says two things at once. The unit counts are the truth.
+  const printsCheckIn = isReconciledHere && state === "RETURNED";
+
   return {
     bookingAssetId: slice.bookingAssetId,
     assetId: slice.assetId,
@@ -385,8 +392,8 @@ function buildRow(
     lost,
     damaged,
     stillOut,
-    checkedInAt: isReconciledHere ? slice.checkedInAt : null,
-    checkedInById: isReconciledHere ? slice.checkedInById : null,
+    checkedInAt: printsCheckIn ? slice.checkedInAt : null,
+    checkedInById: printsCheckIn ? slice.checkedInById : null,
   };
 }
 

@@ -346,6 +346,32 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
     expect(row.checkedInById).toBeNull();
   });
 
+  it("prints no check-in moment while a stamped slice still owes units", () => {
+    // A quantity slice can carry a settled marker and still owe units: untagged
+    // logs cap at the booked quantity, so a re-dispatched slice reconciles its
+    // marker while part of the second trip is unaccounted for. A row stating
+    // both a return time and an outstanding count says two things at once.
+    const result = buildCheckinReceipt({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 4,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 8,
+          checkedInAt: CHECKED_IN_AT,
+          checkedInById: "user-1",
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 4 })]]),
+    });
+
+    const row = rowFor(result, "ba-1");
+    expect(row.state).toBe("STILL_OUT");
+    expect(row.stillOut).toBe(4);
+    expect(row.checkedInAt).toBeNull();
+    expect(row.checkedInById).toBeNull();
+  });
+
   it("measures a re-dispatched slice against the cumulative counter, not the booked quantity", () => {
     // `checkedOutQuantity` is never decremented, so a slice that went out,
     // came back and went out again has sent more units than it booked.
