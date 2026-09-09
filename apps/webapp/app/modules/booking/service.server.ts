@@ -887,20 +887,61 @@ async function releaseCheckedOutKits(
       // which is correct: some of its units are still out.
       checkedOutAt: { not: null },
       checkedInAt: null,
+      // The three shapes a slice can hold a kit through — the same three
+      // `getKitIdsToAcquire` stamps one from. Drop the last leg and a kit whose
+      // INDIVIDUAL member is out on a standalone slice reads as unheld, because
+      // that slice carries no provenance by design.
       OR: [
         { sourceKitId: { in: kitIds } },
         { assetKitId: { in: [...kitIdByAssetKitId.keys()] } },
+        {
+          sourceKitId: null,
+          assetKitId: null,
+          asset: {
+            type: AssetType.INDIVIDUAL,
+            assetKits: { some: { kitId: { in: kitIds }, organizationId } },
+          },
+        },
       ],
     },
-    select: { assetKitId: true, sourceKitId: true },
+    select: {
+      id: true,
+      assetKitId: true,
+      sourceKitId: true,
+      asset: {
+        select: { type: true, assetKits: { select: { kitId: true } } },
+      },
+    },
   });
 
+  // Attributed by the shared resolver rather than by hand: one implementation
+  // of "which kit does this slice hold" is what keeps acquire and release from
+  // drifting apart again.
+  const kitIdsBySliceId = await getKitIdsBySlice({
+    slices: slicesStillOut.map((slice) => ({
+      id: slice.id,
+      assetKitId: slice.assetKitId,
+      sourceKitId: slice.sourceKitId,
+      // Defensive `?.`, matching the other resolvers: fixtures and narrower
+      // selects can omit the relation. Without `asset` a slice answers from
+      // provenance alone, which is the safe direction — it can only fail to
+      // pin a kit this exit was already releasing.
+      assetKits: slice.asset?.assetKits ?? [],
+      assetType: slice.asset?.type,
+    })),
+    organizationId,
+    client,
+  });
+
+  // Intersected with the kits actually being released: a standalone slice's
+  // asset can belong to kits this exit knows nothing about, and those are not
+  // ours to pin.
+  const requestedKitIds = new Set(kitIds);
   const heldByAnotherBooking = new Set<string>();
-  for (const slice of slicesStillOut) {
-    const kitId =
-      slice.sourceKitId ??
-      (slice.assetKitId ? kitIdByAssetKitId.get(slice.assetKitId) : undefined);
-    if (kitId) heldByAnotherBooking.add(kitId);
+  for (const sliceKitIds of kitIdsBySliceId.values()) {
+    for (const kitId of sliceKitIds) {
+      if (requestedKitIds.has(kitId)) heldByAnotherBooking.add(kitId);
+    }
   }
 
   const releasableKitIds = kitIds.filter(
@@ -8361,10 +8402,24 @@ export async function partialCheckoutBooking({
         const untaggedQtySliceIds = bookingFound.bookingAssets
           .filter((ba) => untaggedQtyAssetIds.has(ba.asset.id))
           .map((ba) => ba.id);
+        /**
+         * Every slice of every kit this booking holds is read too, not just the
+         * ones this batch names. The kit-completeness test below asks what each
+         * of a kit's slices still owes, and an absent entry there would read as
+         * "owes nothing" — stamping a kit whose other member was never scanned.
+         *
+         * Free: the helper dedupes its id list and costs a fixed number of
+         * queries however long it is, so widening this call is what keeps the
+         * answer complete without a second round-trip.
+         */
+        const kitSliceIds = [...sliceIdsByKitId.values()].flatMap((ids) => [
+          ...ids,
+        ]);
         const sliceCommittedRemainingBySlice =
           await computeBookingAssetsSliceRemainingToCheckOut(tx, id, [
             ...sliceTaggedBookingAssetIds,
             ...untaggedQtySliceIds,
+            ...kitSliceIds,
           ]);
 
         for (const disp of dispositions) {
@@ -8863,20 +8918,23 @@ export async function partialCheckoutBooking({
          *
          * `sliceCommittedRemainingBySlice` is what each slice still owed before
          * this batch, so a slice already fully out enters at 0 and a slice this
-         * batch finishes lands there — no re-read needed, and the arithmetic is
-         * the same one the per-slice caps were enforced with.
+         * batch finishes lands there. What moved comes from `unitsBySliceId`,
+         * the same per-slice attribution the departure markers were written
+         * from — so the kit decision and the markers can never disagree, and
+         * INDIVIDUAL and untagged claims are counted, which the QT-only
+         * disposition ledger does not carry.
          */
-        const claimedThisBatch = (sliceId: string) =>
-          claimedBySliceThisBatch.get(sliceId) ?? 0;
+        const movedThisBatch = (sliceId: string) =>
+          unitsBySliceId.get(sliceId) ?? 0;
         const remainingAfterBatch = (sliceId: string) =>
           (sliceCommittedRemainingBySlice.get(sliceId) ?? 0) -
-          claimedThisBatch(sliceId);
+          movedThisBatch(sliceId);
 
         const completeKitIds: string[] = [];
         for (const [kitId, sliceIds] of sliceIdsByKitId) {
           const ids = [...sliceIds];
           // A kit none of whose slices moved keeps the status it had.
-          if (!ids.some((sliceId) => claimedThisBatch(sliceId) > 0)) continue;
+          if (!ids.some((sliceId) => movedThisBatch(sliceId) > 0)) continue;
           if (ids.every((sliceId) => remainingAfterBatch(sliceId) <= 0)) {
             completeKitIds.push(kitId);
           }
