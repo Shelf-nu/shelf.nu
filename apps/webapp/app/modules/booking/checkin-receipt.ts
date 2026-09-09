@@ -83,19 +83,23 @@ export type CheckinReceiptSlice = {
   /** Who ran that session. */
   sessionCheckedInById?: string | null;
   /**
-   * Tagged disposition entries naming THIS slice, in the order they were
-   * written.
+   * Tagged RETURN entries naming THIS slice, in the order they were written.
    *
    * A quantity slice returned in part keeps `checkedInAt` null, because that
    * marker means fully reconciled, so its units come back with no marker to
    * date them. The log that recorded those units carries the moment and the
    * person, and that is a record rather than a substitution.
    *
+   * Returns only. A consumed, lost or damaged unit was written off rather than
+   * handed over, so the person who logged it received nothing and must not
+   * appear as a receiver — and a later write-off must not date the row after
+   * the units actually came back.
+   *
    * Only logs that name the slice. Untagged legacy logs are spread across
    * slices by a greedy pass that carries no times, so attributing a moment from
    * one would be a guess.
    */
-  dispositionRecords?: Array<{ at: Date; byId: string }>;
+  returnRecords?: Array<{ at: Date; byId: string }>;
 };
 
 /**
@@ -384,9 +388,10 @@ function distinctInOrder(ids: Array<string | null | undefined>): string[] {
  * 2. For an INDIVIDUAL slice on a finished booking, the progressive session
  *    naming its asset — what the completion gate accepts for rows reconciled
  *    before the markers existed.
- * 3. For a QUANTITY_TRACKED slice, the disposition logs that name the slice.
- *    Units returned in part never set the marker, so without this a partial
- *    return prints with no date and no name against it.
+ * 3. For a QUANTITY_TRACKED slice, the RETURN logs that name it. Units
+ *    returned in part never set the marker, so without this a partial return
+ *    prints with no date and no name against it. Write-offs are excluded: a
+ *    consumed, lost or damaged unit was not handed to anybody.
  *
  * The first two are held to the departure they claim to answer: a moment beside
  * a row this receipt calls never checked out claims a return for units that
@@ -416,8 +421,9 @@ function resolveCheckIn(
 
   if (slice.assetType === AssetType.QUANTITY_TRACKED) {
     // Sessions cannot express partial units, so they never settle a quantity
-    // slice. Its logs can, and they carry both the moment and the person.
-    const records = slice.dispositionRecords ?? [];
+    // slice. Its return logs can, and they carry both the moment and the
+    // person.
+    const records = slice.returnRecords ?? [];
     if (records.length === 0) {
       return null;
     }

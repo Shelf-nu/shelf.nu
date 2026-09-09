@@ -489,7 +489,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
           quantity: 6,
           checkedOutAt: CHECKED_OUT_AT,
           checkedOutQuantity: 6,
-          dispositionRecords: [{ at: returnedAt, byId: "user-7" }],
+          returnRecords: [{ at: returnedAt, byId: "user-7" }],
         }),
       ],
       breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 3 })]]),
@@ -505,6 +505,29 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
     expect(row.checkedInByIds).toEqual(["user-7"]);
   });
 
+  it("never names a write-off logger as a receiver", () => {
+    // A consumed, lost or damaged unit was written off, not handed over. The
+    // server passes returns only, so a slice whose logs are all write-offs has
+    // nothing to date it and nobody to name.
+    const result = build({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 6,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 6,
+          returnRecords: [],
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ lost: 6 })]]),
+    });
+
+    const row = rowFor(result, "ba-1");
+    expect(row.lost).toBe(6);
+    expect(row.checkedInAt).toBeNull();
+    expect(row.checkedInByIds).toEqual([]);
+  });
+
   it("names every person who returned units, in the order they did", () => {
     const first = new Date("2026-09-02T11:00:00.000Z");
     const second = new Date("2026-09-03T09:00:00.000Z");
@@ -515,7 +538,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
           quantity: 6,
           checkedOutAt: CHECKED_OUT_AT,
           checkedOutQuantity: 6,
-          dispositionRecords: [
+          returnRecords: [
             { at: second, byId: "user-b" },
             { at: first, byId: "user-a" },
           ],
@@ -541,7 +564,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
           quantity: 6,
           checkedOutAt: CHECKED_OUT_AT,
           checkedOutQuantity: 6,
-          dispositionRecords: [],
+          returnRecords: [],
         }),
       ],
       breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 6 })]]),
@@ -565,7 +588,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
           checkedOutQuantity: 6,
           checkedInAt: CHECKED_IN_AT,
           checkedInById: "user-1",
-          dispositionRecords: [
+          returnRecords: [
             { at: new Date("2026-09-02T11:00:00.000Z"), byId: "user-7" },
           ],
         }),

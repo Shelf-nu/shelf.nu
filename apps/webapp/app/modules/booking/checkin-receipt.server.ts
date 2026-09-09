@@ -273,19 +273,26 @@ export async function fetchCheckinReceiptData(
       }
     }
 
-    // Moments and people for the rows the markers cannot date. Tagged logs
-    // only: an untagged legacy log is spread across an asset's slices by a
-    // greedy pass that carries no times, so taking a moment from one would be a
-    // guess rather than a record.
-    const dispositionRecordsBySlice = new Map<
+    // Moments and people for the rows the markers cannot date.
+    //
+    // RETURN logs only. The other three categories record a write-off, not a
+    // hand-over: whoever logged a loss did not receive anything, so naming them
+    // under "Checked in by" is the same false claim the stamp and the signature
+    // used to make. On a slice with both, a later damage log would also date
+    // the row after the moment the units actually came back.
+    //
+    // Tagged logs only as well: an untagged legacy log is spread across an
+    // asset's slices by a greedy pass that carries no times, so taking a moment
+    // from one would be a guess rather than a record.
+    const returnRecordsBySlice = new Map<
       string,
       Array<{ at: Date; byId: string }>
     >();
     for (const log of dispositionLogs) {
-      if (!log.bookingAssetId) continue;
-      const forSlice = dispositionRecordsBySlice.get(log.bookingAssetId) ?? [];
+      if (!log.bookingAssetId || log.category !== "RETURN") continue;
+      const forSlice = returnRecordsBySlice.get(log.bookingAssetId) ?? [];
       forSlice.push({ at: log.createdAt, byId: log.userId });
-      dispositionRecordsBySlice.set(log.bookingAssetId, forSlice);
+      returnRecordsBySlice.set(log.bookingAssetId, forSlice);
     }
 
     // Reconcile exactly the slices the sheet prints, in the order it prints
@@ -313,7 +320,7 @@ export async function fetchCheckinReceiptData(
                 latestSessionByAsset.get(marker.assetId)?.at ?? null,
               sessionCheckedInById:
                 latestSessionByAsset.get(marker.assetId)?.byId ?? null,
-              dispositionRecords: dispositionRecordsBySlice.get(marker.id),
+              returnRecords: returnRecordsBySlice.get(marker.id),
             },
           ]
         : [];
