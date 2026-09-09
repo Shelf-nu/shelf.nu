@@ -59,8 +59,8 @@ describe("someKitMemberBlocksCustodyAssignment", () => {
   it("allows rows the client never loaded, which the server re-validates", () => {
     // "Select all across pages" selects rows with no membership payload. The
     // guard is an affordance; `assetKits` being absent must not throw.
-    expect(
-      someKitMemberBlocksCustodyAssignment([{ id: "kit-unloaded" }])
-    ).toBe(false);
+    expect(someKitMemberBlocksCustodyAssignment([{ id: "kit-unloaded" }])).toBe(
+      false
+    );
   });
 });
