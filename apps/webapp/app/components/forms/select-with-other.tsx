@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
 import {
   Popover,
@@ -105,7 +105,10 @@ function UnhydratedSelectWithOther({
   required,
   children,
   className,
-}: SelectWithOtherProps) {
+  selectRef,
+}: SelectWithOtherProps & {
+  selectRef?: RefObject<HTMLSelectElement | null>;
+}) {
   const { selection, customValue } = resolveSelectState(
     options,
     defaultValue ?? undefined
@@ -131,6 +134,7 @@ function UnhydratedSelectWithOther({
         {label}
       </FieldLabel>
       <select
+        ref={selectRef}
         id={name}
         name={name}
         required={required}
@@ -172,12 +176,27 @@ function UnhydratedSelectWithOther({
  */
 export function SelectWithOther(props: SelectWithOtherProps) {
   const isHydrated = useHydrated();
+  const fallbackRef = useRef<HTMLSelectElement>(null);
 
   if (!isHydrated) {
-    return <UnhydratedSelectWithOther {...props} />;
+    return <UnhydratedSelectWithOther {...props} selectRef={fallbackRef} />;
   }
 
-  return <EnhancedSelectWithOther {...props} />;
+  /**
+   * The fallback is a real control, so on a slow connection the user can answer
+   * it before the bundle arrives. React has not committed its removal yet while
+   * this render runs, so read the live answer here: seeding the enhanced control
+   * from `defaultValue` alone would silently throw that answer away and leave a
+   * required field empty. `EnhancedSelectWithOther` only reads `defaultValue`
+   * to seed its initial state, so it does not matter that the ref is empty on
+   * later renders.
+   */
+  return (
+    <EnhancedSelectWithOther
+      {...props}
+      defaultValue={fallbackRef.current?.value || props.defaultValue}
+    />
+  );
 }
 
 function EnhancedSelectWithOther({

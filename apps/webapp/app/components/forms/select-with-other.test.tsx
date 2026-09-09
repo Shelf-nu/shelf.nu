@@ -10,8 +10,9 @@
  * @see {@link file://./select-with-other.tsx}
  */
 
-import { render } from "@testing-library/react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { act, render } from "@testing-library/react";
+import { hydrateRoot } from "react-dom/client";
+import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { SelectWithOther } from "./select-with-other";
 
@@ -100,5 +101,69 @@ describe("SelectWithOther once hydrated", () => {
     expect(
       container.querySelector<HTMLInputElement>('input[name="jobTitle"]')?.value
     ).toBe("IT Administrator");
+  });
+});
+
+describe("SelectWithOther during the hydration swap", () => {
+  it("keeps an answer given before the bundle arrived", () => {
+    const field = (
+      <SelectWithOther
+        label="What's your role?"
+        name="jobTitle"
+        options={OPTIONS}
+        required
+        otherInputLabel="Specify your role"
+      />
+    );
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    container.innerHTML = renderToString(field);
+
+    // The user answers the server-rendered select while the bundle is loading.
+    const select = container.querySelector("select");
+    expect(select).not.toBeNull();
+    select!.value = "IT Administrator";
+
+    let root: ReturnType<typeof hydrateRoot>;
+    act(() => {
+      root = hydrateRoot(container, field);
+    });
+
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="jobTitle"]')?.value
+    ).toBe("IT Administrator");
+
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it("falls back to the saved value when the user answered nothing", () => {
+    const field = (
+      <SelectWithOther
+        label="What's your role?"
+        name="jobTitle"
+        options={OPTIONS}
+        required
+        defaultValue="Operations Manager"
+        otherInputLabel="Specify your role"
+      />
+    );
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    container.innerHTML = renderToString(field);
+
+    let root: ReturnType<typeof hydrateRoot>;
+    act(() => {
+      root = hydrateRoot(container, field);
+    });
+
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="jobTitle"]')?.value
+    ).toBe("Operations Manager");
+
+    act(() => root.unmount());
+    container.remove();
   });
 });
