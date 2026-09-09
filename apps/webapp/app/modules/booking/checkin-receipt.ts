@@ -171,8 +171,11 @@ export type CheckinLatenessNote = {
  *
  * The same 15-minute grace the Booking Compliance report applies, so the sheet
  * and the report can never disagree about whether a booking was on time. A
- * return earlier than the grace allows is stated as early rather than as a
+ * close earlier than the grace allows is stated as early rather than as a
  * negative lateness.
+ *
+ * The wording carries no verb, because the row it sits on is labelled
+ * "Returned" only when units actually came back and "Accounted for" otherwise.
  *
  * The duration prints its two most significant non-zero units. A receipt states
  * how late a return was, not a stopwatch reading, and a lateness past the grace
@@ -195,7 +198,7 @@ export function formatLatenessNote(
   }
 
   if (latenessMs < 0) {
-    return { text: "returned early", isLate: false };
+    return { text: "early", isLate: false };
   }
 
   const { days, hours, minutes } = formatOverdueDuration(latenessMs);
@@ -390,9 +393,11 @@ export type SentUnitsFields = {
 /**
  * Units a slice sent out on its current trip.
  *
- * The cumulative counter when it holds anything; otherwise the whole booked
- * quantity for a slice whose marker is stamped, which is what a stamped row
- * with a zero counter means; otherwise nothing, because the slice never left.
+ * The cumulative counter when it holds anything — it is only ever incremented
+ * on dispatch, so a positive counter is itself proof units left; otherwise the
+ * whole booked quantity for a slice whose marker is stamped, which is what a
+ * stamped row with a zero counter means; otherwise nothing, because neither
+ * record says anything left.
  *
  * This is also the capacity a slice may absorb when untagged disposition logs
  * are attributed. Sizing that from the booked quantity instead lets a return

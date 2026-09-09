@@ -203,6 +203,37 @@ describe("booking check-in receipt — the sheet", () => {
     expect(returnedFact).toHaveTextContent("16 hours after the planned end");
   });
 
+  it("does not call the closing moment a return when nothing came back", () => {
+    // why: a booking whose every unit was written off closed at a moment, but
+    // nothing was returned. "Returned" on that row is the same false claim the
+    // stamp used to make.
+    const { container } = renderReceipt({
+      rows: [
+        row({
+          isQuantityTracked: true,
+          quantity: 6,
+          sent: 6,
+          returned: 0,
+          lost: 6,
+        }),
+      ],
+      totals: {
+        itemsBooked: 1,
+        unitsSentOut: 6,
+        returned: 0,
+        consumed: 0,
+        lost: 6,
+        damaged: 0,
+        stillOut: 0,
+      },
+      stamp: "All items accounted for",
+    });
+
+    const facts = factsBlock(container);
+    expect(within(facts).queryByText("Returned")).not.toBeInTheDocument();
+    expect(within(facts).getByText("Accounted for")).toBeInTheDocument();
+  });
+
   it("omits the returned line entirely when nothing recorded a return", () => {
     // why: a booking whose completion predates the activity log has no recorded
     // moment. A blank row would read as "returned at no time"; the sheet must

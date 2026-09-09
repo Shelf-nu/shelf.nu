@@ -452,7 +452,13 @@ export const BookingCheckinReceiptPreview = ({
           </When>
 
           <When truthy={!!pdfMeta.returnedAt}>
-            <ReceiptFact label="Returned">
+            {/* The moment the booking closed. It is a return only when units
+                actually came back: a booking whose every unit was written off
+                as consumed, lost or damaged closed at this moment without
+                anything being returned, and the row must not say otherwise. */}
+            <ReceiptFact
+              label={totals.returned > 0 ? "Returned" : "Accounted for"}
+            >
               {pdfMeta.returnedAt}
               <When truthy={!!pdfMeta.latenessNote}>
                 {" · "}

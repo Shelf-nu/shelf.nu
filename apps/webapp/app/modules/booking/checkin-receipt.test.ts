@@ -622,7 +622,7 @@ describe("formatLatenessNote", () => {
 
   it("states an early return as early rather than as a negative lateness", () => {
     expect(formatLatenessNote(-3 * ONE_HOUR_MS)).toEqual({
-      text: "returned early",
+      text: "early",
       isLate: false,
     });
   });
@@ -686,15 +686,17 @@ describe("resolveSentUnits", () => {
     ).toBe(4);
   });
 
-  it("counts nothing for an un-stamped slice even if a counter is set", () => {
-    // Defensive: the two are written together, and a counter without a marker
-    // must not hand capacity to a slice with no departure to answer for.
+  it("trusts a positive counter even without a departure marker", () => {
+    // The counter is only ever incremented on dispatch, so a positive value is
+    // itself proof that units left. The two are written together, so this pairs
+    // only on inconsistent data — and there the counter is the record that says
+    // something actually moved.
     expect(
       resolveSentUnits({
         quantity: 4,
         checkedOutAt: null,
-        checkedOutQuantity: 0,
+        checkedOutQuantity: 6,
       })
-    ).toBe(0);
+    ).toBe(6);
   });
 });
