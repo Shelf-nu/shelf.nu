@@ -46,6 +46,7 @@ import {
   getPartiallyCheckedInAssetIds,
   getKitIdsByAssets,
   getKitIdsByBookingSlices,
+  getKitIdsToAcquire,
   updateBasicBooking,
   updateBookingAssets,
   buildKitSlicesForBooking,
@@ -1528,9 +1529,14 @@ describe("partialCheckinBooking", () => {
 
     // Verify kit status updated when all assets checked in
     expect(db.kit.updateMany).toHaveBeenCalledWith({
-      // why: partial check-in now scopes the kit status update by
-      // organizationId (cross-org IDOR hardening).
-      where: { id: { in: ["kit-1"] }, organizationId: "org-1" },
+      // why: the kit status update is scoped by organizationId (cross-org
+      // IDOR hardening) and by CHECKED_OUT, so a kit that shares a member
+      // with this booking but is held in custody is left alone.
+      where: {
+        id: { in: ["kit-1"] },
+        organizationId: "org-1",
+        status: KitStatus.CHECKED_OUT,
+      },
       data: { status: KitStatus.AVAILABLE },
     });
 
@@ -1685,8 +1691,8 @@ describe("getPartiallyCheckedInAssetIds", () => {
 });
 
 describe("getKitIdsByAssets", () => {
-  // An asset belongs to a kit when assetKits[0]?.kitId resolves to a kitId;
-  // an empty assetKits array represents "not in any kit".
+  // An asset belongs to a kit for every `AssetKit` row it carries; an empty
+  // assetKits array represents "not in any kit".
   it("should return unique kit IDs from assets", () => {
     const assets = [
       { id: "asset-1", assetKits: [{ kitId: "kit-1" }] },
@@ -1709,6 +1715,181 @@ describe("getKitIdsByAssets", () => {
     const result = getKitIdsByAssets(assets);
 
     expect(result).toEqual([]);
+  });
+
+  it("names every kit a quantity-tracked asset belongs to, not just the first", () => {
+    // A release leg: the kit reached through the second membership still owes
+    // this booking something, and a first-row read would strand it.
+    const assets = [
+      { id: "asset-1", assetKits: [{ kitId: "kit-1" }, { kitId: "kit-2" }] },
+    ];
+
+    expect(getKitIdsByAssets(assets).sort()).toEqual(["kit-1", "kit-2"]);
+  });
+});
+
+describe("getKitIdsToAcquire", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /** One `BookingAsset` row, with the defaults most cases don't care about. */
+  function slice({
+    id,
+    assetKitId = null,
+    sourceKitId = null,
+    type = AssetType.QUANTITY_TRACKED,
+    memberships = [],
+  }: {
+    id: string;
+    assetKitId?: string | null;
+    sourceKitId?: string | null;
+    type?: AssetType;
+    memberships?: string[];
+  }) {
+    return {
+      id,
+      assetKitId,
+      sourceKitId,
+      asset: { type, assetKits: memberships.map((kitId) => ({ kitId })) },
+    };
+  }
+
+  it("stamps only the kit a slice was booked under", async () => {
+    // The asset sits in both kits; the booking took it from kit-1.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-1",
+          sourceKitId: "kit-1",
+          memberships: ["kit-2", "kit-1"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual(["kit-1"]);
+  });
+
+  it("is unaffected by the order membership rows come back in", async () => {
+    const forwards = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-1",
+          sourceKitId: "kit-1",
+          memberships: ["kit-1", "kit-2"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+    const backwards = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-1",
+          sourceKitId: "kit-1",
+          memberships: ["kit-2", "kit-1"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(forwards).toEqual(backwards);
+  });
+
+  it("stamps no kit for a standalone quantity-tracked slice", async () => {
+    // Loose units come out of the free pool, which is a separate axis from the
+    // kit slices — every kit holding this asset stays intact.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-1",
+          type: AssetType.QUANTITY_TRACKED,
+          memberships: ["kit-1", "kit-2"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("stamps the kit for a standalone INDIVIDUAL slice", async () => {
+    // The one physical item leaves, so its kit is genuinely incomplete.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-1",
+          type: AssetType.INDIVIDUAL,
+          memberships: ["kit-1"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual(["kit-1"]);
+  });
+
+  it("resolves a legacy kit-driven slice through the AssetKit hop", async () => {
+    // why: overrides the module default, which derives a kitId from the input
+    // (`kit-of-<id>`). A fixed row instead, so the assertion names the kit this
+    // leg must resolve `ak-1` to rather than a value echoed back from the id.
+    // One-shot: `clearAllMocks` clears call history but NOT implementations, so
+    // a persistent override would answer for every later test in this file. The
+    // legacy hop issues exactly one read, so the queued value is consumed here.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValueOnce([
+      { id: "ak-1", kitId: "kit-9" },
+    ]);
+
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({ id: "ba-1", assetKitId: "ak-1", memberships: ["kit-3"] }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual(["kit-9"]);
+    expect(db.assetKit.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
+      select: { id: true, kitId: true },
+    });
+  });
+
+  it("stamps nothing for a standalone quantity-tracked slice on the release side too", async () => {
+    // Release has to be the exact inverse of acquire. A booking holding only
+    // free-pool units of a shared asset never stamped any kit, so it must not
+    // name one on the way out — otherwise cancelling it releases a kit that a
+    // different booking has out.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-loose",
+          type: AssetType.QUANTITY_TRACKED,
+          memberships: ["kit-1", "kit-2"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("keeps a booking's kit slice and its free-pool slice apart", async () => {
+    // Both slices are the same asset on the same booking: one booked under
+    // kit-1, one loose. Only the kit-driven one stamps.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-kit",
+          sourceKitId: "kit-1",
+          memberships: ["kit-1", "kit-2"],
+        }),
+        slice({ id: "ba-loose", memberships: ["kit-1", "kit-2"] }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual(["kit-1"]);
   });
 });
 
@@ -13512,8 +13693,13 @@ describe("getKitIdsByBookingSlices", () => {
     // why: overrides the module default, which derives a kitId from the input
     // (`kit-of-<id>`). A fixed row instead, so the assertion names the kit this
     // leg must resolve `ak-1` to rather than a value echoed back from the id.
+    // One-shot: `clearAllMocks` clears call history but NOT implementations, so
+    // a persistent override would answer for every later test in this file. The
+    // legacy hop issues exactly one read, so the queued value is consumed here.
     //@ts-expect-error missing vitest type
-    db.assetKit.findMany.mockResolvedValue([{ id: "ak-1", kitId: "kit-9" }]);
+    db.assetKit.findMany.mockResolvedValueOnce([
+      { id: "ak-1", kitId: "kit-9" },
+    ]);
 
     const result = await getKitIdsByBookingSlices({
       slices: [{ assetId: "asset-1", assetKitId: "ak-1", sourceKitId: null }],
@@ -13540,8 +13726,10 @@ describe("getKitIdsByBookingSlices", () => {
   it("resolves nothing rather than throwing when a membership has vanished", async () => {
     // A concurrent detach legitimately removes the row between the two reads.
     // That means "no kit to release", never "reject the check-in".
+    // One-shot for the reason given above: an empty array left in place would
+    // answer the check-in suites that follow.
     //@ts-expect-error missing vitest type
-    db.assetKit.findMany.mockResolvedValue([]);
+    db.assetKit.findMany.mockResolvedValueOnce([]);
 
     const result = await getKitIdsByBookingSlices({
       slices: [
@@ -13627,7 +13815,11 @@ describe("checkinBooking - releases a kit detached mid-booking", () => {
     });
 
     expect(db.kit.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["kit-1"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["kit-1"] },
+        organizationId: "org-1",
+        status: KitStatus.CHECKED_OUT,
+      },
       data: { status: KitStatus.AVAILABLE },
     });
   });
