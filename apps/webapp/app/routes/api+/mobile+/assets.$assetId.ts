@@ -94,9 +94,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: true,
         category: { select: { id: true, name: true, color: true } },
         // Select location through the pivot and synthesise the singular
-        // `location` below so the mobile JSON contract stays flat.
+        // `location` below so the mobile JSON contract stays flat. The
+        // per-row `quantity` is the units placed at that location
+        // (AssetLocation.quantity — NOT workspace stock); it feeds the
+        // `placementCount` / `locationQuantity` fields the qty-aware
+        // "Update location" sheet reads.
         assetLocations: {
-          select: { location: { select: { id: true, name: true } } },
+          select: {
+            quantity: true,
+            location: { select: { id: true, name: true } },
+          },
         },
         custody: {
           // Oldest-first so the flattened single custody + custodyList are
@@ -340,6 +347,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         kit: flattened.kit,
         kitId: flattened.kitId,
         location: flattened.location,
+        // Placement metadata (additive) for the qty-aware "Update location"
+        // sheet: how many AssetLocation rows exist (drives the
+        // multi-placement collapse warning — the update is a pivot replace)
+        // and the units placed at the primary location (the sheet's
+        // pre-fill). `locationQuantity` is the per-row placement quantity,
+        // NOT workspace stock.
+        placementCount: asset.assetLocations.length,
+        locationQuantity:
+          asset.assetLocations.find(
+            (al) => al.location.id === flattened.location?.id
+          )?.quantity ?? null,
         // Name only (no id, no image fields — see the destructure above).
         assetModel,
         // why: re-attach the detail-shape custody (with createdAt +
