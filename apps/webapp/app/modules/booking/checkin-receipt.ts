@@ -85,7 +85,19 @@ export type CheckinReceiptRowState =
   | "RETURNED"
   | "STILL_OUT";
 
-/** One printed line of the items table. */
+/**
+ * One printed line of the items table.
+ *
+ * The counts are UNITS, not rows: a QUANTITY_TRACKED slice reports every unit it
+ * moved, and an INDIVIDUAL slice reports 1 or 0. `sent` is what left on the
+ * departure the slice is on now, and the four disposition counts plus
+ * `stillOut` always add back up to it.
+ *
+ * `checkedInAt` and `checkedInById` are present only when the slice's recorded
+ * check-in answers that departure. A slice that never left, or one dispatched
+ * again since its return, carries `null` for both rather than a moment that
+ * would contradict the row it sits on.
+ */
 export type CheckinReceiptRow = {
   bookingAssetId: string;
   assetId: string;
@@ -223,7 +235,14 @@ export type CheckinReceiptViewRow = Omit<
     checkedInOn: string | null;
   };
 
-/** The booking facts the sheet's header and key-value block print. */
+/**
+ * The booking facts the sheet's header and key-value block print.
+ *
+ * Deliberately narrower than the booking row the server reads: only what the
+ * sheet shows crosses the wire. Both custodian shapes are carried because the
+ * sheet resolves the custodian name with the same expression the booking
+ * checklist uses, so the two documents can never name a different person.
+ */
 export type CheckinReceiptViewBooking = {
   id: string;
   name: string;
