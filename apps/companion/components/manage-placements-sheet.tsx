@@ -29,7 +29,7 @@
  * @see {@link file://../app/(tabs)/assets/[id].tsx} the consumer
  * @see {@link file://./location-picker.tsx} the nested location picker
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 import {
   View,
   Text,
@@ -80,6 +80,73 @@ type Props = {
   onClose: () => void;
 };
 
+/**
+ * The editor's coupled state. The rows and the two banners always move
+ * together (adding a row clears the duplicate hint, reopening resets all
+ * three), so they live in one reducer rather than separate `useState` calls.
+ */
+type EditorState = {
+  rows: EditableRow[];
+  /** Set when the picker returns a location that already has a row. */
+  duplicateHint: string | null;
+  /**
+   * True when the sheet OPENED with the manual sum above the total. A
+   * per-open snapshot rather than derived state: it keeps the "stock was used
+   * up while every unit was placed" explanation on screen while the user
+   * fixes the numbers, which is exactly when it is needed.
+   */
+  openedOverPlaced: boolean;
+};
+
+type EditorAction =
+  | { type: "reset"; rows: EditableRow[]; openedOverPlaced: boolean }
+  | { type: "addRow"; row: EditableRow }
+  | { type: "duplicateLocation"; locationName: string }
+  | { type: "removeRow"; rowId: string }
+  | { type: "setQuantity"; rowId: string; quantity: number };
+
+/**
+ * Applies one editor transition.
+ *
+ * @param state - Current editor state.
+ * @param action - The transition to apply.
+ * @returns The next state.
+ */
+function editorReducer(state: EditorState, action: EditorAction): EditorState {
+  switch (action.type) {
+    case "reset":
+      return {
+        rows: action.rows,
+        duplicateHint: null,
+        openedOverPlaced: action.openedOverPlaced,
+      };
+    case "addRow":
+      return {
+        ...state,
+        rows: [...state.rows, action.row],
+        duplicateHint: null,
+      };
+    case "duplicateLocation":
+      return {
+        ...state,
+        duplicateHint: `${action.locationName} is already listed below.`,
+      };
+    case "removeRow":
+      return {
+        ...state,
+        rows: state.rows.filter((r) => r.rowId !== action.rowId),
+        duplicateHint: null,
+      };
+    case "setQuantity":
+      return {
+        ...state,
+        rows: state.rows.map((r) =>
+          r.rowId === action.rowId ? { ...r, quantity: action.quantity } : r
+        ),
+      };
+  }
+}
+
 let rowCounter = 0;
 function nextRowId() {
   rowCounter += 1;
@@ -109,36 +176,28 @@ export function ManagePlacementsSheet({
   const { colors } = useTheme();
   const styles = useStyles();
 
-  const [rows, setRows] = useState<EditableRow[]>([]);
+  const [{ rows, duplicateHint, openedOverPlaced }, dispatch] = useReducer(
+    editorReducer,
+    { rows: [], duplicateHint: null, openedOverPlaced: false }
+  );
   const [showLocationPicker, setShowLocationPicker] = useState(false);
-  /** Set when the picker returns a location that already has a row. */
-  const [duplicateHint, setDuplicateHint] = useState<string | null>(null);
-  /**
-   * True when the sheet OPENED with the manual sum above the total.
-   * Deliberately a per-open snapshot, not derived state: it keeps the
-   * "stock was used up while fully placed" explanation on screen while the
-   * user fixes the numbers, which is exactly when it is needed.
-   */
-  const [openedOverPlaced, setOpenedOverPlaced] = useState(false);
 
   // Re-seed the editable rows every time the sheet opens: each open edits
   // the placements as they are NOW, so stale rows must not leak across.
   useEffect(() => {
-    if (visible) {
-      const manual = initialPlacements.filter((p) => p.viaKit === null);
-      setRows(
-        manual.map((p) => ({
-          rowId: nextRowId(),
-          locationId: p.locationId,
-          locationName: p.locationName,
-          quantity: p.quantity,
-        }))
-      );
-      setDuplicateHint(null);
-      setOpenedOverPlaced(
-        manual.reduce((s, p) => s + p.quantity, 0) > totalQuantity
-      );
-    }
+    if (!visible) return;
+    const manual = initialPlacements.filter((p) => p.viaKit === null);
+    dispatch({
+      type: "reset",
+      rows: manual.map((p) => ({
+        rowId: nextRowId(),
+        locationId: p.locationId,
+        locationName: p.locationName,
+        quantity: p.quantity,
+      })),
+      openedOverPlaced:
+        manual.reduce((s, p) => s + p.quantity, 0) > totalQuantity,
+    });
     // why: seed from the props as they are at the moment the sheet opens —
     // re-seeding on every initialPlacements identity change would wipe
     // in-progress edits when the parent refetches in the background.
@@ -193,38 +252,37 @@ export function ManagePlacementsSheet({
   const canAddRow = unplaced > 0;
 
   const setRowQuantity = (rowId: string, quantity: number) => {
-    setRows((prev) =>
-      prev.map((r) => (r.rowId === rowId ? { ...r, quantity } : r))
-    );
+    dispatch({ type: "setQuantity", rowId, quantity });
   };
 
   /** Step a row's quantity by `delta`, clamped to `1..totalQuantity`. */
   const stepRow = (row: EditableRow, delta: number) => {
-    const next = Math.min(Math.max(row.quantity + delta, 1), totalQuantity);
-    setRowQuantity(row.rowId, next);
+    dispatch({
+      type: "setQuantity",
+      rowId: row.rowId,
+      quantity: Math.min(Math.max(row.quantity + delta, 1), totalQuantity),
+    });
   };
 
   const removeRow = (rowId: string) => {
-    setRows((prev) => prev.filter((r) => r.rowId !== rowId));
-    setDuplicateHint(null);
+    dispatch({ type: "removeRow", rowId });
   };
 
   const addLocation = (location: { id: string; name: string }) => {
     setShowLocationPicker(false);
     if (rows.some((r) => r.locationId === location.id)) {
-      setDuplicateHint(`${location.name} is already listed below.`);
+      dispatch({ type: "duplicateLocation", locationName: location.name });
       return;
     }
-    setDuplicateHint(null);
-    setRows((prev) => [
-      ...prev,
-      {
+    dispatch({
+      type: "addRow",
+      row: {
         rowId: nextRowId(),
         locationId: location.id,
         locationName: location.name,
         quantity: Math.max(1, unplaced),
       },
-    ]);
+    });
   };
 
   const save = () => {
@@ -266,117 +324,19 @@ export function ManagePlacementsSheet({
           </Text>
 
           {/* Read-only kit-driven placements */}
-          {kitRows.length > 0 ? (
-            <View style={styles.kitBlock}>
-              <Text style={styles.kitBlockLabel}>
-                Placements managed by kits (read-only)
-              </Text>
-              {kitRows.map((p) => (
-                <View
-                  key={`${p.locationId}-${p.viaKit?.id}`}
-                  style={styles.kitRow}
-                >
-                  <Text style={styles.kitRowName} numberOfLines={1}>
-                    {p.locationName}
-                  </Text>
-                  <Text style={styles.kitRowMeta} numberOfLines={1}>
-                    via kit {p.viaKit?.name} ·{" "}
-                    {formatQuantity(p.quantity, unitOfMeasure) ?? p.quantity}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
+          <KitPlacementList rows={kitRows} unitOfMeasure={unitOfMeasure} />
 
           {/* Editable placement rows */}
           {rows.map((row) => (
-            <View key={row.rowId} style={styles.row}>
-              <View style={styles.rowHeader}>
-                <Ionicons
-                  name="location-outline"
-                  size={16}
-                  color={colors.foregroundSecondary}
-                />
-                <Text style={styles.rowName} numberOfLines={1}>
-                  {row.locationName}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => removeRow(row.rowId)}
-                  style={styles.removeButton}
-                  accessibilityLabel={`Remove ${row.locationName}`}
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="trash-outline"
-                    size={18}
-                    color={colors.foregroundSecondary}
-                  />
-                </TouchableOpacity>
-              </View>
-              <View style={styles.quantityRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.stepButton,
-                    row.quantity <= 1 && styles.stepButtonDisabled,
-                  ]}
-                  onPress={() => stepRow(row, -1)}
-                  disabled={row.quantity <= 1}
-                  activeOpacity={0.7}
-                  accessibilityLabel={`Decrease ${row.locationName} quantity`}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: row.quantity <= 1 }}
-                >
-                  <Ionicons name="remove" size={20} color={colors.foreground} />
-                </TouchableOpacity>
-                <TextInput
-                  style={styles.input}
-                  value={row.quantity === 0 ? "" : String(row.quantity)}
-                  onChangeText={(text) => {
-                    // Digits only, live-capped at the pool so a row can
-                    // never claim more than the asset owns; the sum check
-                    // below handles the cross-row bound. A cleared field
-                    // parks the row at 0 (rendered empty) so the next
-                    // keystroke starts a fresh number — snapping straight
-                    // back to a digit would make erase-then-type
-                    // concatenate onto it.
-                    const digits = text.replace(/[^0-9]/g, "");
-                    if (!digits) {
-                      setRowQuantity(row.rowId, 0);
-                      return;
-                    }
-                    setRowQuantity(
-                      row.rowId,
-                      Math.min(parseInt(digits, 10), totalQuantity)
-                    );
-                  }}
-                  // Focusing selects the pre-filled value so the first
-                  // keystroke replaces it rather than appending — placing a
-                  // portion is the common case, so typing a new number must
-                  // not concatenate onto the default (full-pool) seed.
-                  selectTextOnFocus
-                  keyboardType="number-pad"
-                  returnKeyType="done"
-                  accessibilityLabel={`Quantity at ${row.locationName}`}
-                />
-                <TouchableOpacity
-                  style={[
-                    styles.stepButton,
-                    row.quantity >= totalQuantity && styles.stepButtonDisabled,
-                  ]}
-                  onPress={() => stepRow(row, 1)}
-                  disabled={row.quantity >= totalQuantity}
-                  activeOpacity={0.7}
-                  accessibilityLabel={`Increase ${row.locationName} quantity`}
-                  accessibilityRole="button"
-                  accessibilityState={{
-                    disabled: row.quantity >= totalQuantity,
-                  }}
-                >
-                  <Ionicons name="add" size={20} color={colors.foreground} />
-                </TouchableOpacity>
-                <Text style={styles.rowUnit}>{unitLabel}</Text>
-              </View>
-            </View>
+            <PlacementRow
+              key={row.rowId}
+              row={row}
+              totalQuantity={totalQuantity}
+              unitLabel={unitLabel}
+              onStep={stepRow}
+              onSetQuantity={setRowQuantity}
+              onRemove={removeRow}
+            />
           ))}
 
           {rows.length === 0 ? (
@@ -407,37 +367,14 @@ export function ManagePlacementsSheet({
           ) : null}
 
           {/* Placed / via kits / unplaced meter */}
-          <View style={styles.meter}>
-            <View style={styles.meterLine}>
-              <Text style={styles.meterLabel}>Placed</Text>
-              <Text style={styles.meterValue}>
-                {placedSum} / {totalLabel}
-              </Text>
-            </View>
-            {kitSum > 0 ? (
-              <View style={styles.meterLine}>
-                <Text style={styles.meterKitLabel}>Via kits</Text>
-                <Text style={styles.meterKitValue}>
-                  {kitSum} {unitLabel}
-                </Text>
-              </View>
-            ) : null}
-            {overPlacedBy > 0 ? (
-              <View style={styles.meterLine}>
-                <Text style={styles.meterErrorLabel}>Over-placed</Text>
-                <Text style={styles.meterErrorValue}>
-                  {overPlacedBy} {unitLabel}
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.meterLine}>
-                <Text style={styles.meterMutedLabel}>Unplaced</Text>
-                <Text style={styles.meterMutedValue}>
-                  {unplaced} {unitLabel}
-                </Text>
-              </View>
-            )}
-          </View>
+          <PlacementMeter
+            placedSum={placedSum}
+            totalLabel={totalLabel}
+            kitSum={kitSum}
+            overPlacedBy={overPlacedBy}
+            unplaced={unplaced}
+            unitLabel={unitLabel}
+          />
 
           {clientError ? (
             <View style={styles.errorBox}>
@@ -492,6 +429,227 @@ export function ManagePlacementsSheet({
         />
       </SafeAreaView>
     </Modal>
+  );
+}
+
+/**
+ * Read-only list of placements a kit owns. Rendered above the editable rows
+ * so the user sees the whole picture; these change only through the kit
+ * itself, and they do not reduce the unplaced pool.
+ *
+ * @param props.rows - Kit-driven placements; renders nothing when empty.
+ * @param props.unitOfMeasure - Display unit for the per-row count.
+ * @returns The read-only block, or null.
+ */
+function KitPlacementList({
+  rows,
+  unitOfMeasure,
+}: {
+  rows: AssetPlacement[];
+  unitOfMeasure?: string | null;
+}) {
+  const styles = useStyles();
+  if (rows.length === 0) return null;
+
+  return (
+    <View style={styles.kitBlock}>
+      <Text style={styles.kitBlockLabel}>
+        Placements managed by kits (read-only)
+      </Text>
+      {rows.map((p) => (
+        <View key={`${p.locationId}-${p.viaKit?.id}`} style={styles.kitRow}>
+          <Text style={styles.kitRowName} numberOfLines={1}>
+            {p.locationName}
+          </Text>
+          <Text style={styles.kitRowMeta} numberOfLines={1}>
+            via kit {p.viaKit?.name} ·{" "}
+            {formatQuantity(p.quantity, unitOfMeasure) ?? p.quantity}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Allocation summary for the asset's pool: what the editable rows place, what
+ * kits hold on their own axis, and the remainder. Shows the remainder as
+ * "Over-placed" when the rows claim more units than the asset owns.
+ *
+ * @param props.placedSum - Units the editable rows currently place.
+ * @param props.totalLabel - The asset's pool, already unit-formatted.
+ * @param props.kitSum - Units held by kit-driven rows; hidden when zero.
+ * @param props.overPlacedBy - Units claimed beyond the pool; hidden when zero.
+ * @param props.unplaced - Units placed nowhere.
+ * @param props.unitLabel - Unit suffix.
+ * @returns The meter element.
+ */
+function PlacementMeter({
+  placedSum,
+  totalLabel,
+  kitSum,
+  overPlacedBy,
+  unplaced,
+  unitLabel,
+}: {
+  placedSum: number;
+  totalLabel: string;
+  kitSum: number;
+  overPlacedBy: number;
+  unplaced: number;
+  unitLabel: string;
+}) {
+  const styles = useStyles();
+
+  return (
+    <View style={styles.meter}>
+      <View style={styles.meterLine}>
+        <Text style={styles.meterLabel}>Placed</Text>
+        <Text style={styles.meterValue}>
+          {placedSum} / {totalLabel}
+        </Text>
+      </View>
+      {kitSum > 0 ? (
+        <View style={styles.meterLine}>
+          <Text style={styles.meterKitLabel}>Via kits</Text>
+          <Text style={styles.meterKitValue}>
+            {kitSum} {unitLabel}
+          </Text>
+        </View>
+      ) : null}
+      {overPlacedBy > 0 ? (
+        <View style={styles.meterLine}>
+          <Text style={styles.meterErrorLabel}>Over-placed</Text>
+          <Text style={styles.meterErrorValue}>
+            {overPlacedBy} {unitLabel}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.meterLine}>
+          <Text style={styles.meterMutedLabel}>Unplaced</Text>
+          <Text style={styles.meterMutedValue}>
+            {unplaced} {unitLabel}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+/**
+ * One editable placement: the location it names, a remove control, and a
+ * quantity stepper bounded to `1..totalQuantity`.
+ *
+ * @param props.row - The row being edited.
+ * @param props.totalQuantity - The asset's pool; the per-row upper bound.
+ * @param props.unitLabel - Unit suffix shown after the stepper.
+ * @param props.onStep - Steps this row's quantity by a delta.
+ * @param props.onSetQuantity - Sets this row's quantity outright.
+ * @param props.onRemove - Drops this row from the set.
+ * @returns The row element.
+ */
+function PlacementRow({
+  row,
+  totalQuantity,
+  unitLabel,
+  onStep,
+  onSetQuantity,
+  onRemove,
+}: {
+  row: EditableRow;
+  totalQuantity: number;
+  unitLabel: string;
+  onStep: (row: EditableRow, delta: number) => void;
+  onSetQuantity: (rowId: string, quantity: number) => void;
+  onRemove: (rowId: string) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+
+  return (
+    <View style={styles.row}>
+      <View style={styles.rowHeader}>
+        <Ionicons
+          name="location-outline"
+          size={16}
+          color={colors.foregroundSecondary}
+        />
+        <Text style={styles.rowName} numberOfLines={1}>
+          {row.locationName}
+        </Text>
+        <TouchableOpacity
+          onPress={() => onRemove(row.rowId)}
+          style={styles.removeButton}
+          accessibilityLabel={`Remove ${row.locationName}`}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name="trash-outline"
+            size={18}
+            color={colors.foregroundSecondary}
+          />
+        </TouchableOpacity>
+      </View>
+      <View style={styles.quantityRow}>
+        <TouchableOpacity
+          style={[
+            styles.stepButton,
+            row.quantity <= 1 && styles.stepButtonDisabled,
+          ]}
+          onPress={() => onStep(row, -1)}
+          disabled={row.quantity <= 1}
+          activeOpacity={0.7}
+          accessibilityLabel={`Decrease ${row.locationName} quantity`}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: row.quantity <= 1 }}
+        >
+          <Ionicons name="remove" size={20} color={colors.foreground} />
+        </TouchableOpacity>
+        <TextInput
+          style={styles.input}
+          value={row.quantity === 0 ? "" : String(row.quantity)}
+          onChangeText={(text) => {
+            // Digits only, live-capped at the pool so a row can never claim
+            // more than the asset owns; the cross-row sum check lives in the
+            // parent. A cleared field parks the row at 0 (rendered empty) so
+            // the next keystroke starts a fresh number — snapping straight
+            // back to a digit would make erase-then-type concatenate onto it.
+            const digits = text.replace(/[^0-9]/g, "");
+            if (!digits) {
+              onSetQuantity(row.rowId, 0);
+              return;
+            }
+            onSetQuantity(
+              row.rowId,
+              Math.min(parseInt(digits, 10), totalQuantity)
+            );
+          }}
+          // Focusing selects the pre-filled value so the first keystroke
+          // replaces it rather than appending — placing a portion is the
+          // common case, so typing a new number must not concatenate onto
+          // the default (full-pool) seed.
+          selectTextOnFocus
+          keyboardType="number-pad"
+          returnKeyType="done"
+          accessibilityLabel={`Quantity at ${row.locationName}`}
+        />
+        <TouchableOpacity
+          style={[
+            styles.stepButton,
+            row.quantity >= totalQuantity && styles.stepButtonDisabled,
+          ]}
+          onPress={() => onStep(row, 1)}
+          disabled={row.quantity >= totalQuantity}
+          activeOpacity={0.7}
+          accessibilityLabel={`Increase ${row.locationName} quantity`}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: row.quantity >= totalQuantity }}
+        >
+          <Ionicons name="add" size={20} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text style={styles.rowUnit}>{unitLabel}</Text>
+      </View>
+    </View>
   );
 }
 
