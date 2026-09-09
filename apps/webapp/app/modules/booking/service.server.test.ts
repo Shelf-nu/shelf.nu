@@ -1833,8 +1833,13 @@ describe("getKitIdsToAcquire", () => {
     // why: overrides the module default, which derives a kitId from the input
     // (`kit-of-<id>`). A fixed row instead, so the assertion names the kit this
     // leg must resolve `ak-1` to rather than a value echoed back from the id.
+    // One-shot: `clearAllMocks` clears call history but NOT implementations, so
+    // a persistent override would answer for every later test in this file. The
+    // legacy hop issues exactly one read, so the queued value is consumed here.
     //@ts-expect-error missing vitest type
-    db.assetKit.findMany.mockResolvedValue([{ id: "ak-1", kitId: "kit-9" }]);
+    db.assetKit.findMany.mockResolvedValueOnce([
+      { id: "ak-1", kitId: "kit-9" },
+    ]);
 
     const result = await getKitIdsToAcquire({
       slices: [
@@ -1848,6 +1853,25 @@ describe("getKitIdsToAcquire", () => {
       where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
       select: { id: true, kitId: true },
     });
+  });
+
+  it("stamps nothing for a standalone quantity-tracked slice on the release side too", async () => {
+    // Release has to be the exact inverse of acquire. A booking holding only
+    // free-pool units of a shared asset never stamped any kit, so it must not
+    // name one on the way out — otherwise cancelling it releases a kit that a
+    // different booking has out.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-loose",
+          type: AssetType.QUANTITY_TRACKED,
+          memberships: ["kit-1", "kit-2"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual([]);
   });
 
   it("keeps a booking's kit slice and its free-pool slice apart", async () => {
@@ -13669,8 +13693,13 @@ describe("getKitIdsByBookingSlices", () => {
     // why: overrides the module default, which derives a kitId from the input
     // (`kit-of-<id>`). A fixed row instead, so the assertion names the kit this
     // leg must resolve `ak-1` to rather than a value echoed back from the id.
+    // One-shot: `clearAllMocks` clears call history but NOT implementations, so
+    // a persistent override would answer for every later test in this file. The
+    // legacy hop issues exactly one read, so the queued value is consumed here.
     //@ts-expect-error missing vitest type
-    db.assetKit.findMany.mockResolvedValue([{ id: "ak-1", kitId: "kit-9" }]);
+    db.assetKit.findMany.mockResolvedValueOnce([
+      { id: "ak-1", kitId: "kit-9" },
+    ]);
 
     const result = await getKitIdsByBookingSlices({
       slices: [{ assetId: "asset-1", assetKitId: "ak-1", sourceKitId: null }],
@@ -13697,8 +13726,10 @@ describe("getKitIdsByBookingSlices", () => {
   it("resolves nothing rather than throwing when a membership has vanished", async () => {
     // A concurrent detach legitimately removes the row between the two reads.
     // That means "no kit to release", never "reject the check-in".
+    // One-shot for the reason given above: an empty array left in place would
+    // answer the check-in suites that follow.
     //@ts-expect-error missing vitest type
-    db.assetKit.findMany.mockResolvedValue([]);
+    db.assetKit.findMany.mockResolvedValueOnce([]);
 
     const result = await getKitIdsByBookingSlices({
       slices: [

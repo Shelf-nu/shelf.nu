@@ -835,23 +835,82 @@ async function reconcileAssetStatusForBookingExit({
 /**
  * Hands kits back to the shelf when a booking lets go of them.
  *
- * Only a kit this booking actually took out is released: the kit-id sets that
- * reach here are deliberately over-inclusive (see {@link getKitIdsByAssets}),
- * and a kit that shares a `QUANTITY_TRACKED` member with the booking can be
- * sitting in a custodian's hands for reasons this booking knows nothing about.
- * `status: CHECKED_OUT` makes the surplus a no-op instead of stranding such a
- * kit as AVAILABLE with its `KitCustody` row still attached.
+ * Two things stand between the caller's kit ids and the write, because
+ * `Kit.status` is workspace-wide state that one booking's exit must not
+ * overwrite on another's behalf:
+ *
+ *  - `status: CHECKED_OUT` leaves a kit held in a custodian's hands alone, so
+ *    it cannot be stranded AVAILABLE with its `KitCustody` row still attached;
+ *  - a kit any OTHER live booking still has out is dropped outright. That one
+ *    the status filter cannot catch, because such a kit is legitimately
+ *    CHECKED_OUT — and releasing it would let it be booked again while it is
+ *    physically away (`assertKitsAddableToActiveBooking` gates on this column).
  *
  * @param client Pass the active `tx` when called inside a transaction.
+ * @param args.excludeBookingIds The exiting bookings, so their own slices
+ *   cannot pin the kit, or each other.
  */
 async function releaseCheckedOutKits(
-  client: Pick<ExtendedPrismaClient, "kit">,
-  { kitIds, organizationId }: { kitIds: string[]; organizationId: string }
+  client: Pick<ExtendedPrismaClient, "kit" | "assetKit" | "bookingAsset">,
+  {
+    kitIds,
+    organizationId,
+    excludeBookingIds,
+  }: {
+    kitIds: string[];
+    organizationId: string;
+    excludeBookingIds: string[];
+  }
 ) {
   if (kitIds.length === 0) return;
+
+  // `sourceKitId` names the kit directly; the `assetKitId` leg needs the pivot
+  // ids to compare against, for slices written before that column existed.
+  const membershipRows = await client.assetKit.findMany({
+    where: { kitId: { in: kitIds }, organizationId },
+    select: { id: true, kitId: true },
+  });
+  const kitIdByAssetKitId = new Map(
+    membershipRows.map((row) => [row.id, row.kitId])
+  );
+
+  const slicesStillOut = await client.bookingAsset.findMany({
+    where: {
+      bookingId: { notIn: excludeBookingIds },
+      booking: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId,
+      },
+      // A live booking is not by itself evidence that it holds the kit — only
+      // the slice's own markers say that. A partially returned
+      // QUANTITY_TRACKED slice keeps a null `checkedInAt` and still counts,
+      // which is correct: some of its units are still out.
+      checkedOutAt: { not: null },
+      checkedInAt: null,
+      OR: [
+        { sourceKitId: { in: kitIds } },
+        { assetKitId: { in: [...kitIdByAssetKitId.keys()] } },
+      ],
+    },
+    select: { assetKitId: true, sourceKitId: true },
+  });
+
+  const heldByAnotherBooking = new Set<string>();
+  for (const slice of slicesStillOut) {
+    const kitId =
+      slice.sourceKitId ??
+      (slice.assetKitId ? kitIdByAssetKitId.get(slice.assetKitId) : undefined);
+    if (kitId) heldByAnotherBooking.add(kitId);
+  }
+
+  const releasableKitIds = kitIds.filter(
+    (kitId) => !heldByAnotherBooking.has(kitId)
+  );
+  if (releasableKitIds.length === 0) return;
+
   return client.kit.updateMany({
     where: {
-      id: { in: kitIds },
+      id: { in: releasableKitIds },
       organizationId,
       status: KitStatus.CHECKED_OUT,
     },
@@ -863,15 +922,22 @@ async function updateBookingKitStates({
   kitIds,
   status,
   organizationId,
+  excludeBookingIds,
 }: {
   kitIds: string[];
   status: KitStatus;
   /** Org that owns the booking — scopes the update so we never touch another org's kits */
   organizationId: string;
+  /** The exiting bookings, for the release path's held-elsewhere check. */
+  excludeBookingIds: string[];
 }) {
   try {
     if (status === KitStatus.AVAILABLE) {
-      return await releaseCheckedOutKits(db, { kitIds, organizationId });
+      return await releaseCheckedOutKits(db, {
+        kitIds,
+        organizationId,
+        excludeBookingIds,
+      });
     }
 
     return await db.kit.updateMany({
@@ -4805,12 +4871,18 @@ export async function checkinBooking({
       slices: bookingFound.bookingAssets,
       organizationId,
     });
-    const kitIds = [
-      ...new Set([
-        ...getKitIdsByAssets(bookingFoundAssets),
-        ...sliceKitAssetIds.keys(),
-      ]),
-    ];
+    /**
+     * Kits this booking took out, resolved exactly as the check-out that
+     * stamped them did — release has to be the inverse of acquire, or it
+     * either strands a kit or hands back one it never held. In particular a
+     * standalone `QUANTITY_TRACKED` slice stamps no kit, so it releases none:
+     * its units come out of the free pool, and every kit holding that asset
+     * kept its own slice throughout.
+     */
+    const kitIds = await getKitIdsToAcquire({
+      slices: bookingFound.bookingAssets,
+      organizationId,
+    });
     const hasKits = kitIds.length > 0;
 
     const isEarlyCheckin = isBookingEarlyCheckin(bookingFound.to!);
@@ -5358,6 +5430,7 @@ export async function checkinBooking({
           await releaseCheckedOutKits(tx, {
             kitIds: kitsToCheckin,
             organizationId,
+            excludeBookingIds: [id],
           });
         }
 
@@ -6474,6 +6547,7 @@ export async function partialCheckinBooking({
         assetKitId: ba.assetKitId ?? null,
         sourceKitId: ba.sourceKitId ?? null,
         assetKits: ba.asset?.assetKits ?? [],
+        assetType: ba.asset.type,
       })),
       organizationId,
     });
@@ -7075,7 +7149,14 @@ export async function partialCheckinBooking({
             id: true,
             assetKitId: true,
             sourceKitId: true,
-            asset: { select: { assetKits: { select: { kitId: true } } } },
+            asset: {
+              select: {
+                // `type` decides whether a slice with no provenance answers
+                // from live membership — see `getKitIdsBySlice`.
+                type: true,
+                assetKits: { select: { kitId: true } },
+              },
+            },
           },
         });
         const unseenSlices = stillOutNow.filter(
@@ -7088,6 +7169,7 @@ export async function partialCheckinBooking({
               assetKitId: slice.assetKitId,
               sourceKitId: slice.sourceKitId,
               assetKits: slice.asset?.assetKits ?? [],
+              assetType: slice.asset.type,
             })),
             organizationId,
             client: tx,
@@ -7105,6 +7187,7 @@ export async function partialCheckinBooking({
       await releaseCheckedOutKits(tx, {
         kitIds: completeKitIds,
         organizationId,
+        excludeBookingIds: [id],
       });
 
       // Activity events — one BOOKING_PARTIAL_CHECKIN per asset that had
@@ -8061,40 +8144,30 @@ export async function partialCheckoutBooking({
     }
 
     /**
-     * A kit goes CHECKED_OUT only once every asset it contributed to this
-     * booking is leaving in this batch.
+     * The slices each kit contributed to this booking.
      *
-     * Kit attribution is resolved per SLICE: a booking holds a kit through the
-     * rows it booked under that kit, not through its members' other kit
-     * memberships. See {@link getKitIdsToAcquireBySlice}.
-     *
-     * The comparison itself stays at asset grain because progressive checkout
-     * addresses assets by id — `assetIdsToCheckOut` cannot distinguish two
-     * slices of the same asset.
+     * Kept at SLICE grain all the way to the decision. An asset id cannot
+     * carry the answer: a `QUANTITY_TRACKED` asset can hold a standalone slice
+     * AND a kit-driven slice on one booking, so "this asset is going out" is
+     * true when only the free-pool half leaves and the kit's units have not
+     * moved. Which kits a slice belongs to is
+     * {@link getKitIdsToAcquireBySlice}'s answer; whether those slices have
+     * actually left is decided inside the transaction, once the markers and
+     * per-slice quantities this batch writes are visible.
      */
-    const assetIdsToCheckOutSet = new Set(assetIdsToCheckOut);
     const acquireKitIdsBySliceId = await getKitIdsToAcquireBySlice({
       slices: bookingFound.bookingAssets,
       organizationId,
     });
 
-    /** Kit id → asset ids that kit contributed to this booking. */
-    const assetIdsByKitId = new Map<string, Set<string>>();
+    const sliceIdsByKitId = new Map<string, Set<string>>();
     for (const ba of bookingFound.bookingAssets) {
       for (const kitId of acquireKitIdsBySliceId.get(ba.id) ?? []) {
-        const bucket = assetIdsByKitId.get(kitId) ?? new Set<string>();
-        bucket.add(ba.asset.id);
-        assetIdsByKitId.set(kitId, bucket);
+        const bucket = sliceIdsByKitId.get(kitId) ?? new Set<string>();
+        bucket.add(ba.id);
+        sliceIdsByKitId.set(kitId, bucket);
       }
     }
-
-    // Every kit in the map contributed at least one asset, so a kit with none
-    // of them in this batch fails the equality and is left CHECKED_OUT.
-    const completeKitIds = [...assetIdsByKitId]
-      .filter(([, assetIds]) =>
-        [...assetIds].every((assetId) => assetIdsToCheckOutSet.has(assetId))
-      )
-      .map(([kitId]) => kitId);
 
     /**
      * Per-asset qty-checkout summary populated INSIDE the tx and consumed by the
@@ -8570,14 +8643,6 @@ export async function partialCheckoutBooking({
           });
         }
 
-        // Only update kit status for kits that are completely checked out
-        if (completeKitIds.length > 0) {
-          await tx.kit.updateMany({
-            where: { id: { in: completeKitIds }, organizationId },
-            data: { status: KitStatus.CHECKED_OUT },
-          });
-        }
-
         /**
          * `PartialBookingCheckout` session row. `assetIds[i]` and `quantities[i]`
          * are positionally aligned: every entry corresponds to one disposition
@@ -8783,6 +8848,44 @@ export async function partialCheckoutBooking({
             // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: slice ids come from this booking's own rows, loaded org-scoped by this action's booking lookup
             where: { id: sliceId, bookingId: id },
             data: { checkedOutQuantity: { increment: units } },
+          });
+        }
+
+        /**
+         * A kit is CHECKED_OUT once every slice it contributed to this booking
+         * has nothing left to send out, and only when this batch is what moved
+         * one of them.
+         *
+         * Decided per SLICE, never per asset: a `QUANTITY_TRACKED` asset can
+         * hold a standalone slice and a kit-driven slice on one booking, so its
+         * id appears on both sides and says nothing about which units left.
+         * Sending the free-pool half out must leave the kit alone.
+         *
+         * `sliceCommittedRemainingBySlice` is what each slice still owed before
+         * this batch, so a slice already fully out enters at 0 and a slice this
+         * batch finishes lands there — no re-read needed, and the arithmetic is
+         * the same one the per-slice caps were enforced with.
+         */
+        const claimedThisBatch = (sliceId: string) =>
+          claimedBySliceThisBatch.get(sliceId) ?? 0;
+        const remainingAfterBatch = (sliceId: string) =>
+          (sliceCommittedRemainingBySlice.get(sliceId) ?? 0) -
+          claimedThisBatch(sliceId);
+
+        const completeKitIds: string[] = [];
+        for (const [kitId, sliceIds] of sliceIdsByKitId) {
+          const ids = [...sliceIds];
+          // A kit none of whose slices moved keeps the status it had.
+          if (!ids.some((sliceId) => claimedThisBatch(sliceId) > 0)) continue;
+          if (ids.every((sliceId) => remainingAfterBatch(sliceId) <= 0)) {
+            completeKitIds.push(kitId);
+          }
+        }
+
+        if (completeKitIds.length > 0) {
+          await tx.kit.updateMany({
+            where: { id: { in: completeKitIds }, organizationId },
+            data: { status: KitStatus.CHECKED_OUT },
           });
         }
 
@@ -10186,6 +10289,9 @@ export async function cancelBooking({
               asset: {
                 select: {
                   id: true,
+                  // `type` decides whether a standalone slice releases this
+                  // asset's kits — see `getKitIdsToAcquire`.
+                  type: true,
                   assetKits: { select: { kitId: true } },
                 },
               },
@@ -10229,19 +10335,17 @@ export async function cancelBooking({
     }
 
     /**
-     * Kits to release, from live membership AND the booking's own slices.
-     * A kit released redundantly is a no-op write; a kit missed stays stuck.
+     * Kits this booking took out, resolved exactly as the check-out that
+     * stamped them did — release has to be the inverse of acquire, or it
+     * either strands a kit or hands back one it never held. In particular a
+     * standalone `QUANTITY_TRACKED` slice stamps no kit, so it releases none:
+     * its units come out of the free pool, and every kit holding that asset
+     * kept its own slice throughout.
      */
-    const cancelSliceKitIds = await getKitIdsByBookingSlices({
+    const kitIds = await getKitIdsToAcquire({
       slices: bookingFound.bookingAssets,
       organizationId,
     });
-    const kitIds = [
-      ...new Set([
-        ...getKitIdsByAssets(cancelAssets),
-        ...cancelSliceKitIds.keys(),
-      ]),
-    ];
     const hasKits = kitIds.length > 0;
 
     const booking = await db.$transaction(async (tx) => {
@@ -10275,7 +10379,11 @@ export async function cancelBooking({
 
         /** If there are any kits, then update their status as well */
         if (hasKits) {
-          await releaseCheckedOutKits(tx, { kitIds, organizationId });
+          await releaseCheckedOutKits(tx, {
+            kitIds,
+            organizationId,
+            excludeBookingIds: [bookingFound.id],
+          });
         }
       }
 
@@ -11889,7 +11997,11 @@ export async function removeAssets({
       b.status === BookingStatus.ONGOING ||
       b.status === BookingStatus.OVERDUE
     ) {
-      await releaseCheckedOutKits(db, { kitIds, organizationId });
+      await releaseCheckedOutKits(db, {
+        kitIds,
+        organizationId,
+        excludeBookingIds: [id],
+      });
     }
 
     const userForNotes = { firstName, lastName, displayName, id: userId };
@@ -12113,6 +12225,9 @@ export async function deleteBooking(
           asset: {
             select: {
               id: true,
+              // `type` decides whether a standalone slice releases this
+              // asset's kits — see `getKitIdsToAcquire`.
+              type: true,
               assetKits: { select: { kitId: true } },
             },
           },
@@ -12140,22 +12255,15 @@ export async function deleteBooking(
         ? currentBooking
         : null;
 
-    const activeBookingAssets =
-      activeBooking?.bookingAssets.map((ba) => ba.asset) ?? [];
-    /**
-     * Kits to release, from live membership AND the booking's own slices.
-     * A kit released redundantly is a no-op write; a kit missed stays stuck.
-     */
-    const deleteSliceKitIds = activeBooking
-      ? await getKitIdsByBookingSlices({
-          slices: activeBooking.bookingAssets,
-          organizationId,
-        })
-      : new Map<string, Set<string>>();
-    const uniqueKitIds = new Set([
-      ...getKitIdsByAssets(activeBookingAssets),
-      ...deleteSliceKitIds.keys(),
-    ]);
+    // Release mirrors acquire — see the twin in `checkinBooking`.
+    const uniqueKitIds = new Set(
+      activeBooking
+        ? await getKitIdsToAcquire({
+            slices: activeBooking.bookingAssets,
+            organizationId,
+          })
+        : []
+    );
     const hasKits = uniqueKitIds.size > 0;
 
     // Capture the active asset IDs BEFORE entering the tx: `Booking.delete`
@@ -12247,6 +12355,7 @@ export async function deleteBooking(
         kitIds: [...uniqueKitIds],
         status: KitStatus.AVAILABLE,
         organizationId,
+        excludeBookingIds: [b.id],
       });
     }
 
@@ -12784,15 +12893,11 @@ type AssetWithKitId = Pick<Asset, "id"> & {
 /**
  * Every kit these assets are LIVE members of.
  *
- * A release-path leg only. It answers "which kits might this booking owe
- * something to", so it is deliberately over-inclusive: a redundant release is a
- * no-op write, while a kit missed stays stuck with no way out of the UI. The
- * release writes are scoped to `status: CHECKED_OUT` so the surplus cannot
- * disturb a kit held in custody.
- *
- * Never use it to ACQUIRE. Membership cannot say which kit a booking took an
- * asset from, and a `QUANTITY_TRACKED` asset may belong to several kits at
- * once — reach for {@link getKitIdsToAcquire} instead.
+ * Naming only, for note and summary text that groups an operation's assets
+ * under a kit heading. It cannot decide `Kit.status` in either direction:
+ * membership does not say which kit a booking took an asset from, and a
+ * `QUANTITY_TRACKED` asset may belong to several kits at once. Acquire and
+ * release both go through {@link getKitIdsToAcquire}, which reads the slice.
  *
  * EVERY membership counts, not just the first: `AssetKit` rows come back
  * unordered, so a first-row read names an arbitrary kit and drops the rest.
@@ -12974,8 +13079,8 @@ export async function getKitIdsToAcquire(args: {
 }
 
 /**
- * Release-path sibling of {@link getKitIdsByAssets}: resolves kits from the
- * BOOKING's own rows rather than from the assets' current membership.
+ * The kits a booking holds, resolved from the BOOKING's own rows rather than
+ * from the assets' current membership.
  *
  * A kit whose member was detached while the booking was live is invisible to
  * membership-based resolution, so nothing releases it and `Kit.status` stays
@@ -12998,11 +13103,10 @@ export async function getKitIdsToAcquire(args: {
  *
  * @param client Pass the active `tx` when called inside a transaction.
  *
- * ALWAYS UNION the result with {@link getKitIdsByAssets}, never substitute it.
- * A standalone slice carries no provenance by design even when its asset is a
- * live kit member, and the acquire paths stamp that kit CHECKED_OUT from
- * membership — so provenance alone would leave exactly those kits stuck.
- * Never use on an acquire path: it names kits the asset has already left.
+ * Provenance ALONE cannot answer "which kits did this booking take out": a
+ * standalone slice carries none by design, and one belonging to an INDIVIDUAL
+ * kit member does empty its kit. {@link getKitIdsToAcquire} joins the two legs
+ * and is what both the acquire and the release writes read.
  */
 export async function getKitIdsByBookingSlices({
   slices,
@@ -13051,6 +13155,12 @@ type BookingSliceKitAttribution = {
   sourceKitId: string | null;
   /** LIVE kit membership of this slice's asset (`Asset.assetKits`). */
   assetKits: { kitId: string }[];
+  /**
+   * Decides whether a slice carrying no provenance answers from that
+   * membership: only an `INDIVIDUAL` asset empties its kit by going out
+   * standalone.
+   */
+  assetType: AssetType;
 };
 
 /**
@@ -13070,17 +13180,15 @@ type BookingSliceKitAttribution = {
  * `assetKitId -> AssetKit.kitId` hop for rows written before that column. It
  * does NOT belong to its asset's other kits — the slice names its own.
  *
- * A standalone slice carries no provenance by design, so it belongs to its
- * asset's LIVE kits: the acquire paths stamp those CHECKED_OUT from membership
- * ({@link getKitIdsByAssets}), and a release gate that ignored them would let a
- * kit go AVAILABLE with a member's free-pool units still out. This is where the
- * union {@link getKitIdsByBookingSlices}'s callers perform by hand lives
- * instead — per slice, inside the resolver.
+ * A standalone slice carries no provenance by design, so it answers from its
+ * asset's LIVE kits — but only for an `INDIVIDUAL` asset, mirroring what
+ * {@link getKitIdsToAcquire} was willing to stamp. A standalone
+ * `QUANTITY_TRACKED` slice draws on the free pool and takes no kit's units, so
+ * it owes no kit anything on the way back. Release must be the exact inverse of
+ * acquire: gate on a kit acquire never stamped and it never comes back.
  *
- * EVERY live membership counts here, not just the first. `getKitIdsByAssets`
- * reads `assetKits[0]` alone, so the acquire side stamps one kit where an asset
- * sits in several. Taking all of them on the release side can only add
- * obligations, never drop one, and over-release is the worse failure.
+ * EVERY live membership counts, not just the first — `AssetKit` rows come back
+ * unordered, so a first-row read names an arbitrary kit and drops the rest.
  *
  * A sibling rather than a new shape for {@link getKitIdsByBookingSlices}: five
  * of its six callers read `.keys()` only, and both shapes are `Map<string,
@@ -13119,7 +13227,7 @@ export async function getKitIdsBySlice({
           ? kitIdByAssetKitId.get(slice.assetKitId)
           : undefined);
       if (kitId) kitIds.add(kitId);
-    } else {
+    } else if (slice.assetType === AssetType.INDIVIDUAL) {
       for (const membership of slice.assetKits ?? []) {
         if (membership?.kitId) kitIds.add(membership.kitId);
       }
@@ -13316,6 +13424,9 @@ export async function bulkDeleteBookings({
               asset: {
                 select: {
                   id: true,
+                  // `type` decides whether a standalone slice releases this
+                  // asset's kits — see `getKitIdsToAcquire`.
+                  type: true,
                   assetKits: { select: { kitId: true } },
                 },
               },
@@ -13337,15 +13448,6 @@ export async function bulkDeleteBookings({
     const overdueOrOngoingBookings = bookings.filter(
       (booking) => booking.status === "OVERDUE" || booking.status === "ONGOING"
     );
-
-    /**
-     * Resolved before the transaction opens: the legacy provenance hop is a
-     * read, and holding a transaction open across it buys nothing.
-     */
-    const bulkDeleteSliceKitIds = await getKitIdsByBookingSlices({
-      slices: overdueOrOngoingBookings.flatMap((b) => b.bookingAssets),
-      organizationId,
-    });
 
     /** We have to cancel scheduler for the bookings */
     const bookingsWithSchedulerReference = bookings.filter(
@@ -13369,10 +13471,13 @@ export async function bulkDeleteBookings({
 
         // Union of live membership and booking-slice provenance — a kit whose
         // member was detached mid-booking is invisible to membership alone.
-        const uniqueKitIds = new Set([
-          ...getKitIdsByAssets(allAssets),
-          ...bulkDeleteSliceKitIds.keys(),
-        ]);
+        // Release mirrors acquire — see the twin in `checkinBooking`.
+        const uniqueKitIds = new Set(
+          await getKitIdsToAcquire({
+            slices: overdueOrOngoingBookings.flatMap((b) => b.bookingAssets),
+            organizationId,
+          })
+        );
 
         /**
          * Per asset, never a blanket flip. An asset on one of these bookings
@@ -13395,6 +13500,7 @@ export async function bulkDeleteBookings({
         await releaseCheckedOutKits(tx, {
           kitIds: [...uniqueKitIds],
           organizationId,
+          excludeBookingIds: bookings.map((booking) => booking.id),
         });
       }
 
@@ -13717,6 +13823,9 @@ export async function bulkCancelBookings({
               asset: {
                 select: {
                   id: true,
+                  // `type` decides whether a standalone slice releases this
+                  // asset's kits — see `getKitIdsToAcquire`.
+                  type: true,
                   assetKits: { select: { kitId: true } },
                 },
               },
@@ -13765,15 +13874,6 @@ export async function bulkCancelBookings({
       (b) => b.status === "ONGOING" || b.status === "OVERDUE"
     );
 
-    /**
-     * Resolved before the transaction opens: the legacy provenance hop is a
-     * read, and holding a transaction open across it buys nothing.
-     */
-    const bulkCancelSliceKitIds = await getKitIdsByBookingSlices({
-      slices: ongoingOrOverdueBookings.flatMap((b) => b.bookingAssets),
-      organizationId,
-    });
-
     /** We have to cancel scheduler for the bookings */
     const bookingsWithSchedulerReference = bookings.filter(
       (booking) => !!booking.activeSchedulerReference
@@ -13793,10 +13893,13 @@ export async function bulkCancelBookings({
         );
         // Union of live membership and booking-slice provenance — a kit whose
         // member was detached mid-booking is invisible to membership alone.
-        const uniqueKitIds = new Set([
-          ...getKitIdsByAssets(allAssets),
-          ...bulkCancelSliceKitIds.keys(),
-        ]);
+        // Release mirrors acquire — see the twin in `checkinBooking`.
+        const uniqueKitIds = new Set(
+          await getKitIdsToAcquire({
+            slices: ongoingOrOverdueBookings.flatMap((b) => b.bookingAssets),
+            organizationId,
+          })
+        );
 
         /**
          * Per asset, never a blanket flip. An asset on one of these bookings
@@ -13820,6 +13923,7 @@ export async function bulkCancelBookings({
         await releaseCheckedOutKits(tx, {
           kitIds: [...uniqueKitIds],
           organizationId,
+          excludeBookingIds: bookings.map((b) => b.id),
         });
       }
 

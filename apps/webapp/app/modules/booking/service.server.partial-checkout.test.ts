@@ -1,5 +1,10 @@
 import Markdoc from "@markdoc/markdoc";
-import { BookingStatus, AssetStatus, AssetType } from "@prisma/client";
+import {
+  BookingStatus,
+  AssetStatus,
+  AssetType,
+  KitStatus,
+} from "@prisma/client";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
@@ -140,9 +145,8 @@ vitest.mock("~/database/db.server", () => {
       // override per-describe `beforeEach` to model bigger slices.
       // why: a kit-driven slice written before `sourceKitId` existed names its
       // kit through this hop (`getKitIdsToAcquireBySlice`). These fixtures set
-      // `assetKitId` with no `sourceKitId`, so the lookup runs; no rows means
-      // the slice resolves to no kit, which is what the note assertions here
-      // expect — kit STATUS is covered in `service.server.test.ts`.
+      // `assetKitId` with no `sourceKitId`, so the lookup runs. The per-test
+      // default is re-installed in `beforeEach`.
       assetKit: {
         findMany: vitest.fn().mockResolvedValue([]),
       },
@@ -443,6 +447,11 @@ describe("partialCheckoutBooking", () => {
             : []
         );
       }
+    );
+    // why: same reasoning as `asset.findMany` above. Default to "no membership
+    // rows resolve", so a slice's kit is named only by the tests that model one.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
     );
     // why: same reasoning as `asset.findMany` above — a prior test's
     // `mockResolvedValue({ count: 0 })` (the concurrent-takeover case) would
@@ -1655,6 +1664,64 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         unitOfMeasure: "boxes",
         quantity: 122,
       });
+    });
+
+    it("does not check out a kit when only the asset's free-pool slice left", async () => {
+      expect.assertions(1);
+      // Gloves holds two slices on this booking: 22 boxes standalone and 100
+      // inside Kittington. Sending the standalone units out takes none of the
+      // kit's, so the kit is still on the shelf — and the asset id alone cannot
+      // say that, because both slices carry it.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(makeGlovesBooking());
+      // why: models the legacy provenance hop resolving Kittington's membership
+      // row, so the kit-driven slice is actually attributed to a kit.
+      (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+        { id: "ak-kittington", kitId: "kit-kittington" },
+      ]);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          {
+            assetId: "asset-gloves",
+            bookingAssetId: "ba-standalone",
+            quantity: 22,
+          },
+        ],
+      });
+
+      expect(db.kit.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { status: KitStatus.CHECKED_OUT },
+        })
+      );
+    });
+
+    it("checks out the kit once its own slice has wholly left", async () => {
+      expect.assertions(1);
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(makeGlovesBooking());
+      (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+        { id: "ak-kittington", kitId: "kit-kittington" },
+      ]);
+
+      // All 100 boxes of the kit-driven slice.
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-gloves", bookingAssetId: "ba-kit", quantity: 100 },
+        ],
+      });
+
+      expect(db.kit.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ["kit-kittington"] } }),
+          data: { status: KitStatus.CHECKED_OUT },
+        })
+      );
     });
 
     it("names a standalone qty slice per-slice and drops the redundant asset mention", async () => {
