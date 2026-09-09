@@ -377,14 +377,29 @@ function resolveCheckIn(
   return null;
 }
 
+/** The columns {@link resolveSentUnits} reads. */
+export type SentUnitsFields = {
+  /** THIS slice's booked units. */
+  quantity: number;
+  /** When the slice was last dispatched; `null` means it never went out. */
+  checkedOutAt: Date | null;
+  /** Cumulative units dispatched on the slice. */
+  checkedOutQuantity: number | null;
+};
+
 /**
- * Units a QUANTITY_TRACKED slice sent out.
+ * Units a slice sent out on its current trip.
  *
  * The cumulative counter when it holds anything; otherwise the whole booked
  * quantity for a slice whose marker is stamped, which is what a stamped row
- * with a zero counter means.
+ * with a zero counter means; otherwise nothing, because the slice never left.
+ *
+ * This is also the capacity a slice may absorb when untagged disposition logs
+ * are attributed. Sizing that from the booked quantity instead lets a return
+ * land on a slice that never went out, which puts returned units on a row the
+ * sheet calls never checked out. One definition, so the two cannot drift.
  */
-function quantitySentOut(slice: CheckinReceiptSlice): number {
+export function resolveSentUnits(slice: SentUnitsFields): number {
   const counted = slice.checkedOutQuantity ?? 0;
   if (counted > 0) {
     return counted;
@@ -403,7 +418,7 @@ function buildRow(
     breakdownByBookingAsset.get(slice.bookingAssetId) ?? NO_DISPOSITIONS;
 
   const sent = isQuantityTracked
-    ? quantitySentOut(slice)
+    ? resolveSentUnits(slice)
     : slice.checkedOutAt
     ? 1
     : 0;

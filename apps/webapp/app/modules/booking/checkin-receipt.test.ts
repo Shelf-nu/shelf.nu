@@ -20,7 +20,11 @@ import type {
   CheckinReceiptDispositionBreakdown,
   CheckinReceiptSlice,
 } from "./checkin-receipt";
-import { buildCheckinReceipt, formatLatenessNote } from "./checkin-receipt";
+import {
+  buildCheckinReceipt,
+  formatLatenessNote,
+  resolveSentUnits,
+} from "./checkin-receipt";
 
 const CHECKED_OUT_AT = new Date("2026-09-01T09:00:00.000Z");
 const CHECKED_IN_AT = new Date("2026-09-03T17:30:00.000Z");
@@ -645,5 +649,52 @@ describe("formatLatenessNote", () => {
       text: "12 days 20 hours after the planned end",
       isLate: true,
     });
+  });
+});
+
+describe("resolveSentUnits", () => {
+  // The receipt measures a row against this, and the disposition attributor
+  // sizes the row's capacity from it, so a slice can never be credited with
+  // more than it sent.
+  it("counts nothing for a slice that never went out", () => {
+    expect(
+      resolveSentUnits({
+        quantity: 5,
+        checkedOutAt: null,
+        checkedOutQuantity: 0,
+      })
+    ).toBe(0);
+  });
+
+  it("counts the cumulative counter once units have been dispatched", () => {
+    expect(
+      resolveSentUnits({
+        quantity: 3,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutQuantity: 6,
+      })
+    ).toBe(6);
+  });
+
+  it("falls back to the booked quantity for a stamped slice with a zero counter", () => {
+    expect(
+      resolveSentUnits({
+        quantity: 4,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutQuantity: 0,
+      })
+    ).toBe(4);
+  });
+
+  it("counts nothing for an un-stamped slice even if a counter is set", () => {
+    // Defensive: the two are written together, and a counter without a marker
+    // must not hand capacity to a slice with no departure to answer for.
+    expect(
+      resolveSentUnits({
+        quantity: 4,
+        checkedOutAt: null,
+        checkedOutQuantity: 0,
+      })
+    ).toBe(0);
   });
 });

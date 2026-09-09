@@ -30,7 +30,11 @@ import type {
   CheckinReceiptRowAsset,
   CheckinReceiptTotals,
 } from "./checkin-receipt";
-import { buildCheckinReceipt, formatLatenessNote } from "./checkin-receipt";
+import {
+  buildCheckinReceipt,
+  formatLatenessNote,
+  resolveSentUnits,
+} from "./checkin-receipt";
 import {
   getLatenessMs,
   resolvePlannedEnd,
@@ -246,14 +250,15 @@ export async function fetchCheckinReceiptData(
     >();
     for (const [assetId, assetSlices] of slicesByAsset) {
       const attributed = attributeCategorizedDispositionsByBookingAsset({
-        // Capacity is what the slice actually SENT, not what it booked. A
-        // slice dispatched twice has a cumulative counter above its booked
-        // quantity, and untagged logs are capped at the capacity given here —
-        // so booking quantity alone strands the second trip's returns and the
-        // sheet reports units still out that came back.
+        // Capacity is what each slice actually SENT, from the same rule the
+        // printed row is measured against — never the booked quantity. Booked
+        // quantity is wrong in both directions: it strands a re-dispatched
+        // slice's second trip, whose cumulative counter runs above it, and it
+        // hands capacity to a slice that never left, so an untagged log lands
+        // as a return on a row the sheet calls never checked out.
         bookingAssetRows: assetSlices.map((slice) => ({
           id: slice.id,
-          quantity: Math.max(slice.quantity, slice.checkedOutQuantity ?? 0),
+          quantity: resolveSentUnits(slice),
           assetKitId: slice.assetKitId,
         })),
         consumptionLogs: logsByAsset.get(assetId) ?? [],
