@@ -1,5 +1,3 @@
-import type { AssetStatus } from "@prisma/client";
-
 /**
  * Pure helpers over kit list rows.
  *
@@ -14,6 +12,8 @@ import type { AssetStatus } from "@prisma/client";
  * @see {@link file://./../routes/_layout+/kits._index.tsx} — supplies `assetKits`
  * @see {@link file://./../components/kits/bulk-actions-dropdown.tsx} — consumer
  */
+
+import type { AssetStatus } from "@prisma/client";
 
 /** Statuses that make a kit member ineligible for a custody assignment. */
 const CUSTODY_BLOCKING_ASSET_STATUSES: AssetStatus[] = [

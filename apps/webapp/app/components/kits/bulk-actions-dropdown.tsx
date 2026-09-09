@@ -70,9 +70,12 @@ function ConditionalDropdown() {
   const user = useUserData();
 
   /**
-   * Due to select all multi page selection,
-   * some of the checks we do cannot be completed as we dont have the data loaded from the server.
-   * As a solution for now we will handle the validation serverSide if hasSelectedAll is true
+   * "Select all" spans every page of the list, so when `allSelected` is true
+   * the selection includes rows this client never loaded and the checks below
+   * cannot be completed from what it holds. They resolve permissively in that
+   * case and the server re-validates the request. Every guard here is an
+   * affordance that explains why an action is unavailable — never the
+   * enforcement.
    */
 
   const allKitsInCustody =

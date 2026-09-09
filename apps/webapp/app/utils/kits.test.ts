@@ -1,17 +1,26 @@
+/**
+ * Tests for the kit list row helpers.
+ *
+ * The rows these helpers read reach the UI through `selectedBulkItemsAtom`,
+ * which types every field as `any`, so the compiler cannot tell a helper that
+ * reads the right field from one that reads a field the loader never sends.
+ * These assertions are that check.
+ *
+ * @see {@link file://./kits.ts}
+ */
+
 import type { AssetStatus } from "@prisma/client";
 import { someKitMemberBlocksCustodyAssignment } from "./kits";
 
+let nextKitId = 0;
+
 /**
- * Kit list rows exactly as the kits index loader supplies them.
- *
- * Membership arrives as `AssetKit` pivot rows — `assetKits[].asset` — and the
- * rows reach the consumer through `selectedBulkItemsAtom`, which types every
- * field as `any`. That makes these assertions the only check that the guard
- * reads the field the loader actually sends.
+ * Builds a kit list row carrying the given member statuses, shaped exactly as
+ * the kits index loader supplies it — membership as `AssetKit` pivot rows
+ * (`assetKits[].asset`), never a flat asset array.
  *
  * @see {@link file://./../routes/_layout+/kits._index.tsx}
  */
-let nextKitId = 0;
 const kitRow = (...statuses: AssetStatus[]) => ({
   id: `kit-${(nextKitId += 1)}`,
   assetKits: statuses.map((status) => ({ asset: { status } })),
