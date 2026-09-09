@@ -10174,12 +10174,12 @@ describe("isBookingFullyCheckedIn", () => {
   it("does not let a first-trip check-in session reconcile a scan re-dispatch that kept the first marker", async () => {
     expect.assertions(1);
 
-    // A progressive check-out keeps a slice's original `checkedOutAt` ("out
-    // since" is the first departure). A slice that went out by scan, came back
-    // by scan and went out by scan again therefore carries the FIRST trip's
-    // marker, while its second departure is recorded only as a check-out
-    // session. The first trip's check-in session postdates that marker, and
-    // it must not stand in for a return that has not happened.
+    // why: a progressive check-out keeps a slice's original `checkedOutAt`
+    // ("out since" is the first departure). A slice that went out by scan,
+    // came back by scan and went out by scan again therefore carries the
+    // FIRST trip's marker, while its second departure is recorded only as a
+    // check-out session. The first trip's check-in session postdates that
+    // marker, and it must not stand in for a return that has not happened.
     //@ts-expect-error missing vitest type
     db.bookingAsset.findMany.mockResolvedValue([
       {
@@ -10195,7 +10195,8 @@ describe("isBookingFullyCheckedIn", () => {
         asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
       },
     ]);
-    // Out at 10:00 and again at 14:00.
+    // why: out at 10:00 and again at 14:00. The second departure exists only
+    // as a check-out session; the marker alone reads as one trip.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckout.findMany.mockResolvedValue([
       {
@@ -10211,7 +10212,8 @@ describe("isBookingFullyCheckedIn", () => {
         checkoutTimestamp: new Date("2026-01-01T14:00:00.000Z"),
       },
     ]);
-    // Back at 12:00, between the two departures.
+    // why: back at 12:00, between the two departures. The session answers
+    // the first trip only.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
       {
@@ -10233,6 +10235,8 @@ describe("isBookingFullyCheckedIn", () => {
     // refusing every session on a re-dispatched slice. The slice went out
     // twice by scan and came back twice; the marker still shows the first
     // trip, and the latest check-in session postdates the latest departure.
+    // why: the marker still shows the first trip, so the sessions below decide
+    // the answer.
     //@ts-expect-error missing vitest type
     db.bookingAsset.findMany.mockResolvedValue([
       {
@@ -10246,6 +10250,7 @@ describe("isBookingFullyCheckedIn", () => {
         asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
       },
     ]);
+    // why: out at 10:00 and again at 14:00, recorded only as sessions.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckout.findMany.mockResolvedValue([
       {
@@ -10261,7 +10266,8 @@ describe("isBookingFullyCheckedIn", () => {
         checkoutTimestamp: new Date("2026-01-01T14:00:00.000Z"),
       },
     ]);
-    // Back at 12:00 and again at 16:00, after the second departure.
+    // why: back at 12:00 and again at 16:00. The 16:00 session postdates the
+    // latest departure, so it answers it.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
       {
@@ -10282,9 +10288,9 @@ describe("isBookingFullyCheckedIn", () => {
   it("does not let first-trip markers reconcile a later scan departure", async () => {
     expect.assertions(1);
 
-    // Both markers can predate the latest departure: rows stamped from session
-    // history carry each side's EARLIEST session, so a slice that was out,
-    // back and out again by scan reads as one complete round trip on its
+    // why: both markers can predate the latest departure. Rows stamped from
+    // session history carry each side's EARLIEST session, so a slice that was
+    // out, back and out again by scan reads as one complete round trip on its
     // markers alone. The check-out sessions still record the second departure,
     // and no check-in answers it.
     //@ts-expect-error missing vitest type
@@ -10300,6 +10306,8 @@ describe("isBookingFullyCheckedIn", () => {
         asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
       },
     ]);
+    // why: the 14:00 departure is recorded only here; the markers do not
+    // show it.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckout.findMany.mockResolvedValue([
       {
@@ -10315,6 +10323,8 @@ describe("isBookingFullyCheckedIn", () => {
         checkoutTimestamp: new Date("2026-01-01T14:00:00.000Z"),
       },
     ]);
+    // why: the only return answers the first trip; nothing answers the 14:00
+    // departure.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
       {
