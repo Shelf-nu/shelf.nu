@@ -558,7 +558,10 @@ describe("buildCheckinReceipt — status stamp", () => {
     expect(result.stamp).toBe("All items returned");
   });
 
-  it("still leads with the outstanding count when units are written off and some are out", () => {
+  it("does not call an outstanding write-off a partial return", () => {
+    // Two units damaged, four unaccounted for, none returned. The outstanding
+    // count is the fact worth leading with, but "partial return" in front of it
+    // claims something the ledger below contradicts.
     const result = build({
       slices: [
         slice({
@@ -569,6 +572,25 @@ describe("buildCheckinReceipt — status stamp", () => {
         }),
       ],
       breakdownByBookingAsset: new Map([["ba-1", breakdown({ damaged: 2 })]]),
+    });
+
+    expect(result.totals.returned).toBe(0);
+    expect(result.stamp).toBe("Nothing returned · 4 still out");
+  });
+
+  it("calls it a partial return once some units have come back", () => {
+    const result = build({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 6,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 6,
+        }),
+      ],
+      breakdownByBookingAsset: new Map([
+        ["ba-1", breakdown({ returned: 1, damaged: 1 })],
+      ]),
     });
 
     expect(result.stamp).toBe("Partial return · 4 still out");
@@ -594,7 +616,9 @@ describe("buildCheckinReceipt — status stamp", () => {
     });
 
     expect(result.totals.stillOut).toBe(4);
-    expect(result.stamp).toBe("Partial return · 4 still out");
+    // Two rows, four units. Nothing came back, so the sentence in front of the
+    // count says so.
+    expect(result.stamp).toBe("Nothing returned · 4 still out");
   });
 });
 

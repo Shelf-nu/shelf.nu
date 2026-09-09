@@ -508,7 +508,8 @@ export function buildCheckinReceipt(
     }
   );
 
-  // Three things this line must never say.
+  // The word "return" appears on this sheet only where units actually came
+  // back. Four things this line must never say.
   //
   // A booking nothing ever left on has no return to state either way: saying
   // everything came back would put a return on paper that never happened, and
@@ -519,13 +520,20 @@ export function buildCheckinReceipt(
   // a ledger reading "Lost 6" is a false claim on a document that gets signed
   // and attached to a claim.
   //
+  // Units outstanding with nothing returned is not a partial return either. The
+  // outstanding count is the fact worth leading with, and the sentence in front
+  // of it has to match the ledger below.
+  //
   // The outstanding count is units rather than rows: an INDIVIDUAL item counts
   // 1, a quantity slice counts every unit it still owes.
+  const anyReturned = totals.returned > 0;
   const stamp =
     totals.unitsSentOut === 0
       ? "Nothing was checked out"
       : totals.stillOut > 0
-      ? `Partial return · ${totals.stillOut} still out`
+      ? anyReturned
+        ? `Partial return · ${totals.stillOut} still out`
+        : `Nothing returned · ${totals.stillOut} still out`
       : totals.returned === totals.unitsSentOut
       ? "All items returned"
       : "All items accounted for";

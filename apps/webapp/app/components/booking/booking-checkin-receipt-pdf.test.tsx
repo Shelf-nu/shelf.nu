@@ -232,6 +232,19 @@ describe("booking check-in receipt — the sheet", () => {
     const facts = factsBlock(container);
     expect(within(facts).queryByText("Returned")).not.toBeInTheDocument();
     expect(within(facts).getByText("Accounted for")).toBeInTheDocument();
+
+    // why: the signature is what turns this sheet into evidence. Asking a
+    // custodian to attest a return over a ledger reading zero returned is the
+    // one claim on the page nobody can walk back.
+    expect(
+      screen.getByText(/Confirmed by \(custodian\) · name, signature, date/)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Returned by \(custodian\)/)
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Recorded by · name, signature, date/)
+    ).toBeInTheDocument();
   });
 
   it("omits the returned line entirely when nothing recorded a return", () => {
@@ -314,10 +327,10 @@ describe("booking check-in receipt — the sheet", () => {
     renderReceipt();
 
     expect(
-      screen.getByText("Returned by (custodian) · name, signature, date")
+      screen.getByText(/Returned by \(custodian\) · name, signature, date/)
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Received by · name, signature, date")
+      screen.getByText(/Received by · name, signature, date/)
     ).toBeInTheDocument();
   });
 

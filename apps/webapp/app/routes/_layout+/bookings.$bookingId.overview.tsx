@@ -1192,13 +1192,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         booking,
         modelName,
         /**
-         * Whether any booked unit has been accounted for — returned, consumed,
-         * lost or damaged.
+         * Whether any QUANTITY_TRACKED unit on this booking has been accounted
+         * for — returned, consumed, lost or damaged.
          *
-         * A quantity slice returned in part keeps `BookingAsset.checkedInAt`
-         * NULL, because that marker means fully reconciled, so the slice
-         * markers alone cannot answer "has anything come back yet". The
-         * check-in receipt is offered for exactly that case, and reads this.
+         * Quantity-tracked only, because that is the gap it fills: a quantity
+         * slice returned in part keeps `BookingAsset.checkedInAt` NULL, since
+         * that marker means fully reconciled, so the slice markers alone cannot
+         * answer "has anything come back yet". Individual assets have no
+         * disposition logs and are answered by their markers, so a reader must
+         * not treat this as a booking-wide "anything returned" flag.
+         *
+         * The check-in receipt is offered for exactly the partial-quantity
+         * case, and reads this alongside the slice markers.
          */
         hasDispositionedUnits: dispositionLogs.length > 0,
         // Shaped view for first paint (same field names the component reads),

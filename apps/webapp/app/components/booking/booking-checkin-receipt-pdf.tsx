@@ -364,6 +364,13 @@ export const BookingCheckinReceiptPreview = ({
       }>`
     : booking.custodianTeamMember?.name;
 
+  // The sheet says "return" only where units actually came back. A booking
+  // closed entirely through consumed, lost or damaged units was reconciled, not
+  // returned, and a signature caption asking the custodian to attest a return
+  // over a ledger reading zero returned is the same false claim the stamp used
+  // to make.
+  const anyReturned = totals.returned > 0;
+
   const plannedPeriod =
     pdfMeta.plannedFrom && pdfMeta.plannedTo
       ? `${pdfMeta.plannedFrom} - ${pdfMeta.plannedTo}`
@@ -413,9 +420,11 @@ export const BookingCheckinReceiptPreview = ({
           <div>
             <div className="flex items-center gap-2">
               <When truthy={!!organization.imageId}>
+                {/* Decorative: the workspace name sits beside it, so a
+                    screen reader gains nothing from describing the mark. */}
                 <Image
                   imageId={organization.imageId}
-                  alt="img"
+                  alt=""
                   className={tw("size-6 rounded-[2px] object-cover")}
                   updatedAt={organization.updatedAt}
                 />
@@ -456,9 +465,7 @@ export const BookingCheckinReceiptPreview = ({
                 actually came back: a booking whose every unit was written off
                 as consumed, lost or damaged closed at this moment without
                 anything being returned, and the row must not say otherwise. */}
-            <ReceiptFact
-              label={totals.returned > 0 ? "Returned" : "Accounted for"}
-            >
+            <ReceiptFact label={anyReturned ? "Returned" : "Accounted for"}>
               {pdfMeta.returnedAt}
               <When truthy={!!pdfMeta.latenessNote}>
                 {" · "}
@@ -586,10 +593,14 @@ export const BookingCheckinReceiptPreview = ({
 
         <div className="mt-8 grid grid-cols-2 gap-6">
           <div className="border-t border-gray-400 pt-1.5 text-xs text-gray-600">
-            Returned by (custodian) · name, signature, date
+            {anyReturned
+              ? "Returned by (custodian)"
+              : "Confirmed by (custodian)"}{" "}
+            · name, signature, date
           </div>
           <div className="border-t border-gray-400 pt-1.5 text-xs text-gray-600">
-            Received by · name, signature, date
+            {anyReturned ? "Received by" : "Recorded by"} · name, signature,
+            date
           </div>
         </div>
 
