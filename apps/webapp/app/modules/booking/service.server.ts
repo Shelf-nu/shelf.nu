@@ -2209,6 +2209,7 @@ export async function reserveBooking({
           )
           .map((ba) => ba.asset),
         bookingId: id,
+        bookingStatus: bookingFound.status,
         organizationId,
         from,
         to,
@@ -9950,6 +9951,7 @@ export async function updateBookingAssets({
             asset.type === AssetType.INDIVIDUAL
         ),
         bookingId: id,
+        bookingStatus: lockedStatus,
         organizationId,
         from: b.from,
         to: b.to,
@@ -10753,7 +10755,17 @@ export async function extendBooking({
           activeSchedulerReference: true,
           bookingAssets: {
             include: {
-              asset: { select: { id: true, status: true } },
+              // `type`, `assetModelId` and `title` feed the model guard that
+              // re-measures the booking against the extended window.
+              asset: {
+                select: {
+                  id: true,
+                  status: true,
+                  type: true,
+                  assetModelId: true,
+                  title: true,
+                },
+              },
             },
           },
           from: true,
@@ -10854,6 +10866,29 @@ export async function extendBooking({
           shouldBeCaptured: false,
         });
       }
+
+      /**
+       * The days being added may overlap model reservations that other
+       * bookings hold, which the clash check above cannot see: a
+       * `BookingModelRequest` names no asset. The booking's standalone
+       * INDIVIDUAL units are measured again against the pool for the new
+       * dates. Kit-driven rows are reserved on the kit axis.
+       */
+      await assertModelUnitsNotReservedElsewhere({
+        assets: booking.bookingAssets
+          .filter(
+            (ba) =>
+              ba.assetKitId == null && ba.asset.type === AssetType.INDIVIDUAL
+          )
+          .map((ba) => ba.asset),
+        bookingId: booking.id,
+        bookingStatus: booking.status,
+        windowChanged: true,
+        organizationId,
+        from: booking.from,
+        to: newEndDate,
+        tx,
+      });
 
       return tx.booking.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2853; this is the write on that same proven id
@@ -14736,6 +14771,7 @@ async function addScannedAssetsToBookingWithinTx(
       (meta) => meta.type === AssetType.INDIVIDUAL
     ),
     bookingId,
+    bookingStatus: scanTargetStatus,
     organizationId,
     from: bookingWindow?.from,
     to: bookingWindow?.to,

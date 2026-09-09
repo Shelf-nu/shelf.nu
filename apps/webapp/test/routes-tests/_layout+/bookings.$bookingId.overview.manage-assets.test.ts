@@ -36,6 +36,12 @@ vi.mock("~/database/db.server", () => ({
     consumptionLog: {
       groupBy: vi.fn(),
     },
+    // why: the loader counts the standalone units the booking already holds
+    // of each model on the page; they count on the booking's side of the
+    // pool. Tests stage held units per case.
+    bookingAsset: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -1305,10 +1311,11 @@ describe("manage-assets loader — Models tab payload", () => {
 });
 
 /**
- * The picker flags an INDIVIDUAL unit whose model's free pool is already
- * promised to other bookings for the booking's window, so the row reads
- * "Reserved by model" and cannot be selected. The write path refuses the same
- * unit; the flag is the picker-side half of that rule.
+ * The picker flags an INDIVIDUAL unit that this booking cannot take by name
+ * because other bookings' model reservations leave the pool no room for one
+ * more unit in the booking's window. The flag mirrors the write-time guard
+ * for a single added unit, so the row reads "Reserved by model" and cannot be
+ * selected wherever Confirm would be refused.
  */
 describe("manage-assets loader — units reserved by model elsewhere", () => {
   const mockContext = {
@@ -1336,6 +1343,17 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
       modelRequests: [],
       ...overrides,
     } as any;
+  }
+
+  /** An outstanding request of this booking for `model1`. */
+  function ownRequest(quantity: number, fulfilledQuantity = 0) {
+    return {
+      assetModelId: "model1",
+      quantity,
+      fulfilledQuantity,
+      fulfilledAt: null,
+      assetModel: { name: "Model" },
+    };
   }
 
   /** Two units of one model, plus a unit with no model. */
@@ -1375,7 +1393,7 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     totalLocations: 0,
   };
 
-  /** `assetModelId → available` for the model reads the loader issues. */
+  /** `available` for the model reads the loader issues. */
   function poolAvailability(available: number) {
     vi.mocked(modelRequestService.getAssetModelAvailability).mockResolvedValue({
       total: 3,
@@ -1385,6 +1403,15 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
       reserved: 3 - 1 - available,
       available,
     });
+  }
+
+  /** The standalone units of `model1` the booking already holds. */
+  function heldUnits(count: number) {
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue(
+      Array.from({ length: count }, () => ({
+        asset: { assetModelId: "model1" },
+      })) as any
+    );
   }
 
   /** The flag per row id in the returned payload. */
@@ -1436,6 +1463,7 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
       modelRequests: [],
     });
     poolAvailability(0);
+    heldUnits(0);
   });
 
   it("flags every unit of a model whose free pool is exhausted, reading each model once", async () => {
@@ -1464,22 +1492,33 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     });
   });
 
-  it("does not flag a model this booking reserves itself", async () => {
+  it("counts the units the booking already holds against the free unit", async () => {
+    // One unit is on the booking already and one unit is free: a second
+    // named unit would not fit. The held unit itself claims nothing new.
     vi.mocked(bookingService.getBooking).mockResolvedValue(
       bookingFixture({
-        modelRequests: [
-          {
-            assetModelId: "model1",
-            quantity: 2,
-            fulfilledQuantity: 0,
-            fulfilledAt: null,
-            assetModel: { name: "Model" },
-          },
-        ],
+        bookingAssets: [{ assetId: "unit-1", assetKitId: null, quantity: 1 }],
+      })
+    );
+    heldUnits(1);
+    poolAvailability(1);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": true,
+      loose: false,
+    });
+  });
+
+  it("never flags a model an active booking reserves itself", async () => {
+    // A unit of that model fulfils the booking's own request.
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({
+        status: BookingStatus.RESERVED,
+        modelRequests: [ownRequest(2)],
       })
     );
 
-    // A unit of that model fulfils the booking's own request.
     expect(await flagsByAssetId()).toEqual({
       "unit-1": false,
       "unit-2": false,
@@ -1490,17 +1529,30 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("does not flag a unit that already holds a standalone row on this booking", async () => {
+  it("flags a draft's units when its own request no longer fits the pool", async () => {
+    // The draft promises itself two units; naming one would still leave one
+    // to assign, and the pool has one free unit for the two of them.
     vi.mocked(bookingService.getBooking).mockResolvedValue(
-      bookingFixture({
-        bookingAssets: [{ assetId: "unit-1", assetKitId: null, quantity: 1 }],
-      })
+      bookingFixture({ modelRequests: [ownRequest(2)] })
     );
+    poolAvailability(1);
 
-    // The held unit claims nothing new; its sibling still cannot be added.
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": true,
+      "unit-2": true,
+      loose: false,
+    });
+  });
+
+  it("leaves a draft's units alone while its own request still fits", async () => {
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({ modelRequests: [ownRequest(1)] })
+    );
+    poolAvailability(1);
+
     expect(await flagsByAssetId()).toEqual({
       "unit-1": false,
-      "unit-2": true,
+      "unit-2": false,
       loose: false,
     });
   });
@@ -1518,5 +1570,6 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     expect(
       modelRequestService.getAssetModelAvailability
     ).not.toHaveBeenCalled();
+    expect(db.bookingAsset.findMany).not.toHaveBeenCalled();
   });
 });

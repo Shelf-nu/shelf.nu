@@ -8015,6 +8015,122 @@ describe("extendBooking", () => {
     );
   });
 
+  it("measures the booking's named model units against the extended window", async () => {
+    expect.assertions(1);
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: "model-1",
+            title: "Monitor",
+          },
+          assetId: "asset-1",
+          assetKitId: null,
+          quantity: 1,
+          id: "ba-t140",
+        },
+        // Reserved on the kit axis: not a claim on the model's loose pool.
+        {
+          asset: {
+            id: "asset-2",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: "model-1",
+            title: "Monitor in a kit",
+          },
+          assetId: "asset-2",
+          assetKitId: "ak-1",
+          quantity: 1,
+          id: "ba-t141",
+        },
+      ],
+      partialCheckins: [],
+    };
+    // why: extendBooking loads the booking before writing; an ONGOING booking
+    // with checked-out assets passes the status and conflict checks.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...mockBooking, to: newEndDate });
+
+    await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    // Only the standalone unit is handed over, under the new end date, with
+    // the whole footprint re-measured.
+    expect(assertModelUnitsNotReservedElsewhere).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        bookingStatus: BookingStatus.ONGOING,
+        windowChanged: true,
+        to: newEndDate,
+        assets: [expect.objectContaining({ id: "asset-1" })],
+      })
+    );
+  });
+
+  it("keeps the end date when the model guard refuses the extended window", async () => {
+    expect.assertions(2);
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: "model-1",
+            title: "Monitor",
+          },
+          assetId: "asset-1",
+          assetKitId: null,
+          quantity: 1,
+          id: "ba-t142",
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: the guard's own pool math lives in its module tests; here it just
+    // refuses, and the write must not happen.
+    (
+      assertModelUnitsNotReservedElsewhere as ReturnType<typeof vitest.fn>
+    ).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: "Some assets cannot be booked by name for these dates",
+        status: 400,
+      })
+    );
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(ShelfError);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
   it("leaves originalTo on the deadline the booking was planned for", async () => {
     expect.assertions(2);
 
@@ -14523,6 +14639,8 @@ describe("model reservation guard — write paths", () => {
       expect(guard).toHaveBeenCalledWith(
         expect.objectContaining({
           bookingId: "booking-1",
+          // The status the row lock returned, not the one read before it.
+          bookingStatus: BookingStatus.ONGOING,
           organizationId: "org-1",
           from: futureFromDate,
           to: futureToDate,
@@ -14577,6 +14695,8 @@ describe("model reservation guard — write paths", () => {
       expect(guard).toHaveBeenCalledWith(
         expect.objectContaining({
           bookingId: "booking-1",
+          // The status the row lock returned.
+          bookingStatus: BookingStatus.ONGOING,
           from: futureFromDate,
           to: futureToDate,
           tx: db,
@@ -14679,6 +14799,7 @@ describe("model reservation guard — write paths", () => {
       expect(guard).toHaveBeenCalledWith(
         expect.objectContaining({
           bookingId: "booking-1",
+          bookingStatus: BookingStatus.DRAFT,
           from: futureFromDate,
           to: futureToDate,
           tx: db,

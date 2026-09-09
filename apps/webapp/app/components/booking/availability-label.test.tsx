@@ -120,4 +120,20 @@ describe("AvailabilityLabel — reserved by model", () => {
     expect(screen.getByText("Already booked")).toBeInTheDocument();
     expect(screen.queryByText("Reserved by model")).not.toBeInTheDocument();
   });
+
+  it("lets a unit that is checked out outrank it", () => {
+    render(
+      <AvailabilityLabel
+        asset={unit({
+          status: AssetStatus.CHECKED_OUT,
+          modelReservedElsewhere: true,
+        })}
+        isCheckedOut
+      />
+    );
+
+    // The unit-level reason describes this unit; the pool reason does not.
+    expect(screen.getByText("Checked out")).toBeInTheDocument();
+    expect(screen.queryByText("Reserved by model")).not.toBeInTheDocument();
+  });
 });

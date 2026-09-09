@@ -300,19 +300,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * Models whose free pool is already promised to other bookings by model
-     * reservations for this booking's window. A unit of such a model cannot
-     * be booked by name here, with two exceptions that mirror the write-time
-     * guard: a model this booking reserves itself (the unit would fulfil that
-     * request), and a unit already on this booking (it claims nothing new).
-     * One availability read per distinct model on the page, through the same
-     * primitive the Models tab and the write paths use.
+     * Models of which this booking cannot take one more unit by name, because
+     * other bookings' model reservations leave the pool no room for it in
+     * this window. Mirrors the write-time guard for a single added unit:
+     * a draft must fit everything it would then hold (its named units plus
+     * the units of its own request still unassigned); an active booking
+     * already holds its units and its request, so a unit that fulfils that
+     * request is never refused and never flagged. A unit already on the
+     * booking claims nothing new. One availability read per distinct model
+     * on the page, through the same primitive the write paths use.
      */
-    const ownOutstandingModelIds = new Set(
-      booking.modelRequests
-        .filter((request) => request.fulfilledAt === null)
-        .map((request) => request.assetModelId)
-    );
+    const isDraft = booking.status === BookingStatus.DRAFT;
+    const remainingByModel = new Map<string, number>();
+    for (const request of booking.modelRequests) {
+      if (request.fulfilledAt !== null) continue;
+      remainingByModel.set(
+        request.assetModelId,
+        (remainingByModel.get(request.assetModelId) ?? 0) +
+          Math.max(0, request.quantity - request.fulfilledQuantity)
+      );
+    }
     const ownStandaloneAssetIds = new Set(
       booking.bookingAssets
         .filter((ba) => ba.assetKitId === null)
@@ -323,8 +330,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assets.flatMap((a) =>
           a.type === AssetType.INDIVIDUAL &&
           a.assetModelId &&
-          !ownOutstandingModelIds.has(a.assetModelId) &&
-          !ownStandaloneAssetIds.has(a.id)
+          !ownStandaloneAssetIds.has(a.id) &&
+          (isDraft || (remainingByModel.get(a.assetModelId) ?? 0) === 0)
             ? [a.assetModelId]
             : []
         )
@@ -332,19 +339,47 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ];
     const exhaustedModelIds = new Set<string>();
     if (booking.from && booking.to && candidateModelIds.length > 0) {
-      const availabilities = await Promise.all(
-        candidateModelIds.map((assetModelId) =>
-          getAssetModelAvailability({
-            assetModelId,
-            organizationId,
+      const [availabilities, heldRows] = await Promise.all([
+        Promise.all(
+          candidateModelIds.map((assetModelId) =>
+            getAssetModelAvailability({
+              assetModelId,
+              organizationId,
+              bookingId: id,
+              from: booking.from,
+              to: booking.to,
+            })
+          )
+        ),
+        // Standalone units of these models already on the booking. They are
+        // not in `availability` (it excludes this booking), so they count on
+        // the booking's side.
+        db.bookingAsset.findMany({
+          where: {
             bookingId: id,
-            from: booking.from,
-            to: booking.to,
-          })
-        )
-      );
+            assetKitId: null,
+            asset: {
+              organizationId,
+              assetModelId: { in: candidateModelIds },
+              type: AssetType.INDIVIDUAL,
+            },
+          },
+          select: { asset: { select: { assetModelId: true } } },
+        }),
+      ]);
+      const heldByModel = new Map<string, number>();
+      for (const row of heldRows) {
+        const assetModelId = row.asset.assetModelId;
+        if (!assetModelId) continue;
+        heldByModel.set(assetModelId, (heldByModel.get(assetModelId) ?? 0) + 1);
+      }
       candidateModelIds.forEach((assetModelId, index) => {
-        if (availabilities[index].available <= 0) {
+        const held = heldByModel.get(assetModelId) ?? 0;
+        const remaining = remainingByModel.get(assetModelId) ?? 0;
+        // One more named unit, plus whatever the booking's own request still
+        // needs once that unit has fulfilled one of its units.
+        const footprint = held + 1 + Math.max(0, remaining - 1);
+        if (footprint > availabilities[index].available) {
           exhaustedModelIds.add(assetModelId);
         }
       });

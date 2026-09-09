@@ -153,21 +153,6 @@ export function AvailabilityLabel({
   }
 
   /**
-   * Every free unit of this asset's model is promised to other bookings by a
-   * model reservation for the selected period, so this unit cannot be booked
-   * by name. Same tone as "Already booked": the pool, not this unit, is taken.
-   */
-  if (asset.modelReservedElsewhere) {
-    return (
-      <AvailabilityBadge
-        badgeText="Reserved by model"
-        tooltipTitle="Model is reserved for this period"
-        tooltipContent="Other bookings reserved every free unit of this asset's model for the selected dates. Change the dates, or pick an asset of another model."
-      />
-    );
-  }
-
-  /**
    * Is currently checked out.
    *
    * QUANTITY_TRACKED assets are exempted here as defense-in-depth:
@@ -220,6 +205,22 @@ export function AvailabilityLabel({
             "This asset is currently checked out as part of another booking and should be available for your selected date range period"
           )
         }
+      />
+    );
+  }
+
+  /**
+   * Every free unit of this asset's model is promised to other bookings by a
+   * model reservation for the selected period, so this unit cannot be booked
+   * by name. Same tone as "Already booked": the pool, not this unit, is taken.
+   * Sits after the unit-level reasons, which describe this unit itself.
+   */
+  if (asset.modelReservedElsewhere) {
+    return (
+      <AvailabilityBadge
+        badgeText="Reserved by model"
+        tooltipTitle="Model is reserved for this period"
+        tooltipContent="Other bookings reserved every free unit of this asset's model for the selected dates. Change the dates, or pick an asset of another model."
       />
     );
   }
