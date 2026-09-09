@@ -4711,11 +4711,19 @@ export async function isBookingFullyCheckedIn(
     const isQtyTrackedAsset = ba.asset?.type === AssetType.QUANTITY_TRACKED;
 
     if (!isQtyTrackedAsset) {
-      // INDIVIDUAL. The slice marker is the same source the check-in
-      // eligibility guard reads, so an asset gates completion exactly when
-      // it is checkinable. A slice never dispatched on THIS booking (added
-      // onto an ONGOING booking, or left behind by a progressive checkout)
-      // has nothing to reconcile and never blocks.
+      // INDIVIDUAL. Dispatch is read from the slice marker, the same source
+      // the scan check-in guard reads, so a slice never dispatched on THIS
+      // booking (added onto an ONGOING booking, or left behind by a
+      // progressive checkout) has nothing to reconcile and never blocks.
+      //
+      // Reconciliation is judged against the slice's latest departure below,
+      // while the scan check-in guard reads `checkedInAt` alone. Both
+      // check-out writers clear `checkedInAt` on a re-dispatch, so the two
+      // agree on every slice they produce. They part on a slice whose markers
+      // were stamped from each side's earliest session and which a later scan
+      // departure sent out again: this gate holds the booking, the scan flow
+      // refuses the slice as already checked in, and the all-at-once check-in
+      // is the path that closes the booking.
       if (!ba.checkedOutAt) continue;
       // The latest departure a return has to answer: the marker, or a newer
       // check-out session naming the asset. The all-at-once checkout refreshes
