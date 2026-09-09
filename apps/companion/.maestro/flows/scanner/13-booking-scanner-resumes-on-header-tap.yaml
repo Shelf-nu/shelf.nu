@@ -5,25 +5,38 @@
 # touches through, so a tap on the booking name reaches the paused layer while
 # the back button keeps working.
 #
-# Opens the first booking in the list that offers scan-to-add.
+# Opens the "QA Scan Booking" fixture (a DRAFT booking in the QA workspace,
+# the same one flows/bookings/02 uses), which always offers scan-to-add.
 # No login step: runs against the session already on the simulator.
 appId: com.shelf.companion.carlos
 ---
 - launchApp:
     appId: com.shelf.companion.carlos
     stopApp: false
-# The Bookings tab keeps its last screen, so an earlier flow may have left it
-# on a booking's detail page. The deep link opens the list.
-- openLink: "shelf://bookings"
-- tapOn:
-    text: "Open"
-    optional: true
 - tapOn: "Bookings"
-- extendedWaitUntil:
-    visible: "Booking: .*"
-    timeout: 15000
+# The Bookings tab keeps its last screen, so an earlier flow may have left it
+# on a booking's detail page.
 - tapOn:
-    text: "Booking: .*"
+    text: "Go back"
+    optional: true
+# DRAFT bookings live under the "All" filter. The filter pills scroll
+# horizontally and "All" sits off-screen to the right on a phone-sized screen.
+- extendedWaitUntil:
+    visible: "Filter: Active.*"
+    timeout: 15000
+- swipe:
+    start: "90%,21%"
+    end: "18%,21%"
+- swipe:
+    start: "90%,21%"
+    end: "18%,21%"
+- tapOn: "Filter: All.*"
+- scrollUntilVisible:
+    element:
+      text: ".*QA Scan Booking.*"
+    direction: DOWN
+    timeout: 60000
+- tapOn: ".*QA Scan Booking.*"
 - extendedWaitUntil:
     visible: ".*Scan assets or kits to add.*"
     timeout: 15000
