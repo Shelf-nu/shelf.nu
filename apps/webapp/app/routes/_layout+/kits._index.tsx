@@ -151,6 +151,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                   // PrismaClientValidationError on every kit search with
                   // ?view=availability (Sentry SHELF-WEBAPP-1P1).
                   ...(view === "availability" && {
+                    // why: out of this rule — a kit bar means "every member
+                    // slice returned", which needs a per-kit fold this select
+                    // does not carry, so kit bars keep the booking's period.
                     bookingAssets: {
                       where: {
                         booking: {

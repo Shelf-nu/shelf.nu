@@ -5,7 +5,10 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AdvancedAssetBooking } from "~/modules/asset/types";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
-import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
+import {
+  RETURNED_EVENT_CLASS,
+  availabilityEventClassNames,
+} from "~/utils/calendar";
 import { useHints } from "~/utils/client-hints";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -22,15 +25,83 @@ type BookingSlice = {
   assetKitId: string | null;
   kitName: string | null;
   quantity: number;
+  checkedOutAt: string | Date | null;
+  checkedInAt: string | Date | null;
 };
 
-/** Simple-mode `asset.bookingAssets[]` element: pivot row + nested booking. */
+/** Simple-mode `asset.bookingAssets[]` element: pivot row + nested booking.
+ * The Prisma include returns every BookingAsset scalar, so the two slice
+ * markers arrive here as Dates without being named in the loader's select. */
 type SimpleModeBookingAsset = {
   booking: AdvancedAssetBooking;
   assetKitId?: string | null;
   kitName?: string | null;
   quantity?: number;
+  checkedOutAt?: string | Date | null;
+  checkedInAt?: string | Date | null;
 };
+
+/** Slice markers the returned rule reads; both loader shapes carry them. */
+type SliceMarkers = Pick<BookingSlice, "checkedOutAt" | "checkedInAt">;
+
+const toMillis = (value: string | Date) => new Date(value).getTime();
+
+/** Milliseconds a returned bar spans when the check-in precedes the booking's
+ * start (early check-out without a date adjustment, then a return): the
+ * calendar needs an end after the start, and one hour keeps the bar visible. */
+const MIN_RETURNED_BAR_MS = 60 * 60 * 1000;
+
+/**
+ * Whether ONE slice has come back from its booking. A departure clears
+ * `checkedInAt`, but rows stamped by the check-in backfill can carry a
+ * `checkedInAt` older than their `checkedOutAt`; only a check-in at or after
+ * the departure means the slice is back — the same test the booking's own
+ * completion gate applies.
+ */
+export function isSliceReturned(slice: SliceMarkers): boolean {
+  if (!slice.checkedInAt) return false;
+  if (!slice.checkedOutAt) return true;
+  return toMillis(slice.checkedInAt) >= toMillis(slice.checkedOutAt);
+}
+
+/**
+ * The instant an asset's bar should end for one booking: the latest check-in
+ * across its folded slices, or null when the asset is still booked or out.
+ *
+ * Only a live booking can have a returned asset. A RESERVED booking has not
+ * started, so its slices are drawn for the whole planned period whatever
+ * markers they carry. A QUANTITY_TRACKED slice gets `checkedInAt` only once
+ * every booked unit is back; a partly returned pool keeps its full bar (its
+ * flow back is tracked by ConsumptionLog, not drawn here).
+ */
+export function resolveReturnedAt(
+  status: AdvancedAssetBooking["status"],
+  slices: SliceMarkers[]
+): string | null {
+  if (status !== "ONGOING" && status !== "OVERDUE") return null;
+  if (slices.length === 0 || !slices.every(isSliceReturned)) return null;
+  const latest = Math.max(
+    ...slices.map((s) => toMillis(s.checkedInAt as string | Date))
+  );
+  return new Date(latest).toISOString();
+}
+
+/**
+ * The bar end for a returned asset. The calendar drops an end that is not
+ * after the start and draws a default-length bar instead, so a check-in
+ * recorded before the booking's (unadjusted) start is pushed to one hour
+ * after it.
+ */
+export function returnedBarEnd(
+  returnedAt: string,
+  from: string | Date
+): string {
+  const start = toMillis(from);
+  const end = toMillis(returnedAt);
+  return end > start
+    ? returnedAt
+    : new Date(start + MIN_RETURNED_BAR_MS).toISOString();
+}
 
 export function useAssetAvailabilityData(items: Items) {
   const { roles } = useUserRoleHelper();
@@ -101,6 +172,8 @@ export function useAssetAvailabilityData(items: Items) {
                 assetKitId: ba.assetKitId ?? null,
                 kitName: ba.kitName ?? null,
                 quantity: ba.quantity ?? 1,
+                checkedOutAt: ba.checkedOutAt ?? null,
+                checkedInAt: ba.checkedInAt ?? null,
               })
             )
           : "bookings" in asset && asset.bookings
@@ -109,6 +182,8 @@ export function useAssetAvailabilityData(items: Items) {
               assetKitId: b.assetKitId ?? null,
               kitName: b.kitName ?? null,
               quantity: b.quantity ?? 1,
+              checkedOutAt: b.checkedOutAt ?? null,
+              checkedInAt: b.checkedInAt ?? null,
             }))
           : [];
 
@@ -136,6 +211,14 @@ export function useAssetAvailabilityData(items: Items) {
           ? resolveUserDisplayName(booking.custodianUser)
           : booking.custodianTeamMember?.name;
 
+        // Every folded slice of this asset is back from a live booking: the
+        // bar stops at the check-in and is drawn as settled, while the
+        // booking keeps its live status (ONGOING or OVERDUE) until it is
+        // completed. Slices that never went out on this booking keep the
+        // planned bar.
+        const returnedAt = resolveReturnedAt(booking.status, group);
+        const returned = returnedAt !== null;
+
         let title = booking.name;
         if (canSeeAllCustody) {
           title += ` | ${custodianName}`;
@@ -153,16 +236,24 @@ export function useAssetAvailabilityData(items: Items) {
           0
         );
 
+        const barEnd = returnedAt
+          ? returnedBarEnd(returnedAt, booking.from)
+          : booking.to;
+
         return {
           title,
           resourceId: asset.id,
           start: toIsoDateTimeToUserTimezone(booking.from, timeZone),
-          end: toIsoDateTimeToUserTimezone(booking.to, timeZone),
+          end: toIsoDateTimeToUserTimezone(barEnd, timeZone),
           classNames: [
             `bookingId-${booking.id}`,
-            ...getStatusClasses(
-              booking.status,
-              isOneDayEvent(new Date(booking.from), new Date(booking.to)),
+            ...(returned ? [RETURNED_EVENT_CLASS] : []),
+            // Same rule the calendar's own class callback applies, so the bar
+            // is drawn the same way from both sides.
+            ...availabilityEventClassNames(
+              { status: booking.status, returned },
+              new Date(booking.from),
+              new Date(booking.to),
               "px-1"
             ),
           ],
@@ -171,6 +262,8 @@ export function useAssetAvailabilityData(items: Items) {
             id: booking.id,
             name: booking.name,
             status: booking.status,
+            returned,
+            returnedAt,
             title: booking.name,
             description: booking.description,
             start: booking.from,
