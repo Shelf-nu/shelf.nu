@@ -187,14 +187,21 @@ export function SelectWithOther(props: SelectWithOtherProps) {
    * it before the bundle arrives. React has not committed its removal yet while
    * this render runs, so read the live answer here: seeding the enhanced control
    * from `defaultValue` alone would silently throw that answer away and leave a
-   * required field empty. `EnhancedSelectWithOther` only reads `defaultValue`
-   * to seed its initial state, so it does not matter that the ref is empty on
-   * later renders.
+   * required field empty.
+   *
+   * The ref, not the value, decides which one wins. An empty live value means
+   * the user cleared the field on purpose and must stay cleared, while a missing
+   * ref means the fallback never rendered — a client-side navigation onto the
+   * form — and the saved answer is all there is. `EnhancedSelectWithOther` only
+   * reads `defaultValue` to seed its initial state, so it does not matter that
+   * the ref is empty again on later renders.
    */
+  const fallbackSelect = fallbackRef.current;
+
   return (
     <EnhancedSelectWithOther
       {...props}
-      defaultValue={fallbackRef.current?.value || props.defaultValue}
+      defaultValue={fallbackSelect ? fallbackSelect.value : props.defaultValue}
     />
   );
 }

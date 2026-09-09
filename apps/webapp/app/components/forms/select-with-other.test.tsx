@@ -138,6 +138,37 @@ describe("SelectWithOther during the hydration swap", () => {
     container.remove();
   });
 
+  it("keeps a field the user cleared before hydration cleared", () => {
+    const field = (
+      <SelectWithOther
+        label="What's your role?"
+        name="jobTitle"
+        options={OPTIONS}
+        defaultValue="Operations Manager"
+        otherInputLabel="Specify your role"
+      />
+    );
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    container.innerHTML = renderToString(field);
+
+    // The user clears the saved answer while the bundle is still loading.
+    container.querySelector("select")!.value = "";
+
+    let root: ReturnType<typeof hydrateRoot>;
+    act(() => {
+      root = hydrateRoot(container, field);
+    });
+
+    expect(
+      container.querySelector<HTMLInputElement>('input[name="jobTitle"]')?.value
+    ).toBe("");
+
+    act(() => root.unmount());
+    container.remove();
+  });
+
   it("falls back to the saved value when the user answered nothing", () => {
     const field = (
       <SelectWithOther
