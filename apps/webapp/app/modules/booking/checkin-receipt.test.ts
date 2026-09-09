@@ -161,6 +161,28 @@ describe("buildCheckinReceipt — individual slices", () => {
     expect(row.checkedInById).toBeNull();
   });
 
+  it("prints no check-in moment on a row that never went out", () => {
+    // A check-in marker beside a NULL departure claims a return for units that
+    // never moved. The row states what it is — never checked out — and nothing
+    // more.
+    const result = buildCheckinReceipt({
+      slices: [
+        slice({
+          checkedOutAt: null,
+          checkedInAt: CHECKED_IN_AT,
+          checkedInById: "user-1",
+        }),
+      ],
+      breakdownByBookingAsset: new Map(),
+    });
+
+    const row = rowFor(result, "ba-1");
+    expect(row.state).toBe("NEVER_CHECKED_OUT");
+    expect(row.returned).toBe(0);
+    expect(row.checkedInAt).toBeNull();
+    expect(row.checkedInById).toBeNull();
+  });
+
   it("leaves the receiving user empty when the check-in marker carries no user", () => {
     // Backfilled rows carry a `checkedInAt` with no `checkedInById`. The sheet
     // prints a blank rather than the custodian or the printing user.

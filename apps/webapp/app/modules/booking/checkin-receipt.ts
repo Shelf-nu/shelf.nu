@@ -294,17 +294,15 @@ const NO_DISPOSITIONS: CheckinReceiptDispositionBreakdown = {
 /**
  * Whether a slice's recorded check-in answers the departure it is on now.
  *
- * A check-in only answers the departure it followed. The receipt states what
- * the current trip recorded and nothing else: a moment left by an earlier trip,
- * printed beside a row this sheet is calling still out, contradicts the row it
- * sits on.
+ * A check-in only answers a departure, and only the one it followed. Every
+ * other marker is left off the sheet: a moment beside a row this receipt calls
+ * never checked out claims a return for units that never moved, and a moment
+ * from an earlier trip beside a row it calls still out contradicts the row it
+ * sits on. Both readings are worse than a blank cell.
  */
 function checkInAnswersCurrentTrip(slice: CheckinReceiptSlice): boolean {
-  if (!slice.checkedInAt) {
+  if (!slice.checkedInAt || !slice.checkedOutAt) {
     return false;
-  }
-  if (!slice.checkedOutAt) {
-    return true;
   }
   return slice.checkedInAt.getTime() >= slice.checkedOutAt.getTime();
 }
@@ -345,7 +343,7 @@ function buildRow(
   // the one item, and the markers alone say whether it came back.
   const returned = isQuantityTracked
     ? dispositions.returned
-    : isReconciledHere && slice.checkedOutAt
+    : isReconciledHere
     ? 1
     : 0;
   const consumed = isQuantityTracked ? dispositions.consumed : 0;
