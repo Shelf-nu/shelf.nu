@@ -13,6 +13,12 @@ appId: com.shelf.companion.carlos
 - launchApp:
     appId: com.shelf.companion.carlos
     stopApp: false
+# The Scan tab keeps its last parameters, so a booking-mode scanner left by an
+# earlier flow would come back. The deep link opens the plain scanner.
+- openLink: "shelf://scanner"
+- tapOn:
+    text: "Open"
+    optional: true
 - tapOn: "Scan"
 - tapOn:
     text: "Allow"
@@ -56,7 +62,15 @@ appId: com.shelf.companion.carlos
 - tapOn: "Close manual entry"
 
 # ── 2. Batch mode: four scanned items push the pill to the top strip ──
-- tapOn: "Scanner action: Assign"
+# The pill's label carries a state suffix once selected, and an earlier run
+# may have left items in the drawer.
+- tapOn: "Scanner action: Assign.*"
+- tapOn:
+    text: "Switch"
+    optional: true
+- tapOn:
+    text: "Clear all.*"
+    optional: true
 - extendedWaitUntil:
     visible:
       id: "dev-scan-toggle"

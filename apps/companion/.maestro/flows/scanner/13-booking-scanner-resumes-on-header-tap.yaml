@@ -12,6 +12,12 @@ appId: com.shelf.companion.carlos
 - launchApp:
     appId: com.shelf.companion.carlos
     stopApp: false
+# The Bookings tab keeps its last screen, so an earlier flow may have left it
+# on a booking's detail page. The deep link opens the list.
+- openLink: "shelf://bookings"
+- tapOn:
+    text: "Open"
+    optional: true
 - tapOn: "Bookings"
 - extendedWaitUntil:
     visible: "Booking: .*"

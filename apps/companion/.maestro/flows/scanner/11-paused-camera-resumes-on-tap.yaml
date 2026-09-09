@@ -13,6 +13,12 @@ appId: com.shelf.companion.carlos
 - launchApp:
     appId: com.shelf.companion.carlos
     stopApp: false
+# The Scan tab keeps its last parameters, so a booking-mode scanner left by an
+# earlier flow would come back. The deep link opens the plain scanner.
+- openLink: "shelf://scanner"
+- tapOn:
+    text: "Open"
+    optional: true
 - tapOn: "Scan"
 - tapOn:
     text: "Allow"
@@ -27,6 +33,17 @@ appId: com.shelf.companion.carlos
     optional: true
 - tapOn:
     text: "Resume camera"
+    optional: true
+# A batch drawer left by an earlier flow covers the camera controls, and
+# switching the action with items scanned asks for confirmation.
+- tapOn:
+    text: "Clear all.*"
+    optional: true
+- tapOn:
+    text: "Scanner action: View.*"
+    optional: true
+- tapOn:
+    text: "Switch"
     optional: true
 - extendedWaitUntil:
     visible:
