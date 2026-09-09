@@ -1,4 +1,3 @@
-import type { AssetStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -7,6 +6,7 @@ import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu"
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isFormProcessing } from "~/utils/form";
+import { someKitMemberBlocksCustodyAssignment } from "~/utils/kits";
 import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
@@ -85,15 +85,8 @@ function ConditionalDropdown() {
     (kit) => kit.status === "CHECKED_OUT"
   );
 
-  const someAssetsInsideKitsCheckedOutOrInCustody = selectedKits.some(
-    (kit) =>
-      kit.assets?.some(
-        (asset: { status: AssetStatus }) => asset.status === "CHECKED_OUT"
-      ) ||
-      kit.assets?.some(
-        (asset: { status: AssetStatus }) => asset.status === "IN_CUSTODY"
-      )
-  );
+  const someAssetsInsideKitsCheckedOutOrInCustody =
+    someKitMemberBlocksCustodyAssignment(selectedKits);
 
   const disabled = selectedKits.length === 0;
 
