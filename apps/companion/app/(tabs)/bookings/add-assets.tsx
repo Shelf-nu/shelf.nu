@@ -64,8 +64,9 @@ const modelKeyExtractor = (item: AvailableModel) => item.id;
  * a capped list would hide inventory the operator has to be able to reach.
  *
  * Route params carry the booking and its window: everything shown is filtered
- * to what is available for those dates, which is why the screen cannot be
- * opened without them.
+ * to what is available for those dates, so `from` and `to` are what make the
+ * lists mean anything. Opened without them, the screen shows its error state —
+ * no retry can supply a window the route never carried.
  *
  * @returns The picker for the booking named in the route params.
  */
@@ -156,7 +157,17 @@ export default function AddBookingAssetsScreen() {
    */
   const fetchPage = useCallback(
     async (targetPage: number, append: boolean) => {
-      if (!currentOrg || !from || !to) return;
+      // A missing booking window is terminal, not transient: every list here
+      // is filtered to those dates, so there is nothing to fall back to. Report
+      // it, or the initial `isLoading` spinner stays up with nothing behind it.
+      if (!from || !to) {
+        setError(
+          "This picker needs the booking's dates. Open it from the booking."
+        );
+        setIsLoading(false);
+        return;
+      }
+      if (!currentOrg) return;
       const reqId = ++requestIdRef.current;
       isFetchingRef.current = true;
       if (append) {
@@ -249,7 +260,13 @@ export default function AddBookingAssetsScreen() {
     void fetchPage(1, false);
   }, [fetchPage]);
 
-  /** Pull the next page in when the list nears its end. */
+  /**
+   * Pull the next page in when the list nears its end.
+   *
+   * The lists pass this to `onEndReached` only while they hold rows: a list
+   * with no rows has no next page, and RN fires that callback from its
+   * content-size change even when it is empty.
+   */
   const loadMore = useCallback(() => {
     if (isFetchingRef.current || !hasMore) return;
     void fetchPage(pageRef.current + 1, true);
@@ -630,7 +647,7 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={assetKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-          onEndReached={loadMore}
+          onEndReached={assets.length ? loadMore : undefined}
           onEndReachedThreshold={0.4}
           ListFooterComponent={listFooter}
           ListEmptyComponent={
@@ -653,7 +670,7 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={kitKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-          onEndReached={loadMore}
+          onEndReached={kits.length ? loadMore : undefined}
           onEndReachedThreshold={0.4}
           ListFooterComponent={listFooter}
           ListEmptyComponent={
@@ -676,7 +693,7 @@ export default function AddBookingAssetsScreen() {
           keyExtractor={modelKeyExtractor}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
-          onEndReached={loadMore}
+          onEndReached={models.length ? loadMore : undefined}
           onEndReachedThreshold={0.4}
           ListFooterComponent={listFooter}
           ListEmptyComponent={
