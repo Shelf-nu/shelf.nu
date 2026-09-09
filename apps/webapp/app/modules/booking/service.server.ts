@@ -922,10 +922,11 @@ async function releaseCheckedOutKits(
       id: slice.id,
       assetKitId: slice.assetKitId,
       sourceKitId: slice.sourceKitId,
-      // Defensive `?.`, matching the other resolvers: fixtures and narrower
-      // selects can omit the relation. Without `asset` a slice answers from
-      // provenance alone, which is the safe direction — it can only fail to
-      // pin a kit this exit was already releasing.
+      // Defensive `?.` for fixtures and narrower selects, NOT because the
+      // fallback is harmless here: a slice that fails to pin its kit makes the
+      // kit MORE releasable, which is the direction this guard exists to
+      // prevent. The `select` above always projects `asset`, so the fallback is
+      // unreachable in production — keep it that way if this query is edited.
       assetKits: slice.asset?.assetKits ?? [],
       assetType: slice.asset?.type,
     })),
