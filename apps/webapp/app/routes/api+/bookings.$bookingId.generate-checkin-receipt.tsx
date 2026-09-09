@@ -114,7 +114,7 @@ export const loader = async ({
         updatedAt: receipt.organization.updatedAt.toISOString(),
       },
       rows: receipt.rows.map(
-        ({ checkedInAt, checkedInById: _checkedInById, ...row }) => ({
+        ({ checkedInAt, checkedInByIds: _checkedInByIds, ...row }) => ({
           ...row,
           checkedInOn: printMoment(checkedInAt),
         })

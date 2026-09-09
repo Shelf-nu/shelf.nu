@@ -175,7 +175,7 @@ describe("buildCheckinReceipt — individual slices", () => {
     // The recorded moment answers the first trip, not the one it is on now.
     // Printing it beside "Still out" would put a contradiction on the sheet.
     expect(row.checkedInAt).toBeNull();
-    expect(row.checkedInById).toBeNull();
+    expect(row.checkedInByIds).toEqual([]);
   });
 
   it("prints no check-in moment on a row that never went out", () => {
@@ -197,7 +197,7 @@ describe("buildCheckinReceipt — individual slices", () => {
     expect(row.state).toBe("NEVER_CHECKED_OUT");
     expect(row.returned).toBe(0);
     expect(row.checkedInAt).toBeNull();
-    expect(row.checkedInById).toBeNull();
+    expect(row.checkedInByIds).toEqual([]);
   });
 
   it("counts a legacy session as the return when the slice marker is absent", () => {
@@ -220,7 +220,7 @@ describe("buildCheckinReceipt — individual slices", () => {
     const row = rowFor(result, "ba-1");
     expect(row.state).toBe("RETURNED");
     expect(row.checkedInAt).toEqual(CHECKED_IN_AT);
-    expect(row.checkedInById).toBe("user-9");
+    expect(row.checkedInByIds).toEqual(["user-9"]);
   });
 
   it("ignores a legacy session while the booking is still running", () => {
@@ -280,7 +280,7 @@ describe("buildCheckinReceipt — individual slices", () => {
 
     const row = rowFor(result, "ba-1");
     expect(row.state).toBe("RETURNED");
-    expect(row.checkedInById).toBeNull();
+    expect(row.checkedInByIds).toEqual([]);
   });
 });
 
@@ -447,7 +447,7 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
     const row = rowFor(result, "ba-1");
     expect(row.stillOut).toBe(4);
     expect(row.checkedInAt).toBeNull();
-    expect(row.checkedInById).toBeNull();
+    expect(row.checkedInByIds).toEqual([]);
   });
 
   it("prints no check-in moment while a stamped slice still owes units", () => {
@@ -473,7 +473,109 @@ describe("buildCheckinReceipt — quantity-tracked slices", () => {
     expect(row.state).toBe("STILL_OUT");
     expect(row.stillOut).toBe(4);
     expect(row.checkedInAt).toBeNull();
-    expect(row.checkedInById).toBeNull();
+    expect(row.checkedInByIds).toEqual([]);
+  });
+
+  it("dates a partly-returned quantity row from the log that recorded the units", () => {
+    // A quantity slice returned in part never gets a check-in marker, because
+    // that marker means fully reconciled. Without the log the sheet prints
+    // "3 returned" with no date and no name against it, which is the weak
+    // evidence this document exists to replace.
+    const returnedAt = new Date("2026-09-02T11:00:00.000Z");
+    const result = build({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 6,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 6,
+          dispositionRecords: [{ at: returnedAt, byId: "user-7" }],
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 3 })]]),
+      isBookingFinished: false,
+    });
+
+    const row = rowFor(result, "ba-1");
+    // Still owed units, and the moment prints anyway: a log dates the units it
+    // records, where a marker dates the whole slice.
+    expect(row.state).toBe("STILL_OUT");
+    expect(row.stillOut).toBe(3);
+    expect(row.checkedInAt).toEqual(returnedAt);
+    expect(row.checkedInByIds).toEqual(["user-7"]);
+  });
+
+  it("names every person who returned units, in the order they did", () => {
+    const first = new Date("2026-09-02T11:00:00.000Z");
+    const second = new Date("2026-09-03T09:00:00.000Z");
+    const result = build({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 6,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 6,
+          dispositionRecords: [
+            { at: second, byId: "user-b" },
+            { at: first, byId: "user-a" },
+          ],
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 6 })]]),
+    });
+
+    const row = rowFor(result, "ba-1");
+    // The latest moment, and both people in the order they first handled units.
+    expect(row.checkedInAt).toEqual(second);
+    expect(row.checkedInByIds).toEqual(["user-a", "user-b"]);
+  });
+
+  it("dates nothing from untagged legacy logs", () => {
+    // Untagged logs are spread across an asset's slices by a greedy pass that
+    // carries no times, so the server hands none of them over. A blank is
+    // honest; a borrowed moment would be a guess.
+    const result = build({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 6,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 6,
+          dispositionRecords: [],
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 6 })]]),
+    });
+
+    const row = rowFor(result, "ba-1");
+    expect(row.state).toBe("RETURNED");
+    expect(row.checkedInAt).toBeNull();
+    expect(row.checkedInByIds).toEqual([]);
+  });
+
+  it("prefers the slice marker over the logs once the slice is settled", () => {
+    // The marker means the whole slice is reconciled, which is a stronger
+    // statement than any single log, so it answers first.
+    const result = build({
+      slices: [
+        slice({
+          assetType: AssetType.QUANTITY_TRACKED,
+          quantity: 6,
+          checkedOutAt: CHECKED_OUT_AT,
+          checkedOutQuantity: 6,
+          checkedInAt: CHECKED_IN_AT,
+          checkedInById: "user-1",
+          dispositionRecords: [
+            { at: new Date("2026-09-02T11:00:00.000Z"), byId: "user-7" },
+          ],
+        }),
+      ],
+      breakdownByBookingAsset: new Map([["ba-1", breakdown({ returned: 6 })]]),
+    });
+
+    const row = rowFor(result, "ba-1");
+    expect(row.checkedInAt).toEqual(CHECKED_IN_AT);
+    expect(row.checkedInByIds).toEqual(["user-1"]);
   });
 
   it("measures a re-dispatched slice against the cumulative counter, not the booked quantity", () => {

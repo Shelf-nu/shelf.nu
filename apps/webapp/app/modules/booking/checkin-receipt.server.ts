@@ -175,6 +175,11 @@ export async function fetchCheckinReceiptData(
             bookingAssetId: true,
             category: true,
             quantity: true,
+            // A quantity slice returned in part never gets a check-in marker,
+            // so its log is the only record of when those units came back and
+            // who took them.
+            createdAt: true,
+            userId: true,
           },
         }),
         resolveCheckInTimes([bookingId]),
@@ -268,6 +273,21 @@ export async function fetchCheckinReceiptData(
       }
     }
 
+    // Moments and people for the rows the markers cannot date. Tagged logs
+    // only: an untagged legacy log is spread across an asset's slices by a
+    // greedy pass that carries no times, so taking a moment from one would be a
+    // guess rather than a record.
+    const dispositionRecordsBySlice = new Map<
+      string,
+      Array<{ at: Date; byId: string }>
+    >();
+    for (const log of dispositionLogs) {
+      if (!log.bookingAssetId) continue;
+      const forSlice = dispositionRecordsBySlice.get(log.bookingAssetId) ?? [];
+      forSlice.push({ at: log.createdAt, byId: log.userId });
+      dispositionRecordsBySlice.set(log.bookingAssetId, forSlice);
+    }
+
     // Reconcile exactly the slices the sheet prints, in the order it prints
     // them, so the totals can never describe a different set of rows from the
     // table above them. Attribution above deliberately spans every slice: one
@@ -293,6 +313,7 @@ export async function fetchCheckinReceiptData(
                 latestSessionByAsset.get(marker.assetId)?.at ?? null,
               sessionCheckedInById:
                 latestSessionByAsset.get(marker.assetId)?.byId ?? null,
+              dispositionRecords: dispositionRecordsBySlice.get(marker.id),
             },
           ]
         : [];
@@ -326,13 +347,13 @@ export async function fetchCheckinReceiptData(
     const checkedInUserIdsInOrder = [
       ...new Set(
         receipt.rows
-          .filter((row) => row.checkedInAt !== null && row.checkedInById)
+          .filter((row) => row.checkedInAt !== null)
           .sort(
             (a, b) =>
               (a.checkedInAt as Date).getTime() -
               (b.checkedInAt as Date).getTime()
           )
-          .map((row) => row.checkedInById as string)
+          .flatMap((row) => row.checkedInByIds)
       ),
     ];
 
@@ -343,6 +364,7 @@ export async function fetchCheckinReceiptData(
           earliestCheckedOutSlice?.checkedOutById ?? null,
           ...slices.map((slice) => slice.checkedInById),
           ...[...latestSessionByAsset.values()].map((s) => s.byId),
+          ...dispositionLogs.map((log) => log.userId),
         ].filter((id): id is string => id !== null)
       ),
     ];
@@ -371,9 +393,12 @@ export async function fetchCheckinReceiptData(
           kitName: asset.kit?.name ?? null,
           isRemovedFromKit: asset.isRemovedFromKit,
           displayCode: assetIdToDisplayCodeMap[asset.id],
-          checkedInByName: row.checkedInById
-            ? nameByUserId.get(row.checkedInById) ?? ""
-            : "",
+          // A slice returned across several sessions by different people names
+          // each of them, in the order they first received something.
+          checkedInByName: row.checkedInByIds
+            .map((id) => nameByUserId.get(id) ?? "")
+            .filter((name) => name !== "")
+            .join(", "),
         },
       ];
     });
