@@ -87,6 +87,14 @@ vitest.mock("~/modules/asset/quantity-breakdown.server", () => ({
   }),
 }));
 
+// why: `subscription.server` loads the Stripe client and the billing config at
+// module load. Stubbing the one capability helper also puts the add-on gate
+// under explicit control, so these tests do not depend on the ambient
+// `ENABLE_PREMIUM_FEATURES` value.
+vitest.mock("~/utils/subscription.server", () => ({
+  canUseBarcodes: vitest.fn(() => true),
+}));
+
 // why: we need to control error formatting without running real error logic
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn((cause: any) => ({
@@ -108,6 +116,7 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 const mockUser = {
   id: "user-1",
@@ -197,10 +206,44 @@ function buildAsset() {
     ],
     assetKits: [],
     tags: [],
-    qrCodes: [],
-    organization: { currency: "USD" },
+    qrCodes: [{ id: "qr-abc123" }],
+    // Code-resolution inputs. Defaults describe a workspace on the stock
+    // QR_ID preference with no alternative codes; the display-code tests
+    // below override exactly what they are about.
+    preferredBarcodeId: null,
+    barcodes: [],
+    organization: {
+      currency: "USD",
+      qrIdDisplayPreference: "QR_ID",
+      barcodesEnabled: false,
+    },
     notes: [],
     customFields: [],
+  };
+}
+
+/** A `buildAsset()` with the code-resolution fields overridden. */
+function buildAssetWithCodes(overrides: {
+  qrIdDisplayPreference?: string;
+  barcodesEnabled?: boolean;
+  barcodes?: { id: string; type: string; value: string }[];
+  preferredBarcodeId?: string | null;
+  sequentialId?: string | null;
+}) {
+  const asset = buildAsset();
+  return {
+    ...asset,
+    sequentialId:
+      overrides.sequentialId === undefined
+        ? asset.sequentialId
+        : overrides.sequentialId,
+    preferredBarcodeId: overrides.preferredBarcodeId ?? null,
+    barcodes: overrides.barcodes ?? [],
+    organization: {
+      currency: "USD",
+      qrIdDisplayPreference: overrides.qrIdDisplayPreference ?? "QR_ID",
+      barcodesEnabled: overrides.barcodesEnabled ?? false,
+    },
   };
 }
 
@@ -389,5 +432,193 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
     const body = await (result as unknown as Response).json();
 
     expect(body.asset.assetModel).toBeNull();
+  });
+});
+
+/**
+ * Which identifier the detail screen is told to show.
+ *
+ * A workspace that labels its assets with Code 128 must see Code 128 here.
+ * The screen cannot work this out for itself — it never receives the
+ * workspace preference — so the endpoint resolves it, exactly as it resolves
+ * the image cascade, and an installed build inherits the answer with no app
+ * release.
+ *
+ * Same precedence as every web asset row: a per-asset override first, then
+ * the workspace preference, then the Shelf QR.
+ *
+ * @see {@link file://../../../app/modules/barcode/display.ts} `resolveDisplayCode`
+ */
+describe("GET /api/mobile/assets/:assetId — display code", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (requireMobileAuth as any).mockResolvedValue({
+      user: mockUser,
+      authUser: { id: "auth-user-1", email: mockUser.email },
+    });
+    (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseBarcodes: true,
+      canUseAudits: false,
+      canSeeAllCustody: true,
+    });
+    (canUseBarcodes as any).mockReturnValue(true);
+  });
+
+  /** Runs the loader and returns the parsed `asset` payload. */
+  async function loadAsset() {
+    const response = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    const body = await (response as unknown as Response).json();
+    return body.asset;
+  }
+
+  it("sends the workspace's Code 128 value, not the Shelf QR", async () => {
+    // why: this is the reported bug — a workspace that prints Code 128 labels
+    // was shown the native Shelf QR on the asset detail screen.
+    (db.asset.findUnique as any).mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+        barcodes: [{ id: "bc-1", type: "Code128", value: "CODE-000128" }],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.displayCode).toEqual({
+      value: "CODE-000128",
+      label: "Code 128",
+      type: "Code128",
+      isFallback: false,
+    });
+  });
+
+  it("marks a preference it could not honour instead of silently showing the QR", async () => {
+    // why: workspace wants Code 128 but this asset has none. The value has to
+    // fall back to the QR, and the screen must be able to say so.
+    (db.asset.findUnique as any).mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+        barcodes: [],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.displayCode).toEqual({
+      value: "qr-abc123",
+      label: "QR Code ID",
+      type: "QR_ID",
+      isFallback: true,
+    });
+  });
+
+  it("lets a per-asset override outrank the workspace preference", async () => {
+    (db.asset.findUnique as any).mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+        preferredBarcodeId: "bc-2",
+        barcodes: [
+          { id: "bc-1", type: "Code128", value: "CODE-000128" },
+          { id: "bc-2", type: "Code39", value: "OVERRIDE-9" },
+        ],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.displayCode).toMatchObject({
+      value: "OVERRIDE-9",
+      label: "Code 39",
+    });
+  });
+
+  it("sends the SAM ID when that is the workspace preference", async () => {
+    (db.asset.findUnique as any).mockResolvedValue(
+      buildAssetWithCodes({ qrIdDisplayPreference: "SAM_ID" })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.displayCode).toMatchObject({
+      value: "SAM-0017",
+      label: "SAM ID",
+      isFallback: false,
+    });
+  });
+
+  it("sends the QR id on the stock preference", async () => {
+    (db.asset.findUnique as any).mockResolvedValue(buildAsset());
+
+    const asset = await loadAsset();
+
+    expect(asset.displayCode).toMatchObject({
+      value: "qr-abc123",
+      label: "QR Code ID",
+      isFallback: false,
+    });
+  });
+
+  it("withholds barcode rows and the preference from a workspace without the add-on", async () => {
+    // why: barcode rows are add-on data. Without the add-on the workspace must
+    // neither receive them nor resolve through them, matching every other
+    // mobile barcode surface.
+    (canUseBarcodes as any).mockReturnValue(false);
+    (db.asset.findUnique as any).mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: false,
+        barcodes: [{ id: "bc-1", type: "Code128", value: "CODE-000128" }],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.barcodes).toEqual([]);
+    expect(asset.displayCode).toMatchObject({
+      value: "qr-abc123",
+      type: "QR_ID",
+      isFallback: true,
+    });
+  });
+
+  it("ships the asset's barcodes so the screen can offer a code switcher", async () => {
+    (db.asset.findUnique as any).mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+        barcodes: [{ id: "bc-1", type: "Code128", value: "CODE-000128" }],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.barcodes).toEqual([
+      { id: "bc-1", type: "Code128", value: "CODE-000128" },
+    ]);
+  });
+
+  it("keeps organization narrowed to currency, leaking no workspace settings", async () => {
+    // why: the select was widened to resolve the code. The response must not
+    // start carrying workspace configuration the companion never asked for.
+    (db.asset.findUnique as any).mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.organization).toEqual({ currency: "USD" });
+    expect(asset.preferredBarcodeId).toBeUndefined();
   });
 });

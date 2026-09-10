@@ -23,6 +23,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
   getMobileUserContext,
@@ -48,8 +49,18 @@ vi.mock("~/database/db.server", () => ({
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    // The loader reads the workspace's code preference once per page, to
+    // resolve which identifier each row shows.
+    organization: { findUniqueOrThrow: vi.fn() },
     $queryRaw: vi.fn(),
   },
+}));
+
+// why: `subscription.server` loads the Stripe client and billing config at
+// module load. Stubbing the capability helper also puts the add-on gate under
+// explicit control, independent of the ambient `ENABLE_PREMIUM_FEATURES`.
+vi.mock("~/utils/subscription.server", () => ({
+  canUseBarcodes: vi.fn(() => true),
 }));
 
 // why: auth + org-access are out of scope for these route-shape tests; stub
@@ -94,6 +105,12 @@ beforeEach(() => {
 
   findManyMock.mockResolvedValue([]);
   countMock.mockResolvedValue(0);
+  // Default workspace: the stock QR_ID preference, no alternative codes. The
+  // display-code tests override exactly what they are about.
+  vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+    qrIdDisplayPreference: "QR_ID",
+    barcodesEnabled: false,
+  } as never);
   // why: default to no search matches — tests that exercise search override
   // this to a known id set.
   queryRawMock.mockResolvedValue([]);
@@ -623,5 +640,136 @@ describe("GET /api/mobile/assets — custody visibility", () => {
     const body = (response as any).data ?? (await (response as any).json());
 
     expect(body.assets[0].custody?.custodian?.name).toBe("Colleague Name");
+  });
+});
+
+/**
+ * Which identifier each list row shows.
+ *
+ * The list is where an operator matches a shelf full of printed labels against
+ * the app, so a workspace that labels its assets with Code 128 must see Code
+ * 128 on the rows — not the SAM ID the rows used to hardcode.
+ *
+ * Resolved server-side, once per page, by the same resolver every web asset
+ * row uses.
+ *
+ * @see {@link file://./../../../../app/modules/barcode/display.ts} `resolveDisplayCode`
+ */
+describe("GET /api/mobile/assets — display code", () => {
+  /** One list row carrying the code-resolution inputs the loader selects. */
+  function row(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "asset-1",
+      title: "Drill",
+      status: "AVAILABLE",
+      sequentialId: "SAM-0017",
+      mainImage: null,
+      mainImageExpiration: null,
+      thumbnailImage: null,
+      availableToBook: true,
+      category: null,
+      assetKits: [],
+      assetLocations: [],
+      custody: [],
+      preferredBarcodeId: null,
+      qrCodes: [{ id: "qr-abc123" }],
+      barcodes: [] as { id: string; type: string; value: string }[],
+      ...overrides,
+    };
+  }
+
+  /** Runs the loader over one row and returns it as the response shaped it. */
+  async function loadRow(fixture: unknown) {
+    findManyMock.mockResolvedValueOnce([fixture] as never);
+    countMock.mockResolvedValueOnce(1);
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request("http://localhost:3000/api/mobile/assets"),
+      })
+    );
+    assertIsDataWithResponseInit(response);
+    return (
+      response.data as {
+        assets: {
+          displayCode: {
+            value: string;
+            label: string;
+            isFallback: boolean;
+          } | null;
+        }[];
+      }
+    ).assets[0];
+  }
+
+  it("shows the workspace's Code 128 value on the row, not the SAM ID", async () => {
+    vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+      qrIdDisplayPreference: "Code128",
+      barcodesEnabled: true,
+    } as never);
+    vi.mocked(canUseBarcodes).mockReturnValue(true);
+
+    const asset = await loadRow(
+      row({ barcodes: [{ id: "bc-1", type: "Code128", value: "CODE-000128" }] })
+    );
+
+    expect(asset.displayCode).toEqual({
+      value: "CODE-000128",
+      label: "Code 128",
+      type: "Code128",
+      isFallback: false,
+    });
+  });
+
+  it("shows the SAM ID when that is the workspace preference", async () => {
+    vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+      qrIdDisplayPreference: "SAM_ID",
+      barcodesEnabled: false,
+    } as never);
+    vi.mocked(canUseBarcodes).mockReturnValue(false);
+
+    const asset = await loadRow(row());
+
+    expect(asset.displayCode).toMatchObject({
+      value: "SAM-0017",
+      label: "SAM ID",
+      isFallback: false,
+    });
+  });
+
+  it("marks a preference this row cannot satisfy", async () => {
+    vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+      qrIdDisplayPreference: "Code128",
+      barcodesEnabled: true,
+    } as never);
+    vi.mocked(canUseBarcodes).mockReturnValue(true);
+
+    const asset = await loadRow(row({ barcodes: [] }));
+
+    expect(asset.displayCode).toMatchObject({
+      value: "qr-abc123",
+      isFallback: true,
+    });
+  });
+
+  it("reads the workspace preference once per page, not once per row", async () => {
+    // why: the preference is per-workspace. Resolving it per row would issue
+    // `perPage` identical queries on every list load.
+    vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+      qrIdDisplayPreference: "QR_ID",
+      barcodesEnabled: false,
+    } as never);
+    findManyMock.mockResolvedValueOnce([
+      row(),
+      row({ id: "asset-2" }),
+    ] as never);
+    countMock.mockResolvedValueOnce(2);
+
+    await loader(
+      createLoaderArgs({
+        request: new Request("http://localhost:3000/api/mobile/assets"),
+      })
+    );
+
+    expect(db.organization.findUniqueOrThrow).toHaveBeenCalledTimes(1);
   });
 });

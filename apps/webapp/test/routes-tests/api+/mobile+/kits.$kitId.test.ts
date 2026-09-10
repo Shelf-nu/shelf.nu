@@ -23,6 +23,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 
 import { loader } from "~/routes/api+/mobile+/kits.$kitId";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
@@ -40,6 +41,13 @@ vi.mock("~/database/db.server", () => ({
 // why: `mobile-auth.server` transitively loads the Supabase admin client and
 // the real Prisma client (no DB / env in unit tests). The route only calls
 // these three gate functions, so only those are stubbed.
+// why: `subscription.server` loads the Stripe client and the billing config at
+// module load. Stubbing the capability helper also puts the add-on gate under
+// explicit control, independent of the ambient `ENABLE_PREMIUM_FEATURES`.
+vi.mock("~/utils/subscription.server", () => ({
+  canUseBarcodes: vi.fn(() => true),
+}));
+
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
@@ -53,6 +61,7 @@ const findFirstMock = vi.mocked(db.kit.findFirst);
 const requireMobileAuthMock = vi.mocked(requireMobileAuth);
 const requireOrganizationAccessMock = vi.mocked(requireOrganizationAccess);
 const requireMobilePermissionMock = vi.mocked(requireMobilePermission);
+const canUseBarcodesMock = vi.mocked(canUseBarcodes);
 const getMobileUserContextMock = vi.mocked(getMobileUserContext);
 
 const FAKE_USER_ID = "user-abc";
@@ -71,10 +80,35 @@ function buildKitFixture(assetKits: unknown[]) {
     updatedAt: new Date("2026-01-01"),
     category: null,
     location: null,
-    qrCodes: [],
-    organization: { currency: "USD" },
+    qrCodes: [{ id: "qr-kit-1" }],
+    // Code-resolution inputs. Default describes a workspace on the stock
+    // QR_ID preference with no alternative codes.
+    barcodes: [] as { id: string; type: string; value: string }[],
+    organization: {
+      currency: "USD",
+      qrIdDisplayPreference: "QR_ID",
+      barcodesEnabled: false,
+    },
     custody: null,
     assetKits,
+  };
+}
+
+/** The base fixture with its code-resolution inputs overridden. */
+function buildKitWithCodes(overrides: {
+  qrIdDisplayPreference?: string;
+  barcodesEnabled?: boolean;
+  barcodes?: { id: string; type: string; value: string }[];
+}) {
+  const kit = buildKitFixture([]);
+  return {
+    ...kit,
+    barcodes: overrides.barcodes ?? [],
+    organization: {
+      currency: "USD",
+      qrIdDisplayPreference: overrides.qrIdDisplayPreference ?? "QR_ID",
+      barcodesEnabled: overrides.barcodesEnabled ?? false,
+    },
   };
 }
 
@@ -245,5 +279,112 @@ describe("GET /api/mobile/kits/:kitId — custody visibility", () => {
     const body = response.data as { kit: { custody: any } };
 
     expect(body.kit.custody?.custodian?.name).toBe("Colleague");
+  });
+});
+
+/**
+ * Which identifier the kit detail screen is told to show.
+ *
+ * Same contract and resolver as the asset detail endpoint. Kits carry no SAM
+ * ID and no per-kit override, so a workspace preferring SAM IDs resolves to
+ * the Shelf QR and the result is marked as a fallback.
+ *
+ * @see {@link file://./../../../../app/modules/barcode/display.ts} `resolveDisplayCode`
+ */
+describe("GET /api/mobile/kits/:kitId — display code", () => {
+  /** Runs the loader against a fixture and returns the shaped kit. */
+  async function loadKit(fixture: unknown) {
+    findFirstMock.mockResolvedValueOnce(fixture as never);
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request(
+          `http://localhost:3000/api/mobile/kits/kit-1?orgId=${FAKE_ORG_ID}`
+        ),
+        params: { kitId: "kit-1" },
+      })
+    );
+    assertIsDataWithResponseInit(response);
+    return (
+      response.data as {
+        kit: {
+          displayCode: {
+            value: string;
+            label: string;
+            type: string;
+            isFallback: boolean;
+          } | null;
+          barcodes: { id: string; type: string; value: string }[];
+          organization: { currency: string };
+        };
+      }
+    ).kit;
+  }
+
+  it("sends the workspace's Code 128 value, not the Shelf QR", async () => {
+    canUseBarcodesMock.mockReturnValue(true);
+
+    const kit = await loadKit(
+      buildKitWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+        barcodes: [{ id: "bc-k1", type: "Code128", value: "KIT-000042" }],
+      })
+    );
+
+    expect(kit.displayCode).toEqual({
+      value: "KIT-000042",
+      label: "Code 128",
+      type: "Code128",
+      isFallback: false,
+    });
+    expect(kit.barcodes).toEqual([
+      { id: "bc-k1", type: "Code128", value: "KIT-000042" },
+    ]);
+  });
+
+  it("falls back to the QR for a SAM ID preference, since kits have no SAM ID", async () => {
+    // why: `Kit` has no `sequentialId` column. The fallback must be MARKED so
+    // the screen can explain itself rather than appearing to ignore the
+    // workspace setting.
+    canUseBarcodesMock.mockReturnValue(true);
+
+    const kit = await loadKit(
+      buildKitWithCodes({ qrIdDisplayPreference: "SAM_ID" })
+    );
+
+    expect(kit.displayCode).toEqual({
+      value: "qr-kit-1",
+      label: "QR Code ID",
+      type: "QR_ID",
+      isFallback: true,
+    });
+  });
+
+  it("withholds barcode rows from a workspace without the add-on", async () => {
+    canUseBarcodesMock.mockReturnValue(false);
+
+    const kit = await loadKit(
+      buildKitWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: false,
+        barcodes: [{ id: "bc-k1", type: "Code128", value: "KIT-000042" }],
+      })
+    );
+
+    expect(kit.barcodes).toEqual([]);
+    expect(kit.displayCode).toMatchObject({ type: "QR_ID", isFallback: true });
+  });
+
+  it("keeps organization narrowed to currency, leaking no workspace settings", async () => {
+    canUseBarcodesMock.mockReturnValue(true);
+
+    const kit = await loadKit(
+      buildKitWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+      })
+    );
+
+    expect(kit.organization).toEqual({ currency: "USD" });
   });
 });
