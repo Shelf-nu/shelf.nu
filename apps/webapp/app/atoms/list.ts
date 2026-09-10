@@ -30,6 +30,25 @@ export const selectedBulkItemsAtom = atom<ListItemData[]>([]);
 export const disabledBulkItemsAtom = atom<ListItemData[]>([]);
 
 /**
+ * Whether the current route's selection is FORM STATE rather than a set of rows
+ * to act on.
+ *
+ * On an index, a tick means "do the next bulk action to this row", so it must
+ * not outlive the filter it was made under: an item ticked before a search
+ * stays selected while invisible, and the action then reaches an asset the user
+ * cannot see. On the `manage-*` screens a tick means "this item is attached to
+ * this booking or kit", so it MUST survive filtering — unticking is how you
+ * detach something, and clearing on search would submit every attached item as
+ * removed.
+ *
+ * Default false, so a new list page is protected without having to remember
+ * anything. The three screens where the selection is form state opt out where
+ * they seed it. `AtomsResetHandler` resets this on every pathname change, so an
+ * opt-out cannot leak into the next route.
+ */
+export const selectionIsFormStateAtom = atom<boolean>(false);
+
+/**
  * Reset the atom when it mounts
  * This item is also reset in the atoms-reset-handler.tsx file
  * This is just in case the atom is used in a component that does not change route
