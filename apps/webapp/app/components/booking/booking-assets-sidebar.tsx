@@ -283,6 +283,13 @@ type SidebarAsset = SidebarAssetBase & {
   bookedQuantity: number;
   kit: NonNullable<SidebarAssetBase["assetKits"][number]["kit"]> | null;
   kitId: string | null;
+  /**
+   * Live kit-driven slice (`BookingAsset.assetKitId` set). Its units come
+   * out of the kit's allocation, not the loose pool, so the stock badges
+   * skip it. Read off the pivot row rather than `kitId`, which also stays
+   * null when the membership cannot be resolved for display.
+   */
+  isKitDriven: boolean;
 };
 
 /**
@@ -322,6 +329,7 @@ function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
       bookedQuantity: ba.quantity,
       kit: sourceKit,
       kitId: sourceKit?.id ?? null,
+      isKitDriven: ba.assetKitId != null,
     };
     if (asset.kitId && asset.kit) {
       const kitId = asset.kitId;
@@ -479,6 +487,7 @@ function AssetTitleAndStatus({
     availability,
     contextStatus: effectiveStatus,
     bookingStatus,
+    isKitDriven: asset.isKitDriven,
   });
 
   return (

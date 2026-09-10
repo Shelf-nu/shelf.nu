@@ -1,3 +1,14 @@
+/**
+ * Booking "Add assets" picker: `/bookings/:bookingId/overview/manage-assets`.
+ *
+ * The loader lists the workspace's assets for the picker (paginated and
+ * filterable) with each row's fitness for THIS booking: kit membership that
+ * blocks a direct add, overlap with other bookings, and the windowed
+ * free-unit count for quantity-tracked assets. The action writes the
+ * selection to the booking through `updateBookingAssets`, which owns the
+ * conflict and quantity guards. Also exports `AssetWithBooking`, the row
+ * shape the booking overview list renders.
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Asset,
@@ -179,6 +190,14 @@ export type AssetWithBooking = Asset & {
    * bookings ever see it). Absent on surfaces that don't project it.
    */
   isRemovedFromKit?: boolean | null;
+  /**
+   * True when this row is a live kit-driven slice (`BookingAsset.assetKitId`
+   * set): its units come out of the kit's allocation (`AssetKit.quantity`),
+   * not the loose pool, so the workspace-availability stock badges do not
+   * apply to it. Resolved by the booking-overview loader; absent on surfaces
+   * that don't project it.
+   */
+  isKitDriven?: boolean | null;
   // Pickup location rendered in the booking Location column. On the
   // pivot model this comes from `assetLocations[0].location` via the
   // loader's `getPrimaryLocation` normalisation.

@@ -503,6 +503,31 @@ describe("resolveQtyStockBadgeVariant", () => {
     ).toBeNull();
   });
 
+  it("(e) returns null for a kit-driven row even when rowQty exceeds both figures, while the same standalone row warns", () => {
+    expect.assertions(2);
+    // A kit holding the asset's last units: the loose pool reads 0/0 because
+    // the kit's allocation is already subtracted from both figures.
+    const kitAvailability = { bookable: 0, physicalNow: 0 };
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 1,
+        availability: kitAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: true,
+      })
+    ).toBeNull();
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 1,
+        availability: kitAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
+      })
+    ).toBe("insufficient");
+  });
+
   it("does not warn amber once the booking has started (ONGOING/OVERDUE) even if rowQty exceeds physicalNow", () => {
     expect.assertions(2);
     // Row itself hasn't drawn from the pool yet (still AVAILABLE
