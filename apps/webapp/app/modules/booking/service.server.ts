@@ -7653,12 +7653,22 @@ export async function partialCheckinBooking({
       checkinSessions: allSessions,
       checkoutSessions: allCheckoutSessions,
     });
-    let remainingAssetCount = 0;
+    // Counted per ASSET, not per slice: a quantity-tracked asset can hold a
+    // standalone slice and several kit-driven ones on one booking, and
+    // `computeBookingAssetRemaining` already answers for all of them.
+    const slicesByAssetId = new Map<string, typeof outstandingBookingAssets>();
     for (const ba of outstandingBookingAssets) {
-      if (ba.asset?.type === AssetType.QUANTITY_TRACKED) {
-        const rem = await computeBookingAssetRemaining(db, id, ba.assetId);
-        if (rem > 0 || isSliceOutByMarker(ba)) remainingAssetCount += 1;
-      } else if (isIndividualSliceStillOut(ba)) {
+      const slices = slicesByAssetId.get(ba.assetId);
+      if (slices) slices.push(ba);
+      else slicesByAssetId.set(ba.assetId, [ba]);
+    }
+    let remainingAssetCount = 0;
+    for (const [assetId, slices] of slicesByAssetId) {
+      if (slices[0].asset?.type === AssetType.QUANTITY_TRACKED) {
+        const rem = await computeBookingAssetRemaining(db, id, assetId);
+        if (rem > 0 || slices.some(isSliceOutByMarker))
+          remainingAssetCount += 1;
+      } else if (slices.some(isIndividualSliceStillOut)) {
         remainingAssetCount += 1;
       }
     }

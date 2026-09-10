@@ -11400,7 +11400,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
           id: "ba-pens",
           assetId: mockQtyAssetId,
           quantity: pens.quantity,
-          assetKitId: null,
+          assetKitId: null as string | null,
           checkedOutAt: pens.checkedOutAt,
           checkedInAt: pens.checkedInAt,
           checkedOutQuantity: pens.checkedOutQuantity,
@@ -11414,7 +11414,7 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
           id: "ba-camera",
           assetId: "asset-camera",
           quantity: 1,
-          assetKitId: null,
+          assetKitId: null as string | null,
           checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
           checkedInAt: null,
           checkedOutQuantity: 1,
@@ -11548,6 +11548,40 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
           data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
         })
       );
+    });
+
+    it("counts pens held on two slices once in what remains", async () => {
+      expect.assertions(2);
+
+      // 5 pens booked standalone and 5 more through a kit, all sent out with
+      // the Check out button at 10:00 and none back. The camera is returned
+      // on its own, so the pens are the one asset left.
+      const booking = makeMixedBooking({
+        quantity: 5,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        checkedOutQuantity: 5,
+      });
+      const withKitSlice = {
+        ...booking,
+        bookingAssets: [
+          ...booking.bookingAssets,
+          {
+            ...booking.bookingAssets[0],
+            id: "ba-pens-kit",
+            assetKitId: "ak-pens",
+          },
+        ],
+      };
+      setupMixed(withKitSlice, { checkins: [], checkouts: [], pensLogged: 0 });
+
+      const result = await partialCheckinBooking({
+        ...baseParams,
+        assetIds: ["asset-camera"],
+      });
+
+      expect(result.isComplete).toBe(false);
+      expect(result.remainingAssetCount).toBe(1);
     });
 
     it("never logs booked pens that did not leave as returned", async () => {
