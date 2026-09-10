@@ -5,7 +5,11 @@ import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
+import { installDomMutationGuard } from "~/utils/dom-mutation-guard";
 import { handleClientBeforeSend } from "~/utils/sentry-filters";
+
+// Must run before hydration so every React commit goes through the guard.
+installDomMutationGuard();
 
 if (window.env?.SENTRY_DSN) {
   Sentry.init({

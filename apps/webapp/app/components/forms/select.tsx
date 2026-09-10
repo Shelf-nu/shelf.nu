@@ -9,7 +9,31 @@ const Select = SelectPrimitive.Root;
 
 const SelectGroup = SelectPrimitive.Group;
 
-const SelectValue = SelectPrimitive.Value;
+/**
+ * Radix renders a string `placeholder` as a bare text node inside the value
+ * span and removes that node when a value is picked. Page translation rewrites
+ * text nodes in place, which would make that removal target a node that is no
+ * longer there. Rendering the placeholder inside an element keeps the swap an
+ * element removal, which stays valid on a translated page.
+ */
+const SelectValue = React.forwardRef<
+  ElementRef<typeof SelectPrimitive.Value>,
+  ComponentPropsWithoutRef<typeof SelectPrimitive.Value>
+>(function SelectValue({ placeholder, ...props }, ref) {
+  return (
+    <SelectPrimitive.Value
+      ref={ref}
+      placeholder={
+        typeof placeholder === "string" ? (
+          <span>{placeholder}</span>
+        ) : (
+          placeholder
+        )
+      }
+      {...props}
+    />
+  );
+});
 
 const SelectTrigger = React.forwardRef<
   ElementRef<typeof SelectPrimitive.Trigger>,
