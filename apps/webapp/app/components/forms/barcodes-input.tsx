@@ -22,6 +22,7 @@ import {
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
 import { getValidationErrors } from "~/utils/http";
+import { generateClientId } from "~/utils/id/client-id";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import Input from "./input";
@@ -49,7 +50,7 @@ type BarcodeInputWithKey = BarcodeInput & { clientKey: string };
 
 /** Generate a stable key for a barcode row (persisted id or fresh UUID). */
 const makeBarcodeKey = (existingId?: string): string =>
-  existingId ?? crypto.randomUUID();
+  existingId ?? generateClientId();
 
 type BarcodesInputProps = {
   className?: string;

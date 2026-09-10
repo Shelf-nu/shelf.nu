@@ -110,7 +110,13 @@ export default defineConfig({
     include: ["./app/routes/**/*.tsx", "./app/routes/**/*.ts"],
   },
   build: {
-    target: "ES2022",
+    // Browser floor for the client bundle. Pinned explicitly (not a Vite alias
+    // such as "baseline-widely-available", which moves between releases) and
+    // equal to the runtime floor probed by `app/utils/browser-support.ts`:
+    // syntax newer than this set is lowered at build time, so a browser below
+    // the floor fails only on the missing runtime APIs that check detects and
+    // turns into an explicit message. Change the two together.
+    target: ["chrome98", "edge98", "firefox94", "safari15.4"],
     assetsDir: `file-assets`,
     rollupOptions: {
       output: {
