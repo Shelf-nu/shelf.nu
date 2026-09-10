@@ -111,6 +111,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         extraInclude: {
           assetKits: {
             select: {
+              // The membership id is the kit-slice discriminator booked rows
+              // point at (`BookingAsset.assetKitId`). `getKitCurrentBooking`
+              // needs it to tell a booking that took THIS kit from one that
+              // took the same pooled asset through another kit.
+              id: true,
               asset: {
                 select: {
                   id: true,
@@ -127,6 +132,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                       },
                     },
                     select: {
+                      // Kit provenance of the booked slice: `assetKitId` is
+                      // the live membership row it was booked under,
+                      // `sourceKitId` the kit itself, which outlives a detach.
+                      // Both NULL = a standalone free-pool slice that belongs
+                      // to no kit.
+                      assetKitId: true,
+                      sourceKitId: true,
+                      // Per-slice departure markers — the record of whether
+                      // these units are out right now. A booking stays ONGOING
+                      // while other assets are away, so its status alone does
+                      // not say this kit is still gone.
+                      checkedOutAt: true,
+                      checkedInAt: true,
                       booking: {
                         select: {
                           id: true,
@@ -200,7 +218,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
     const currentBooking = getKitCurrentBooking({
       id: kit.id,
-      assets: kit.assetKits.map((ak) => ak.asset),
+      assetKits: kit.assetKits,
     });
 
     const header: HeaderData = {

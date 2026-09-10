@@ -35,7 +35,12 @@ const ROLE_PERMISSIONS = { OWNER: { qr: ["read", "update"] } };
  */
 ```
 
-Existing mirrors: none — the permissions mirror was extracted to
-`@shelf/permissions` (packages/permissions). If you create a new mirror,
-add it to this list; when you touch one, diff it against its canonical
-source before shipping.
+Existing mirrors:
+
+| Companion file                                    | Canonical source                        | Extraction target |
+| ------------------------------------------------- | --------------------------------------- | ----------------- |
+| `lib/booking-kit-rows.ts` → `describeBookingRows` | `apps/webapp/app/utils/booking-rows.ts` | `@shelf/labels`   |
+
+The permissions mirror is gone — it was extracted to `@shelf/permissions`
+(packages/permissions). If you create a new mirror, add it to this table; when
+you touch one, diff it against its canonical source before shipping.

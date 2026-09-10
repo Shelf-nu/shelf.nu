@@ -133,6 +133,13 @@ jobs:
       - name: 🧩 Run workspace package tests
         run: pnpm -r --filter "./packages/*" run test
 
+      # Same reasoning one directory over: the companion's suite is node:test
+      # via tsx and the webapp vitest run does not reach it either, so its
+      # `lib/**` tests were dead weight. They are pure and take under a second
+      # — no simulator, no database.
+      - name: 📱 Run companion tests
+        run: pnpm --filter @shelf/companion test
+
   tooling:
     name: 🛠️ PR review tooling
     runs-on: ubuntu-latest

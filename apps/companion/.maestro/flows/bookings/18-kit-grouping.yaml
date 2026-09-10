@@ -1,0 +1,158 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Assets grouped under their kits (mobile) [FIXTURE-DEPENDENT]"
+tags:
+  - bookings
+  - kits
+  - grouping
+  - fixture-dependent
+env:
+  BOOKING_NAME: "ZZX Stress"
+  AUDIO_KIT: "ZZX Audio Package"
+  RIG_KIT: "ZZX Projection Rig"
+
+---
+# A booking that holds kits shows one row per kit, collapsed, with the members
+# behind it — the same shape the website's booking page uses.
+#
+# Preconditions (GRANULAR WORKSPACE, QA database):
+#   - a RESERVED booking whose name starts "ZZX Stress", holding
+#     "ZZX Audio Package" (3 of its 3 assets) and "ZZX Projection Rig" (4 of 4)
+#   - both kits AVAILABLE
+#
+# Read-only: it opens a selection mode to prove the header selects its members,
+# then cancels. Nothing is ever submitted, so the fixture booking is unchanged.
+#
+# The kit header's accessibility label carries the whole state
+# ("Kit: <name>, <n> assets, <status>, collapsed|expanded[, selected]"), which
+# is what these assertions read — the visible text truncates.
+
+- runFlow: ../../shared/login.yaml
+
+# The iOS "Save Password?" prompt can appear LATE (after login.yaml's own
+# dismissal), covering the nav — clear it if present, then wait for the tab bar.
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 15000
+
+# ── Switch to the QA workspace ──
+# The picker renders the active workspace as "NAME (current)", so tap the name
+# with a trailing wildcard — a bare name misses and strands the sheet open.
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE.*"
+- waitForAnimationToEnd
+
+# ── Open the fixture booking ──
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Filter: Active.*"
+    timeout: 20000
+# The pill row scrolls horizontally and "All" is the last pill, off-screen.
+- swipe:
+    start: "90%,21%"
+    end: "18%,21%"
+- swipe:
+    start: "90%,21%"
+    end: "18%,21%"
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 15000
+- tapOn: "Filter: All.*"
+# The list refetches on a filter change; scrolling before the first page lands
+# runs off the end of a shorter list and never comes back.
+- extendedWaitUntil:
+    visible: "Booking: .*"
+    timeout: 20000
+# Match the card paren-free — the fixture's name ends in "(safe to delete)" and
+# parens are regex groups. `waitToSettleTimeoutMs` gives each page time to
+# render before the next swipe.
+- scrollUntilVisible:
+    element:
+      text: "Booking: ${BOOKING_NAME}.*"
+    direction: DOWN
+    timeout: 60000
+    waitToSettleTimeoutMs: 600
+- tapOn:
+    text: "Booking: ${BOOKING_NAME}.*"
+
+# ── Both kits render as one collapsed row each ──
+- scrollUntilVisible:
+    element:
+      text: "Kit: ${AUDIO_KIT}, 3 assets,.*collapsed.*"
+    direction: DOWN
+    timeout: 30000
+- assertVisible: "Kit: ${AUDIO_KIT}, 3 assets,.*collapsed.*"
+- assertVisible: "Kit: ${RIG_KIT}, 4 assets,.*collapsed.*"
+
+# A collapsed kit hides its members — this is the whole point of the grouping.
+- assertNotVisible: ".*${AUDIO_KIT} .*item 1.*"
+- takeScreenshot: kit-collapsed
+
+# ── Opening a kit reveals its members ──
+- tapOn: "Kit: ${AUDIO_KIT}, 3 assets,.*collapsed.*"
+- extendedWaitUntil:
+    visible: "Kit: ${AUDIO_KIT}, 3 assets,.*expanded.*"
+    timeout: 10000
+# The other kit is unaffected.
+- assertVisible: "Kit: ${RIG_KIT}, 4 assets,.*collapsed.*"
+# Bring the revealed members into the viewport, which both proves they render
+# and puts them in the screenshot.
+- scrollUntilVisible:
+    element:
+      text: ".*${AUDIO_KIT} .*item 1.*"
+    direction: DOWN
+    timeout: 20000
+    centerElement: true
+- assertVisible: ".*${AUDIO_KIT} .*item 1.*"
+- assertVisible: ".*${AUDIO_KIT} .*item 3.*"
+- takeScreenshot: kit-expanded
+
+# ── A header selects its members ──
+# Entering a selection mode opens every kit, so a member is never hidden from a
+# selection the user is building.
+# `centerElement` keeps the button clear of the nav bar — tapped flush against
+# the top edge the press lands on the header instead, and Maestro reports the
+# tap as completed either way. The wait below is what actually proves the mode
+# was entered.
+- scrollUntilVisible:
+    element:
+      text: "Select assets to remove"
+    direction: UP
+    timeout: 30000
+    centerElement: true
+- tapOn: "Select assets to remove"
+- extendedWaitUntil:
+    visible: "Cancel selection"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: "Kit: ${RIG_KIT}, 4 assets,.*expanded.*"
+    direction: DOWN
+    timeout: 30000
+    waitToSettleTimeoutMs: 600
+- tapOn: "Kit: ${RIG_KIT}, 4 assets,.*expanded.*"
+- extendedWaitUntil:
+    visible: "Kit: ${RIG_KIT}, 4 assets,.*expanded, selected.*"
+    timeout: 10000
+# The floating action counts the members the header picked.
+- assertVisible: ".*Remove 4 selected assets.*"
+- takeScreenshot: kit-select-remove
+
+# ── Leave without submitting ──
+# The button sits in the list header, which is scrolled off by now.
+- scrollUntilVisible:
+    element:
+      text: "Cancel selection"
+    direction: UP
+    timeout: 30000
+    centerElement: true
+- tapOn: "Cancel selection"
+- extendedWaitUntil:
+    notVisible: ".*Remove 4 selected assets.*"
+    timeout: 10000
