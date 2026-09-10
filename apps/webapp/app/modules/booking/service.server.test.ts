@@ -11382,6 +11382,200 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     expect(result.isComplete).toBe(true);
   });
 
+  describe("the all-returned shortcut with a quantity asset beside an individual one", () => {
+    /**
+     * One quantity-tracked slice (pens) and one individual asset on an
+     * ONGOING booking. Each test returns only the individual asset, so the
+     * shortcut to `checkinBooking` may run only if the pens count as back.
+     */
+    const makeMixedBooking = (pens: {
+      quantity: number;
+      checkedOutAt: Date;
+      checkedInAt: Date | null;
+      checkedOutQuantity: number;
+    }) => ({
+      ...makeQtyBooking(),
+      bookingAssets: [
+        {
+          id: "ba-pens",
+          assetId: mockQtyAssetId,
+          quantity: pens.quantity,
+          assetKitId: null,
+          checkedOutAt: pens.checkedOutAt,
+          checkedInAt: pens.checkedInAt,
+          checkedOutQuantity: pens.checkedOutQuantity,
+          asset: {
+            id: mockQtyAssetId,
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [],
+          },
+        },
+        {
+          id: "ba-camera",
+          assetId: "asset-camera",
+          quantity: 1,
+          assetKitId: null,
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+          checkedOutQuantity: 1,
+          asset: {
+            id: "asset-camera",
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+
+    /**
+     * Wires the reads for one scenario on top of `setupQtyMocks`.
+     *
+     * @param booking - the mixed booking the service loads
+     * @param sessions - the booking's check-in and check-out sessions
+     */
+    function setupMixed(
+      booking: ReturnType<typeof makeMixedBooking>,
+      sessions: {
+        checkins: Array<{ assetIds: string[]; checkinTimestamp: Date }>;
+        checkouts: Array<{
+          assetIds: string[];
+          quantities: number[];
+          bookingAssetIds: string[];
+          checkoutTimestamp: Date;
+        }>;
+        pensLogged: number;
+      }
+    ) {
+      setupQtyMocks({ logged: sessions.pensLogged });
+      // why: the booking the service loads, with both slices.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(booking);
+      // why: the remaining helpers read the pens' booked units by asset; the
+      // completion gate and the remaining count read every slice by booking.
+      (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockImplementation((args: { where: { assetId?: string } }) =>
+          Promise.resolve(
+            args.where?.assetId
+              ? [{ quantity: booking.bookingAssets[0].quantity }]
+              : booking.bookingAssets
+          )
+        );
+      // why: the sessions each test's history leaves on record.
+      (
+        db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(sessions.checkins);
+      (
+        db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(sessions.checkouts);
+    }
+
+    afterEach(() => {
+      // why: restore the check-out session mock this block replaces.
+      (db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue([]);
+    });
+
+    it("keeps the booking open when the pens went out again after a full return", async () => {
+      expect.assertions(3);
+
+      // 5 pens booked, all 5 out and back by 12:00 (a check-in session names
+      // them), then all 5 sent out again at 14:00 by the Check out button,
+      // which refreshes the marker and clears the return.
+      setupMixed(
+        makeMixedBooking({
+          quantity: 5,
+          checkedOutAt: new Date("2026-01-01T14:00:00.000Z"),
+          checkedInAt: null,
+          checkedOutQuantity: 10,
+        }),
+        {
+          checkins: [
+            {
+              assetIds: [mockQtyAssetId],
+              checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+            },
+          ],
+          checkouts: [],
+          pensLogged: 5,
+        }
+      );
+
+      const result = await partialCheckinBooking({
+        ...baseParams,
+        assetIds: ["asset-camera"],
+      });
+
+      // The pens are out on their second trip: returning the camera records
+      // a partial check-in and finishes nothing.
+      expect(result.isComplete).toBe(false);
+      expect(db.partialBookingCheckin.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ assetIds: ["asset-camera"] }),
+        })
+      );
+      expect(db.booking.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: BookingStatus.COMPLETE }),
+        })
+      );
+    });
+
+    it("never logs booked pens that did not leave as returned", async () => {
+      expect.assertions(2);
+
+      // 10 pens booked, 3 sent at 10:00 and those 3 back by 12:00. The slice
+      // is settled for what left, but 7 booked pens never went anywhere, so no
+      // check-in session names the asset. Reading the pens from their marker
+      // alone would call them back and hand the booking to `checkinBooking`,
+      // which logs every booked unit still unaccounted for.
+      setupMixed(
+        makeMixedBooking({
+          quantity: 10,
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: new Date("2026-01-01T12:00:00.000Z"),
+          checkedOutQuantity: 3,
+        }),
+        {
+          checkins: [
+            {
+              assetIds: [],
+              checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+            },
+          ],
+          checkouts: [
+            {
+              assetIds: [mockQtyAssetId],
+              quantities: [3],
+              bookingAssetIds: ["ba-pens"],
+              checkoutTimestamp: new Date("2026-01-01T10:00:00.000Z"),
+            },
+          ],
+          pensLogged: 3,
+        }
+      );
+
+      await partialCheckinBooking({
+        ...baseParams,
+        assetIds: ["asset-camera"],
+      });
+
+      // The camera is checked in on its own; the pens are not touched.
+      expect(db.partialBookingCheckin.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ assetIds: ["asset-camera"] }),
+        })
+      );
+      expect(
+        consumptionLogService.createConsumptionLog
+      ).not.toHaveBeenCalledWith(
+        expect.objectContaining({ assetId: mockQtyAssetId })
+      );
+    });
+  });
+
   it("writes three logs and decrements pool when returned+lost+damaged equals remaining", async () => {
     expect.assertions(5);
 

@@ -6518,8 +6518,14 @@ export async function partialCheckinBooking({
     // assets are shared across overlapping bookings, and one returned here can
     // be CHECKED_OUT by a later booking.
     //
-    // A QUANTITY_TRACKED asset keeps the session test: a check-in session names
-    // one only once all of its units are back.
+    // A QUANTITY_TRACKED asset is out while EITHER no check-in session names it
+    // OR any of its slices is out by its markers. Never read it from the
+    // markers alone: a slice is settled once the units that left are back, but
+    // booked units that never left still count against it, and
+    // `checkinBooking` would log every one of them as returned. A session names
+    // the asset only once every booked unit is accounted for, which catches
+    // that; the marker catches a slice sent out again after the session was
+    // written.
     //
     // Only safe when no qty dispositions are in play, because per-asset qty
     // work needs to run in this function's transaction (so we don't split
@@ -6551,6 +6557,16 @@ export async function partialCheckinBooking({
       const sessionReturnedAssetIds = new Set(
         checkinSessions.flatMap((session) => session.assetIds)
       );
+      const qtyAssetIdsOutByMarker = new Set(
+        bookingFound.bookingAssets
+          .filter(
+            (ba) =>
+              ba.asset.type === AssetType.QUANTITY_TRACKED &&
+              ba.checkedOutAt !== null &&
+              (!ba.checkedInAt || ba.checkedInAt < ba.checkedOutAt)
+          )
+          .map((ba) => ba.assetId)
+      );
       const providedAssetIds = new Set(effectiveAssetIds);
 
       // Only assets that went out on this booking can be outstanding: a
@@ -6559,7 +6575,8 @@ export async function partialCheckinBooking({
       const outstandingAssetIds = [...assetIdsWithACheckedOutSlice].filter(
         (assetId) =>
           assetTypeById.get(assetId) === AssetType.QUANTITY_TRACKED
-            ? !sessionReturnedAssetIds.has(assetId)
+            ? !sessionReturnedAssetIds.has(assetId) ||
+              qtyAssetIdsOutByMarker.has(assetId)
             : outstandingIndividualAssetIds.has(assetId)
       );
 
