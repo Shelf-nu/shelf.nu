@@ -1,0 +1,75 @@
+appId: com.shelf.companion.carlos
+name: "Audits - Row Opens Asset"
+tags:
+  - audits
+
+---
+# Test: an asset row on the audit detail opens the asset detail.
+#
+# The web audit row links its title to the asset page; the phone row does the
+# same so a field worker who finds a missing or unexpected asset can update it
+# on the spot. The row navigates cross-tab through pushIntoTab, which anchors
+# the Assets list beneath the asset detail, so "back" lands on the Assets list
+# (not on the audit) and must never strand the user on a detail with no back
+# target. The audit stays mounted in its own stack: reopening it from Home
+# shows it again.
+#
+# Fixture: SHELF_TEST_AUDIT_NAME is an audit with at least one expected asset.
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_AUDIT_NAME
+
+- runFlow: ../../shared/login.yaml
+
+- tapOn: "Home"
+- tapOn: "Audits"
+- scrollUntilVisible:
+    element: ".*${SHELF_TEST_AUDIT_NAME}.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn: ".*${SHELF_TEST_AUDIT_NAME}.*"
+
+# Audit detail: the asset section renders once the detail payload lands
+- extendedWaitUntil:
+    visible: "Audit Details"
+    timeout: 15000
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 15000
+
+# ── First asset row opens the asset ──
+# The row's a11y label names the action; a deleted asset's row does not carry
+# it, so this always picks a row that has an asset to open.
+- extendedWaitUntil:
+    visible: ".*, tap to open asset"
+    timeout: 15000
+- tapOn:
+    text: ".*, tap to open asset"
+    index: 0
+
+# Asset detail — "Created" is always rendered there. The header is not a
+# stable anchor: it flips from "Asset Details" to the asset's name on load.
+- extendedWaitUntil:
+    visible: "Created"
+    timeout: 20000
+- takeScreenshot: audit-row-asset-detail
+
+# ── Back has a target: the Assets list, not a dead end ──
+- back
+- extendedWaitUntil:
+    visible: "Search assets"
+    timeout: 15000
+- assertNotVisible: "Created"
+- takeScreenshot: audit-row-back-to-assets
+
+# ── The audit is still reachable and intact ──
+- tapOn: "Home"
+- tapOn: "Audits"
+- scrollUntilVisible:
+    element: ".*${SHELF_TEST_AUDIT_NAME}.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn: ".*${SHELF_TEST_AUDIT_NAME}.*"
+- extendedWaitUntil:
+    visible: "Audit Details"
+    timeout: 15000
+- assertVisible: "Filter: All.*"
+- takeScreenshot: audit-row-back-to-audit
