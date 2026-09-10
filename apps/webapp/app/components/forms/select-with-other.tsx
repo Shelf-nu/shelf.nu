@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
 import {
   Popover,
@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { useHydrated } from "remix-utils/use-hydrated";
 
 import Input from "~/components/forms/input";
 import When from "~/components/when/when";
@@ -16,6 +17,20 @@ import { resolveSelectState } from "~/utils/options";
 import { tw } from "~/utils/tw";
 
 export const OTHER_OPTION_VALUE = "other";
+
+/**
+ * Value submitted by the no-JavaScript fallback when the user picks "Other".
+ *
+ * It is a plain human-readable string rather than {@link OTHER_OPTION_VALUE} so
+ * that it is safe to persist as-is, and so that re-rendering the form with it as
+ * `defaultValue` puts the enhanced control into its "Other" state with "Other"
+ * as the custom text (see `resolveSelectState`).
+ */
+const OTHER_FALLBACK_VALUE = "Other";
+
+/** Classes shared by the enhanced trigger and the fallback <select>. */
+const CONTROL_CLASSES =
+  "h-[44px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-gray-900 hover:border-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
 
 type SelectWithOtherProps = {
   /** Accessible label for the select field. */
@@ -69,7 +84,129 @@ function FieldLabel({
   );
 }
 
-export function SelectWithOther({
+/**
+ * Server-rendered version of the control that works without JavaScript.
+ *
+ * The enhanced control is a Radix popover writing into a hidden input, so it is
+ * inert until React hydrates. Onboarding is the first screen of the product and
+ * these answers are required, so a browser that never hydrates (JavaScript
+ * blocked, a bundle that fails to parse, an extension breaking the page) would
+ * otherwise dead-end the signup with no way to answer. A native <select> carries
+ * the same `name`, submits with the plain form POST, and supports type-ahead and
+ * the browser's own required-field validation with no scripting at all.
+ */
+function UnhydratedSelectWithOther({
+  label,
+  name,
+  options,
+  error,
+  defaultValue,
+  placeholder = "Select an option",
+  required,
+  children,
+  className,
+  selectRef,
+}: SelectWithOtherProps & {
+  selectRef?: RefObject<HTMLSelectElement | null>;
+}) {
+  const { selection, customValue } = resolveSelectState(
+    options,
+    defaultValue ?? undefined
+  );
+
+  /**
+   * A previously stored free-text answer is not in `options`, so it needs its
+   * own <option> or the select would silently drop it on the next submit.
+   */
+  const preservedCustomValue =
+    selection === OTHER_OPTION_VALUE && customValue !== OTHER_FALLBACK_VALUE
+      ? customValue
+      : null;
+
+  const selectedValue =
+    selection === OTHER_OPTION_VALUE
+      ? preservedCustomValue ?? OTHER_FALLBACK_VALUE
+      : selection;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <FieldLabel htmlFor={name} required={required}>
+        {label}
+      </FieldLabel>
+      <select
+        ref={selectRef}
+        id={name}
+        name={name}
+        required={required}
+        defaultValue={selectedValue}
+        className={tw(
+          CONTROL_CLASSES,
+          // Greys out the placeholder the way the enhanced trigger does: a
+          // required select with no answer is :invalid.
+          required && "invalid:text-gray-500",
+          error &&
+            "border-error-300 focus:border-error-300 focus:ring-error-100",
+          className
+        )}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+        {preservedCustomValue ? (
+          <option value={preservedCustomValue}>{preservedCustomValue}</option>
+        ) : null}
+        <option value={OTHER_FALLBACK_VALUE}>{OTHER_FALLBACK_VALUE}</option>
+      </select>
+      {error ? <p className="text-sm text-error-500">{error}</p> : null}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A single-choice field with a free-text "Other" escape hatch.
+ *
+ * Renders a plain <select> on the server and swaps to the styled popover once
+ * React has hydrated, so the field is answerable even when the page's
+ * JavaScript never runs. Mirrors the `useHydrated` split used by the app's
+ * other dropdowns (see `components/kits/actions-dropdown.tsx`).
+ */
+export function SelectWithOther(props: SelectWithOtherProps) {
+  const isHydrated = useHydrated();
+  const fallbackRef = useRef<HTMLSelectElement>(null);
+
+  if (!isHydrated) {
+    return <UnhydratedSelectWithOther {...props} selectRef={fallbackRef} />;
+  }
+
+  /**
+   * The fallback is a real control, so on a slow connection the user can answer
+   * it before the bundle arrives. React has not committed its removal yet while
+   * this render runs, so read the live answer here: seeding the enhanced control
+   * from `defaultValue` alone would silently throw that answer away and leave a
+   * required field empty.
+   *
+   * The ref, not the value, decides which one wins. An empty live value means
+   * the user cleared the field on purpose and must stay cleared, while a missing
+   * ref means the fallback never rendered — a client-side navigation onto the
+   * form — and the saved answer is all there is. `EnhancedSelectWithOther` only
+   * reads `defaultValue` to seed its initial state, so it does not matter that
+   * the ref is empty again on later renders.
+   */
+  const fallbackSelect = fallbackRef.current;
+
+  return (
+    <EnhancedSelectWithOther
+      {...props}
+      defaultValue={fallbackSelect ? fallbackSelect.value : props.defaultValue}
+    />
+  );
+}
+
+function EnhancedSelectWithOther({
   label,
   name,
   options,
@@ -181,7 +318,8 @@ export function SelectWithOther({
             type="button"
             tabIndex={0}
             className={tw(
-              "flex h-[44px] w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-gray-900 hover:border-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary",
+              "flex items-center justify-between",
+              CONTROL_CLASSES,
               !selection && "text-gray-500",
               error &&
                 "border-error-300 focus:border-error-300 focus:ring-error-100",
