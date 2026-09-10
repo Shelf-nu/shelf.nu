@@ -15,6 +15,8 @@
  *
  * @see {@link file://../../../app/routes/api+/mobile+/assets.$assetId.ts}
  */
+import type { Mock } from "vitest";
+import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import { loader } from "~/routes/api+/mobile+/assets.$assetId";
 import { createLoaderArgs } from "@mocks/remix";
 
@@ -117,6 +119,16 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
+
+/**
+ * Typed handles for the mocks every suite below drives. Auth fixtures are cast
+ * to the helper's own return type, never to `any`, so a fixture that stops
+ * resembling what the helper returns fails the build.
+ */
+const requireMobileAuthMock = vitest.mocked(requireMobileAuth);
+const requireOrganizationAccessMock = vitest.mocked(requireOrganizationAccess);
+const getMobileUserContextMock = vitest.mocked(getMobileUserContext);
+const canUseBarcodesMock = vitest.mocked(canUseBarcodes);
 
 const mockUser = {
   id: "user-1",
@@ -222,6 +234,32 @@ function buildAsset() {
   };
 }
 
+/**
+ * The row these suites hand the asset lookup: `buildAsset()`'s shape, with the
+ * fields the fixtures vary widened to what the loader can actually receive.
+ */
+type AssetFixture = Omit<
+  ReturnType<typeof buildAsset>,
+  "sequentialId" | "assetModel" | "preferredBarcodeId" | "barcodes"
+> & {
+  sequentialId: string | null;
+  assetModel: ReturnType<typeof buildAsset>["assetModel"] | null;
+  preferredBarcodeId: string | null;
+  barcodes: { id: string; type: string; value: string }[];
+};
+
+/**
+ * The asset lookup, narrowed to {@link AssetFixture}.
+ *
+ * The loader reads with `select`, so Prisma hands it the selected shape and
+ * never a whole row — yet the mocked client's signature still asks for one.
+ * Narrowing the handle once, here, means every fixture handed to it is checked
+ * against the shape the loader reads instead of being waved through by a cast.
+ */
+const assetFindUniqueMock = db.asset.findUnique as unknown as Mock<
+  (args: unknown) => Promise<AssetFixture | null>
+>;
+
 /** A `buildAsset()` with the code-resolution fields overridden. */
 function buildAssetWithCodes(overrides: {
   qrIdDisplayPreference?: string;
@@ -260,30 +298,30 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
 
-    (requireMobileAuth as any).mockResolvedValue({
+    requireMobileAuthMock.mockResolvedValue({
       user: mockUser,
       authUser: { id: "auth-user-1", email: mockUser.email },
-    });
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
 
-    (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    requireOrganizationAccessMock.mockResolvedValue("org-1");
 
-    (getMobileUserContext as any).mockResolvedValue({
+    getMobileUserContextMock.mockResolvedValue({
       role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: true,
-    });
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
-    (db.asset.findUnique as any).mockResolvedValue(buildAsset());
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
   });
 
   it("shows a self-service caller only their own custody rows + the hidden count", async () => {
-    (getMobileUserContext as any).mockResolvedValue({
+    getMobileUserContextMock.mockResolvedValue({
       role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: false,
-    });
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const result = await loader(
       createLoaderArgs({
@@ -314,16 +352,16 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
   });
 
   it("keeps the legacy custody visible when the restricted caller IS the primary custodian", async () => {
-    (getMobileUserContext as any).mockResolvedValue({
+    getMobileUserContextMock.mockResolvedValue({
       role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: false,
-    });
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
     // Reorder so the caller's row is the primary (oldest) one
     const asset = buildAsset();
     asset.custody = [asset.custody[1], asset.custody[0], asset.custody[2]];
-    (db.asset.findUnique as any).mockResolvedValue(asset);
+    assetFindUniqueMock.mockResolvedValue(asset);
 
     const result = await loader(
       createLoaderArgs({
@@ -373,18 +411,18 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
 
-    (requireMobileAuth as any).mockResolvedValue({
+    requireMobileAuthMock.mockResolvedValue({
       user: mockUser,
       authUser: { id: "auth-user-1", email: mockUser.email },
-    });
-    (requireOrganizationAccess as any).mockResolvedValue("org-1");
-    (getMobileUserContext as any).mockResolvedValue({
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
+    requireOrganizationAccessMock.mockResolvedValue("org-1");
+    getMobileUserContextMock.mockResolvedValue({
       role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: true,
-    });
-    (db.asset.findUnique as any).mockResolvedValue(buildAsset());
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
   });
 
   it("sends the SAM ID, which the scanner's manual entry accepts", async () => {
@@ -417,7 +455,7 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
   });
 
   it("returns a null model rather than omitting the field when the asset has none", async () => {
-    (db.asset.findUnique as any).mockResolvedValue({
+    assetFindUniqueMock.mockResolvedValue({
       ...buildAsset(),
       assetModel: null,
     });
@@ -452,18 +490,18 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
 describe("GET /api/mobile/assets/:assetId — display code", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-    (requireMobileAuth as any).mockResolvedValue({
+    requireMobileAuthMock.mockResolvedValue({
       user: mockUser,
       authUser: { id: "auth-user-1", email: mockUser.email },
-    });
-    (requireOrganizationAccess as any).mockResolvedValue("org-1");
-    (getMobileUserContext as any).mockResolvedValue({
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
+    requireOrganizationAccessMock.mockResolvedValue("org-1");
+    getMobileUserContextMock.mockResolvedValue({
       role: "ADMIN",
       canUseBarcodes: true,
       canUseAudits: false,
       canSeeAllCustody: true,
-    });
-    (canUseBarcodes as any).mockReturnValue(true);
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+    canUseBarcodesMock.mockReturnValue(true);
   });
 
   /** Runs the loader and returns the parsed `asset` payload. */
@@ -481,7 +519,7 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
   it("sends the workspace's Code 128 value, not the Shelf QR", async () => {
     // why: this is the reported bug — a workspace that prints Code 128 labels
     // was shown the native Shelf QR on the asset detail screen.
-    (db.asset.findUnique as any).mockResolvedValue(
+    assetFindUniqueMock.mockResolvedValue(
       buildAssetWithCodes({
         qrIdDisplayPreference: "Code128",
         barcodesEnabled: true,
@@ -502,7 +540,7 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
   it("marks a preference it could not honour instead of silently showing the QR", async () => {
     // why: workspace wants Code 128 but this asset has none. The value has to
     // fall back to the QR, and the screen must be able to say so.
-    (db.asset.findUnique as any).mockResolvedValue(
+    assetFindUniqueMock.mockResolvedValue(
       buildAssetWithCodes({
         qrIdDisplayPreference: "Code128",
         barcodesEnabled: true,
@@ -521,7 +559,7 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
   });
 
   it("lets a per-asset override outrank the workspace preference", async () => {
-    (db.asset.findUnique as any).mockResolvedValue(
+    assetFindUniqueMock.mockResolvedValue(
       buildAssetWithCodes({
         qrIdDisplayPreference: "Code128",
         barcodesEnabled: true,
@@ -542,7 +580,7 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
   });
 
   it("sends the SAM ID when that is the workspace preference", async () => {
-    (db.asset.findUnique as any).mockResolvedValue(
+    assetFindUniqueMock.mockResolvedValue(
       buildAssetWithCodes({ qrIdDisplayPreference: "SAM_ID" })
     );
 
@@ -556,7 +594,7 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
   });
 
   it("sends the QR id on the stock preference", async () => {
-    (db.asset.findUnique as any).mockResolvedValue(buildAsset());
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
 
     const asset = await loadAsset();
 
@@ -571,8 +609,8 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
     // why: barcode rows are add-on data. Without the add-on the workspace must
     // neither receive them nor resolve through them, matching every other
     // mobile barcode surface.
-    (canUseBarcodes as any).mockReturnValue(false);
-    (db.asset.findUnique as any).mockResolvedValue(
+    canUseBarcodesMock.mockReturnValue(false);
+    assetFindUniqueMock.mockResolvedValue(
       buildAssetWithCodes({
         qrIdDisplayPreference: "Code128",
         barcodesEnabled: false,
@@ -591,7 +629,7 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
   });
 
   it("ships the asset's barcodes so the screen can offer a code switcher", async () => {
-    (db.asset.findUnique as any).mockResolvedValue(
+    assetFindUniqueMock.mockResolvedValue(
       buildAssetWithCodes({
         qrIdDisplayPreference: "Code128",
         barcodesEnabled: true,
@@ -609,7 +647,7 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
   it("keeps organization narrowed to currency, leaking no workspace settings", async () => {
     // why: the select was widened to resolve the code. The response must not
     // start carrying workspace configuration the companion never asked for.
-    (db.asset.findUnique as any).mockResolvedValue(
+    assetFindUniqueMock.mockResolvedValue(
       buildAssetWithCodes({
         qrIdDisplayPreference: "Code128",
         barcodesEnabled: true,
@@ -620,5 +658,23 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
 
     expect(asset.organization).toEqual({ currency: "USD" });
     expect(asset.preferredBarcodeId).toBeUndefined();
+  });
+
+  it("reads the asset's QR codes in a fixed order, so one code wins on every load", async () => {
+    // why: `Qr.assetId` is not unique, and both the resolver and the app take
+    // the first QR. An unordered read could show a different code on each
+    // load — something a mocked database cannot exhibit, so the query is what
+    // this pins.
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
+
+    await loadAsset();
+
+    expect(db.asset.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          qrCodes: { orderBy: QR_CODES_ORDER_BY, select: { id: true } },
+        }),
+      })
+    );
   });
 });

@@ -33,6 +33,21 @@ import type {
 } from "@prisma/client";
 
 /**
+ * Order for reading an entity's `qrCodes` relation whenever the result feeds
+ * {@link resolveDisplayCode}, which takes the first entry.
+ *
+ * `Qr.assetId` and `Qr.kitId` are indexed but not unique. Linking a code
+ * replaces the relation wholesale, so an entity normally carries one QR — but
+ * nothing in the schema guarantees it, and without an order two reads of the
+ * same entity can pick different codes. Oldest first, with `id` settling the
+ * ties that a batch of codes generated in one statement produces.
+ */
+export const QR_CODES_ORDER_BY: Prisma.QrOrderByWithRelationInput[] = [
+  { createdAt: "asc" },
+  { id: "asc" },
+];
+
+/**
  * Prisma `select` fragment for the asset fields a list-view loader must
  * include to call `resolveDisplayCode`. Designed to be spread into a
  * larger select clause:
@@ -46,14 +61,15 @@ import type {
  *     },
  *   });
  *
- * Tight by design: only fields the resolver reads. `qrCodes: { take: 1 }`
- * leverages the schema invariant that every asset has exactly one active
- * QR; older orphaned QRs (`assetId = null`) are excluded by the relation.
+ * Tight by design: only fields the resolver reads. One QR is enough because
+ * the resolver only ever shows the first; {@link QR_CODES_ORDER_BY} makes
+ * "first" the same row on every read. Orphaned QRs (`assetId = null`) are
+ * outside the relation and never appear.
  */
 export const ASSET_CODE_RESOLUTION_SELECT = {
   sequentialId: true,
   preferredBarcodeId: true,
-  qrCodes: { take: 1, select: { id: true } },
+  qrCodes: { take: 1, orderBy: QR_CODES_ORDER_BY, select: { id: true } },
   barcodes: { select: { id: true, type: true, value: true } },
 } as const satisfies Prisma.AssetSelect;
 

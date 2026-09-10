@@ -24,6 +24,7 @@ import {
 
 import { loader } from "~/routes/api+/mobile+/kits.$kitId";
 import { canUseBarcodes } from "~/utils/subscription.server";
+import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
@@ -386,5 +387,23 @@ describe("GET /api/mobile/kits/:kitId — display code", () => {
     );
 
     expect(kit.organization).toEqual({ currency: "USD" });
+  });
+
+  it("reads the kit's QR codes in a fixed order, so one code wins on every load", async () => {
+    // why: `Qr.kitId` is not unique, and both the resolver and the app take
+    // the first QR. An unordered read could show a different code on each
+    // load — something a mocked database cannot exhibit, so the query is what
+    // this pins.
+    canUseBarcodesMock.mockReturnValue(true);
+
+    await loadKit(buildKitWithCodes({}));
+
+    expect(db.kit.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          qrCodes: { orderBy: QR_CODES_ORDER_BY, select: { id: true } },
+        }),
+      })
+    );
   });
 });

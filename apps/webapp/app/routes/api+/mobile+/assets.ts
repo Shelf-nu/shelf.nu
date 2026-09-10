@@ -17,6 +17,7 @@ import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import {
   labelForPreference,
+  QR_CODES_ORDER_BY,
   resolveDisplayCode,
 } from "~/modules/barcode/display";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -155,7 +156,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
             // workspace that labels its assets with Code 128 can match a
             // physical label against this list.
             preferredBarcodeId: true,
-            qrCodes: { take: 1, select: { id: true } },
+            qrCodes: {
+              take: 1,
+              orderBy: QR_CODES_ORDER_BY,
+              select: { id: true },
+            },
             barcodes: { select: { id: true, type: true, value: true } },
             // Model cover image; `shapeMobileAssetResponse` resolves the cascade
             // into the flat image fields the companion already reads.

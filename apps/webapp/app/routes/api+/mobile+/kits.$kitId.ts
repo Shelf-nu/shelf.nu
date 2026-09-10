@@ -23,6 +23,7 @@ import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   labelForPreference,
+  QR_CODES_ORDER_BY,
   resolveDisplayCode,
 } from "~/modules/barcode/display";
 import { makeShelfError } from "~/utils/error";
@@ -81,7 +82,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         updatedAt: true,
         category: { select: { id: true, name: true, color: true } },
         location: { select: { id: true, name: true } },
-        qrCodes: { select: { id: true } },
+        // Ordered so the resolver below and the app, which both read the
+        // first entry, settle on the same code on every load.
+        qrCodes: { orderBy: QR_CODES_ORDER_BY, select: { id: true } },
         // The kit's alternative codes, resolved into `displayCode` below so a
         // workspace that labels its kits with Code 128 sees Code 128 rather
         // than the Shelf QR. Kits carry no `sequentialId` or per-kit override,

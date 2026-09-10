@@ -24,6 +24,7 @@ import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
+import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
   getMobileUserContext,
@@ -771,5 +772,24 @@ describe("GET /api/mobile/assets — display code", () => {
     );
 
     expect(db.organization.findUniqueOrThrow).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads each row's QR in a fixed order, so one code wins on every load", async () => {
+    // why: `Qr.assetId` is not unique and the resolver takes the first QR. An
+    // unordered read could flip a row's code between loads — something a
+    // mocked database cannot exhibit, so the query is what this pins.
+    await loadRow(row());
+
+    expect(db.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          qrCodes: {
+            take: 1,
+            orderBy: QR_CODES_ORDER_BY,
+            select: { id: true },
+          },
+        }),
+      })
+    );
   });
 });

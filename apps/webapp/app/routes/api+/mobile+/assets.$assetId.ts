@@ -18,6 +18,7 @@ import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server"
 import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   labelForPreference,
+  QR_CODES_ORDER_BY,
   resolveDisplayCode,
 } from "~/modules/barcode/display";
 import { makeShelfError } from "~/utils/error";
@@ -150,7 +151,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           },
         },
         tags: { select: { id: true, name: true } },
-        qrCodes: { select: { id: true } },
+        // Ordered so the resolver below and the app, which both read the
+        // first entry, settle on the same code on every load.
+        qrCodes: { orderBy: QR_CODES_ORDER_BY, select: { id: true } },
         // The asset's alternative codes, and the per-asset override that can
         // outrank the workspace preference. Both feed `resolveDisplayCode`
         // below so the detail screen shows the identifier this workspace

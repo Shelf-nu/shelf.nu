@@ -4,6 +4,8 @@ import {
   resolveDisplayCode,
   type AssetForCodeResolution,
   type OrganizationForCodeResolution,
+  ASSET_CODE_RESOLUTION_SELECT,
+  QR_CODES_ORDER_BY,
 } from "./display";
 
 // @vitest-environment node
@@ -427,5 +429,17 @@ describe("resolveDisplayCode — non-addon organizations", () => {
 
     // Still resolves at runtime — which is exactly why the type must object.
     expect(result.value).toBe("qr");
+  });
+});
+
+describe("ASSET_CODE_RESOLUTION_SELECT", () => {
+  it("orders the QR relation, so the one QR it keeps is the same on every read", () => {
+    // why: the fragment keeps a single QR and `Qr.assetId` is not unique.
+    // Without the order, which QR survives `take: 1` is up to the database.
+    expect(ASSET_CODE_RESOLUTION_SELECT.qrCodes).toEqual({
+      take: 1,
+      orderBy: QR_CODES_ORDER_BY,
+      select: { id: true },
+    });
   });
 });
