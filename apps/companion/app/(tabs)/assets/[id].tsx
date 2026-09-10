@@ -39,6 +39,8 @@ import {
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import { pushIntoTab } from "@/lib/navigation";
+import { buildBookingCustodyRows } from "@/lib/asset-custody-rows";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
@@ -101,7 +103,7 @@ export default function AssetDetailScreen() {
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
   // Render dates in the acting user's format preferences + timezone.
-  const { formatDate } = useDateFormatter();
+  const { formatDate, formatDateTime } = useDateFormatter();
 
   // Asset data
   const {
@@ -403,6 +405,15 @@ export default function AssetDetailScreen() {
     isQtyTracked && asset.custodyList && asset.custodyList.length > 0
       ? asset.custodyList
       : null;
+  // Custody held through a booking. Rendered only when neither custody source
+  // above has a row, the same precedence as the web asset page's card.
+  const bookingCustodyRows = buildBookingCustodyRows(asset.activeBooking, {
+    formatDateTime,
+    // The booking lives in another tab; the helper roots that tab at its list
+    // so "back" has somewhere to go.
+    onOpenBooking: (bookingId) =>
+      pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`),
+  });
   // Cap for the assign-quantity step. Prefer the server's custodyAvailable
   // (web-parity cap that also excludes kit earmarks); fall back for older
   // servers to the broader `available`, then the plain total — the server
@@ -671,7 +682,18 @@ export default function AssetDetailScreen() {
                   value={formatDate(asset.custody.createdAt)}
                 />
               </>
-            ) : null}
+            ) : (
+              bookingCustodyRows.map((row) => (
+                <InfoRow
+                  key={row.key}
+                  icon={row.icon}
+                  label={row.label}
+                  value={row.value}
+                  onPress={row.onPress}
+                  accessibilityLabel={row.accessibilityLabel}
+                />
+              ))
+            )}
             {/* Holders hidden from this caller (privacy filtering) — one calm
                 muted row so partial lists don't read as the full picture. */}
             {custodyOthersCount > 0 && (

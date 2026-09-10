@@ -243,6 +243,26 @@ export type AssetDetail = {
       } | null;
     };
   } | null;
+  /**
+   * The booking an INDIVIDUAL asset is checked out on, and who holds the asset
+   * through it: the web asset page's "In custody of … via …" card. Everything
+   * is resolved server-side, so the screen prints it and derives nothing.
+   *
+   * - `from`: the booking's start, an ISO instant.
+   * - `custodianName`: `null` when the booking has no custodian.
+   * - `canOpen`: whether this viewer may open the booking. The row is only
+   *   tappable when true; the booking screen refuses everyone else.
+   *
+   * `null` when the asset is not checked out, is quantity-tracked, or the
+   * viewer may not see custody. Absent on older servers — render nothing.
+   */
+  activeBooking?: {
+    id: string;
+    name: string;
+    from: string;
+    custodianName: string | null;
+    canOpen: boolean;
+  } | null;
   kit: { id: string; name: string; status: string } | null;
   tags: { id: string; name: string }[];
   qrCodes: { id: string }[];
