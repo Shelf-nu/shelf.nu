@@ -7,13 +7,13 @@
  * item is back.
  *
  * A slice is out from its first departure until a return answers its LATEST
- * departure. The slice marker dates only the first one: the progressive
- * checkout keeps `checkedOutAt` when a returned slice goes out again and clears
- * `checkedInAt`, so a later departure is dated by its `PartialBookingCheckout`
- * session and nowhere else. A check-in session names an asset for good, so a
- * return recorded for an earlier trip stays on record after the slice leaves
- * again, and read against the first departure it would report the new trip as
- * already over.
+ * departure: the later of `checkedOutAt` and the newest `PartialBookingCheckout`
+ * session naming the asset. The all-at-once checkout refreshes `checkedOutAt`
+ * when it sends a returned slice out again, but a stored slice can hold a later
+ * departure that only its check-out session dates, so both are read. A check-in
+ * session names an asset for good, so a return recorded for an earlier trip
+ * stays on record after the slice leaves again, and read against the first
+ * departure it would report the new trip as already over.
  *
  * `QUANTITY_TRACKED` slices are judged by unit arithmetic instead and never
  * reach this test.

@@ -1533,6 +1533,55 @@ describe("partialCheckinBooking", () => {
       expect(flippedToAvailable).not.toContain("asset-1");
     });
 
+    it("does not count an item that never went out as remaining", async () => {
+      expect.assertions(2);
+
+      // why: asset-3 was added to the booking after it went out and has never
+      // been checked out, so it has no marker and nothing to check in.
+      const withNeverOut = {
+        ...outAgainBooking,
+        bookingAssets: [
+          ...outAgainBooking.bookingAssets,
+          {
+            asset: { id: "asset-3", assetKits: [], type: AssetType.INDIVIDUAL },
+            assetId: "asset-3",
+            quantity: 1,
+            id: "ba-3",
+            checkedOutAt: null,
+            checkedInAt: null,
+          },
+        ],
+      };
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(withNeverOut);
+      // why: the completion gate's and the remaining count's read of the
+      // same three slices.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(
+        withNeverOut.bookingAssets.map((ba) => ({
+          id: ba.id,
+          assetId: ba.assetId,
+          quantity: 1,
+          assetKitId: null,
+          checkedOutAt: ba.checkedOutAt,
+          checkedInAt: ba.checkedInAt,
+          checkedOutQuantity: ba.checkedOutAt ? 1 : 0,
+          asset: { id: ba.assetId, type: AssetType.INDIVIDUAL },
+        }))
+      );
+
+      const result = await partialCheckinBooking({
+        ...mockPartialCheckinParams,
+        assetIds: ["asset-2"],
+      });
+
+      // asset-1 is the only item left to check in; asset-3 never left.
+      expect(result.isComplete).toBe(false);
+      expect(result.remainingAssetCount).toBe(1);
+    });
+
     it("completes the booking when the batch returns both items", async () => {
       expect.assertions(2);
 

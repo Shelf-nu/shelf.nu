@@ -1,3 +1,13 @@
+/**
+ * Tests for the per-slice "still out" test shared by the booking completion
+ * gate and the progressive check-in's all-returned shortcut.
+ *
+ * Covers each way an INDIVIDUAL slice's departures and returns can be recorded
+ * (markers, check-in and check-out sessions, and their order) so both
+ * completion paths keep agreeing about whether an item is back.
+ *
+ * @see {@link file://./slice-return.ts}
+ */
 import { describe, expect, it } from "vitest";
 
 import { makeIsIndividualSliceOutstanding } from "./slice-return";
@@ -74,9 +84,10 @@ describe("makeIsIndividualSliceOutstanding", () => {
     ).toBe(false);
   });
 
-  it("counts a slice sent out again by scan after its first return", () => {
-    // Out at 10:00 and back at 12:00; the scan at 14:00 keeps the 10:00
-    // marker and clears the return, leaving the 12:00 session on record.
+  it("counts a slice whose later departure only its check-out session dates", () => {
+    // Out at 10:00 and back at 12:00, then out again at 14:00 with only a
+    // check-out session to show for it: the marker still reads 10:00 with no
+    // return, and the 12:00 session from the first trip stays on record.
     const isOutstanding = makeIsIndividualSliceOutstanding({
       checkinSessions: [checkin("12:00")],
       checkoutSessions: [checkout("14:00")],

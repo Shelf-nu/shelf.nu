@@ -4686,13 +4686,15 @@ export async function isBookingFullyCheckedIn(
       // booking has nothing to reconcile and never blocks.
       //
       // Reconciliation is judged against the slice's latest departure, while
-      // the scan check-in guard reads `checkedInAt` alone. Both check-out
-      // writers clear `checkedInAt` on a re-dispatch, so the two agree on
-      // every slice they produce. They part on a slice whose markers were
-      // stamped from each side's earliest session and which a later scan
-      // departure sent out again: this gate holds the booking, the scan flow
-      // refuses the slice as already checked in, and the all-at-once check-in
-      // is the path that closes the booking.
+      // the scan check-in guard reads `checkedInAt` alone. The progressive
+      // checkout refuses to send a returned INDIVIDUAL slice out again, and the
+      // all-at-once checkout refreshes `checkedOutAt` and clears `checkedInAt`
+      // when it does, so the two agree on every slice the writers produce.
+      // They part on a slice whose markers were stamped from each side's
+      // earliest session and which a later scan departure sent out again: this
+      // gate holds the booking, the scan flow refuses the slice as already
+      // checked in, and the all-at-once check-in is the path that closes the
+      // booking.
       if (isIndividualSliceOutstanding(ba)) return false;
       continue;
     }
@@ -7602,10 +7604,10 @@ export async function partialCheckinBooking({
     }
 
     // Compute a coarse "remaining" count for the toast: bookingAssets not
-    // yet fully reconciled. An individual counts as remaining while no
-    // PartialBookingCheckin session names it, and while it is out by the
-    // shared per-slice test, which is what catches one that went out again
-    // after an earlier return; qty-tracked count as remaining if
+    // yet fully reconciled. An individual counts as remaining while it is out
+    // by the shared per-slice test, the same judgement the completion gate
+    // makes, so one that never went out is not counted and one that went out
+    // again after an earlier return is; qty-tracked count as remaining if
     // `computeBookingAssetRemaining > 0`.
     const outstandingBookingAssets = await db.bookingAsset.findMany({
       where: { bookingId: id },
@@ -7626,9 +7628,6 @@ export async function partialCheckinBooking({
         select: { assetIds: true, checkoutTimestamp: true },
       }),
     ]);
-    const reconciledIndividualIds = new Set<string>(
-      allSessions.flatMap((s) => s.assetIds as string[])
-    );
     const isIndividualSliceStillOut = makeIsIndividualSliceOutstanding({
       checkinSessions: allSessions,
       checkoutSessions: allCheckoutSessions,
@@ -7638,10 +7637,7 @@ export async function partialCheckinBooking({
       if (ba.asset?.type === AssetType.QUANTITY_TRACKED) {
         const rem = await computeBookingAssetRemaining(db, id, ba.assetId);
         if (rem > 0) remainingAssetCount += 1;
-      } else if (
-        !reconciledIndividualIds.has(ba.assetId) ||
-        isIndividualSliceStillOut(ba)
-      ) {
+      } else if (isIndividualSliceStillOut(ba)) {
         remainingAssetCount += 1;
       }
     }
