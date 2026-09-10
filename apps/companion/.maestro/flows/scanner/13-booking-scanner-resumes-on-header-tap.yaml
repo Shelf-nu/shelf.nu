@@ -1,0 +1,65 @@
+# Scanner in booking mode — a paused camera resumes on a tap on the booking header
+#
+# The add-to-booking scanner replaces the action pills with a header (back
+# button, "ADD TO BOOKING", booking name). The header's label wrappers pass
+# touches through, so a tap on the booking name reaches the paused layer while
+# the back button keeps working.
+#
+# Opens the "QA Scan Booking" fixture (a DRAFT booking in the QA workspace,
+# the same one flows/bookings/02 uses), which always offers scan-to-add.
+# No login step: runs against the session already on the simulator.
+appId: com.shelf.companion.carlos
+---
+- launchApp:
+    appId: com.shelf.companion.carlos
+    stopApp: false
+- tapOn: "Bookings"
+# The Bookings tab keeps its last screen, so an earlier flow may have left it
+# on a booking's detail page.
+- tapOn:
+    text: "Go back"
+    optional: true
+# DRAFT bookings live under the "All" filter. The filter pills scroll
+# horizontally and "All" sits off-screen to the right on a phone-sized screen.
+- extendedWaitUntil:
+    visible: "Filter: Active.*"
+    timeout: 15000
+- swipe:
+    start: "90%,21%"
+    end: "18%,21%"
+- swipe:
+    start: "90%,21%"
+    end: "18%,21%"
+- tapOn: "Filter: All.*"
+- scrollUntilVisible:
+    element:
+      text: ".*QA Scan Booking.*"
+    direction: DOWN
+    timeout: 60000
+- tapOn: ".*QA Scan Booking.*"
+- extendedWaitUntil:
+    visible: ".*Scan assets or kits to add.*"
+    timeout: 15000
+- tapOn: ".*Scan assets or kits to add.*"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible: "Scan assets or kits to add"
+    timeout: 15000
+# Pause with the button when it is reachable; otherwise the 30 s auto-pause.
+- tapOn:
+    text: "Pause camera"
+    optional: true
+- extendedWaitUntil:
+    visible: "Camera paused.*"
+    timeout: 45000
+- takeScreenshot: booking-scanner-paused
+# The booking name sits in the header at the bottom of the top strip.
+- tapOn:
+    point: "30%,27%"
+- extendedWaitUntil:
+    notVisible: "Camera paused.*"
+    timeout: 5000
+- takeScreenshot: booking-scanner-resumed-by-header-tap
+- tapOn: "Go back"
