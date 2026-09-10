@@ -301,6 +301,308 @@ export async function getAssetModelAvailability({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                    assertModelUnitsNotReservedElsewhere                    */
+/* -------------------------------------------------------------------------- */
+
+/** An INDIVIDUAL asset about to hold a standalone row on a booking. */
+type ModelUnitCandidate = Pick<Asset, "id" | "title" | "assetModelId">;
+
+/**
+ * The reads {@link assertModelUnitsNotReservedElsewhere} issues on top of the
+ * availability reads. Structural, like {@link AssetModelAvailabilityClient},
+ * so an interactive transaction client satisfies it without a cast.
+ */
+export type ModelReservationGuardClient = RawQueryClient &
+  AssetModelAvailabilityClient & {
+    bookingModelRequest: AssetModelAvailabilityClient["bookingModelRequest"] & {
+      findMany: (args: {
+        where: Prisma.BookingModelRequestWhereInput;
+        select: {
+          assetModelId: true;
+          quantity: true;
+          fulfilledQuantity: true;
+        };
+      }) => Promise<
+        Array<{
+          assetModelId: string;
+          quantity: number;
+          fulfilledQuantity: number;
+        }>
+      >;
+    };
+    bookingAsset: AssetModelAvailabilityClient["bookingAsset"] & {
+      findMany: (args: {
+        where: Prisma.BookingAssetWhereInput;
+        select: { assetId: true; asset: { select: { assetModelId: true } } };
+      }) => Promise<
+        Array<{ assetId: string; asset: { assetModelId: string | null } }>
+      >;
+    };
+    assetModel: {
+      findMany: (args: {
+        where: Prisma.AssetModelWhereInput;
+        select: { id: true; name: true };
+      }) => Promise<Array<{ id: string; name: string }>>;
+    };
+  };
+
+type AssertModelUnitsNotReservedElsewhereArgs = {
+  /**
+   * The INDIVIDUAL assets about to hold a standalone `BookingAsset` row on
+   * `bookingId`. Assets without a model are ignored. Kit-driven slices must
+   * not be passed: a kit is reserved as one unit on its own axis, and its
+   * members are not claims on the loose pool.
+   */
+  assets: ModelUnitCandidate[];
+  bookingId: string;
+  /**
+   * The booking's status at the time of the write. A DRAFT claims nothing on
+   * the pool yet, so everything it would hold of a model has to fit. An active
+   * booking already holds its units and its own request, so only the units a
+   * write adds beyond that request are measured; a write that merely fulfils
+   * the request never changes what the booking takes from the pool.
+   */
+  bookingStatus: BookingStatus;
+  /**
+   * The booking's window is changing (an extension). The pool for the new
+   * dates has never measured this booking, so its whole footprint is checked
+   * again, exactly as for a draft, even though nothing is being added.
+   */
+  windowChanged?: boolean;
+  organizationId: string;
+  /**
+   * The booking's window. When either end is missing there is nothing to
+   * overlap, so the check is skipped; the DRAFT → RESERVED transition runs it
+   * again once the dates exist.
+   */
+  from: Date | null | undefined;
+  to: Date | null | undefined;
+  /**
+   * The caller's interactive transaction. Required: the model lock only
+   * serialises writers when it is held by the transaction that goes on to
+   * write, and the counts only see that transaction's own rows through it.
+   */
+  tx: ModelReservationGuardClient;
+};
+
+/** Groups asset ids by model, each asset counted once per model. */
+function groupAssetIdsByModel(
+  rows: Array<{ assetId: string; assetModelId: string | null }>
+): Map<string, Set<string>> {
+  const byModel = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (!row.assetModelId) continue;
+    const ids = byModel.get(row.assetModelId) ?? new Set<string>();
+    ids.add(row.assetId);
+    byModel.set(row.assetModelId, ids);
+  }
+  return byModel;
+}
+
+/** What a booking would take from one model's pool once a write lands. */
+type ModelClaim = {
+  assetModelId: string;
+  /** Units of the model the booking holds by name after the write. */
+  named: number;
+  /** Units of the booking's own request still unassigned after the write. */
+  stillToAssign: number;
+};
+
+/**
+ * Refuses to book a model's units by name when other bookings have already
+ * reserved that model's free pool for the same window.
+ *
+ * A `BookingModelRequest` promises N unnamed units of a model. Naming one of
+ * those units on another booking takes it out of the pool the promise draws
+ * from, so it competes for the same units as the request even though no
+ * `BookingAsset` row ever names the request. This guard is the per-asset
+ * counterpart of the reservation guard in {@link upsertBookingModelRequest}:
+ * both measure the same pool through {@link getAssetModelAvailability}, under
+ * the same per-model lock.
+ *
+ * The pool is measured excluding `bookingId`, so what is compared against it is
+ * the booking's whole footprint on the model once the write lands: the
+ * standalone units it will hold by name (its existing ones plus `assets`, each
+ * asset counted once) and the units of its own outstanding request that stay
+ * unassigned. A new unit fulfils that request before it claims anything (see
+ * {@link fulfilModelRequestsForAssets}), so run this before fulfilment, while
+ * the request is still outstanding.
+ *
+ * A DRAFT holds nothing on the pool yet, so its whole footprint must fit. An
+ * active booking's footprint is already on the pool; only a write that adds
+ * units beyond its own request is measured, and a write that only fulfils the
+ * request is never refused, even on a pool that is already over-committed.
+ * When the window changes (`windowChanged`), the pool for the new dates has
+ * never seen this booking, so its whole footprint is measured again.
+ *
+ * @throws {ShelfError} 400 (`shouldBeCaptured: false`) naming every model whose
+ *   units do not fit, in one message.
+ * @throws {ShelfError} 404 when a model is not in the caller's workspace.
+ */
+export async function assertModelUnitsNotReservedElsewhere({
+  assets,
+  bookingId,
+  bookingStatus,
+  windowChanged = false,
+  organizationId,
+  from,
+  to,
+  tx,
+}: AssertModelUnitsNotReservedElsewhereArgs): Promise<void> {
+  if (!from || !to) return;
+
+  const newAssetIdsByModel = groupAssetIdsByModel(
+    assets.map((asset) => ({
+      assetId: asset.id,
+      assetModelId: asset.assetModelId,
+    }))
+  );
+  if (newAssetIdsByModel.size === 0) return;
+  const candidateModelIds = [...newAssetIdsByModel.keys()];
+
+  const ownRequests = await tx.bookingModelRequest.findMany({
+    where: {
+      bookingId,
+      assetModelId: { in: candidateModelIds },
+      fulfilledAt: null,
+    },
+    select: { assetModelId: true, quantity: true, fulfilledQuantity: true },
+  });
+  const remainingByModel = new Map<string, number>();
+  for (const request of ownRequests) {
+    remainingByModel.set(
+      request.assetModelId,
+      (remainingByModel.get(request.assetModelId) ?? 0) +
+        Math.max(0, request.quantity - request.fulfilledQuantity)
+    );
+  }
+
+  // Standalone units of these models the booking already holds. They are not
+  // in `availability` (it excludes this booking), so they count on the
+  // booking's side.
+  const heldAssetIdsByModel = groupAssetIdsByModel(
+    (
+      await tx.bookingAsset.findMany({
+        where: {
+          bookingId,
+          assetKitId: null,
+          asset: {
+            organizationId,
+            assetModelId: { in: candidateModelIds },
+            type: AssetType.INDIVIDUAL,
+          },
+        },
+        select: { assetId: true, asset: { select: { assetModelId: true } } },
+      })
+    ).map((row) => ({
+      assetId: row.assetId,
+      assetModelId: row.asset.assetModelId,
+    }))
+  );
+
+  const isDraft = bookingStatus === BookingStatus.DRAFT;
+  const claims: ModelClaim[] = [];
+  for (const [assetModelId, newAssetIds] of newAssetIdsByModel) {
+    const heldAssetIds = heldAssetIdsByModel.get(assetModelId) ?? new Set();
+    const addedUnits = [...newAssetIds].filter(
+      (assetId) => !heldAssetIds.has(assetId)
+    ).length;
+    const remaining = remainingByModel.get(assetModelId) ?? 0;
+    // On an active booking a write that stays within its own request adds no
+    // claim: the units it names were promised to it already. A window change
+    // is measured in full, whatever it adds.
+    if (!isDraft && !windowChanged && addedUnits <= remaining) continue;
+    claims.push({
+      assetModelId,
+      named: new Set([...newAssetIds, ...heldAssetIds]).size,
+      stillToAssign: Math.max(0, remaining - addedUnits),
+    });
+  }
+  if (claims.length === 0) return;
+
+  // Sorted so two transactions contending for the same models take the locks
+  // in one global order and cannot deadlock. Every lock is taken before any
+  // pool is measured, matching the reservation guard.
+  claims.sort((a, b) => a.assetModelId.localeCompare(b.assetModelId));
+  for (const claim of claims) {
+    await lockAssetModelForReservation(tx, claim.assetModelId, organizationId);
+  }
+
+  const shortfalls: Array<
+    ModelClaim & Omit<AssetModelAvailability, "total" | "reserved">
+  > = [];
+  for (const claim of claims) {
+    const availability = await getAssetModelAvailability({
+      assetModelId: claim.assetModelId,
+      organizationId,
+      bookingId,
+      from,
+      to,
+      db: tx,
+    });
+    if (claim.named + claim.stillToAssign > availability.available) {
+      shortfalls.push({
+        ...claim,
+        inCustody: availability.inCustody,
+        reservedConcrete: availability.reservedConcrete,
+        reservedViaRequest: availability.reservedViaRequest,
+        available: availability.available,
+      });
+    }
+  }
+  if (shortfalls.length === 0) return;
+
+  const models = await tx.assetModel.findMany({
+    where: {
+      id: { in: shortfalls.map((s) => s.assetModelId) },
+      organizationId,
+    },
+    select: { id: true, name: true },
+  });
+  const nameById = new Map(models.map((m) => [m.id, m.name]));
+
+  const units = (n: number) => `${n} ${n === 1 ? "unit" : "units"}`;
+  const lines = shortfalls.map((s) => {
+    const ownRequest =
+      s.stillToAssign > 0
+        ? ` and ${units(
+            s.stillToAssign
+          )} still to assign from this booking's own reservation`
+        : "";
+    // Custody and concrete rows on other bookings shrink the pool as well;
+    // name them when they do, so the numbers in the sentence add up.
+    const otherDeductions = [
+      s.inCustody > 0 ? `${units(s.inCustody)} in custody` : null,
+      s.reservedConcrete > 0
+        ? `${units(s.reservedConcrete)} booked by name on other bookings`
+        : null,
+    ].filter((part): part is string => part !== null);
+    const deductions =
+      otherDeductions.length > 0
+        ? ` ${otherDeductions.join(" and ")} also count against the pool.`
+        : "";
+    return `"${nameById.get(s.assetModelId) ?? s.assetModelId}": ${units(
+      s.named
+    )} requested by name${ownRequest}, but ${units(s.reservedViaRequest)} ${
+      s.reservedViaRequest === 1 ? "is" : "are"
+    } reserved by model on other bookings for these dates and only ${
+      s.available
+    } more can be booked.${deductions}`;
+  });
+
+  throw new ShelfError({
+    cause: null,
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+    message: `Some assets cannot be booked by name for these dates:\n${lines.join(
+      "\n"
+    )}\nRemove them, or change the dates.`,
+    additionalData: { bookingId, shortfalls },
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /*                          getBookingModelTabData                            */
 /* -------------------------------------------------------------------------- */
 

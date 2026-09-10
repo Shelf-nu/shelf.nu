@@ -26,7 +26,10 @@ import {
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
-import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
+import {
+  assertModelUnitsNotReservedElsewhere,
+  fulfilModelRequestsForAssets,
+} from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
 import * as lowStockService from "~/modules/consumption-log/low-stock.server";
 import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
@@ -426,6 +429,13 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
   // assets each caller hands it, so the default is an empty result and tests
   // assert on the call argument.
   fulfilModelRequestsForAssets: vitest.fn().mockResolvedValue(new Map()),
+  // why: the same split for the model reservation guard — its pool math is
+  // covered in booking-model-request/service.server.test.ts. Here the tests
+  // assert which assets and window each write path hands it, and that a
+  // refusal aborts the write. Default: every unit fits.
+  assertModelUnitsNotReservedElsewhere: vitest
+    .fn()
+    .mockResolvedValue(undefined),
 }));
 
 // why: spying on booking update email calls without executing
@@ -8005,6 +8015,122 @@ describe("extendBooking", () => {
     );
   });
 
+  it("measures the booking's named model units against the extended window", async () => {
+    expect.assertions(1);
+    const newEndDate = new Date("2025-01-02T17:00:00Z");
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: "model-1",
+            title: "Monitor",
+          },
+          assetId: "asset-1",
+          assetKitId: null,
+          quantity: 1,
+          id: "ba-t140",
+        },
+        // Reserved on the kit axis: not a claim on the model's loose pool.
+        {
+          asset: {
+            id: "asset-2",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: "model-1",
+            title: "Monitor in a kit",
+          },
+          assetId: "asset-2",
+          assetKitId: "ak-1",
+          quantity: 1,
+          id: "ba-t141",
+        },
+      ],
+      partialCheckins: [],
+    };
+    // why: extendBooking loads the booking before writing; an ONGOING booking
+    // with checked-out assets passes the status and conflict checks.
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...mockBooking, to: newEndDate });
+
+    await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    // Only the standalone unit is handed over, under the new end date, with
+    // the whole footprint re-measured.
+    expect(assertModelUnitsNotReservedElsewhere).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        bookingStatus: BookingStatus.ONGOING,
+        windowChanged: true,
+        to: newEndDate,
+        assets: [expect.objectContaining({ id: "asset-1" })],
+      })
+    );
+  });
+
+  it("keeps the end date when the model guard refuses the extended window", async () => {
+    expect.assertions(2);
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: "model-1",
+            title: "Monitor",
+          },
+          assetId: "asset-1",
+          assetKitId: null,
+          quantity: 1,
+          id: "ba-t142",
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    // why: the guard's own pool math lives in its module tests; here it just
+    // refuses, and the write must not happen.
+    (
+      assertModelUnitsNotReservedElsewhere as ReturnType<typeof vitest.fn>
+    ).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: "Some assets cannot be booked by name for these dates",
+        status: 400,
+      })
+    );
+
+    await expect(
+      extendBooking({
+        id: "booking-1",
+        organizationId: "org-1",
+        newEndDate: new Date("2025-01-02T17:00:00Z"),
+        hints: mockClientHints,
+        userId: "user-1",
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(ShelfError);
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
   it("leaves originalTo on the deadline the booking was planned for", async () => {
     expect.assertions(2);
 
@@ -14515,5 +14641,353 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
     );
 
     expect(releasedKitIds()).toEqual(["kit-a"]);
+  });
+});
+
+/**
+ * The model reservation guard is a module mock here (its pool math is covered
+ * in booking-model-request/service.server.test.ts). These tests pin what each
+ * write path hands it — which rows, which window, which client — and that a
+ * refusal aborts the write.
+ */
+describe("model reservation guard — write paths", () => {
+  const guard = assertModelUnitsNotReservedElsewhere as ReturnType<
+    typeof vitest.fn
+  >;
+
+  /** The refusal the guard raises when a unit does not fit the pool. */
+  function refusal() {
+    return new ShelfError({
+      cause: null,
+      label: "Booking",
+      status: 400,
+      shouldBeCaptured: false,
+      message:
+        'Some assets cannot be booked by name for these dates:\n"Suturing Practice Pad": 1 unit requested by name, but 2 units are reserved by model on other bookings for these dates and only 0 more can be booked.\nRemove them, or change the dates.',
+    });
+  }
+
+  /** The rows every `asset.findMany` in these paths resolves, keyed by id. */
+  const ASSETS: Record<string, Record<string, unknown>> = {
+    "asset-ind": {
+      id: "asset-ind",
+      type: AssetType.INDIVIDUAL,
+      title: "Suturing Practice Pad",
+      unitOfMeasure: null,
+      assetModelId: "model-1",
+      status: AssetStatus.AVAILABLE,
+      availableToBook: true,
+      bookingAssets: [],
+    },
+    "asset-held": {
+      id: "asset-held",
+      type: AssetType.INDIVIDUAL,
+      title: "Arterial Puncture Simulator",
+      unitOfMeasure: null,
+      assetModelId: "model-1",
+      status: AssetStatus.AVAILABLE,
+      availableToBook: true,
+      bookingAssets: [],
+    },
+    "asset-kit": {
+      id: "asset-kit",
+      type: AssetType.INDIVIDUAL,
+      title: "Kit member",
+      unitOfMeasure: null,
+      assetModelId: "model-1",
+      status: AssetStatus.AVAILABLE,
+      availableToBook: true,
+      bookingAssets: [],
+    },
+    "asset-qt": {
+      id: "asset-qt",
+      type: AssetType.QUANTITY_TRACKED,
+      title: "Gloves",
+      unitOfMeasure: "pairs",
+      assetModelId: null,
+      quantity: 10,
+      status: AssetStatus.AVAILABLE,
+      availableToBook: true,
+      bookingAssets: [],
+    },
+  };
+
+  /** Ids of the assets a guard call received, in the order it received them. */
+  function handedAssetIds(call = 0): string[] {
+    return (guard.mock.calls[call][0].assets as Array<{ id: string }>).map(
+      (asset) => asset.id
+    );
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    guard.mockResolvedValue(undefined);
+    // why: the write paths read the same assets several times with different
+    // selects, and the mock does not project — one fixture answers them all.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ASSETS[id] ?? { id })
+        )
+    );
+    // why: `clearAllMocks` keeps queued once-values, and an earlier suite can
+    // leave one on the kit org-scope read. Reset it and restore the echo so
+    // the kit slices in these fixtures pass `assertAssetKitsBelongToOrg`.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockReset();
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({
+            id,
+            kitId: `kit-of-${id}`,
+          }))
+        )
+    );
+  });
+
+  afterEach(() => {
+    // Restore the module-level echo so later suites see the default rows.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+        );
+      }
+    );
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([]);
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+  });
+
+  describe("updateBookingAssets", () => {
+    const draft = {
+      id: "booking-1",
+      name: "Draft Booking",
+      status: BookingStatus.DRAFT,
+      from: futureFromDate,
+      to: futureToDate,
+    };
+
+    beforeEach(() => {
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(draft);
+      // One INDIVIDUAL unit already holds a standalone row on the booking.
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.findMany.mockResolvedValue([
+        { assetId: "asset-held", assetKitId: null },
+      ]);
+    });
+
+    it("hands the guard only the new standalone INDIVIDUAL rows, with the booking window", async () => {
+      expect.assertions(2);
+
+      await updateBookingAssets({
+        id: "booking-1",
+        organizationId: "org-1",
+        // A new unit, a quantity-tracked pool, and a unit already on the booking.
+        assetIds: ["asset-ind", "asset-qt", "asset-held"],
+        quantities: { "asset-qt": 3 },
+        kitSlices: [
+          {
+            assetId: "asset-kit",
+            assetKitId: "ak-1",
+            kitId: "kit-1",
+            quantity: 1,
+          },
+        ],
+        userId: "user-1",
+      });
+
+      // Kit slices are reserved on the kit axis, quantity-tracked rows have
+      // their own pool guard, and a row that is already there claims nothing.
+      expect(handedAssetIds()).toEqual(["asset-ind"]);
+      expect(guard).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingId: "booking-1",
+          // The status the row lock returned, not the one read before it.
+          bookingStatus: BookingStatus.ONGOING,
+          organizationId: "org-1",
+          from: futureFromDate,
+          to: futureToDate,
+          tx: db,
+        })
+      );
+    });
+
+    it("writes nothing when the guard refuses", async () => {
+      expect.assertions(3);
+      guard.mockRejectedValueOnce(refusal());
+
+      await expect(
+        updateBookingAssets({
+          id: "booking-1",
+          organizationId: "org-1",
+          assetIds: ["asset-ind"],
+          userId: "user-1",
+        })
+      ).rejects.toThrow(/reserved by model/);
+
+      // The refusal lands before the row inserts and before fulfilment.
+      expect(db.$executeRaw).not.toHaveBeenCalled();
+      expect(fulfilModelRequestsForAssets).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("addScannedAssetsToBooking", () => {
+    beforeEach(() => {
+      // The window the scan path reads once for every overlap guard.
+      //@ts-expect-error missing vitest type
+      db.booking.findFirst.mockResolvedValue({
+        from: futureFromDate,
+        to: futureToDate,
+      });
+    });
+
+    it("hands the guard the standalone INDIVIDUAL scans only, before fulfilment", async () => {
+      expect.assertions(3);
+
+      await addScannedAssetsToBooking({
+        assetIds: ["asset-ind"],
+        kitSlices: [
+          { assetId: "asset-kit", assetKitId: "ak-1", kitId: "kit-1" },
+        ],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      });
+
+      expect(handedAssetIds()).toEqual(["asset-ind"]);
+      expect(guard).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingId: "booking-1",
+          // The status the row lock returned.
+          bookingStatus: BookingStatus.ONGOING,
+          from: futureFromDate,
+          to: futureToDate,
+          tx: db,
+        })
+      );
+      // Fulfilment closes the booking's own request; the guard must judge the
+      // model while that request is still outstanding.
+      expect(guard.mock.invocationCallOrder[0]).toBeLessThan(
+        (fulfilModelRequestsForAssets as ReturnType<typeof vitest.fn>).mock
+          .invocationCallOrder[0]
+      );
+    });
+
+    it("creates no rows when the guard refuses", async () => {
+      expect.assertions(2);
+      guard.mockRejectedValueOnce(refusal());
+
+      await expect(
+        addScannedAssetsToBooking({
+          assetIds: ["asset-ind"],
+          kitIds: [],
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+        })
+      ).rejects.toThrow(/reserved by model/);
+
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("reserveBooking", () => {
+    const reserveParams = {
+      id: "booking-1",
+      name: "Reserved Booking",
+      organizationId: "org-1",
+      custodianUserId: "user-1",
+      custodianTeamMemberId: "team-1",
+      from: futureFromDate,
+      to: futureToDate,
+      description: "Reserved booking description",
+      hints: mockClientHints,
+      isSelfServiceOrBase: false,
+      tags: [],
+    };
+
+    /** A draft holding one standalone unit and one kit-driven unit. */
+    const draft = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      from: futureFromDate,
+      to: futureToDate,
+      modelRequests: [],
+      bookingAssets: [
+        {
+          id: "ba-standalone",
+          assetId: "asset-ind",
+          assetKitId: null,
+          quantity: 1,
+          asset: ASSETS["asset-ind"],
+        },
+        {
+          id: "ba-kit",
+          assetId: "asset-kit",
+          assetKitId: "ak-1",
+          quantity: 1,
+          asset: ASSETS["asset-kit"],
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(draft);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({
+        ...draft,
+        status: BookingStatus.RESERVED,
+      });
+      // Eligibility: the draft holds a slice and none is flagged unbookable.
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.count.mockResolvedValue(1);
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.findFirst.mockResolvedValue(null);
+    });
+
+    afterEach(() => {
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.count.mockResolvedValue(0);
+      //@ts-expect-error missing vitest type
+      db.bookingAsset.findFirst.mockResolvedValue(null);
+    });
+
+    it("re-validates every standalone INDIVIDUAL row on the draft in the reserve transaction", async () => {
+      expect.assertions(3);
+
+      await reserveBooking(reserveParams);
+
+      expect(handedAssetIds()).toEqual(["asset-ind"]);
+      expect(guard).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingId: "booking-1",
+          bookingStatus: BookingStatus.DRAFT,
+          from: futureFromDate,
+          to: futureToDate,
+          tx: db,
+        })
+      );
+      expect(db.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: BookingStatus.RESERVED }),
+        })
+      );
+    });
+
+    it("keeps the draft a draft when the guard refuses", async () => {
+      expect.assertions(2);
+      guard.mockRejectedValueOnce(refusal());
+
+      await expect(reserveBooking(reserveParams)).rejects.toThrow(
+        /reserved by model/
+      );
+
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
   });
 });
