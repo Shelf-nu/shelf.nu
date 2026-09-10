@@ -105,6 +105,14 @@ export type CalendarExtendedProps = {
    * physical units (always qty 1), so the calendar hides the per-slice `Qty`
    * and the booked-units total for them — the number is redundant noise. */
   quantityTracked?: boolean;
+  /** Availability view only: true when every folded slice of this asset has
+   * been checked in from the booking. The bar then ends at `returnedAt` and
+   * is styled as complete, while `status` keeps the booking's real status
+   * for the popover badge. Absent on the booking calendar. */
+  returned?: boolean;
+  /** Availability view only: ISO instant of the latest check-in among the
+   * folded slices; null unless `returned`. */
+  returnedAt?: string | null;
 };
 
 // Loader Function to Return Bookings Data

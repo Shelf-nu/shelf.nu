@@ -2010,7 +2010,13 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             END,
             'assetKitId', atb."assetKitId",
             'quantity', atb."quantity",
-            'kitName', bk_kit.name
+            'kitName', bk_kit.name,
+            -- Slice markers the availability bar reads to end a returned
+            -- asset's bar at its check-in instead of the booking's end.
+            -- Unwrapped like from/to above: timestamptz serialises with its
+            -- offset and the hook parses it with new Date().
+            'checkedOutAt', atb."checkedOutAt",
+            'checkedInAt', atb."checkedInAt"
           )
         ),
         '[]'::jsonb

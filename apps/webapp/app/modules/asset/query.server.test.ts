@@ -1093,6 +1093,10 @@ describe("assetQueryFragment", () => {
       // Per-slice pivot metadata the fold reads (booked units, kit membership).
       expect(sql).toContain('atb."assetKitId"');
       expect(sql).toContain('atb."quantity"');
+      // Slice markers the returned rule reads: the bar of an asset that is
+      // back from a live booking ends at its check-in, not the booking's end.
+      expect(sql).toContain(`'checkedOutAt', atb."checkedOutAt"`);
+      expect(sql).toContain(`'checkedInAt', atb."checkedInAt"`);
       // Kit name resolved through org-scoped AssetKit -> Kit joins, using
       // aliases (bk_ak/bk_kit) distinct from the outer query's own-kit ak/k.
       expect(sql).toContain("'kitName', bk_kit.name");
@@ -1111,6 +1115,7 @@ describe("assetQueryFragment", () => {
       // Default (table views) must not pay for the availability-only subquery.
       expect(sql).not.toContain("AS bookings");
       expect(sql).not.toContain('atb."assetKitId"');
+      expect(sql).not.toContain('atb."checkedInAt"');
       expect(sql).not.toContain("'kitName', bk_kit.name");
     });
   });
