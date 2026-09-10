@@ -367,11 +367,14 @@ export const BookingPDFPreview = ({
               <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Location
               </th>
-              {/* Sized for the code, which spans the cell under the image: at
-                  150px it gets ~130px, enough for a SAM ID or a ten-character
-                  QR id on one line and a 25-character legacy QR id on two.
-                  Longer barcode values wrap further on `break-all`. */}
-              <th className="min-w-[150px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              {/* Sized so the CODE gets ~120px, the same room the audit
+                  receipt gives it at 140px. The two numbers differ because this
+                  cell also carries the tick box and its gap on the code's line,
+                  which take 32px the audit cell does not spend. At ~120px a SAM
+                  ID or a ten-character QR id takes one line and a 25-character
+                  legacy QR id takes two; below ~166px the legacy id takes
+                  three. Longer barcode values wrap further on `break-all`. */}
+              <th className="min-w-[174px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Code
               </th>
             </tr>
