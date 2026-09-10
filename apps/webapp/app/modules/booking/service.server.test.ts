@@ -1348,11 +1348,16 @@ describe("partialCheckinBooking", () => {
       ],
     });
 
-    // asset-1 and asset-2 were already returned for this booking in earlier
-    // sessions (records exist); asset-3 is the last outstanding asset.
+    // asset-1 and asset-2 were already returned for this booking in an earlier
+    // session, after they went out at 10:00; asset-3 is the last outstanding
+    // asset.
+    // why: the session's time is what ties it to the departure it answers.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-1", "asset-2"] },
+      {
+        assetIds: ["asset-1", "asset-2"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
 
     // Every asset still reads CHECKED_OUT globally because other active
@@ -1377,6 +1382,127 @@ describe("partialCheckinBooking", () => {
     // to recognise completion and left the booking incomplete.
     expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
     expect(result.isComplete).toBe(true);
+  });
+
+  describe("an item checked in and then sent out again", () => {
+    /**
+     * The booking was checked out with the button at 10:00, so no check-out
+     * session names either item. asset-1 came back by scan at 12:00 and went
+     * out again by scan at 14:00: the progressive checkout keeps its first
+     * marker and clears the return, and the 12:00 check-in session stays on
+     * record. asset-2 has been out since 10:00.
+     */
+    const outAgainBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+        {
+          asset: { id: "asset-2", assetKits: [], type: AssetType.INDIVIDUAL },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-2",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      // why: the booking the service loads, with asset-1 out on its second trip.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(outAgainBooking);
+      // why: the completion gate's read of the same slices.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(
+        outAgainBooking.bookingAssets.map((ba) => ({
+          id: ba.id,
+          assetId: ba.assetId,
+          quantity: 1,
+          assetKitId: null,
+          checkedOutAt: ba.checkedOutAt,
+          checkedInAt: ba.checkedInAt,
+          checkedOutQuantity: ba.assetId === "asset-1" ? 2 : 1,
+          asset: { id: ba.assetId, type: AssetType.INDIVIDUAL },
+        }))
+      );
+      // why: the first trip's return, which predates asset-1's second departure.
+      (
+        db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([
+        {
+          assetIds: ["asset-1"],
+          checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+        },
+      ]);
+      // why: asset-1's second departure, recorded only as a session.
+      (
+        db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([
+        {
+          assetIds: ["asset-1"],
+          quantities: [1],
+          bookingAssetIds: [""],
+          checkoutTimestamp: new Date("2026-01-01T14:00:00.000Z"),
+        },
+      ]);
+      // why: both items are physically out, and read CHECKED_OUT.
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+        { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+        { id: "asset-2", title: "Asset 2", status: AssetStatus.CHECKED_OUT },
+      ]);
+    });
+
+    it("keeps the booking open when the batch returns only the other item", async () => {
+      expect.assertions(3);
+
+      const result = await partialCheckinBooking({
+        ...mockPartialCheckinParams,
+        assetIds: ["asset-2"],
+      });
+
+      // asset-1 is out on its second trip, so returning asset-2 finishes
+      // nothing: a partial check-in is recorded for asset-2 alone.
+      expect(result.isComplete).toBe(false);
+      expect(db.partialBookingCheckin.create).toHaveBeenCalledWith({
+        data: {
+          bookingId: "booking-1",
+          checkedInById: "user-1",
+          assetIds: ["asset-2"],
+          checkinCount: 1,
+        },
+      });
+      // Nothing reads asset-1 as back on the shelf.
+      const flippedToAvailable = (
+        db.asset.updateMany as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .filter(([args]) => args?.data?.status === AssetStatus.AVAILABLE)
+        .flatMap(([args]) => args?.where?.id?.in ?? []);
+      expect(flippedToAvailable).not.toContain("asset-1");
+    });
+
+    it("completes the booking when the batch returns both items", async () => {
+      expect.assertions(2);
+
+      const result = await partialCheckinBooking({
+        ...mockPartialCheckinParams,
+        assetIds: ["asset-1", "asset-2"],
+      });
+
+      // Everything still out is in the batch, so the complete check-in runs
+      // and no partial session is recorded.
+      expect(result.isComplete).toBe(true);
+      expect(db.partialBookingCheckin.create).not.toHaveBeenCalled();
+    });
   });
 
   it("should reject a batch containing assets not in the booking before taking the completion shortcut", async () => {
