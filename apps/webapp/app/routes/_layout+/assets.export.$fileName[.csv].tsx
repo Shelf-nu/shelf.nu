@@ -8,7 +8,11 @@ import {
   exportAssetsFromIndexToCsv,
 } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import {
+  buildContentDisposition,
+  error,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -87,7 +91,14 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       csvString = await exportAssetsBackupToCsv({ organizationId });
     }
 
-    return csvResponse(csvString);
+    return csvResponse(csvString, {
+      headers: {
+        "content-disposition": buildContentDisposition(null, {
+          fallback: "assets",
+          suffix: "-export",
+        }),
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
