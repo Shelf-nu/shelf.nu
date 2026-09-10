@@ -1,5 +1,10 @@
 import Markdoc from "@markdoc/markdoc";
-import { BookingStatus, AssetStatus, AssetType } from "@prisma/client";
+import {
+  BookingStatus,
+  AssetStatus,
+  AssetType,
+  KitStatus,
+} from "@prisma/client";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
@@ -138,6 +143,13 @@ vitest.mock("~/database/db.server", () => {
       // INDIVIDUAL legacy path the booked total is implicitly 1, so the
       // default echoes one slice with `quantity: 1`. Qty-tracked tests
       // override per-describe `beforeEach` to model bigger slices.
+      // why: a kit-driven slice written before `sourceKitId` existed names its
+      // kit through this hop (`getKitIdsToAcquireBySlice`). These fixtures set
+      // `assetKitId` with no `sourceKitId`, so the lookup runs. The per-test
+      // default is re-installed in `beforeEach`.
+      assetKit: {
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
       bookingAsset: {
         findMany: vitest.fn().mockResolvedValue([{ quantity: 1 }]),
         // why: `computeBookingAssetSliceRemaining` reads a single slice's
@@ -435,6 +447,11 @@ describe("partialCheckoutBooking", () => {
             : []
         );
       }
+    );
+    // why: same reasoning as `asset.findMany` above. Default to "no membership
+    // rows resolve", so a slice's kit is named only by the tests that model one.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
     );
     // why: same reasoning as `asset.findMany` above — a prior test's
     // `mockResolvedValue({ count: 0 })` (the concurrent-takeover case) would
@@ -741,6 +758,7 @@ describe("partialCheckoutBooking", () => {
       data: {
         bookingId: "booking-1",
         checkedOutById: "user-1",
+        checkoutTimestamp: expect.any(Date),
         assetIds: ["asset-1"],
         quantities: [1],
         bookingAssetIds: [""],
@@ -748,6 +766,92 @@ describe("partialCheckoutBooking", () => {
       },
     });
     expect(result.isComplete).toBe(true);
+  });
+
+  it("dates the delegated session row from the submission, never from the row write", async () => {
+    expect.assertions(3);
+
+    // The delegated row is written only after `checkoutBooking` has committed
+    // and its post-commit side effects have run. The completion gate reads the
+    // later of a session's timestamp and the slice marker as the departure a
+    // check-in has to answer, so the row has to be dated no later than the
+    // marker it accompanies.
+    const submittedAt = new Date();
+    // why: `Date` is faked so the clock can be moved inside the checkout
+    // transaction and again in the post-commit side effects; a row dated at
+    // its own write would then land after both.
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    vitest.setSystemTime(submittedAt);
+    try {
+      // why: one asset covers everything outstanding, which is what sends the
+      // batch down the delegated full-checkout path.
+      const singleAssetBooking = {
+        ...reservedBooking,
+        _count: { bookingAssets: 1 },
+        bookingAssets: [
+          {
+            asset: {
+              id: "asset-1",
+              status: AssetStatus.AVAILABLE,
+              assetKits: [],
+            },
+          },
+        ],
+      };
+      let checkoutStarted = false;
+      // why: the marker's `checkedOutAt` is stamped inside the checkout
+      // transaction; moving the clock on entry puts the marker after the
+      // submission. Restored in `finally`.
+      (db.$transaction as ReturnType<typeof vitest.fn>).mockImplementation(
+        (callback: (tx: unknown) => unknown) => {
+          checkoutStarted = true;
+          vitest.setSystemTime(new Date(submittedAt.getTime() + 5_000));
+          return callback(db);
+        }
+      );
+      // why: the booking is read before the checkout and again to hydrate the
+      // return payload after its post-commit side effects; moving the clock on
+      // the reads that follow the transaction puts the row write after the
+      // marker. Restored in `finally`.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockImplementation(() => {
+        if (checkoutStarted) {
+          vitest.setSystemTime(new Date(submittedAt.getTime() + 10_000));
+        }
+        return Promise.resolve(singleAssetBooking);
+      });
+
+      await partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] });
+
+      const markerAt = (
+        db.bookingAsset.updateMany as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .map(([args]) => args?.data?.checkedOutAt)
+        .find((value): value is Date => value instanceof Date);
+      const sessionAt = (
+        db.partialBookingCheckout.create as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .map(([args]) => args?.data?.checkoutTimestamp)
+        .find((value): value is Date => value instanceof Date);
+
+      expect(sessionAt?.getTime()).toBe(submittedAt.getTime());
+      expect(sessionAt!.getTime()).toBeLessThanOrEqual(markerAt!.getTime());
+      // The clock has moved past both writes; a row dated at its own write
+      // would read as now.
+      expect(sessionAt!.getTime()).toBeLessThan(Date.now());
+    } finally {
+      vitest.useRealTimers();
+      (db.$transaction as ReturnType<typeof vitest.fn>).mockImplementation(
+        (callbackOrArray: unknown) =>
+          typeof callbackOrArray === "function"
+            ? (callbackOrArray as (tx: unknown) => unknown)(db)
+            : Promise.all(callbackOrArray as Promise<unknown>[])
+      );
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue({});
+    }
   });
 
   it("does NOT delegate to full checkout once partial-checkout records exist; the later final batch completes in the partial path", async () => {
@@ -1647,6 +1751,186 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         unitOfMeasure: "boxes",
         quantity: 122,
       });
+    });
+
+    /**
+     * A kit whose members are INDIVIDUAL assets, each booked as its own
+     * standalone slice — the shape `getKitIdsToAcquireBySlice` attributes
+     * through live membership rather than slice provenance.
+     */
+    const individualKitMembership = { id: "ak-ind", kitId: "kit-cases" };
+    const makeIndividualKitBooking = () => ({
+      id: "booking-1",
+      name: "Case run",
+      status: BookingStatus.ONGOING,
+      organizationId: "org-1",
+      custodianUserId: "user-1",
+      custodianTeamMemberId: null,
+      from: futureFrom,
+      to: futureTo,
+      _count: { bookingAssets: 2 },
+      bookingAssets: [
+        {
+          id: "ba-case-a",
+          quantity: 1,
+          assetKitId: null,
+          sourceKitId: null,
+          asset: {
+            id: "asset-case-a",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.INDIVIDUAL,
+            title: "Case A",
+            unitOfMeasure: null,
+            assetKits: [individualKitMembership],
+          },
+        },
+        {
+          id: "ba-case-b",
+          quantity: 1,
+          assetKitId: null,
+          sourceKitId: null,
+          asset: {
+            id: "asset-case-b",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.INDIVIDUAL,
+            title: "Case B",
+            unitOfMeasure: null,
+            assetKits: [individualKitMembership],
+          },
+        },
+      ],
+    });
+
+    /**
+     * Echo the requested slices back with their booked quantity, so the
+     * per-slice remaining reader sees real rows. `outSliceIds` are treated as
+     * already gone (remaining 0); everything else still owes its full quantity.
+     */
+    const mockSliceRows = (
+      booking: ReturnType<typeof makeIndividualKitBooking>
+    ) => {
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: { where?: { id?: { in?: string[] } } }) => {
+        const ids = args?.where?.id?.in;
+        if (!Array.isArray(ids)) return Promise.resolve([{ quantity: 1 }]);
+        return Promise.resolve(
+          booking.bookingAssets
+            .filter((ba) => ids.includes(ba.id))
+            .map((ba) => ({
+              id: ba.id,
+              assetId: ba.asset.id,
+              quantity: ba.quantity,
+              assetKitId: ba.assetKitId,
+              asset: { status: ba.asset.status },
+            }))
+        );
+      });
+    };
+
+    it("checks out a kit of INDIVIDUAL members once all of them are scanned", async () => {
+      expect.assertions(1);
+      // Regression: the kit decision must count INDIVIDUAL departures. Reading
+      // only the quantity-tracked disposition ledger leaves this kit unstamped
+      // forever, because that ledger never records an INDIVIDUAL claim.
+      const booking = makeIndividualKitBooking();
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(booking);
+      mockSliceRows(booking);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-case-a", "asset-case-b"],
+      });
+
+      expect(db.kit.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ["kit-cases"] } }),
+          data: { status: KitStatus.CHECKED_OUT },
+        })
+      );
+    });
+
+    it("leaves a kit alone while one of its members is still unscanned", async () => {
+      expect.assertions(1);
+      // The other member's slice is absent from this batch. Its remaining must
+      // come from its own booked quantity, not from a missing map entry read as
+      // "owes nothing".
+      const booking = makeIndividualKitBooking();
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(booking);
+      mockSliceRows(booking);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        assetIds: ["asset-case-a"],
+      });
+
+      expect(db.kit.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { status: KitStatus.CHECKED_OUT },
+        })
+      );
+    });
+
+    it("does not check out a kit when only the asset's free-pool slice left", async () => {
+      expect.assertions(1);
+      // Gloves holds two slices on this booking: 22 boxes standalone and 100
+      // inside Kittington. Sending the standalone units out takes none of the
+      // kit's, so the kit is still on the shelf — and the asset id alone cannot
+      // say that, because both slices carry it.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(makeGlovesBooking());
+      // why: models the legacy provenance hop resolving Kittington's membership
+      // row, so the kit-driven slice is actually attributed to a kit.
+      (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+        { id: "ak-kittington", kitId: "kit-kittington" },
+      ]);
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          {
+            assetId: "asset-gloves",
+            bookingAssetId: "ba-standalone",
+            quantity: 22,
+          },
+        ],
+      });
+
+      expect(db.kit.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { status: KitStatus.CHECKED_OUT },
+        })
+      );
+    });
+
+    it("checks out the kit once its own slice has wholly left", async () => {
+      expect.assertions(1);
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(makeGlovesBooking());
+      (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+        { id: "ak-kittington", kitId: "kit-kittington" },
+      ]);
+
+      // All 100 boxes of the kit-driven slice.
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-gloves", bookingAssetId: "ba-kit", quantity: 100 },
+        ],
+      });
+
+      expect(db.kit.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ["kit-kittington"] } }),
+          data: { status: KitStatus.CHECKED_OUT },
+        })
+      );
     });
 
     it("names a standalone qty slice per-slice and drops the redundant asset mention", async () => {

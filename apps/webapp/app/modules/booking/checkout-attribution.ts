@@ -237,8 +237,9 @@ export function attributeDispositionsByBookingAsset(args: {
  * while a sibling is counted past what it booked.
  *
  * A slice missing from `committedRemainingBySlice` falls back to its booked
- * quantity. The map covers tagged and untagged-resolved `QUANTITY_TRACKED`
- * slices only, so defaulting to zero would starve every `INDIVIDUAL` slice.
+ * quantity. Callers seed the map for the slices they know a claim can reach,
+ * and defaulting an absent one to zero would starve it — the fallback is what
+ * lets a slice the caller never measured still take its share.
  *
  * Pure derivation — no DB calls.
  *

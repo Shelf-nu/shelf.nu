@@ -64,7 +64,7 @@ import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
   getBooking,
   getDetailedPartialCheckinData,
-  getKitIdsByAssets,
+  getKitIdsByBookingSlices,
   removeAssets,
   updateBookingAssets,
   createKitBookingNote,
@@ -199,9 +199,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const bookingKitIds = getKitIdsByAssets(
-      booking.bookingAssets.map((ba) => ba.asset)
-    );
+    /**
+     * The kits this booking holds, from the slices booked under them.
+     *
+     * Not from member assets' kit memberships: a `QUANTITY_TRACKED` asset can
+     * belong to several kits, so a standalone slice of one would pre-select a
+     * kit nobody added — and saving would then add it for real. The booking's
+     * own rows name the kit they were booked under, which is the same source
+     * `BOOKING_WITH_ASSETS_INCLUDE` groups the overview by.
+     */
+    const bookingKitIds = [
+      ...(
+        await getKitIdsByBookingSlices({
+          slices: booking.bookingAssets,
+          organizationId,
+        })
+      ).keys(),
+    ];
 
     /**
      * Book-by-Model — Models tab payload. Shared with the manage-assets
