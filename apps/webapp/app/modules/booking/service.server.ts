@@ -175,7 +175,10 @@ import {
 } from "./helpers";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import type { NotificationRecipient } from "./notification-recipients.server";
-import { makeIsIndividualSliceOutstanding } from "./slice-return";
+import {
+  isSliceOutByMarker,
+  makeIsIndividualSliceOutstanding,
+} from "./slice-return";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
@@ -6562,8 +6565,7 @@ export async function partialCheckinBooking({
           .filter(
             (ba) =>
               ba.asset.type === AssetType.QUANTITY_TRACKED &&
-              ba.checkedOutAt !== null &&
-              (!ba.checkedInAt || ba.checkedInAt < ba.checkedOutAt)
+              isSliceOutByMarker(ba)
           )
           .map((ba) => ba.assetId)
       );
@@ -7624,8 +7626,10 @@ export async function partialCheckinBooking({
     // yet fully reconciled. An individual counts as remaining while it is out
     // by the shared per-slice test, the same judgement the completion gate
     // makes, so one that never went out is not counted and one that went out
-    // again after an earlier return is; qty-tracked count as remaining if
-    // `computeBookingAssetRemaining > 0`.
+    // again after an earlier return is. A qty-tracked slice counts while its
+    // booked units are not all accounted for (`computeBookingAssetRemaining`
+    // > 0) OR while it is out by its markers, which is what a slice sent out
+    // again after a full return looks like.
     const outstandingBookingAssets = await db.bookingAsset.findMany({
       where: { bookingId: id },
       select: {
@@ -7653,7 +7657,7 @@ export async function partialCheckinBooking({
     for (const ba of outstandingBookingAssets) {
       if (ba.asset?.type === AssetType.QUANTITY_TRACKED) {
         const rem = await computeBookingAssetRemaining(db, id, ba.assetId);
-        if (rem > 0) remainingAssetCount += 1;
+        if (rem > 0 || isSliceOutByMarker(ba)) remainingAssetCount += 1;
       } else if (isIndividualSliceStillOut(ba)) {
         remainingAssetCount += 1;
       }

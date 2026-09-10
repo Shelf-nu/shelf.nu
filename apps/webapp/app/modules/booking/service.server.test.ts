@@ -11447,6 +11447,22 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       }
     ) {
       setupQtyMocks({ logged: sessions.pensLogged });
+      const recordedCheckins: Array<{
+        assetIds: string[];
+        checkinTimestamp: Date;
+      }> = [];
+      // why: a check-in writes its session row and then reads the sessions
+      // back to count what remains, so the write has to be visible to that
+      // read the way it is in the database.
+      (
+        db.partialBookingCheckin.create as ReturnType<typeof vitest.fn>
+      ).mockImplementation(({ data }: { data: { assetIds: string[] } }) => {
+        recordedCheckins.push({
+          assetIds: data.assetIds,
+          checkinTimestamp: new Date("2026-01-01T16:00:00.000Z"),
+        });
+        return Promise.resolve({});
+      });
       // why: the booking the service loads, with both slices.
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
@@ -11462,24 +11478,34 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
               : booking.bookingAssets
           )
         );
-      // why: the sessions each test's history leaves on record.
+      // why: the sessions each test's history leaves on record, followed by
+      // whatever the check-in under test records.
       (
         db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
-      ).mockResolvedValue(sessions.checkins);
+      ).mockImplementation(() =>
+        Promise.resolve([...sessions.checkins, ...recordedCheckins])
+      );
       (
         db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
       ).mockResolvedValue(sessions.checkouts);
     }
 
     afterEach(() => {
-      // why: restore the check-out session mock this block replaces.
+      // why: restore the session mocks this block replaces, so the tests after
+      // it read the module defaults again.
       (db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>)
         .mockReset()
         .mockResolvedValue([]);
+      (db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue([]);
+      (db.partialBookingCheckin.create as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue({});
     });
 
     it("keeps the booking open when the pens went out again after a full return", async () => {
-      expect.assertions(3);
+      expect.assertions(4);
 
       // 5 pens booked, all 5 out and back by 12:00 (a check-in session names
       // them), then all 5 sent out again at 14:00 by the Check out button,
@@ -11509,8 +11535,9 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
       });
 
       // The pens are out on their second trip: returning the camera records
-      // a partial check-in and finishes nothing.
+      // a partial check-in, finishes nothing, and leaves the pens remaining.
       expect(result.isComplete).toBe(false);
+      expect(result.remainingAssetCount).toBe(1);
       expect(db.partialBookingCheckin.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ assetIds: ["asset-camera"] }),

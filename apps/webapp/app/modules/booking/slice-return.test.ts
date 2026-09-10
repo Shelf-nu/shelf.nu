@@ -10,7 +10,10 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { makeIsIndividualSliceOutstanding } from "./slice-return";
+import {
+  isSliceOutByMarker,
+  makeIsIndividualSliceOutstanding,
+} from "./slice-return";
 
 const at = (time: string) => new Date(`2026-01-01T${time}:00.000Z`);
 
@@ -178,6 +181,38 @@ describe("makeIsIndividualSliceOutstanding", () => {
         assetId: "asset-1",
         checkedOutAt: at("10:00"),
         checkedInAt: null,
+      })
+    ).toBe(true);
+  });
+});
+
+describe("isSliceOutByMarker", () => {
+  it("is false for a slice that never left", () => {
+    expect(isSliceOutByMarker({ checkedOutAt: null, checkedInAt: null })).toBe(
+      false
+    );
+  });
+
+  it("is true for a slice that left with no return", () => {
+    expect(
+      isSliceOutByMarker({ checkedOutAt: at("10:00"), checkedInAt: null })
+    ).toBe(true);
+  });
+
+  it("is false once a return answers the departure", () => {
+    expect(
+      isSliceOutByMarker({
+        checkedOutAt: at("10:00"),
+        checkedInAt: at("12:00"),
+      })
+    ).toBe(false);
+  });
+
+  it("is true when the departure is newer than the return", () => {
+    expect(
+      isSliceOutByMarker({
+        checkedOutAt: at("14:00"),
+        checkedInAt: at("12:00"),
       })
     ).toBe(true);
   });

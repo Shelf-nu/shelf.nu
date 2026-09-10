@@ -41,6 +41,28 @@ type CheckoutSessionTimes = {
 };
 
 /**
+ * Whether a slice is out by its markers alone: it has left
+ * (`checkedOutAt` set) and carries no return at or after that departure.
+ *
+ * Both check-out writers clear `checkedInAt` when a returned slice leaves
+ * again, so this is how a quantity-tracked slice sent out again reads. It is
+ * not a return test for quantity slices on its own: a quantity slice's
+ * `checkedInAt` is stamped once the units that LEFT are back, while booked
+ * units that never left still count against the booking.
+ *
+ * @param slice - the slice's two markers
+ * @returns true when the slice is out by its markers
+ */
+export function isSliceOutByMarker(
+  slice: Pick<BookingAsset, "checkedOutAt" | "checkedInAt">
+): boolean {
+  return (
+    slice.checkedOutAt !== null &&
+    (!slice.checkedInAt || slice.checkedInAt < slice.checkedOutAt)
+  );
+}
+
+/**
  * Latest session time per asset id over rows that name the asset. A row
  * without a time dates nothing and is skipped.
  */
