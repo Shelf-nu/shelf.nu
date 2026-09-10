@@ -68,6 +68,15 @@ const IS_TWO_DIMENSIONAL: Record<BarcodeSymbology, boolean> = {
 const CODE_SIZE = 180;
 
 /**
+ * The two colours every code is drawn in, whatever the theme.
+ *
+ * Literal rather than theme tokens: `colors.white` is the card surface in dark
+ * mode, and a code drawn light-on-dark is one that many scanners cannot read.
+ */
+const CODE_LIGHT = "#FFFFFF";
+const CODE_DARK = "#000000";
+
+/**
  * Renders one linear or 2D barcode as SVG.
  *
  * bwip-js throws on a value the symbology cannot encode (letters in an EAN-13,
@@ -93,8 +102,8 @@ const BarcodeImage = memo(function BarcodeImage({
         scale: 3,
         ...(IS_TWO_DIMENSIONAL[symbology] ? {} : { height: 12 }),
         includetext: false,
-        backgroundcolor: "ffffff",
-        barcolor: "000000",
+        backgroundcolor: CODE_LIGHT.slice(1),
+        barcolor: CODE_DARK.slice(1),
       }) as string;
     } catch {
       return null;
@@ -112,11 +121,8 @@ const BarcodeImage = memo(function BarcodeImage({
     );
   }
 
-  // The bars stay black on white in BOTH themes, because that is what a
-  // scanner needs — inverting a linear barcode is a common cause of failed
-  // reads. In dark mode that would otherwise put a bare white slab on a dark
-  // card, so the code sits on an explicit rounded plate: it reads as the
-  // printed label it represents rather than as a rendering fault.
+  // Drawn on the shared label plate — see `codePlate` for why every code stays
+  // black on white in both themes.
   return (
     <View
       style={styles.codePlate}
@@ -222,6 +228,7 @@ export const CodeSection = memo(function CodeSection({
           {selected.kind === "qr" ? (
             QRCode ? (
               <View
+                style={styles.codePlate}
                 accessible
                 accessibilityRole="image"
                 accessibilityLabel={`Shelf QR code for ${selected.value}`}
@@ -229,8 +236,8 @@ export const CodeSection = memo(function CodeSection({
                 <QRCode
                   value={`${getApiBaseUrl()}/qr/${selected.qrId}`}
                   size={CODE_SIZE}
-                  backgroundColor={colors.white}
-                  color={colors.foreground}
+                  backgroundColor={CODE_LIGHT}
+                  color={CODE_DARK}
                 />
               </View>
             ) : (
@@ -297,10 +304,12 @@ const useCodeStyles = createStyles((colors, shadows) => ({
     borderBottomColor: colors.border,
     flexGrow: 0,
   },
-  // Always literal white, never `colors.white` — that token is the dark card
-  // surface in dark mode, and a barcode has to stay dark-on-light to scan.
+  // The label plate every code sits on. Codes stay black on white in both
+  // themes because an inverted code — light on dark — fails on many scanners.
+  // On a dark card the plate makes that read as the printed label it
+  // represents rather than as a rendering fault.
   codePlate: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: CODE_LIGHT,
     borderRadius: borderRadius.md,
     padding: spacing.md,
     alignItems: "center" as const,
