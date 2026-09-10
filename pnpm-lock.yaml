@@ -52,6 +52,9 @@ importers:
 
   apps/companion:
     dependencies:
+      '@bwip-js/react-native':
+        specifier: ^4.11.4
+        version: 4.11.4
       '@expo/metro-runtime':
         specifier: ~6.1.2
         version: 6.1.2(expo@54.0.33)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
@@ -1429,6 +1432,9 @@ packages:
   '@bwip-js/browser@4.10.1':
     resolution: {integrity: sha512-7PMCX95WwDkOh5T4fZ8vn4rK4TYgcFGfczbmclTCJzLC0q4Z7Cx7/NRBhgxCjEC0Jo2sOmwqoiE/g5zN+d3/1A==}
 
+  '@bwip-js/react-native@4.11.4':
+    resolution: {integrity: sha512-dmEkgc1OKdUySScXATNlE7HP0CmBLzC6dxQsIMQ+IDdU2GueHCogHYD4r4zhcz+XPIsHbNGEyrdAlAN1EfavLg==}
+
   '@commitlint/cli@20.5.3':
     resolution: {integrity: sha512-OJdL0EXWD5y9LPa0nr/geOwzaS8BsdaybKkcloB0JgsguGxNv2R+hC2FTPqrAcprg35zF33KOQerY0x8W1aesA==}
     engines: {node: '>=v18'}
@@ -1905,6 +1911,7 @@ packages:
 
   '@evilmartians/lefthook@2.1.6':
     resolution: {integrity: sha512-ysZbzryf74wlISmgm0PH/n1lJ0HD7AHmI6DoJgWO9qzIETQknhGdmKbkOi0MjLYtiOHWQl8Dr2qwg0ksDpNZjA==}
+    cpu: [x64, arm64, ia32]
     os: [darwin, linux, win32]
     hasBin: true
 
@@ -9521,6 +9528,9 @@ packages:
       react: '>=16.2.0'
       react-dom: '>=16.2.0'
 
+  react-zlib-js@1.0.5:
+    resolution: {integrity: sha512-TLcPdmqhIl+ylwOwlfm1WUuI7NVvhAv3L74d1AabhjyaAbmLOROTA/Q4EQ/UMCFCOjIkVim9fT3UZOQSFk/mlA==}
+
   react-zorm@0.9.0:
     resolution: {integrity: sha512-esuEiNUuj+JfI4Lz5o36KgT2JNN/NTNeO/70FghbRSBjCxRKeEtjO4KXP7SOMzbOa6rhOFNiP+goPXOUTLG/pw==}
     peerDependencies:
@@ -11765,6 +11775,10 @@ snapshots:
   '@bcoe/v8-coverage@0.2.3': {}
 
   '@bwip-js/browser@4.10.1': {}
+
+  '@bwip-js/react-native@4.11.4':
+    dependencies:
+      react-zlib-js: 1.0.5
 
   '@commitlint/cli@20.5.3(@types/node@25.3.0)(typescript@6.0.3)':
     dependencies:
@@ -20965,6 +20979,8 @@ snapshots:
     dependencies:
       react: 19.2.1
       react-dom: 19.2.1(react@19.2.1)
+
+  react-zlib-js@1.0.5: {}
 
   react-zorm@0.9.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(zod@3.25.76):
     dependencies:
