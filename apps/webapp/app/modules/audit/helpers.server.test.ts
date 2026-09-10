@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createAssetScanNote,
+  createAssigneesChangedNote,
   createAuditCreationNote,
   createAuditStartedNote,
   createAuditCompletedNote,
@@ -172,6 +173,95 @@ describe("audit helpers", () => {
       });
 
       expect(mockTx.auditNote.create).toHaveBeenCalled();
+    });
+  });
+
+  describe("createAssigneesChangedNote", () => {
+    let mockTx: any;
+
+    const users = [
+      { id: "user-1", firstName: "Ana", lastName: "Lead" },
+      { id: "user-2", firstName: "Ben", lastName: "Scan" },
+      { id: "user-3", firstName: "Cy", lastName: "Count" },
+      { id: "user-4", firstName: "Di", lastName: "Gone" },
+    ];
+
+    beforeEach(() => {
+      mockTx = {
+        user: {
+          findMany: vi
+            .fn()
+            .mockImplementation(({ where }: any) =>
+              Promise.resolve(users.filter((u) => where.id.in.includes(u.id)))
+            ),
+        },
+        auditNote: {
+          create: vi.fn(),
+        },
+      };
+    });
+
+    it("writes ONE note naming everyone added and everyone removed", async () => {
+      await createAssigneesChangedNote({
+        auditSessionId: "audit-1",
+        userId: "user-1",
+        addedUserIds: ["user-2", "user-3"],
+        removedUserIds: ["user-4"],
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).toHaveBeenCalledTimes(1);
+      const { content, userId, type } =
+        mockTx.auditNote.create.mock.calls[0][0].data;
+      expect(userId).toBe("user-1");
+      expect(type).toBe("UPDATE");
+      expect(content).toContain("added assignees:");
+      expect(content).toContain('text="Ben Scan"');
+      expect(content).toContain('text="Cy Count"');
+      expect(content).toContain("removed assignee:");
+      expect(content).toContain('text="Di Gone"');
+      expect(
+        content.startsWith('{% link to="/settings/team/users/user-1"')
+      ).toBe(true);
+    });
+
+    it("uses the singular when one person was added", async () => {
+      await createAssigneesChangedNote({
+        auditSessionId: "audit-1",
+        userId: "user-1",
+        addedUserIds: ["user-2"],
+        removedUserIds: [],
+        tx: mockTx,
+      });
+
+      const { content } = mockTx.auditNote.create.mock.calls[0][0].data;
+      expect(content).toContain("added assignee:");
+      expect(content).not.toContain("removed");
+    });
+
+    it("writes nothing when the change is empty", async () => {
+      await createAssigneesChangedNote({
+        auditSessionId: "audit-1",
+        userId: "user-1",
+        addedUserIds: [],
+        removedUserIds: [],
+        tx: mockTx,
+      });
+
+      expect(mockTx.user.findMany).not.toHaveBeenCalled();
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
+    });
+
+    it("skips the note when the updater cannot be found", async () => {
+      await createAssigneesChangedNote({
+        auditSessionId: "audit-1",
+        userId: "user-missing",
+        addedUserIds: ["user-2"],
+        removedUserIds: [],
+        tx: mockTx,
+      });
+
+      expect(mockTx.auditNote.create).not.toHaveBeenCalled();
     });
   });
 

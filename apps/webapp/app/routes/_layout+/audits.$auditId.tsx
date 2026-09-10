@@ -23,6 +23,8 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { resolveAssigneeUserIds } from "~/modules/audit/assignee-form";
+import { sendAuditAssignedEmails } from "~/modules/audit/assignment-emails.server";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
@@ -81,6 +83,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     if (intent === "edit-audit") {
+      // Editing details (and the assignee list with them) is an admin/owner
+      // action. The UI hides Edit for other roles; enforce it here too so a
+      // direct POST cannot let a base member assign themselves to an audit.
+      if (isSelfServiceOrBase) {
+        throw new ShelfError({
+          cause: null,
+          message: "You do not have permission to edit audits.",
+          additionalData: { userId, auditId },
+          label,
+          status: 403,
+        });
+      }
+
       const parsedData = parseData(formData, EditAuditSchema);
       const hints = getClientHint(request);
 
@@ -98,18 +113,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }).toJSDate()
         : null;
 
-      // Parse assignee from JSON (same pattern as create audit)
-      let assigneeUserId: string | null = null;
-      if (parsedData.assignee) {
-        try {
-          const parsed = JSON.parse(parsedData.assignee);
-          assigneeUserId = parsed.userId || null;
-        } catch {
-          assigneeUserId = parsedData.assignee || null;
-        }
-      }
+      // The edit form always renders the selector, so an empty list means
+      // "remove everyone". The singular `assignee` is the pre-multi-assign
+      // field, still accepted so a form loaded before the deploy saves cleanly.
+      const assigneeUserIds = resolveAssigneeUserIds(
+        parsedData.assignees,
+        parsedData.assignee
+      );
 
-      await updateAuditSession({
+      const { addedAssigneeIds } = await updateAuditSession({
         id: auditId,
         organizationId,
         userId,
@@ -117,8 +129,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           name: parsedData.name,
           description: parsedData.description || null,
           dueDate: dueDateUTC,
-          assigneeUserId,
+          assigneeUserIds,
         },
+      });
+
+      // Newly added people get the same email as on create; the editor is
+      // never emailed about their own change.
+      void sendAuditAssignedEmails({
+        auditId,
+        organizationId,
+        recipientUserIds: addedAssigneeIds.filter((id) => id !== userId),
+        hints,
       });
 
       return payload({ success: true });

@@ -23,6 +23,9 @@ export const EditAuditSchema = z.object({
     .max(1000, "Description must be 1000 characters or fewer")
     .optional(),
   dueDate: z.string().optional(),
+  /** `assignees[i]` JSON blobs from AuditTeamMemberSelector. */
+  assignees: z.array(z.string()).optional(),
+  /** Pre-multi-assign singular field; still parsed server-side. */
   assignee: z.string().optional(),
 });
 
@@ -33,7 +36,7 @@ type EditAuditDialogProps = {
     description: string | null;
     dueDate: Date | null;
     status: AuditStatus;
-    /** Only `userId` is read — it maps back to the assignee's team member. */
+    /** Only `userId` is read — it maps back to each assignee's team member. */
     assignments: Array<{ userId: string }>;
   };
   teamMembers: Array<{
@@ -62,7 +65,7 @@ export function EditAuditDialog({
   const nameError = zo.errors.name()?.message;
   const descriptionError = zo.errors.description()?.message;
   const dueDateError = zo.errors.dueDate()?.message;
-  const assigneeError = zo.errors.assignee()?.message;
+  const assigneeError = zo.errors.assignees()?.message;
 
   // Resolved timezone preference — the SAME zone date DISPLAY uses. Seed the
   // datetime-local default from the stored UTC instant in this zone (not the
@@ -81,15 +84,27 @@ export function EditAuditDialog({
     );
   }, [audit.dueDate, timeZone]);
 
-  // Get current assignee's team member ID (convert from user ID)
-  const defaultAssigneeTeamMemberId = useMemo(() => {
-    if (audit.assignments.length === 0) {
-      return undefined;
-    }
-    const currentUserId = audit.assignments[0].userId;
-    const teamMember = teamMembers.find((tm) => tm.userId === currentUserId);
-    return teamMember?.id;
-  }, [teamMembers, audit.assignments]);
+  // Pre-select every current assignee (convert user ids to team member ids).
+  // An assignee whose team member row is gone cannot be rendered or re-saved,
+  // so they drop out of the selection; saving then removes that assignment.
+  const defaultAssignees = useMemo(
+    () =>
+      audit.assignments.flatMap((assignment) => {
+        const teamMember = teamMembers.find(
+          (tm) => tm.userId === assignment.userId
+        );
+        return teamMember
+          ? [
+              {
+                id: teamMember.id,
+                userId: assignment.userId,
+                name: teamMember.name,
+              },
+            ]
+          : [];
+      }),
+    [teamMembers, audit.assignments]
+  );
 
   const isActiveAudit = audit.status === "ACTIVE";
 
@@ -109,7 +124,7 @@ export function EditAuditDialog({
           <div className="-mb-3 w-full pb-6">
             <h3>Edit audit details</h3>
             <p className="text-gray-600">
-              Update the name, description, due date, and assignee of this
+              Update the name, description, due date, and assignees of this
               audit.
             </p>
           </div>
@@ -167,8 +182,8 @@ export function EditAuditDialog({
                       Active audit
                     </p>
                     <p className="mt-1 text-sm text-amber-700">
-                      This audit is currently active. Changing the assignee may
-                      affect ongoing scans.
+                      This audit is currently active. Removing an assignee takes
+                      away their access to scan it right away.
                     </p>
                   </div>
                 </div>
@@ -178,14 +193,16 @@ export function EditAuditDialog({
             {/* Right column: Team member selector */}
             <div className="!border-r">
               <Separator className="md:hidden" />
-              <p className="p-3 pb-0 font-medium">Select assignee (optional)</p>
+              <p className="p-3 pb-0 font-medium">
+                Select assignees (optional)
+              </p>
               <p className="border-b p-3">
                 Admins can perform any audit. Choosing assignees also lets those
                 people perform it, including several at different times.
               </p>
               <AuditTeamMemberSelector
                 error={assigneeError}
-                defaultValue={defaultAssigneeTeamMemberId}
+                defaultSelected={defaultAssignees}
               />
             </div>
           </div>

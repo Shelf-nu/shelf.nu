@@ -169,7 +169,7 @@ export function StartAuditDialogContent({
         {/* Right column: Team member selector */}
         <div className="!border-r">
           <Separator className="md:hidden" />
-          <p className="p-3 pb-0 font-medium">Select assignee (optional).</p>
+          <p className="p-3 pb-0 font-medium">Select assignees (optional).</p>
           <p className="border-b p-3 ">
             Admins can perform any audit. Choosing assignees also lets those
             people perform it, including several at different times.
