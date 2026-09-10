@@ -1,0 +1,244 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Scan to check out (mobile)"
+tags:
+  - bookings
+  - checkout
+  - scanner
+  - high-impact
+
+---
+# Progressive check-out driven by the scanner: the twin of "Scan to Check In".
+# Takes a reserved booking's assets out one scan at a time, asserting that a
+# scanned kit contributes its members, an off-booking asset is refused, a
+# re-scanned kit reports it is already covered, and the counts shown come from
+# the server rather than from the scan list.
+#
+# Also covers the ONGOING entry rule: once the first batch flips the booking to
+# ONGOING, "Check Out All Assets" disappears while both progressive check-out
+# affordances stay, so the operator can keep taking the rest.
+#
+# Fixture, set up via psql before the run and removed after, in GRANULAR
+# WORKSPACE (cmn8vu17y001rooi1l2etdpzf):
+#   - Four AVAILABLE, bookable, uncustodied INDIVIDUAL assets: "E2E Checkout
+#     Alpha" and "Bravo" as the two members of kit "E2E Scan Checkout Kit",
+#     "Charlie" scanned on its own, "Delta" never added to the booking.
+#   - Qr rows for the kit, Charlie and Delta.
+#   - A RESERVED booking "E2E Scan Checkout Booking" holding Alpha, Bravo and
+#     Charlie as standalone rows (assetKitId NULL). That is the shape the
+#     phone's scan-to-add path produces for kit members, and it is the harder
+#     case here: the scanner must recognise them from the scanned kit's own
+#     payload rather than from a kit link on the rows.
+#
+#   Seed the booking rather than building it through the picker: the picker
+#   hides kit members, so a kit can only be added through the add-scanner, and
+#   that setup path is not what this flow is testing.
+#
+#   Give every asset a cuid-shaped id (leading "c"): the partial-checkout
+#   endpoint validates assetIds with zod .cuid(), so any other id shape is
+#   refused with 400 before the booking is touched.
+#
+#   Re-seeding between runs must also reset the assets to AVAILABLE. A previous
+#   run leaves them CHECKED_OUT, and the scanner then correctly refuses them as
+#   already out.
+#
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD
+#      SHELF_TEST_CHECKOUT_KIT_QR_ID     kit QR                 (e2eskchkqr01)
+#      SHELF_TEST_CHECKOUT_ASSET_QR_ID   asset ON the booking   (e2eskchkqra3)
+#      SHELF_TEST_OFF_BOOKING_QR_ID      asset NOT on it        (e2eskchkqra4)
+
+- runFlow: ../../shared/login.yaml
+
+# The iOS "Save Password?" prompt can appear LATE (after login.yaml's own
+# dismissal), covering the nav — clear it if present, then wait for the tab bar.
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 15000
+
+# ── Switch to the GRANULAR (TEAM) workspace — bookings are TEAM-only ──
+# Only when a switch is actually needed. The workspace row and the sheet's
+# option carry the same name, so running the switch while already in GRANULAR
+# taps the row behind the sheet and leaves the sheet covering the tab bar.
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- runFlow:
+    when:
+      notVisible: "Current workspace: GRANULAR WORKSPACE.*"
+    commands:
+      - tapOn: ".*Current workspace.*"
+      - tapOn: ".*GRANULAR WORKSPACE.*"
+      - waitForAnimationToEnd
+
+# ── Open the seeded booking ──
+# Search rather than scroll: the list sorts by start date ascending and pages
+# at 20, so a booking dated tomorrow can sit well past the first page. Match
+# the card's own label, since the search field holds the same words.
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Search bookings"
+    timeout: 20000
+- tapOn: "Search bookings"
+- inputText: "E2E Scan Checkout"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Booking: E2E Scan Checkout Booking.*"
+    timeout: 30000
+- tapOn: "Booking: E2E Scan Checkout Booking.*"
+
+# ── RESERVED offers all three check-out affordances ──
+- extendedWaitUntil:
+    visible: "Check out all assets in this booking"
+    timeout: 25000
+- assertVisible: "Scan assets to check out"
+- assertVisible: "Select assets to check out"
+- takeScreenshot: checkout-reserved-buttons
+
+# ── Enter the check-out scanner ──
+- tapOn: "Scan assets to check out"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible: "Booking Check-Out"
+    timeout: 20000
+- assertVisible: "Scan assets to check out"
+- takeScreenshot: checkout-scanner-header
+# The manual-entry field stays open once revealed, in which case the toggle
+# that reveals it is not rendered.
+- tapOn:
+    id: "dev-scan-toggle"
+    optional: true
+
+# ── A kit QR contributes its two members, never the kit itself ──
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_CHECKOUT_KIT_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*(2 assets to check out|Booking Still Loading).*"
+    timeout: 20000
+# The booking context fetch can still be in flight on the very first scan; the
+# scanner asks for a rescan rather than guessing membership.
+- runFlow:
+    when:
+      visible: ".*Booking Still Loading.*"
+    commands:
+      - tapOn:
+          id: "dev-scan-input"
+      - inputText: ${SHELF_TEST_CHECKOUT_KIT_QR_ID}
+      - pressKey: Enter
+- extendedWaitUntil:
+    visible: "2 assets to check out"
+    timeout: 20000
+- takeScreenshot: checkout-drawer-2
+
+# ── An asset that is not on the booking is refused ──
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_OFF_BOOKING_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*Not in This Booking.*"
+    timeout: 20000
+- assertVisible: "2 assets to check out"
+- takeScreenshot: checkout-error-not-in-booking
+# The result card covers the manual-entry field until it is dismissed; a
+# success card clears itself, an error waits for the tap.
+- tapOn: ".*Tap to dismiss.*"
+
+# ── Re-scanning the kit reports its members are already in the list ──
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_CHECKOUT_KIT_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*Already Covered.*"
+    timeout: 20000
+- assertVisible: "2 assets to check out"
+- takeScreenshot: checkout-error-already-covered
+- tapOn: ".*Tap to dismiss.*"
+
+# ── Submit the first batch: the server's own numbers come back ──
+- tapOn:
+    id: "batch-drawer-submit"
+- extendedWaitUntil:
+    visible: "Check Out Assets"
+    timeout: 15000
+- tapOn:
+    text: "^Check Out$"
+- extendedWaitUntil:
+    visible: ".*Checked Out.*"
+    timeout: 30000
+- assertVisible: ".*2 checked out, 1 remaining.*"
+- takeScreenshot: checkout-alert-checked-out
+- tapOn: "OK"
+
+# ── One asset still reserved, so the scanner stays put to keep scanning ──
+- assertVisible: "Booking Check-Out"
+
+# ── ONGOING entry rule: full check-out is gone, both partial paths remain ──
+- tapOn: "Go back"
+- extendedWaitUntil:
+    visible: "Ongoing"
+    timeout: 25000
+- assertVisible: "Scan assets to check out"
+- assertVisible: "Select assets to check out"
+- assertNotVisible: "Check out all assets in this booking"
+- takeScreenshot: checkout-ongoing-booking
+
+# ── Second batch: the last reserved asset, scanned by its own QR ──
+- tapOn: "Scan assets to check out"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible: "Booking Check-Out"
+    timeout: 20000
+- tapOn:
+    id: "dev-scan-toggle"
+    optional: true
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_CHECKOUT_ASSET_QR_ID}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*(1 asset to check out|Booking Still Loading).*"
+    timeout: 20000
+- runFlow:
+    when:
+      visible: ".*Booking Still Loading.*"
+    commands:
+      - tapOn:
+          id: "dev-scan-input"
+      - inputText: ${SHELF_TEST_CHECKOUT_ASSET_QR_ID}
+      - pressKey: Enter
+- extendedWaitUntil:
+    visible: "1 asset to check out"
+    timeout: 20000
+- tapOn:
+    id: "batch-drawer-submit"
+- extendedWaitUntil:
+    visible: "Check Out Assets"
+    timeout: 15000
+- tapOn:
+    text: "^Check Out$"
+- extendedWaitUntil:
+    visible: ".*Checked Out.*"
+    timeout: 30000
+- assertVisible: ".*1 checked out, 0 remaining.*"
+- takeScreenshot: checkout-alert-complete
+- tapOn: "OK"
+
+# ── Nothing left to scan, so the app returns to the booking itself ──
+- extendedWaitUntil:
+    visible: "E2E Scan Checkout Booking"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "Check in all assets"
+    timeout: 25000
+- assertNotVisible: "Scan assets to check out"
+- takeScreenshot: checkout-all-out
