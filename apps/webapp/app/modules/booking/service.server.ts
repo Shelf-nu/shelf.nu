@@ -7602,29 +7602,46 @@ export async function partialCheckinBooking({
     }
 
     // Compute a coarse "remaining" count for the toast: bookingAssets not
-    // yet fully reconciled. Individuals count as remaining if not in any
-    // PartialBookingCheckin session; qty-tracked count as remaining if
+    // yet fully reconciled. An individual counts as remaining while no
+    // PartialBookingCheckin session names it, and while it is out by the
+    // shared per-slice test, which is what catches one that went out again
+    // after an earlier return; qty-tracked count as remaining if
     // `computeBookingAssetRemaining > 0`.
     const outstandingBookingAssets = await db.bookingAsset.findMany({
       where: { bookingId: id },
       select: {
         assetId: true,
+        checkedOutAt: true,
+        checkedInAt: true,
         asset: { select: { type: true } },
       },
     });
-    const allSessions = await db.partialBookingCheckin.findMany({
-      where: { bookingId: id },
-      select: { assetIds: true },
-    });
+    const [allSessions, allCheckoutSessions] = await Promise.all([
+      db.partialBookingCheckin.findMany({
+        where: { bookingId: id },
+        select: { assetIds: true, checkinTimestamp: true },
+      }),
+      db.partialBookingCheckout.findMany({
+        where: { bookingId: id },
+        select: { assetIds: true, checkoutTimestamp: true },
+      }),
+    ]);
     const reconciledIndividualIds = new Set<string>(
       allSessions.flatMap((s) => s.assetIds as string[])
     );
+    const isIndividualSliceStillOut = makeIsIndividualSliceOutstanding({
+      checkinSessions: allSessions,
+      checkoutSessions: allCheckoutSessions,
+    });
     let remainingAssetCount = 0;
     for (const ba of outstandingBookingAssets) {
       if (ba.asset?.type === AssetType.QUANTITY_TRACKED) {
         const rem = await computeBookingAssetRemaining(db, id, ba.assetId);
         if (rem > 0) remainingAssetCount += 1;
-      } else if (!reconciledIndividualIds.has(ba.assetId)) {
+      } else if (
+        !reconciledIndividualIds.has(ba.assetId) ||
+        isIndividualSliceStillOut(ba)
+      ) {
         remainingAssetCount += 1;
       }
     }

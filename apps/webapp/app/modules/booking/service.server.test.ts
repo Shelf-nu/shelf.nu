@@ -887,10 +887,14 @@ describe("partialCheckinBooking", () => {
 
     // why: so isBookingFullyCheckedIn sees asset-1 and asset-2 as reconciled
     // (and asset-3 as still outstanding) — keeps the booking at "partial"
-    // and makes remainingAssetCount resolve to 1.
+    // and makes remainingAssetCount resolve to 1. The session is dated after
+    // the 10:00 departure it answers.
     //@ts-expect-error missing vitest type
     db.partialBookingCheckin.findMany.mockResolvedValue([
-      { assetIds: ["asset-1", "asset-2"] },
+      {
+        assetIds: ["asset-1", "asset-2"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
     ]);
 
     // Mock asset statuses — the scanned assets are CHECKED_OUT so they pass
@@ -1415,7 +1419,40 @@ describe("partialCheckinBooking", () => {
       ],
     };
 
+    /** Check-in sessions this test run has written, visible to later reads. */
+    let recordedCheckins: Array<{
+      assetIds: string[];
+      checkinTimestamp: Date;
+    }> = [];
+
+    afterEach(() => {
+      // why: restore the shared session mocks this block replaces, so the
+      // tests after it read the module defaults again.
+      (db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue([]);
+      (db.partialBookingCheckin.create as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue({});
+      (db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>)
+        .mockReset()
+        .mockResolvedValue([]);
+    });
+
     beforeEach(() => {
+      recordedCheckins = [];
+      // why: a check-in writes its session row and then reads the sessions
+      // back to count what remains, so the write has to be visible to that
+      // read the way it is in the database.
+      (
+        db.partialBookingCheckin.create as ReturnType<typeof vitest.fn>
+      ).mockImplementation(({ data }: { data: { assetIds: string[] } }) => {
+        recordedCheckins.push({
+          assetIds: data.assetIds,
+          checkinTimestamp: new Date("2026-01-01T16:00:00.000Z"),
+        });
+        return Promise.resolve({});
+      });
       // why: the booking the service loads, with asset-1 out on its second trip.
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
@@ -1435,15 +1472,19 @@ describe("partialCheckinBooking", () => {
           asset: { id: ba.assetId, type: AssetType.INDIVIDUAL },
         }))
       );
-      // why: the first trip's return, which predates asset-1's second departure.
+      // why: the first trip's return, which predates asset-1's second
+      // departure, followed by whatever this test's check-in records.
       (
         db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
-      ).mockResolvedValue([
-        {
-          assetIds: ["asset-1"],
-          checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
-        },
-      ]);
+      ).mockImplementation(() =>
+        Promise.resolve([
+          {
+            assetIds: ["asset-1"],
+            checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+          },
+          ...recordedCheckins,
+        ])
+      );
       // why: asset-1's second departure, recorded only as a session.
       (
         db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
@@ -1463,7 +1504,7 @@ describe("partialCheckinBooking", () => {
     });
 
     it("keeps the booking open when the batch returns only the other item", async () => {
-      expect.assertions(3);
+      expect.assertions(4);
 
       const result = await partialCheckinBooking({
         ...mockPartialCheckinParams,
@@ -1471,8 +1512,10 @@ describe("partialCheckinBooking", () => {
       });
 
       // asset-1 is out on its second trip, so returning asset-2 finishes
-      // nothing: a partial check-in is recorded for asset-2 alone.
+      // nothing: a partial check-in is recorded for asset-2 alone, and asset-1
+      // is the one item left.
       expect(result.isComplete).toBe(false);
+      expect(result.remainingAssetCount).toBe(1);
       expect(db.partialBookingCheckin.create).toHaveBeenCalledWith({
         data: {
           bookingId: "booking-1",
