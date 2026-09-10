@@ -758,6 +758,7 @@ describe("partialCheckoutBooking", () => {
       data: {
         bookingId: "booking-1",
         checkedOutById: "user-1",
+        checkoutTimestamp: expect.any(Date),
         assetIds: ["asset-1"],
         quantities: [1],
         bookingAssetIds: [""],
@@ -765,6 +766,92 @@ describe("partialCheckoutBooking", () => {
       },
     });
     expect(result.isComplete).toBe(true);
+  });
+
+  it("dates the delegated session row from the submission, never from the row write", async () => {
+    expect.assertions(3);
+
+    // The delegated row is written only after `checkoutBooking` has committed
+    // and its post-commit side effects have run. The completion gate reads the
+    // later of a session's timestamp and the slice marker as the departure a
+    // check-in has to answer, so the row has to be dated no later than the
+    // marker it accompanies.
+    const submittedAt = new Date();
+    // why: `Date` is faked so the clock can be moved inside the checkout
+    // transaction and again in the post-commit side effects; a row dated at
+    // its own write would then land after both.
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    vitest.setSystemTime(submittedAt);
+    try {
+      // why: one asset covers everything outstanding, which is what sends the
+      // batch down the delegated full-checkout path.
+      const singleAssetBooking = {
+        ...reservedBooking,
+        _count: { bookingAssets: 1 },
+        bookingAssets: [
+          {
+            asset: {
+              id: "asset-1",
+              status: AssetStatus.AVAILABLE,
+              assetKits: [],
+            },
+          },
+        ],
+      };
+      let checkoutStarted = false;
+      // why: the marker's `checkedOutAt` is stamped inside the checkout
+      // transaction; moving the clock on entry puts the marker after the
+      // submission. Restored in `finally`.
+      (db.$transaction as ReturnType<typeof vitest.fn>).mockImplementation(
+        (callback: (tx: unknown) => unknown) => {
+          checkoutStarted = true;
+          vitest.setSystemTime(new Date(submittedAt.getTime() + 5_000));
+          return callback(db);
+        }
+      );
+      // why: the booking is read before the checkout and again to hydrate the
+      // return payload after its post-commit side effects; moving the clock on
+      // the reads that follow the transaction puts the row write after the
+      // marker. Restored in `finally`.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockImplementation(() => {
+        if (checkoutStarted) {
+          vitest.setSystemTime(new Date(submittedAt.getTime() + 10_000));
+        }
+        return Promise.resolve(singleAssetBooking);
+      });
+
+      await partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] });
+
+      const markerAt = (
+        db.bookingAsset.updateMany as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .map(([args]) => args?.data?.checkedOutAt)
+        .find((value): value is Date => value instanceof Date);
+      const sessionAt = (
+        db.partialBookingCheckout.create as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .map(([args]) => args?.data?.checkoutTimestamp)
+        .find((value): value is Date => value instanceof Date);
+
+      expect(sessionAt?.getTime()).toBe(submittedAt.getTime());
+      expect(sessionAt!.getTime()).toBeLessThanOrEqual(markerAt!.getTime());
+      // The clock has moved past both writes; a row dated at its own write
+      // would read as now.
+      expect(sessionAt!.getTime()).toBeLessThan(Date.now());
+    } finally {
+      vitest.useRealTimers();
+      (db.$transaction as ReturnType<typeof vitest.fn>).mockImplementation(
+        (callbackOrArray: unknown) =>
+          typeof callbackOrArray === "function"
+            ? (callbackOrArray as (tx: unknown) => unknown)(db)
+            : Promise.all(callbackOrArray as Promise<unknown>[])
+      );
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue({});
+    }
   });
 
   it("does NOT delegate to full checkout once partial-checkout records exist; the later final batch completes in the partial path", async () => {

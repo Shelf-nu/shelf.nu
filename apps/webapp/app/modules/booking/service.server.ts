@@ -4516,6 +4516,25 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
 }
 
 /**
+ * Latest session timestamp per asset id, over progressive session rows that
+ * name the asset. A row without a timestamp dates nothing and is skipped.
+ */
+function latestSessionTimestampByAsset(
+  rows: Array<{ assetIds: string[]; at: Date | null }>
+): Map<string, Date> {
+  const latestByAsset = new Map<string, Date>();
+  for (const row of rows) {
+    const at = row.at;
+    if (!at) continue;
+    for (const id of row.assetIds) {
+      const seen = latestByAsset.get(id);
+      if (!seen || at > seen) latestByAsset.set(id, at);
+    }
+  }
+  return latestByAsset;
+}
+
+/**
  * Determines whether a booking has been fully checked in across all of
  * its assets.
  *
@@ -4531,8 +4550,13 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
  * For `INDIVIDUAL` assets: a slice with `checkedOutAt` must be reconciled —
  * `checkedInAt` set, or present in a `PartialBookingCheckin.assetIds` row
  * (rows reconciled before the marker existed carry only the session record).
- * Slices never dispatched (added onto an ONGOING booking, or left behind by
- * a progressive checkout) have nothing to check in and never block.
+ * The reconciliation has to be no older than the slice's latest departure,
+ * which is the later of its marker and the newest `PartialBookingCheckout`
+ * session naming the asset: the marker dates the first departure, and a
+ * check-in that answered an earlier trip stays on record after the slice
+ * goes out again. Slices never dispatched (added onto an ONGOING booking, or
+ * left behind by a progressive checkout) have nothing to check in and never
+ * block.
  *
  * For `QUANTITY_TRACKED` assets: obligated units are judged PER SLICE and
  * summed — a slice's session-attributed units when any exist (capped by its
@@ -4543,9 +4567,10 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
  * unit is reconciled; units that never left the warehouse carry no
  * obligation.
  *
- * Called by both `partialCheckinBooking` and `checkinBooking` to decide
- * the ONGOING/OVERDUE → COMPLETE transition. Keeping this in one place
- * prevents the two code paths from drifting.
+ * Called by `partialCheckinBooking` to decide the ONGOING/OVERDUE →
+ * COMPLETE transition. The all-at-once `checkinBooking` returns every
+ * outstanding slice and completes unconditionally, so this is the one place
+ * that judges completion.
  *
  * @param tx - Prisma transaction client
  * @param bookingId - Booking to evaluate
@@ -4589,7 +4614,15 @@ export async function isBookingFullyCheckedIn(
     }),
     tx.partialBookingCheckout.findMany({
       where: { bookingId },
-      select: { assetIds: true, quantities: true, bookingAssetIds: true },
+      // The timestamp records a departure the slice marker cannot: a
+      // progressive check-out keeps a slice's first `checkedOutAt`, so a
+      // later departure of the same asset is dated here and nowhere else.
+      select: {
+        assetIds: true,
+        quantities: true,
+        bookingAssetIds: true,
+        checkoutTimestamp: true,
+      },
     }),
   ]);
 
@@ -4604,18 +4637,29 @@ export async function isBookingFullyCheckedIn(
    * whose asset id never leaves this set, and a bare set of ids would let that
    * session reconcile the second departure too.
    */
-  const latestSessionCheckinByAsset = new Map<string, Date>();
-  for (const row of partialCheckins as Array<{
-    assetIds: string[];
-    checkinTimestamp: Date | null;
-  }>) {
-    for (const id of row.assetIds) {
-      const at = row.checkinTimestamp;
-      if (!at) continue;
-      const seen = latestSessionCheckinByAsset.get(id);
-      if (!seen || at > seen) latestSessionCheckinByAsset.set(id, at);
-    }
-  }
+  const latestSessionCheckinByAsset = latestSessionTimestampByAsset(
+    (
+      partialCheckins as Array<{
+        assetIds: string[];
+        checkinTimestamp: Date | null;
+      }>
+    ).map((row) => ({ assetIds: row.assetIds, at: row.checkinTimestamp }))
+  );
+
+  /**
+   * The most recent check-out session naming each asset. The slice marker
+   * dates the FIRST departure only — a progressive re-dispatch clears
+   * `checkedInAt` and keeps `checkedOutAt`, which is what "out since" shows —
+   * so a slice's latest departure is the later of its marker and this.
+   */
+  const latestSessionCheckoutByAsset = latestSessionTimestampByAsset(
+    (
+      partialCheckouts as Array<{
+        assetIds: string[];
+        checkoutTimestamp: Date | null;
+      }>
+    ).map((row) => ({ assetIds: row.assetIds, at: row.checkoutTimestamp }))
+  );
 
   type SliceRow = {
     id: string;
@@ -4667,27 +4711,38 @@ export async function isBookingFullyCheckedIn(
     const isQtyTrackedAsset = ba.asset?.type === AssetType.QUANTITY_TRACKED;
 
     if (!isQtyTrackedAsset) {
-      // INDIVIDUAL. The slice marker is the same source the check-in
-      // eligibility guard reads, so an asset gates completion exactly when
-      // it is checkinable. A slice never dispatched on THIS booking (added
-      // onto an ONGOING booking, or left behind by a progressive checkout)
-      // has nothing to reconcile and never blocks.
-      if (!ba.checkedOutAt) continue;
-      // Reconciled — by the slice marker, or by a partial-checkin session
-      // for rows reconciled before the marker existed.
+      // INDIVIDUAL. Dispatch is read from the slice marker, the same source
+      // the scan check-in guard reads, so a slice never dispatched on THIS
+      // booking (added onto an ONGOING booking, or left behind by a
+      // progressive checkout) has nothing to reconcile and never blocks.
       //
-      // The check-in has to be no older than the departure it answers. A slice
-      // that came back and then went out again carries both markers, and the
-      // refreshed `checkedOutAt` is what says it is out now; reading
-      // `checkedInAt` alone would report the second trip as already returned.
-      if (ba.checkedInAt && ba.checkedInAt >= ba.checkedOutAt) continue;
-      // Session fallback, for rows reconciled before the marker existed. It is
-      // held to the same test as the marker: the session has to be no older
-      // than the departure it claims to answer. Without that, a second
-      // departure clears `checkedInAt` and the FIRST trip's session — whose
-      // asset id is still listed — silently reconciles the new one.
-      const sessionAt = latestSessionCheckinByAsset.get(ba.assetId);
-      if (sessionAt && sessionAt >= ba.checkedOutAt) continue;
+      // Reconciliation is judged against the slice's latest departure below,
+      // while the scan check-in guard reads `checkedInAt` alone. Both
+      // check-out writers clear `checkedInAt` on a re-dispatch, so the two
+      // agree on every slice they produce. They part on a slice whose markers
+      // were stamped from each side's earliest session and which a later scan
+      // departure sent out again: this gate holds the booking, the scan flow
+      // refuses the slice as already checked in, and the all-at-once check-in
+      // is the path that closes the booking.
+      if (!ba.checkedOutAt) continue;
+      // The latest departure a return has to answer: the marker, or a newer
+      // check-out session naming the asset. The all-at-once checkout refreshes
+      // the marker when a reconciled slice goes out again; the progressive
+      // checkout keeps the first one, so its later departures are dated only
+      // by their session.
+      const sessionOutAt = latestSessionCheckoutByAsset.get(ba.assetId);
+      const departedAt =
+        sessionOutAt && sessionOutAt > ba.checkedOutAt
+          ? sessionOutAt
+          : ba.checkedOutAt;
+      // Reconciled — by the slice marker, or by a check-in session for rows
+      // reconciled before the marker existed. Either has to be no older than
+      // that departure: a check-in that answered an earlier trip stays on
+      // record after the slice goes out again, and read against the first
+      // departure it would report the new trip as already returned.
+      if (ba.checkedInAt && ba.checkedInAt >= departedAt) continue;
+      const sessionInAt = latestSessionCheckinByAsset.get(ba.assetId);
+      if (sessionInAt && sessionInAt >= departedAt) continue;
       return false;
     }
 
@@ -7991,6 +8046,12 @@ export async function partialCheckoutBooking({
       qtyClaimsCoverFullRemaining;
 
     if (shouldDelegateToFullCheckout) {
+      // The departure this session records. A session dates the departure it
+      // describes, never a later instant: the completion gate reads the later
+      // of a session's timestamp and the slice marker as the departure a
+      // check-in has to answer, and the row below is written only after the
+      // checkout has committed and its side effects have run.
+      const departedAt = new Date();
       const fullyCheckedOut = await checkoutBooking({
         id,
         organizationId,
@@ -8039,6 +8100,9 @@ export async function partialCheckoutBooking({
           data: {
             bookingId: id,
             checkedOutById: userId,
+            // Dated from the capture above, not from the row's own default, so
+            // the session never postdates the marker it accompanies.
+            checkoutTimestamp: departedAt,
             assetIds: outstandingAssetIds,
             quantities: outstandingQuantities,
             bookingAssetIds: outstandingBookingAssetIds,
