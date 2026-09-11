@@ -6,8 +6,9 @@
  *
  * The rules under test are the ones a screenshot cannot check: which kit a
  * quantity-tracked asset is grouped under when its slices disagree, what a
- * kit's badge says on a booking that is over, and when a removal may name the
- * kit instead of listing its assets.
+ * kit's badge says on a booking that is over, how a selection counts a kit as
+ * one thing, and when a removal may name the kit instead of listing its
+ * assets.
  *
  * @see ./booking-kit-rows.ts
  */
@@ -17,8 +18,10 @@ import { test } from "node:test";
 import {
   bookingRowKey,
   buildBookingRows,
+  countSelection,
   describeBookingRows,
   describeRemoval,
+  describeSelection,
   isBookingAssetSelectable,
   resolveBookingKitBadge,
   resolveKitSelectionState,
@@ -722,6 +725,191 @@ test("a removal names the kits before the assets", () => {
     describeRemoval({ assetCount: 2, kitCount: 1 }),
     "1 kit and 2 assets"
   );
+  assert.equal(
+    describeRemoval({ assetCount: 1, kitCount: 1 }),
+    "1 kit and 1 asset"
+  );
   assert.equal(describeRemoval({ assetCount: 3, kitCount: 0 }), "3 assets");
   assert.equal(describeRemoval({ assetCount: 0, kitCount: 2 }), "2 kits");
+});
+
+test("a removal with nothing to name still names assets", () => {
+  assert.equal(describeRemoval({ assetCount: 0, kitCount: 0 }), "0 assets");
+});
+
+// ---------------------------------------------------------------------------
+// The floating action's label
+// ---------------------------------------------------------------------------
+
+test("a selection names kits before assets, joined by an ampersand", () => {
+  assert.equal(
+    describeSelection({ kitCount: 1, assetCount: 1 }),
+    "1 Kit & 1 Asset"
+  );
+  assert.equal(
+    describeSelection({ kitCount: 1, assetCount: 2 }),
+    "1 Kit & 2 Assets"
+  );
+  assert.equal(
+    describeSelection({ kitCount: 2, assetCount: 1 }),
+    "2 Kits & 1 Asset"
+  );
+  assert.equal(
+    describeSelection({ kitCount: 3, assetCount: 4 }),
+    "3 Kits & 4 Assets"
+  );
+});
+
+test("a selection of only kits does not mention assets", () => {
+  assert.equal(describeSelection({ kitCount: 1, assetCount: 0 }), "1 Kit");
+  assert.equal(describeSelection({ kitCount: 2, assetCount: 0 }), "2 Kits");
+});
+
+test("a selection of only assets does not mention kits", () => {
+  assert.equal(describeSelection({ kitCount: 0, assetCount: 1 }), "1 Asset");
+  assert.equal(describeSelection({ kitCount: 0, assetCount: 3 }), "3 Assets");
+});
+
+test("an empty selection still reads as a count", () => {
+  assert.equal(describeSelection({ kitCount: 0, assetCount: 0 }), "0 Assets");
+});
+
+/** Two kits and a standalone asset, as the list renders them. */
+function kitsAndLooseAsset(expandedKitIds: ReadonlySet<string>): BookingRow[] {
+  return buildBookingRows({
+    assets: [
+      inKit("m1", "kit-1", "Camera Kit"),
+      inKit("m2", "kit-1", "Camera Kit"),
+      inKit("m3", "kit-1", "Camera Kit"),
+      inKit("r1", "kit-2", "Rig"),
+      inKit("r2", "kit-2", "Rig"),
+      asset({ id: "loose-1" }),
+      asset({ id: "loose-2" }),
+    ],
+    kits: [
+      { ...cameraKit, assetCount: 3 },
+      { ...cameraKit, id: "kit-2", name: "Rig", assetCount: 2 },
+    ],
+    expandedKitIds,
+  });
+}
+
+test("a picked kit counts once, however many members it holds", () => {
+  assert.deepEqual(
+    countSelection({
+      rows: kitsAndLooseAsset(new Set()),
+      selectedAssetIds: new Set(["m1", "m2", "m3"]),
+      selectMode: "checkout",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 1, assetCount: 0 }
+  );
+});
+
+test("a standalone asset beside a picked kit counts as one asset", () => {
+  assert.deepEqual(
+    countSelection({
+      rows: kitsAndLooseAsset(new Set()),
+      selectedAssetIds: new Set(["m1", "m2", "m3", "loose-1"]),
+      selectMode: "checkout",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 1, assetCount: 1 }
+  );
+});
+
+test("every picked kit and every standalone asset is counted", () => {
+  assert.deepEqual(
+    countSelection({
+      rows: kitsAndLooseAsset(new Set()),
+      selectedAssetIds: new Set([
+        "m1",
+        "m2",
+        "m3",
+        "r1",
+        "r2",
+        "loose-1",
+        "loose-2",
+      ]),
+      selectMode: "remove",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 2, assetCount: 2 }
+  );
+});
+
+test("opening a kit does not change what the selection counts", () => {
+  const selectedAssetIds = new Set(["r1", "r2", "loose-2"]);
+  const collapsed = countSelection({
+    rows: kitsAndLooseAsset(new Set()),
+    selectedAssetIds,
+    selectMode: "checkout",
+    checkedInAssetIds: [],
+  });
+  const expanded = countSelection({
+    rows: kitsAndLooseAsset(new Set(["kit-1", "kit-2"])),
+    selectedAssetIds,
+    selectMode: "checkout",
+    checkedInAssetIds: [],
+  });
+  assert.deepEqual(collapsed, { kitCount: 1, assetCount: 1 });
+  assert.deepEqual(expanded, collapsed);
+});
+
+test("in check-in a kit counts once its outstanding members are picked", () => {
+  // m1 is out; m2 never left, so check-in cannot act on it. Picking m1 alone
+  // is the whole of what the header offers.
+  const rows = buildBookingRows({
+    assets: [
+      asset({
+        id: "m1",
+        kitId: "kit-1",
+        kit: { id: "kit-1", name: "Camera Kit" },
+        status: "CHECKED_OUT",
+      }),
+      asset({
+        id: "m2",
+        kitId: "kit-1",
+        kit: { id: "kit-1", name: "Camera Kit" },
+        status: "AVAILABLE",
+      }),
+    ],
+    kits: [cameraKit],
+    expandedKitIds: new Set(),
+  });
+  assert.deepEqual(
+    countSelection({
+      rows,
+      selectedAssetIds: new Set(["m1"]),
+      selectMode: "checkin",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 1, assetCount: 0 }
+  );
+});
+
+test("members of a partly picked kit count as the assets they are", () => {
+  // The header reads "some", so the kit is not picked whole; the label still
+  // covers the member the submit will send.
+  assert.deepEqual(
+    countSelection({
+      rows: kitsAndLooseAsset(new Set()),
+      selectedAssetIds: new Set(["m1"]),
+      selectMode: "remove",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 0, assetCount: 1 }
+  );
+});
+
+test("nothing picked counts nothing", () => {
+  assert.deepEqual(
+    countSelection({
+      rows: kitsAndLooseAsset(new Set()),
+      selectedAssetIds: new Set(),
+      selectMode: "checkout",
+      checkedInAssetIds: [],
+    }),
+    { kitCount: 0, assetCount: 0 }
+  );
 });
