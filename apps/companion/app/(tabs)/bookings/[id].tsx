@@ -50,6 +50,7 @@ import {
 } from "@/components/checkin-disposition-sheet";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
+import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
 import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
 import {
   bookingRowKey,
@@ -139,6 +140,9 @@ export default function BookingDetailScreen() {
   // False when the workspace requires explicit (scan/select) check-in for this
   // user's role — hide the quick "Check In All" button to match web policy.
   const [canQuickCheckin, setCanQuickCheckin] = useState(true);
+  // The check-out twin: false hides "Check Out All Assets". Read through
+  // canOfferQuickCheckout, which keeps the button for servers without the flag.
+  const [canQuickCheckout, setCanQuickCheckout] = useState(true);
   // Per-booking lifecycle-action availability (cancel/archive/duplicate/delete),
   // computed server-side mirroring the web ActionsDropdown gating.
   const [bookingActions, setBookingActions] = useState({
@@ -220,6 +224,7 @@ export default function BookingDetailScreen() {
     setCanCheckout(data.canCheckout);
     setCanCheckin(data.canCheckin);
     setCanQuickCheckin(data.canQuickCheckin);
+    setCanQuickCheckout(canOfferQuickCheckout(data));
     setBookingActions(data.bookingActions);
     // Clear stale selections — checked-in assets are no longer selectable
     setSelectedAssetIds(new Set());
@@ -1616,8 +1621,10 @@ export default function BookingDetailScreen() {
               )}
 
             {/* Full check-out is RESERVED-only (web parity); the loader's
-                canCheckout reflects that. */}
-            {canCheckout && (
+                canCheckout reflects that. It is hidden when the workspace
+                requires explicit check-out for this role, which leaves
+                "Select to Check Out" below as the way to check out. */}
+            {canCheckout && canQuickCheckout && (
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleCheckout}

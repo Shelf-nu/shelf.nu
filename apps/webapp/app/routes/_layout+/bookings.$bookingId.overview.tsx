@@ -67,6 +67,7 @@ import {
   calculatePartialCheckinProgress,
   calculateUnitCheckinProgress,
 } from "~/modules/booking/utils.server";
+import { assertQuickCheckoutAllowed } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -1762,6 +1763,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "checkOut": {
+        // The one-click check-out is refused when the workspace requires the
+        // explicit flow (scan or select) for this role.
+        assertQuickCheckoutAllowed({ role, bookingSettings });
+
         const booking = await checkoutBooking({
           id,
           organizationId,
@@ -1801,6 +1806,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // Booked bucket at once. The service resolves the eligible ids
         // server-side (no client-supplied id list) and routes through the
         // progressive partial-checkout path, which writes notes/events.
+        // Being one click, it is refused under the explicit check-out
+        // requirement, the same as "Check out".
+        assertQuickCheckoutAllowed({ role, bookingSettings });
+
         return await checkoutRemainingAssets({
           formData,
           request,
