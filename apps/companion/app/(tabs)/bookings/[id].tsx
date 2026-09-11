@@ -154,11 +154,10 @@ export default function BookingDetailScreen() {
    * Mirrors the web's `canUserManageBookingAssets`: closed statuses reject, and
    * a RESTRICTED role may only build its own DRAFT booking.
    *
-   * BASE as well as SELF_SERVICE. The web passes both roles into that helper
-   * (its parameter is named `isSelfService` but every caller hands it
-   * `isBaseOrSelfService`), while this screen tested SELF_SERVICE alone. A BASE
-   * custodian is a custodian at every status, so the add, browse, remove and
-   * fulfil affordances below stayed on past DRAFT for them.
+   * BASE as well as SELF_SERVICE: the web passes both roles into that helper
+   * (its parameter is named `isSelfService`, but every caller hands it
+   * `isBaseOrSelfService`). The add, browse, remove and fulfil affordances
+   * below therefore turn off past DRAFT for both roles.
    */
   const isRestrictedRole = Boolean(
     currentOrg?.roles?.some((r) => r === "SELF_SERVICE" || r === "BASE")
@@ -899,11 +898,11 @@ export default function BookingDetailScreen() {
               pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${item.id}`);
             }
           }}
-          accessibilityLabel={`${item.title}, ${stateLabel}${
-            isCheckedIn ? ", checked in" : ""
-          }${isSelected ? ", selected" : ""}${
-            selectable ? ". Tap to select" : ""
-          }`}
+          accessibilityLabel={`${item.title}${
+            item.location ? `, at ${item.location.name}` : ""
+          }, ${stateLabel}${isCheckedIn ? ", checked in" : ""}${
+            isSelected ? ", selected" : ""
+          }${selectable ? ". Tap to select" : ""}`}
           accessibilityRole="button"
         >
           {selectable && (
@@ -984,6 +983,20 @@ export default function BookingDetailScreen() {
                 {item.category.name}
               </Text>
             )}
+            {/* Kit members carry their own location too, as on the website.
+                An older server sends none, and the row then has no line. */}
+            {item.location ? (
+              <View style={styles.assetLocationRow}>
+                <Ionicons
+                  name="location-outline"
+                  size={11}
+                  color={colors.mutedLight}
+                />
+                <Text style={styles.assetLocation} numberOfLines={1}>
+                  {item.location.name}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
@@ -1103,8 +1116,8 @@ export default function BookingDetailScreen() {
    *
    * The first two are decided from rows this screen already holds. The third
    * cannot be — it needs the overlapping-booking query — so the server sends
-   * it as a flag. `?? false` keeps a not-yet-updated server (rolling deploy,
-   * field absent) on the old behavior rather than blocking Reserve outright.
+   * it as a flag. `?? false` reads a server that does not send the flag
+   * (rolling deploy) as reporting no conflict, rather than blocking Reserve.
    *
    * All three are enforced server-side too: the first two in
    * `bookings.reserve.ts`, the third by `reserveBooking`'s race-safe conflict
@@ -1304,10 +1317,9 @@ export default function BookingDetailScreen() {
                   </View>
                 )}
 
-                {/* why: web shows who created the booking on this same screen,
-                    and the field was already in the payload — fetched, then
-                    dropped. Custodian and creator are different people often
-                    enough that showing only one is misleading. */}
+                {/* why: web shows who created the booking on this same screen.
+                    Custodian and creator are different people often enough
+                    that showing only one is misleading. */}
                 {creatorName ? (
                   <View style={styles.infoRow}>
                     <Ionicons
@@ -1436,11 +1448,10 @@ export default function BookingDetailScreen() {
                 </View>
               </View>
             )}
-            {/* why visible rather than only in an alert: the disabled Reserve
-                  button was a dead control - tapping it produced nothing on
-                  device, so the one thing a user needs (what to fix) was
-                  unreachable. Stating it here does not depend on a tap firing,
-                  and it is readable before you even reach for the button. */}
+            {/* why visible rather than only in an alert: a disabled button
+                  takes no taps, so a reason shown on tap could never appear.
+                  Stating it here does not depend on a tap firing, and it is
+                  readable before you even reach for the button. */}
             {booking.status === "DRAFT" && reserveBlockedReason ? (
               <Text style={styles.reserveBlockedNote}>
                 {reserveBlockedReason}
@@ -2534,6 +2545,19 @@ const useStyles = createStyles((colors, shadows) => ({
   assetCategory: {
     fontSize: fontSize.xs,
     color: colors.muted,
+  },
+  // The location line matches the kit header's, so a kit and the assets under
+  // it name their locations the same way.
+  assetLocationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  assetLocation: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+    // Shrinks beside the icon, so a long name truncates inside the card.
+    flexShrink: 1,
   },
 
   // Checkbox for selection
