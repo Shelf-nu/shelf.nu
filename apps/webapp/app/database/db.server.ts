@@ -23,7 +23,11 @@ if (NODE_ENV === "production") {
     global.__db__ = createDatabaseClient();
   }
   db = global.__db__;
-  void db.$connect();
+  // Tests run with placeholder database URLs (see `test/setup-test-env.ts`),
+  // so an eager connect there can only fail, as a late unhandled rejection
+  // that Vitest pins on whichever file happens to be running. Skipping it is
+  // safe: Prisma connects lazily on the first query.
+  if (!process.env.VITEST) void db.$connect();
 }
 
 export { db };
