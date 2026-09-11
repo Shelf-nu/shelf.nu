@@ -21,6 +21,7 @@ import {
 import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibility.server";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -33,7 +34,9 @@ import {
  *
  * Returns full kit detail for the companion app's kit screen: status,
  * custody, description, image, and the contained assets (each tappable
- * through to the asset detail screen).
+ * through to the asset detail screen). A kit image whose signed URL has
+ * lapsed is re-signed, and the new URL written back to the kit, before it is
+ * sent.
  *
  * @param args - React Router loader args.
  * @param args.request - Incoming request; carries the mobile bearer auth and
@@ -62,11 +65,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
-    const kit = await db.kit.findFirst({
+    const storedKit = await db.kit.findFirst({
       // org-scoped lookup — a foreign-org kit id resolves to null (404)
       where: { id: kitId, organizationId },
       select: {
         id: true,
+        // Scopes the write-back of a re-signed image below.
+        organizationId: true,
         name: true,
         description: true,
         status: true,
@@ -102,9 +107,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           },
         },
         // Kit ↔ Asset membership is the AssetKit pivot (see schema).
-        // Select through the pivot and synthesise a flat `assets` array
-        // below so the mobile JSON contract stays unchanged for the
-        // companion app (kit screen still receives `kit.assets[]`).
+        // Select through the pivot and synthesise the flat `kit.assets[]`
+        // array below, which is the shape the companion's kit screen reads.
         assetKits: {
           select: {
             // AssetKit.quantity — units of THIS asset held by THIS kit (the
@@ -130,10 +134,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 // its model's photo is not blank on the kit detail screen.
                 ...ASSET_MODEL_IMAGE_SELECT,
                 category: { select: { id: true, name: true } },
-                // Post-Phase-4b: `Asset.location` was replaced by the
-                // `AssetLocation` pivot. Project the primary placement
-                // through the pivot and flatten back to a single `location`
-                // field below so the mobile JSON contract stays unchanged.
+                // Placement lives on the `AssetLocation` pivot. Project the
+                // primary placement through it; it is flattened below into
+                // the single `location` field the mobile JSON contract
+                // carries.
                 assetLocations: {
                   select: { location: { select: { id: true, name: true } } },
                   take: 1,
@@ -146,12 +150,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       },
     });
 
-    if (!kit) {
+    if (!storedKit) {
       return data(
         { error: { message: "Kit not found in this workspace." } },
         { status: 404 }
       );
     }
+
+    // A kit's `image` is a signed storage URL that stops working once
+    // `imageExpiration` passes, and the app has no way to renew it. Re-sign a
+    // lapsed one so the kit screen never receives a dead link. `organizationId`
+    // only scopes that write-back, so it is dropped before the response.
+    const [refreshedKit] = await refreshExpiredKitImages([storedKit]);
+    const { organizationId: _organizationId, ...kit } = refreshedKit;
 
     // Flatten the AssetKit pivot into the asset list the companion expects.
     // Also flatten the `assetLocations[0]` pivot back into the singular
@@ -181,10 +192,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     /**
      * `kit: read` is held by BASE and SELF_SERVICE, and this select reaches
-     * `custodian.user.email`. The mobile asset detail route already nulls its
-     * legacy custody field for viewers who may not see it; this one had no
-     * gate at all. Null the whole object rather than emptying the custodian —
-     * that is the established shape on the mobile surface.
+     * `custodian.user.email`. For a viewer who may not see the holder, null
+     * the whole custody object rather than emptying the custodian: that is the
+     * established shape on the mobile surface, and the mobile asset detail
+     * route does the same with its legacy custody field.
      */
     const visibleCustody =
       kitData.custody &&

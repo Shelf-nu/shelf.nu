@@ -12,6 +12,9 @@
  *    missing and not every kit in the workspace.
  * 3. The lookup is scoped to the caller's organization, so a kit id that does
  *    not belong to it can never be described back.
+ * 4. A kit's `image` is a signed URL the app cannot renew, so the kit rows go
+ *    through `refreshExpiredKitImages` before they are sent: a lapsed URL
+ *    arrives re-signed, with the `imageExpiration` the helper returned.
  *
  * @see {@link file://./bookings.$bookingId.ts} loader under test
  */
@@ -28,6 +31,7 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import type * as BookingServiceServer from "~/modules/booking/service.server";
+import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 
 import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
 
@@ -98,11 +102,19 @@ vi.mock("~/utils/permissions/permission.validator.server", () => ({
   hasPermission: vi.fn().mockResolvedValue(false),
 }));
 
+// why: re-signing calls Supabase Storage and writes the new URL back to the
+// kit row. The helper has its own contract; the kit-image case below pins what
+// the loader does with it, and every other case gets its rows back untouched.
+vi.mock("~/modules/kit/service.server", () => ({
+  refreshExpiredKitImages: vi.fn((kits: unknown[]) => Promise.resolve(kits)),
+}));
+
 const findFirstMock = vi.mocked(db.booking.findFirst);
 const kitFindManyMock = vi.mocked(db.kit.findMany);
 const requireMobileAuthMock = vi.mocked(requireMobileAuth);
 const requireOrganizationAccessMock = vi.mocked(requireOrganizationAccess);
 const getMobileUserContextMock = vi.mocked(getMobileUserContext);
+const refreshExpiredKitImagesMock = vi.mocked(refreshExpiredKitImages);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -292,6 +304,47 @@ describe("GET /api/mobile/bookings/:bookingId — the kits its assets group unde
 
     expect(kitsFrom(await get())).toEqual([]);
     expect(kitFindManyMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/mobile/bookings/:bookingId — kit images", () => {
+  it("sends a lapsed kit image re-signed, with its new expiry", async () => {
+    findFirstMock.mockResolvedValue(
+      bookingRow([
+        slice({ id: "ba1", assetId: "a1", membership: "ak1", kit: AUDIO }),
+      ])
+    );
+    const storedKit = {
+      ...AUDIO,
+      organizationId: "org-1",
+      status: "AVAILABLE",
+      image: "https://example.test/sign/kits/audio.png?token=lapsed",
+      imageExpiration: new Date("2020-01-01T00:00:00.000Z"),
+      category: null,
+      location: null,
+      _count: { assetKits: 1 },
+    };
+    kitFindManyMock.mockResolvedValueOnce([storedKit] as never);
+    const resignedImage =
+      "https://example.test/sign/kits/audio.png?token=fresh";
+    const newExpiration = new Date("2099-01-01T00:00:00.000Z");
+    refreshExpiredKitImagesMock.mockResolvedValueOnce([
+      { ...storedKit, image: resignedImage, imageExpiration: newExpiration },
+    ]);
+
+    const kits = kitsFrom(await get());
+
+    // The rows go to the helper as the query returned them — `organizationId`
+    // included, since the helper scopes its write-back by it.
+    expect(refreshExpiredKitImagesMock).toHaveBeenCalledWith([storedKit]);
+    expect(kits[0]).toMatchObject({
+      id: "kit-audio",
+      image: resignedImage,
+      imageExpiration: newExpiration,
+      assetCount: 1,
+    });
+    // Selected for the write-back only; the app's kit shape has no such field.
+    expect(kits[0]).not.toHaveProperty("organizationId");
   });
 });
 
