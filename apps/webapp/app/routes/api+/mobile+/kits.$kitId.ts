@@ -107,9 +107,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           },
         },
         // Kit ↔ Asset membership is the AssetKit pivot (see schema).
-        // Select through the pivot and synthesise a flat `assets` array
-        // below so the mobile JSON contract stays unchanged for the
-        // companion app (kit screen still receives `kit.assets[]`).
+        // Select through the pivot and synthesise the flat `kit.assets[]`
+        // array below, which is the shape the companion's kit screen reads.
         assetKits: {
           select: {
             // AssetKit.quantity — units of THIS asset held by THIS kit (the
@@ -135,10 +134,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 // its model's photo is not blank on the kit detail screen.
                 ...ASSET_MODEL_IMAGE_SELECT,
                 category: { select: { id: true, name: true } },
-                // Post-Phase-4b: `Asset.location` was replaced by the
-                // `AssetLocation` pivot. Project the primary placement
-                // through the pivot and flatten back to a single `location`
-                // field below so the mobile JSON contract stays unchanged.
+                // Placement lives on the `AssetLocation` pivot. Project the
+                // primary placement through it; it is flattened below into
+                // the single `location` field the mobile JSON contract
+                // carries.
                 assetLocations: {
                   select: { location: { select: { id: true, name: true } } },
                   take: 1,
@@ -193,10 +192,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     /**
      * `kit: read` is held by BASE and SELF_SERVICE, and this select reaches
-     * `custodian.user.email`. The mobile asset detail route already nulls its
-     * legacy custody field for viewers who may not see it; this one had no
-     * gate at all. Null the whole object rather than emptying the custodian —
-     * that is the established shape on the mobile surface.
+     * `custodian.user.email`. For a viewer who may not see the holder, null
+     * the whole custody object rather than emptying the custodian: that is the
+     * established shape on the mobile surface, and the mobile asset detail
+     * route does the same with its legacy custody field.
      */
     const visibleCustody =
       kitData.custody &&

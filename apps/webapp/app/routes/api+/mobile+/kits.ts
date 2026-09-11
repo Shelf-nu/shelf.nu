@@ -81,8 +81,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           image: true,
           imageExpiration: true,
           // Kits link to assets via the `AssetKit` pivot model — count that
-          // relation, then re-key to `assets` below so the mobile companion's
-          // existing API contract (`_count.assets`) is preserved.
+          // relation, then re-key it below to `_count.assets`, the key the
+          // companion reads.
           _count: { select: { assetKits: true } },
           category: { select: { id: true, name: true } },
           location: { select: { id: true, name: true } },
@@ -116,10 +116,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...rest,
       _count: { assets: _count.assetKits },
       /**
-       * `kit: read` is held by BASE and SELF_SERVICE, and this list had no
-       * custody gate at all — a restricted viewer read every kit's holder
-       * from it. Null the object for holders the viewer may not see, matching
-       * the mobile detail routes; the caller's own custody stays visible.
+       * `kit: read` is held by BASE and SELF_SERVICE, so a restricted viewer
+       * reaches this list. Null the object for holders the viewer may not
+       * see, matching the mobile detail routes; the caller's own custody
+       * stays visible.
        */
       custody:
         rest.custody &&
