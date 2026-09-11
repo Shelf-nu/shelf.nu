@@ -363,7 +363,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               (RESERVED/ONGOING/OVERDUE with still-Booked items) into a single
               dropdown — mirroring the check-in dropdown for a consistent header.
               CheckoutDropdown renders a single button when only one option
-              applies, and nothing when neither does.
+              applies, and only "Scan to check out" when the workspace requires
+              explicit check-out for the viewer's role.
 
               When the booking has outstanding `BookingModelRequest` rows the
               normal RESERVED → ONGOING transition is refused by the server
@@ -438,6 +439,13 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                       )
                     }
                     checkOutDisabled={checkoutDisabled}
+                    requireExplicitCheckout={
+                      !isOwner &&
+                      ((isAdministrator &&
+                        bookingSettings.requireExplicitCheckoutForAdmin) ||
+                        (isSelfService &&
+                          bookingSettings.requireExplicitCheckoutForSelfService))
+                    }
                   />
                 );
               })()}

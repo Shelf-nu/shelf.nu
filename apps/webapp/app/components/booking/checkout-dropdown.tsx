@@ -18,6 +18,10 @@
  * When only the quick option applies the component renders it as a single
  * button instead of a dropdown.
  *
+ * When the workspace requires explicit check-out for the viewer's role, the
+ * quick option is refused on the server, so the component renders only the
+ * "Scan to check out" button.
+ *
  * @see {@link file://./checkout-dialog.tsx} - the "Check Out" trigger/flow
  * @see {@link file://./forms/edit-booking-form.tsx} - the call site
  */
@@ -62,14 +66,24 @@ type CheckoutDropdownProps = {
   canCheckOutRemaining: boolean;
   /** Whether the progressive "Scan to check out" option is available */
   canScanCheckOut: boolean;
+  /**
+   * Whether the workspace requires the explicit check-out flow (scan or
+   * select) for the viewer's role. When true, only "Scan to check out" is
+   * rendered and neither quick option is offered.
+   */
+  requireExplicitCheckout?: boolean;
 };
 
 /**
  * Renders the check-out control for a booking.
  *
+ * Render it only when at least one option applies; the call site guarantees
+ * that through the booking status.
+ *
  * @param props - {@link CheckoutDropdownProps}
- * @returns A dropdown when both options apply, otherwise a single button, or
- *   `null` when neither option is available.
+ * @returns Only the "Scan to check out" button when explicit check-out is
+ *   required; otherwise a single button when one option applies, or a
+ *   dropdown when both do.
  */
 export default function CheckoutDropdown({
   disabled,
@@ -80,6 +94,7 @@ export default function CheckoutDropdown({
   canFullCheckOut,
   canCheckOutRemaining,
   canScanCheckOut,
+  requireExplicitCheckout,
 }: CheckoutDropdownProps) {
   const {
     ref: dropdownRef,
@@ -134,6 +149,24 @@ export default function CheckoutDropdown({
       </span>
     </Button>
   );
+
+  // Explicit check-out is required for this role: the server refuses both
+  // quick options, so offer only the scanner. It keeps the primary variant
+  // while RESERVED, where checking out is the main action.
+  if (requireExplicitCheckout) {
+    return (
+      <Button
+        variant={triggerVariant}
+        icon="scan"
+        size="sm"
+        className="grow whitespace-nowrap"
+        to={`/bookings/${booking.id}/overview/checkout-assets`}
+        disabled={disabled}
+      >
+        Scan to check out
+      </Button>
+    );
+  }
 
   // Only the progressive scan applies (no quick option). Render a single
   // secondary button — no dropdown needed.
