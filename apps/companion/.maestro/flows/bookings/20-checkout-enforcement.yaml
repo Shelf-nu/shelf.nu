@@ -1,0 +1,86 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Check-out enforcement (mobile) [ROLE+FIXTURE-DEPENDENT]"
+tags:
+  - bookings
+  - checkout
+  - enforcement
+  - fixture-dependent
+env:
+  BOOKING_NAME: "REPLACE WITH RESERVED BOOKING NAME"
+
+---
+# Verifies the explicit check-out requirement: when "Require explicit
+# check-out" is ON for the signed-in user's role, a RESERVED booking's detail
+# HIDES the one-tap "Check Out All Assets" and keeps "Select to Check Out".
+# The server refuses the one-tap check-out for that role anyway; this checks
+# that the app does not offer it.
+#
+# !! PRECONDITIONS — the rule is UNOBSERVABLE unless ALL of these hold:
+#   1. ROLE: the app is signed in as a SELF_SERVICE (or ADMIN) member of
+#      GRANULAR WORKSPACE, NOT the workspace owner. The owner is exempt and
+#      always sees "Check Out All Assets", so this flow would false-fail.
+#      An app already signed in keeps its session. An app on the login screen
+#      signs in through login-self-service.yaml, which needs
+#      SHELF_TEST_SELF_SERVICE_EMAIL / SHELF_TEST_SELF_SERVICE_PASSWORD.
+#   2. SETTING: "Require explicit check-out for Self Service" (or "for Admins")
+#      is ON for that workspace: Settings > Bookings as the owner, or psql:
+#        UPDATE "BookingSettings"
+#        SET "requireExplicitCheckoutForSelfService" = true
+#        WHERE "organizationId" = '<workspace id>';
+#   3. FIXTURE: a RESERVED booking with >0 assets, held by the signed-in user,
+#      with no unassigned model reservations. Put its exact name in
+#      BOOKING_NAME.
+#   Read-only (asserts visibility only — no mutations, no cleanup).
+#   Keep OUT of the idempotent smoke suite; run only in a seeded env.
+#
+# Selectors verified from app/(tabs)/bookings/[id].tsx and
+# app/(tabs)/bookings/index.tsx.
+
+- runFlow:
+    when:
+      visible:
+        id: "email-input"
+    file: ../../shared/login-self-service.yaml
+
+# The iOS "Save Password?" prompt can appear LATE (after the login flow's own
+# dismissal), covering the nav — clear it if present, then wait for the tab bar.
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 15000
+
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*Current workspace.*"
+    timeout: 8000
+- tapOn: ".*Current workspace.*"
+- tapOn: "GRANULAR WORKSPACE"
+- waitForAnimationToEnd
+
+- tapOn: "Bookings"
+- tapOn:
+    text: "Bookings"
+- extendedWaitUntil:
+    visible: "Filter: Reserved.*"
+    timeout: 30000
+- tapOn: "Filter: Reserved.*"
+- scrollUntilVisible:
+    element:
+      text: "Booking: ${BOOKING_NAME}.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    text: "Booking: ${BOOKING_NAME}.*"
+- extendedWaitUntil:
+    visible: "More booking actions"
+    timeout: 20000
+
+# CORE: the one-tap check-out must be ABSENT when enforcement is ON...
+- assertNotVisible: "Check out all assets in this booking"
+- assertNotVisible: "Check Out All Assets"
+# ...while the explicit entry point REMAINS (proves the booking is truly
+# reserved and the panel rendered — guards against a false "absent" pass).
+- assertVisible: "Select assets to check out"
+- takeScreenshot: checkout-enforcement-forced

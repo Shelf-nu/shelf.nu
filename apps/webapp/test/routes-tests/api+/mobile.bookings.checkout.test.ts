@@ -1,5 +1,7 @@
+import { OrganizationRoles } from "@prisma/client";
 import { action } from "~/routes/api+/mobile+/bookings.checkout";
 import { createActionArgs } from "@mocks/remix";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
@@ -47,6 +49,11 @@ vi.mock("~/database/db.server", () => ({
   db: { booking: { findFirst: vi.fn() } },
 }));
 
+// why: workspace settings drive the explicit-check-out gate — mock to avoid DB
+vi.mock("~/modules/booking-settings/service.server", () => ({
+  getBookingSettingsForOrganization: vi.fn(),
+}));
+
 // why: we need to control error formatting in the catch block
 vi.mock("~/utils/error", () => ({
   makeShelfError: vi.fn(),
@@ -67,8 +74,20 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
+
+/** The workspace's explicit check-out switches, both off unless a test says. */
+function explicitCheckout({
+  admin = false,
+  selfService = false,
+}: { admin?: boolean; selfService?: boolean } = {}) {
+  return {
+    requireExplicitCheckoutForAdmin: admin,
+    requireExplicitCheckoutForSelfService: selfService,
+  };
+}
 
 const mockUser = {
   id: "user-1",
@@ -108,10 +127,20 @@ describe("POST /api/mobile/bookings/checkout", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
     // Default: the caller owns the booking, so the ownership guard is a
     // no-op and the pre-existing cases still test what they were written for.
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
-      roles: ["SELF_SERVICE"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
+    // Default: explicit check-out is not required, so the one-tap path is open.
+    (getBookingSettingsForOrganization as any).mockResolvedValue(
+      explicitCheckout()
+    );
+    // The route answers with the error's own message and status.
+    (makeShelfError as any).mockImplementation(
+      (cause: { message: string; status?: number }) => ({
+        message: cause.message,
+        status: cause.status ?? 500,
+      })
+    );
     (db.booking.findFirst as any).mockResolvedValue({
       from: BOOKING_FROM,
       to: BOOKING_TO,
@@ -187,10 +216,9 @@ describe("POST /api/mobile/bookings/checkout", () => {
   it("refuses a SELF_SERVICE user checking out someone else's booking", async () => {
     // SELF_SERVICE holds `booking:checkout`, so the role gate above passes for
     // ANY booking id in the organization. Only the ownership guard stops this.
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
-      roles: ["SELF_SERVICE"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
     (db.booking.findFirst as any).mockResolvedValue({
       from: BOOKING_FROM,
       to: BOOKING_TO,
@@ -207,10 +235,9 @@ describe("POST /api/mobile/bookings/checkout", () => {
 
   it("still lets ADMIN check out a booking they do not own", async () => {
     // The guard is a no-op for ADMIN/OWNER — it must not break admin workflows.
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
-      roles: ["ADMIN"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+    );
     (db.booking.findFirst as any).mockResolvedValue({
       from: BOOKING_FROM,
       to: BOOKING_TO,
@@ -228,10 +255,11 @@ describe("POST /api/mobile/bookings/checkout", () => {
     // `getMobileUserContext.role` is roles[0], so a membership ordered
     // [SELF_SERVICE, ADMIN] resolves to SELF_SERVICE — the guard would refuse
     // an actual admin. The guard reads the whole array instead.
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
-      roles: ["SELF_SERVICE", "ADMIN"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({
+        roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
+      })
+    );
     (db.booking.findFirst as any).mockResolvedValue({
       creatorId: "someone-else",
       custodianUserId: "someone-else",
@@ -241,5 +269,97 @@ describe("POST /api/mobile/bookings/checkout", () => {
     await action(createActionArgs({ request }));
 
     expect(checkoutBooking).toHaveBeenCalled();
+  });
+  describe("explicit check-out requirement", () => {
+    const EXPLICIT_MESSAGE =
+      "This workspace requires explicit check-out. Scan or select the assets to check them out.";
+
+    it("refuses an ADMIN's one-tap check-out (403) when admins must check out explicitly", async () => {
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+      );
+      (getBookingSettingsForOrganization as any).mockResolvedValue(
+        explicitCheckout({ admin: true })
+      );
+
+      const request = createCheckoutRequest({ bookingId: "booking-1" });
+      const result = (await action(
+        createActionArgs({ request })
+      )) as unknown as Response;
+
+      expect(result.status).toBe(403);
+      expect((await result.json()).error.message).toBe(EXPLICIT_MESSAGE);
+      // The one-tap check-out must NOT run: the user scans or selects instead.
+      expect(checkoutBooking).not.toHaveBeenCalled();
+    });
+
+    it("refuses a SELF_SERVICE user's one-tap check-out when their switch is on", async () => {
+      (getBookingSettingsForOrganization as any).mockResolvedValue(
+        explicitCheckout({ selfService: true })
+      );
+
+      const request = createCheckoutRequest({ bookingId: "booking-1" });
+      const result = (await action(
+        createActionArgs({ request })
+      )) as unknown as Response;
+
+      expect(result.status).toBe(403);
+      expect((await result.json()).error.message).toBe(EXPLICIT_MESSAGE);
+      expect(checkoutBooking).not.toHaveBeenCalled();
+    });
+
+    it("lets the OWNER check out in one tap whatever the switches say", async () => {
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: [OrganizationRoles.OWNER] })
+      );
+      (getBookingSettingsForOrganization as any).mockResolvedValue(
+        explicitCheckout({ admin: true, selfService: true })
+      );
+      (checkoutBooking as any).mockResolvedValue({
+        id: "booking-1",
+        name: "Test Booking",
+        status: "ONGOING",
+      });
+
+      const request = createCheckoutRequest({ bookingId: "booking-1" });
+      const result = (await action(
+        createActionArgs({ request })
+      )) as unknown as Response;
+
+      expect(result.status).toBe(200);
+      expect(checkoutBooking).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets an ADMIN through when only the Self Service switch is on", async () => {
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+      );
+      (getBookingSettingsForOrganization as any).mockResolvedValue(
+        explicitCheckout({ selfService: true })
+      );
+
+      const request = createCheckoutRequest({ bookingId: "booking-1" });
+      await action(createActionArgs({ request }));
+
+      expect(checkoutBooking).toHaveBeenCalledTimes(1);
+    });
+
+    it("judges a multi-role membership by its most privileged role", async () => {
+      // [SELF_SERVICE, ADMIN] is an admin: the Self Service switch does not
+      // apply, even though SELF_SERVICE comes first in the array.
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({
+          roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
+        })
+      );
+      (getBookingSettingsForOrganization as any).mockResolvedValue(
+        explicitCheckout({ selfService: true })
+      );
+
+      const request = createCheckoutRequest({ bookingId: "booking-1" });
+      await action(createActionArgs({ request }));
+
+      expect(checkoutBooking).toHaveBeenCalledTimes(1);
+    });
   });
 });
