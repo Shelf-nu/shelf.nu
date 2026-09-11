@@ -24,6 +24,8 @@ export const BOOKING_SETTINGS_SELECT = {
   autoArchiveExpiredReservations: true,
   requireExplicitCheckinForAdmin: true,
   requireExplicitCheckinForSelfService: true,
+  requireExplicitCheckoutForAdmin: true,
+  requireExplicitCheckoutForSelfService: true,
   countKitsAsSingleUnit: true,
   notifyBookingCreator: true,
   notifyAdminsOnNewBooking: true,
@@ -136,6 +138,8 @@ export async function getBookingSettingsForOrganization(
           autoArchiveExpiredReservations: false,
           requireExplicitCheckinForAdmin: false,
           requireExplicitCheckinForSelfService: false,
+          requireExplicitCheckoutForAdmin: false,
+          requireExplicitCheckoutForSelfService: false,
           countKitsAsSingleUnit: false,
           notifyBookingCreator: true,
           notifyAdminsOnNewBooking: true,
@@ -164,6 +168,17 @@ export async function getBookingSettingsForOrganization(
   }
 }
 
+/**
+ * Updates an organization's booking settings.
+ *
+ * Only the fields passed with a value are written; every field left
+ * `undefined` keeps its stored value, so each settings card can save its own
+ * fields without resending the others.
+ *
+ * @param args - The organization id plus the settings fields to change
+ * @returns The updated settings, in the {@link BOOKING_SETTINGS_SELECT} shape
+ * @throws {ShelfError} If the organization has no settings row or the update fails
+ */
 export async function updateBookingSettings({
   organizationId,
   bufferStartTime,
@@ -175,6 +190,8 @@ export async function updateBookingSettings({
   autoArchiveExpiredReservations,
   requireExplicitCheckinForAdmin,
   requireExplicitCheckinForSelfService,
+  requireExplicitCheckoutForAdmin,
+  requireExplicitCheckoutForSelfService,
   countKitsAsSingleUnit,
   notifyBookingCreator,
   notifyAdminsOnNewBooking,
@@ -189,6 +206,8 @@ export async function updateBookingSettings({
   autoArchiveExpiredReservations?: boolean;
   requireExplicitCheckinForAdmin?: boolean;
   requireExplicitCheckinForSelfService?: boolean;
+  requireExplicitCheckoutForAdmin?: boolean;
+  requireExplicitCheckoutForSelfService?: boolean;
   countKitsAsSingleUnit?: boolean;
   notifyBookingCreator?: boolean;
   notifyAdminsOnNewBooking?: boolean;
@@ -216,6 +235,12 @@ export async function updateBookingSettings({
     if (requireExplicitCheckinForSelfService !== undefined)
       updateData.requireExplicitCheckinForSelfService =
         requireExplicitCheckinForSelfService;
+    if (requireExplicitCheckoutForAdmin !== undefined)
+      updateData.requireExplicitCheckoutForAdmin =
+        requireExplicitCheckoutForAdmin;
+    if (requireExplicitCheckoutForSelfService !== undefined)
+      updateData.requireExplicitCheckoutForSelfService =
+        requireExplicitCheckoutForSelfService;
     if (countKitsAsSingleUnit !== undefined)
       updateData.countKitsAsSingleUnit = countKitsAsSingleUnit;
     if (notifyBookingCreator !== undefined)
