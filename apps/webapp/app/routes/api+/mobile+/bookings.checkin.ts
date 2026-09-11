@@ -45,19 +45,23 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    // PARITY with the web check-in action (bookings.$bookingId.overview.tsx
-    // :1034-1054): when the workspace requires EXPLICIT check-in for the
-    // caller's role, the quick "check in all" path is forbidden — they must
-    // scan / select the assets (the partial-checkin path). The mobile app must
-    // NEVER be more permissive than the web / a workspace's settings, so we
-    // enforce the same policy server-side here.
-    const { role, roles } = await getMobileUserContext(user.id, organizationId);
+    // PARITY with the web booking action's `checkIn` guard: when the workspace
+    // requires EXPLICIT check-in for the caller's role, the quick "check in
+    // all" path is forbidden — they must scan / select the assets (the
+    // partial-checkin path). The mobile app must NEVER be more permissive than
+    // the web / a workspace's settings, so we enforce the same policy
+    // server-side here. Judged by the most privileged role, as the loader's
+    // `canQuickCheckin` is, so the app never offers a button this refuses.
+    const { roles, effectiveRole } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const explicitCheckinRequired =
-      (role === OrganizationRoles.ADMIN &&
+      (effectiveRole === OrganizationRoles.ADMIN &&
         bookingSettings.requireExplicitCheckinForAdmin) ||
-      (role === OrganizationRoles.SELF_SERVICE &&
+      (effectiveRole === OrganizationRoles.SELF_SERVICE &&
         bookingSettings.requireExplicitCheckinForSelfService);
     if (explicitCheckinRequired) {
       throw new ShelfError({
@@ -105,8 +109,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Cross-user IDOR guard, mirroring the checkout routes: SELF_SERVICE holds
     // `booking:checkin`, so the role gate above passes for ANY booking id in
     // the organization, and `checkinBooking` does not check ownership itself.
-    // No-op for ADMIN/OWNER. `role` is already resolved above for the
-    // explicit-checkin policy.
+    // No-op for ADMIN/OWNER.
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,

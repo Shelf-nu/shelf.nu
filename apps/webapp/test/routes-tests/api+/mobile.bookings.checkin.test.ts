@@ -1,5 +1,7 @@
+import { OrganizationRoles } from "@prisma/client";
 import { action } from "~/routes/api+/mobile+/bookings.checkin";
 import { createActionArgs } from "@mocks/remix";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
@@ -114,10 +116,9 @@ describe("POST /api/mobile/bookings/checkin", () => {
     });
     (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
     // Default: admin role + explicit check-in NOT required (quick check-in OK).
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
-      roles: ["ADMIN"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+    );
     (getBookingSettingsForOrganization as any).mockResolvedValue({
       requireExplicitCheckinForAdmin: false,
       requireExplicitCheckinForSelfService: false,
@@ -174,10 +175,9 @@ describe("POST /api/mobile/bookings/checkin", () => {
   it("blocks quick check-in (403) when the workspace requires explicit check-in for the role", async () => {
     // Admin in a workspace that mandates explicit (scan/select) check-in for
     // admins — quick "check in all" must be refused, mirroring the web policy.
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
-      roles: ["ADMIN"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+    );
     (getBookingSettingsForOrganization as any).mockResolvedValue({
       requireExplicitCheckinForAdmin: true,
       requireExplicitCheckinForSelfService: false,
@@ -199,10 +199,9 @@ describe("POST /api/mobile/bookings/checkin", () => {
     // SELF_SERVICE holds `booking:checkin`, so the role gate above passes for
     // ANY booking id in the organization, and `checkinBooking` does not check
     // ownership itself. Only the ownership guard stops this.
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
-      roles: ["SELF_SERVICE"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
     (db.booking.findFirst as any).mockResolvedValue({
       creatorId: "someone-else",
       custodianUserId: "someone-else",
@@ -216,10 +215,9 @@ describe("POST /api/mobile/bookings/checkin", () => {
   });
 
   it("still lets ADMIN check in a booking they do not own", async () => {
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
-      roles: ["ADMIN"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+    );
     (db.booking.findFirst as any).mockResolvedValue({
       creatorId: "someone-else",
       custodianUserId: "someone-else",
@@ -235,13 +233,33 @@ describe("POST /api/mobile/bookings/checkin", () => {
     // `getMobileUserContext.role` is roles[0], so a membership ordered
     // [SELF_SERVICE, ADMIN] resolves to SELF_SERVICE — the guard would refuse
     // an actual admin. The guard reads the whole array instead.
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
-      roles: ["SELF_SERVICE", "ADMIN"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({
+        roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
+      })
+    );
     (db.booking.findFirst as any).mockResolvedValue({
       creatorId: "someone-else",
       custodianUserId: "someone-else",
+    });
+
+    const request = createCheckinRequest({ bookingId: "booking-1" });
+    await action(createActionArgs({ request }));
+
+    expect(checkinBooking).toHaveBeenCalled();
+  });
+  it("judges the explicit check-in policy by the most privileged role", async () => {
+    // [SELF_SERVICE, ADMIN] is an admin, and the loader offers "Check In All"
+    // to it when only the Self Service switch is on. The route must agree
+    // rather than refuse by the array's first role.
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({
+        roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
+      })
+    );
+    (getBookingSettingsForOrganization as any).mockResolvedValue({
+      requireExplicitCheckinForAdmin: false,
+      requireExplicitCheckinForSelfService: true,
     });
 
     const request = createCheckinRequest({ bookingId: "booking-1" });
