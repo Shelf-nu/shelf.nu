@@ -26,6 +26,7 @@ import {
 } from "~/modules/booking/service.server";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -39,6 +40,8 @@ import { hasPermission } from "~/utils/permissions/permission.validator.server";
  * GET /api/mobile/bookings/:bookingId
  *
  * Returns full booking detail with assets, custodian, and check-in status.
+ * A kit image whose signed URL has lapsed is re-signed, and the new URL
+ * written back to the kit, before it is sent.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -545,7 +548,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // own. It is org-scoped as well as id-scoped: a kit id reaching this query
     // came from a BookingAsset row, but scoping it keeps the response's kit
     // payload inside the caller's workspace by construction.
-    const [sliceRows, checkoutSessionRows, kitRows] = await Promise.all([
+    const [sliceRows, checkoutSessionRows, storedKitRows] = await Promise.all([
       db.bookingAsset.findMany({
         where: { bookingId: booking.id },
         select: {
@@ -566,6 +569,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             where: { id: { in: bookingKitIds }, organizationId },
             select: {
               id: true,
+              // Scopes the write-back of a re-signed image below.
+              organizationId: true,
               name: true,
               status: true,
               image: true,
@@ -581,6 +586,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           })
         : Promise.resolve([]),
     ]);
+    // A kit's `image` is a signed storage URL that stops working once
+    // `imageExpiration` passes, and the app has no way to renew it. Re-sign the
+    // lapsed ones so a kit header never receives a dead link. `organizationId`
+    // only scopes that write-back, so it is dropped before the response.
+    const kitRows = (await refreshExpiredKitImages(storedKitRows)).map(
+      ({ organizationId: _organizationId, ...kit }) => kit
+    );
     const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
       slices: sliceRows,
       checkoutSessions: checkoutSessionRows,
