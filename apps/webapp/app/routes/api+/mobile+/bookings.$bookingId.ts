@@ -13,8 +13,10 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { ASSET_LOCATIONS_INCLUDE } from "~/modules/asset/fields";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { getPrimaryLocation } from "~/modules/asset/utils";
 import { computeDispatchedUnitsByAsset } from "~/modules/booking/checkout-attribution";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
@@ -173,6 +175,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                   },
                   orderBy: { createdAt: "asc" },
                 },
+                // Where the asset sits, through the `AssetLocation` pivot.
+                // Only the primary placement is sent (see `location` below),
+                // picked by the shared placement order, so an asset placed in
+                // several locations names the same one on every refresh.
+                assetLocations: {
+                  select: { location: { select: { id: true, name: true } } },
+                  orderBy: ASSET_LOCATIONS_INCLUDE.orderBy,
+                  take: 1,
+                },
               },
             },
           },
@@ -234,9 +245,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // = mixed standalone + kit-driven). Mobile clients that don't know
     // about `assetKitId` see the same flat shape they always did.
     //
-    // `slices` additively exposes the per-BookingAsset-row breakdown (Gap 1,
-    // Companion QT display parity) so the app can render standalone vs.
-    // kit-driven booked units separately instead of only the merged total.
+    // `slices` additively exposes the per-BookingAsset-row breakdown, so the
+    // app can render standalone vs. kit-driven booked units separately instead
+    // of only the merged total.
     type SliceRow = {
       bookingAssetId: string;
       quantity: number;
@@ -283,7 +294,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     const assets = Array.from(byAssetId.values()).map((row) => {
-      const { assetKits, ...rest } = row.first.asset;
+      // `assetLocations` is taken out here so the pivot never reaches the
+      // payload; it is sent only as the flat `location` below.
+      const { assetKits, assetLocations, ...rest } = row.first.asset;
       // why: no `sourceKitId` fallback for detached kit residue here. This
       // response collapses per asset rather than grouping by kit, and the
       // unanimous rule below deliberately reports `null` rather than guessing
@@ -294,10 +307,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // mis-attribute the slice to one of multiple sources.
       const unanimousAssetKitId =
         row.assetKitIds.size === 1 ? Array.from(row.assetKitIds)[0] : null;
-      // Merged kit = the kit of the unanimous membership, else null. This
-      // REPLACES the legacy `assetKits[0].kit` synthesis, which mislabelled
-      // standalone/mixed rows with an arbitrary membership. Safe for old
-      // clients: they already render a null kit (INDIVIDUAL assets have one).
+      // Merged kit = the kit of the unanimous membership, else null. Never an
+      // arbitrary membership such as `assetKits[0]`: a standalone or mixed row
+      // has no single kit to name. Clients already render a null kit, which
+      // every standalone INDIVIDUAL asset has.
       const mergedKit =
         unanimousAssetKitId != null
           ? assetKits.find((ak) => ak.id === unanimousAssetKitId)?.kit ?? null
@@ -306,6 +319,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // Resolves the model-image cascade and drops the nested `assetModel`,
         // so the companion keeps one source of truth for the image.
         ...serializeAssetImage(rest),
+        // The asset's primary location, for the location line web's booking
+        // page shows on every asset row, kit members included. `null` when
+        // the asset is unplaced. Additive: older clients ignore it.
+        location: getPrimaryLocation({ assetLocations }),
         kit: mergedKit,
         kitId: mergedKit?.id ?? null,
         // Per-booking quantity (sum of all slices for this asset in
@@ -372,9 +389,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Checkinable while ONGOING/OVERDUE AND something is still to check in.
     // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: booked units not
     // yet reconciled = remainingToCheckIn > 0 (booked − returned/consumed/lost/
-    // damaged) — the SAME "remaining" the web check-in drawer caps at. The old
-    // `checkedOutCount > 0` gate hid check-in on a partially-checked-out QT
-    // booking, whose asset status stays AVAILABLE while units are still booked.
+    // damaged) — the SAME "remaining" the web check-in drawer caps at. Status
+    // cannot answer this for a QT asset: it stays AVAILABLE while some of its
+    // units are still out.
     const hasCheckinable = assets.some((a) => {
       if (a.type === AssetType.QUANTITY_TRACKED) {
         const rem = remainingByAsset.get(a.id);

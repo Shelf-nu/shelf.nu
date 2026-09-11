@@ -16,6 +16,7 @@ import {
   Platform,
   ActionSheetIOS,
   Modal,
+  type LayoutChangeEvent,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
@@ -50,6 +51,7 @@ import {
 } from "@/components/checkin-disposition-sheet";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
+import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
 import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
 import {
   bookingRowKey,
@@ -62,6 +64,7 @@ import {
   splitRemovalSelection,
   type BookingRow,
 } from "@/lib/booking-kit-rows";
+import { filterBookingAssets } from "@/lib/booking-search";
 
 /**
  * Booking-scoped lifecycle state for a QUANTITY_TRACKED asset row. The asset's
@@ -120,6 +123,12 @@ const LIFECYCLE_COLORS = {
   returned: "#22C55E",
 } as const;
 
+/**
+ * The booking detail screen: the booking's details, the actions its status and
+ * the caller's role allow, its reserved models, and its assets and kits, which
+ * can be searched, grouped under their kits, and selected for check-in,
+ * check-out or removal.
+ */
 export default function BookingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -154,11 +163,10 @@ export default function BookingDetailScreen() {
    * Mirrors the web's `canUserManageBookingAssets`: closed statuses reject, and
    * a RESTRICTED role may only build its own DRAFT booking.
    *
-   * BASE as well as SELF_SERVICE. The web passes both roles into that helper
-   * (its parameter is named `isSelfService` but every caller hands it
-   * `isBaseOrSelfService`), while this screen tested SELF_SERVICE alone. A BASE
-   * custodian is a custodian at every status, so the add, browse, remove and
-   * fulfil affordances below stayed on past DRAFT for them.
+   * BASE as well as SELF_SERVICE: the web passes both roles into that helper
+   * (its parameter is named `isSelfService`, but every caller hands it
+   * `isBaseOrSelfService`). The add, browse, remove and fulfil affordances
+   * below therefore turn off past DRAFT for both roles.
    */
   const isRestrictedRole = Boolean(
     currentOrg?.roles?.some((r) => r === "SELF_SERVICE" || r === "BASE")
@@ -182,6 +190,16 @@ export default function BookingDetailScreen() {
   // Kits open collapsed, as on the website: a booking of several kits should
   // read as a short list of cases, not as every asset inside them.
   const [expandedKitIds, setExpandedKitIds] = useState<Set<string>>(new Set());
+  // What the user typed into the assets search. It narrows what the list shows
+  // and nothing else: the selection, the select modes and the counts above the
+  // list all keep reading the whole booking.
+  const [searchTerm, setSearchTerm] = useState("");
+  const isSearching = searchTerm.trim().length > 0;
+  const listRef = useRef<FlatList<BookingRow>>(null);
+  // The search box's offset from the top of the list's content. The box sits
+  // directly in the list header, which starts the content, so its layout `y`
+  // is that offset.
+  const searchBoxY = useRef(0);
 
   // Sequential quantity picker for checking out QUANTITY_TRACKED assets: the
   // user selects the rows, then we walk each QT asset asking "how many units?"
@@ -781,8 +799,13 @@ export default function BookingDetailScreen() {
   }, []);
 
   /**
-   * The list's rows: one header per kit, its members beneath when open, and
-   * every ungrouped asset where the server put it.
+   * The whole booking as rows: one header per kit, its members beneath when
+   * open, and every ungrouped asset where the server put it.
+   *
+   * Everything that acts on the selection reads these rows, never the searched
+   * ones. A selection made before a search can hold assets the search hides,
+   * and `splitRemovalSelection` has to see all of them to tell a whole kit from
+   * a standalone row.
    */
   const rows = useMemo(
     () =>
@@ -793,6 +816,38 @@ export default function BookingDetailScreen() {
       }),
     [booking?.assets, booking?.kits, expandedKitIds]
   );
+
+  /**
+   * The rows the list shows: the whole booking, or what the search found. A
+   * search returns kits whole, so a kit header here counts, badges and selects
+   * the same members it does in `rows`.
+   */
+  const visibleRows = useMemo(() => {
+    const allAssets = booking?.assets ?? [];
+    const found = filterBookingAssets(allAssets, booking?.kits, searchTerm);
+    if (found === allAssets) return rows;
+    return buildBookingRows({
+      assets: found,
+      kits: booking?.kits,
+      expandedKitIds,
+    });
+  }, [booking?.assets, booking?.kits, expandedKitIds, rows, searchTerm]);
+
+  /**
+   * Scrolls the search box to the top of the list, so the rows it finds fill
+   * the space above the keyboard rather than sitting behind it.
+   */
+  const revealSearchResults = useCallback(() => {
+    listRef.current?.scrollToOffset({
+      offset: Math.max(0, searchBoxY.current - spacing.sm),
+      animated: true,
+    });
+  }, []);
+
+  /** Keeps `searchBoxY` in step with where the search box is laid out. */
+  const recordSearchBoxY = useCallback((event: LayoutChangeEvent) => {
+    searchBoxY.current = event.nativeEvent.layout.y;
+  }, []);
 
   const toggleKitExpansion = useCallback((kitId: string) => {
     setExpandedKitIds((prev) => {
@@ -899,11 +954,11 @@ export default function BookingDetailScreen() {
               pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${item.id}`);
             }
           }}
-          accessibilityLabel={`${item.title}, ${stateLabel}${
-            isCheckedIn ? ", checked in" : ""
-          }${isSelected ? ", selected" : ""}${
-            selectable ? ". Tap to select" : ""
-          }`}
+          accessibilityLabel={`${item.title}${
+            item.location ? `, at ${item.location.name}` : ""
+          }, ${stateLabel}${isCheckedIn ? ", checked in" : ""}${
+            isSelected ? ", selected" : ""
+          }${selectable ? ". Tap to select" : ""}`}
           accessibilityRole="button"
         >
           {selectable && (
@@ -984,6 +1039,20 @@ export default function BookingDetailScreen() {
                 {item.category.name}
               </Text>
             )}
+            {/* Kit members carry their own location too, as on the website.
+                An older server sends none, and the row then has no line. */}
+            {item.location ? (
+              <View style={styles.assetLocationRow}>
+                <Ionicons
+                  name="location-outline"
+                  size={11}
+                  color={colors.mutedLight}
+                />
+                <Text style={styles.assetLocation} numberOfLines={1}>
+                  {item.location.name}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
@@ -1103,8 +1172,8 @@ export default function BookingDetailScreen() {
    *
    * The first two are decided from rows this screen already holds. The third
    * cannot be — it needs the overlapping-booking query — so the server sends
-   * it as a flag. `?? false` keeps a not-yet-updated server (rolling deploy,
-   * field absent) on the old behavior rather than blocking Reserve outright.
+   * it as a flag. `?? false` reads a server that does not send the flag
+   * (rolling deploy) as reporting no conflict, rather than blocking Reserve.
    *
    * All three are enforced server-side too: the first two in
    * `bookings.reserve.ts`, the third by `reserveBooking`'s race-safe conflict
@@ -1211,10 +1280,19 @@ export default function BookingDetailScreen() {
       )}
 
       <FlatList
-        data={rows}
+        ref={listRef}
+        data={visibleRows}
         renderItem={renderRow}
         keyExtractor={bookingRowKey}
         contentContainerStyle={styles.list}
+        // With the search keyboard up, the first tap on a row selects it
+        // instead of only closing the keyboard; scrolling puts it away. On iOS
+        // the keyboard's height is added below the rows, so the search box can
+        // scroll to the top even when few rows match. Android resizes the
+        // window instead, where a short list may stop short of the top.
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
         removeClippedSubviews
         maxToRenderPerBatch={10}
         windowSize={5}
@@ -1226,6 +1304,13 @@ export default function BookingDetailScreen() {
             tintColor={colors.muted}
             accessibilityLabel="Pull to refresh"
           />
+        }
+        ListEmptyComponent={
+          isSearching ? (
+            <Text style={styles.searchEmpty}>
+              No assets match &ldquo;{searchTerm.trim()}&rdquo;
+            </Text>
+          ) : null
         }
         ListHeaderComponent={
           <View style={styles.header}>
@@ -1304,10 +1389,9 @@ export default function BookingDetailScreen() {
                   </View>
                 )}
 
-                {/* why: web shows who created the booking on this same screen,
-                    and the field was already in the payload — fetched, then
-                    dropped. Custodian and creator are different people often
-                    enough that showing only one is misleading. */}
+                {/* why: web shows who created the booking on this same screen.
+                    Custodian and creator are different people often enough
+                    that showing only one is misleading. */}
                 {creatorName ? (
                   <View style={styles.infoRow}>
                     <Ionicons
@@ -1436,11 +1520,10 @@ export default function BookingDetailScreen() {
                 </View>
               </View>
             )}
-            {/* why visible rather than only in an alert: the disabled Reserve
-                  button was a dead control - tapping it produced nothing on
-                  device, so the one thing a user needs (what to fix) was
-                  unreachable. Stating it here does not depend on a tap firing,
-                  and it is readable before you even reach for the button. */}
+            {/* why visible rather than only in an alert: a disabled button
+                  takes no taps, so a reason shown on tap could never appear.
+                  Stating it here does not depend on a tap firing, and it is
+                  readable before you even reach for the button. */}
             {booking.status === "DRAFT" && reserveBlockedReason ? (
               <Text style={styles.reserveBlockedNote}>
                 {reserveBlockedReason}
@@ -1930,6 +2013,19 @@ export default function BookingDetailScreen() {
                 Assets ({booking.assetCount})
               </Text>
             )}
+
+            {/* The booking arrives whole, so the search filters the rows the
+                screen already holds and fetches nothing. The box stays while a
+                term is set, so a term that outlives the last asset can still
+                be cleared. */}
+            {booking.assets.length > 0 || searchTerm !== "" ? (
+              <BookingAssetsSearch
+                value={searchTerm}
+                onChangeText={setSearchTerm}
+                onFocus={revealSearchResults}
+                onLayout={recordSearchBoxY}
+              />
+            ) : null}
           </View>
         }
       />
@@ -2397,6 +2493,12 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.muted,
     marginTop: 2,
   },
+  searchEmpty: {
+    fontSize: fontSize.base,
+    color: colors.muted,
+    textAlign: "center",
+    paddingVertical: spacing.xl,
+  },
 
   // Reserved-models (book-by-model) section
   modelsSection: {
@@ -2534,6 +2636,19 @@ const useStyles = createStyles((colors, shadows) => ({
   assetCategory: {
     fontSize: fontSize.xs,
     color: colors.muted,
+  },
+  // The location line matches the kit header's, so a kit and the assets under
+  // it name their locations the same way.
+  assetLocationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  assetLocation: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+    // Shrinks beside the icon, so a long name truncates inside the card.
+    flexShrink: 1,
   },
 
   // Checkbox for selection
