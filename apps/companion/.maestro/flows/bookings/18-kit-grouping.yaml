@@ -9,6 +9,7 @@ env:
   BOOKING_NAME: "ZZX Stress"
   AUDIO_KIT: "ZZX Audio Package"
   RIG_KIT: "ZZX Projection Rig"
+  LOOSE_ASSET: "ZZX Standalone Fixture 01"
 
 ---
 # A booking that holds kits shows one row per kit, collapsed, with the members
@@ -16,15 +17,19 @@ env:
 #
 # Preconditions (GRANULAR WORKSPACE, QA database):
 #   - a RESERVED booking whose name starts "ZZX Stress", holding
-#     "ZZX Audio Package" (3 of its 3 assets) and "ZZX Projection Rig" (4 of 4)
+#     "ZZX Audio Package" (3 of its 3 assets), "ZZX Projection Rig" (4 of 4)
+#     and the standalone asset "ZZX Standalone Fixture 01"
 #   - both kits AVAILABLE
 #
-# Read-only: it opens a selection mode to prove the header selects its members,
-# then cancels. Nothing is ever submitted, so the fixture booking is unchanged.
+# Read-only: it opens a selection mode to prove a kit is picked as one unit
+# from its header, then cancels. Nothing is ever submitted, so the fixture
+# booking is unchanged.
 #
 # The kit header's accessibility label carries the whole state
-# ("Kit: <name>, <n> assets, <status>, collapsed|expanded[, selected]"), which
-# is what these assertions read — the visible text truncates.
+# ("Kit: <name>, <n> assets, <status>, collapsed|expanded[, selected]. Tap to
+# select|deselect"), which is what these assertions read — the visible text
+# truncates. An asset row's label ends ". Tap to select" only when the row has
+# a checkbox of its own.
 
 - runFlow: ../../shared/login.yaml
 
@@ -113,9 +118,10 @@ env:
 - assertVisible: ".*${AUDIO_KIT} .*item 3.*"
 - takeScreenshot: kit-expanded
 
-# ── A header selects its members ──
-# Entering a selection mode opens every kit, so a member is never hidden from a
-# selection the user is building.
+# ── A kit is picked as one unit ──
+# Entering a selection mode leaves each kit as the user left it: the Audio kit
+# opened above stays open and the Rig stays shut, each with one checkbox on its
+# header.
 # `centerElement` keeps the button clear of the nav bar — tapped flush against
 # the top edge the press lands on the header instead, and Maestro reports the
 # tap as completed either way. The wait below is what actually proves the mode
@@ -130,18 +136,55 @@ env:
 - extendedWaitUntil:
     visible: "Cancel selection"
     timeout: 10000
+# The Rig header sits above the Audio kit, so scrolling down meets it first.
 - scrollUntilVisible:
     element:
-      text: "Kit: ${RIG_KIT}, 4 assets,.*expanded.*"
+      text: "Kit: ${RIG_KIT}, 4 assets,.*collapsed. Tap to select"
     direction: DOWN
     timeout: 30000
     waitToSettleTimeoutMs: 600
-- tapOn: "Kit: ${RIG_KIT}, 4 assets,.*expanded.*"
+- scrollUntilVisible:
+    element:
+      text: ".*${AUDIO_KIT} .*item 1.*"
+    direction: DOWN
+    timeout: 30000
+    centerElement: true
+- assertVisible: "Kit: ${AUDIO_KIT}, 3 assets,.*expanded. Tap to select"
+
+# A member has no checkbox, and tapping it selects nothing.
+- assertNotVisible: ".*${AUDIO_KIT} .*item 1.*Tap to select.*"
+- tapOn: ".*${AUDIO_KIT} .*item 1.*"
+- assertVisible: "Kit: ${AUDIO_KIT}, 3 assets,.*expanded. Tap to select"
+- assertNotVisible: "Remove [0-9].*"
+- takeScreenshot: kit-members-no-checkbox
+
+# ── One tick picks the whole kit ──
+# Centred: the list scrolls under both the nav bar and the tab bar, and a tap
+# on a row flush against either lands on the bar instead.
+- scrollUntilVisible:
+    element:
+      text: "Kit: ${RIG_KIT}, 4 assets,.*collapsed. Tap to select"
+    direction: UP
+    timeout: 20000
+    centerElement: true
+- tapOn: "Kit: ${RIG_KIT}, 4 assets,.*collapsed. Tap to select"
 - extendedWaitUntil:
-    visible: "Kit: ${RIG_KIT}, 4 assets,.*expanded, selected.*"
+    visible: "Kit: ${RIG_KIT}, 4 assets,.*collapsed, selected.*"
     timeout: 10000
-# The floating action counts the members the header picked.
-- assertVisible: ".*Remove 4 selected assets.*"
+# The floating action counts the kit as one thing, however many assets it holds.
+- assertVisible: "Remove 1 Kit"
+
+# A standalone asset keeps its own checkbox and joins the count.
+- scrollUntilVisible:
+    element:
+      text: "${LOOSE_ASSET}, .*Tap to select"
+    direction: DOWN
+    timeout: 20000
+    centerElement: true
+- tapOn: "${LOOSE_ASSET}, .*Tap to select"
+- extendedWaitUntil:
+    visible: "Remove 1 Kit & 1 Asset"
+    timeout: 10000
 - takeScreenshot: kit-select-remove
 
 # ── Leave without submitting ──
@@ -154,5 +197,5 @@ env:
     centerElement: true
 - tapOn: "Cancel selection"
 - extendedWaitUntil:
-    notVisible: ".*Remove 4 selected assets.*"
+    notVisible: "Remove 1 Kit & 1 Asset"
     timeout: 10000

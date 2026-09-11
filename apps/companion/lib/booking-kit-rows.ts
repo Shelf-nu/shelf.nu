@@ -3,10 +3,10 @@
  *
  * The booking endpoint sends a flat list of assets plus the kits they belong
  * to. This module turns those two into the rows the screen renders — one
- * header per kit followed by its members when expanded — and answers the three
+ * header per kit followed by its members when expanded — and answers the
  * questions that grouping raises: what the kit's badge says, which members a
- * header may select, and whether a removal may name the kit instead of its
- * assets.
+ * header may select, how a selection reads on the action button, and whether a
+ * removal may name the kit instead of its assets.
  *
  * Everything here is pure and free of React Native so the rules can be tested
  * under Node. The screen owns the pixels; this owns the decisions.
@@ -301,17 +301,21 @@ export function resolveBookingKitBadge({
 export type BookingSelectMode = "checkin" | "checkout" | "remove" | null;
 
 /**
- * Whether a row can be picked in the current mode.
+ * Whether the current mode can act on an asset.
+ *
+ * This answers for the asset, not for where it is drawn. A standalone row is
+ * picked by its own tap when this holds; a kit member is never picked from its
+ * own row, and its header uses this to decide which members one tick picks.
  *
  * Quantity-tracked assets are judged by units, not status: a partly
  * checked-out one stays AVAILABLE while units are still reserved. A returned
  * individual asset is AVAILABLE again too, so check-out excludes the ones
  * already checked in rather than re-offering them.
  *
- * @param item - the asset row
+ * @param item - the asset
  * @param selectMode - the active mode, or null when not selecting
  * @param checkedInAssetIds - assets already checked back in
- * @returns true when tapping the row toggles its selection
+ * @returns true when the mode can act on the asset
  */
 export function isBookingAssetSelectable(
   item: BookingAsset,
@@ -367,6 +371,61 @@ export function resolveKitSelectionState({
   ).length;
   if (picked === 0) return "none";
   return picked === selectable.length ? "all" : "some";
+}
+
+/** What a selection holds, with a wholly picked kit counted as one thing. */
+export type SelectionCounts = { kitCount: number; assetCount: number };
+
+/**
+ * Counts a selection the way the list offers it: a kit is one thing, and every
+ * other pick is an asset.
+ *
+ * `kitCount` is the kit headers that read "all" — every member the mode can act
+ * on is picked. `assetCount` is every selected id those kits do not account
+ * for. A member is only ever picked through its header, so these are normally
+ * the standalone rows; an id outside every wholly picked kit still counts, so
+ * the label covers everything the submit will send.
+ *
+ * @param args.rows - the rendered rows; a kit header carries every member
+ *   whether or not the kit is open
+ * @param args.selectedAssetIds - the current selection
+ * @param args.selectMode - the active mode
+ * @param args.checkedInAssetIds - assets already checked back in
+ * @returns the counts `describeSelection` names
+ */
+export function countSelection({
+  rows,
+  selectedAssetIds,
+  selectMode,
+  checkedInAssetIds,
+}: {
+  rows: BookingRow[];
+  selectedAssetIds: ReadonlySet<string>;
+  selectMode: BookingSelectMode;
+  checkedInAssetIds: readonly string[];
+}): SelectionCounts {
+  let kitCount = 0;
+  const coveredByKit = new Set<string>();
+
+  for (const row of rows) {
+    if (row.type !== "kit") continue;
+    const state = resolveKitSelectionState({
+      members: row.members,
+      selectMode,
+      selectedAssetIds,
+      checkedInAssetIds,
+    });
+    if (state !== "all") continue;
+    kitCount += 1;
+    for (const member of row.members) coveredByKit.add(member.id);
+  }
+
+  let assetCount = 0;
+  for (const id of selectedAssetIds) {
+    if (!coveredByKit.has(id)) assetCount += 1;
+  }
+
+  return { kitCount, assetCount };
 }
 
 /**
@@ -450,9 +509,48 @@ export function splitRemovalSelection({
   };
 }
 
+/** The words one kits-then-assets phrase is written in. */
+type KitsThenAssetsWording = {
+  kit: { one: string; many: string };
+  asset: { one: string; many: string };
+  joiner: string;
+};
+
+/**
+ * Names kits and assets, kits first because a kit is the larger thing.
+ *
+ * A kits-only count drops the asset half ("2 kits", not "2 kits and 0
+ * assets"); a count of nothing still names assets, so the phrase is never
+ * empty.
+ *
+ * @param counts - how many kits and assets to name
+ * @param wording - the nouns and the word that joins the two halves
+ * @returns e.g. `"1 kit and 2 assets"` or `"1 Kit & 2 Assets"`
+ */
+function describeKitsThenAssets(
+  { kitCount, assetCount }: SelectionCounts,
+  wording: KitsThenAssetsWording
+): string {
+  const parts: string[] = [];
+  if (kitCount > 0) {
+    parts.push(
+      `${kitCount} ${kitCount === 1 ? wording.kit.one : wording.kit.many}`
+    );
+  }
+  if (assetCount > 0 || kitCount === 0) {
+    parts.push(
+      `${assetCount} ${
+        assetCount === 1 ? wording.asset.one : wording.asset.many
+      }`
+    );
+  }
+  return parts.join(wording.joiner);
+}
+
 /**
  * Names what a removal will take, leading with the kits because a kit is the
- * larger thing leaving the booking.
+ * larger thing leaving the booking. Reads inside a sentence, so it is lower
+ * case.
  *
  * @param args.assetCount - assets removed by id
  * @param args.kitCount - kits removed as a whole
@@ -465,12 +563,38 @@ export function describeRemoval({
   assetCount: number;
   kitCount: number;
 }): string {
-  const parts: string[] = [];
-  if (kitCount > 0) {
-    parts.push(`${kitCount} ${kitCount === 1 ? "kit" : "kits"}`);
-  }
-  if (assetCount > 0 || kitCount === 0) {
-    parts.push(`${assetCount} ${assetCount === 1 ? "asset" : "assets"}`);
-  }
-  return parts.join(" and ");
+  return describeKitsThenAssets(
+    { kitCount, assetCount },
+    {
+      kit: { one: "kit", many: "kits" },
+      asset: { one: "asset", many: "assets" },
+      joiner: " and ",
+    }
+  );
+}
+
+/**
+ * Names a selection on the floating action button, after its verb:
+ * "Check Out 1 Kit & 1 Asset". The verb is Title Case, so the counts are too,
+ * and the ampersand keeps a two-part label on one line.
+ *
+ * The screen reader label uses the same words, so the button sounds the way it
+ * reads.
+ *
+ * @param args.kitCount - kits picked whole, from `countSelection`
+ * @param args.assetCount - picks outside a whole kit, from `countSelection`
+ * @returns e.g. `"1 Kit & 1 Asset"`, `"2 Kits"`, `"3 Assets"`
+ */
+export function describeSelection({
+  kitCount,
+  assetCount,
+}: SelectionCounts): string {
+  return describeKitsThenAssets(
+    { kitCount, assetCount },
+    {
+      kit: { one: "Kit", many: "Kits" },
+      asset: { one: "Asset", many: "Assets" },
+      joiner: " & ",
+    }
+  );
 }
