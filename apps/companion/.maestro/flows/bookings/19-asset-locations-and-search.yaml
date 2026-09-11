@@ -1,0 +1,254 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Asset locations and the assets search (mobile) [FIXTURE-DEPENDENT]"
+tags:
+  - bookings
+  - kits
+  - search
+  - fixture-dependent
+env:
+  BOOKING_NAME: "ZZX Stress"
+  AUDIO_KIT: "ZZX Audio Package"
+  RIG_KIT: "ZZX Projection Rig"
+  KIT_LOCATION: "Studio"
+  PLACED_ASSET: "ZZX Standalone Fixture 01"
+  PLACED_ASSET_LOCATION: "Mobile Lab 2"
+
+---
+# Each asset row names where it sits, kit members included, and the search box
+# above the list narrows it by name, kit and location without touching the
+# selection.
+#
+# Precondition: app foregrounded with a signed-in session (qa-admin1 /
+# GRANULAR WORKSPACE). Uses the no-login pattern, so NO launchApp/clearState.
+# Fixture (QA database): the RESERVED booking whose name starts "ZZX Stress",
+# holding "ZZX Audio Package" (3 of 3, the kit placed at "Studio", which places
+# its members there too), "ZZX Projection Rig" (4 of 4, unplaced) and
+# standalone fixtures, of which only "ZZX Standalone Fixture 01" is placed, at
+# "Mobile Lab 2".
+#
+# Read-only: it opens a selection mode and picks rows, then cancels. Nothing is
+# submitted, so the fixture booking is unchanged.
+#
+# An asset row's accessibility label reads "<title>, at <location>, <status>…",
+# which is what the location assertions read. Maestro full-matches labels, so
+# text matchers are regex-wrapped with .* per .maestro/LESSONS.md.
+
+# ── Open the fixture booking ──
+# A second tap on the active tab returns its stack to the list.
+- tapOn: "Bookings"
+- tapOn:
+    text: "Bookings"
+    optional: true
+- extendedWaitUntil:
+    visible: "Search bookings"
+    timeout: 20000
+- tapOn: "Search bookings"
+- eraseText: 40
+- inputText: "${BOOKING_NAME}"
+- extendedWaitUntil:
+    visible: "Booking: ${BOOKING_NAME}.*"
+    timeout: 20000
+# The first tap may only close the keyboard.
+- tapOn: "Booking: ${BOOKING_NAME}.*"
+- tapOn:
+    text: "Booking: ${BOOKING_NAME}.*"
+    optional: true
+- extendedWaitUntil:
+    visible: ".*Select assets to remove.*"
+    timeout: 30000
+
+# ── Kit members and standalone assets carry their location ──
+- scrollUntilVisible:
+    element:
+      text: "Kit: ${AUDIO_KIT}, 3 assets,.*collapsed.*"
+    direction: DOWN
+    timeout: 30000
+    waitToSettleTimeoutMs: 600
+    centerElement: true
+- tapOn: "Kit: ${AUDIO_KIT}, 3 assets,.*collapsed.*"
+- extendedWaitUntil:
+    visible: "Kit: ${AUDIO_KIT}, 3 assets,.*expanded.*"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: "${PLACED_ASSET}, at ${PLACED_ASSET_LOCATION},.*"
+    direction: DOWN
+    timeout: 20000
+    waitToSettleTimeoutMs: 600
+- assertVisible: "${AUDIO_KIT} — item 3, at ${KIT_LOCATION},.*"
+- takeScreenshot: 01-locations-on-kit-members-and-standalone
+
+# ── A kit's name narrows the list to that kit ──
+- scrollUntilVisible:
+    element:
+      text: "Search assets and kits"
+    direction: UP
+    timeout: 20000
+    centerElement: true
+- tapOn: "Search assets and kits"
+- inputText: "audio package"
+# Return closes the keyboard, so the rows it found are all on screen.
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Kit: ${AUDIO_KIT}, 3 assets,.*"
+    timeout: 10000
+- assertNotVisible: "Kit: ${RIG_KIT}.*"
+- assertNotVisible: "${PLACED_ASSET},.*"
+- assertVisible: "${AUDIO_KIT} — item 1, at ${KIT_LOCATION},.*"
+- takeScreenshot: 02-search-by-kit-name
+
+# ── A location's name finds what sits there ──
+- tapOn: "Clear search"
+- tapOn: "Search assets and kits"
+- inputText: "mobile lab"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "${PLACED_ASSET}, at ${PLACED_ASSET_LOCATION},.*"
+    timeout: 10000
+- assertNotVisible: "Kit: ${AUDIO_KIT}.*"
+- assertNotVisible: "Kit: ${RIG_KIT}.*"
+- takeScreenshot: 03-search-by-location
+
+# ── A term that matches nothing says so ──
+- tapOn: "Clear search"
+- tapOn: "Search assets and kits"
+- inputText: "zzqq"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "No assets match.*"
+    timeout: 10000
+- takeScreenshot: 04-search-no-match
+- tapOn: "Clear search"
+- extendedWaitUntil:
+    visible: "Kit: ${RIG_KIT}.*"
+    timeout: 10000
+
+# ── The selection survives a change of term ──
+- scrollUntilVisible:
+    element:
+      text: "Select assets to remove"
+    direction: UP
+    timeout: 30000
+    centerElement: true
+- tapOn: "Select assets to remove"
+- extendedWaitUntil:
+    visible: "Cancel selection"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: "${PLACED_ASSET}, at ${PLACED_ASSET_LOCATION},.*Tap to select.*"
+    direction: DOWN
+    timeout: 30000
+    waitToSettleTimeoutMs: 600
+    centerElement: true
+- tapOn: "${PLACED_ASSET}, at ${PLACED_ASSET_LOCATION},.*Tap to select.*"
+- extendedWaitUntil:
+    visible: ".*Remove 1 selected assets.*"
+    timeout: 10000
+# A term that hides the selected row leaves it selected.
+- scrollUntilVisible:
+    element:
+      text: "Search assets and kits"
+    direction: UP
+    timeout: 20000
+    centerElement: true
+- tapOn: "Search assets and kits"
+- inputText: "audio package"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Kit: ${AUDIO_KIT}, 3 assets,.*"
+    timeout: 10000
+- assertNotVisible: "${PLACED_ASSET},.*"
+- assertVisible: ".*Remove 1 selected assets.*"
+# The kit header picks its three members; the count adds them to the hidden one.
+- tapOn: "Kit: ${AUDIO_KIT}, 3 assets,.*Tap to select.*"
+- extendedWaitUntil:
+    visible: ".*Remove 4 selected assets.*"
+    timeout: 10000
+- takeScreenshot: 05-selection-kept-across-search
+# Clearing the term shows the hidden row still selected.
+- tapOn: "Clear search"
+- scrollUntilVisible:
+    element:
+      text: "${PLACED_ASSET}, at ${PLACED_ASSET_LOCATION},.*selected.*"
+    direction: DOWN
+    timeout: 30000
+    waitToSettleTimeoutMs: 600
+    centerElement: true
+- assertVisible: ".*Remove 4 selected assets.*"
+- takeScreenshot: 06-selection-after-clearing-search
+
+# ── A kit found through one member selects all of its members ──
+# "item 3" is in one member title of each kit and in nothing else, so both kits
+# are on screen only because of that member; the rest come back with it.
+- scrollUntilVisible:
+    element:
+      text: "Search assets and kits"
+    direction: UP
+    timeout: 20000
+    centerElement: true
+- tapOn: "Search assets and kits"
+- inputText: "item 3"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Kit: ${RIG_KIT}, 4 assets,.*Tap to select.*"
+    timeout: 10000
+- assertNotVisible: "${PLACED_ASSET},.*"
+- tapOn: "Kit: ${RIG_KIT}, 4 assets,.*Tap to select.*"
+- extendedWaitUntil:
+    visible: ".*Remove 8 selected assets.*"
+    timeout: 10000
+- assertVisible: "${RIG_KIT} — item 1, Available, selected.*"
+- takeScreenshot: 07-kit-found-through-one-member-selected
+# With the term cleared, every member of that kit is selected.
+- tapOn: "Clear search"
+- scrollUntilVisible:
+    element:
+      text: "${RIG_KIT} — item 4, Available, selected.*"
+    direction: DOWN
+    timeout: 30000
+    waitToSettleTimeoutMs: 600
+- assertVisible: "${RIG_KIT} — item 1, Available, selected.*"
+- assertVisible: "${RIG_KIT} — item 2, Available, selected.*"
+- assertVisible: "${RIG_KIT} — item 3, Available, selected.*"
+- assertVisible: ".*Remove 8 selected assets.*"
+- takeScreenshot: 08-every-member-selected-after-clearing
+
+# ── Leaving the selection keeps the term; nothing is submitted ──
+- scrollUntilVisible:
+    element:
+      text: "Search assets and kits"
+    direction: UP
+    timeout: 20000
+    centerElement: true
+- tapOn: "Search assets and kits"
+- inputText: "audio package"
+- pressKey: Enter
+- extendedWaitUntil:
+    notVisible: "Kit: ${RIG_KIT}.*"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      text: "Cancel selection"
+    direction: UP
+    timeout: 30000
+    centerElement: true
+- tapOn: "Cancel selection"
+- extendedWaitUntil:
+    notVisible: ".*Remove 8 selected assets.*"
+    timeout: 10000
+# The term outlives the selection mode: the list is still narrowed to the kit
+# and the clear control still shows.
+- scrollUntilVisible:
+    element:
+      text: "Kit: ${AUDIO_KIT}, 3 assets,.*"
+    direction: DOWN
+    timeout: 20000
+    centerElement: true
+- assertVisible: "Clear search"
+- assertNotVisible: "Kit: ${RIG_KIT}.*"
+- takeScreenshot: 09-term-kept-after-leaving-selection
+- tapOn: "Clear search"
+- extendedWaitUntil:
+    visible: "Kit: ${RIG_KIT}.*"
+    timeout: 10000
