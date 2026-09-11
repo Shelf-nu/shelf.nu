@@ -20,6 +20,9 @@ env:
 #     "ZZX Audio Package" (3 of its 3 assets), "ZZX Projection Rig" (4 of 4)
 #     and the standalone asset "ZZX Standalone Fixture 01"
 #   - both kits AVAILABLE
+#   - rows sort by asset status, then creation, so the list reads: the Rig
+#     header, the Audio header, then the standalone assets. The scrolls below
+#     rely on that order.
 #
 # Read-only: it opens a selection mode to prove a kit is picked as one unit
 # from its header, then cancels. Nothing is ever submitted, so the fixture

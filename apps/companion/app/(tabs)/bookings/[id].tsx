@@ -888,8 +888,9 @@ export default function BookingDetailScreen() {
       // kit's one tick covers — in check-in mode, only the members still out.
       const isSelected = selectedAssetIds.has(item.id);
       // A kit member has no checkbox of its own: its kit is picked as one unit,
-      // from the header. Standalone rows share the header's definition of what
-      // the mode can act on, so the two never offer different sets.
+      // from the header. A standalone row is offered by the same rule the header
+      // applies to its members, so an asset in a given state is selectable or
+      // not wherever it sits.
       const selectable =
         !inKit && isBookingAssetSelectable(item, selectMode, checkedInAssetIds);
 

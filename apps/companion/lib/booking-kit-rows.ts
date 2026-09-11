@@ -576,7 +576,7 @@ export function describeRemoval({
 /**
  * Names a selection on the floating action button, after its verb:
  * "Check Out 1 Kit & 1 Asset". The verb is Title Case, so the counts are too,
- * and the ampersand keeps a two-part label on one line.
+ * and the ampersand keeps a two-part label short.
  *
  * The screen reader label uses the same words, so the button sounds the way it
  * reads.

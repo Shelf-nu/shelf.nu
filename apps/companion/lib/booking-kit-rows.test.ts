@@ -725,16 +725,16 @@ test("a removal names the kits before the assets", () => {
     describeRemoval({ assetCount: 2, kitCount: 1 }),
     "1 kit and 2 assets"
   );
+  assert.equal(
+    describeRemoval({ assetCount: 1, kitCount: 1 }),
+    "1 kit and 1 asset"
+  );
   assert.equal(describeRemoval({ assetCount: 3, kitCount: 0 }), "3 assets");
   assert.equal(describeRemoval({ assetCount: 0, kitCount: 2 }), "2 kits");
 });
 
 test("a removal with nothing to name still names assets", () => {
   assert.equal(describeRemoval({ assetCount: 0, kitCount: 0 }), "0 assets");
-  assert.equal(
-    describeRemoval({ assetCount: 1, kitCount: 1 }),
-    "1 kit and 1 asset"
-  );
 });
 
 // ---------------------------------------------------------------------------
