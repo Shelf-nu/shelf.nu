@@ -1,12 +1,15 @@
 /**
- * Regression tests for the mobile kit detail endpoint.
+ * Response-contract tests for the mobile kit detail endpoint.
  *
- * Pins the Gap-3 (kit quantity awareness) contract: each `kit.assets[]`
- * member must additively carry `kitQuantity` (= `AssetKit.quantity`, the
- * units of that asset held by THIS kit), `unitOfMeasure`, and `type`. It also
- * pins the `totalValue` correctness fix — the kit-surface multiplier is the
- * per-membership `AssetKit.quantity`, NOT the asset's workspace-wide
- * `Asset.quantity` stock (see .claude/rules/quantity-semantics-per-surface.md).
+ * - Each `kit.assets[]` member carries `kitQuantity` (= `AssetKit.quantity`,
+ *   the units of that asset held by THIS kit), `unitOfMeasure`, and `type`.
+ * - `totalValue` multiplies by the per-membership `AssetKit.quantity`, NOT the
+ *   asset's workspace-wide `Asset.quantity` stock (see
+ *   .claude/rules/quantity-semantics-per-surface.md).
+ * - Custody is nulled for a viewer who may not see the holder.
+ * - The kit's `image` is a signed URL the app cannot renew, so the kit goes
+ *   through `refreshExpiredKitImages` before it is sent: a lapsed URL arrives
+ *   re-signed, with the `imageExpiration` the helper returned.
  *
  * @see {@link file://../../../../app/routes/api+/mobile+/kits.$kitId.ts} for the loader under test
  */
@@ -21,6 +24,7 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 
 import { loader } from "~/routes/api+/mobile+/kits.$kitId";
 
@@ -49,11 +53,19 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   getMobileUserContext: vi.fn(),
 }));
 
+// why: re-signing calls Supabase Storage and writes the new URL back to the
+// kit row. The helper has its own contract; the kit-image case below pins what
+// the route does with it, and every other case gets its kit back untouched.
+vi.mock("~/modules/kit/service.server", () => ({
+  refreshExpiredKitImages: vi.fn((kits: unknown[]) => Promise.resolve(kits)),
+}));
+
 const findFirstMock = vi.mocked(db.kit.findFirst);
 const requireMobileAuthMock = vi.mocked(requireMobileAuth);
 const requireOrganizationAccessMock = vi.mocked(requireOrganizationAccess);
 const requireMobilePermissionMock = vi.mocked(requireMobilePermission);
 const getMobileUserContextMock = vi.mocked(getMobileUserContext);
+const refreshExpiredKitImagesMock = vi.mocked(refreshExpiredKitImages);
 
 const FAKE_USER_ID = "user-abc";
 const FAKE_ORG_ID = "org-xyz";
@@ -178,6 +190,41 @@ describe("GET /api/mobile/kits/:kitId", () => {
   });
 });
 
+describe("GET /api/mobile/kits/:kitId — kit image", () => {
+  it("sends a lapsed kit image re-signed, with its new expiry", async () => {
+    const storedKit = {
+      ...buildKitFixture([]),
+      organizationId: FAKE_ORG_ID,
+      image: "https://example.test/sign/kits/camera.png?token=lapsed",
+      imageExpiration: new Date("2020-01-01T00:00:00.000Z"),
+    };
+    findFirstMock.mockResolvedValueOnce(storedKit as never);
+    const resignedImage =
+      "https://example.test/sign/kits/camera.png?token=fresh";
+    const newExpiration = new Date("2099-01-01T00:00:00.000Z");
+    refreshExpiredKitImagesMock.mockResolvedValueOnce([
+      { ...storedKit, image: resignedImage, imageExpiration: newExpiration },
+    ]);
+
+    const response = await loader(
+      createLoaderArgs({ params: { kitId: "kit-1" } })
+    );
+    assertIsDataWithResponseInit(response);
+    const body = response.data as { kit: Record<string, unknown> };
+
+    // The kit goes to the helper as the query returned it — `organizationId`
+    // included, since the helper scopes its write-back by it.
+    expect(refreshExpiredKitImagesMock).toHaveBeenCalledWith([storedKit]);
+    expect(body.kit).toMatchObject({
+      id: "kit-1",
+      image: resignedImage,
+      imageExpiration: newExpiration,
+    });
+    // Selected for the write-back only; the app's kit shape has no such field.
+    expect(body.kit).not.toHaveProperty("organizationId");
+  });
+});
+
 describe("GET /api/mobile/kits/:kitId — custody visibility", () => {
   /** Kit fixture holding custody by a named colleague, with their email. */
   function kitInColleaguesCustody() {
@@ -201,7 +248,7 @@ describe("GET /api/mobile/kits/:kitId — custody visibility", () => {
 
   it("nulls a colleague's custody for a viewer who may not see all custody", async () => {
     // `kit: read` is held by BASE and SELF_SERVICE, and this select reaches
-    // `custodian.user.email` — so without a gate the whole identity shipped.
+    // `custodian.user.email` — without the gate the whole identity is sent.
     getMobileUserContextMock.mockResolvedValue({
       canSeeAllCustody: false,
     } as Awaited<ReturnType<typeof getMobileUserContext>>);

@@ -20,13 +20,13 @@ import { ViewButtonGroup } from "~/components/calendar/view-button-group";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import type { CalendarExtendedProps } from "~/routes/_layout+/calendar";
 import {
+  availabilityEventClassNames,
   getCalendarTitleAndSubtitle,
-  getStatusClasses,
   handleEventClick,
   handleEventMouseEnter,
   handleEventMouseLeave,
-  isOneDayEvent,
   scrollToNow,
 } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
@@ -226,19 +226,14 @@ export default function AvailabilityCalendar({
               resourceAreaWidth="35%"
               resourceLabelContent={resourceLabelContent}
               eventContent={renderEventCard}
-              eventClassNames={(eventInfo) => {
-                const viewType = eventInfo.view.type;
-                const isOneDay = isOneDayEvent(
+              eventClassNames={(eventInfo) =>
+                availabilityEventClassNames(
+                  eventInfo.event.extendedProps as CalendarExtendedProps,
                   eventInfo.event.start,
-                  eventInfo.event.end
-                );
-
-                return getStatusClasses(
-                  eventInfo.event.extendedProps.status,
-                  isOneDay,
-                  viewType
-                );
-              }}
+                  eventInfo.event.end,
+                  eventInfo.view.type
+                )
+              }
               nowIndicatorDidMount={handleNowIndicatorDidMount}
               viewDidMount={handleViewDidMount}
               datesSet={handleDatesSet}

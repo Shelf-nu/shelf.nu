@@ -682,6 +682,12 @@ export type BookingAsset = {
   mainImage: string | null;
   kitId: string | null;
   category: { id: string; name: string; color: string } | null;
+  /**
+   * Where the asset sits: its primary placement, or null when it is unplaced.
+   * Optional because an older server does not send it, in which case the row
+   * shows no location line.
+   */
+  location?: { id: string; name: string } | null;
   kit: { id: string; name: string } | null;
   // Quantity-tracked fields. The server sends `quantity` for every asset;
   // `type`/`unitOfMeasure`/`consumptionType` + the `remaining*` counts are what
