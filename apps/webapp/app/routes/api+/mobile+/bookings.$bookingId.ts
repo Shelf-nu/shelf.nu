@@ -320,6 +320,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       };
     });
 
+    // The kits the app groups those assets under. Only the UNANIMOUS kit ids
+    // qualify: an asset whose slices disagree carries `kitId: null` above and
+    // renders standalone, exactly as web's `shapeBookingAssets` keys on
+    // `asset.kitId`. Empty when the booking holds no kit-driven rows.
+    const bookingKitIds = [
+      ...new Set(
+        assets
+          .map((a) => a.kitId)
+          .filter((kitId): kitId is string => kitId !== null)
+      ),
+    ];
+
     // Per-QUANTITY_TRACKED-asset remaining, computed up-front so the capability
     // flags below can reason about UNITS, not the asset's global status.
     const qtRemaining = await Promise.all(
@@ -528,7 +540,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // slice by slice from stamps + session attribution (an asset can mix a
     // button-checked-out slice with a progressively-scanned sibling — see
     // `computeDispatchedUnitsByAsset`).
-    const [sliceRows, checkoutSessionRows] = await Promise.all([
+    //
+    // The kit lookup rides along here rather than taking a round trip of its
+    // own. It is org-scoped as well as id-scoped: a kit id reaching this query
+    // came from a BookingAsset row, but scoping it keeps the response's kit
+    // payload inside the caller's workspace by construction.
+    const [sliceRows, checkoutSessionRows, kitRows] = await Promise.all([
       db.bookingAsset.findMany({
         where: { bookingId: booking.id },
         select: {
@@ -544,6 +561,25 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         where: { bookingId: booking.id },
         select: { assetIds: true, quantities: true, bookingAssetIds: true },
       }),
+      bookingKitIds.length > 0
+        ? db.kit.findMany({
+            where: { id: { in: bookingKitIds }, organizationId },
+            select: {
+              id: true,
+              name: true,
+              status: true,
+              image: true,
+              imageExpiration: true,
+              category: { select: { id: true, name: true, color: true } },
+              location: { select: { id: true, name: true } },
+              // The kit's FULL membership, which is what tells the app whether
+              // the rows it holds are the whole kit — a removal that names the
+              // kit detaches every member, so it may only offer that when the
+              // booking holds all of them.
+              _count: { select: { assetKits: true } },
+            },
+          })
+        : Promise.resolve([]),
     ]);
     const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
       slices: sliceRows,
@@ -649,6 +685,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodianTeamMember: booking.custodianTeamMember,
         tags: booking.tags,
         assets: assetsForResponse,
+        // The kits those assets group under, in the order the app first meets
+        // them in `assets`, so both sides agree on where a kit's header sits.
+        // `assetCount` is the kit's own membership size, not the number of
+        // members this booking holds — the app counts the latter from `assets`.
+        kits: bookingKitIds
+          .map((kitId) => kitRows.find((kit) => kit.id === kitId))
+          .filter((kit): kit is (typeof kitRows)[number] => kit !== undefined)
+          .map(({ _count, ...kit }) => ({
+            ...kit,
+            assetCount: _count.assetKits,
+          })),
         assetCount: totalAssets,
         checkedOutCount,
         modelRequests,
@@ -658,6 +705,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         hasAlreadyBookedAssets,
       },
       checkedInAssetIds,
+      // Which assets this booking actually sent out, from the slice markers.
+      // `checkedInAssetIds` is filled for ONGOING/OVERDUE only, so on a
+      // finished booking this is the one field that separates a kit that went
+      // out and came back from one that never left.
+      checkedOutAssetIds,
       canCheckout,
       canCheckin,
       canQuickCheckin,

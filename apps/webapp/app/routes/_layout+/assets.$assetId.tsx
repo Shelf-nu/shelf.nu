@@ -309,6 +309,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Handles the asset page's own intents: delete, relink QR code, set reminder and
+ * add barcode. Each intent is permission-checked against the action it maps to,
+ * so deleting needs `asset: delete` while the other three need `asset: update`.
+ *
+ * @returns A redirect after deletion, or the intent's result or failure with its status
+ */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -352,7 +359,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           z.object({ mainImageUrl: z.string().optional() })
         );
 
-        await deleteAsset({ organizationId, id });
+        // Name the actor, or the activity event records the deletion as
+        // "System" — the mobile delete route already passes it, so the same
+        // action read differently depending on where it was performed.
+        await deleteAsset({ organizationId, id, actorUserId: userId });
 
         if (mainImageUrl) {
           // as it is deletion operation giving hardcoded path(to make sure all the images were deleted)

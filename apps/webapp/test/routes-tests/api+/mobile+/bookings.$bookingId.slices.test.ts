@@ -50,6 +50,10 @@ vi.mock("~/database/db.server", () => ({
     // the slices/merged-kit serialization contract under test.
     bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
+    // why: the fixture's kit-driven slices make the loader describe the kits
+    // they belong to. What those kits look like is pinned by the sibling kits
+    // test; here the payload only has to exist.
+    kit: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 

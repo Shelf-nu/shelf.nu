@@ -2610,68 +2610,196 @@ export async function releaseCustody({
   }
 }
 
+/**
+ * Whether a booked slice is out right now.
+ *
+ * Read from the slice's own markers rather than `Asset.status`, which says the
+ * asset is out SOMEWHERE — true of a `QUANTITY_TRACKED` asset whichever kit
+ * took it. A live booking is not enough either: one stays ONGOING while other
+ * assets are away, long after this slice came back.
+ *
+ * A returning slice is the only thing that clears it, so absence of
+ * `checkedOutAt` is not evidence of absence: rows written before the markers
+ * existed carry neither, and read as out — which is what they are, on a booking
+ * still ONGOING. When the departure IS recorded, the check-in has to be no
+ * older than the departure it answers: a slice that came back and then went out
+ * again carries both, and the refreshed `checkedOutAt` is what says it is out
+ * now.
+ */
+function isSliceStillOut(slice: {
+  checkedOutAt: Date | null;
+  checkedInAt: Date | null;
+}): boolean {
+  if (!slice.checkedInAt) return true;
+  return slice.checkedOutAt !== null && slice.checkedInAt < slice.checkedOutAt;
+}
+
+/** The custodian of a booking, projected for a kit row's custody cell. */
+type KitBookingCustodian = {
+  custodianUser: Pick<
+    User,
+    "firstName" | "lastName" | "displayName" | "profilePicture"
+  > | null;
+  custodianTeamMember: { name: string } | null;
+};
+
+/**
+ * Resolves, for each of `kitIds`, the booking that currently holds THAT kit.
+ *
+ * A booked slice belongs to a kit when it was booked under one of the kit's
+ * live membership rows (`BookingAsset.assetKitId` → `AssetKit.id`) or under the
+ * kit itself (`BookingAsset.sourceKitId`, which survives a detach). Both
+ * columns are NULL on a standalone free-pool slice.
+ *
+ * That scoping is what makes the answer correct for `QUANTITY_TRACKED` assets:
+ * one asset may sit in several kits at once, so "this asset is on an ongoing
+ * booking" says nothing about which kit that booking took.
+ *
+ * Costs two round-trips whatever the number of kits — the membership ids, then
+ * the slices — so a page of checked-out kits does not fan out per row.
+ *
+ * @param kitIds - The kits to resolve, typically one page's checked-out rows
+ * @returns Kit id → the holding booking's custodian, for kits that have one
+ */
+async function getBookingCustodiansHoldingKits(
+  kitIds: Kit["id"][],
+  organizationIds: Kit["organizationId"][]
+): Promise<Map<Kit["id"], KitBookingCustodian>> {
+  const membershipRows = await db.assetKit.findMany({
+    where: { kitId: { in: kitIds }, organizationId: { in: organizationIds } },
+    select: { id: true, kitId: true },
+  });
+  const kitIdByAssetKitId = new Map(
+    membershipRows.map((row) => [row.id, row.kitId])
+  );
+
+  const bookedSlices = await db.bookingAsset.findMany({
+    where: {
+      booking: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId: { in: organizationIds },
+      },
+      OR: [
+        { sourceKitId: { in: kitIds } },
+        { assetKitId: { in: [...kitIdByAssetKitId.keys()] } },
+      ],
+    },
+    // Several ongoing bookings can hold one kit at once. Ordering fixes which
+    // of them names the custodian, so the cell does not flip between requests
+    // with whatever order Postgres happens to return.
+    orderBy: { id: "asc" },
+    select: {
+      assetKitId: true,
+      sourceKitId: true,
+      // Departure markers. A booking stays ONGOING while other assets are
+      // away, so its status alone does not say this kit's units are still out.
+      // The comparison between the two is a column-to-column one that a Prisma
+      // `where` cannot express, so it is applied below.
+      checkedOutAt: true,
+      checkedInAt: true,
+      booking: {
+        select: {
+          custodianTeamMember: { select: { name: true } },
+          custodianUser: {
+            select: {
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const requestedKitIds = new Set(kitIds);
+  const custodianByKitId = new Map<Kit["id"], KitBookingCustodian>();
+
+  for (const slice of bookedSlices) {
+    if (!isSliceStillOut(slice)) continue;
+
+    // Live membership names the kit exactly; `sourceKitId` answers for slices
+    // whose membership row has since been removed.
+    const kitId =
+      (slice.assetKitId ? kitIdByAssetKitId.get(slice.assetKitId) : null) ??
+      slice.sourceKitId;
+
+    if (!kitId || !requestedKitIds.has(kitId) || custodianByKitId.has(kitId)) {
+      continue;
+    }
+
+    custodianByKitId.set(kitId, slice.booking);
+  }
+
+  return custodianByKitId;
+}
+
+/**
+ * Whether a kit row's projection already names a custodian of its own.
+ *
+ * `Kit` declares no `custody` field — it arrives through whatever `include` the
+ * caller asked for, so its presence is a fact about the projection rather than
+ * the model. Probing structurally reads it without widening the generic that
+ * every call site is bound to.
+ */
+function kitCarriesOwnCustodian(kit: Kit): boolean {
+  const custody = (kit as { custody?: { custodian?: unknown } | null }).custody;
+  return Boolean(custody?.custodian);
+}
+
+/**
+ * Fills a CHECKED_OUT kit's custody cell with the custodian of the booking
+ * holding it.
+ *
+ * A kit has no direct relation to a booking: it goes out through the slices its
+ * member assets contribute, so the custodian is read back from the booking
+ * those slices belong to — and only slices booked under this kit count, see
+ * {@link getBookingCustodiansHoldingKits}. A kit no booking holds keeps
+ * whatever custodian its own `custody` row names.
+ *
+ * Kits in any other status are returned untouched, by reference.
+ *
+ * @param kits - Kit rows to annotate; every other field is preserved as-is
+ * @returns The same rows, with booking custody filled in where one applies
+ * @throws {ShelfError} If the custodian lookup fails
+ */
 export async function updateKitsWithBookingCustodians<T extends Kit>(
   kits: T[]
 ): Promise<T[]> {
   try {
     /** When kits are checked out, we have to display the custodian from that booking */
-    const checkedOutKits = kits
-      .filter((kit) => kit.status === "CHECKED_OUT")
-      .map((k) => k.id);
+    const checkedOutKitIds = kits
+      .filter((kit) => kit.status === KitStatus.CHECKED_OUT)
+      .map((kit) => kit.id);
 
-    if (checkedOutKits.length === 0) {
+    if (checkedOutKitIds.length === 0) {
       return kits;
     }
 
-    const resolvedKits: T[] = [];
+    // Org scope comes off the rows themselves — every `Kit` carries it — so the
+    // lookup cannot reach another workspace without widening the signature
+    // every call site is bound to.
+    const organizationIds = [
+      ...new Set(kits.map((kit) => kit.organizationId)),
+    ];
+    const custodianByKitId = await getBookingCustodiansHoldingKits(
+      checkedOutKitIds,
+      organizationIds
+    );
+    const checkedOutKitIdSet = new Set(checkedOutKitIds);
 
-    for (const kit of kits) {
-      if (!checkedOutKits.includes(kit.id)) {
-        resolvedKits.push(kit);
-        continue;
+    return kits.map((kit): T => {
+      if (!checkedOutKitIdSet.has(kit.id)) {
+        return kit;
       }
 
-      /** A kit is not directly associated with booking so have to make an extra query to get the booking for kit.
-       * We filter for assets that have an active booking to avoid picking
-       * an asset in the kit that is AVAILABLE and has no relevant booking.
-       * Kit membership is read through the `AssetKit` pivot. */
-      const kitAsset = await db.asset.findFirst({
-        where: {
-          assetKits: { some: { kitId: kit.id } },
-          bookingAssets: {
-            some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
-          },
-        },
-        select: {
-          id: true,
-          bookingAssets: {
-            where: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
-            include: {
-              booking: {
-                select: {
-                  id: true,
-                  custodianTeamMember: true,
-                  custodianUser: {
-                    select: {
-                      firstName: true,
-                      lastName: true,
-                      displayName: true,
-                      profilePicture: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      });
-
-      const booking = kitAsset?.bookingAssets[0]?.booking;
-      const custodianUser = booking?.custodianUser;
-      const custodianTeamMember = booking?.custodianTeamMember;
+      const holdingCustodian = custodianByKitId.get(kit.id);
+      const custodianUser = holdingCustodian?.custodianUser;
+      const custodianTeamMember = holdingCustodian?.custodianTeamMember;
 
       if (custodianUser) {
-        resolvedKits.push({
+        return {
           ...kit,
           custody: {
             custodian: {
@@ -2682,17 +2810,20 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
               user: custodianUser,
             },
           },
-        });
-      } else if (custodianTeamMember) {
-        resolvedKits.push({
+        };
+      }
+
+      if (custodianTeamMember) {
+        return {
           ...kit,
-          custody: {
-            custodian: { name: custodianTeamMember.name },
-          },
-        });
-      } else {
-        resolvedKits.push(kit);
-        /** This case should never happen because there must be a custodianUser or custodianTeamMember assigned to a booking */
+          custody: { custodian: { name: custodianTeamMember.name } },
+        };
+      }
+
+      // A booking always names a custodian, so reaching here means no booking
+      // holds this kit's slices. The kit's own custody row is then the only
+      // holder there is — and when that is empty too, nothing can name one.
+      if (!kitCarriesOwnCustodian(kit)) {
         Logger.error(
           new ShelfError({
             cause: null,
@@ -2702,9 +2833,9 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
           })
         );
       }
-    }
 
-    return resolvedKits;
+      return kit;
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -2728,43 +2859,61 @@ type CurrentBookingType = {
 };
 
 /**
- * Determines if a kit has a current booking by checking its assets.
- * A kit is considered to have a current booking when at least one of its assets is:
- * 1. Currently checked out (status === CHECKED_OUT)
- * 2. Has an ongoing or overdue booking
+ * The ongoing or overdue booking that currently holds a kit, if any.
  *
- * This ensures the custody card only shows when assets are actually in custody,
- * not just when they have ongoing bookings but have been checked back in.
+ * A kit goes out through the booking slices its member assets contribute, and
+ * only slices booked under THIS kit count: `BookingAsset.assetKitId` names one
+ * of the kit's live membership rows, and `sourceKitId` names the kit itself and
+ * survives a detach. Both are NULL on a standalone free-pool slice.
  *
- * @returns The first ongoing/overdue booking found, or undefined if none exist
+ * The slice must also still be out — see {@link isSliceStillOut}.
+ *
+ * @param kit - The kit with its membership rows and their assets' active slices
+ * @returns The booking holding a slice of this kit that is still out, or
+ *   `undefined`
  */
 export function getKitCurrentBooking(kit: {
   id: string;
-  assets: {
-    status: AssetStatus;
-    bookingAssets: { booking: CurrentBookingType }[];
+  assetKits: {
+    id: string;
+    asset: {
+      bookingAssets: {
+        assetKitId: string | null;
+        sourceKitId: string | null;
+        checkedOutAt: Date | null;
+        checkedInAt: Date | null;
+        booking: CurrentBookingType;
+      }[];
+    };
   }[];
-}) {
-  const ongoingBookingAsset = kit.assets
-    // Filter each asset's bookingAssets to only ongoing or overdue ones
-    .map((a) => ({
-      ...a,
-      bookingAssets: a.bookingAssets.filter(
-        (ba) =>
-          ba.booking.status === BookingStatus.ONGOING ||
-          ba.booking.status === BookingStatus.OVERDUE
-      ),
-    }))
-    // Only consider assets that are actually checked out
-    .filter((a) => a.status === AssetStatus.CHECKED_OUT)
-    // Find the first asset that has any ongoing/overdue bookings
-    .find((a) => a.bookingAssets.length > 0);
+}): CurrentBookingType | undefined {
+  const ownAssetKitIds = new Set(
+    kit.assetKits.map((membership) => membership.id)
+  );
 
-  const ongoingBooking = ongoingBookingAsset
-    ? ongoingBookingAsset.bookingAssets[0].booking
-    : undefined;
+  /** Whether this slice was booked under the kit being asked about. */
+  const belongsToKit = (slice: {
+    assetKitId: string | null;
+    sourceKitId: string | null;
+  }) =>
+    slice.sourceKitId === kit.id ||
+    (slice.assetKitId !== null && ownAssetKitIds.has(slice.assetKitId));
 
-  return ongoingBooking;
+  for (const membership of kit.assetKits) {
+    const holdingSlice = membership.asset.bookingAssets.find(
+      (slice) =>
+        (slice.booking.status === BookingStatus.ONGOING ||
+          slice.booking.status === BookingStatus.OVERDUE) &&
+        belongsToKit(slice) &&
+        isSliceStillOut(slice)
+    );
+
+    if (holdingSlice) {
+      return holdingSlice.booking;
+    }
+  }
+
+  return undefined;
 }
 
 export async function bulkDeleteKits({
