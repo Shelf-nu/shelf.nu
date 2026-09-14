@@ -1,6 +1,8 @@
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { createAssetModel as createAssetModelFactory } from "@factories";
 import { db } from "~/database/db.server";
+import { recordEvents } from "~/modules/activity-event/service.server";
+import { createNotes } from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { parseFileFormData } from "~/utils/storage.server";
 import {
@@ -31,6 +33,21 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn(),
       updateMany: vitest.fn(),
     },
+    // why: `createLoadUserForNotes` is NOT mocked, so the real memoized loader
+    // runs and reads this stub to build the note's author link.
+    user: {
+      findFirst: vitest.fn(),
+    },
+    // why: the delete paths write their activity trail in the same transaction
+    // as the delete. Running the callback with `db` keeps the assertions on the
+    // mocked models above.
+    $transaction: vitest
+      .fn()
+      .mockImplementation((callbackOrArray: unknown) =>
+        typeof callbackOrArray === "function"
+          ? (callbackOrArray as (tx: unknown) => unknown)(db)
+          : Promise.all(callbackOrArray as Promise<unknown>[])
+      ),
     // why: `~/utils/org-validation.server` is NOT mocked here, so
     // `assertCategoryBelongsToOrg` runs for real against this stub whenever a
     // `defaultCategoryId` is supplied.
@@ -38,6 +55,19 @@ vitest.mock("~/database/db.server", () => ({
       findFirst: vitest.fn(),
     },
   },
+}));
+
+// why: note persistence is exercised in `note/service.server.test.ts`; here the
+// question is only which assets get a note and what it says, so the writer is
+// stubbed and its arguments asserted.
+vitest.mock("~/modules/note/service.server", () => ({
+  createNotes: vitest.fn().mockResolvedValue({}),
+}));
+
+// why: event persistence is exercised in the activity-event suite. Stubbing it
+// keeps the assertion on the emitted payload rather than on Prisma plumbing.
+vitest.mock("~/modules/activity-event/service.server", () => ({
+  recordEvents: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: parseFileFormData streams a multipart body to Supabase storage — a
@@ -410,8 +440,14 @@ describe("updateAssetModel", () => {
 describe("deleteAssetModel", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-    // @ts-expect-error mock setup — no inheriting assets unless a test says so
+    // @ts-expect-error mock setup — no linked assets unless a test says so
     db.asset.findMany.mockResolvedValue([]);
+    // @ts-expect-error mock setup
+    db.user.findFirst.mockResolvedValue({
+      firstName: "Dana",
+      lastName: "Ray",
+      displayName: null,
+    });
   });
 
   it("deletes an asset model scoped to organization", async () => {
@@ -421,10 +457,84 @@ describe("deleteAssetModel", () => {
     await deleteAssetModel({
       id: "asset-model-123",
       organizationId: "org-123",
+      userId: "user-1",
     });
 
     expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
       where: { id: "asset-model-123", organizationId: "org-123" },
+    });
+  });
+
+  it("records the unlink on every asset the deleted model held", async () => {
+    // Deleting a model is `ON DELETE SET NULL` on every asset that held it, so
+    // the field changes with no other write to hang the history off. Without
+    // this the asset's model silently disappears and its activity tab stays
+    // empty — the same trail gap a plain removal already avoids.
+    // @ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", assetModel: { id: "model-1", name: "Sony PXW-Z190" } },
+      { id: "asset-2", assetModel: { id: "model-1", name: "Sony PXW-Z190" } },
+    ]);
+    // @ts-expect-error mock setup
+    db.assetModel.deleteMany.mockResolvedValue({ count: 1 });
+
+    await deleteAssetModel({
+      id: "model-1",
+      organizationId: "org-123",
+      userId: "user-1",
+    });
+
+    expect(recordEvents as ReturnType<typeof vitest.fn>).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_MODEL_CHANGED",
+          assetId: "asset-1",
+          field: "assetModelId",
+          fromValue: "model-1",
+          toValue: null,
+        }),
+        expect.objectContaining({ assetId: "asset-2", toValue: null }),
+      ],
+      expect.anything()
+    );
+
+    const note = (createNotes as ReturnType<typeof vitest.fn>).mock.calls[0][0];
+    expect(note.assetIds).toEqual(["asset-1", "asset-2"]);
+    expect(note.content).toContain("deleted the asset model");
+    expect(note.content).toContain("Sony PXW-Z190");
+  });
+
+  it("writes no trail when the model held no assets", async () => {
+    // Nothing changed on any asset, so inventing a note would be noise. This is
+    // also the create-rollback path, where the model is seconds old.
+    // @ts-expect-error mock setup
+    db.assetModel.deleteMany.mockResolvedValue({ count: 1 });
+
+    await deleteAssetModel({
+      id: "model-1",
+      organizationId: "org-123",
+      userId: "user-1",
+    });
+
+    expect(recordEvents).not.toHaveBeenCalled();
+    expect(createNotes).not.toHaveBeenCalled();
+  });
+
+  it("raises the transaction timeout, because one model can hold many assets", async () => {
+    // The trail is one event and one note per asset held, all inside the delete
+    // transaction. Prisma's 5s interactive default has already aborted two
+    // other bulk asset writes in production with P2028.
+    // @ts-expect-error mock setup
+    db.assetModel.deleteMany.mockResolvedValue({ count: 1 });
+
+    await deleteAssetModel({
+      id: "model-1",
+      organizationId: "org-123",
+      userId: "user-1",
+    });
+
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
     });
   });
 
@@ -436,6 +546,7 @@ describe("deleteAssetModel", () => {
       deleteAssetModel({
         id: "asset-model-123",
         organizationId: "org-123",
+        userId: "user-1",
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -541,6 +652,16 @@ describe("createAssetModelsIfNotExists", () => {
 describe("bulkDeleteAssetModels", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // @ts-expect-error mock setup — no linked assets unless a test says so
+    db.asset.findMany.mockResolvedValue([]);
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([]);
+    // @ts-expect-error mock setup
+    db.user.findFirst.mockResolvedValue({
+      firstName: "Dana",
+      lastName: "Ray",
+      displayName: null,
+    });
   });
 
   it("deletes specific asset models by IDs", async () => {
@@ -550,6 +671,7 @@ describe("bulkDeleteAssetModels", () => {
     await bulkDeleteAssetModels({
       assetModelIds: ["model-1", "model-2"],
       organizationId: "org-123",
+      userId: "user-1",
     });
 
     expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
@@ -567,6 +689,7 @@ describe("bulkDeleteAssetModels", () => {
     await bulkDeleteAssetModels({
       assetModelIds: ["all-selected"],
       organizationId: "org-123",
+      userId: "user-1",
     });
 
     // why: the assets of a deleted model need no image cleanup — they never
@@ -574,6 +697,66 @@ describe("bulkDeleteAssetModels", () => {
     expect(db.asset.updateMany).not.toHaveBeenCalled();
     expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
       where: { organizationId: "org-123" },
+    });
+  });
+
+  it("records the unlink per asset, grouped by the model each one left", async () => {
+    // A bulk delete unlinks assets across several models at once. The note
+    // names the model an asset actually left, so the grouping is what keeps a
+    // large batch to one statement per model rather than one per asset.
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1", name: "Sony PXW-Z190" },
+      { id: "model-2", name: "Panasonic PT-VZ580" },
+    ]);
+    // @ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", assetModel: { id: "model-1", name: "Sony PXW-Z190" } },
+      {
+        id: "asset-2",
+        assetModel: { id: "model-2", name: "Panasonic PT-VZ580" },
+      },
+      { id: "asset-3", assetModel: { id: "model-1", name: "Sony PXW-Z190" } },
+    ]);
+    // @ts-expect-error mock setup
+    db.assetModel.deleteMany.mockResolvedValue({ count: 2 });
+
+    await bulkDeleteAssetModels({
+      assetModelIds: ["model-1", "model-2"],
+      organizationId: "org-123",
+      userId: "user-1",
+    });
+
+    // One event per asset, each naming the model it actually left.
+    expect(recordEvents as ReturnType<typeof vitest.fn>).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ assetId: "asset-1", fromValue: "model-1" }),
+        expect.objectContaining({ assetId: "asset-2", fromValue: "model-2" }),
+        expect.objectContaining({ assetId: "asset-3", fromValue: "model-1" }),
+      ],
+      expect.anything()
+    );
+
+    const calls = (createNotes as ReturnType<typeof vitest.fn>).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0].assetIds).toEqual(["asset-1", "asset-3"]);
+    expect(calls[0][0].content).toContain("Sony PXW-Z190");
+    expect(calls[1][0].assetIds).toEqual(["asset-2"]);
+    expect(calls[1][0].content).toContain("Panasonic PT-VZ580");
+  });
+
+  it("raises the transaction timeout, because select-all can span the workspace", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.deleteMany.mockResolvedValue({ count: 3 });
+
+    await bulkDeleteAssetModels({
+      assetModelIds: ["all-selected"],
+      organizationId: "org-123",
+      userId: "user-1",
+    });
+
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
     });
   });
 });
