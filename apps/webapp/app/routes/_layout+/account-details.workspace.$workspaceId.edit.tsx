@@ -1,4 +1,4 @@
-import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
+import { Currency, OrganizationType } from "@prisma/client";
 import {
   MaxFileSizeExceededError,
   parseFormData,
@@ -47,7 +47,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
+import { isOrganizationOwner, requirePermission } from "~/utils/roles.server";
 import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
@@ -186,7 +186,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role, organizations } = await requirePermission({
+    const { organizations, userOrganizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.workspace,
@@ -365,12 +365,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return payload({ success: true });
       }
       case "sso": {
-        if (role !== OrganizationRoles.OWNER) {
+        /**
+         * This route is reachable while a DIFFERENT workspace is selected, so
+         * the role to test is the one held in the workspace named by the
+         * params — `requirePermission` resolves its `role` against the
+         * selected workspace, which here is whichever one the user happens to
+         * be sitting in.
+         */
+        if (!isOrganizationOwner({ userOrganizations, organizationId: id })) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",
             message: "You are not allowed to edit SSO settings.",
             label: "Settings",
+            status: 403,
+            shouldBeCaptured: false,
           });
         }
 
@@ -381,6 +390,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             message: "SSO is not enabled for this organization.",
             additionalData: { userId, id },
             label: "Organization",
+            status: 400,
+            shouldBeCaptured: false,
           });
         }
 
