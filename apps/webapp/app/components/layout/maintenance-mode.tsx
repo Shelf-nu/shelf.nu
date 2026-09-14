@@ -19,10 +19,15 @@ export default function BlockInteractions({
   icon,
 }: Props) {
   return (
-    <div className="fixed z-[9999999] h-dvh w-screen px-4 py-16 md:p-16">
+    // `h-screen` is the fallback for browsers without dynamic viewport units,
+    // so the overlay still covers the page on the ones this screen exists for.
+    <div className="fixed z-[9999999] h-screen w-screen px-4 py-16 supports-[height:100dvh]:h-dvh md:p-16">
       <img
         src="/static/images/bg-overlay1.png"
         alt="background"
+        // Deferred so a hidden instance (the browser-support gate in root.tsx)
+        // does not download the image on every page load.
+        loading="lazy"
         className="absolute left-0 top-0 -z-10 size-full object-cover"
       />
       <div className="flex size-full items-center justify-center bg-white shadow-xl">

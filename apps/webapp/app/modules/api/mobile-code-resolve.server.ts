@@ -2,7 +2,9 @@
  * Mobile scanned-code resolver (shared)
  *
  * Resolves a scanned QR id or SAM / sequential id to its linked asset or kit,
- * enforcing organization membership. It deliberately does NOT record scan
+ * enforcing organization membership. A SAM-shaped value the workspace has no
+ * asset for falls back to its barcode table, so labels printed with a
+ * SAM-shaped barcode value still resolve. It deliberately does NOT record scan
  * provenance: recording is the *caller's* (the endpoint's) decision.
  *
  * This is the seam that keeps the recording vs non-recording behaviour an
@@ -29,8 +31,10 @@ import {
   shapeMobileAssetResponse,
   shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
+import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { getParams } from "~/utils/http.server";
 import { parseSequentialId } from "~/utils/sequential-id";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 /** The resolved code payload returned to the companion (shared by both routes). */
 type ResolvedCode = {
@@ -83,6 +87,97 @@ export type ResolveMobileCodeResult =
   | { ok: true; qr: ResolvedCode; recordableQrId: string | null };
 
 /**
+ * A barcode row carrying just what a mobile resolve needs.
+ *
+ * The relation types are borrowed from the shape helpers rather than declared
+ * again, so widening `MOBILE_ASSET_SELECT` / `MOBILE_KIT_SELECT` cannot leave
+ * this type behind. `getBarcodeByValue` is generic over its `include` and
+ * returns `any`, so annotating the call site is what keeps the payload typed.
+ */
+type MobileBarcodeMatch = {
+  value: string;
+  assetId: string | null;
+  kitId: string | null;
+  asset: Parameters<typeof shapeMobileAssetResponse>[0] | null;
+  kit: Parameters<typeof shapeMobileKitResponse>[0];
+};
+
+/**
+ * Resolve a SAM-shaped scan against the workspace's barcode table.
+ *
+ * Reserved for values the SAM lookup already missed — a SAM id is the core
+ * identifier and always wins, so a value that is both resolves as the SAM.
+ *
+ * Gated on the Barcodes add-on because the barcode table is add-on data:
+ * resolving through it for a workspace without the add-on would hand out what
+ * the add-on sells. Uses `canUseBarcodes` rather than reading `barcodesEnabled`
+ * directly so a self-hosted deployment — which has no billing to gate on and
+ * therefore holds every add-on — is not refused; the mobile barcode route
+ * gates the same way.
+ *
+ * Scoped to the caller's own workspace only. The mobile barcode route also
+ * searches sibling workspaces so it can offer a switch, but a SAM-shaped value
+ * arrives here as a SAM candidate, and SAM resolution never leaves the current
+ * workspace.
+ *
+ * @param args.value - The raw scanned string, exactly as the route received it.
+ * @param args.organizationId - The caller's current workspace.
+ * @returns An ok result when the value is a barcode LINKED to an asset or kit,
+ *   otherwise `null` so the caller can fall through to its own not-found. An
+ *   unlinked barcode returns `null` too: the response must not reveal that a
+ *   row exists for a code that resolves to nothing.
+ * @see {@link file://./../../routes/api+/mobile+/barcode.$value.ts}
+ */
+async function resolveSamShapedBarcode({
+  value,
+  organizationId,
+}: {
+  value: string;
+  organizationId: string;
+}): Promise<ResolveMobileCodeResult | null> {
+  const organization = await db.organization.findUnique({
+    where: { id: organizationId },
+    select: { barcodesEnabled: true },
+  });
+
+  if (!organization || !canUseBarcodes(organization)) {
+    return null;
+  }
+
+  const barcode: MobileBarcodeMatch | null = await getBarcodeByValue({
+    value,
+    organizationId,
+    include: {
+      asset: { select: MOBILE_ASSET_SELECT },
+      kit: { select: MOBILE_KIT_SELECT },
+    },
+  });
+
+  if (!barcode || (!barcode.assetId && !barcode.kitId)) {
+    return null;
+  }
+
+  return {
+    ok: true,
+    // A barcode has no QR record, so there is nothing to record a scan
+    // against — same as a SAM resolve.
+    recordableQrId: null,
+    qr: {
+      // The stored barcode value, which may differ in case from what was
+      // scanned; the companion echoes this id back on follow-up calls.
+      id: barcode.value,
+      assetId: barcode.assetId,
+      kitId: barcode.kitId,
+      organizationId,
+      // Flatten the pivot shape (assetKits/assetLocations/custody) into the
+      // legacy flat shape the companion expects, exactly as the QR path does.
+      asset: barcode.asset ? shapeMobileAssetResponse(barcode.asset) : null,
+      kit: shapeMobileKitResponse(barcode.kit),
+    },
+  };
+}
+
+/**
  * Resolve a scanned code to its asset/kit, enforcing org membership.
  *
  * @param args.request - The loader request (for SAM org context).
@@ -104,8 +199,9 @@ export async function resolveMobileScannedCode({
 
   // ── SAM / sequential ID path (web parity) ──
   // SAM ids are unique per-org (not global like a QR id), so resolution needs
-  // the caller's workspace. Core identifier, NOT gated behind the Barcodes
-  // add-on (matches web, where SAM resolution sits in the qr-read path).
+  // the caller's workspace. The SAM lookup is a core identifier and NOT gated
+  // behind the Barcodes add-on (matches web, where SAM resolution sits in the
+  // qr-read path); only the barcode fallback below carries that gate.
   const sequentialId = parseSequentialId(qrId);
   if (sequentialId) {
     const organizationId = await requireOrganizationAccess(request, user.id);
@@ -115,6 +211,22 @@ export async function resolveMobileScannedCode({
     });
 
     if (!asset) {
+      // A printed label can carry a SAM-shaped value that the workspace
+      // registered as a BARCODE rather than as the asset's SAM id. The
+      // companion cannot tell the two apart from the decoded string, so it
+      // routes every SAM-shaped scan here; without this fallback such a label
+      // dead-ends on the 404 below even though the workspace holds the code.
+      const fromBarcode = await resolveSamShapedBarcode({
+        // The raw scanned string, not the normalized SAM id: barcode values
+        // are matched original-case first, then uppercased.
+        value: qrId,
+        organizationId,
+      });
+
+      if (fromBarcode) {
+        return fromBarcode;
+      }
+
       return {
         ok: false,
         status: 404,

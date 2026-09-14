@@ -124,14 +124,31 @@ export interface PdfDbResult {
   originalTo?: string;
 }
 
+/** Optional switches for {@link fetchAllPdfRelatedData}. */
+export interface PdfDataOptions {
+  /**
+   * Whether to encode a QR image per asset. `true` by default, so a sheet that
+   * prints QR images needs no opt-in.
+   *
+   * A sheet that prints only the text code passes `false`: the encode is a
+   * per-asset cost and puts a data URL per asset into a response that nothing
+   * reads. The workspace's own `showQrCodesOnPdfs` still wins over a `true`
+   * here — this switch can only turn generation off, never on.
+   */
+  includeQrImages?: boolean;
+}
+
 export async function fetchAllPdfRelatedData(
   bookingId: string,
   organizationId: string,
   userId: string,
   role: OrganizationRoles | undefined,
   request: Request,
-  sortParams?: SortParams
+  sortParams?: SortParams,
+  options?: PdfDataOptions
 ): Promise<PdfDbResult> {
+  const includeQrImages = options?.includeQrImages ?? true;
+
   try {
     const booking = await getBooking({
       id: bookingId,
@@ -306,19 +323,21 @@ export async function fetchAllPdfRelatedData(
     const uniqueAssetsForQr = Array.from(
       new Map(sortedAssets.map((asset) => [asset.id, asset])).values()
     );
-    // Encoded only when the sheet will print them. A workspace with the QR
-    // image turned off renders nothing from this map, so generating it would
-    // cost a QR encode per asset and put a data URL per asset in the response
-    // that nothing reads. The renderer already treats a missing entry as
-    // "no image", so an empty map needs no handling of its own.
-    const assetIdToQrCodeMap = organization.showQrCodesOnPdfs
-      ? await getQrCodeMaps({
-          assets: uniqueAssetsForQr,
-          userId,
-          organizationId,
-          size: "small",
-        })
-      : {};
+    // Encoded only when the sheet will print them: a workspace that turned QR
+    // images off, or a caller whose sheet has no QR column at all, renders
+    // nothing from this map, so generating it would cost a QR encode per asset
+    // and put a data URL per asset in the response that nothing reads. The
+    // renderer already treats a missing entry as "no image", so an empty map
+    // needs no handling of its own.
+    const assetIdToQrCodeMap =
+      organization.showQrCodesOnPdfs && includeQrImages
+        ? await getQrCodeMaps({
+            assets: uniqueAssetsForQr,
+            userId,
+            organizationId,
+            size: "small",
+          })
+        : {};
 
     // Resolve the printed code once per unique asset, over the same deduped
     // list the QR images are generated from. Resolving per rendered row would
