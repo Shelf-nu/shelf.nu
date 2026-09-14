@@ -1099,4 +1099,123 @@ describe("manage-kits loader — Models tab payload", () => {
     // kits read as available.
     expect(result.items[0].custody).toBeTruthy();
   });
+
+  describe("overlap predicate for the picker's booking rows", () => {
+    /**
+     * Evaluates the loader's Prisma `OR` against a candidate booking.
+     *
+     * The predicate decides which existing bookings are shown against a kit,
+     * and therefore whether the kit reads as available. Asserting its literal
+     * shape would pass for any pair of endpoints, including a pair no booking
+     * can satisfy — so this interprets the operators instead, and the tests
+     * below state which candidates must match.
+     */
+    function matchesOverlapClause(
+      or: Array<{
+        from: { lte?: Date; gte?: Date };
+        to: { lte?: Date; gte?: Date };
+      }>,
+      candidate: { from: Date; to: Date }
+    ): boolean {
+      const satisfies = (
+        value: Date,
+        bound: { lte?: Date; gte?: Date }
+      ): boolean =>
+        (bound.lte === undefined || value.getTime() <= bound.lte.getTime()) &&
+        (bound.gte === undefined || value.getTime() >= bound.gte.getTime());
+
+      return or.some(
+        (clause) =>
+          satisfies(candidate.from, clause.from) &&
+          satisfies(candidate.to, clause.to)
+      );
+    }
+
+    /** Runs the loader and digs out the `OR` it handed the kit query. */
+    async function readOverlapClause() {
+      vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+        showModelsTab: false,
+        assetModels: [],
+        initialAssetModels: [],
+        totalAssetModels: 0,
+        matchedAssetModels: 0,
+        modelRequests: [],
+      });
+
+      await loader(
+        createLoaderArgs({ context: mockContext, params: mockParams })
+      );
+
+      const args: any = vi.mocked(kitService.getPaginatedAndFilterableKits).mock
+        .calls[0][0];
+
+      return args.extraInclude.assetKits.select.asset.select.bookingAssets.where
+        .booking.OR as Array<{
+        from: { lte?: Date; gte?: Date };
+        to: { lte?: Date; gte?: Date };
+      }>;
+    }
+
+    // The booking being filled runs Jan 1 → Jan 2 (`mockLoaderBooking`).
+    it.each([
+      {
+        label: "starts before and ends inside",
+        candidate: {
+          from: new Date("2025-12-30"),
+          to: new Date("2026-01-01T12:00:00Z"),
+        },
+      },
+      {
+        label: "starts inside and ends after",
+        candidate: {
+          from: new Date("2026-01-01T12:00:00Z"),
+          to: new Date("2026-01-05"),
+        },
+      },
+      {
+        label: "sits entirely inside",
+        candidate: {
+          from: new Date("2026-01-01T06:00:00Z"),
+          to: new Date("2026-01-01T18:00:00Z"),
+        },
+      },
+      {
+        label: "spans the whole period",
+        candidate: { from: new Date("2025-12-01"), to: new Date("2026-02-01") },
+      },
+    ])("matches a booking that $label", async ({ candidate }) => {
+      expect(matchesOverlapClause(await readOverlapClause(), candidate)).toBe(
+        true
+      );
+    });
+
+    it.each([
+      {
+        label: "ends before this one starts",
+        candidate: { from: new Date("2025-12-01"), to: new Date("2025-12-15") },
+      },
+      {
+        label: "starts after this one ends",
+        candidate: { from: new Date("2026-02-01"), to: new Date("2026-02-15") },
+      },
+    ])("ignores a booking that $label", async ({ candidate }) => {
+      expect(matchesOverlapClause(await readOverlapClause(), candidate)).toBe(
+        false
+      );
+    });
+
+    it("has no clause that only a zero-length booking could satisfy", async () => {
+      // A clause bounding `from` from below and `to` from above by the same
+      // instant is satisfiable only where from === to, which no real booking
+      // is — so it silently contributes nothing to the OR.
+      for (const clause of await readOverlapClause()) {
+        const impossible =
+          clause.from.gte !== undefined &&
+          clause.to.lte !== undefined &&
+          clause.from.gte.getTime() >= clause.to.lte.getTime();
+
+        expect(impossible).toBe(false);
+      }
+    });
+  });
 });
