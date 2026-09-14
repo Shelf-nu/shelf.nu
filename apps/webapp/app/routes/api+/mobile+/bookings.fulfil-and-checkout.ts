@@ -82,12 +82,16 @@ export async function action({ request }: ActionFunctionArgs) {
       "Booking"
     );
 
-    // A body that names no scanned unit is a plain one-tap check-out sent to
-    // this route, so the explicit check-out rule refuses it exactly as the
-    // checkout route does, judged by the most privileged role like the
-    // loader's `canQuickCheckout`. Scanned units stay open: the fulfil scanner
-    // is the explicit flow for a booking with model requests.
-    if (assetIds.length === 0 && kitIds.length === 0) {
+    // With no model request left to fulfil, this route is the one-tap
+    // check-out under another name, whatever the body names, so the explicit
+    // check-out rule refuses it exactly as the checkout route does, judged by
+    // the most privileged role like the loader's `canQuickCheckout`. A booking
+    // that still has requests open stays on the fulfil scanner, which is the
+    // explicit flow for it.
+    const openModelRequests = await db.bookingModelRequest.count({
+      where: { bookingId, booking: { organizationId }, fulfilledAt: null },
+    });
+    if (openModelRequests === 0) {
       const { effectiveRole } = await getMobileUserContext(
         user.id,
         organizationId

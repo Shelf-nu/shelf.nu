@@ -48,11 +48,15 @@ vi.mock("~/utils/roles.server", () => ({
 }));
 
 // why: the booking lookup feeding the ownership guard; avoids a database.
-const { bookingFindUniqueOrThrow } = vi.hoisted(() => ({
+const { bookingFindUniqueOrThrow, modelRequestCount } = vi.hoisted(() => ({
   bookingFindUniqueOrThrow: vi.fn(),
+  modelRequestCount: vi.fn(),
 }));
 vi.mock("~/database/db.server", () => ({
-  db: { booking: { findUniqueOrThrow: bookingFindUniqueOrThrow } },
+  db: {
+    booking: { findUniqueOrThrow: bookingFindUniqueOrThrow },
+    bookingModelRequest: { count: modelRequestCount },
+  },
 }));
 
 // why: the sink we assert is never reached on a refused request.
@@ -92,18 +96,21 @@ function post({
   creatorId = "someone-else",
   custodianUserId = "someone-else",
   scanned = true,
+  openRequests = 0,
   requireExplicitCheckoutForAdmin = false,
 }: {
   roles: OrganizationRoles[];
   creatorId?: string;
   custodianUserId?: string;
-  scanned?: boolean;
+  scanned?: boolean | "junk-kit";
+  openRequests?: number;
   requireExplicitCheckoutForAdmin?: boolean;
 }) {
   const role = roles[0];
   bookingSettingsMock.mockResolvedValue(
     createBookingSettings({ requireExplicitCheckoutForAdmin })
   );
+  modelRequestCount.mockResolvedValue(openRequests);
   requirePermissionMock.mockResolvedValue({
     organizationId: "org-1",
     role,
@@ -127,7 +134,13 @@ function post({
         // repeated plain key collapses to a string and the schema 400s BEFORE
         // the guard, which would make the refusal assertions pass for the wrong
         // reason.
-        body: new URLSearchParams(scanned ? { "assetIds[0]": "asset-1" } : {}),
+        body: new URLSearchParams(
+          scanned === true
+            ? { "assetIds[0]": "asset-1" }
+            : scanned === "junk-kit"
+            ? { "kitIds[0]": "" }
+            : {}
+        ),
       }
     ),
     params: { bookingId: "booking-1" },
@@ -189,7 +202,9 @@ describe("fulfil-and-checkout action", () => {
     expect(fulfilMock).toHaveBeenCalled();
   });
 
-  it("refuses a zero-scan request from an ADMIN when explicit check-out is required", async () => {
+  it("refuses a request on a booking with no open model requests when explicit check-out is required", async () => {
+    // With nothing left to fulfil, this route is the one-tap check-out under
+    // another name, whatever the body names.
     const response = (await post({
       roles: [OrganizationRoles.ADMIN],
       scanned: false,
@@ -200,10 +215,22 @@ describe("fulfil-and-checkout action", () => {
     expect(fulfilMock).not.toHaveBeenCalled();
   });
 
-  it("still lets an ADMIN fulfil with scanned units when explicit check-out is required", async () => {
+  it("is not fooled by a body that names a blank kit id", async () => {
+    const response = (await post({
+      roles: [OrganizationRoles.ADMIN],
+      scanned: "junk-kit",
+      requireExplicitCheckoutForAdmin: true,
+    })) as unknown as Response;
+
+    expect(response.status).toBe(403);
+    expect(fulfilMock).not.toHaveBeenCalled();
+  });
+
+  it("stays open while the booking still has model requests to fulfil", async () => {
     await post({
       roles: [OrganizationRoles.ADMIN],
       scanned: true,
+      openRequests: 2,
       requireExplicitCheckoutForAdmin: true,
     });
 
@@ -213,7 +240,7 @@ describe("fulfil-and-checkout action", () => {
     });
   });
 
-  it("lets a zero-scan request through when explicit check-out is not required", async () => {
+  it("lets the plain check-out through when explicit check-out is not required", async () => {
     await post({ roles: [OrganizationRoles.ADMIN], scanned: false });
 
     expect(fulfilMock).toHaveBeenCalledTimes(1);

@@ -56,7 +56,10 @@ vi.mock("~/modules/booking/service.server", () => ({
 
 // why: the booking window lookup; avoids a database.
 vi.mock("~/database/db.server", () => ({
-  db: { booking: { findFirst: vi.fn() } },
+  db: {
+    booking: { findFirst: vi.fn() },
+    bookingModelRequest: { count: vi.fn() },
+  },
 }));
 
 // why: the switch state under test, chosen per case.
@@ -131,6 +134,7 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
       creatorId: "user-1",
       custodianUserId: null,
     } as never);
+    vi.mocked(db.bookingModelRequest.count).mockResolvedValue(0);
     vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
       createBookingSettings()
     );
@@ -142,7 +146,7 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     );
   });
 
-  it("refuses a zero-scan body from an ADMIN when the Admin switch is on", async () => {
+  it("refuses a body on a booking with no open model requests when the Admin switch is on", async () => {
     vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
       createBookingSettings({ requireExplicitCheckoutForAdmin: true })
     );
@@ -176,7 +180,23 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledTimes(1);
   });
 
-  it("still fulfils with scanned units when the Admin switch is on", async () => {
+  it("is not fooled by a body that names a blank kit id", async () => {
+    vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
+      createBookingSettings({ requireExplicitCheckoutForAdmin: true })
+    );
+
+    const result = await action(
+      createActionArgs({
+        request: createRequest({ bookingId: "booking-1", kitIds: [""] }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(403);
+    expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+  });
+
+  it("stays open while the booking still has model requests to fulfil", async () => {
+    vi.mocked(db.bookingModelRequest.count).mockResolvedValue(2);
     vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
       createBookingSettings({ requireExplicitCheckoutForAdmin: true })
     );
@@ -196,7 +216,7 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     );
   });
 
-  it("lets a zero-scan body through when no switch is on", async () => {
+  it("lets the plain check-out through when no switch is on", async () => {
     const result = await action(
       createActionArgs({ request: createRequest({ bookingId: "booking-1" }) })
     );

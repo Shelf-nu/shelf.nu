@@ -304,12 +304,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       fulfilAndCheckoutSchema
     );
 
-    // A request that names no scanned unit is a plain one-tap check-out
-    // wearing this route's clothes, so the explicit check-out rule judges it
-    // exactly as it judges the "Check out" button. Scanned units stay open:
-    // the fulfil scanner is the explicit flow for a booking with model
-    // requests.
-    if (assetIds.length === 0 && kitIds.length === 0) {
+    // With no model request left to fulfil, this route is the one-tap
+    // check-out under another name, whatever the body names, so the explicit
+    // check-out rule judges it exactly as it judges the "Check out" button.
+    // A booking that still has requests open stays on the fulfil scanner,
+    // which is the explicit flow for it: the service refuses the check-out
+    // unless the scanned units fulfil every request.
+    const openModelRequests = await db.bookingModelRequest.count({
+      where: { bookingId, booking: { organizationId }, fulfilledAt: null },
+    });
+    if (openModelRequests === 0) {
       const bookingSettings =
         await getBookingSettingsForOrganization(organizationId);
       assertQuickCheckoutAllowed({ role, bookingSettings });
