@@ -31,7 +31,7 @@ import {
   selectedBulkItemsCountAtom,
   setDisabledBulkItemsAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
+  seedFormSelectionAtom,
 } from "~/atoms/list";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image/component";
@@ -1130,7 +1130,7 @@ export default function AddAssetsToNewBooking() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const seedFormSelection = useSetAtom(seedFormSelectionAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
   const disabledBulkItems = useAtomValue(disabledBulkItemsAtom);
@@ -1213,7 +1213,7 @@ export default function AddAssetsToNewBooking() {
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
-    setSelectedBulkItems(bookingAssets);
+    seedFormSelection(bookingAssets);
   }
 
   /**

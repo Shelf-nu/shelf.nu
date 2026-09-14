@@ -26,7 +26,7 @@ import {
   selectedBulkItemsCountAtom,
   setDisabledBulkItemsAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
+  seedFormSelectionAtom,
 } from "~/atoms/list";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import {
@@ -745,7 +745,7 @@ export default function AddKitsToBooking() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const seedFormSelection = useSetAtom(seedFormSelectionAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
@@ -795,7 +795,7 @@ export default function AddKitsToBooking() {
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
-    setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
+    seedFormSelection(bookingKitIds.map((kitId) => ({ id: kitId })));
   }
 
   /**
