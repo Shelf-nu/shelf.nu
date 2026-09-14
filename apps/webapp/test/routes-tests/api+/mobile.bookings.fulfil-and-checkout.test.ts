@@ -1,11 +1,11 @@
 /**
- * Tests for POST /api/mobile/bookings/fulfil-and-checkout: the explicit
- * check-out rule on the zero-scan case.
+ * Tests for POST /api/mobile/bookings/fulfil-and-checkout: how the route
+ * hands the explicit check-out rule to the service.
  *
- * A body that names no scanned unit performs a plain one-tap check-out through
- * this route, so the workspace's "require explicit check-out" switches must
- * refuse it for the covered roles exactly as the checkout route does, while a
- * body carrying scanned units (the fulfil scanner) stays open.
+ * The rule itself is applied inside the service transaction; the route decides
+ * whether it applies (by the caller's most privileged role and the workspace
+ * switches) only after the booking and ownership checks, so a missing booking
+ * still answers 404.
  *
  * @see {@link file://../../../app/routes/api+/mobile+/bookings.fulfil-and-checkout.ts}
  * @see {@link file://./mobile.bookings.checkout.test.ts} — the checkout twin
@@ -58,10 +58,7 @@ vi.mock("~/modules/booking/service.server", () => ({
 
 // why: the booking window lookup; avoids a database.
 vi.mock("~/database/db.server", () => ({
-  db: {
-    booking: { findFirst: vi.fn() },
-    bookingModelRequest: { findMany: vi.fn() },
-  },
+  db: { booking: { findFirst: vi.fn() } },
 }));
 
 // why: the switch state under test, chosen per case.
@@ -136,7 +133,6 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
       creatorId: "user-1",
       custodianUserId: null,
     } as never);
-    vi.mocked(db.bookingModelRequest.findMany).mockResolvedValue([]);
     vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
       createBookingSettings()
     );
@@ -148,7 +144,7 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     );
   });
 
-  it("refuses a body on a booking with no open model requests when the Admin switch is on", async () => {
+  it("hands the service requireExplicitCheckout: true for an ADMIN when the Admin switch is on", async () => {
     vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
       createBookingSettings({ requireExplicitCheckoutForAdmin: true })
     );
@@ -157,13 +153,16 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
       createActionArgs({ request: createRequest({ bookingId: "booking-1" }) })
     );
 
-    expect((result as unknown as Response).status).toBe(403);
-    const body = await (result as unknown as Response).json();
-    expect(body.error.message).toContain("requires explicit check-out");
-    expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+    expect((result as unknown as Response).status).toBe(200);
+    expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        requireExplicitCheckout: true,
+      })
+    );
   });
 
-  it("judges the zero-scan body by the most privileged role of the membership", async () => {
+  it("judges the switch by the most privileged role of the membership", async () => {
     vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({
         roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
@@ -173,77 +172,38 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
       createBookingSettings({ requireExplicitCheckoutForSelfService: true })
     );
 
-    const result = await action(
+    await action(
       createActionArgs({ request: createRequest({ bookingId: "booking-1" }) })
     );
 
-    // ADMIN wins, and only the Self Service switch is on, so this passes.
-    expect((result as unknown as Response).status).toBe(200);
-    expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledTimes(1);
-  });
-
-  it("is not fooled by a body that names a blank kit id", async () => {
-    vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
-      createBookingSettings({ requireExplicitCheckoutForAdmin: true })
-    );
-
-    const result = await action(
-      createActionArgs({
-        request: createRequest({ bookingId: "booking-1", kitIds: [""] }),
-      })
-    );
-
-    expect((result as unknown as Response).status).toBe(403);
-    expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
-  });
-
-  it("treats a request with every unit assigned but no stamp as done", async () => {
-    vi.mocked(db.bookingModelRequest.findMany).mockResolvedValue([
-      { quantity: 2, fulfilledQuantity: 2, fulfilledAt: null },
-    ] as never);
-    vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
-      createBookingSettings({ requireExplicitCheckoutForAdmin: true })
-    );
-
-    const result = await action(
-      createActionArgs({
-        request: createRequest({ bookingId: "booking-1", kitIds: [""] }),
-      })
-    );
-
-    expect((result as unknown as Response).status).toBe(403);
-    expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
-  });
-
-  it("stays open while the booking still has model requests to fulfil", async () => {
-    vi.mocked(db.bookingModelRequest.findMany).mockResolvedValue([
-      { quantity: 2, fulfilledQuantity: 0, fulfilledAt: null },
-    ] as never);
-    vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
-      createBookingSettings({ requireExplicitCheckoutForAdmin: true })
-    );
-
-    const result = await action(
-      createActionArgs({
-        request: createRequest({
-          bookingId: "booking-1",
-          assetIds: ["asset-1"],
-        }),
-      })
-    );
-
-    expect((result as unknown as Response).status).toBe(200);
+    // ADMIN wins, and only the Self Service switch is on.
     expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledWith(
-      expect.objectContaining({ bookingId: "booking-1", assetIds: ["asset-1"] })
+      expect.objectContaining({ requireExplicitCheckout: false })
     );
   });
 
-  it("lets the plain check-out through when no switch is on", async () => {
-    const result = await action(
+  it("hands the service requireExplicitCheckout: false when no switch is on", async () => {
+    await action(
       createActionArgs({ request: createRequest({ bookingId: "booking-1" }) })
     );
 
-    expect((result as unknown as Response).status).toBe(200);
-    expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledTimes(1);
+    expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ requireExplicitCheckout: false })
+    );
+  });
+
+  it("answers 404 for a booking outside the workspace even when the switch is on", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue(null);
+    vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
+      createBookingSettings({ requireExplicitCheckoutForAdmin: true })
+    );
+
+    const result = await action(
+      createActionArgs({ request: createRequest({ bookingId: "missing" }) })
+    );
+
+    expect((result as unknown as Response).status).toBe(404);
+    expect(getBookingSettingsForOrganization).not.toHaveBeenCalled();
+    expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
   });
 });

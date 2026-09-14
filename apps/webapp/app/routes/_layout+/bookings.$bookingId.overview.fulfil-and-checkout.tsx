@@ -53,12 +53,11 @@ import {
   fulfilModelRequestsAndCheckout,
   getBooking,
 } from "~/modules/booking/service.server";
-import { assertQuickCheckoutAllowed } from "~/modules/booking-settings/explicit-checkout";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
-import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -305,23 +304,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       fulfilAndCheckoutSchema
     );
 
-    // With no model request left to fulfil (the same reading of "left" as the
-    // check-out guard inside the service), this route is the one-tap
-    // check-out under another name, whatever the body names, so the explicit
-    // check-out rule judges it exactly as it judges the "Check out" button.
-    // A booking that still has requests open stays on the fulfil scanner,
-    // which is the explicit flow for it: the service refuses the check-out
-    // unless the scanned units fulfil every request.
-    const modelRequests = await db.bookingModelRequest.findMany({
-      where: { bookingId, booking: { organizationId } },
-      select: { quantity: true, fulfilledQuantity: true, fulfilledAt: true },
-    });
-    if (getOutstandingModelRequests(modelRequests).length === 0) {
-      const bookingSettings =
-        await getBookingSettingsForOrganization(organizationId);
-      assertQuickCheckoutAllowed({ role, bookingSettings });
-    }
-
     /**
      * Pull the booking's from/to for the pre-tx conflict guard inside
      * the service (mirrors the existing `checkoutBooking` caller in
@@ -352,6 +334,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
+    // Decided after the booking and ownership checks, so a missing or foreign
+    // booking answers as such; the service applies the rule inside its
+    // transaction, on the model requests as they are at that moment.
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const requireExplicitCheckout = isExplicitCheckoutRequired({
+      role,
+      bookingSettings,
+    });
+
     await fulfilModelRequestsAndCheckout({
       bookingId,
       organizationId,
@@ -362,6 +354,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       hints: getClientHint(request),
       from: basicBookingInfo.from,
       to: basicBookingInfo.to,
+      requireExplicitCheckout,
     });
 
     sendNotification({

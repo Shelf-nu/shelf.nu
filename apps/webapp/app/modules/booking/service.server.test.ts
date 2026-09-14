@@ -4862,6 +4862,172 @@ describe("fulfilModelRequestsAndCheckout", () => {
     };
   }
 
+  describe("explicit check-out rule", () => {
+    // why: `clearAllMocks` in beforeEach keeps queued `Once` values, so each
+    // test queues exactly the reads its path consumes and nothing more.
+    const preTxBooking = () =>
+      buildPreTxBooking({
+        bookingAssets: [
+          {
+            asset: {
+              id: "hp-1",
+              assetKits: [],
+              title: "HP LaserJet 2020",
+              status: AssetStatus.AVAILABLE,
+              bookingAssets: [],
+            },
+            assetId: "hp-1",
+            quantity: 1,
+            id: "ba-hp",
+            checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+            checkedInAt: null,
+          },
+        ],
+      });
+
+    /** The single read a refused call makes before the rule throws. */
+    function queueRefusedPathReads() {
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce(preTxBooking());
+    }
+
+    /** Every read of a call that goes through to ONGOING, in flow order. */
+    function queueHappyPathReads() {
+      const mockBooking = preTxBooking();
+      const hydratedBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+      (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+        .mockResolvedValueOnce(mockBooking)
+        .mockResolvedValueOnce(hydratedBooking);
+      const dell = {
+        id: "dell-1",
+        title: "Dell #1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-dell",
+      };
+      // why: the scanned asset is read three times: by the org guard, inside
+      // the tx for its model id, and after commit for the note text (title).
+      (db.asset.findMany as ReturnType<typeof vitest.fn>)
+        .mockResolvedValueOnce([dell])
+        .mockResolvedValueOnce([dell])
+        .mockResolvedValueOnce([dell]);
+      (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            quantity: 1,
+            asset: { id: "hp-1", title: "HP", type: AssetType.INDIVIDUAL },
+          },
+          {
+            quantity: 1,
+            asset: {
+              id: "dell-1",
+              title: "Dell #1",
+              type: AssetType.INDIVIDUAL,
+            },
+          },
+        ]);
+      //@ts-expect-error missing vitest type
+      db.booking.update.mockResolvedValue({ id: "booking-1" });
+      return { hydratedBooking };
+    }
+
+    const openRequest = {
+      quantity: 2,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+    };
+    const unstampedDoneRequest = {
+      quantity: 2,
+      fulfilledQuantity: 2,
+      fulfilledAt: null,
+    };
+    const refusal = {
+      status: 403,
+      title: "Not allowed to quick check-out",
+    };
+
+    it("refuses inside the transaction when nothing is left to fulfil, before any write", async () => {
+      queueRefusedPathReads();
+      // why: the rule reads the requests once, inside the tx, before anything
+      // else; an empty answer makes this call a one-tap check-out.
+      (
+        db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce([]);
+
+      await expect(
+        fulfilModelRequestsAndCheckout({
+          ...mockFulfilParams,
+          assetIds: ["dell-1"],
+          requireExplicitCheckout: true,
+        })
+      ).rejects.toMatchObject(refusal);
+
+      expect(db.asset.updateMany).not.toHaveBeenCalled();
+      expect(db.booking.update).not.toHaveBeenCalled();
+      expect(hasStatusUpdate()).toBe(false);
+      // The booking and its requests are locked before the decision is read.
+      const locks = (db.$queryRaw as ReturnType<typeof vitest.fn>).mock.calls
+        .map((call) => String(call[0]))
+        .filter((sql) => sql.includes("FOR UPDATE"));
+      expect(locks.some((sql) => sql.includes('"Booking"'))).toBe(true);
+      expect(locks.some((sql) => sql.includes('"BookingModelRequest"'))).toBe(
+        true
+      );
+    });
+
+    it("treats a request with every unit assigned but no stamp as nothing left to fulfil", async () => {
+      queueRefusedPathReads();
+      (
+        db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce([unstampedDoneRequest]);
+
+      await expect(
+        fulfilModelRequestsAndCheckout({
+          ...mockFulfilParams,
+          assetIds: ["dell-1"],
+          requireExplicitCheckout: true,
+        })
+      ).rejects.toMatchObject(refusal);
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
+
+    it("stays open while a request is still to be fulfilled", async () => {
+      const { hydratedBooking } = queueHappyPathReads();
+      // why: first read is the rule's (one request open); the second is the
+      // outstanding guard inside the checkout writes, after the scanned unit
+      // has been assigned, so it reads empty.
+      (db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>)
+        .mockResolvedValueOnce([openRequest])
+        .mockResolvedValueOnce([]);
+
+      const result = await fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: ["dell-1"],
+        requireExplicitCheckout: true,
+      });
+
+      expect(result).toEqual(hydratedBooking);
+      expect(hasStatusUpdate()).toBe(true);
+    });
+
+    it("does not read the requests for the rule when it does not apply", async () => {
+      queueHappyPathReads();
+      (
+        db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce([]);
+
+      await fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: ["dell-1"],
+      });
+
+      // Only the checkout writes' guard read the requests.
+      expect(db.bookingModelRequest.findMany).toHaveBeenCalledTimes(1);
+      expect(hasStatusUpdate()).toBe(true);
+    });
+  });
+
   it("should create BookingAssets + drain all requests + transition to ONGOING on happy path", async () => {
     expect.assertions(3);
 

@@ -16,9 +16,8 @@ import {
   resolveMostPrivilegedRole,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -83,39 +82,6 @@ export async function action({ request }: ActionFunctionArgs) {
       "Booking"
     );
 
-    // With no model request left to fulfil (the same reading of "left" as the
-    // check-out guard inside the service), this route is the one-tap
-    // check-out under another name, whatever the body names, so the explicit
-    // check-out rule refuses it exactly as the checkout route does, judged by
-    // the most privileged role like the loader's `canQuickCheckout`. A booking
-    // that still has requests open stays on the fulfil scanner, which is the
-    // explicit flow for it.
-    const modelRequests = await db.bookingModelRequest.findMany({
-      where: { bookingId, booking: { organizationId } },
-      select: { quantity: true, fulfilledQuantity: true, fulfilledAt: true },
-    });
-    if (getOutstandingModelRequests(modelRequests).length === 0) {
-      const { effectiveRole } = await getMobileUserContext(
-        user.id,
-        organizationId
-      );
-      const bookingSettings =
-        await getBookingSettingsForOrganization(organizationId);
-      if (
-        isExplicitCheckoutRequired({ role: effectiveRole, bookingSettings })
-      ) {
-        throw new ShelfError({
-          cause: null,
-          title: "Not allowed to quick check-out",
-          message:
-            "This workspace requires explicit check-out. Scan or select the assets to check them out.",
-          label: "Booking",
-          status: 403,
-          shouldBeCaptured: false,
-        });
-      }
-    }
-
     // Load the booking's reservation window so the service can run its
     // asset-conflict guard (gated on `from && to`, exactly as the plain
     // checkout endpoint does). Org-scoped, so a foreign-org id 404s.
@@ -145,12 +111,26 @@ export async function action({ request }: ActionFunctionArgs) {
     // `fulfilModelRequestsAndCheckout` does NOT check ownership itself (unlike
     // the scan-add path, whose guard lives in `processBooking`), so without
     // this the mobile route would be more permissive than web.
-    const { roles } = await getMobileUserContext(user.id, organizationId);
+    const { roles, effectiveRole } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
       role: resolveMostPrivilegedRole(roles),
       action: "check out",
+    });
+
+    // Decided after the booking and ownership checks, so a missing or foreign
+    // booking answers 404 as before. Judged by the most privileged role, like
+    // the loader's `canQuickCheckout`; the service applies the rule inside its
+    // transaction, on the model requests as they are at that moment.
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const requireExplicitCheckout = isExplicitCheckoutRequired({
+      role: effectiveRole,
+      bookingSettings,
     });
 
     // Same hint derivation as the plain checkout endpoint: native clients can't
@@ -167,6 +147,7 @@ export async function action({ request }: ActionFunctionArgs) {
       assetIds,
       kitIds,
       hints,
+      requireExplicitCheckout,
       // Pass the booking's own window: enables the conflict guard without
       // adjusting any dates (adjustment needs a checkoutIntentChoice, which
       // mobile never sends → stays a "without-adjusted-date" checkout).

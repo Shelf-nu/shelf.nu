@@ -3432,6 +3432,7 @@ export async function fulfilModelRequestsAndCheckout({
   hints,
   from,
   to,
+  requireExplicitCheckout = false,
 }: {
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
@@ -3442,6 +3443,13 @@ export async function fulfilModelRequestsAndCheckout({
   hints: ClientHint;
   from?: Date | null;
   to?: Date | null;
+  /**
+   * True when the workspace requires explicit check-out for the caller's
+   * role. The rule is decided inside the transaction, on the model requests
+   * as they are at that moment: with none left to fulfil, this call is the
+   * one-tap check-out under another name and is refused with a 403.
+   */
+  requireExplicitCheckout?: boolean;
 }) {
   try {
     /**
@@ -3605,6 +3613,40 @@ export async function fulfilModelRequestsAndCheckout({
      */
     await db.$transaction(
       async (tx) => {
+        // Hold the booking and its model requests for the rest of the
+        // transaction. The explicit check-out decision below and the
+        // outstanding-request guard inside the checkout writes then read rows
+        // that a concurrent fulfilment cannot change underneath them.
+        await tx.$queryRaw`SELECT id FROM "Booking" WHERE id = ${bookingId} FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM "BookingModelRequest" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
+
+        if (requireExplicitCheckout) {
+          // With no model request left to fulfil (the same reading of "left"
+          // as the guard in the checkout writes), this call is the one-tap
+          // check-out under another name, so the explicit rule refuses it.
+          // A booking with open requests stays on the fulfil scanner, which is
+          // the explicit flow for it.
+          const modelRequests = await tx.bookingModelRequest.findMany({
+            where: { bookingId },
+            select: {
+              quantity: true,
+              fulfilledQuantity: true,
+              fulfilledAt: true,
+            },
+          });
+          if (getOutstandingModelRequests(modelRequests).length === 0) {
+            throw new ShelfError({
+              cause: null,
+              title: "Not allowed to quick check-out",
+              message:
+                "Explicit check-out is required in this organization. Please scan or select the assets to check them out.",
+              status: 403,
+              label,
+              shouldBeCaptured: false,
+            });
+          }
+        }
+
         await addScannedAssetsToBookingWithinTx(tx, {
           assetIds,
           kitIds,
