@@ -58,6 +58,21 @@ env:
     timeout: 30000
 
 # ── Kit members and standalone assets carry their location ──
+# Both kits are opened here, outside any selection mode. A selection mode
+# leaves kits as they are and its header tap selects rather than opens, and the
+# steps below read the members of each kit. The Rig header sits above the Audio
+# kit, so scrolling down meets it first.
+- scrollUntilVisible:
+    element:
+      text: "Kit: ${RIG_KIT}, 4 assets,.*collapsed.*"
+    direction: DOWN
+    timeout: 30000
+    waitToSettleTimeoutMs: 600
+    centerElement: true
+- tapOn: "Kit: ${RIG_KIT}, 4 assets,.*collapsed.*"
+- extendedWaitUntil:
+    visible: "Kit: ${RIG_KIT}, 4 assets,.*expanded.*"
+    timeout: 10000
 - scrollUntilVisible:
     element:
       text: "Kit: ${AUDIO_KIT}, 3 assets,.*collapsed.*"
@@ -143,7 +158,7 @@ env:
     centerElement: true
 - tapOn: "${PLACED_ASSET}, at ${PLACED_ASSET_LOCATION},.*Tap to select.*"
 - extendedWaitUntil:
-    visible: ".*Remove 1 selected assets.*"
+    visible: "Remove 1 Asset"
     timeout: 10000
 # A term that hides the selected row leaves it selected.
 - scrollUntilVisible:
@@ -159,11 +174,12 @@ env:
     visible: "Kit: ${AUDIO_KIT}, 3 assets,.*"
     timeout: 10000
 - assertNotVisible: "${PLACED_ASSET},.*"
-- assertVisible: ".*Remove 1 selected assets.*"
-# The kit header picks its three members; the count adds them to the hidden one.
+- assertVisible: "Remove 1 Asset"
+# The kit header picks the whole kit; the button counts it as one kit beside
+# the hidden asset.
 - tapOn: "Kit: ${AUDIO_KIT}, 3 assets,.*Tap to select.*"
 - extendedWaitUntil:
-    visible: ".*Remove 4 selected assets.*"
+    visible: "Remove 1 Kit & 1 Asset"
     timeout: 10000
 - takeScreenshot: 05-selection-kept-across-search
 # Clearing the term shows the hidden row still selected.
@@ -175,7 +191,7 @@ env:
     timeout: 30000
     waitToSettleTimeoutMs: 600
     centerElement: true
-- assertVisible: ".*Remove 4 selected assets.*"
+- assertVisible: "Remove 1 Kit & 1 Asset"
 - takeScreenshot: 06-selection-after-clearing-search
 
 # ── A kit found through one member selects all of its members ──
@@ -196,7 +212,7 @@ env:
 - assertNotVisible: "${PLACED_ASSET},.*"
 - tapOn: "Kit: ${RIG_KIT}, 4 assets,.*Tap to select.*"
 - extendedWaitUntil:
-    visible: ".*Remove 8 selected assets.*"
+    visible: "Remove 2 Kits & 1 Asset"
     timeout: 10000
 - assertVisible: "${RIG_KIT} — item 1, Available, selected.*"
 - takeScreenshot: 07-kit-found-through-one-member-selected
@@ -211,7 +227,7 @@ env:
 - assertVisible: "${RIG_KIT} — item 1, Available, selected.*"
 - assertVisible: "${RIG_KIT} — item 2, Available, selected.*"
 - assertVisible: "${RIG_KIT} — item 3, Available, selected.*"
-- assertVisible: ".*Remove 8 selected assets.*"
+- assertVisible: "Remove 2 Kits & 1 Asset"
 - takeScreenshot: 08-every-member-selected-after-clearing
 
 # ── Leaving the selection keeps the term; nothing is submitted ──
@@ -235,7 +251,7 @@ env:
     centerElement: true
 - tapOn: "Cancel selection"
 - extendedWaitUntil:
-    notVisible: ".*Remove 8 selected assets.*"
+    notVisible: "Remove 2 Kits & 1 Asset"
     timeout: 10000
 # The term outlives the selection mode: the list is still narrowed to the kit
 # and the clear control still shows.
