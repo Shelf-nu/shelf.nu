@@ -51,6 +51,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { getIntParam } from "~/utils/search-params-number";
 
 export const loader = async ({
   context,
@@ -188,7 +189,7 @@ export const loader = async ({
       }
 
       case "idle-assets": {
-        const idleThreshold = parseInt(searchParams.get("days") || "30", 10);
+        const idleThreshold = getIntParam(searchParams, "days", 30);
         const reportData = await idleAssetsReport({
           organizationId,
           currency,
