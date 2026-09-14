@@ -37,6 +37,8 @@ import {
   type CheckinDisposition,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { useAuth } from "@/lib/auth-context";
+import { userHasPermission } from "@/lib/permissions";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
@@ -124,6 +126,9 @@ export default function BookingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { currentOrg } = useOrg();
+  // Current auth user — the booking's creator/custodian ids are compared
+  // against it to mirror the server's ownership gate for restricted roles.
+  const { user } = useAuth();
   const { colors, statusBadge, bookingStatusBadge } = useTheme();
   const styles = useStyles();
   const { formatDateTime } = useDateFormatter();
@@ -1127,17 +1132,10 @@ export default function BookingDetailScreen() {
     booking.custodianTeamMember?.name ||
     formatPersonName(booking.custodianUser);
 
-  // Lifecycle counts for the progress bar: every asset is in exactly one of three
-  // states. `checkedOutCount` (status === CHECKED_OUT) already EXCLUDES returned
-  // assets — partial check-in flips them back to AVAILABLE — so it IS the live
-  // "on job" count, and returns are subtracted from the reserved bucket (not from
-  // checkedOutCount again, which would double-count them).
-  const checkedInCount = checkedInAssetIds.length; // returned
-  const onJobCount = booking.checkedOutCount; // still out
-  const reservedCount = Math.max(
-    0,
-    booking.assetCount - onJobCount - checkedInCount
-  ); // never checked out
+  // How many of the booking's assets have been returned. Drives whether the
+  // progress card is worth showing at all; the card's own segments come from
+  // the server's shared helper further down.
+  const checkedInCount = checkedInAssetIds.length;
   // Only show the bar once there's check-out activity — otherwise it's a flat,
   // single-colour bar that adds noise to a freshly-reserved booking.
   const showProgress =
@@ -1174,10 +1172,59 @@ export default function BookingDetailScreen() {
   // gates the full "Check Out All" button), so we derive our own flag for the
   // partial path — otherwise "Select to Check Out" disappears the moment the
   // first batch flips the booking to ONGOING.
+  // Each row answers for itself. Booking-wide arithmetic cannot: a pooled
+  // asset's remaining units and its global status are independent, so
+  // subtracting whole returned and checked-out assets from the total both
+  // hides the control while units remain (a partial return cancels the row
+  // against its own count) and shows it when none do (a spent row whose
+  // status is still AVAILABLE). A quantity-tracked row is answered by the
+  // booking-scoped count the server sends for it; every other row by whether
+  // it is still on the booking and not yet out.
+  const hasUnitsLeftToCheckOut = booking.assets.some((a) =>
+    typeof a.remainingToCheckOut === "number"
+      ? a.remainingToCheckOut > 0
+      : a.status !== "CHECKED_OUT" && !checkedInAssetIds.includes(a.id)
+  );
+
   const canPartialCheckout =
-    reservedCount > 0 &&
+    hasUnitsLeftToCheckOut &&
     !hasOutstandingModelRequests &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
+
+  /**
+   * Whether the server would scope this user's booking writes to their own
+   * bookings.
+   *
+   * Roles are a set, and the server judges a request by the most privileged
+   * one it contains, so someone holding both SELF_SERVICE and ADMIN writes to
+   * any booking. `isRestrictedRole` asks the opposite question — whether ANY
+   * restricted role is present — which is the right test for the DRAFT-only
+   * editing rules above but would hide controls from a multi-role admin here.
+   */
+  const isRestrictedToOwnBookings =
+    isRestrictedRole &&
+    !currentOrg?.roles?.some((r) => r === "OWNER" || r === "ADMIN");
+
+  /**
+   * Whether to offer the progressive check-out affordances (scan and select).
+   *
+   * Both submit to the same endpoint, so they share one gate. It mirrors what
+   * the server will accept: the `booking:checkout` permission, and — for a
+   * restricted role, whose writes are scoped to their own bookings — being the
+   * booking's creator or its custodian. Offering either to someone the server
+   * would reject just trades a visible button for a 403.
+   */
+  const canUseProgressiveCheckout =
+    canPartialCheckout &&
+    userHasPermission({
+      roles: currentOrg?.roles,
+      entity: "booking",
+      action: "checkout",
+    }) &&
+    (!isRestrictedToOwnBookings ||
+      (!!user?.id &&
+        (booking.creator.id === user.id ||
+          booking.custodianUser?.id === user.id)));
 
   // Same gate the manage buttons use: an editable booking, and self-service
   // users only on their own DRAFTs (server re-checks ownership + status).
@@ -1637,8 +1684,36 @@ export default function BookingDetailScreen() {
 
             {/* Progressive check-out persists while reserved assets remain, even
                 after the booking has gone ONGOING (canPartialCheckout, not
-                canCheckout) so the user can keep taking the rest. */}
-            {canPartialCheckout && (
+                canCheckout) so the user can keep taking the rest. Scanning is
+                the twin of "Scan to Check In" below: one asset at a time,
+                batched, submitted to the partial-checkout endpoint. */}
+            {canUseProgressiveCheckout && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/scanner?bookingId=${
+                      booking.id
+                    }&bookingName=${encodeURIComponent(
+                      booking.name
+                    )}&bookingAction=checkout`
+                  )
+                }
+                accessibilityLabel="Scan assets to check out"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="scan"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>
+                  Scan to Check Out
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {canUseProgressiveCheckout && (
               <TouchableOpacity
                 style={[
                   styles.actionButtonOutline,
