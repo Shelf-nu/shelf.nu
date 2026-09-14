@@ -215,6 +215,24 @@ describe("getAccountStatus", () => {
       ).toBe("Owner (Paid - Plus)");
     });
 
+    it.each([
+      { tierId: TierId.tier_2, expected: "Owner (Paid - Team)" },
+      { tierId: TierId.custom, expected: "Owner (Paid - Custom)" },
+    ])("reports $tierId as paid, not free", ({ tierId, expected }) => {
+      // A paid tier with no team workspace to show it on is still paid.
+      expect(
+        getAccountStatus(
+          user({
+            tierId,
+            userOrganizations: [
+              ownedWorkspace(OrganizationType.PERSONAL, tierId),
+            ],
+          }),
+          prefs
+        )
+      ).toBe(expected);
+    });
+
     it("reports free", () => {
       expect(
         getAccountStatus(

@@ -96,8 +96,9 @@ function findJoinedTeam(
 }
 
 /**
- * The label for someone who owns a team workspace — the billing decision maker,
- * so their own tier and subscription are the right things to read.
+ * The label for someone who pays for their own workspace — a team they own, or
+ * a personal workspace. They are the billing party, so their own tier and
+ * subscription are the right things to read.
  */
 function formatOwnerStatus(
   user: UserForAccountStatus,
@@ -119,7 +120,6 @@ function formatOwnerStatus(
   if (user.tierId === TierId.tier_2) return "Owner (Paid - Team)";
   if (user.tierId === TierId.custom) return "Owner (Paid - Custom)";
 
-  // A team workspace exists but nothing is being paid for it yet.
   return "Owner (Free)";
 }
 
@@ -146,8 +146,9 @@ function formatMemberStatus(team: MembershipForAccountStatus): string {
 /**
  * The admin dashboard's account status for one user.
  *
- * Team workspaces are considered before personal ones, because that is where
- * the billing relationship lives.
+ * Owning a team makes someone the billing party even if they have also joined
+ * other teams, so ownership is checked first. Someone who only joined teams is
+ * labelled from those teams' owners; everyone else pays, or not, for their own.
  *
  * @param user - The user row, with memberships and their owners' tiers
  * @param prefs - Date formatting preferences, for a trial end date
@@ -157,19 +158,12 @@ export function getAccountStatus(
   user: UserForAccountStatus,
   prefs: ResolvedFormatPrefs
 ): string {
-  if (findOwnedTeam(user)) {
-    return formatOwnerStatus(user, prefs);
+  if (!findOwnedTeam(user)) {
+    const joinedTeam = findJoinedTeam(user);
+    if (joinedTeam) {
+      return formatMemberStatus(joinedTeam);
+    }
   }
 
-  const joinedTeam = findJoinedTeam(user);
-  if (joinedTeam) {
-    return formatMemberStatus(joinedTeam);
-  }
-
-  // Personal workspace only — their own tier is the whole story.
-  if (user.tierId === TierId.tier_1) {
-    return "Owner (Paid - Plus)";
-  }
-
-  return "Owner (Free)";
+  return formatOwnerStatus(user, prefs);
 }

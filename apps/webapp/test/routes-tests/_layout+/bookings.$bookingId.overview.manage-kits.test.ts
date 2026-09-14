@@ -1101,6 +1101,25 @@ describe("manage-kits loader — Models tab payload", () => {
   });
 
   describe("overlap predicate for the picker's booking rows", () => {
+    /** One clause of the overlap `OR`, as the loader builds it. */
+    type OverlapClause = {
+      from: { lte?: Date; gte?: Date };
+      to: { lte?: Date; gte?: Date };
+    };
+
+    /** The path from the kit include down to that `OR`. */
+    type IncludeWithOverlap = {
+      assetKits: {
+        select: {
+          asset: {
+            select: {
+              bookingAssets: { where: { booking: { OR: OverlapClause[] } } };
+            };
+          };
+        };
+      };
+    };
+
     /**
      * Evaluates the loader's Prisma `OR` against a candidate booking.
      *
@@ -1111,10 +1130,7 @@ describe("manage-kits loader — Models tab payload", () => {
      * below state which candidates must match.
      */
     function matchesOverlapClause(
-      or: Array<{
-        from: { lte?: Date; gte?: Date };
-        to: { lte?: Date; gte?: Date };
-      }>,
+      or: OverlapClause[],
       candidate: { from: Date; to: Date }
     ): boolean {
       const satisfies = (
@@ -1132,7 +1148,9 @@ describe("manage-kits loader — Models tab payload", () => {
     }
 
     /** Runs the loader and digs out the `OR` it handed the kit query. */
-    async function readOverlapClause() {
+    async function readOverlapClause(): Promise<OverlapClause[]> {
+      // why: the loader awaits the Models tab payload before it queries kits;
+      // this is the minimal payload that lets it get there.
       vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
         showModelsTab: false,
         assetModels: [],
@@ -1146,14 +1164,18 @@ describe("manage-kits loader — Models tab payload", () => {
         createLoaderArgs({ context: mockContext, params: mockParams })
       );
 
-      const args: any = vi.mocked(kitService.getPaginatedAndFilterableKits).mock
-        .calls[0][0];
+      const args = vi.mocked(kitService.getPaginatedAndFilterableKits).mock
+        .calls[0]?.[0];
+      if (!args?.extraInclude) {
+        throw new Error("Expected the loader to query kits with an include");
+      }
 
-      return args.extraInclude.assetKits.select.asset.select.bookingAssets.where
-        .booking.OR as Array<{
-        from: { lte?: Date; gte?: Date };
-        to: { lte?: Date; gte?: Date };
-      }>;
+      // `extraInclude` is typed as the generic `Prisma.KitInclude`, whose
+      // relations are `boolean | args` unions; this names the one shape the
+      // loader builds.
+      const include = args.extraInclude as unknown as IncludeWithOverlap;
+      return include.assetKits.select.asset.select.bookingAssets.where.booking
+        .OR;
     }
 
     // The booking being filled runs Jan 1 → Jan 2 (`mockLoaderBooking`).

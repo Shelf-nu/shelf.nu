@@ -47,7 +47,10 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { isOrganizationOwner, requirePermission } from "~/utils/roles.server";
+import {
+  isOrganizationOwner,
+  requirePermissionInOrganization,
+} from "~/utils/roles.server";
 import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
@@ -66,9 +69,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizations } = await requirePermission({
+    // Judged by the role held in the workspace being edited, which need not be
+    // the one selected.
+    const { organizations } = await requirePermissionInOrganization({
       userId,
       request,
+      organizationId: id,
       entity: PermissionEntity.workspace,
       action: PermissionAction.update,
     });
@@ -186,12 +192,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizations, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.workspace,
-      action: PermissionAction.update,
-    });
+    const { organizations, userOrganizations } =
+      await requirePermissionInOrganization({
+        userId,
+        request,
+        organizationId: id,
+        entity: PermissionEntity.workspace,
+        action: PermissionAction.update,
+      });
 
     /** Because you can access this view even when you have a different currentOrganization than the one you are editing
      * We need to query the org using the orgId from the params
@@ -366,11 +374,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "sso": {
         /**
-         * This route is reachable while a DIFFERENT workspace is selected, so
-         * the role to test is the one held in the workspace named by the
-         * params — `requirePermission` resolves its `role` against the
-         * selected workspace, which here is whichever one the user happens to
-         * be sitting in.
+         * SSO decides how everyone in the workspace signs in, so it is
+         * owner-only — stricter than `workspace: update`, which an ADMIN holds.
+         * Tested against the workspace being edited, like the permission check
+         * above, since it need not be the one selected.
          */
         if (!isOrganizationOwner({ userOrganizations, organizationId: id })) {
           throw new ShelfError({
