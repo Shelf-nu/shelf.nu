@@ -28,6 +28,7 @@ import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.serve
 import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -358,13 +359,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // checked out. The shared checkout service hard-blocks the RESERVED →
     // ONGOING transition until every `BookingModelRequest` is assigned to
     // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // `fulfilledAt: null` row remains). Fold that into the state flag so the app
-    // never offers a "Check Out" the server would reject — the app instead
-    // guides the operator to assign the reserved units first (see the
-    // booking-detail "Assign to check out" CTA).
-    const hasOutstandingModelRequests = booking.modelRequests.some(
-      (mr) => mr.fulfilledAt === null
-    );
+    // request is outstanding). Read through the same predicate the service
+    // uses, and fold it into the state flag so the app never offers a "Check
+    // Out" the server would reject — the app instead guides the operator to
+    // assign the reserved units first (see the booking-detail "Assign to
+    // check out" CTA).
+    const hasOutstandingModelRequests =
+      getOutstandingModelRequests(booking.modelRequests).length > 0;
 
     const canCheckoutByState =
       booking.status === "RESERVED" &&

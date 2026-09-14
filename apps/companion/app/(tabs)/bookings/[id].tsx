@@ -1155,15 +1155,18 @@ export default function BookingDetailScreen() {
   // omits the card rather than crashing.
   const lp = booking.lifecycleProgress ?? null;
 
-  // Book-by-model reservations still awaiting assignment. Fulfilled rows
-  // (`fulfilledAt` set) are hidden here — the concrete assets they became
-  // already appear in the assets list, so showing them too would double up.
-  // Mirrors the web booking overview (booking-assets-column.tsx). The `?? []`
-  // matches the web guard + this file's cross-version convention: a booking
-  // detail from a not-yet-updated server (rolling deploy) omits the field, and
-  // an unguarded `.filter` would crash the whole screen to the error boundary.
+  // Book-by-model reservations still awaiting assignment. Fulfilled rows are
+  // hidden here — the concrete assets they became already appear in the
+  // assets list, so showing them too would double up. MIRROR of the web
+  // predicate `getOutstandingModelRequests` (apps/webapp/app/utils/
+  // booking-model-requests.ts): a request is outstanding only while it is
+  // unstamped AND has units left, which is also when the server accepts a
+  // fulfilment. The `?? []` matches the web guard + this file's cross-version
+  // convention: a booking detail from a not-yet-updated server (rolling
+  // deploy) omits the field, and an unguarded `.filter` would crash the whole
+  // screen to the error boundary.
   const outstandingModelRequests = (booking.modelRequests ?? []).filter(
-    (mr) => mr.fulfilledAt === null
+    (mr) => mr.fulfilledAt === null && mr.fulfilledQuantity < mr.quantity
   );
   // A booking with unfulfilled model reservations can't be checked out at all
   // (full OR partial): the shared checkout service hard-blocks RESERVED →

@@ -58,6 +58,7 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -186,22 +187,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * Outstanding model requests — anything with `fulfilledAt === null`
-     * still needs fulfilment. If none remain, this route has nothing to
-     * do; send the operator back to the booking page where the normal
-     * checkout flow lives. `booked` reflects the original reservation
-     * intent (for progress denominators); `remaining` is what's still
-     * outstanding after any prior partial-scan progress, so the drawer
-     * pre-populates the right number of pending rows.
+     * Outstanding model requests, read through the shared predicate so this
+     * page offers the fulfil scanner exactly when the service will accept a
+     * fulfilment. If none remain, this route has nothing to do; send the
+     * operator back to the booking page where the normal checkout flow
+     * lives. `booked` reflects the original reservation intent (for progress
+     * denominators); `remaining` is what's still outstanding after any prior
+     * partial-scan progress, so the drawer pre-populates the right number of
+     * pending rows.
      */
-    const expectedModelRequests = booking.modelRequests
-      .filter((r) => r.fulfilledAt === null)
-      .map((r) => ({
-        assetModelId: r.assetModelId,
-        assetModelName: r.assetModel.name,
-        booked: r.quantity,
-        remaining: r.quantity - r.fulfilledQuantity,
-      }));
+    const expectedModelRequests = getOutstandingModelRequests(
+      booking.modelRequests
+    ).map((r) => ({
+      assetModelId: r.assetModelId,
+      assetModelName: r.assetModel.name,
+      booked: r.quantity,
+      remaining: r.quantity - r.fulfilledQuantity,
+    }));
 
     if (expectedModelRequests.length === 0) {
       return redirect(`/bookings/${bookingId}`);

@@ -17,6 +17,7 @@ import type {
   BookingPageActionData,
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
@@ -100,9 +101,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
    * `booking.modelRequests` (already loaded via `BOOKING_WITH_ASSETS_INCLUDE`)
    * to avoid a new loader field.
    */
-  const outstandingModelRequestCount =
-    loaderBooking.modelRequests?.filter((r) => r.fulfilledAt === null).length ??
-    0;
+  const outstandingModelRequestCount = getOutstandingModelRequests(
+    loaderBooking.modelRequests
+  ).length;
 
   // Progressive checkout is only offered while there are still items that
   // haven't been checked out yet (the Booked bucket). Once everything has been
