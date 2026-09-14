@@ -21,7 +21,7 @@ import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
+  seedFormSelectionAtom,
 } from "~/atoms/list";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -216,7 +216,7 @@ export default function ManageLocationKits() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const seedFormSelection = useSetAtom(seedFormSelectionAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
@@ -239,8 +239,8 @@ export default function ManageLocationKits() {
    * Set selected items for kit based on the route data
    */
   useEffect(() => {
-    setSelectedBulkItems(location.kits);
-  }, [location.kits, setSelectedBulkItems]);
+    seedFormSelection(location.kits);
+  }, [location.kits, seedFormSelection]);
 
   return (
     <Tabs

@@ -16,8 +16,7 @@ import {
   selectedBulkItemsCountAtom,
   setDisabledBulkItemsAtom,
   setSelectedBulkItemAtom,
-  selectionIsFormStateAtom,
-  setSelectedBulkItemsAtom,
+  seedFormSelectionAtom,
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -312,9 +311,9 @@ const REMOVAL_NOTICE_ID = "manage-kit-assets-removal-notice";
 export default function ManageAssetsInKit() {
   const { kit, items, totalItems, bookingImpactByAssetId } =
     useLoaderData<LoaderData>();
-  // why: `.map` returns a new array each render. The effects below depend on
-  // these lists, so without memoisation each render fired the effect and
-  // re-triggered a render via setSelectedBulkItems → infinite loop.
+  // why: `.map` returns a new array each render. The disabled-items effect
+  // below depends on `kitAssetIds`, so an unmemoised list would re-run it on
+  // every render, and its `setDisabledBulkItems` write would loop.
   const kitAssetsList = useMemo(
     () => kit.assetKits.map((ak) => ak.asset),
     [kit.assetKits]
@@ -344,8 +343,7 @@ export default function ManageAssetsInKit() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
-  const setSelectionIsFormState = useSetAtom(selectionIsFormStateAtom);
+  const seedFormSelection = useSetAtom(seedFormSelectionAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
@@ -451,12 +449,7 @@ export default function ManageAssetsInKit() {
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
-    setSelectedBulkItems(kitAssetsList);
-    // Here a tick means "attached to this booking or kit", not "act on this
-    // row", so it has to survive a search: unticking is how you detach
-    // something, and a clear on filter change would submit every attached
-    // item as removed.
-    setSelectionIsFormState(true);
+    seedFormSelection(kitAssetsList);
   }
 
   /**

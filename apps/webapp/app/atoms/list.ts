@@ -42,9 +42,11 @@ export const disabledBulkItemsAtom = atom<ListItemData[]>([]);
  * removed.
  *
  * Default false, so a new list page is protected without having to remember
- * anything. The three screens where the selection is form state opt out where
- * they seed it. `AtomsResetHandler` resets this on every pathname change, so an
- * opt-out cannot leak into the next route.
+ * anything. Screens whose selection is form state never set this directly: they
+ * seed through `seedFormSelectionAtom`, which sets it in the same write, so a
+ * screen cannot load its attached items without also opting out.
+ * `AtomsResetHandler` resets this on every pathname change, so an opt-out
+ * cannot leak into the next route.
  */
 export const selectionIsFormStateAtom = atom<boolean>(false);
 
@@ -118,6 +120,25 @@ export const setSelectedBulkItemsAtom = atom<null, ListItemData[][], void>(
     });
 
     set(selectedBulkItemsAtom, Array.from(prevItemsMap.values()));
+  }
+);
+
+/**
+ * Seeds the selection of a `manage-*` screen with the items already attached to
+ * its booking, kit or location, and marks that selection as form state.
+ *
+ * Use this — not `setSelectedBulkItemsAtom` — wherever a screen loads what is
+ * attached. Those screens submit every unticked item as removed, so if the
+ * selection were cleared by a search the save would detach everything; the flag
+ * set here is what stops `AtomsResetHandler` from clearing it.
+ *
+ * @param update - The items currently attached, pre-ticked in the picker
+ */
+export const seedFormSelectionAtom = atom<null, ListItemData[][], void>(
+  null,
+  (_, set, update) => {
+    set(setSelectedBulkItemsAtom, update);
+    set(selectionIsFormStateAtom, true);
   }
 );
 
