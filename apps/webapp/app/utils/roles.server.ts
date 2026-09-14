@@ -231,6 +231,59 @@ export async function requirePermission({
 }
 
 /**
+ * Checks a permission against the organization a route is about, rather than
+ * the one the user currently has selected.
+ *
+ * `requirePermission` judges the caller by their role in the SELECTED
+ * workspace, which is right for routes that act on the workspace the user is
+ * in. A route that names an organization in its params can act on a different
+ * one, and a user's roles differ between workspaces: the owner of the workspace
+ * being edited can be a BASE member of the one they are sitting in. Such a route
+ * must be judged by the role held in the organization it names.
+ *
+ * @param userId - The caller
+ * @param request - The incoming request, used to resolve the caller's memberships
+ * @param organizationId - The organization named by the route, not the selected one
+ * @param entity - The entity the route acts on
+ * @param action - The action the route performs
+ * @returns The caller's memberships and the organizations visible to them
+ * @throws {ShelfError} 403 when the caller is not a member of `organizationId`, or
+ *   their role there does not grant the permission
+ */
+export async function requirePermissionInOrganization({
+  userId,
+  request,
+  organizationId,
+  entity,
+  action,
+}: {
+  userId: string;
+  request: Request;
+  organizationId: string;
+  entity: PermissionEntity;
+  action: PermissionAction;
+}) {
+  const { organizations, userOrganizations } = await getSelectedOrganization({
+    userId,
+    request,
+  });
+
+  // A non-member holds no roles there, which grants nothing. Passing an empty
+  // array rather than `undefined` keeps the check from falling back to a
+  // database lookup that would reach the same answer.
+  const roles =
+    userOrganizations.find((o) => o.organization.id === organizationId)
+      ?.roles ?? [];
+
+  await validatePermission({ roles, action, entity, organizationId, userId });
+
+  Sentry.setUser({ id: userId });
+  Sentry.setTag("organizationId", organizationId);
+
+  return { organizations, userOrganizations };
+}
+
+/**
  * Whether the user holds OWNER in the given organization.
  *
  * Checks membership of the roles ARRAY rather than `resolveEffectiveRole`,
