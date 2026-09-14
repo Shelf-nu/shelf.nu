@@ -84,7 +84,9 @@ export function ReportFilterBar({ reportId, timeframe, isLoading }: Props) {
     return (
       <div className="flex items-center justify-between rounded border border-gray-200 bg-white px-4 py-3">
         <IdleThresholdSelector
-          value={getIntParam(searchParams, "days", 30)}
+          // Same floor the loader applies, so the selector shows the threshold
+          // the report actually ran with.
+          value={getIntParam(searchParams, "days", 30, { min: 1 })}
           onChange={handleIdleThresholdChange}
           disabled={isLoading}
         />

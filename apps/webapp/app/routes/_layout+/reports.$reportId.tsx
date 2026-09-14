@@ -193,7 +193,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await idleAssetsReport({
         organizationId,
         currency: currentOrganization.currency,
-        idleThresholdDays: getIntParam(url.searchParams, "days", 30),
+        // A threshold below one day puts the cutoff at or after now, which
+        // marks every asset idle.
+        idleThresholdDays: getIntParam(url.searchParams, "days", 30, {
+          min: 1,
+        }),
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
         page: getIntParam(url.searchParams, "page", 1),

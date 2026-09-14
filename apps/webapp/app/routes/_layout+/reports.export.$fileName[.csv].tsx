@@ -196,7 +196,10 @@ export const loader = async ({
       }
 
       case "idle-assets": {
-        const idleThreshold = getIntParam(searchParams, "days", 30);
+        // Same floor as the report page, so the CSV matches what was on screen.
+        const idleThreshold = getIntParam(searchParams, "days", 30, {
+          min: 1,
+        });
         const reportData = await idleAssetsReport({
           organizationId,
           currency,
