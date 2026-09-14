@@ -168,8 +168,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
             // structurally accepts the wider shape.
             category: { select: { id: true, name: true } },
             // Kit linkage via the AssetKit pivot — flattened to top-level
-            // `kit` + `kitId` by `shapeMobileAssetResponse`.
+            // `kit` + `kitId` by `shapeMobileAssetResponse`, which takes the
+            // FIRST row. The order is therefore load-bearing, not decoration:
+            // only INDIVIDUAL assets are capped at one membership (the
+            // `enforce_individual_asset_single_kit` trigger), so a
+            // QUANTITY_TRACKED asset in several kits would name a different
+            // one on each refresh without it. Oldest membership first is the
+            // kit the web asset index calls primary (`assetQueryJoins` orders
+            // its LATERAL pick on the same two columns) — keep them equal, or
+            // the two surfaces name different kits for the same asset. `id`
+            // breaks ties between memberships written in one transaction.
             assetKits: {
+              orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
               select: { kit: { select: { id: true, name: true } } },
             },
             // Location via the AssetLocation pivot — flattened to top-level
@@ -255,6 +265,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
         custody: visibleCustody,
         custodyList,
         custodyListOthersCount,
+        // How many kits this asset belongs to. `shaped.kit` names only the
+        // first, so a row holding several memberships needs this to say the
+        // named kit is one of many rather than the only one — the mobile
+        // counterpart of the web asset index's primary + "+N" kit column.
+        kitCount: asset.assetKits.length,
         mainImageExpiration: serializeImageExpiration(
           shaped.imageSource,
           mainImageExpiration

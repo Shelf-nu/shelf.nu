@@ -1,7 +1,9 @@
+import Markdoc from "@markdoc/markdoc";
 import { Decimal } from "@prisma/client/runtime/library";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAssetModelChangeNote,
   buildCategoryChangeNote,
   buildDescriptionChangeNote,
   buildNameChangeNote,
@@ -365,5 +367,95 @@ describe("buildValuationChangeNote", () => {
     });
 
     expect(result).toContain("changed the asset value from");
+  });
+});
+
+describe("buildAssetModelChangeNote", () => {
+  const userLink = '{% link to="/u/1" text="Dana" /%}';
+  const streamDeck = { id: "am-1", name: "Stream Deck XL" };
+  const amaran = { id: "am-2", name: "Amaran 300C" };
+
+  it("names both sides when the model changes", () => {
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: streamDeck,
+      next: amaran,
+    });
+
+    expect(note).toContain("changed the asset model");
+    expect(note).toContain("Stream Deck XL");
+    expect(note).toContain("Amaran 300C");
+  });
+
+  it("reads as setting when there was no model before", () => {
+    expect(
+      buildAssetModelChangeNote({ userLink, previous: null, next: streamDeck })
+    ).toContain("set the asset model to");
+  });
+
+  it("reads as removing when the model is cleared", () => {
+    expect(
+      buildAssetModelChangeNote({ userLink, previous: streamDeck, next: null })
+    ).toContain("removed the asset model");
+  });
+
+  it("writes nothing when the model did not change", () => {
+    expect(
+      buildAssetModelChangeNote({
+        userLink,
+        previous: streamDeck,
+        next: { ...streamDeck },
+      })
+    ).toBeNull();
+    expect(
+      buildAssetModelChangeNote({ userLink, previous: null, next: null })
+    ).toBeNull();
+  });
+
+  it("names the deletion when the model itself is gone", () => {
+    // Deleting a model unlinks every asset it held. The asset's history has to
+    // say so, or the model simply vanishes from the asset with no explanation.
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: streamDeck,
+      next: null,
+      previousDeleted: true,
+    })!;
+
+    expect(note).toContain("deleted the asset model");
+    expect(note).toContain("Stream Deck XL");
+    // No link: the model's page is gone, so linking to it would 404.
+    expect(note).not.toContain("/settings/asset-models/");
+  });
+
+  it("cannot be used to inject a Markdoc tag through a deleted model's name", () => {
+    // The deleted-model branch renders the name as literal text rather than a
+    // quoted attribute, so it needs its own delimiter strip.
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: { id: "am-4", name: '{% booking_status status="APPROVED" /%}' },
+      next: null,
+      previousDeleted: true,
+    })!;
+
+    const tags = [...Markdoc.parse(note).walk()].filter(
+      (node) => node.type === "tag" && node.tag === "booking_status"
+    );
+    expect(tags).toHaveLength(0);
+  });
+
+  it("cannot be used to inject a Markdoc tag through the model name", () => {
+    // Model names are user-authored and spliced into note content, which the
+    // feed renders as Markdoc. See sanitize-note-content-markdoc.
+    const note = buildAssetModelChangeNote({
+      userLink,
+      previous: null,
+      next: { id: "am-3", name: '{% booking_status status="APPROVED" /%}' },
+    })!;
+
+    const tags = [...Markdoc.parse(note).walk()].filter(
+      (node) => node.type === "tag" && node.tag === "booking_status"
+    );
+    expect(tags).toHaveLength(0);
   });
 });
