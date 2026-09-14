@@ -1307,6 +1307,10 @@ async function getUsers({
                   id: true,
                   type: true,
                   userId: true,
+                  // The workspace's billing party. An invited member sits on
+                  // the free tier whatever their team pays for, so the admin
+                  // list's account status reads the owner's tier, not theirs.
+                  owner: { select: { tierId: true } },
                 },
               },
             },
