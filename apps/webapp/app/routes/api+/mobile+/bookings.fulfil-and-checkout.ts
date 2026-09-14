@@ -10,12 +10,14 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { fulfilModelRequestsAndCheckout } from "~/modules/booking/service.server";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import {
   resolveMostPrivilegedRole,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -79,6 +81,33 @@ export async function action({ request }: ActionFunctionArgs) {
       request,
       "Booking"
     );
+
+    // A body that names no scanned unit is a plain one-tap check-out sent to
+    // this route, so the explicit check-out rule refuses it exactly as the
+    // checkout route does, judged by the most privileged role like the
+    // loader's `canQuickCheckout`. Scanned units stay open: the fulfil scanner
+    // is the explicit flow for a booking with model requests.
+    if (assetIds.length === 0 && kitIds.length === 0) {
+      const { effectiveRole } = await getMobileUserContext(
+        user.id,
+        organizationId
+      );
+      const bookingSettings =
+        await getBookingSettingsForOrganization(organizationId);
+      if (
+        isExplicitCheckoutRequired({ role: effectiveRole, bookingSettings })
+      ) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not allowed to quick check-out",
+          message:
+            "This workspace requires explicit check-out. Scan or select the assets to check them out.",
+          label: "Booking",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+    }
 
     // Load the booking's reservation window so the service can run its
     // asset-conflict guard (gated on `from && to`, exactly as the plain

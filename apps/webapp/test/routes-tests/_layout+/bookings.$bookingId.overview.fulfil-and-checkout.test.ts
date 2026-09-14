@@ -17,6 +17,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { createBookingSettings } from "@factories";
 
 // why: mocking Remix's data() so the action's error path returns a Response
 // whose status is assertable (React Router v7 single fetch).
@@ -68,21 +69,41 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
+// why: the explicit check-out rule reads the workspace settings; each case
+// below chooses the switch state without a database.
+const { bookingSettingsMock } = vi.hoisted(() => ({
+  bookingSettingsMock: vi.fn(),
+}));
+vi.mock("~/modules/booking-settings/service.server", () => ({
+  getBookingSettingsForOrganization: bookingSettingsMock,
+}));
+
 import { action } from "~/routes/_layout+/bookings.$bookingId.overview.fulfil-and-checkout";
 
 // @vitest-environment node
 
-/** POSTs to the action as a caller holding `roles`. */
+/**
+ * POSTs to the action as a caller holding `roles`. `scanned` decides whether
+ * the body names a unit; a body without one is the zero-scan case the explicit
+ * check-out rule refuses.
+ */
 function post({
   roles,
   creatorId = "someone-else",
   custodianUserId = "someone-else",
+  scanned = true,
+  requireExplicitCheckoutForAdmin = false,
 }: {
   roles: OrganizationRoles[];
   creatorId?: string;
   custodianUserId?: string;
+  scanned?: boolean;
+  requireExplicitCheckoutForAdmin?: boolean;
 }) {
   const role = roles[0];
+  bookingSettingsMock.mockResolvedValue(
+    createBookingSettings({ requireExplicitCheckoutForAdmin })
+  );
   requirePermissionMock.mockResolvedValue({
     organizationId: "org-1",
     role,
@@ -106,7 +127,7 @@ function post({
         // repeated plain key collapses to a string and the schema 400s BEFORE
         // the guard, which would make the refusal assertions pass for the wrong
         // reason.
-        body: new URLSearchParams({ "assetIds[0]": "asset-1" }),
+        body: new URLSearchParams(scanned ? { "assetIds[0]": "asset-1" } : {}),
       }
     ),
     params: { bookingId: "booking-1" },
@@ -166,5 +187,36 @@ describe("fulfil-and-checkout action", () => {
     await post({ roles: [OrganizationRoles.ADMIN] });
 
     expect(fulfilMock).toHaveBeenCalled();
+  });
+
+  it("refuses a zero-scan request from an ADMIN when explicit check-out is required", async () => {
+    const response = (await post({
+      roles: [OrganizationRoles.ADMIN],
+      scanned: false,
+      requireExplicitCheckoutForAdmin: true,
+    })) as unknown as Response;
+
+    expect(response.status).toBe(403);
+    expect(fulfilMock).not.toHaveBeenCalled();
+  });
+
+  it("still lets an ADMIN fulfil with scanned units when explicit check-out is required", async () => {
+    await post({
+      roles: [OrganizationRoles.ADMIN],
+      scanned: true,
+      requireExplicitCheckoutForAdmin: true,
+    });
+
+    expect(fulfilMock).toHaveBeenCalledTimes(1);
+    expect(fulfilMock.mock.calls[0][0]).toMatchObject({
+      assetIds: ["asset-1"],
+    });
+  });
+
+  it("lets a zero-scan request through when explicit check-out is not required", async () => {
+    await post({ roles: [OrganizationRoles.ADMIN], scanned: false });
+
+    expect(fulfilMock).toHaveBeenCalledTimes(1);
+    expect(bookingSettingsMock).toHaveBeenCalledWith("org-1");
   });
 });

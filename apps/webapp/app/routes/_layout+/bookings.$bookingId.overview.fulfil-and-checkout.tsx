@@ -53,6 +53,8 @@ import {
   fulfilModelRequestsAndCheckout,
   getBooking,
 } from "~/modules/booking/service.server";
+import { assertQuickCheckoutAllowed } from "~/modules/booking-settings/explicit-checkout";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
@@ -301,6 +303,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       formData,
       fulfilAndCheckoutSchema
     );
+
+    // A request that names no scanned unit is a plain one-tap check-out
+    // wearing this route's clothes, so the explicit check-out rule judges it
+    // exactly as it judges the "Check out" button. Scanned units stay open:
+    // the fulfil scanner is the explicit flow for a booking with model
+    // requests.
+    if (assetIds.length === 0 && kitIds.length === 0) {
+      const bookingSettings =
+        await getBookingSettingsForOrganization(organizationId);
+      assertQuickCheckoutAllowed({ role, bookingSettings });
+    }
 
     /**
      * Pull the booking's from/to for the pre-tx conflict guard inside
