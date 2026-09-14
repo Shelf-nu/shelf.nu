@@ -53,6 +53,13 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { getIntParam } from "~/utils/search-params-number";
 
+/**
+ * Builds the report named by `?reportId` as a CSV download, applying the same
+ * filters as the report page but reading up to 10,000 rows instead of one page.
+ *
+ * @returns The CSV as an attachment, or the failure with its status — 400 without
+ *   a report id, 404 for an unknown report, 403 for one that does not export
+ */
 export const loader = async ({
   context,
   request,

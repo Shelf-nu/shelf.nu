@@ -81,6 +81,16 @@ export const handle = {
     match?.data?.report?.title || "Report",
 };
 
+/**
+ * Resolves the requested report and runs it with the filters in the query
+ * string: timeframe, category, location, custodian, threshold and page.
+ * Numeric parameters that are missing or unreadable fall back to their
+ * defaults rather than reaching the report as `NaN`.
+ *
+ * @returns The report's data for the current filters, its id, and the page header
+ * @throws {ShelfError} 404 for an unknown report; 403 for one not yet enabled, or
+ *   when the caller lacks `reports: read`
+ */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;

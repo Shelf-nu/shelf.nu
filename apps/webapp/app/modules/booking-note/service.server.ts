@@ -379,7 +379,10 @@ export async function getBookingNotes({
  * @param bookingId - Booking the note must belong to (typically the route's `:bookingId` param)
  * @param userId - User ID (must match note creator)
  * @param organizationId - Organization the note's booking must belong to
- * @returns Delete operation result (0 if the note did not match the constraints)
+ * @returns The delete result; its `count` is always 1
+ * @throws {ShelfError} 403 when no note matched — not the caller's, not on this
+ *   booking, or not in this organization
+ * @throws {ShelfError} 500 when the database operation fails
  */
 export async function deleteBookingNote({
   id,

@@ -296,10 +296,9 @@ describe("BookingNote Service", () => {
     /**
      * The predicate carries the authorization, so zero rows is a refusal — the
      * note is someone else's, on another booking, or in another workspace. It
-     * has to be reported: the caller cannot tell the difference, and the
-     * activity route showed "deleted successfully" on the strength of the call
-     * returning at all. Matches `deleteTeamMemberNote`, `deleteNote` and
-     * `deleteLocationNote`, which all refuse here.
+     * has to throw: callers treat a call that returns as a completed delete, and
+     * cannot tell the three refusals apart from the count. Matches
+     * `deleteTeamMemberNote`, `deleteNote` and `deleteLocationNote`.
      */
     it("refuses when the note's booking is not in the organization", async () => {
       //@ts-expect-error missing vitest type

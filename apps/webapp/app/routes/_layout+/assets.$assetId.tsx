@@ -309,6 +309,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * Handles the asset page's own intents: delete, relink QR code, set reminder and
+ * add barcode. Each intent is permission-checked against the action it maps to,
+ * so deleting needs `asset: delete` while the other three need `asset: update`.
+ *
+ * @returns A redirect after deletion, or the intent's result or failure with its status
+ */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
