@@ -1013,6 +1013,10 @@ model Organization {
   // Branding preference for downloadable labels
   showShelfBranding Boolean @default(true)
 
+  // Whether the booking checklist and audit receipt PDFs print the QR image.
+  // Off means the sheet cannot be scanned in place of the label on the item.
+  showQrCodesOnPdfs Boolean @default(true)
+
   // Custom footer text appended to workspace emails
   customEmailFooter String? @db.VarChar(500)
 
@@ -2570,6 +2574,7 @@ enum ActivityAction {
   ASSET_NAME_CHANGED
   ASSET_DESCRIPTION_CHANGED
   ASSET_CATEGORY_CHANGED
+  ASSET_MODEL_CHANGED
   ASSET_KIT_CHANGED
   ASSET_LOCATION_CHANGED
   ASSET_TAGS_CHANGED

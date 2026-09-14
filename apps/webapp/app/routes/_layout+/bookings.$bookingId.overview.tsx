@@ -1191,6 +1191,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         booking,
         modelName,
+        /**
+         * Whether any QUANTITY_TRACKED unit on this booking has been accounted
+         * for — returned, consumed, lost or damaged.
+         *
+         * Quantity-tracked only, because that is the gap it fills: a quantity
+         * slice returned in part keeps `BookingAsset.checkedInAt` NULL, since
+         * that marker means fully reconciled, so the slice markers alone cannot
+         * answer "has anything come back yet". Individual assets have no
+         * disposition logs and are answered by their markers, so a reader must
+         * not treat this as a booking-wide "anything returned" flag.
+         *
+         * The check-in receipt is offered for exactly the partial-quantity
+         * case, and reads this alongside the slice markers.
+         */
+        hasDispositionedUnits: dispositionLogs.length > 0,
         // Shaped view for first paint (same field names the component reads),
         // post-enriched with per-row qty disposition data (Polish-6 multi-row).
         items: enrichedItems,
@@ -2066,7 +2081,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "revert-to-draft": {
-        await revertBookingToDraft({ id, organizationId, userId });
+        await revertBookingToDraft({
+          id,
+          organizationId,
+          userId,
+          hints: getClientHint(request),
+        });
 
         sendNotification({
           title: "Booking reverted",

@@ -5,7 +5,13 @@
  * Returns JSON that the client renders as a styled HTML preview,
  * then converts to PDF via react-to-print.
  *
- * @see {@link file://../../components/reports/compliance-report-pdf.tsx}
+ * Serves the three reports that ship a PDF — booking compliance, asset
+ * inventory and custody snapshot. `REPORTS_WITH_PDF` in
+ * `report-export-actions.tsx` gates which pages offer the button, and the
+ * switch below must cover exactly that list.
+ *
+ * @see {@link file://../../components/reports/report-pdf.tsx} the renderer this feeds
+ * @see {@link file://../../components/reports/report-export-actions.tsx} `REPORTS_WITH_PDF`
  */
 
 import { data } from "react-router";
@@ -18,6 +24,7 @@ import {
   bookingComplianceReport,
   assetInventoryReport,
   custodySnapshotReport,
+  type BookingComplianceSortColumn,
 } from "~/modules/reports/helpers.server";
 import { sumQuantityAwareValue } from "~/modules/reports/pdf-totals";
 import { getReportById } from "~/modules/reports/registry";
@@ -180,11 +187,21 @@ export const loader = async ({
         }),
     };
 
-    // Generate report data based on type
+    // Generate report data based on type. Each case parses the same filter
+    // params its page-loader counterpart honors (see reports.$reportId.tsx)
+    // and hands them to the same query function — the client forwards the
+    // page's full query string, so the PDF contains exactly the rows the
+    // filtered page shows.
     let pdfMeta: ReportPdfMeta;
 
     switch (reportId) {
       case "booking-compliance": {
+        // Sort params mirror the page so the PDF row order matches the table.
+        const sortBy = (searchParams.get("sortBy") ||
+          "scheduledEnd") as BookingComplianceSortColumn;
+        const sortOrder = (searchParams.get("sortOrder") || "desc") as
+          | "asc"
+          | "desc";
         const reportData = await bookingComplianceReport({
           organizationId,
           timeframe,
@@ -192,6 +209,8 @@ export const loader = async ({
           timeZone: prefs.timeZone,
           page: 1,
           pageSize: 10000, // PDF can handle large tables
+          sortBy,
+          sortOrder,
         });
 
         const overdueKpi = reportData.kpis.find(
@@ -246,6 +265,16 @@ export const loader = async ({
       case "asset-inventory": {
         const reportData = await assetInventoryReport({
           organizationId,
+          currency: organization.currency,
+          categoryIds:
+            searchParams.get("categories")?.split(",").filter(Boolean) ||
+            undefined,
+          locationIds:
+            searchParams.get("locations")?.split(",").filter(Boolean) ||
+            undefined,
+          statuses:
+            searchParams.get("statuses")?.split(",").filter(Boolean) ||
+            undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -294,6 +323,9 @@ export const loader = async ({
       case "custody-snapshot": {
         const reportData = await custodySnapshotReport({
           organizationId,
+          currency: organization.currency,
+          teamMemberId: searchParams.get("teamMember") || undefined,
+          locationId: searchParams.get("location") || undefined,
           page: 1,
           pageSize: 10000,
         });

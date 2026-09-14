@@ -33,6 +33,7 @@ import type * as BookingServiceServer from "~/modules/booking/service.server";
 import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
@@ -49,6 +50,10 @@ vi.mock("~/database/db.server", () => ({
     // the slices/merged-kit serialization contract under test.
     bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
+    // why: the fixture's kit-driven slices make the loader describe the kits
+    // they belong to. What those kits look like is pinned by the sibling kits
+    // test; here the payload only has to exist.
+    kit: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -112,13 +117,9 @@ beforeEach(() => {
     user: { id: "user-1" },
   } as Awaited<ReturnType<typeof requireMobileAuth>>);
   requireOrganizationAccessMock.mockResolvedValue("org-1");
-  getMobileUserContextMock.mockResolvedValue({
-    role: OrganizationRoles.ADMIN,
-    roles: [OrganizationRoles.ADMIN],
-    canUseBarcodes: true,
-    canUseAudits: true,
-    canSeeAllCustody: true,
-  });
+  getMobileUserContextMock.mockResolvedValue(
+    mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+  );
 });
 
 const K1 = { id: "kit-1", name: "Kit One" };

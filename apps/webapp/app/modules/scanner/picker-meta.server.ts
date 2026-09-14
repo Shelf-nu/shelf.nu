@@ -12,13 +12,14 @@
  *
  * @see {@link file://./../location/picker-meta.server.ts} `getLocationPickerMeta`
  * @see {@link file://./../kit/picker-meta.server.ts} `getKitPickerMeta`
- * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.manage-assets.tsx}
- *   booking picker's inline availability formula (Phase 4b)
+ * @see {@link file://./../asset/availability.server.ts} `getAssetAvailabilityBatch`,
+ *   which answers the booking context.
  */
 
-import { AssetType, BookingStatus } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
 import { getKitPickerMeta } from "~/modules/kit/picker-meta.server";
 import { getLocationPickerMeta } from "~/modules/location/picker-meta.server";
 
@@ -34,7 +35,7 @@ export type ScannerPickerContext = z.infer<typeof ScannerPickerContextSchema>;
  * Normalised picker-meta shape returned to scanner drawers. Mirrors
  * the fields each manage-assets picker exposes on a per-row basis but
  * collapses the context-specific names (`maxAllowedForThisLocation`,
- * `maxAllowedForThisKit`, ad-hoc booking math) to a uniform `maxAllowed`.
+ * `maxAllowedForThisKit`, a booking's `bookable`) to a uniform `maxAllowed`.
  */
 export type ScannerPickerMeta = {
   /** Strict-available pool the qty input is bounded by. */
@@ -98,71 +99,40 @@ export async function getScannerPickerMeta({
     };
   }
 
-  // Booking: matches the asset overview's "Available" formula so the
-  // scanner MAX agrees with what the user sees on the asset page:
+  // Booking: the pool comes from `getAssetAvailabilityBatch` — the same
+  // primitive the manage-assets picker lists rows by and the write guard
+  // (`assertAssetQuantitiesAvailable`) enforces with. The scanner drawer both
+  // caps its qty input and refuses a scan on this number, so it has to be the
+  // server's number rather than a second derivation of it. Summing the parts
+  // here instead gets two of them wrong: kit-driven `BookingAsset` rows are
+  // already inside `inKits`, so counting them again subtracts a kit slice
+  // twice, and a plain sum stacks bookings that never overlap each other,
+  // where the primitive sweeps for the peak concurrent claim. Both understate
+  // the pool, which refuses an add the server would have accepted.
   //
-  //   maxAllowed = Asset.quantity
-  //              − sum(AssetKit.quantity)                ← kit-committed
-  //              − sum(Custody.quantity)                  ← held by custodians
-  //              − sum(BookingAsset.quantity from overlapping
-  //                    active bookings, excluding this booking)
-  //
-  // The booking picker's inline formula (`bookings.$bookingId.
-  // overview.manage-assets.tsx:264`) drops the kit term because it
-  // pre-filters qty-tracked assets with any kit membership out of the
-  // results entirely — that's a separate bug for the picker, but the
-  // scanner needs the full formula so multi-kit qty-tracked rows can
-  // still be added to a booking from their free pool.
-  //
-  // The "overlapping" filter only fires when the booking has dates.
-  // Bookings without dates compete with every other reservation.
+  // Without dates the primitive falls back to the conservative sum of every
+  // active commitment, so a booking still being planned never over-promises.
   const booking = await db.booking.findUnique({
     where: { id: context.id, organizationId },
     select: { id: true, from: true, to: true },
   });
   if (!booking) return null;
 
-  const [assetKitSum, custodySum, bookingSum] = await Promise.all([
-    db.assetKit.aggregate({
-      where: { assetId, organizationId },
-      _sum: { quantity: true },
-    }),
-    db.custody.aggregate({
-      where: { assetId },
-      _sum: { quantity: true },
-    }),
-    db.bookingAsset.aggregate({
-      where: {
-        assetId,
-        bookingId: { not: booking.id },
-        booking: {
-          status: {
-            in: [
-              BookingStatus.RESERVED,
-              BookingStatus.ONGOING,
-              BookingStatus.OVERDUE,
-            ],
-          },
-          ...(booking.from &&
-            booking.to && {
-              OR: [
-                { from: { lte: booking.to }, to: { gte: booking.from } },
-                { from: { gte: booking.from }, to: { lte: booking.to } },
-              ],
-            }),
-        },
-      },
-      _sum: { quantity: true },
-    }),
-  ]);
-
-  const inKits = assetKitSum._sum.quantity ?? 0;
-  const inCustody = custodySum._sum.quantity ?? 0;
-  const reserved = bookingSum._sum.quantity ?? 0;
-  const maxAllowed = Math.max(0, totalQty - inKits - inCustody - reserved);
+  const availabilityByAsset = await getAssetAvailabilityBatch([assetId], {
+    organizationId,
+    window:
+      booking.from && booking.to
+        ? { from: booking.from, to: booking.to }
+        : null,
+    // This booking's own rows are what the scan is topping up; leaving them in
+    // would measure the request against itself.
+    excludeBookingId: booking.id,
+  });
 
   return {
-    maxAllowed,
+    // `bookable` is signed so write guards can tell "already over-committed"
+    // from "exactly full". This one bounds a qty input, so clamp it.
+    maxAllowed: Math.max(0, availabilityByAsset.get(assetId)?.bookable ?? 0),
     assetQuantity: totalQty,
     unitOfMeasure: asset.unitOfMeasure,
   };

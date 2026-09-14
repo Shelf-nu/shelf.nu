@@ -15,6 +15,7 @@ import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AuditAssetStatusBadge } from "./audit-asset-status-badge";
 import { AuditStatusBadgeWithOverdue } from "./audit-status-badge-with-overdue";
+import { AssetCodePrintText } from "../assets/asset-code-print-text";
 import { CategoryBadge } from "../assets/category-badge";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
@@ -152,7 +153,7 @@ export const AuditReceiptPDF = ({
  * @param pdfMeta - All audit data needed for the PDF (note content is already sanitized server-side)
  */
 // react-doctor:no-giant-component — deferred for follow-up refactor
-const AuditPDFContent = ({
+export const AuditPDFContent = ({
   componentRef,
   pdfMeta,
 }: {
@@ -166,17 +167,23 @@ const AuditPDFContent = ({
     organization,
     assets,
     assetIdToQrCodeMap,
+    assetIdToDisplayCodeMap,
     generalImages,
     assetImages,
     conditionNotes,
     activityNotes,
   } = pdfMeta;
 
+  // An audit is a claim about what was physically present, so a receipt whose
+  // QR can be scanned from the desk undermines the thing it records. Workspaces
+  // that care turn the image off; the text code still prints.
+  const showQrCodesOnPdfs = organization.showQrCodesOnPdfs ?? true;
+
   // why: the receipt can be downloaded at ANY point in an audit's life — the
   // Actions dropdown offers it with no status gate — so it must apply the same
   // completion rule as the screen it was printed from. `missingAssetCount` is
-  // seeded with the full expected count at creation, so a receipt for a
-  // never-started audit used to assert that every one of its assets was lost.
+  // seeded with the full expected count at creation, so it only means "lost"
+  // once the audit is complete.
   const auditIsCompleted = isAuditCompleted(session);
   const unscannedLabel = auditAssetStatusLabel("PENDING", auditIsCompleted);
 
@@ -542,8 +549,12 @@ const AuditPDFContent = ({
                 <th className="w-20 border border-gray-300 p-2.5 text-left text-xs font-medium">
                   Status
                 </th>
-                <th className="min-w-[80px] border border-gray-300 p-2.5 text-left text-xs font-medium">
-                  QR Code
+                {/* Sized for the code, which sits under the image: 140px gives
+                    it ~120px, enough for a 25-character legacy QR id on two
+                    lines. Below 140px those take three, and the extra line
+                    costs more table height than the Name column loses. */}
+                <th className="min-w-[140px] border border-gray-300 p-2.5 text-left text-xs font-medium">
+                  Code
                 </th>
               </tr>
             </thead>
@@ -600,13 +611,25 @@ const AuditPDFContent = ({
                       />
                     </td>
                     <td className="border border-gray-300 p-2.5 align-top">
-                      {assetIdToQrCodeMap[asset.id] && (
-                        <img
-                          src={assetIdToQrCodeMap[asset.id]}
-                          alt={`QR code for ${asset.title}`}
-                          className="size-16"
+                      <div className="flex flex-col items-start gap-1">
+                        <When
+                          truthy={
+                            showQrCodesOnPdfs && !!assetIdToQrCodeMap[asset.id]
+                          }
+                        >
+                          <img
+                            src={assetIdToQrCodeMap[asset.id]}
+                            alt={`QR code for ${asset.title}`}
+                            className="size-16"
+                          />
+                        </When>
+                        {/* Printed even when the QR image is missing: the code
+                            is the part a reader matches against the physical
+                            label. */}
+                        <AssetCodePrintText
+                          displayCode={assetIdToDisplayCodeMap[asset.id]}
                         />
-                      )}
+                      </div>
                     </td>
                   </tr>
                 </Fragment>

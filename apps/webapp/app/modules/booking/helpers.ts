@@ -1,4 +1,5 @@
 import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { addMinutes, isAfter, isBefore, subMinutes } from "date-fns";
 import { ONE_DAY, ONE_HOUR } from "~/utils/constants";
 import { getPrimaryLocation } from "../asset/utils";
@@ -919,4 +920,39 @@ export function buildPdfBookingAssetSlices<TAsset extends PdfSliceSourceAsset>(
       bookingAssetId: ba.id,
     };
   });
+}
+
+/**
+ * Prisma `where` selecting the assets that physically block an add to an
+ * ONGOING / OVERDUE booking: no free unit exists to stage, so the add cannot
+ * be honoured.
+ *
+ * INDIVIDUAL only. `Asset.status` is a single flag over the whole row, so a
+ * QUANTITY_TRACKED pool reads CHECKED_OUT while one unit is out and the rest of
+ * the pool is free stock: the flag cannot tell "18 of 27 are out" from "nothing
+ * left". The pickers offer a qty asset only while its `bookable` pool is above
+ * zero, so matching one here would refuse an add the UI just offered. Per-unit
+ * capacity for qty assets belongs to `assertAssetQuantitiesAvailable` inside
+ * `updateBookingAssets`, which is windowed and runs under a row lock.
+ *
+ * Both add-to-booking guards — the manage-assets route and `processBooking` —
+ * read through this so the rule stays one rule.
+ *
+ * @param args.assetIds - The NEW asset ids the caller wants to add.
+ * @param args.organizationId - Caller's organization (scopes the query).
+ * @returns A `Prisma.AssetWhereInput` matching only the blocking assets.
+ */
+export function buildAddToActiveBookingBlockerWhere({
+  assetIds,
+  organizationId,
+}: {
+  assetIds: string[];
+  organizationId: string;
+}): Prisma.AssetWhereInput {
+  return {
+    id: { in: assetIds },
+    organizationId,
+    status: AssetStatus.CHECKED_OUT,
+    type: AssetType.INDIVIDUAL,
+  };
 }

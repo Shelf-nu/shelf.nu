@@ -23,6 +23,7 @@ import {
 import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
@@ -75,13 +76,9 @@ beforeEach(() => {
     user: { id: "user-1" },
   } as Awaited<ReturnType<typeof requireMobileAuth>>);
   requireOrganizationAccessMock.mockResolvedValue("org-1");
-  getMobileUserContextMock.mockResolvedValue({
-    role: OrganizationRoles.ADMIN,
-    roles: [OrganizationRoles.ADMIN],
-    canUseBarcodes: true,
-    canUseAudits: true,
-    canSeeAllCustody: true,
-  });
+  getMobileUserContextMock.mockResolvedValue(
+    mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+  );
 });
 
 describe("GET /api/mobile/bookings/:bookingId — model requests", () => {

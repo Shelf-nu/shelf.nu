@@ -1,6 +1,7 @@
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { describe, it, expect } from "vitest";
 import {
+  buildAddToActiveBookingBlockerWhere,
   buildPdfAssetRows,
   buildPdfBookingAssetSlices,
   countRemainingCheckoutAssets,
@@ -1197,5 +1198,33 @@ describe("buildPdfBookingAssetSlices", () => {
 
     const filtered = filterBookingAssets(slices, "Camera");
     expect(filtered.map((s) => s.id).sort()).toEqual(["cam", "tripod"]);
+  });
+});
+
+describe("buildAddToActiveBookingBlockerWhere", () => {
+  it("narrows to CHECKED_OUT INDIVIDUAL assets in the caller's org", () => {
+    expect(
+      buildAddToActiveBookingBlockerWhere({
+        assetIds: ["a1", "a2"],
+        organizationId: "org-1",
+      })
+    ).toEqual({
+      id: { in: ["a1", "a2"] },
+      organizationId: "org-1",
+      status: AssetStatus.CHECKED_OUT,
+      type: AssetType.INDIVIDUAL,
+    });
+  });
+
+  it("excludes QUANTITY_TRACKED assets from the blocker set", () => {
+    // A qty pool reads CHECKED_OUT while free units remain, so matching it
+    // here would refuse an add the picker had already offered. The type
+    // predicate is the whole point of this helper — assert it explicitly.
+    const where = buildAddToActiveBookingBlockerWhere({
+      assetIds: ["a1"],
+      organizationId: "org-1",
+    });
+    expect(where.type).toBe(AssetType.INDIVIDUAL);
+    expect(where.type).not.toBe(AssetType.QUANTITY_TRACKED);
   });
 });
