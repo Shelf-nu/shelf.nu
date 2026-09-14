@@ -26,9 +26,14 @@
  * `snake_case`, `kebab-case` or dotted prefix/suffix around the sensitive word
  * — so `newPassword`, `password_confirmation` and `x-api-key` all match, while
  * a merely adjacent field like `passwordUpdatedAt` does not need to.
+ *
+ * The preceding letter or digit is matched, not looked behind: this module
+ * ships in the client bundle, and a lookbehind throws on Safari below 16.4.
+ * Only ever call `.test()` on it, where consuming that character cannot change
+ * the answer.
  */
 const SENSITIVE_KEY =
-  /(?:^|[._-]|(?<=[a-z0-9]))(otp|passwd|password|pwd|secret|token|api[._-]?key|credential|authorization|cookie|session[._-]?id|private[._-]?key)(?:$|[._-]|(?=[A-Z]))/i;
+  /(?:^|[._-]|[a-z0-9])(otp|passwd|password|pwd|secret|token|api[._-]?key|credential|authorization|cookie|session[._-]?id|private[._-]?key)(?:$|[._-]|(?=[A-Z]))/i;
 
 /** Replacement written in place of a redacted value. */
 export const REDACTED = "[REDACTED]";

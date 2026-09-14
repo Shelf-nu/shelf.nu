@@ -6,7 +6,9 @@
  * The supported floor is Chrome 98, Edge 98, Firefox 94 and Safari 15.4. The
  * client bundle is compiled for exactly that set (`build.target` in
  * `vite.config.ts`), so newer syntax is lowered and a browser below the floor
- * fails only on runtime APIs the bundle calls without guards. The check below
+ * fails only on runtime APIs the bundle calls without guards. Regex lookbehind
+ * is the one syntax that cannot be lowered (it throws on Safari below 16.4), so
+ * ESLint rejects it in client code. The check below
  * runs as a classic inline script in the document `<head>`, written in ES5 so
  * that every browser can parse it, before any module script executes. It
  * probes `Object.hasOwn`, `structuredClone` and `Array.prototype.at`, which

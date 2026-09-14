@@ -64,6 +64,20 @@ describe("redactSensitive", () => {
     expect(redactSensitive({ [key]: "sensitive" })[key]).toBe(REDACTED);
   });
 
+  it.each(["x-api-key", "user.token", "2fa-secret"])(
+    "redacts %s, where a separator bounds the sensitive word",
+    (key) => {
+      expect(redactSensitive({ [key]: "sensitive" })[key]).toBe(REDACTED);
+    }
+  );
+
+  it.each(["token1", "password1", "my password", "user/token", "auth:token"])(
+    "keeps %s, where the sensitive word is not bounded by a separator or a letter",
+    (key) => {
+      expect(redactSensitive({ [key]: "kept" })[key]).toBe("kept");
+    }
+  );
+
   it("does not mutate the input — callers still need the real values", () => {
     // A validation failure still has to tell the user which field was wrong.
     const input = { otp: "123456", email: "a@b.c" };

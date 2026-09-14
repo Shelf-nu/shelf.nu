@@ -27,3 +27,8 @@ pinned in two places that must move together: `build.target` in
 in `app/utils/browser-support.ts` (older browsers get the "browser out of
 date" screen instead of a hang). Before using a browser API newer than that
 floor, add a guard or extend the probes.
+
+Regex lookbehind (`(?<=`, `(?<!`) is the one syntax the build cannot lower:
+esbuild turns the literal into `new RegExp(...)`, which parses on Safari 15.4
+and then throws when it runs. ESLint rejects it in client code; match the
+preceding character instead, or keep the regex in a `*.server.ts` module.
