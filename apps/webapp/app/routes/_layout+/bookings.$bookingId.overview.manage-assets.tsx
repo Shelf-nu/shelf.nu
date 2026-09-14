@@ -80,7 +80,7 @@ import { buildAddToActiveBookingBlockerWhere } from "~/modules/booking/helpers";
 import {
   getBooking,
   getDetailedPartialCheckinData,
-  getKitIdsByAssets,
+  getKitIdsByBookingSlices,
   removeAssets,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
@@ -338,9 +338,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const bookingKitIds = getKitIdsByAssets(
-      booking.bookingAssets.map((ba) => ba.asset)
-    );
+    /**
+     * The kits this booking holds, from the slices booked under them — see the
+     * twin in the manage-kits loader. Membership would count a kit whose
+     * `QUANTITY_TRACKED` member is only on the booking as a standalone slice.
+     */
+    const bookingKitIds = [
+      ...(
+        await getKitIdsByBookingSlices({
+          slices: booking.bookingAssets,
+          organizationId,
+        })
+      ).keys(),
+    ];
 
     /**
      * Strip kit-driven slices from `booking.bookingAssets` so the picker's
