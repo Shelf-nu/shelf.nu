@@ -16,6 +16,7 @@
  * @see {@link file://./../../routes/_layout+/settings.bookings.tsx} - the action
  *   that persists both cards and refuses non-owners
  */
+import { useEffect, useRef } from "react";
 import { useFetcher } from "react-router";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { tw } from "~/utils/tw";
@@ -54,15 +55,30 @@ export function ExplicitRequirementSettingsCard({
 }) {
   const fetcher = useFetcher();
   const { isOwner } = useUserRoleHelper();
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // The switches are uncontrolled and flip the moment they are clicked. When
+  // the action refuses the save, the stored values are what still apply, so
+  // the form goes back to its defaults while the error toast explains why.
+  useEffect(() => {
+    const refused =
+      fetcher.state === "idle" &&
+      fetcher.data != null &&
+      typeof fetcher.data === "object" &&
+      "error" in fetcher.data &&
+      Boolean((fetcher.data as { error?: unknown }).error);
+    if (refused) formRef.current?.reset();
+  }, [fetcher.state, fetcher.data]);
 
   return (
-    <Card>
+    <Card className="my-0">
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
       </div>
       <div>
         <fetcher.Form
+          ref={formRef}
           method="post"
           onChange={(e) => {
             // The action refuses non-owners on its own; this only skips a

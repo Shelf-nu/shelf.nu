@@ -152,8 +152,11 @@ export default function CheckoutDropdown({
 
   // Explicit check-out is required for this role: the server refuses both
   // quick options, so offer only the scanner. It keeps the primary variant
-  // while RESERVED, where checking out is the main action.
+  // while RESERVED, where checking out is the main action. With nothing left
+  // to scan there is nothing to offer at all, the same answer the unrestricted
+  // path gives when only a quick option would remain.
   if (requireExplicitCheckout) {
+    if (!canScanCheckOut) return null;
     return (
       <Button
         variant={triggerVariant}

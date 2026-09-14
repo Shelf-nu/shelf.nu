@@ -87,9 +87,10 @@ describe("CheckoutDropdown", () => {
     expect(screen.queryByText(/check out remaining/i)).not.toBeInTheDocument();
   });
 
-  it("never falls back to the one-click check-out when the scanner has nothing listed", () => {
+  it("offers nothing at all when explicit check-out is required and there is nothing to scan", () => {
     // A reserved booking whose Booked bucket reads empty would otherwise get
-    // the lone quick "Check out" button.
+    // the lone quick "Check out" button, which the server would refuse; a
+    // scanner with nothing to scan is no better, so the control disappears.
     const { container } = renderDropdown({
       canFullCheckOut: true,
       canCheckOutRemaining: false,
@@ -99,8 +100,8 @@ describe("CheckoutDropdown", () => {
 
     expect(quickCheckoutSubmits(container)).toHaveLength(0);
     expect(
-      screen.getByRole("link", { name: /scan to check out/i })
-    ).toHaveAttribute("href", SCAN_PAGE);
+      screen.queryByRole("link", { name: /scan to check out/i })
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the one-click check-out when explicit check-out is not required", () => {
