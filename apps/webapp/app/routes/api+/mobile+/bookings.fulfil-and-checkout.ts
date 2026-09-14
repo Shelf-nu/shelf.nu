@@ -16,6 +16,7 @@ import {
   resolveMostPrivilegedRole,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -82,16 +83,18 @@ export async function action({ request }: ActionFunctionArgs) {
       "Booking"
     );
 
-    // With no model request left to fulfil, this route is the one-tap
+    // With no model request left to fulfil (the same reading of "left" as the
+    // check-out guard inside the service), this route is the one-tap
     // check-out under another name, whatever the body names, so the explicit
     // check-out rule refuses it exactly as the checkout route does, judged by
     // the most privileged role like the loader's `canQuickCheckout`. A booking
     // that still has requests open stays on the fulfil scanner, which is the
     // explicit flow for it.
-    const openModelRequests = await db.bookingModelRequest.count({
-      where: { bookingId, booking: { organizationId }, fulfilledAt: null },
+    const modelRequests = await db.bookingModelRequest.findMany({
+      where: { bookingId, booking: { organizationId } },
+      select: { quantity: true, fulfilledQuantity: true, fulfilledAt: true },
     });
-    if (openModelRequests === 0) {
+    if (getOutstandingModelRequests(modelRequests).length === 0) {
       const { effectiveRole } = await getMobileUserContext(
         user.id,
         organizationId

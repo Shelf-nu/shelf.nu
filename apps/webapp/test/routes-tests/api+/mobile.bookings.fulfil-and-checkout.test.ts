@@ -60,7 +60,7 @@ vi.mock("~/modules/booking/service.server", () => ({
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
-    bookingModelRequest: { count: vi.fn() },
+    bookingModelRequest: { findMany: vi.fn() },
   },
 }));
 
@@ -136,7 +136,7 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
       creatorId: "user-1",
       custodianUserId: null,
     } as never);
-    vi.mocked(db.bookingModelRequest.count).mockResolvedValue(0);
+    vi.mocked(db.bookingModelRequest.findMany).mockResolvedValue([]);
     vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
       createBookingSettings()
     );
@@ -197,8 +197,28 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
   });
 
+  it("treats a request with every unit assigned but no stamp as done", async () => {
+    vi.mocked(db.bookingModelRequest.findMany).mockResolvedValue([
+      { quantity: 2, fulfilledQuantity: 2, fulfilledAt: null },
+    ] as never);
+    vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
+      createBookingSettings({ requireExplicitCheckoutForAdmin: true })
+    );
+
+    const result = await action(
+      createActionArgs({
+        request: createRequest({ bookingId: "booking-1", kitIds: [""] }),
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(403);
+    expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+  });
+
   it("stays open while the booking still has model requests to fulfil", async () => {
-    vi.mocked(db.bookingModelRequest.count).mockResolvedValue(2);
+    vi.mocked(db.bookingModelRequest.findMany).mockResolvedValue([
+      { quantity: 2, fulfilledQuantity: 0, fulfilledAt: null },
+    ] as never);
     vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
       createBookingSettings({ requireExplicitCheckoutForAdmin: true })
     );

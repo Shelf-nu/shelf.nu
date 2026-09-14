@@ -58,6 +58,7 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -304,16 +305,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       fulfilAndCheckoutSchema
     );
 
-    // With no model request left to fulfil, this route is the one-tap
+    // With no model request left to fulfil (the same reading of "left" as the
+    // check-out guard inside the service), this route is the one-tap
     // check-out under another name, whatever the body names, so the explicit
     // check-out rule judges it exactly as it judges the "Check out" button.
     // A booking that still has requests open stays on the fulfil scanner,
     // which is the explicit flow for it: the service refuses the check-out
     // unless the scanned units fulfil every request.
-    const openModelRequests = await db.bookingModelRequest.count({
-      where: { bookingId, booking: { organizationId }, fulfilledAt: null },
+    const modelRequests = await db.bookingModelRequest.findMany({
+      where: { bookingId, booking: { organizationId } },
+      select: { quantity: true, fulfilledQuantity: true, fulfilledAt: true },
     });
-    if (openModelRequests === 0) {
+    if (getOutstandingModelRequests(modelRequests).length === 0) {
       const bookingSettings =
         await getBookingSettingsForOrganization(organizationId);
       assertQuickCheckoutAllowed({ role, bookingSettings });

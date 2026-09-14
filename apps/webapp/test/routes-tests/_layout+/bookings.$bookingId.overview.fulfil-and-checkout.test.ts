@@ -48,16 +48,34 @@ vi.mock("~/utils/roles.server", () => ({
 }));
 
 // why: the booking lookup feeding the ownership guard; avoids a database.
-const { bookingFindUniqueOrThrow, modelRequestCount } = vi.hoisted(() => ({
+const { bookingFindUniqueOrThrow, modelRequestFindMany } = vi.hoisted(() => ({
   bookingFindUniqueOrThrow: vi.fn(),
-  modelRequestCount: vi.fn(),
+  modelRequestFindMany: vi.fn(),
 }));
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findUniqueOrThrow: bookingFindUniqueOrThrow },
-    bookingModelRequest: { count: modelRequestCount },
+    bookingModelRequest: { findMany: modelRequestFindMany },
   },
 }));
+
+/** A model request row as the guard reads it. */
+type RequestRow = {
+  quantity: number;
+  fulfilledQuantity: number;
+  fulfilledAt: Date | null;
+};
+const OPEN_REQUEST: RequestRow = {
+  quantity: 2,
+  fulfilledQuantity: 0,
+  fulfilledAt: null,
+};
+// Every unit assigned but never stamped: history, not open work.
+const UNSTAMPED_DONE_REQUEST: RequestRow = {
+  quantity: 2,
+  fulfilledQuantity: 2,
+  fulfilledAt: null,
+};
 
 // why: the sink we assert is never reached on a refused request.
 const { fulfilMock } = vi.hoisted(() => ({ fulfilMock: vi.fn() }));
@@ -98,21 +116,21 @@ function post({
   creatorId = "someone-else",
   custodianUserId = "someone-else",
   scanned = true,
-  openRequests = 0,
+  modelRequests = [] as RequestRow[],
   requireExplicitCheckoutForAdmin = false,
 }: {
   roles: OrganizationRoles[];
   creatorId?: string;
   custodianUserId?: string;
   scanned?: boolean | "junk-kit";
-  openRequests?: number;
+  modelRequests?: RequestRow[];
   requireExplicitCheckoutForAdmin?: boolean;
 }) {
   const role = roles[0];
   bookingSettingsMock.mockResolvedValue(
     createBookingSettings({ requireExplicitCheckoutForAdmin })
   );
-  modelRequestCount.mockResolvedValue(openRequests);
+  modelRequestFindMany.mockResolvedValue(modelRequests);
   requirePermissionMock.mockResolvedValue({
     organizationId: "org-1",
     role,
@@ -228,11 +246,23 @@ describe("fulfil-and-checkout action", () => {
     expect(fulfilMock).not.toHaveBeenCalled();
   });
 
+  it("treats a request with every unit assigned but no stamp as done", async () => {
+    const response = (await post({
+      roles: [OrganizationRoles.ADMIN],
+      scanned: "junk-kit",
+      modelRequests: [UNSTAMPED_DONE_REQUEST],
+      requireExplicitCheckoutForAdmin: true,
+    })) as unknown as Response;
+
+    expect(response.status).toBe(403);
+    expect(fulfilMock).not.toHaveBeenCalled();
+  });
+
   it("stays open while the booking still has model requests to fulfil", async () => {
     await post({
       roles: [OrganizationRoles.ADMIN],
       scanned: true,
-      openRequests: 2,
+      modelRequests: [OPEN_REQUEST],
       requireExplicitCheckoutForAdmin: true,
     });
 
