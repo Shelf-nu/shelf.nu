@@ -39,7 +39,7 @@ vi.mock("~/modules/booking/service.server", () => ({
   createKitBookingNote: vi.fn(),
   // Loader-only — used by the Models-tab loader tests below.
   getBooking: vi.fn(),
-  getKitIdsByAssets: vi.fn(),
+  getKitIdsByBookingSlices: vi.fn(),
 }));
 
 // Loader-only — `getPaginatedAndFilterableKits` backs the Kits tab list.
@@ -923,7 +923,9 @@ describe("manage-kits loader — Models tab payload", () => {
     });
 
     vi.mocked(bookingService.getBooking).mockResolvedValue(mockLoaderBooking);
-    vi.mocked(bookingService.getKitIdsByAssets).mockReturnValue([]);
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
     vi.mocked(kitService.getPaginatedAndFilterableKits).mockResolvedValue(
       mockPaginatedKits as any
     );

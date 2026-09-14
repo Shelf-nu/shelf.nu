@@ -42,6 +42,7 @@ import {
   flattenSelectedBookingItems,
   isAssetCheckableOut,
 } from "~/utils/booking-assets";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
 import CheckoutDialog from "./checkout-dialog";
 import { AssetImage } from "../assets/asset-image/component";
@@ -132,6 +133,7 @@ function CheckoutQtyInput({
       <span className="text-xs font-medium text-gray-700">Checked out</span>
       <input
         type="number"
+        {...numberInputWheelGuard}
         min={1}
         max={max}
         step={1}

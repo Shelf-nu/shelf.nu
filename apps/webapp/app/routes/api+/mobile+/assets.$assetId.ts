@@ -15,7 +15,10 @@ import {
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
-import { isQuantityTracked } from "~/modules/asset/utils";
+import {
+  isQuantityTracked,
+  shapeMobileAssetPlacements,
+} from "~/modules/asset/utils";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 
@@ -94,9 +97,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         userId: true,
         category: { select: { id: true, name: true, color: true } },
         // Select location through the pivot and synthesise the singular
-        // `location` below so the mobile JSON contract stays flat.
+        // `location` below so the mobile JSON contract stays flat. The
+        // per-row `quantity` is the units placed at that location
+        // (AssetLocation.quantity — NOT workspace stock). `assetKitId` +
+        // `assetKit.kit` discriminate kit-driven rows so the `placements`
+        // array can mark them read-only ("via kit ...") for the placements
+        // editor.
         assetLocations: {
-          select: { location: { select: { id: true, name: true } } },
+          select: {
+            quantity: true,
+            assetKitId: true,
+            location: { select: { id: true, name: true } },
+            assetKit: {
+              select: { kit: { select: { id: true, name: true } } },
+            },
+          },
         },
         custody: {
           // Oldest-first so the flattened single custody + custodyList are
@@ -340,6 +355,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         kit: flattened.kit,
         kitId: flattened.kitId,
         location: flattened.location,
+        // Placement metadata (additive). `placements` is the full per-row
+        // breakdown (manual rows first, kit-driven rows marked `viaKit`) —
+        // the detail screen's placements card and the placements editor
+        // read it. `placementCount` + `locationQuantity` stay alongside for
+        // app bundles that pre-date the editor and still drive the
+        // single-location move sheet from them.
+        placements: shapeMobileAssetPlacements(asset.assetLocations),
+        placementCount: asset.assetLocations.length,
+        locationQuantity:
+          asset.assetLocations.find(
+            (al) => al.location.id === flattened.location?.id
+          )?.quantity ?? null,
         // Name only (no id, no image fields — see the destructure above).
         assetModel,
         // why: re-attach the detail-shape custody (with createdAt +

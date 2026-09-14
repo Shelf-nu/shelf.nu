@@ -10,6 +10,7 @@ import { generateOrphanedCodes } from "~/modules/qr/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const meta = () => [
@@ -159,6 +160,7 @@ export default function AdminOrgQrCodes() {
           <Form method="post">
             <input
               type="number"
+              {...numberInputWheelGuard}
               max={1000}
               min={1}
               name="amount"

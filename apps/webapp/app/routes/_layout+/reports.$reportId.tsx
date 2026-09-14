@@ -114,11 +114,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
   }
 
-  // Check permissions
-  const { organizationId } = await requirePermission({
+  // Check permissions. `currentOrganization` supplies the workspace currency
+  // for the reports whose KPI strings carry money values.
+  const { organizationId, currentOrganization } = await requirePermission({
     userId,
     request,
-    entity: PermissionEntity.asset,
+    entity: PermissionEntity.reports,
     action: PermissionAction.read,
   });
 
@@ -171,6 +172,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     case "overdue-items":
       reportData = await overdueItemsReport({
         organizationId,
+        currency: currentOrganization.currency,
         custodianId: url.searchParams.get("custodian") || undefined,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
@@ -180,6 +182,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     case "idle-assets":
       reportData = await idleAssetsReport({
         organizationId,
+        currency: currentOrganization.currency,
         idleThresholdDays: getIntParam(url.searchParams, "days", 30),
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
@@ -191,6 +194,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     case "custody-snapshot":
       reportData = await custodySnapshotReport({
         organizationId,
+        currency: currentOrganization.currency,
         teamMemberId: url.searchParams.get("teamMember") || undefined,
         locationId: url.searchParams.get("location") || undefined,
         page: getIntParam(url.searchParams, "page", 1),
@@ -221,6 +225,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     case "distribution":
       reportData = await assetDistributionReport({
         organizationId,
+        currency: currentOrganization.currency,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
@@ -229,6 +234,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     case "asset-inventory":
       reportData = await assetInventoryReport({
         organizationId,
+        currency: currentOrganization.currency,
         categoryIds:
           url.searchParams.get("categories")?.split(",").filter(Boolean) ||
           undefined,
