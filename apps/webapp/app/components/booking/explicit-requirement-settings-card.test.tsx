@@ -23,22 +23,32 @@ import { ExplicitCheckoutSettings } from "./explicit-checkout-settings";
 const mockSubmit = vi.fn();
 const mockUseUserRoleHelper = vi.fn(() => ({ isOwner: true }));
 
+/** What the fetcher reports; a test changes it and re-renders to play the action's answer. */
+const fetcherState: { state: "idle" | "submitting"; data: unknown } = {
+  state: "idle",
+  data: undefined,
+};
+
 // why: useFetcher needs a data router; a plain form plus a captured `submit`
-// lets the tests read exactly what the card would send to the action.
+// lets the tests read exactly what the card would send to the action, and
+// `fetcherState` lets them play back what the action answered. `Form` is one
+// component for the whole run: a new one per render would remount the
+// switches on every re-render and hide whether the card resets them itself.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-router");
+  const MockForm = ({
+    children,
+    ...rest
+  }: {
+    children: ReactNode;
+    [key: string]: unknown;
+  }) => <form {...rest}>{children}</form>;
   return {
     ...actual,
     useFetcher: () => ({
-      state: "idle",
-      data: undefined,
-      Form: ({
-        children,
-        ...rest
-      }: {
-        children: ReactNode;
-        [key: string]: unknown;
-      }) => <form {...rest}>{children}</form>,
+      state: fetcherState.state,
+      data: fetcherState.data,
+      Form: MockForm,
       submit: mockSubmit,
     }),
   };
@@ -61,6 +71,8 @@ function submittedFormData() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockUseUserRoleHelper.mockReturnValue({ isOwner: true });
+  fetcherState.state = "idle";
+  fetcherState.data = undefined;
 });
 
 describe("ExplicitCheckoutSettings", () => {
@@ -110,6 +122,53 @@ describe("ExplicitCheckoutSettings", () => {
     // action's schema reads as false.
     expect(formData.get("requireExplicitCheckoutForSelfService")).toBe("on");
     expect(formData.get("requireExplicitCheckoutForAdmin")).toBeNull();
+  });
+
+  it("puts a switch back to its stored value when the action refuses the save", () => {
+    const stored = {
+      requireExplicitCheckoutForAdmin: false,
+      requireExplicitCheckoutForSelfService: true,
+    };
+    const { rerender } = render(
+      <ExplicitCheckoutSettings
+        header={checkoutHeader}
+        defaultValues={stored}
+      />
+    );
+    const adminSwitch = () =>
+      screen.getByRole("switch", {
+        name: "Require explicit check-out for Admins",
+      });
+
+    fireEvent.click(adminSwitch());
+    expect(adminSwitch()).toHaveAttribute("aria-checked", "true");
+
+    // The action answers with an error; the stored values still apply.
+    fetcherState.data = { error: { message: "Could not save the setting." } };
+    rerender(
+      <ExplicitCheckoutSettings
+        header={checkoutHeader}
+        defaultValues={stored}
+      />
+    );
+
+    expect(adminSwitch()).toHaveAttribute("aria-checked", "false");
+    expect(
+      screen.getByRole("switch", {
+        name: "Require explicit check-out for Self Service",
+      })
+    ).toHaveAttribute("aria-checked", "true");
+
+    // The next save posts the stored values, not the refused one.
+    mockSubmit.mockClear();
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: "Require explicit check-out for Self Service",
+      })
+    );
+    const formData = submittedFormData();
+    expect(formData.get("requireExplicitCheckoutForAdmin")).toBeNull();
+    expect(formData.get("requireExplicitCheckoutForSelfService")).toBeNull();
   });
 
   it("keeps the switches read-only for anyone but the owner", () => {

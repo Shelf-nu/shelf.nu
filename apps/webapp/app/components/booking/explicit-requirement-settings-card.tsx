@@ -16,7 +16,7 @@
  * @see {@link file://./../../routes/_layout+/settings.bookings.tsx} - the action
  *   that persists both cards and refuses non-owners
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useFetcher } from "react-router";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { tw } from "~/utils/tw";
@@ -55,7 +55,11 @@ export function ExplicitRequirementSettingsCard({
 }) {
   const fetcher = useFetcher();
   const { isOwner } = useUserRoleHelper();
-  const formRef = useRef<HTMLFormElement>(null);
+  // Bumped on every refused save; keyed on the form, it remounts the switches
+  // from `defaultChecked`. A Radix switch keeps its visible state in React and
+  // ignores a native form reset, so remounting is what returns it to the
+  // stored value.
+  const [formRevision, setFormRevision] = useState(0);
 
   // The switches are uncontrolled and flip the moment they are clicked. When
   // the action refuses the save, the stored values are what still apply, so
@@ -67,7 +71,7 @@ export function ExplicitRequirementSettingsCard({
       typeof fetcher.data === "object" &&
       "error" in fetcher.data &&
       Boolean((fetcher.data as { error?: unknown }).error);
-    if (refused) formRef.current?.reset();
+    if (refused) setFormRevision((revision) => revision + 1);
   }, [fetcher.state, fetcher.data]);
 
   return (
@@ -78,7 +82,7 @@ export function ExplicitRequirementSettingsCard({
       </div>
       <div>
         <fetcher.Form
-          ref={formRef}
+          key={formRevision}
           method="post"
           onChange={(e) => {
             // The action refuses non-owners on its own; this only skips a
