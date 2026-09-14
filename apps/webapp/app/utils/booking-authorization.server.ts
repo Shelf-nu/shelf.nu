@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { ShelfError } from "./error";
 import { ROLE_PRECEDENCE } from "./role-precedence";
+import { resolveUserDisplayName, type UserNameFields } from "./user";
 
 /**
  * The minimal booking projection needed to decide whether a requester is the
@@ -208,4 +209,172 @@ export function validateBookingOwnership({
   }
 
   // ADMIN and OWNER roles are implicitly allowed - no check needed
+}
+
+/**
+ * Whether a role is one of the two restricted, "own records only" roles.
+ *
+ * @param role - Effective role from `resolveEffectiveRole` (web) or
+ *   {@link resolveMostPrivilegedRole} (mobile).
+ * @returns `true` for SELF_SERVICE and BASE.
+ */
+export function isSelfServiceOrBaseRole(role: OrganizationRoles): boolean {
+  return (
+    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE
+  );
+}
+
+/**
+ * Whether the caller may see bookings they are not the custodian of.
+ *
+ * ADMIN / OWNER always can. SELF_SERVICE and BASE only can when the workspace
+ * has switched the corresponding setting on. This is the standard visibility
+ * rule for bookings; every read path that can surface someone else's booking
+ * gates on it, on web (`/bookings`, the command palette, CSV export) and on
+ * mobile (the list, the calendar, the booking detail, the dashboard).
+ *
+ * Exported so callers outside `requirePermission` resolve it identically. A
+ * surface that invents its own rule disagrees with the loader that seeded it -
+ * a picker whose list changes the moment the user types, or two platforms that
+ * disagree about which bookings exist.
+ *
+ * READ only. It never widens a mutation: a restricted user may legitimately
+ * view a booking they cannot write to. Writes stay on the role's permission
+ * grant plus {@link validateBookingOwnership} / {@link bookingWriteScopeClause}.
+ *
+ * Lives here rather than in `roles.server.ts` so the mobile API can reach it:
+ * that module pulls in Sentry and the organization service, and through it
+ * Stripe and the mailer, which no mobile route or its test can carry. This
+ * module imports only Prisma types and two local helpers - keep it that way.
+ *
+ * @param args.role - The caller's effective role.
+ * @param args.currentOrganization - Workspace whose override settings apply.
+ * @returns `true` when bookings should NOT be restricted to the caller's own.
+ */
+export function resolveCanSeeAllBookings({
+  role,
+  currentOrganization,
+}: {
+  role: OrganizationRoles;
+  currentOrganization: {
+    selfServiceCanSeeBookings: boolean;
+    baseUserCanSeeBookings: boolean;
+  };
+}): boolean {
+  return (
+    // Admin/Owner always can see all
+    !isSelfServiceOrBaseRole(role) ||
+    // SELF_SERVICE can see all if org setting allows
+    (role === OrganizationRoles.SELF_SERVICE &&
+      currentOrganization.selfServiceCanSeeBookings) ||
+    // BASE can see all if org setting allows
+    (role === OrganizationRoles.BASE &&
+      currentOrganization.baseUserCanSeeBookings)
+  );
+}
+
+/**
+ * The name shown in place of a custodian the viewer may not see.
+ *
+ * The literal the web badge draws (`TeamMemberBadge`), so a booking redacted
+ * on one platform reads the same on the other. Distinct from `null`, which
+ * means the booking has no custodian at all — collapsing the two reports an
+ * unassigned booking as a withheld one.
+ */
+export const WITHHELD_CUSTODIAN_NAME = "private";
+
+/**
+ * The custody links a booking row needs for its custodian to be named.
+ *
+ * Both `custodianUser.id` and `custodianTeamMember.userId` are REQUIRED, and
+ * that is the point: they are what answer "is the custodian the caller?", so a
+ * query that omits either silently redacts a user's own booking. Required
+ * fields turn that into a compile error instead.
+ *
+ * `custodianUser` carries {@link UserNameFields} rather than the name halves
+ * spelled out, so a projection cannot drift back to naming someone by their
+ * legal name without failing to compile.
+ */
+export type BookingCustodianLinks = {
+  custodianUser?: (UserNameFields & { id: string }) | null;
+  custodianTeamMember?: { name: string; userId: string | null } | null;
+};
+
+/**
+ * Whether this viewer may see WHO holds a booking.
+ *
+ * Separate from {@link canSeeBooking}, and gated by a separate workspace
+ * override: seeing that a booking exists does not mean seeing who has it. A
+ * workspace may grant either without the other.
+ *
+ * The caller always sees their own name, through EITHER custody link — a
+ * booking assigned by picking a team member carries `custodianUserId = NULL`,
+ * so matching the user link alone hides a booking's holder from the very
+ * person holding it.
+ *
+ * @param params.canSeeAllCustody - Whether the workspace lets this role see
+ *   custody it does not hold (ADMIN/OWNER, or a granted override).
+ * @param params.booking - The booking's two custody links.
+ * @param params.userId - The viewer.
+ * @returns `true` when the custodian may be named to this viewer.
+ */
+export function canSeeBookingCustodian({
+  canSeeAllCustody,
+  booking,
+  userId,
+}: {
+  canSeeAllCustody: boolean;
+  booking: BookingCustodianLinks;
+  userId: string;
+}): boolean {
+  return (
+    canSeeAllCustody ||
+    booking.custodianUser?.id === userId ||
+    booking.custodianTeamMember?.userId === userId
+  );
+}
+
+/**
+ * The custodian name a booking row should carry for this viewer.
+ *
+ * Three distinct answers, and the app renders each differently: a name, `null`
+ * for "this booking has no custodian", and {@link WITHHELD_CUSTODIAN_NAME} for
+ * "it has one you may not see".
+ *
+ * The team-member link wins when both are set, matching the web bookings list
+ * (`list-bookings-content.tsx`). `TeamMember.name` tracks `User.displayName`,
+ * so the two normally agree — but when they do not, web's answer is the one
+ * every surface must give.
+ *
+ * Shared by the mobile list, calendar and dashboard so the three lenses on the
+ * same rows cannot disagree about who holds a booking.
+ *
+ * @param params.canSeeAllCustody - Whether custody may be shown to this viewer.
+ * @param params.booking - The booking's two custody links.
+ * @param params.userId - The viewer.
+ * @returns The custodian's name, `null` when there is none, or the withheld
+ *   sentinel when there is one this viewer may not see.
+ */
+export function resolveBookingCustodianName({
+  canSeeAllCustody,
+  booking,
+  userId,
+}: {
+  canSeeAllCustody: boolean;
+  booking: BookingCustodianLinks;
+  userId: string;
+}): string | null {
+  if (!booking.custodianUser && !booking.custodianTeamMember) {
+    return null;
+  }
+
+  if (!canSeeBookingCustodian({ canSeeAllCustody, booking, userId })) {
+    return WITHHELD_CUSTODIAN_NAME;
+  }
+
+  return (
+    booking.custodianTeamMember?.name ||
+    resolveUserDisplayName(booking.custodianUser) ||
+    null
+  );
 }

@@ -24,6 +24,7 @@ import {
 } from "@shelf/labels";
 
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
 import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
@@ -35,6 +36,7 @@ import { ShelfError } from "~/utils/error";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
+import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import {
   createBooking,
   partialCheckinBooking,
@@ -44,6 +46,7 @@ import {
   getPartiallyCheckedInAssetIds,
   getKitIdsByAssets,
   getKitIdsByBookingSlices,
+  getKitIdsToAcquire,
   updateBasicBooking,
   updateBookingAssets,
   buildKitSlicesForBooking,
@@ -449,6 +452,14 @@ vitest.mock("~/modules/organization/service.server", () => ({
       displayName: null,
     },
   ]),
+}));
+
+// why: recipient resolution has its own tests
+// (notification-recipients.server.test.ts). Mocking the resolver lets each
+// test control the resolved list so the email fan-out can be asserted without
+// real org-settings lookups. Default: nobody resolves, so no emails fire.
+vitest.mock("./notification-recipients.server", () => ({
+  getBookingNotificationRecipients: vitest.fn().mockResolvedValue([]),
 }));
 
 // why: preventing actual job scheduling and queue operations during tests
@@ -1518,9 +1529,14 @@ describe("partialCheckinBooking", () => {
 
     // Verify kit status updated when all assets checked in
     expect(db.kit.updateMany).toHaveBeenCalledWith({
-      // why: partial check-in now scopes the kit status update by
-      // organizationId (cross-org IDOR hardening).
-      where: { id: { in: ["kit-1"] }, organizationId: "org-1" },
+      // why: the kit status update is scoped by organizationId (cross-org
+      // IDOR hardening) and by CHECKED_OUT, so a kit that shares a member
+      // with this booking but is held in custody is left alone.
+      where: {
+        id: { in: ["kit-1"] },
+        organizationId: "org-1",
+        status: KitStatus.CHECKED_OUT,
+      },
       data: { status: KitStatus.AVAILABLE },
     });
 
@@ -1675,8 +1691,8 @@ describe("getPartiallyCheckedInAssetIds", () => {
 });
 
 describe("getKitIdsByAssets", () => {
-  // An asset belongs to a kit when assetKits[0]?.kitId resolves to a kitId;
-  // an empty assetKits array represents "not in any kit".
+  // An asset belongs to a kit for every `AssetKit` row it carries; an empty
+  // assetKits array represents "not in any kit".
   it("should return unique kit IDs from assets", () => {
     const assets = [
       { id: "asset-1", assetKits: [{ kitId: "kit-1" }] },
@@ -1699,6 +1715,181 @@ describe("getKitIdsByAssets", () => {
     const result = getKitIdsByAssets(assets);
 
     expect(result).toEqual([]);
+  });
+
+  it("names every kit a quantity-tracked asset belongs to, not just the first", () => {
+    // A release leg: the kit reached through the second membership still owes
+    // this booking something, and a first-row read would strand it.
+    const assets = [
+      { id: "asset-1", assetKits: [{ kitId: "kit-1" }, { kitId: "kit-2" }] },
+    ];
+
+    expect(getKitIdsByAssets(assets).sort()).toEqual(["kit-1", "kit-2"]);
+  });
+});
+
+describe("getKitIdsToAcquire", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /** One `BookingAsset` row, with the defaults most cases don't care about. */
+  function slice({
+    id,
+    assetKitId = null,
+    sourceKitId = null,
+    type = AssetType.QUANTITY_TRACKED,
+    memberships = [],
+  }: {
+    id: string;
+    assetKitId?: string | null;
+    sourceKitId?: string | null;
+    type?: AssetType;
+    memberships?: string[];
+  }) {
+    return {
+      id,
+      assetKitId,
+      sourceKitId,
+      asset: { type, assetKits: memberships.map((kitId) => ({ kitId })) },
+    };
+  }
+
+  it("stamps only the kit a slice was booked under", async () => {
+    // The asset sits in both kits; the booking took it from kit-1.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-1",
+          sourceKitId: "kit-1",
+          memberships: ["kit-2", "kit-1"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual(["kit-1"]);
+  });
+
+  it("is unaffected by the order membership rows come back in", async () => {
+    const forwards = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-1",
+          sourceKitId: "kit-1",
+          memberships: ["kit-1", "kit-2"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+    const backwards = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-1",
+          sourceKitId: "kit-1",
+          memberships: ["kit-2", "kit-1"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(forwards).toEqual(backwards);
+  });
+
+  it("stamps no kit for a standalone quantity-tracked slice", async () => {
+    // Loose units come out of the free pool, which is a separate axis from the
+    // kit slices — every kit holding this asset stays intact.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-1",
+          type: AssetType.QUANTITY_TRACKED,
+          memberships: ["kit-1", "kit-2"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("stamps the kit for a standalone INDIVIDUAL slice", async () => {
+    // The one physical item leaves, so its kit is genuinely incomplete.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-1",
+          type: AssetType.INDIVIDUAL,
+          memberships: ["kit-1"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual(["kit-1"]);
+  });
+
+  it("resolves a legacy kit-driven slice through the AssetKit hop", async () => {
+    // why: overrides the module default, which derives a kitId from the input
+    // (`kit-of-<id>`). A fixed row instead, so the assertion names the kit this
+    // leg must resolve `ak-1` to rather than a value echoed back from the id.
+    // One-shot: `clearAllMocks` clears call history but NOT implementations, so
+    // a persistent override would answer for every later test in this file. The
+    // legacy hop issues exactly one read, so the queued value is consumed here.
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValueOnce([
+      { id: "ak-1", kitId: "kit-9" },
+    ]);
+
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({ id: "ba-1", assetKitId: "ak-1", memberships: ["kit-3"] }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual(["kit-9"]);
+    expect(db.assetKit.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
+      select: { id: true, kitId: true },
+    });
+  });
+
+  it("stamps nothing for a standalone quantity-tracked slice on the release side too", async () => {
+    // Release has to be the exact inverse of acquire. A booking holding only
+    // free-pool units of a shared asset never stamped any kit, so it must not
+    // name one on the way out — otherwise cancelling it releases a kit that a
+    // different booking has out.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-loose",
+          type: AssetType.QUANTITY_TRACKED,
+          memberships: ["kit-1", "kit-2"],
+        }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("keeps a booking's kit slice and its free-pool slice apart", async () => {
+    // Both slices are the same asset on the same booking: one booked under
+    // kit-1, one loose. Only the kit-driven one stamps.
+    const result = await getKitIdsToAcquire({
+      slices: [
+        slice({
+          id: "ba-kit",
+          sourceKitId: "kit-1",
+          memberships: ["kit-1", "kit-2"],
+        }),
+        slice({ id: "ba-loose", memberships: ["kit-1", "kit-2"] }),
+      ],
+      organizationId: "org-1",
+    });
+
+    expect(result).toEqual(["kit-1"]);
   });
 });
 
@@ -7639,11 +7830,13 @@ describe("revertBookingToDraft", () => {
     const result = await revertBookingToDraft({
       id: "booking-1",
       organizationId: "org-1",
+      hints: mockClientHints,
     });
 
     expect(db.booking.update).toHaveBeenCalledWith({
       where: { id: "booking-1" },
       data: { status: BookingStatus.DRAFT },
+      include: expect.any(Object),
     });
     expect(result).toEqual(draftBooking);
   });
@@ -7656,8 +7849,86 @@ describe("revertBookingToDraft", () => {
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
     await expect(
-      revertBookingToDraft({ id: "booking-1", organizationId: "org-1" })
+      revertBookingToDraft({
+        id: "booking-1",
+        organizationId: "org-1",
+        hints: mockClientHints,
+      })
     ).rejects.toThrow(ShelfError);
+  });
+
+  // why: regression — reverting a reservation used to be silent. The custodian
+  // submitted a request, an admin sent it back, and no email went out (every
+  // other lifecycle transition emails). This pins the notification in place.
+  it("emails the resolved recipients when a reservation is reverted", async () => {
+    const custodianUser = {
+      id: "user-2",
+      email: "custodian@example.com",
+      firstName: "Custodian",
+      lastName: "User",
+      displayName: null,
+      dateFormat: null,
+      timeFormat: null,
+      weekStart: null,
+      timeZone: null,
+    };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      custodianUserId: "user-2",
+    };
+    const draftBooking = {
+      ...mockBooking,
+      status: BookingStatus.DRAFT,
+      custodianUser,
+      custodianTeamMember: null,
+      creator: custodianUser,
+      notificationRecipients: [],
+      organization: {
+        name: "Test Org",
+        customEmailFooter: null,
+        owner: { email: "owner@example.com" },
+      },
+      _count: { bookingAssets: mockBooking.bookingAssets.length },
+    };
+
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue(draftBooking);
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: custodianUser.email,
+        firstName: custodianUser.firstName,
+        lastName: custodianUser.lastName,
+        userId: custodianUser.id,
+        dateFormat: null,
+        timeFormat: null,
+        weekStart: null,
+        timeZone: null,
+        reason: "custodian",
+      },
+    ]);
+
+    await revertBookingToDraft({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "admin-1",
+      hints: mockClientHints,
+    });
+
+    expect(getBookingNotificationRecipients).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "REVERT_TO_DRAFT",
+        editorUserId: "admin-1",
+      })
+    );
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "custodian@example.com",
+        subject: expect.stringContaining("reverted to draft"),
+      })
+    );
   });
 });
 
@@ -9898,6 +10169,173 @@ describe("isBookingFullyCheckedIn", () => {
     const result = await isBookingFullyCheckedIn(db, "booking-1");
 
     expect(result).toBe(true);
+  });
+
+  it("does not let a first-trip check-in session reconcile a scan re-dispatch that kept the first marker", async () => {
+    expect.assertions(1);
+
+    // why: a progressive check-out keeps a slice's original `checkedOutAt`
+    // ("out since" is the first departure). A slice that went out by scan,
+    // came back by scan and went out by scan again therefore carries the
+    // FIRST trip's marker, while its second departure is recorded only as a
+    // check-out session. The first trip's check-in session postdates that
+    // marker, and it must not stand in for a return that has not happened.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        // First departure; the second one did not refresh it.
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        // Cleared by the second departure.
+        checkedInAt: null,
+        checkedOutQuantity: 2,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // why: out at 10:00 and again at 14:00. The second departure exists only
+    // as a check-out session; the marker alone reads as one trip.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T10:00:00.000Z"),
+      },
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T14:00:00.000Z"),
+      },
+    ]);
+    // why: back at 12:00, between the two departures. The session answers
+    // the first trip only.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    // The asset is out on its second trip.
+    expect(result).toBe(false);
+  });
+
+  it("accepts a check-in session that answers the latest scan departure", async () => {
+    expect.assertions(1);
+
+    // The mirror of the case above, so the guard cannot be satisfied by
+    // refusing every session on a re-dispatched slice. The slice went out
+    // twice by scan and came back twice; the marker still shows the first
+    // trip, and the latest check-in session postdates the latest departure.
+    // why: the marker still shows the first trip, so the sessions below decide
+    // the answer.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        checkedOutQuantity: 2,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // why: out at 10:00 and again at 14:00, recorded only as sessions.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T10:00:00.000Z"),
+      },
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T14:00:00.000Z"),
+      },
+    ]);
+    // why: back at 12:00 and again at 16:00. The 16:00 session postdates the
+    // latest departure, so it answers it.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T16:00:00.000Z"),
+      },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(true);
+  });
+
+  it("does not let first-trip markers reconcile a later scan departure", async () => {
+    expect.assertions(1);
+
+    // why: both markers can predate the latest departure. Rows stamped from
+    // session history carry each side's EARLIEST session, so a slice that was
+    // out, back and out again by scan reads as one complete round trip on its
+    // markers alone. The check-out sessions still record the second departure,
+    // and no check-in answers it.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: new Date("2026-01-01T12:00:00.000Z"),
+        checkedOutQuantity: 2,
+        asset: { id: "asset-1", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // why: the 14:00 departure is recorded only here; the markers do not
+    // show it.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckout.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T10:00:00.000Z"),
+      },
+      {
+        assetIds: ["asset-1"],
+        quantities: [1],
+        bookingAssetIds: [""],
+        checkoutTimestamp: new Date("2026-01-01T14:00:00.000Z"),
+      },
+    ]);
+    // why: the only return answers the first trip; nothing answers the 14:00
+    // departure.
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
+    ]);
+
+    const result = await isBookingFullyCheckedIn(db, "booking-1");
+
+    expect(result).toBe(false);
   });
 
   it("returns false when qty-tracked units went out, came back, and went out again", async () => {
@@ -12700,7 +13138,12 @@ describe("processBooking — checked-out guard for active bookings", () => {
    *  2. the guard — filters `status: CHECKED_OUT`; returns the offending rows.
    */
   function mockAssets(
-    rows: Array<{ id: string; title?: string; status: AssetStatus }>
+    rows: Array<{
+      id: string;
+      title?: string;
+      status: AssetStatus;
+      type?: AssetType;
+    }>
   ) {
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
       (args?: any) => {
@@ -12711,10 +13154,18 @@ describe("processBooking — checked-out guard for active bookings", () => {
           !requestedIds || requestedIds.includes(id);
 
         if (args?.where?.status === AssetStatus.CHECKED_OUT) {
+          // why: the guard narrows to INDIVIDUAL rows, so the mock has to
+          // honour `where.type` too — otherwise a qty-tracked row comes back
+          // and the test asserts the mock's behaviour rather than the query's.
+          const typeFilter: AssetType | undefined = args?.where?.type;
           return Promise.resolve(
             rows
               .filter(
-                (r) => r.status === AssetStatus.CHECKED_OUT && inScope(r.id)
+                (r) =>
+                  r.status === AssetStatus.CHECKED_OUT &&
+                  inScope(r.id) &&
+                  (typeFilter === undefined ||
+                    (r.type ?? AssetType.INDIVIDUAL) === typeFilter)
               )
               .map((r) => ({ id: r.id, title: r.title ?? r.id }))
           );
@@ -12840,6 +13291,57 @@ describe("processBooking — checked-out guard for active bookings", () => {
       OWNER_AUTH
     );
     expect(finalAssetIds).toEqual(["asset-1"]);
+  });
+
+  it("does NOT block a QUANTITY_TRACKED asset whose pool is partly checked out", async () => {
+    // `Asset.status` is one flag for the whole row: a 27-unit pool with 18
+    // units out on other bookings reads CHECKED_OUT while 9 units are free.
+    // Per-unit capacity is `assertAssetQuantitiesAvailable`'s job inside
+    // `updateBookingAssets`, so the row-level guard must let the pool through.
+    mockBooking(BookingStatus.ONGOING);
+    mockAssets([
+      {
+        id: "asset-1",
+        title: "Compass",
+        status: AssetStatus.CHECKED_OUT,
+        type: AssetType.QUANTITY_TRACKED,
+      },
+    ]);
+
+    const { finalAssetIds } = await processBooking(
+      "booking-1",
+      ["asset-1"],
+      "org-1",
+      OWNER_AUTH
+    );
+    expect(finalAssetIds).toEqual(["asset-1"]);
+  });
+
+  it("still blocks a CHECKED_OUT INDIVIDUAL asset alongside a qty-tracked one", async () => {
+    mockBooking(BookingStatus.ONGOING);
+    mockAssets([
+      {
+        id: "asset-qt",
+        title: "Compass",
+        status: AssetStatus.CHECKED_OUT,
+        type: AssetType.QUANTITY_TRACKED,
+      },
+      {
+        id: "asset-ind",
+        title: "Camera",
+        status: AssetStatus.CHECKED_OUT,
+        type: AssetType.INDIVIDUAL,
+      },
+    ]);
+
+    await expect(
+      processBooking(
+        "booking-1",
+        ["asset-qt", "asset-ind"],
+        "org-1",
+        OWNER_AUTH
+      )
+    ).rejects.toThrow(/Camera/);
   });
 
   it("guards only NEW checked-out assets, ignoring ones already on this booking", async () => {
@@ -13358,8 +13860,13 @@ describe("getKitIdsByBookingSlices", () => {
     // why: overrides the module default, which derives a kitId from the input
     // (`kit-of-<id>`). A fixed row instead, so the assertion names the kit this
     // leg must resolve `ak-1` to rather than a value echoed back from the id.
+    // One-shot: `clearAllMocks` clears call history but NOT implementations, so
+    // a persistent override would answer for every later test in this file. The
+    // legacy hop issues exactly one read, so the queued value is consumed here.
     //@ts-expect-error missing vitest type
-    db.assetKit.findMany.mockResolvedValue([{ id: "ak-1", kitId: "kit-9" }]);
+    db.assetKit.findMany.mockResolvedValueOnce([
+      { id: "ak-1", kitId: "kit-9" },
+    ]);
 
     const result = await getKitIdsByBookingSlices({
       slices: [{ assetId: "asset-1", assetKitId: "ak-1", sourceKitId: null }],
@@ -13386,8 +13893,10 @@ describe("getKitIdsByBookingSlices", () => {
   it("resolves nothing rather than throwing when a membership has vanished", async () => {
     // A concurrent detach legitimately removes the row between the two reads.
     // That means "no kit to release", never "reject the check-in".
+    // One-shot for the reason given above: an empty array left in place would
+    // answer the check-in suites that follow.
     //@ts-expect-error missing vitest type
-    db.assetKit.findMany.mockResolvedValue([]);
+    db.assetKit.findMany.mockResolvedValueOnce([]);
 
     const result = await getKitIdsByBookingSlices({
       slices: [
@@ -13473,7 +13982,11 @@ describe("checkinBooking - releases a kit detached mid-booking", () => {
     });
 
     expect(db.kit.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["kit-1"] }, organizationId: "org-1" },
+      where: {
+        id: { in: ["kit-1"] },
+        organizationId: "org-1",
+        status: KitStatus.CHECKED_OUT,
+      },
       data: { status: KitStatus.AVAILABLE },
     });
   });

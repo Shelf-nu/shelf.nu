@@ -136,6 +136,22 @@ export type AssetListItem = {
   thumbnailImage: string | null;
   category: { id: string; name: string } | null;
   location: { id: string; name: string } | null;
+  /**
+   * The kit a list row names, so the reader knows where to go looking. Only
+   * INDIVIDUAL assets are capped at one membership — a QUANTITY_TRACKED asset
+   * can sit in several kits at once, and this is the one the server treats as
+   * primary: the oldest membership, the same kit the web asset index names.
+   * Read it together with `kitCount`, which says whether there are others.
+   * Absent on an older server, where the row renders without a kit line.
+   */
+  kit?: { id: string; name: string } | null;
+  /**
+   * How many kits the asset belongs to in total, so a row showing one of
+   * several can say so instead of presenting it as the only one. 0 when the
+   * asset is in no kit. Absent on a server that predates the field — treat
+   * that as "no others known" and show `kit` on its own, never as 0 kits.
+   */
+  kitCount?: number;
   custody: { custodian: { id: string; name: string } } | null;
 } & AssetQuantityFields;
 
@@ -255,7 +271,53 @@ export type AssetDetail = {
    * shows a muted "+N other(s) hold this asset" row. Absent on older servers.
    */
   custodyListOthersCount?: number;
+  /**
+   * Full per-row placement breakdown: manual rows first, then kit-driven
+   * rows (marked `viaKit`, read-only — they change through the kit). Feeds
+   * the detail screen's placements card and seeds the placements editor.
+   * Absent on older servers; fall back to the flat `location` field.
+   */
+  placements?: AssetPlacement[];
+  /**
+   * Number of AssetLocation placements the asset currently has. Absent on
+   * older servers.
+   */
+  placementCount?: number;
+  /**
+   * Units placed at the primary location (the per-row AssetLocation.quantity,
+   * NOT workspace stock). `null` when the asset is unplaced; absent on older
+   * servers.
+   */
+  locationQuantity?: number | null;
 } & AssetQuantityFields;
+
+/**
+ * One placement row of an asset: where units sit and whether the row is
+ * owned by a kit. `quantity` is the per-row AssetLocation.quantity (units
+ * placed at that location — NOT workspace stock). Kit-driven rows
+ * (`viaKit` set) are read-only in the placements editor: they change
+ * through the kit's own flows.
+ */
+export type AssetPlacement = {
+  locationId: string;
+  locationName: string;
+  quantity: number;
+  viaKit: { id: string; name: string } | null;
+};
+
+/**
+ * Response of the mobile manage-placements endpoint: the refreshed flat
+ * `location` plus the committed placement set (manual + kit rows), so the
+ * caller can update state without a second round trip.
+ */
+export type ManagePlacementsResponse = {
+  asset: {
+    id: string;
+    title: string;
+    location: { id: string; name: string } | null;
+  };
+  placements: AssetPlacement[];
+};
 
 /**
  * Kit shape returned by the scanner's QR/barcode resolvers. The per-asset
@@ -520,6 +582,12 @@ export type UpdateLocationResponse = {
     title: string;
     location: { id: string; name: string } | null;
   };
+  /**
+   * Units now placed at the location (per-row AssetLocation.quantity; 1 for
+   * INDIVIDUAL assets). Absent on the no-op short-circuit and on older
+   * servers.
+   */
+  placedQuantity?: number;
 };
 
 export type UpdateImageResponse = {
@@ -672,6 +740,25 @@ export type BookingModelRequest = {
   fulfilledAt: string | null;
 };
 
+/**
+ * A kit whose members this booking holds, as sent alongside `assets`.
+ *
+ * `assetCount` is the kit's OWN membership size — how many assets belong to
+ * the kit in the workspace — not how many of them this booking holds. The two
+ * differ whenever a booking took only part of a kit, and the difference is
+ * what decides whether a removal may name the kit instead of its assets.
+ */
+export type BookingKit = {
+  id: string;
+  name: string;
+  status: KitStatus;
+  image: string | null;
+  imageExpiration: string | null;
+  category: { id: string; name: string; color: string } | null;
+  location: { id: string; name: string } | null;
+  assetCount: number;
+};
+
 export type BookingDetail = {
   id: string;
   name: string;
@@ -702,6 +789,13 @@ export type BookingDetail = {
   } | null;
   tags: { id: string; name: string; color: string | null }[];
   assets: BookingAsset[];
+  /**
+   * The kits the assets above group under, in the order the booking first
+   * meets them. Absent on an older server, where the detail screen still
+   * groups members under a header built from `asset.kit` but shows no kit
+   * image, status badge, category or location.
+   */
+  kits?: BookingKit[];
   assetCount: number;
   checkedOutCount: number;
   /** Book-by-model reservations (outstanding + fulfilled), matching the web. */
@@ -745,6 +839,15 @@ export type BookingDetail = {
 export type BookingDetailResponse = {
   booking: BookingDetail;
   checkedInAssetIds: string[];
+  /**
+   * The assets this booking sent out, from the per-slice check-out markers.
+   * `checkedInAssetIds` is filled for ONGOING/OVERDUE only, so on a finished
+   * booking this is what tells a kit that went out and came back from one
+   * that never left. Absent on an older server; the detail screen then treats
+   * every member of a finished booking as having gone out, which is what a
+   * quick check-out (no per-slice records) means anyway.
+   */
+  checkedOutAssetIds?: string[];
   canCheckout: boolean;
   canCheckin: boolean;
   /**

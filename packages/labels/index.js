@@ -46,6 +46,36 @@ export const ASSET_BOOKING_PSEUDO_STATUS_LABELS = Object.freeze({
   PARTIALLY_CHECKED_OUT: "Partially checked out",
 });
 
+/**
+ * How a kit's state is named, on the website and on the phone.
+ *
+ * - `AVAILABLE` — "Available": free to book or take.
+ * - `IN_CUSTODY` — "In custody": someone is holding it.
+ * - `CHECKED_OUT` — "Checked out": it is out on a booking.
+ * - `PARTIALLY_CHECKED_IN` — "Already checked in".
+ *
+ * The first three are the persisted `KitStatus` enum. The fourth is not stored
+ * anywhere: a booking derives it for a kit whose every member it holds has been
+ * checked back in while the booking is still running. It reuses the asset
+ * wording deliberately, so a kit and the members listed under it never describe
+ * the same state in different words on one screen.
+ *
+ * The three enum entries are spelled out rather than spread from
+ * {@link ASSET_STATUS_LABELS}, and must stay that way: `KitStatus` and
+ * `AssetStatus` are separate database enums that happen to name the same three
+ * states, and this map's KEY SET has to track `KitStatus` alone — a member
+ * added to one enum has no business appearing on the other's badges. Their
+ * WORDING, on the other hand, must match, because a booking lists a kit and the
+ * assets inside it on one screen. The "a kit and an asset are named alike" test
+ * holds those three strings together: reword both maps, or neither.
+ */
+export const KIT_STATUS_LABELS = Object.freeze({
+  AVAILABLE: "Available",
+  IN_CUSTODY: "In custody",
+  CHECKED_OUT: "Checked out",
+  PARTIALLY_CHECKED_IN: ASSET_BOOKING_PSEUDO_STATUS_LABELS.ALREADY_CHECKED_IN,
+});
+
 // Booking status enum (BookingStatus in the Prisma schema).
 export const BOOKING_STATUS_LABELS = Object.freeze({
   DRAFT: "Draft",
