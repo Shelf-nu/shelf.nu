@@ -15,6 +15,7 @@
 
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createBookingSettings } from "@factories";
 import { createLoaderArgs } from "@mocks/remix";
 
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
@@ -101,13 +102,12 @@ function switches(
     checkoutSelfService?: boolean;
   } = {}
 ) {
-  return {
+  return createBookingSettings({
     requireExplicitCheckinForAdmin: on.checkinAdmin ?? false,
     requireExplicitCheckinForSelfService: on.checkinSelfService ?? false,
     requireExplicitCheckoutForAdmin: on.checkoutAdmin ?? false,
     requireExplicitCheckoutForSelfService: on.checkoutSelfService ?? false,
-    countKitsAsSingleUnit: false,
-  };
+  });
 }
 
 /** Runs the loader as a caller with `roles` and returns the two flags. */
@@ -118,9 +118,7 @@ async function quickFlagsFor(
   vi.mocked(getMobileUserContext).mockResolvedValue(
     mobileUserContext({ roles })
   );
-  vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
-    settings as Awaited<ReturnType<typeof getBookingSettingsForOrganization>>
-  );
+  vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(settings);
 
   const response = await loader(
     createLoaderArgs({

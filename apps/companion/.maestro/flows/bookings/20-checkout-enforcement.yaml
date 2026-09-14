@@ -73,14 +73,16 @@ env:
     timeout: 30000
 - tapOn:
     text: "Booking: ${BOOKING_NAME}.*"
+
+# The explicit entry point REMAINS under the rule. It renders together with the
+# booking's action flags, so once it is visible the one-tap check-out has been
+# decided too — this also guards against a false "absent" pass on a booking
+# that is not reserved or has not loaded.
 - extendedWaitUntil:
-    visible: "More booking actions"
+    visible: "Select assets to check out"
     timeout: 20000
 
-# CORE: the one-tap check-out must be ABSENT when enforcement is ON...
+# CORE: the one-tap check-out must be ABSENT when enforcement is ON.
 - assertNotVisible: "Check out all assets in this booking"
 - assertNotVisible: "Check Out All Assets"
-# ...while the explicit entry point REMAINS (proves the booking is truly
-# reserved and the panel rendered — guards against a false "absent" pass).
-- assertVisible: "Select assets to check out"
 - takeScreenshot: checkout-enforcement-forced

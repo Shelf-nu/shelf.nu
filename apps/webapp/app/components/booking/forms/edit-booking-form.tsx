@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
@@ -11,6 +12,7 @@ import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
@@ -164,9 +166,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     isBaseOrSelfService,
     isBase,
     isAdministratorOrOwner,
-    isAdministrator,
-    isOwner,
-    isSelfService,
+    effectiveRole,
   } = useUserRoleHelper();
 
   const zo = useZorm(
@@ -439,13 +439,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                       )
                     }
                     checkOutDisabled={checkoutDisabled}
-                    requireExplicitCheckout={
-                      !isOwner &&
-                      ((isAdministrator &&
-                        bookingSettings.requireExplicitCheckoutForAdmin) ||
-                        (isSelfService &&
-                          bookingSettings.requireExplicitCheckoutForSelfService))
-                    }
+                    requireExplicitCheckout={isExplicitCheckoutRequired({
+                      role: effectiveRole,
+                      bookingSettings,
+                    })}
                   />
                 );
               })()}
@@ -468,11 +465,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 }}
                 disabled={disabled || isLoadingWorkingHours}
                 requireExplicitCheckin={
-                  !isOwner &&
-                  ((isAdministrator &&
+                  (effectiveRole === OrganizationRoles.ADMIN &&
                     bookingSettings.requireExplicitCheckinForAdmin) ||
-                    (isSelfService &&
-                      bookingSettings.requireExplicitCheckinForSelfService))
+                  (effectiveRole === OrganizationRoles.SELF_SERVICE &&
+                    bookingSettings.requireExplicitCheckinForSelfService)
                 }
               />
             </When>
