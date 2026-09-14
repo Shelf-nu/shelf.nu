@@ -296,6 +296,46 @@ describe("POST /api/mobile/bookings/checkout", () => {
       expect(checkoutBooking).not.toHaveBeenCalled();
     });
 
+    it("answers 404 for a booking outside the workspace even when the switch is on", async () => {
+      vi.mocked(getMobileUserContext).mockResolvedValue(
+        mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+      );
+      vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
+        explicitCheckout({ admin: true })
+      );
+      vi.mocked(db.booking.findFirst).mockResolvedValue(null);
+
+      const request = createCheckoutRequest({ bookingId: "missing" });
+      const result = (await action(
+        createActionArgs({ request })
+      )) as unknown as Response;
+
+      // The booking is validated first; the policy is never consulted for a
+      // booking the caller cannot see, so the settings are not read either.
+      expect(result.status).toBe(404);
+      expect(getBookingSettingsForOrganization).not.toHaveBeenCalled();
+      expect(checkoutBooking).not.toHaveBeenCalled();
+    });
+
+    it("settles ownership before the policy for a SELF_SERVICE user on someone else's booking", async () => {
+      vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
+        explicitCheckout({ selfService: true })
+      );
+      vi.mocked(db.booking.findFirst).mockResolvedValue(
+        bookingRow({ creatorId: "someone-else", custodianUserId: null })
+      );
+
+      const request = createCheckoutRequest({ bookingId: "booking-1" });
+      const result = (await action(
+        createActionArgs({ request })
+      )) as unknown as Response;
+
+      expect(result.status).toBe(403);
+      expect((await result.json()).error.message).not.toBe(EXPLICIT_MESSAGE);
+      expect(getBookingSettingsForOrganization).not.toHaveBeenCalled();
+      expect(checkoutBooking).not.toHaveBeenCalled();
+    });
+
     it("lets the OWNER check out in one tap whatever the switches say", async () => {
       vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileUserContext({ roles: [OrganizationRoles.OWNER] })
