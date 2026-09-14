@@ -31,6 +31,8 @@ const createDataMock = vi.hoisted(() => {
     });
 });
 
+// why: `data()` needs a router context; the mock above hands back a plain
+// Response with the same status and body the assertions read.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual("react-router");
   return {

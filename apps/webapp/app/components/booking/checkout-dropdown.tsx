@@ -67,9 +67,9 @@ type CheckoutDropdownProps = {
   /** Whether the progressive "Scan to check out" option is available */
   canScanCheckOut: boolean;
   /**
-   * Whether the workspace requires the explicit check-out flow (scan or
-   * select) for the viewer's role. When true, only "Scan to check out" is
-   * rendered and neither quick option is offered.
+   * True when the workspace requires explicit check-out for the viewer's
+   * role. The server then refuses both quick options, so only "Scan to check
+   * out" is offered, and nothing at all when there is nothing left to scan.
    */
   requireExplicitCheckout?: boolean;
 };

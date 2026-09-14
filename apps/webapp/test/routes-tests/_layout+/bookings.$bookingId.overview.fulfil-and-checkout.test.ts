@@ -78,6 +78,8 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
 const { bookingSettingsMock } = vi.hoisted(() => ({
   bookingSettingsMock: vi.fn(),
 }));
+// why: the explicit check-out rule reads the workspace settings; the hoisted
+// mock above lets each case choose the switch state without a database.
 vi.mock("~/modules/booking-settings/service.server", () => ({
   getBookingSettingsForOrganization: bookingSettingsMock,
 }));

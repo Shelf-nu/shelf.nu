@@ -1,5 +1,3 @@
-import type { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-
 /**
  * Factory for the `BookingSettings` shape `getBookingSettingsForOrganization`
  * returns (its `BOOKING_SETTINGS_SELECT` projection).
@@ -11,6 +9,7 @@ import type { getBookingSettingsForOrganization } from "~/modules/booking-settin
  *
  * @see {@link file://./../../app/modules/booking-settings/service.server.ts}
  */
+import type { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 
 /** The workspace booking settings as the service returns them. */
 export type BookingSettingsFixture = Awaited<
