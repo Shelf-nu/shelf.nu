@@ -56,8 +56,10 @@ import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
 import {
   bookingRowKey,
   buildBookingRows,
+  countSelection,
   describeBookingRows,
   describeRemoval,
+  describeSelection,
   isBookingAssetSelectable,
   resolveBookingKitBadge,
   resolveKitSelectionState,
@@ -173,7 +175,8 @@ export default function BookingDetailScreen() {
   const [isActioning, setIsActioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // For progressive check-in/check-out: selected assets
+  // The asset ids picked in the current selection mode. A kit enters as the
+  // members its header picked; a member's own row never adds itself.
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(
     new Set()
   );
@@ -185,7 +188,8 @@ export default function BookingDetailScreen() {
   >(null);
   const isSelectMode = selectMode !== null;
   // Kits open collapsed, as on the website: a booking of several kits should
-  // read as a short list of cases, not as every asset inside them.
+  // read as a short list of cases, not as every asset inside them. Only the
+  // user opens a kit; entering a selection mode leaves them as they are.
   const [expandedKitIds, setExpandedKitIds] = useState<Set<string>>(new Set());
 
   // Sequential quantity picker for checking out QUANTITY_TRACKED assets: the
@@ -809,9 +813,13 @@ export default function BookingDetailScreen() {
   }, []);
 
   /**
-   * Picks or drops a kit's members in one tap. Only the ones the current mode
-   * can act on move, so a header in check-in mode leaves an already-returned
-   * member alone rather than selecting something the submit would drop.
+   * Picks or drops a kit's members in one tap. This is the only way a member
+   * enters a selection: a kit is picked as one unit, as on the website, so no
+   * one checks out or removes part of a kit by accident.
+   *
+   * Only the members the current mode can act on move, so a header in check-in
+   * mode leaves an already-returned member alone rather than selecting
+   * something the submit would drop.
    */
   const toggleKitSelection = useCallback(
     (members: BookingAsset[]) => {
@@ -833,26 +841,29 @@ export default function BookingDetailScreen() {
   );
 
   /**
-   * Enters or leaves a selection mode.
+   * Enters or leaves a selection mode, starting from an empty selection.
    *
-   * Entering opens every kit: the members are what a mode acts on, and a
-   * collapsed kit would hide rows from a selection the user is building.
-   * Leaving keeps the groups as the user left them.
+   * Kits stay open or closed as the user left them: a kit is picked from its
+   * header, so nothing inside it has to be on screen to be selected.
    */
-  const setSelectModeAndReveal = useCallback(
+  const toggleSelectMode = useCallback(
     (mode: "checkin" | "checkout" | "remove") => {
       setSelectMode((prev) => (prev === mode ? null : mode));
       setSelectedAssetIds(new Set());
-      setExpandedKitIds((prev) => {
-        if (selectMode === mode) return prev;
-        const next = new Set(prev);
-        for (const row of rows) {
-          if (row.type === "kit") next.add(row.kitId);
-        }
-        return next;
-      });
     },
-    [rows, selectMode]
+    []
+  );
+
+  /** What the selection holds, for the floating action button's label. */
+  const selectionCounts = useMemo(
+    () =>
+      countSelection({
+        rows,
+        selectedAssetIds,
+        selectMode,
+        checkedInAssetIds,
+      }),
+    [rows, selectedAssetIds, selectMode, checkedInAssetIds]
   );
 
   const renderAsset = useCallback(
@@ -878,15 +889,15 @@ export default function BookingDetailScreen() {
         : statusBadge[item.status] ?? fallbackBadge;
       const stateLabel = qtState ? qtState.label : formatStatus(item.status);
       const isCheckedIn = checkedInAssetIds.includes(item.id);
+      // A member of a picked kit reads as selected too, which shows what the
+      // kit's one tick covers — in check-in mode, only the members still out.
       const isSelected = selectedAssetIds.has(item.id);
-      // One definition of selectability, shared with the kit header — a header
-      // that selected a different set from the rows under it would hand the
-      // submit rows the user never saw offered.
-      const selectable = isBookingAssetSelectable(
-        item,
-        selectMode,
-        checkedInAssetIds
-      );
+      // A kit member has no checkbox of its own: its kit is picked as one unit,
+      // from the header. A standalone row is offered by the same rule the header
+      // applies to its members, so an asset in a given state is selectable or
+      // not wherever it sits.
+      const selectable =
+        !inKit && isBookingAssetSelectable(item, selectMode, checkedInAssetIds);
 
       return (
         <TouchableOpacity
@@ -897,6 +908,10 @@ export default function BookingDetailScreen() {
             isCheckedIn && styles.assetCardCheckedIn,
           ]}
           activeOpacity={selectable ? 0.6 : 1}
+          // In a selection mode a row either toggles itself or does nothing,
+          // so a tap meant for the selection never navigates away. Disabling
+          // the inert ones lets a screen reader say so.
+          disabled={isSelectMode && !selectable}
           onPress={() => {
             if (selectable) {
               toggleAssetSelection(item.id);
@@ -1098,6 +1113,16 @@ export default function BookingDetailScreen() {
 
   /** How many kit groups the list holds; 0 means nothing is grouped. */
   const kitRowCount = rows.filter((row) => row.type === "kit").length;
+
+  // The floating action names what it acts on, counting a kit as one thing:
+  // "Check Out 1 Kit & 1 Asset".
+  const selectionActionLabel = `${
+    selectMode === "checkout"
+      ? "Check Out"
+      : selectMode === "remove"
+      ? "Remove"
+      : "Check In"
+  } ${describeSelection(selectionCounts)}`;
 
   /**
    * Why Reserve is unavailable, or null when it is fine. Mirrors all THREE of
@@ -1633,7 +1658,7 @@ export default function BookingDetailScreen() {
                     selectMode === "remove" && styles.actionButtonOutlineActive,
                   ]}
                   onPress={() => {
-                    setSelectModeAndReveal("remove");
+                    toggleSelectMode("remove");
                   }}
                   accessibilityLabel={
                     selectMode === "remove"
@@ -1720,7 +1745,7 @@ export default function BookingDetailScreen() {
                   selectMode === "checkout" && styles.actionButtonOutlineActive,
                 ]}
                 onPress={() => {
-                  setSelectModeAndReveal("checkout");
+                  toggleSelectMode("checkout");
                 }}
                 accessibilityLabel={
                   selectMode === "checkout"
@@ -1852,7 +1877,7 @@ export default function BookingDetailScreen() {
                       styles.actionButtonOutlineActive,
                   ]}
                   onPress={() => {
-                    setSelectModeAndReveal("checkin");
+                    toggleSelectMode("checkin");
                   }}
                   accessibilityLabel={
                     selectMode === "checkin"
@@ -2021,13 +2046,7 @@ export default function BookingDetailScreen() {
                 ? handleRemoveAssets
                 : handlePartialCheckin
             }
-            accessibilityLabel={`${
-              selectMode === "checkout"
-                ? "Check out"
-                : selectMode === "remove"
-                ? "Remove"
-                : "Check in"
-            } ${selectedAssetIds.size} selected assets`}
+            accessibilityLabel={selectionActionLabel}
             accessibilityRole="button"
           >
             <Ionicons
@@ -2042,13 +2061,7 @@ export default function BookingDetailScreen() {
               color={colors.primaryForeground}
             />
             <Text style={styles.floatingButtonText}>
-              {selectMode === "checkout"
-                ? "Check Out"
-                : selectMode === "remove"
-                ? "Remove"
-                : "Check In"}{" "}
-              {selectedAssetIds.size}{" "}
-              {selectedAssetIds.size === 1 ? "Asset" : "Assets"}
+              {selectionActionLabel}
             </Text>
           </TouchableOpacity>
         </View>
