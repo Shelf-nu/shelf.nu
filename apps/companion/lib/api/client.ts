@@ -6,6 +6,7 @@ import {
 import { getSupabase, getSupabaseClientUrl } from "../supabase";
 import { isSessionServerMismatched } from "../server/contract";
 import { reportServerMismatch } from "../sentry";
+import { CLIENT_USER_AGENT } from "./user-agent";
 
 /**
  * Base URL of the Shelf server the app is currently connected to.
@@ -306,6 +307,10 @@ export async function apiFetch<T>(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
+        // why: scan records and server logs attribute requests to the app
+        // ("Shelf app on iPhone") instead of an unparseable default UA.
+        // Null on web builds, where User-Agent is browser-controlled.
+        ...(CLIENT_USER_AGENT ? { "User-Agent": CLIENT_USER_AGENT } : {}),
         ...options.headers,
       },
     });
@@ -423,6 +428,7 @@ export async function apiUpload<T>(
       headers: {
         Authorization: `Bearer ${accessToken}`,
         // Do NOT set Content-Type — fetch auto-sets it with the multipart boundary
+        ...(CLIENT_USER_AGENT ? { "User-Agent": CLIENT_USER_AGENT } : {}),
       },
       body: formData,
     });
