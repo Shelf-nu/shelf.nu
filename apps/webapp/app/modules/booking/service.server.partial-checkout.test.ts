@@ -1140,6 +1140,54 @@ describe("partialCheckoutBooking", () => {
     expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
   });
 
+  it("refuses to check out again an INDIVIDUAL asset already checked in on this booking", async () => {
+    expect.assertions(3);
+
+    // why: an ONGOING booking checked out with the button, so no session names
+    // either asset. asset-1 has since been checked back in, so its slice
+    // carries `checkedInAt` and the asset reads AVAILABLE again.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...reservedBooking,
+      status: BookingStatus.ONGOING,
+      _count: { bookingAssets: 2 },
+      bookingAssets: [
+        {
+          checkedInAt: new Date("2026-01-01T12:00:00.000Z"),
+          asset: {
+            id: "asset-1",
+            title: "Asset asset-1",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+        {
+          checkedInAt: null,
+          asset: {
+            id: "asset-2",
+            title: "Asset asset-2",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+
+    const attempt = partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1"],
+    });
+
+    await expect(attempt).rejects.toThrow(
+      "already checked in for this booking"
+    );
+    await expect(attempt).rejects.toMatchObject({ status: 400 });
+    expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+  });
+
   it("reads checkout sessions a BOUNDED number of times regardless of booking size (no O(M) query fan-out)", async () => {
     expect.assertions(3);
 

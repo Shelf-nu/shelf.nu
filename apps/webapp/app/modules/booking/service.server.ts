@@ -175,6 +175,10 @@ import {
 } from "./helpers";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import type { NotificationRecipient } from "./notification-recipients.server";
+import {
+  isSliceOutByMarker,
+  makeIsIndividualSliceOutstanding,
+} from "./slice-return";
 import type {
   BookingLoaderResponse,
   BookingWithExtraInclude,
@@ -4516,22 +4520,13 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
 }
 
 /**
- * Latest session timestamp per asset id, over progressive session rows that
- * name the asset. A row without a timestamp dates nothing and is skipped.
+ * Up to three asset titles for an error message, then a count of the rest.
  */
-function latestSessionTimestampByAsset(
-  rows: Array<{ assetIds: string[]; at: Date | null }>
-): Map<string, Date> {
-  const latestByAsset = new Map<string, Date>();
-  for (const row of rows) {
-    const at = row.at;
-    if (!at) continue;
-    for (const id of row.assetIds) {
-      const seen = latestByAsset.get(id);
-      if (!seen || at > seen) latestByAsset.set(id, at);
-    }
-  }
-  return latestByAsset;
+function nameList(assets: { title: string }[]): string {
+  return `${assets
+    .slice(0, 3)
+    .map((a) => a.title)
+    .join(", ")}${assets.length > 3 ? ` and ${assets.length - 3} more` : ""}`;
 }
 
 /**
@@ -4547,16 +4542,12 @@ function latestSessionTimestampByAsset(
  * and a booking-level test would let one scanned asset strip the return
  * obligation off every button-checked-out asset on the booking.
  *
- * For `INDIVIDUAL` assets: a slice with `checkedOutAt` must be reconciled —
- * `checkedInAt` set, or present in a `PartialBookingCheckin.assetIds` row
- * (rows reconciled before the marker existed carry only the session record).
- * The reconciliation has to be no older than the slice's latest departure,
- * which is the later of its marker and the newest `PartialBookingCheckout`
- * session naming the asset: the marker dates the first departure, and a
- * check-in that answered an earlier trip stays on record after the slice
- * goes out again. Slices never dispatched (added onto an ONGOING booking, or
- * left behind by a progressive checkout) have nothing to check in and never
- * block.
+ * For `INDIVIDUAL` assets: every slice that went out has to be back, judged
+ * by `makeIsIndividualSliceOutstanding`: `checkedInAt`, or a
+ * `PartialBookingCheckin` session for rows reconciled before the marker
+ * existed, no older than the slice's latest departure. Slices never
+ * dispatched (added onto an ONGOING booking, or left behind by a progressive
+ * checkout) have nothing to check in and never block.
  *
  * For `QUANTITY_TRACKED` assets: obligated units are judged PER SLICE and
  * summed — a slice's session-attributed units when any exist (capped by its
@@ -4568,9 +4559,9 @@ function latestSessionTimestampByAsset(
  * obligation.
  *
  * Called by `partialCheckinBooking` to decide the ONGOING/OVERDUE →
- * COMPLETE transition. The all-at-once `checkinBooking` returns every
- * outstanding slice and completes unconditionally, so this is the one place
- * that judges completion.
+ * COMPLETE transition. Its all-returned shortcut applies the same per-slice
+ * test before handing a final batch to `checkinBooking`, which completes
+ * unconditionally; the two must keep sharing it.
  *
  * @param tx - Prisma transaction client
  * @param bookingId - Booking to evaluate
@@ -4631,35 +4622,17 @@ export async function isBookingFullyCheckedIn(
     return true;
   }
 
-  /**
-   * The most recent check-in session naming each asset. Kept as a time rather
-   * than a flag: a slice that departed twice has a session for the first trip
-   * whose asset id never leaves this set, and a bare set of ids would let that
-   * session reconcile the second departure too.
-   */
-  const latestSessionCheckinByAsset = latestSessionTimestampByAsset(
-    (
-      partialCheckins as Array<{
-        assetIds: string[];
-        checkinTimestamp: Date | null;
-      }>
-    ).map((row) => ({ assetIds: row.assetIds, at: row.checkinTimestamp }))
-  );
-
-  /**
-   * The most recent check-out session naming each asset. The slice marker
-   * dates the FIRST departure only — a progressive re-dispatch clears
-   * `checkedInAt` and keeps `checkedOutAt`, which is what "out since" shows —
-   * so a slice's latest departure is the later of its marker and this.
-   */
-  const latestSessionCheckoutByAsset = latestSessionTimestampByAsset(
-    (
-      partialCheckouts as Array<{
-        assetIds: string[];
-        checkoutTimestamp: Date | null;
-      }>
-    ).map((row) => ({ assetIds: row.assetIds, at: row.checkoutTimestamp }))
-  );
+  /** Whether an INDIVIDUAL slice is still out — see the shared test. */
+  const isIndividualSliceOutstanding = makeIsIndividualSliceOutstanding({
+    checkinSessions: partialCheckins as Array<{
+      assetIds: string[];
+      checkinTimestamp: Date | null;
+    }>,
+    checkoutSessions: partialCheckouts as Array<{
+      assetIds: string[];
+      checkoutTimestamp: Date | null;
+    }>,
+  });
 
   type SliceRow = {
     id: string;
@@ -4713,37 +4686,20 @@ export async function isBookingFullyCheckedIn(
     if (!isQtyTrackedAsset) {
       // INDIVIDUAL. Dispatch is read from the slice marker, the same source
       // the scan check-in guard reads, so a slice never dispatched on THIS
-      // booking (added onto an ONGOING booking, or left behind by a
-      // progressive checkout) has nothing to reconcile and never blocks.
+      // booking has nothing to reconcile and never blocks.
       //
-      // Reconciliation is judged against the slice's latest departure below,
-      // while the scan check-in guard reads `checkedInAt` alone. Both
-      // check-out writers clear `checkedInAt` on a re-dispatch, so the two
-      // agree on every slice they produce. They part on a slice whose markers
-      // were stamped from each side's earliest session and which a later scan
-      // departure sent out again: this gate holds the booking, the scan flow
-      // refuses the slice as already checked in, and the all-at-once check-in
-      // is the path that closes the booking.
-      if (!ba.checkedOutAt) continue;
-      // The latest departure a return has to answer: the marker, or a newer
-      // check-out session naming the asset. The all-at-once checkout refreshes
-      // the marker when a reconciled slice goes out again; the progressive
-      // checkout keeps the first one, so its later departures are dated only
-      // by their session.
-      const sessionOutAt = latestSessionCheckoutByAsset.get(ba.assetId);
-      const departedAt =
-        sessionOutAt && sessionOutAt > ba.checkedOutAt
-          ? sessionOutAt
-          : ba.checkedOutAt;
-      // Reconciled — by the slice marker, or by a check-in session for rows
-      // reconciled before the marker existed. Either has to be no older than
-      // that departure: a check-in that answered an earlier trip stays on
-      // record after the slice goes out again, and read against the first
-      // departure it would report the new trip as already returned.
-      if (ba.checkedInAt && ba.checkedInAt >= departedAt) continue;
-      const sessionInAt = latestSessionCheckinByAsset.get(ba.assetId);
-      if (sessionInAt && sessionInAt >= departedAt) continue;
-      return false;
+      // Reconciliation is judged against the slice's latest departure, while
+      // the scan check-in guard reads `checkedInAt` alone. The progressive
+      // checkout refuses to send a returned INDIVIDUAL slice out again, and the
+      // all-at-once checkout refreshes `checkedOutAt` and clears `checkedInAt`
+      // when it does, so the two agree on every slice the writers produce.
+      // They part on a slice whose markers were stamped from each side's
+      // earliest session and which a later scan departure sent out again: this
+      // gate holds the booking, the scan flow refuses the slice as already
+      // checked in, and the all-at-once check-in is the path that closes the
+      // booking.
+      if (isIndividualSliceOutstanding(ba)) return false;
+      continue;
     }
 
     // QUANTITY_TRACKED — judged once per ASSET, because `remaining` and the
@@ -6504,15 +6460,6 @@ export async function partialCheckinBooking({
       select: { id: true, title: true },
     });
 
-    /** Formats up to three titles, then "and N more". */
-    const nameList = (assets: { title: string }[]) =>
-      `${assets
-        .slice(0, 3)
-        .map((a) => a.title)
-        .join(", ")}${
-        assets.length > 3 ? ` and ${assets.length - 3} more` : ""
-      }`;
-
     // Checked in already: a duplicate request, not an invalid one. Tested
     // FIRST, and independently of `checkedOutAt` — a reconciled slice carries
     // both markers, and "never checked out" would be the wrong reason to give.
@@ -6562,33 +6509,77 @@ export async function partialCheckinBooking({
       });
     }
 
-    // Early exit: if this batch returns every asset still outstanding for THIS
-    // booking, run a complete check-in instead of recording another partial one.
+    // Early exit: if this batch returns every asset still out on THIS booking,
+    // run a complete check-in instead of recording another partial one.
     //
-    // Completion is decided from this booking's PartialBookingCheckin records —
-    // NOT from the assets' global `status`. Assets are shared across overlapping
-    // bookings, so an asset that was returned for this booking can be
-    // CHECKED_OUT again by a later booking. Keying completion on global status
-    // therefore left the booking stuck ONGOING/OVERDUE even though every item
-    // was returned here. The records are the per-booking source of truth and
-    // match what the check-in progress bar shows the user (fix from main:
-    // ddafe62fd / 9df00afff).
+    // `checkinBooking` returns every checked-out asset on the booking, so the
+    // batch has to cover each one that is genuinely out. "Out" is judged per
+    // slice by the test the completion gate uses (see `isBookingFullyCheckedIn`):
+    // the slice markers, held against the slice's latest departure. An asset
+    // whose earlier trip was checked in and which has gone out again is out,
+    // whatever check-in sessions name it. Never the assets' global `status`:
+    // assets are shared across overlapping bookings, and one returned here can
+    // be CHECKED_OUT by a later booking.
+    //
+    // A QUANTITY_TRACKED asset is out while EITHER no check-in session names it
+    // OR any of its slices is out by its markers. Never read it from the
+    // markers alone: a slice is settled once the units that left are back, but
+    // booked units that never left still count against it, and
+    // `checkinBooking` would log every one of them as returned. A session names
+    // the asset only once every booked unit is accounted for, which catches
+    // that; the marker catches a slice sent out again after the session was
+    // written.
     //
     // Only safe when no qty dispositions are in play, because per-asset qty
     // work needs to run in this function's transaction (so we don't split
     // consumption-log writes across two services).
     if (!hasQuantityDispositions) {
-      const alreadyCheckedInAssetIds = await getPartiallyCheckedInAssetIds(id);
-      const recordedAssetIdSet = new Set(alreadyCheckedInAssetIds);
+      const [checkinSessions, checkoutSessions] = await Promise.all([
+        db.partialBookingCheckin.findMany({
+          where: { bookingId: id, booking: { organizationId } },
+          select: { assetIds: true, checkinTimestamp: true },
+        }),
+        db.partialBookingCheckout.findMany({
+          where: { bookingId: id, booking: { organizationId } },
+          select: { assetIds: true, checkoutTimestamp: true },
+        }),
+      ]);
+      const isIndividualSliceOutstanding = makeIsIndividualSliceOutstanding({
+        checkinSessions,
+        checkoutSessions,
+      });
+      const outstandingIndividualAssetIds = new Set(
+        bookingFound.bookingAssets
+          .filter(
+            (ba) =>
+              ba.asset.type !== AssetType.QUANTITY_TRACKED &&
+              isIndividualSliceOutstanding(ba)
+          )
+          .map((ba) => ba.assetId)
+      );
+      const sessionReturnedAssetIds = new Set(
+        checkinSessions.flatMap((session) => session.assetIds)
+      );
+      const qtyAssetIdsOutByMarker = new Set(
+        bookingFound.bookingAssets
+          .filter(
+            (ba) =>
+              ba.asset.type === AssetType.QUANTITY_TRACKED &&
+              isSliceOutByMarker(ba)
+          )
+          .map((ba) => ba.assetId)
+      );
       const providedAssetIds = new Set(effectiveAssetIds);
 
-      // Outstanding = CHECKED-OUT-for-this-booking assets not yet checked
-      // back in. Crucially this is the eligible (checked-out) set, NOT every
-      // booking asset: a progressive booking can hold never-checked-out items,
-      // and counting those as outstanding would keep it stuck ONGOING forever
-      // after the actually checked-out items are all returned.
+      // Only assets that went out on this booking can be outstanding: a
+      // progressive booking can hold items that never left, and counting
+      // those would keep it ONGOING after everything that did leave is back.
       const outstandingAssetIds = [...assetIdsWithACheckedOutSlice].filter(
-        (assetId) => !recordedAssetIdSet.has(assetId)
+        (assetId) =>
+          assetTypeById.get(assetId) === AssetType.QUANTITY_TRACKED
+            ? !sessionReturnedAssetIds.has(assetId) ||
+              qtyAssetIdsOutByMarker.has(assetId)
+            : outstandingIndividualAssetIds.has(assetId)
       );
 
       if (
@@ -7632,29 +7623,52 @@ export async function partialCheckinBooking({
     }
 
     // Compute a coarse "remaining" count for the toast: bookingAssets not
-    // yet fully reconciled. Individuals count as remaining if not in any
-    // PartialBookingCheckin session; qty-tracked count as remaining if
-    // `computeBookingAssetRemaining > 0`.
+    // yet fully reconciled. An individual counts as remaining while it is out
+    // by the shared per-slice test, the same judgement the completion gate
+    // makes, so one that never went out is not counted and one that went out
+    // again after an earlier return is. A qty-tracked slice counts while its
+    // booked units are not all accounted for (`computeBookingAssetRemaining`
+    // > 0) OR while it is out by its markers, which is what a slice sent out
+    // again after a full return looks like.
     const outstandingBookingAssets = await db.bookingAsset.findMany({
       where: { bookingId: id },
       select: {
         assetId: true,
+        checkedOutAt: true,
+        checkedInAt: true,
         asset: { select: { type: true } },
       },
     });
-    const allSessions = await db.partialBookingCheckin.findMany({
-      where: { bookingId: id },
-      select: { assetIds: true },
+    const [allSessions, allCheckoutSessions] = await Promise.all([
+      db.partialBookingCheckin.findMany({
+        where: { bookingId: id },
+        select: { assetIds: true, checkinTimestamp: true },
+      }),
+      db.partialBookingCheckout.findMany({
+        where: { bookingId: id },
+        select: { assetIds: true, checkoutTimestamp: true },
+      }),
+    ]);
+    const isIndividualSliceStillOut = makeIsIndividualSliceOutstanding({
+      checkinSessions: allSessions,
+      checkoutSessions: allCheckoutSessions,
     });
-    const reconciledIndividualIds = new Set<string>(
-      allSessions.flatMap((s) => s.assetIds as string[])
-    );
-    let remainingAssetCount = 0;
+    // Counted per ASSET, not per slice: a quantity-tracked asset can hold a
+    // standalone slice and several kit-driven ones on one booking, and
+    // `computeBookingAssetRemaining` already answers for all of them.
+    const slicesByAssetId = new Map<string, typeof outstandingBookingAssets>();
     for (const ba of outstandingBookingAssets) {
-      if (ba.asset?.type === AssetType.QUANTITY_TRACKED) {
-        const rem = await computeBookingAssetRemaining(db, id, ba.assetId);
-        if (rem > 0) remainingAssetCount += 1;
-      } else if (!reconciledIndividualIds.has(ba.assetId)) {
+      const slices = slicesByAssetId.get(ba.assetId);
+      if (slices) slices.push(ba);
+      else slicesByAssetId.set(ba.assetId, [ba]);
+    }
+    let remainingAssetCount = 0;
+    for (const [assetId, slices] of slicesByAssetId) {
+      if (slices[0].asset?.type === AssetType.QUANTITY_TRACKED) {
+        const rem = await computeBookingAssetRemaining(db, id, assetId);
+        if (rem > 0 || slices.some(isSliceOutByMarker))
+          remainingAssetCount += 1;
+      } else if (slices.some(isIndividualSliceStillOut)) {
         remainingAssetCount += 1;
       }
     }
@@ -7820,6 +7834,9 @@ export async function partialCheckoutBooking({
               // the kit it was booked under even after a detach. Both are
               // required by `getKitIdsToAcquireBySlice`.
               sourceKitId: true,
+              // Set once the slice is back: an INDIVIDUAL asset whose slice
+              // carries it cannot go out again on this booking.
+              checkedInAt: true,
               asset: {
                 select: {
                   id: true,
@@ -7976,6 +7993,39 @@ export async function partialCheckoutBooking({
           shouldBeCaptured: false,
         });
       }
+    }
+
+    /**
+     * An INDIVIDUAL asset checked back in on this booking is finished with it
+     * and does not leave again under the same booking. Every client already
+     * withholds it from check-out; this is the server's copy of that rule. The
+     * slice's `checkedInAt` is the record, whichever flow reconciled it.
+     * `QUANTITY_TRACKED` assets are judged by their unit counts instead.
+     */
+    const returnedIndividualAssetIds = new Set(
+      bookingFound.bookingAssets
+        .filter(
+          (ba) =>
+            ba.asset.type !== AssetType.QUANTITY_TRACKED &&
+            Boolean(ba.checkedInAt)
+        )
+        .map((ba) => ba.asset.id)
+    );
+    const returnedScanned = bookingAssetsDeduped.filter(
+      (asset) =>
+        returnedIndividualAssetIds.has(asset.id) &&
+        effectiveAssetIds.includes(asset.id)
+    );
+    if (returnedScanned.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label,
+        message: `These assets were already checked in for this booking and cannot be checked out again: ${nameList(
+          returnedScanned
+        )}.`,
+        shouldBeCaptured: false,
+      });
     }
 
     // Assets already checked out for THIS booking. Source of truth is the
