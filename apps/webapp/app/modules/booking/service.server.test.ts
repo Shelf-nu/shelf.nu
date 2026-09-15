@@ -4992,7 +4992,35 @@ describe("fulfilModelRequestsAndCheckout", () => {
       expect(db.booking.update).not.toHaveBeenCalled();
     });
 
-    it("stays open while a request is still to be fulfilled", async () => {
+    it("refuses when the booking already holds assets that are not checked out, before any write", async () => {
+      queueRefusedPathReads();
+      // A request is open, so the fulfil scanner is the right flow, but the
+      // checkout writes would also send out the booking's other assets, which
+      // this call did not scan.
+      (
+        db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce([openRequest]);
+      (
+        db.bookingAsset.count as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce(2);
+
+      const refused = fulfilModelRequestsAndCheckout({
+        ...mockFulfilParams,
+        assetIds: ["dell-1"],
+        requireExplicitCheckout: true,
+      });
+
+      await expect(refused).rejects.toMatchObject(refusal);
+      await expect(refused).rejects.toThrow(/haven't been scanned/);
+      expect(db.bookingAsset.count).toHaveBeenCalledWith({
+        where: { bookingId: "booking-1", checkedOutAt: null },
+      });
+      expect(db.asset.updateMany).not.toHaveBeenCalled();
+      expect(db.booking.update).not.toHaveBeenCalled();
+      expect(hasStatusUpdate()).toBe(false);
+    });
+
+    it("stays open while a request is still to be fulfilled and nothing else waits on the booking", async () => {
       const { hydratedBooking } = queueHappyPathReads();
       // why: first read is the rule's (one request open); the second is the
       // outstanding guard inside the checkout writes, after the scanned unit
@@ -5009,9 +5037,13 @@ describe("fulfilModelRequestsAndCheckout", () => {
 
       expect(result).toEqual(hydratedBooking);
       expect(hasStatusUpdate()).toBe(true);
+      // The rule looked for waiting assets and found none (the mock's 0).
+      expect(db.bookingAsset.count).toHaveBeenCalledWith({
+        where: { bookingId: "booking-1", checkedOutAt: null },
+      });
     });
 
-    it("does not read the requests for the rule when it does not apply", async () => {
+    it("does not read the requests or the waiting assets for the rule when it does not apply", async () => {
       queueHappyPathReads();
       (
         db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
@@ -5024,6 +5056,9 @@ describe("fulfilModelRequestsAndCheckout", () => {
 
       // Only the checkout writes' guard read the requests.
       expect(db.bookingModelRequest.findMany).toHaveBeenCalledTimes(1);
+      expect(db.bookingAsset.count).not.toHaveBeenCalledWith({
+        where: { bookingId: "booking-1", checkedOutAt: null },
+      });
       expect(hasStatusUpdate()).toBe(true);
     });
   });

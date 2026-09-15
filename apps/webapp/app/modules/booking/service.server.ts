@@ -3445,9 +3445,11 @@ export async function fulfilModelRequestsAndCheckout({
   to?: Date | null;
   /**
    * True when the workspace requires explicit check-out for the caller's
-   * role. The rule is decided inside the transaction, on the model requests
-   * as they are at that moment: with none left to fulfil, this call is the
-   * one-tap check-out under another name and is refused with a 403.
+   * role. The rule is decided inside the transaction, on the booking as it is
+   * at that moment, and refuses with a 403 when this call would check out
+   * anything it did not scan: with no model request left to fulfil it is the
+   * one-tap check-out under another name, and with assets already on the
+   * booking and not yet out, those would leave with the scanned units.
    */
   requireExplicitCheckout?: boolean;
 }) {
@@ -3640,6 +3642,26 @@ export async function fulfilModelRequestsAndCheckout({
               title: "Not allowed to quick check-out",
               message:
                 "Explicit check-out is required in this organization. Please scan or select the assets to check them out.",
+              status: 403,
+              label,
+              shouldBeCaptured: false,
+            });
+          }
+
+          // Everything this call checks out must be something it scanned. The
+          // checkout writes below send out every asset on the booking, and an
+          // asset already on it cannot be scanned here (it is already a row),
+          // so any row not yet out would leave unscanned. Read before the
+          // scanned rows are added, under the booking lock taken above.
+          const waitingRowCount: number = await tx.bookingAsset.count({
+            where: { bookingId, checkedOutAt: null },
+          });
+          if (waitingRowCount > 0) {
+            throw new ShelfError({
+              cause: null,
+              title: "Not allowed to quick check-out",
+              message:
+                "Explicit check-out is required in this organization, and this booking already holds assets that haven't been scanned. Assign the reserved units from Manage assets or by scanning them onto the booking, then scan or select the assets to check it out.",
               status: 403,
               label,
               shouldBeCaptured: false,
