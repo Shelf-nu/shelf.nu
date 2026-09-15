@@ -29,8 +29,7 @@ vi.mock("react-router", async () => {
 });
 
 // why: external auth — don't hit Supabase. getMobileUserContext carries the
-// paid-add-on flag (canUseAudits) so we can assert it gates this route
-// (#2551 replaced the old requireMobileAuditsEnabled helper).
+// paid-add-on flag (canUseAudits) so we can assert it gates this route.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
@@ -39,7 +38,7 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 }));
 
 // why: external guard — session/org/asset/assignee scoping is unit-tested
-// in mobile-evidence.server.test.ts; here we only assert it is invoked.
+// in mobile-evidence.server.test.ts; here it supplies the audit's status.
 vi.mock("~/modules/audit/mobile-evidence.server", () => ({
   requireAuditAssetInSession: vi.fn(),
 }));
@@ -114,7 +113,9 @@ describe("POST /api/mobile/audits/note", () => {
       canUseAudits: true,
     });
     (requireMobilePermission as any).mockResolvedValue(undefined);
-    (requireAuditAssetInSession as any).mockResolvedValue(undefined);
+    (requireAuditAssetInSession as any).mockResolvedValue({
+      auditStatus: "ACTIVE",
+    });
   });
 
   it("creates a condition note scoped to the auditAsset and returns it", async () => {
@@ -142,6 +143,21 @@ describe("POST /api/mobile/audits/note", () => {
       })
     );
   });
+
+  it.each(["COMPLETED", "CANCELLED", "ARCHIVED"])(
+    "refuses a note on a %s audit",
+    async (auditStatus) => {
+      // A finished audit is a record; its receipt prints the notes it holds.
+      (requireAuditAssetInSession as any).mockResolvedValue({ auditStatus });
+
+      const result = await action(
+        createActionArgs({ request: createNoteRequest(validBody) })
+      );
+
+      expect((result as unknown as Response).status).toBe(400);
+      expect(db.auditNote.create).not.toHaveBeenCalled();
+    }
+  );
 
   it("returns 403 when the workspace lacks the Audits add-on (revenue bypass closed)", async () => {
     (getMobileUserContext as any).mockResolvedValue({

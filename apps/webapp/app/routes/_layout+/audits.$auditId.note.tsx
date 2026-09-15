@@ -4,7 +4,10 @@ import { z } from "zod";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
 import { createAuditNote } from "~/modules/audit/note-service.server";
-import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
+import {
+  assertAuditAcceptsComments,
+  requireAuditAssigneeForBaseSelfService,
+} from "~/modules/audit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
@@ -45,6 +48,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       select: {
         id: true,
         organizationId: true,
+        status: true,
         assignments: {
           select: { userId: true },
         },
@@ -80,6 +84,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
+        assertAuditAcceptsComments(audit.status, {
+          auditSessionId: auditId,
+          organizationId,
+        });
+
         sendNotification({
           title: "Note created",
           message: "Your audit note has been created successfully",
@@ -110,10 +119,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // deleteMany, not delete: `delete` needs a unique where, and the
         // organization scope has to come through the parent audit session
         // (AuditNote has no organizationId column).
+        //
+        // Only COMMENT notes are deletable. The audit's own activity entries —
+        // started, scanned, removed, completed — are UPDATE notes that record
+        // the acting user's id, so an author filter alone would let someone
+        // erase the trail of what they did. Scoped to the audit in the URL too.
         const deleted = await db.auditNote.deleteMany({
           where: {
             id: noteId,
             userId, // Ensure user can only delete their own notes
+            type: "COMMENT",
+            auditSessionId: auditId,
             auditSession: { organizationId },
           },
         });
@@ -126,6 +142,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             additionalData: { noteId, organizationId },
             label: "Audit",
             status: 403,
+            shouldBeCaptured: false,
           });
         }
 

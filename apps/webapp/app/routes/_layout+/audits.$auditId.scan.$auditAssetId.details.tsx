@@ -28,6 +28,10 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
+  AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
+  auditAcceptsComments,
+} from "~/modules/audit/comment-policy";
+import {
   createAuditAssetImagesAddedNote,
   createAuditImageEvidenceNote,
 } from "~/modules/audit/helpers.server";
@@ -37,6 +41,7 @@ import {
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
+  assertAuditAcceptsComments,
   requireAuditAssignee,
   requireAuditAssigneeForBaseSelfService,
 } from "~/modules/audit/service.server";
@@ -97,6 +102,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         auditSession: {
           select: {
+            status: true,
             assignments: {
               select: { userId: true },
             },
@@ -234,7 +240,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         auditSessionId: auditId,
         auditSession: { organizationId },
       },
-      select: { id: true },
+      select: { id: true, auditSession: { select: { status: true } } },
     });
 
     if (!auditAssetInSession) {
@@ -262,6 +268,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       // `{% audit_images ids="..." /%}`) into the rendered feed/report —
       // mirrors the image-evidence path and the mobile note route.
       const content = stripMarkdocDelimiters(rawContent ?? "");
+
+      assertAuditAcceptsComments(auditAssetInSession.auditSession.status, {
+        auditSessionId: auditId,
+        organizationId,
+      });
 
       if (!content) {
         throw new ShelfError({
@@ -786,6 +797,7 @@ export default function AuditAssetDetails() {
     images,
     auditAsset,
   } = useLoaderData<typeof loader>();
+  const acceptsComments = auditAcceptsComments(auditAsset.auditSession.status);
   const actionData = useActionData<typeof action>();
 
   const imageUploadFetcher = useFetcher<typeof action>();
@@ -998,24 +1010,30 @@ export default function AuditAssetDetails() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Add note form */}
+      {/* Add note form — only while the audit is still open */}
       <div className="shrink-0 border-b border-gray-200 px-6 py-4">
-        <Form method="post" ref={noteFormRef}>
-          <input type="hidden" name="intent" value="create-note" />
-          <div className="space-y-2">
-            <textarea
-              name="content"
-              placeholder="Add a note..."
-              rows={3}
-              className="w-full resize-none rounded-md border border-gray-300 p-2 text-sm focus:border-gray-500 focus:outline-none"
-            />
-            <div className="flex justify-end">
-              <Button type="submit" size="sm" disabled={disabled}>
-                {disabled ? "Adding Note..." : "Add Note"}
-              </Button>
+        {acceptsComments ? (
+          <Form method="post" ref={noteFormRef}>
+            <input type="hidden" name="intent" value="create-note" />
+            <div className="space-y-2">
+              <textarea
+                name="content"
+                placeholder="Add a note..."
+                rows={3}
+                className="w-full resize-none rounded-md border border-gray-300 p-2 text-sm focus:border-gray-500 focus:outline-none"
+              />
+              <div className="flex justify-end">
+                <Button type="submit" size="sm" disabled={disabled}>
+                  {disabled ? "Adding Note..." : "Add Note"}
+                </Button>
+              </div>
             </div>
-          </div>
-        </Form>
+          </Form>
+        ) : (
+          <p className="text-sm text-gray-500">
+            {AUDIT_CLOSED_TO_COMMENTS_MESSAGE}
+          </p>
+        )}
       </div>
 
       {/* Notes section - scrollable, takes remaining space */}
