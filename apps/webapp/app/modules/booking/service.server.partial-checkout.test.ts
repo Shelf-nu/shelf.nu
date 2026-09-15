@@ -645,6 +645,48 @@ describe("partialCheckoutBooking", () => {
     );
   });
 
+  it("records BOOKING_STATUS_CHANGED RESERVED → ONGOING on the batch that checks the booking out", async () => {
+    expect.assertions(1);
+
+    // The post-update re-fetch carries the status the batch wrote.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(reservedBooking)
+      .mockResolvedValue({ ...reservedBooking, status: BookingStatus.ONGOING });
+
+    // One of three assets: the progressive branch, not the full delegate.
+    await partialCheckoutBooking({ ...baseParams, assetIds: ["asset-1"] });
+
+    // Status-transition counts in reports read this event.
+    expect(activityEventService.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "BOOKING_STATUS_CHANGED",
+        bookingId: "booking-1",
+        field: "status",
+        fromValue: BookingStatus.RESERVED,
+        toValue: BookingStatus.ONGOING,
+      })
+    );
+  });
+
+  it("records no BOOKING_STATUS_CHANGED on a later batch of an already-ONGOING booking", async () => {
+    expect.assertions(2);
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...reservedBooking, status: BookingStatus.ONGOING });
+    // An earlier batch already sent asset-1 out; asset-3 stays booked after
+    // this one.
+    pbcHooks.__seedPbcSessions?.([{ assetIds: ["asset-1"], quantities: [1] }]);
+
+    await partialCheckoutBooking({ ...baseParams, assetIds: ["asset-2"] });
+
+    // The batch itself went through, so the absence below is not vacuous.
+    expect(db.partialBookingCheckout.create).toHaveBeenCalledTimes(1);
+    expect(activityEventService.recordEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "BOOKING_STATUS_CHANGED" })
+    );
+  });
+
   it("names an individual kit asset in the activity-log note when only part of its kit is checked out", async () => {
     expect.assertions(2);
 

@@ -5,14 +5,10 @@
  * assets) for Admins, for Self Service users, or for both. For a covered role
  * the one-click check-out is refused: "Check out" and "Check out remaining" on
  * the web booking page, "Check Out All Assets" in the mobile app. Scanning or
- * selecting the assets, and the fulfil-and-check-out scanner, stay open. The
- * scanner is refused whenever it would check out something it did not scan:
- * when no model request is left to fulfil, or when the full check-out it
- * performs would also send out assets already on the booking (never out, back
- * in full, or quantity-tracked units still left to dispatch).
- * `fulfilModelRequestsAndCheckout` decides both inside its transaction; such a
- * booking is checked out by assigning its reserved units first, then scanning
- * or selecting its assets.
+ * selecting the assets stays open, and so does the fulfil-and-check-out
+ * scanner: under the requirement it assigns the scanned reserved units and
+ * checks out only those, leaving the booking's other assets booked
+ * (`fulfilAndCheckOut`).
  *
  * OWNER is always exempt and BASE is not covered, the same as the explicit
  * check-in requirement. Pass the membership's most privileged role

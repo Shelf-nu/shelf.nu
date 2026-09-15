@@ -892,6 +892,16 @@ export type BookingActionResponse = {
   };
 };
 
+/**
+ * Response of the fulfil-and-check-out endpoint. `remainingCount` is how many
+ * booked assets are still to check out: above 0 when the workspace requires
+ * explicit check-out and only the scanned units went out. Absent on an older
+ * server, which always checks out the whole booking.
+ */
+export type FulfilAndCheckoutResponse = BookingActionResponse & {
+  remainingCount?: number;
+};
+
 export type PartialCheckinResponse = {
   success: boolean;
   checkedInCount: number;

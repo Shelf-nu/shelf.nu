@@ -1,8 +1,8 @@
 /**
  * Tests for POST /api/mobile/bookings/fulfil-and-checkout: how the route
- * hands the explicit check-out rule to the service.
+ * hands the explicit check-out rule to the orchestrator.
  *
- * The rule itself is applied inside the service transaction; the route decides
+ * The rule itself is applied by `fulfilAndCheckOut`; the route decides
  * whether it applies (by the caller's most privileged role and the workspace
  * switches) only after the booking and ownership checks, so a missing booking
  * still answers 404.
@@ -51,9 +51,10 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   getMobileUserContext: vi.fn(),
 }));
 
-// why: the sink the refusal must never reach.
-vi.mock("~/modules/booking/service.server", () => ({
-  fulfilModelRequestsAndCheckout: vi.fn(),
+// why: the orchestrator has its own suite; this file pins what the action
+// hands over.
+vi.mock("~/modules/booking/fulfil-and-checkout.server", () => ({
+  fulfilAndCheckOut: vi.fn(),
 }));
 
 // why: the booking window lookup; avoids a database.
@@ -88,17 +89,16 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import { fulfilModelRequestsAndCheckout } from "~/modules/booking/service.server";
+import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import { makeShelfError, type ShelfError } from "~/utils/error";
 
 const BOOKING_FROM = new Date("2026-07-01T09:00:00Z");
 const BOOKING_TO = new Date("2026-07-01T17:00:00Z");
 
-const FULFILLED_BOOKING = {
-  id: "booking-1",
-  name: "Test Booking",
-  status: "ONGOING",
-} as Awaited<ReturnType<typeof fulfilModelRequestsAndCheckout>>;
+const FULFILLED_RESULT = {
+  booking: { id: "booking-1", name: "Test Booking", status: "ONGOING" },
+  remainingAssetCount: 2,
+} as Awaited<ReturnType<typeof fulfilAndCheckOut>>;
 
 function createRequest(body: Record<string, unknown>, orgId = "org-1") {
   return new Request(
@@ -136,9 +136,7 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
       createBookingSettings()
     );
-    vi.mocked(fulfilModelRequestsAndCheckout).mockResolvedValue(
-      FULFILLED_BOOKING
-    );
+    vi.mocked(fulfilAndCheckOut).mockResolvedValue(FULFILLED_RESULT);
     vi.mocked(makeShelfError).mockImplementation(
       (cause) => cause as ShelfError
     );
@@ -154,12 +152,15 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     );
 
     expect((result as unknown as Response).status).toBe(200);
-    expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledWith(
+    expect(fulfilAndCheckOut).toHaveBeenCalledWith(
       expect.objectContaining({
         bookingId: "booking-1",
         requireExplicitCheckout: true,
       })
     );
+
+    const body = await (result as unknown as Response).json();
+    expect(body.remainingCount).toBe(2);
   });
 
   it("judges the switch by the most privileged role of the membership", async () => {
@@ -177,7 +178,7 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     );
 
     // ADMIN wins, and only the Self Service switch is on.
-    expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledWith(
+    expect(fulfilAndCheckOut).toHaveBeenCalledWith(
       expect.objectContaining({ requireExplicitCheckout: false })
     );
   });
@@ -187,7 +188,7 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
       createActionArgs({ request: createRequest({ bookingId: "booking-1" }) })
     );
 
-    expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledWith(
+    expect(fulfilAndCheckOut).toHaveBeenCalledWith(
       expect.objectContaining({ requireExplicitCheckout: false })
     );
   });
@@ -204,6 +205,6 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
 
     expect((result as unknown as Response).status).toBe(404);
     expect(getBookingSettingsForOrganization).not.toHaveBeenCalled();
-    expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+    expect(fulfilAndCheckOut).not.toHaveBeenCalled();
   });
 });

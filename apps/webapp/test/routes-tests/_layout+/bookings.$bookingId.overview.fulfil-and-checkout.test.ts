@@ -1,17 +1,15 @@
 /**
- * Web fulfil-and-checkout — permission mapping and cross-user guard.
+ * Web fulfil-and-checkout action — what a direct POST, which skips the loader,
+ * is held to before `fulfilAndCheckOut` runs.
  *
- * Two defects, both reachable by a direct POST that skips the loader:
- *
- *  1. The action gated on `PermissionAction.update`. BASE holds `update` and
- *     deliberately does NOT hold `checkout`, so a BASE user could check out
- *     through this route despite the role being denied that capability.
- *  2. The action had no ownership check at all — `canUserManageBookingAssets`
- *     runs only in the loader, and `fulfilModelRequestsAndCheckout` does not
- *     check ownership itself. So SELF_SERVICE, who legitimately holds
- *     `booking:checkout`, could check out anyone else's booking.
- *
- * detail.dev finding D017 — the web twin of D005.
+ * Pins:
+ *  - the permission demanded: `booking:checkout`, which BASE does not hold,
+ *    rather than `booking:update`, which it does;
+ *  - the ownership guard: SELF_SERVICE holds `booking:checkout` but may only
+ *    check out a booking they created or are custodian of, and it runs before
+ *    the workspace settings are read;
+ *  - the `requireExplicitCheckout` flag handed to `fulfilAndCheckOut`;
+ *  - a refused check-out reaching the user as an error notification.
  *
  * @see {@link file://./../../../app/routes/_layout+/bookings.$bookingId.overview.fulfil-and-checkout.tsx}
  */
@@ -38,8 +36,8 @@ vi.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
-// why: the permission gate is the first defect under test — mocking it lets
-// each case choose the caller's role, and asserts which action was demanded.
+// why: the permission gate is under test — mocking it lets each case choose
+// the caller's role, and asserts which action was demanded.
 const { requirePermissionMock } = vi.hoisted(() => ({
   requirePermissionMock: vi.fn(),
 }));
@@ -55,16 +53,20 @@ vi.mock("~/database/db.server", () => ({
   db: { booking: { findUniqueOrThrow: bookingFindUniqueOrThrow } },
 }));
 
-// why: the sink we assert is never reached on a refused request.
-const { fulfilMock } = vi.hoisted(() => ({ fulfilMock: vi.fn() }));
+// why: the loader's export; the action never calls it.
 vi.mock("~/modules/booking/service.server", () => ({
-  fulfilModelRequestsAndCheckout: fulfilMock,
   getBooking: vi.fn(),
 }));
 
+// why: the sink we assert is never reached on a refused request. The
+// orchestrator has its own suite; this file pins what the action hands over.
+const { fulfilMock } = vi.hoisted(() => ({ fulfilMock: vi.fn() }));
+vi.mock("~/modules/booking/fulfil-and-checkout.server", () => ({
+  fulfilAndCheckOut: fulfilMock,
+}));
+
 // why: the emitter pushes to a live SSE stream keyed to a real session; there
-// is none in a route-level test, and the notification is a side effect of the
-// success path rather than anything these assertions inspect.
+// is none in a route-level test. The mock records what the user is told.
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
@@ -79,6 +81,8 @@ vi.mock("~/modules/booking-settings/service.server", () => ({
 }));
 
 import { action } from "~/routes/_layout+/bookings.$bookingId.overview.fulfil-and-checkout";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfError } from "~/utils/error";
 
 // @vitest-environment node
 
@@ -99,6 +103,10 @@ function post({
   requireExplicitCheckoutForAdmin?: boolean;
 }) {
   const role = roles[0];
+  fulfilMock.mockResolvedValue({
+    booking: { id: "booking-1", name: "Load-in", status: "ONGOING" },
+    remainingAssetCount: 0,
+  });
   bookingSettingsMock.mockResolvedValue(
     createBookingSettings({ requireExplicitCheckoutForAdmin })
   );
@@ -141,8 +149,8 @@ describe("fulfil-and-checkout action", () => {
   it("demands booking:checkout, not booking:update", async () => {
     await post({ roles: [OrganizationRoles.ADMIN] });
 
-    // BASE holds `update` and not `checkout`; gating on `update` is exactly
-    // what let a BASE user check out here.
+    // BASE holds `update` and not `checkout`; gating on `update` would let a
+    // BASE user check out here.
     expect(requirePermissionMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "checkout" })
     );
@@ -220,5 +228,35 @@ describe("fulfil-and-checkout action", () => {
 
     expect(fulfilMock).not.toHaveBeenCalled();
     expect(bookingSettingsMock).not.toHaveBeenCalled();
+  });
+
+  it("tells the user why a check-out was refused", async () => {
+    const message =
+      "Cannot check out — 1 × Dell still unassigned. The scanned units were assigned; scan the remaining reserved units to check out.";
+    fulfilMock.mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        status: 400,
+        label: "Booking",
+        message,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const result = await post({ roles: [OrganizationRoles.ADMIN] });
+
+    expect((result as unknown as Response).status).toBe(400);
+    // The drawer renders no action data, so this notification is the only
+    // place the operator sees the refusal.
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message,
+        icon: { name: "x", variant: "error" },
+        senderId: "user-1",
+      })
+    );
+    expect(sendNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Checked out" })
+    );
   });
 });

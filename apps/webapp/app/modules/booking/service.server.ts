@@ -2429,10 +2429,9 @@ async function scheduleCheckinReminderForBooking(
  * `checkoutTopUps` are quantity-tracked slices an earlier scan session sent
  * out only partly, whose remaining units leave now.
  *
- * {@link checkoutBookingWritesWithinTx} writes these departures, and the
- * explicit check-out rule in {@link fulfilModelRequestsAndCheckout} refuses a
- * fulfil scan that would send any of them out unscanned. Both read them here,
- * so the rule cannot drift from what the writes actually do.
+ * {@link checkoutBookingWritesWithinTx} reads its departures here, before the
+ * marker writes make departing slices indistinguishable from ones an earlier
+ * batch sent out.
  *
  * @param tx - Interactive transaction client
  * @param bookingId - A booking the caller has already org-checked
@@ -3414,13 +3413,8 @@ export async function checkoutBooking({
  * scanned assets AND transitions the booking from RESERVED to
  * ONGOING/OVERDUE in a single atomic transaction.
  *
- * Used by the fulfil-and-checkout drawer — the operator
- * scans the assets that satisfy their model-level reservations, optionally
- * adds off-model scans that get checked out along with everything else,
- * and clicks Check Out. The route action then delegates here instead of
- * calling `addScannedAssetsToBooking` + `checkoutBooking` sequentially,
- * because a sequential call pattern would leak half-materialised state if
- * availability validation failed AFTER requests had already been drained.
+ * Called by `fulfilAndCheckOut` when the explicit check-out requirement does
+ * not apply.
  *
  * Atomicity guarantees (all-or-nothing):
  *   - `BookingModelRequest` decrements (via `materializeModelRequestForAsset`)
@@ -3469,7 +3463,6 @@ export async function fulfilModelRequestsAndCheckout({
   hints,
   from,
   to,
-  requireExplicitCheckout = false,
 }: {
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
@@ -3480,17 +3473,6 @@ export async function fulfilModelRequestsAndCheckout({
   hints: ClientHint;
   from?: Date | null;
   to?: Date | null;
-  /**
-   * True when the workspace requires explicit check-out for the caller's
-   * role. The rule is decided inside the transaction, on the booking as it is
-   * at that moment, and refuses with a 403 when this call would check out
-   * anything it did not scan: with no model request left to fulfil it is the
-   * one-tap check-out under another name, and when the full check-out would
-   * also depart assets already on the booking (never out, back in full, or
-   * quantity-tracked units still left to dispatch), those would leave with the
-   * scanned units.
-   */
-  requireExplicitCheckout?: boolean;
 }) {
   try {
     /**
@@ -3655,59 +3637,11 @@ export async function fulfilModelRequestsAndCheckout({
     await db.$transaction(
       async (tx) => {
         // Hold the booking and its model requests for the rest of the
-        // transaction. The explicit check-out decision below and the
-        // outstanding-request guard inside the checkout writes then read rows
-        // that a concurrent fulfilment cannot change underneath them.
+        // transaction, so the outstanding-request guard inside the checkout
+        // writes reads rows a concurrent fulfilment cannot change underneath
+        // it.
         await tx.$queryRaw`SELECT id FROM "Booking" WHERE id = ${bookingId} FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM "BookingModelRequest" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
-
-        if (requireExplicitCheckout) {
-          // With no model request left to fulfil (the same reading of "left"
-          // as the guard in the checkout writes), this call is the one-tap
-          // check-out under another name, so the explicit rule refuses it.
-          // A booking with open requests stays on the fulfil scanner, which is
-          // the explicit flow for it.
-          const modelRequests = await tx.bookingModelRequest.findMany({
-            where: { bookingId },
-            select: {
-              quantity: true,
-              fulfilledQuantity: true,
-              fulfilledAt: true,
-            },
-          });
-          if (getOutstandingModelRequests(modelRequests).length === 0) {
-            throw new ShelfError({
-              cause: null,
-              title: "Not allowed to quick check-out",
-              message:
-                "Explicit check-out is required in this organization. Please scan or select the assets to check them out.",
-              status: 403,
-              label,
-              shouldBeCaptured: false,
-            });
-          }
-
-          // Everything this call checks out must be something it scanned. The
-          // checkout writes below send out whatever a full check-out departs:
-          // rows never out, rows that went out and came back in full, and the
-          // remaining units of partly sent-out quantity-tracked slices. Rows
-          // already on the booking cannot be scanned here, so any of those would
-          // leave unscanned. Read through the writer's own helper, before the
-          // scanned rows are added, under the booking lock taken above.
-          const { departingSlices, checkoutTopUps } =
-            await readFullCheckoutDepartures(tx, bookingId);
-          if (departingSlices.length > 0 || checkoutTopUps.length > 0) {
-            throw new ShelfError({
-              cause: null,
-              title: "Not allowed to quick check-out",
-              message:
-                "Explicit check-out is required in this organization, and checking out here would also send out assets that haven't been scanned. Assign the reserved units from Manage assets or by scanning them onto the booking, then scan or select the assets to check it out.",
-              status: 403,
-              label,
-              shouldBeCaptured: false,
-            });
-          }
-        }
 
         await addScannedAssetsToBookingWithinTx(tx, {
           assetIds,
@@ -9512,6 +9446,18 @@ export async function partialCheckoutBooking({
     // overwrites activeSchedulerReference, so without the explicit cancel the
     // old job would be orphaned in the queue.
     if (result.bookingStatusChanged) {
+      // This batch writes its own partial check-out note instead of a status
+      // transition note, so it records the transition event itself. The
+      // returned booking is read back after the status write, so its status is
+      // the one this batch persisted.
+      await recordBookingStatusChangedEvent({
+        organizationId,
+        bookingId: id,
+        userId,
+        fromStatus: BookingStatus.RESERVED,
+        toStatus: result.booking.status,
+      });
+
       await cancelScheduler(bookingFound);
 
       const expired = bookingFound.to
