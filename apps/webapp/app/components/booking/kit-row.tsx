@@ -1,3 +1,18 @@
+/**
+ * Kit Row
+ *
+ * One kit in a booking's asset table. The header shows the kit's image and
+ * name, its booking-aware status (or a Returned badge), its code chip, the
+ * "Already booked" overlap signal and the number of member rows; when expanded,
+ * each booked member asset renders beneath it through `ListAssetContent`.
+ *
+ * "Already booked" comes from the member assets' bookings and this kit's own
+ * booking slices, never from `Kit.status`: a kit that an overlapping booking has
+ * only reserved is still AVAILABLE.
+ *
+ * @see {@link file://./booking-assets-column.tsx} renders one KitRow per kit
+ * @see {@link file://./list-asset-content.tsx} the member asset rows
+ */
 import React from "react";
 import type { Barcode, BookingStatus, Category, Kit } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
