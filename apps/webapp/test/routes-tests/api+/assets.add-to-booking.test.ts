@@ -38,9 +38,11 @@ vi.mock("~/modules/booking/service.server", () => ({
   updateBookingAssets: vi.fn(),
 }));
 
-// why: the note and notification writers are only reached after a successful add.
+// why: writes notes through Prisma, and is only reached after a successful add.
 vi.mock("~/modules/note/service.server", () => ({ createNotes: vi.fn() }));
+// why: reads the acting user from the database, only after a successful add.
 vi.mock("~/modules/user/service.server", () => ({ getUserByID: vi.fn() }));
+// why: pushes to a server-sent-events emitter with no test transport.
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));

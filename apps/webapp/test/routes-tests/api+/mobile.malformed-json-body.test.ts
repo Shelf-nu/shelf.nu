@@ -33,15 +33,19 @@ vi.mock("~/utils/rate-limit.server", () => ({
   enforceUserRateLimit: vi.fn(),
 }));
 
-// why: the services behind each action write through Prisma, and none is
-// reached when the body cannot be read.
+// why: tags.create's write, which an unreadable body never reaches.
 vi.mock("~/modules/tag/service.server", () => ({ createTag: vi.fn() }));
+// why: audits.note's evidence lookup reads through Prisma and the audit service.
 vi.mock("~/modules/audit/mobile-evidence.server", () => ({}));
-vi.mock("~/modules/audit/note-content.server", () => ({}));
+// why: the custody-quantity actions' asset reads go through Prisma; never reached.
 vi.mock("~/modules/asset/service.server", () => ({}));
+// why: the low-stock check reads through Prisma and sends email, after a write.
 vi.mock("~/modules/consumption-log/low-stock.server", () => ({}));
+// why: the custody-quantity actions write notes through Prisma; never reached.
 vi.mock("~/modules/note/service.server", () => ({}));
+// why: the custody-quantity actions resolve the team member through Prisma.
 vi.mock("~/modules/team-member/service.server", () => ({}));
+// why: the custody-quantity actions read the acting user through Prisma.
 vi.mock("~/modules/user/service.server", () => ({}));
 
 import {

@@ -45,10 +45,9 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    // Paid Audits add-on gate. #2551 replaced the standalone
-    // `requireMobileAuditsEnabled` helper with the `canUseAudits` flag on
-    // `getMobileUserContext` — mirror `audits.complete.ts` so the revenue
-    // gate stays consistent across every mobile audit route.
+    // Paid Audits add-on gate, read from `getMobileUserContext`'s
+    // `canUseAudits`. Every mobile audit route checks it the same way as
+    // `audits.complete.ts`, so the add-on gates the whole feature.
     const { canUseAudits } = await getMobileUserContext(
       user.id,
       organizationId

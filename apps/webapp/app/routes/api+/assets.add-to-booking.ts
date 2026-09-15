@@ -20,7 +20,7 @@ import { intersected } from "~/utils/utils";
 
 /** Shown whenever nothing in the selection can be added to the booking. */
 const ALL_ASSETS_ALREADY_IN_BOOKING =
-  "The booking you have selected already contains all the selected assets. Please select different booking or different assets.";
+  "The booking you have selected already contains all the selected assets. Please select a different booking or different assets.";
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const authSession = context.getSession();

@@ -3055,9 +3055,9 @@ const ASSET_INDEX_SETTINGS: AssetIndexSettings = {
  * Bulk custody refusals are the caller's selection, not a server fault.
  *
  * Each of these is a message written for the user — they picked assets that are
- * not available, not in custody, or quantity-tracked. Marked uncaptured, but
- * without a status a ShelfError answers 500, so the client saw a server error
- * for its own selection.
+ * not available, not in custody, or quantity-tracked. Marking a ShelfError
+ * uncaptured does not set its status, which defaults to 500, so each refusal
+ * has to carry its 400 explicitly.
  */
 describe("bulk custody — refusals of the selection answer 400", () => {
   beforeEach(() => {

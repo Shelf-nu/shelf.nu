@@ -1,19 +1,3 @@
-import { data, type ActionFunctionArgs } from "react-router";
-import { z } from "zod";
-import {
-  requireMobileAuth,
-  requireMobilePermission,
-  requireOrganizationAccess,
-} from "~/modules/api/mobile-auth.server";
-import { parseMobileBody } from "~/modules/api/mobile-body.server";
-import { createTag } from "~/modules/tag/service.server";
-import { makeShelfError } from "~/utils/error";
-import { getRandomColor } from "~/utils/get-random-color";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-
 /**
  * POST /api/mobile/tags/create
  *
@@ -34,6 +18,21 @@ import {
  * @see {@link file://./tags.ts} the picker read (returns `canCreate` for UI gating).
  * @see {@link file://../../_layout+/tags.new.tsx} the web equivalent this mirrors.
  */
+import { data, type ActionFunctionArgs } from "react-router";
+import { z } from "zod";
+import {
+  requireMobileAuth,
+  requireMobilePermission,
+  requireOrganizationAccess,
+} from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import { createTag } from "~/modules/tag/service.server";
+import { makeShelfError } from "~/utils/error";
+import { getRandomColor } from "~/utils/get-random-color";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 
 /** Mirrors the web `NewTagFormSchema.name` rule (min 3 chars). */
 const CreateTagSchema = z.object({
