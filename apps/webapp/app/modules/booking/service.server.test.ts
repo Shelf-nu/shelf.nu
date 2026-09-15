@@ -4992,7 +4992,59 @@ describe("fulfilModelRequestsAndCheckout", () => {
       expect(db.booking.update).not.toHaveBeenCalled();
     });
 
-    it("refuses when the booking already holds assets that are not checked out, before any write", async () => {
+    type RuleSlice = {
+      id: string;
+      assetId: string;
+      quantity: number;
+      assetKitId: string | null;
+    };
+
+    /**
+     * Queues the rule's own reads of what a full check-out would send out,
+     * made inside the tx before the scanned rows are added: stamped
+     * quantity-tracked slices first (with their sessions when there are any),
+     * then the departing slices. Queued before any other `bookingAsset` read,
+     * so they are the first answered.
+     */
+    function queueRuleDepartureReads({
+      stampedQtySlices = [],
+      sessions = [],
+      departing = [],
+    }: {
+      stampedQtySlices?: RuleSlice[];
+      sessions?: Array<{
+        assetIds: string[];
+        quantities: number[];
+        bookingAssetIds: string[];
+      }>;
+      departing?: Array<{ id: string; quantity: number }>;
+    }) {
+      (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+        .mockResolvedValueOnce(stampedQtySlices)
+        .mockResolvedValueOnce(departing);
+      if (stampedQtySlices.length > 0) {
+        (
+          db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+        ).mockResolvedValueOnce(sessions);
+      }
+    }
+
+    /** How many reads asked for the slices a full check-out departs. */
+    function departingReadCount() {
+      return (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mock.calls.filter((call) => Array.isArray(call[0]?.where?.OR)).length;
+    }
+
+    /** Asserts the refusal left the booking exactly as it was. */
+    function expectNothingWritten() {
+      expect(db.asset.updateMany).not.toHaveBeenCalled();
+      expect(db.booking.update).not.toHaveBeenCalled();
+      expect(db.bookingAsset.updateMany).not.toHaveBeenCalled();
+      expect(hasStatusUpdate()).toBe(false);
+    }
+
+    it("refuses when the booking already holds assets that never went out, before any write", async () => {
       queueRefusedPathReads();
       // A request is open, so the fulfil scanner is the right flow, but the
       // checkout writes would also send out the booking's other assets, which
@@ -5000,9 +5052,7 @@ describe("fulfilModelRequestsAndCheckout", () => {
       (
         db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
       ).mockResolvedValueOnce([openRequest]);
-      (
-        db.bookingAsset.count as ReturnType<typeof vitest.fn>
-      ).mockResolvedValueOnce(2);
+      queueRuleDepartureReads({ departing: [{ id: "ba-hp", quantity: 1 }] });
 
       const refused = fulfilModelRequestsAndCheckout({
         ...mockFulfilParams,
@@ -5012,15 +5062,66 @@ describe("fulfilModelRequestsAndCheckout", () => {
 
       await expect(refused).rejects.toMatchObject(refusal);
       await expect(refused).rejects.toThrow(/haven't been scanned/);
-      expect(db.bookingAsset.count).toHaveBeenCalledWith({
-        where: { bookingId: "booking-1", checkedOutAt: null },
-      });
-      expect(db.asset.updateMany).not.toHaveBeenCalled();
-      expect(db.booking.update).not.toHaveBeenCalled();
-      expect(hasStatusUpdate()).toBe(false);
+      expectNothingWritten();
     });
 
-    it("stays open while a request is still to be fulfilled and nothing else waits on the booking", async () => {
+    it("refuses when an asset that went out and came back in full would leave again", async () => {
+      queueRefusedPathReads();
+      (
+        db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce([openRequest]);
+      // A returned slice carries both markers, so only the departing read
+      // (never-out OR out-and-back) names it; a `checkedOutAt: null` test
+      // would let it re-depart unscanned.
+      queueRuleDepartureReads({
+        departing: [{ id: "ba-returned", quantity: 1 }],
+      });
+
+      await expect(
+        fulfilModelRequestsAndCheckout({
+          ...mockFulfilParams,
+          assetIds: ["dell-1"],
+          requireExplicitCheckout: true,
+        })
+      ).rejects.toMatchObject(refusal);
+      expect(departingReadCount()).toBe(1);
+      expectNothingWritten();
+    });
+
+    it("refuses when a quantity-tracked slice still has units a full check-out would top up", async () => {
+      queueRefusedPathReads();
+      (
+        db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce([openRequest]);
+      // 1 of 3 units left in an earlier scan session; the full check-out would
+      // send the other 2 without them being scanned.
+      queueRuleDepartureReads({
+        stampedQtySlices: [
+          { id: "ba-cable", assetId: "cable-1", quantity: 3, assetKitId: null },
+        ],
+        sessions: [
+          {
+            assetIds: ["cable-1"],
+            quantities: [1],
+            bookingAssetIds: ["ba-cable"],
+          },
+        ],
+      });
+
+      await expect(
+        fulfilModelRequestsAndCheckout({
+          ...mockFulfilParams,
+          assetIds: ["dell-1"],
+          requireExplicitCheckout: true,
+        })
+      ).rejects.toMatchObject(refusal);
+      expectNothingWritten();
+    });
+
+    it("stays open while a request is still to be fulfilled and nothing else would leave", async () => {
+      // Queued first: the rule reads before the scan-add and the checkout
+      // writes make their own reads.
+      queueRuleDepartureReads({});
       const { hydratedBooking } = queueHappyPathReads();
       // why: first read is the rule's (one request open); the second is the
       // outstanding guard inside the checkout writes, after the scanned unit
@@ -5037,13 +5138,11 @@ describe("fulfilModelRequestsAndCheckout", () => {
 
       expect(result).toEqual(hydratedBooking);
       expect(hasStatusUpdate()).toBe(true);
-      // The rule looked for waiting assets and found none (the mock's 0).
-      expect(db.bookingAsset.count).toHaveBeenCalledWith({
-        where: { bookingId: "booking-1", checkedOutAt: null },
-      });
+      // The rule and the checkout writes each read the departures once.
+      expect(departingReadCount()).toBe(2);
     });
 
-    it("does not read the requests or the waiting assets for the rule when it does not apply", async () => {
+    it("does not read the requests or the departures for the rule when it does not apply", async () => {
       queueHappyPathReads();
       (
         db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
@@ -5054,11 +5153,9 @@ describe("fulfilModelRequestsAndCheckout", () => {
         assetIds: ["dell-1"],
       });
 
-      // Only the checkout writes' guard read the requests.
+      // Only the checkout writes read the requests and the departures.
       expect(db.bookingModelRequest.findMany).toHaveBeenCalledTimes(1);
-      expect(db.bookingAsset.count).not.toHaveBeenCalledWith({
-        where: { bookingId: "booking-1", checkedOutAt: null },
-      });
+      expect(departingReadCount()).toBe(1);
       expect(hasStatusUpdate()).toBe(true);
     });
   });

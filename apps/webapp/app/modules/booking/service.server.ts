@@ -2421,6 +2421,134 @@ async function scheduleCheckinReminderForBooking(
 }
 
 /**
+ * The slices a full check-out of this booking sends out, read before it stamps
+ * anything.
+ *
+ * Two answers, both derived from the per-slice markers and scan sessions:
+ * `departingSlices` leave whole (never out, or out and back in full), and
+ * `checkoutTopUps` are quantity-tracked slices an earlier scan session sent
+ * out only partly, whose remaining units leave now.
+ *
+ * {@link checkoutBookingWritesWithinTx} writes these departures, and the
+ * explicit check-out rule in {@link fulfilModelRequestsAndCheckout} refuses a
+ * fulfil scan that would send any of them out unscanned. Both read them here,
+ * so the rule cannot drift from what the writes actually do.
+ *
+ * @param tx - Interactive transaction client
+ * @param bookingId - A booking the caller has already org-checked
+ * @returns The whole-slice departures and the partial top-ups
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function readFullCheckoutDepartures(
+  tx: any,
+  bookingId: Booking["id"]
+): Promise<{
+  departingSlices: Array<{ id: string; quantity: number }>;
+  checkoutTopUps: Array<{ id: string; assetId: string; residue: number }>;
+}> {
+  /**
+   * A quantity-tracked slice partially dispatched by progressive scans before
+   * this full checkout keeps its earlier stamp, but its residual units go out
+   * NOW and would otherwise leave no record of their own: dispatched units
+   * are judged from session attribution wherever a slice has session units
+   * (see `computeDispatchedUnitsByAsset`), so an unrecorded residue would let
+   * the booking complete once just the scanned units return. Read the
+   * pre-stamp state here; the matching session row is written below, after
+   * the stamps.
+   */
+  const preStampedQtySlices = (await tx.bookingAsset.findMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      checkedOutAt: { not: null },
+      asset: { type: AssetType.QUANTITY_TRACKED },
+    },
+    select: { id: true, assetId: true, quantity: true, assetKitId: true },
+  })) as Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+  }>;
+  const checkoutTopUps: Array<{
+    id: string;
+    assetId: string;
+    residue: number;
+  }> = [];
+  if (preStampedQtySlices.length > 0) {
+    const priorSessions = (await tx.partialBookingCheckout.findMany({
+      where: { bookingId },
+      select: { assetIds: true, quantities: true, bookingAssetIds: true },
+    })) as Array<{
+      assetIds: string[];
+      quantities: number[];
+      bookingAssetIds: string[];
+    }>;
+    const logsByAsset = checkoutSessionsToLogsByAsset(
+      priorSessions,
+      () => true
+    );
+    const slicesByAsset = new Map<string, typeof preStampedQtySlices>();
+    for (const s of preStampedQtySlices) {
+      const group = slicesByAsset.get(s.assetId);
+      if (group) group.push(s);
+      else slicesByAsset.set(s.assetId, [s]);
+    }
+    for (const [assetId, group] of slicesByAsset) {
+      const attributed = attributeDispositionsByBookingAsset({
+        bookingAssetRows: group.map((s) => ({
+          id: s.id,
+          quantity: s.quantity,
+          assetKitId: s.assetKitId,
+        })),
+        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      });
+      for (const s of group) {
+        const units = attributed.get(s.id) ?? 0;
+        // Only a slice with SOME session units under-reads — a stamped slice
+        // with none reads back as fully dispatched from its stamp alone.
+        if (units > 0 && units < s.quantity) {
+          checkoutTopUps.push({
+            id: s.id,
+            assetId: s.assetId,
+            residue: s.quantity - units,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * The slices this call sends out, read while they are still identifiable —
+   * the marker writes below are what distinguish them, so afterwards nothing
+   * separates them from slices an earlier batch sent out.
+   *
+   * Two groups depart, and both count. A slice that never left is the obvious
+   * one. A slice that already went out and came back IN FULL is departing
+   * again: the re-out write below clears its `checkedInAt`, and its units are
+   * physically gone a second time. Counting only the first group would let the
+   * derived "still out" figure go negative, because the return that came
+   * between the two departures is already recorded against it.
+   *
+   * An all-at-once checkout sends every unit of every slice it touches, so each
+   * one's count grows by its full booked quantity.
+   */
+  const departingSlices = await tx.bookingAsset.findMany({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
+    where: {
+      bookingId,
+      OR: [
+        { checkedOutAt: null },
+        { checkedOutAt: { not: null }, checkedInAt: { not: null } },
+      ],
+    },
+    select: { id: true, quantity: true },
+  });
+
+  return { departingSlices, checkoutTopUps };
+}
+
+/**
  * Transaction-body helper shared by {@link checkoutBooking} and
  * {@link fulfilModelRequestsAndCheckout}.
  *
@@ -2687,77 +2815,12 @@ async function checkoutBookingWritesWithinTx(
     data: { status: AssetStatus.CHECKED_OUT },
   });
 
-  /**
-   * A quantity-tracked slice partially dispatched by progressive scans before
-   * this full checkout keeps its earlier stamp, but its residual units go out
-   * NOW and would otherwise leave no record of their own: dispatched units
-   * are judged from session attribution wherever a slice has session units
-   * (see `computeDispatchedUnitsByAsset`), so an unrecorded residue would let
-   * the booking complete once just the scanned units return. Read the
-   * pre-stamp state here; the matching session row is written below, after
-   * the stamps.
-   */
-  const preStampedQtySlices = (await tx.bookingAsset.findMany({
-    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
-    where: {
-      bookingId,
-      checkedOutAt: { not: null },
-      asset: { type: AssetType.QUANTITY_TRACKED },
-    },
-    select: { id: true, assetId: true, quantity: true, assetKitId: true },
-  })) as Array<{
-    id: string;
-    assetId: string;
-    quantity: number;
-    assetKitId: string | null;
-  }>;
-  const checkoutTopUps: Array<{
-    id: string;
-    assetId: string;
-    residue: number;
-  }> = [];
-  if (preStampedQtySlices.length > 0) {
-    const priorSessions = (await tx.partialBookingCheckout.findMany({
-      where: { bookingId },
-      select: { assetIds: true, quantities: true, bookingAssetIds: true },
-    })) as Array<{
-      assetIds: string[];
-      quantities: number[];
-      bookingAssetIds: string[];
-    }>;
-    const logsByAsset = checkoutSessionsToLogsByAsset(
-      priorSessions,
-      () => true
-    );
-    const slicesByAsset = new Map<string, typeof preStampedQtySlices>();
-    for (const s of preStampedQtySlices) {
-      const group = slicesByAsset.get(s.assetId);
-      if (group) group.push(s);
-      else slicesByAsset.set(s.assetId, [s]);
-    }
-    for (const [assetId, group] of slicesByAsset) {
-      const attributed = attributeDispositionsByBookingAsset({
-        bookingAssetRows: group.map((s) => ({
-          id: s.id,
-          quantity: s.quantity,
-          assetKitId: s.assetKitId,
-        })),
-        consumptionLogs: logsByAsset.get(assetId) ?? [],
-      });
-      for (const s of group) {
-        const units = attributed.get(s.id) ?? 0;
-        // Only a slice with SOME session units under-reads — a stamped slice
-        // with none reads back as fully dispatched from its stamp alone.
-        if (units > 0 && units < s.quantity) {
-          checkoutTopUps.push({
-            id: s.id,
-            assetId: s.assetId,
-            residue: s.quantity - units,
-          });
-        }
-      }
-    }
-  }
+  // What this call sends out, read before the stamps below make departing
+  // slices indistinguishable from ones an earlier batch sent out.
+  const { departingSlices, checkoutTopUps } = await readFullCheckoutDepartures(
+    tx,
+    bookingId
+  );
 
   /**
    * Record the checkout on each slice. Together with the residue session row
@@ -2769,32 +2832,6 @@ async function checkoutBookingWritesWithinTx(
    * keeps its own (earlier, more accurate) timestamp. Any stale check-in marker
    * is cleared: a full checkout sends the whole booking back out.
    */
-  /**
-   * The slices this call sends out, read while they are still identifiable —
-   * the marker writes below are what distinguish them, so afterwards nothing
-   * separates them from slices an earlier batch sent out.
-   *
-   * Two groups depart, and both count. A slice that never left is the obvious
-   * one. A slice that already went out and came back IN FULL is departing
-   * again: the re-out write below clears its `checkedInAt`, and its units are
-   * physically gone a second time. Counting only the first group would let the
-   * derived "still out" figure go negative, because the return that came
-   * between the two departures is already recorded against it.
-   *
-   * An all-at-once checkout sends every unit of every slice it touches, so each
-   * one's count grows by its full booked quantity.
-   */
-  const departingSlices = await tx.bookingAsset.findMany({
-    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingId was org-checked by the caller's findUniqueOrThrow({where:{id,organizationId}})
-    where: {
-      bookingId,
-      OR: [
-        { checkedOutAt: null },
-        { checkedOutAt: { not: null }, checkedInAt: { not: null } },
-      ],
-    },
-    select: { id: true, quantity: true },
-  });
 
   await tx.bookingAsset.updateMany({
     // Keyed on the ids read above, not on `checkedOutAt: null`, so the marker
@@ -3448,8 +3485,10 @@ export async function fulfilModelRequestsAndCheckout({
    * role. The rule is decided inside the transaction, on the booking as it is
    * at that moment, and refuses with a 403 when this call would check out
    * anything it did not scan: with no model request left to fulfil it is the
-   * one-tap check-out under another name, and with assets already on the
-   * booking and not yet out, those would leave with the scanned units.
+   * one-tap check-out under another name, and when the full check-out would
+   * also depart assets already on the booking (never out, back in full, or
+   * quantity-tracked units still left to dispatch), those would leave with the
+   * scanned units.
    */
   requireExplicitCheckout?: boolean;
 }) {
@@ -3649,19 +3688,20 @@ export async function fulfilModelRequestsAndCheckout({
           }
 
           // Everything this call checks out must be something it scanned. The
-          // checkout writes below send out every asset on the booking, and an
-          // asset already on it cannot be scanned here (it is already a row),
-          // so any row not yet out would leave unscanned. Read before the
+          // checkout writes below send out whatever a full check-out departs:
+          // rows never out, rows that went out and came back in full, and the
+          // remaining units of partly sent-out quantity-tracked slices. Rows
+          // already on the booking cannot be scanned here, so any of those would
+          // leave unscanned. Read through the writer's own helper, before the
           // scanned rows are added, under the booking lock taken above.
-          const waitingRowCount: number = await tx.bookingAsset.count({
-            where: { bookingId, checkedOutAt: null },
-          });
-          if (waitingRowCount > 0) {
+          const { departingSlices, checkoutTopUps } =
+            await readFullCheckoutDepartures(tx, bookingId);
+          if (departingSlices.length > 0 || checkoutTopUps.length > 0) {
             throw new ShelfError({
               cause: null,
               title: "Not allowed to quick check-out",
               message:
-                "Explicit check-out is required in this organization, and this booking already holds assets that haven't been scanned. Assign the reserved units from Manage assets or by scanning them onto the booking, then scan or select the assets to check it out.",
+                "Explicit check-out is required in this organization, and checking out here would also send out assets that haven't been scanned. Assign the reserved units from Manage assets or by scanning them onto the booking, then scan or select the assets to check it out.",
               status: 403,
               label,
               shouldBeCaptured: false,
