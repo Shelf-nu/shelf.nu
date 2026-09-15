@@ -193,6 +193,51 @@ describe("POST /api/mobile/bookings/checkin", () => {
     expect(checkinBooking).not.toHaveBeenCalled();
   });
 
+  it("answers 404 for a booking outside the workspace even when the check-in switch is on", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+    );
+    vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
+      createBookingSettings({ requireExplicitCheckinForAdmin: true })
+    );
+    vi.mocked(db.booking.findFirst).mockResolvedValue(null);
+
+    const request = createCheckinRequest({ bookingId: "missing" });
+    const result = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
+
+    // The booking is validated first; the policy is never consulted for a
+    // booking the caller cannot see, so the settings are not read either.
+    expect(result.status).toBe(404);
+    expect(getBookingSettingsForOrganization).not.toHaveBeenCalled();
+    expect(checkinBooking).not.toHaveBeenCalled();
+  });
+
+  it("settles ownership before the check-in policy for a SELF_SERVICE user on someone else's booking", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
+    vi.mocked(getBookingSettingsForOrganization).mockResolvedValue(
+      createBookingSettings({ requireExplicitCheckinForSelfService: true })
+    );
+    vi.mocked(db.booking.findFirst).mockResolvedValue(
+      bookingRow({ creatorId: "someone-else", custodianUserId: null })
+    );
+
+    const request = createCheckinRequest({ bookingId: "booking-1" });
+    const result = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
+
+    expect(result.status).toBe(403);
+    expect((await result.json()).error.message).not.toMatch(
+      /explicit check-in/
+    );
+    expect(getBookingSettingsForOrganization).not.toHaveBeenCalled();
+    expect(checkinBooking).not.toHaveBeenCalled();
+  });
+
   it("refuses a SELF_SERVICE user checking in someone else's booking", async () => {
     // SELF_SERVICE holds `booking:checkin`, so the role gate above passes for
     // ANY booking id in the organization, and `checkinBooking` does not check
