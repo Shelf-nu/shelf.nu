@@ -526,6 +526,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
               "Only the workspace owner can change explicit check-in settings",
             status: 403,
             label: "Booking Settings",
+            shouldBeCaptured: false,
           });
         }
 
@@ -566,6 +567,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
               "Only the workspace owner can change explicit check-out settings",
             status: 403,
             label: "Booking Settings",
+            shouldBeCaptured: false,
           });
         }
 

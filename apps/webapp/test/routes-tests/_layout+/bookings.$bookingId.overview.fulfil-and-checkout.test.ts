@@ -69,8 +69,6 @@ vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
-// why: the explicit check-out rule reads the workspace settings; each case
-// below chooses the switch state without a database.
 const { bookingSettingsMock } = vi.hoisted(() => ({
   bookingSettingsMock: vi.fn(),
 }));
