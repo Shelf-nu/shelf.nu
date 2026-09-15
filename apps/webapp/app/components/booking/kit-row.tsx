@@ -107,26 +107,33 @@ export default function KitRow({
   );
 
   /**
-   * Kit-driven slices of THIS kit across its member assets — rows whose
-   * `assetKitId` marks them kit-driven and whose `sourceKitId` names this
-   * kit specifically, never a standalone row of the same asset or a slice
-   * booked under a different kit.
+   * Kit-driven slices of THIS kit across its member assets. A slice belongs to
+   * this kit when it is live (`assetKitId` set) and either its `sourceKitId`
+   * names the kit or its `assetKitId` is one of the asset's own memberships of
+   * the kit — the second covers rows written without `sourceKitId`. Never a
+   * standalone row of the same asset, or a slice held through another kit.
    */
-  const thisKitSlices: KitBookingSlice[] = assets.flatMap((asset) =>
-    (asset.bookingAssets ?? []).filter(
-      (ba) => ba.assetKitId !== null && ba.sourceKitId === kit.id
-    )
-  );
+  const thisKitSlices: KitBookingSlice[] = assets.flatMap((asset) => {
+    const membershipIdsOfThisKit = new Set(
+      (asset.assetKits ?? [])
+        .filter((membership) => membership.kitId === kit.id)
+        .map((membership) => membership.id)
+    );
+    return (asset.bookingAssets ?? []).filter(
+      (ba) =>
+        ba.assetKitId !== null &&
+        (ba.sourceKitId === kit.id || membershipIdsOfThisKit.has(ba.assetKitId))
+    );
+  });
 
-  // Kit is overlapping if it's not AVAILABLE and has conflicting bookings.
-  // `hasAssetBookingConflicts` alone misses a kit made only of
-  // QUANTITY_TRACKED members — it exempts them, since several bookings may
-  // legitimately share a QT asset's free pool — so `hasKitBookingConflicts`
-  // is ORed in to catch a conflict recorded on the kit-driven slice instead.
+  // "Already booked" comes from the bookings and their slices, never from
+  // `Kit.status`: a kit another booking has only reserved is still AVAILABLE.
+  // `hasAssetBookingConflicts` exempts QUANTITY_TRACKED members, since several
+  // bookings may share a pool, so `hasKitBookingConflicts` is ORed in to catch a
+  // conflict recorded on the kit's own slices.
   const isOverlapping =
-    kit.status !== "AVAILABLE" &&
-    (assets.some((asset) => hasAssetBookingConflicts(asset, bookingId)) ||
-      hasKitBookingConflicts(thisKitSlices, bookingId));
+    assets.some((asset) => hasAssetBookingConflicts(asset, bookingId)) ||
+    hasKitBookingConflicts(thisKitSlices, bookingId);
 
   // A kit "returned" as a unit only when EVERY one of its assets was actually
   // checked out — the same unanimity rule the lifecycle bar uses in unit mode

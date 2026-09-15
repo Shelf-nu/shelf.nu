@@ -160,7 +160,11 @@ export type AssetWithBooking = Asset & {
   custody: Custody | null;
   category: Category;
   tags: Pick<Tag, "id" | "name" | "color">[];
-  assetKits: { kitId: string; kit?: { id: string; name: string } }[];
+  assetKits: {
+    id: string;
+    kitId: string;
+    kit?: { id: string; name: string };
+  }[];
   qrScanned: string;
   /** Quantity booked from the BookingAsset pivot (present for QUANTITY_TRACKED assets) */
   bookedQuantity?: number | null;
