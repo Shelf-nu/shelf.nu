@@ -3051,6 +3051,104 @@ const ASSET_INDEX_SETTINGS: AssetIndexSettings = {
   updatedAt: new Date("2026-01-01T00:00:00Z"),
 };
 
+/**
+ * Bulk custody refusals are the caller's selection, not a server fault.
+ *
+ * Each of these is a message written for the user — they picked assets that are
+ * not available, not in custody, or quantity-tracked. Marking a ShelfError
+ * uncaptured does not set its status, which defaults to 500, so each refusal
+ * has to carry its 400 explicitly.
+ */
+describe("bulk custody — refusals of the selection answer 400", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      null
+    );
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Custodian",
+        user: {
+          id: "user-1",
+          firstName: "Cust",
+          lastName: "Odian",
+          displayName: null,
+        },
+      }
+    );
+  });
+
+  /** Runs `fn` and returns the ShelfError it threw. */
+  async function refusal(fn: () => Promise<unknown>) {
+    try {
+      await fn();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ShelfError);
+      return err as ShelfError;
+    }
+    throw new Error("Expected the call to be refused");
+  }
+
+  const checkOut = () =>
+    bulkCheckOutAssets({
+      allowedTeamMemberIds: "all" as const,
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      custodianId: "tm-1",
+      custodianName: "Custodian",
+      organizationId: "org-1",
+      settings: ASSET_INDEX_SETTINGS,
+      role: OrganizationRoles.ADMIN,
+    });
+
+  const checkIn = () =>
+    bulkCheckInAssets({
+      allowedTeamMemberIds: "all" as const,
+      userId: "user-1",
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+      settings: ASSET_INDEX_SETTINGS,
+      role: OrganizationRoles.ADMIN,
+    });
+
+  it.each([
+    {
+      label: "assigning an asset that is not available",
+      run: checkOut,
+      asset: { status: "IN_CUSTODY", type: "INDIVIDUAL", custody: [] },
+      message: "There are some unavailable assets",
+    },
+    {
+      label: "assigning only quantity-tracked assets",
+      run: checkOut,
+      asset: { status: "AVAILABLE", type: "QUANTITY_TRACKED", custody: [] },
+      message: "All selected assets are quantity-tracked",
+    },
+    {
+      label: "releasing an asset with no custody",
+      run: checkIn,
+      asset: { status: "AVAILABLE", type: "INDIVIDUAL", custody: [] },
+      message: "There are some assets without custody",
+    },
+    {
+      label: "releasing only quantity-tracked assets",
+      run: checkIn,
+      asset: { status: "IN_CUSTODY", type: "QUANTITY_TRACKED", custody: [] },
+      message: "All selected assets are quantity-tracked",
+    },
+  ])("refuses $label with a 400", async ({ run, asset, message }) => {
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "asset-1", title: "Drill", ...asset },
+    ]);
+
+    const error = await refusal(run);
+
+    expect(error.message).toContain(message);
+    expect(error.status).toBe(400);
+    expect(error.shouldBeCaptured).toBe(false);
+  });
+});
+
 describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
