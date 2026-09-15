@@ -1,20 +1,35 @@
-import { useState, useMemo, useCallback, useRef } from "react";
-import { toBlob } from "html-to-image";
+/**
+ * Bulk QR export dialog — the hub of the two print journeys.
+ *
+ * Opened from Actions ▸ "Export QR labels" on the asset index. Fetches the
+ * selected assets' resolved label data, then offers:
+ *  - **Print on a regular printer** — `<QrLabelSheet>`: plain paper you cut,
+ *    or a pre-cut sticker sheet template.
+ *  - **Print on a label printer** — `<QrLabelStockSheet>`: one label per
+ *    print on die-cut stock, or the SVG files for label software.
+ *
+ * Paid feature: gated by the asset-export entitlement (same as CSV export);
+ * free workspaces see the upgrade prompt instead of fetching.
+ *
+ * @see {@link file://./qr-label-sheet.tsx}
+ * @see {@link file://./qr-label-stock-sheet.tsx}
+ * @see {@link file://./../../routes/api+/assets.get-assets-for-bulk-qr-download.ts}
+ */
+import { useMemo, useState, type ReactNode } from "react";
 import { useAtomValue } from "jotai";
-import JSZip from "jszip";
-import { DownloadIcon } from "lucide-react";
+import { DownloadIcon, Printer, Sparkles, Tags } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { QrLabelSheet } from "~/components/assets/qr-label-sheet";
+import { QrLabelStockSheet } from "~/components/assets/qr-label-stock-sheet";
+import { UpgradeMessage } from "~/components/marketing/upgrade-message";
 import { useSearchParams } from "~/hooks/search-params";
+import useApiQuery from "~/hooks/use-api-query";
+import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import type { BulkQrDownloadLoaderData } from "~/routes/api+/assets.get-assets-for-bulk-qr-download";
-import { generateHtmlFromComponent } from "~/utils/component-to-html";
-import { isSelectingAllItems } from "~/utils/list";
-import { sanitizeFilename } from "~/utils/misc";
-import { QrLabel } from "../code-preview/code-preview";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
-import When from "../when/when";
 
 type BulkDownloadQrDialogProps = {
   className?: string;
@@ -22,310 +37,228 @@ type BulkDownloadQrDialogProps = {
   onClose: () => void;
 };
 
-type DownloadState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "success" }
-  | { status: "error"; error: string };
+/** Which screen of the dialog is showing. */
+type DialogView = "choose" | "sheet" | "stock";
 
+/**
+ * @param props.isDialogOpen - controls visibility
+ * @param props.onClose - close handler (resets internal view)
+ */
 export default function BulkDownloadQrDialog({
   className,
   isDialogOpen,
   onClose,
 }: BulkDownloadQrDialogProps) {
-  const { totalItems } = useLoaderData<{ totalItems: number }>();
-
-  const [downloadState, setDownloadState] = useState<DownloadState>({
-    status: "idle",
-  });
+  const [view, setView] = useState<DialogView>("choose");
   const [searchParams] = useSearchParams();
 
-  /**
-   * Monotonically increasing id of the most recent download request.
-   *
-   * The dialog stays mounted while the user filters/re-selects behind it (only
-   * `isDialogOpen` toggles), and a download can be dismissed (header X, Escape,
-   * backdrop) while its fetch is still in flight. A single boolean can't tell
-   * which request a late response belongs to once a newer request has started,
-   * so every click (and every close) bumps this token; a resolution is only
-   * acted on while its captured id still matches the latest one.
-   */
-  const requestIdRef = useRef(0);
-
-  /**
-   * AbortController for the in-flight request, so starting a new download (or
-   * closing the dialog) aborts the previous fetch instead of leaving it to
-   * resolve and zip stale assets.
-   */
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // Paid feature: gated behind the asset-export entitlement (same as CSV export).
+  const { canExportAssets } = useLoaderData<AssetIndexLoaderData>();
 
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
-  const allAssetsSelected = isSelectingAllItems(selectedAssets);
 
-  const isSelectingMoreThan100 =
-    selectedAssets.length > 100 || (allAssetsSelected && totalItems > 100);
-
-  const disabled =
-    selectedAssets.length === 0 || downloadState.status === "loading";
-
-  function handleClose() {
-    // Supersede and abort any in-flight request so a late resolution cannot
-    // trigger a download after the dialog has been dismissed.
-    requestIdRef.current += 1;
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    setDownloadState({ status: "idle" });
-    onClose();
-  }
-
-  // Prepare API query parameters
+  // Build the query: current filters + each selected asset id (ALL_SELECTED_KEY
+  // included when selecting all, so the loader re-applies the index filters).
   const apiSearchParams = useMemo(() => {
     if (selectedAssets.length === 0) return undefined;
-
     const query = new URLSearchParams(searchParams);
-    selectedAssets.forEach((asset) => {
-      query.append("assetIds", asset.id);
-    });
+    selectedAssets.forEach((asset) => query.append("assetIds", asset.id));
     return query;
   }, [selectedAssets, searchParams]);
 
-  /**
-   * Builds the QR zip from the assets returned for THIS request and triggers the
-   * browser download.
-   *
-   * The freshly fetched payload is passed in as an argument and never read from
-   * the query cache, so the zip always contains the assets matching the request
-   * the user just made — not a response cached from a previous filter/selection.
-   *
-   * @param data - Asset + QR payload for the current selection/filters
-   * @param requestId - Token of the request that produced `data`; the browser
-   * download is skipped if a newer request has since superseded this one.
-   */
-  const processDownload = useCallback(
-    async (data: BulkQrDownloadLoaderData, requestId: number) => {
-      try {
-        const { assets, qrIdDisplayPreference, showShelfBranding } = data;
+  const { data, isLoading } = useApiQuery<BulkQrDownloadLoaderData>({
+    api: "/api/assets/get-assets-for-bulk-qr-download",
+    searchParams: apiSearchParams,
+    // Don't even fetch for free users — the loader would 403; show the upsell instead.
+    enabled: isDialogOpen && canExportAssets && !!apiSearchParams,
+  });
 
-        const zip = new JSZip();
-        const qrFolder = zip.folder("qr-codes");
-
-        /* Converting our React component to html so that we can later convert it into an image */
-        const qrNodes = assets.map((asset) =>
-          generateHtmlFromComponent(
-            <QrLabel
-              data={{ qr: asset.qr }}
-              title={asset.title}
-              qrIdDisplayPreference={qrIdDisplayPreference}
-              sequentialId={asset.sequentialId}
-              showShelfBranding={showShelfBranding}
-            />
-          )
-        );
-
-        const toBlobOptions = {
-          width: 300,
-          height: 300,
-          backgroundColor: "white",
-          style: {
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            textAlign: "center",
-          },
-        };
-
-        /**
-         * We are converting first qr to image separately because toBlob will cache the font
-         * and will not make further network requests for other qr codes.
-         */
-        const firstQrImage = await toBlob(qrNodes[0], toBlobOptions);
-
-        /* Converting all qr nodes into images */
-        const qrImages = await Promise.all(
-          qrNodes.slice(1).map((qrNode) => toBlob(qrNode, toBlobOptions))
-        );
-
-        /* Appending qr code image to zip file */
-        [firstQrImage, ...qrImages].forEach((qrImage, index) => {
-          const asset = assets[index];
-
-          // Generate filename based on preference
-          let filename: string;
-          if (qrIdDisplayPreference === "SAM_ID" && asset.sequentialId) {
-            filename = `${asset.sequentialId}_${sanitizeFilename(
-              asset.title
-            )}_${asset.qr.id}.jpg`;
-          } else {
-            filename = `${sanitizeFilename(asset.title)}_${asset.qr.id}.jpg`;
-          }
-
-          if (!qrImage) {
-            return;
-          }
-
-          if (qrFolder) {
-            qrFolder.file(filename, qrImage);
-          } else {
-            zip.file(filename, qrImage);
-          }
-        });
-
-        const zipBlob = await zip.generateAsync({ type: "blob" });
-
-        // A newer request may have superseded this one while we were
-        // rasterizing; if so, drop this download silently.
-        if (requestId !== requestIdRef.current) return;
-
-        const downloadLink = document.createElement("a");
-
-        downloadLink.href = URL.createObjectURL(zipBlob);
-        downloadLink.download = `qr-codes-${new Date().getTime()}.zip`;
-
-        downloadLink.click();
-
-        setTimeout(() => {
-          URL.revokeObjectURL(downloadLink.href);
-        }, 4e4);
-
-        setDownloadState({ status: "success" });
-      } catch (error) {
-        // A superseded request must not clobber the UI with its own error.
-        if (requestId !== requestIdRef.current) return;
-        setDownloadState({
-          status: "error",
-          error:
-            error instanceof Error ? error.message : "Something went wrong.",
-        });
-      }
-    },
-    []
-  );
-
-  /**
-   * Starts a download for the CURRENT selection/filters.
-   *
-   * Each click supersedes any in-flight request (bumping the token and aborting
-   * the previous fetch) and fetches fresh data directly, so a slower earlier
-   * response can never be processed in place of this one. We fetch imperatively
-   * here — rather than via `useApiQuery` — precisely because this flow needs
-   * per-request cancellation that a shared, cache-retaining query hook can't
-   * provide.
-   */
-  async function handleBulkDownloadQr() {
-    if (isSelectingMoreThan100 || !apiSearchParams) {
-      return;
-    }
-
-    // Supersede any in-flight request before starting a fresh one.
-    requestIdRef.current += 1;
-    const requestId = requestIdRef.current;
-    abortControllerRef.current?.abort();
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    setDownloadState({ status: "loading" });
-
-    try {
-      const response = await fetch(
-        `/api/assets/get-assets-for-bulk-qr-download?${apiSearchParams.toString()}`,
-        { signal: controller.signal }
-      );
-      const data = (await response.json()) as BulkQrDownloadLoaderData;
-
-      // Ignore the response if a newer request superseded this one in flight.
-      if (requestId !== requestIdRef.current) {
-        return;
-      }
-
-      await processDownload(data, requestId);
-    } catch (error) {
-      // Aborted/superseded requests resolve here too; only the latest one may
-      // surface an error.
-      if (requestId !== requestIdRef.current) {
-        return;
-      }
-      setDownloadState({
-        status: "error",
-        error: error instanceof Error ? error.message : "Something went wrong.",
-      });
-    }
+  function handleClose() {
+    setView("choose");
+    onClose();
   }
+
+  // The print journeys need the roomy dialog.
+  const isFullScreen = view === "sheet" || view === "stock";
+
+  // The loader can return an error payload (e.g. a select-all over the export
+  // limit). useApiQuery surfaces it as `data` without an `assets` array, so
+  // guard before reading `data.assets` instead of crashing.
+  const hasAssets = Array.isArray((data as { assets?: unknown })?.assets);
+
+  const apiErrorMessage =
+    data && !hasAssets
+      ? (data as { error?: { message?: string } }).error?.message ??
+        "Something went wrong preparing the labels."
+      : null;
+
+  const title = !canExportAssets
+    ? "Printing QR labels is a premium feature"
+    : view === "sheet"
+    ? "Print on a regular printer"
+    : view === "stock"
+    ? "Print on a label printer"
+    : hasAssets
+    ? `Make QR labels for ${data!.assets.length} ${
+        data!.assets.length === 1 ? "asset" : "assets"
+      }`
+    : "Make QR labels";
 
   return (
     <DialogPortal>
       <Dialog
         open={isDialogOpen}
         onClose={handleClose}
-        className={className}
+        className={
+          isFullScreen
+            ? "h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:py-0"
+            : className
+        }
         title={
-          <div className="flex items-center justify-center rounded-full border-8 border-primary-50 bg-primary-100 p-2 text-primary-600">
-            <DownloadIcon />
+          <div className="w-full">
+            <div className="mb-2 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
+              {canExportAssets ? <DownloadIcon /> : <Sparkles />}
+            </div>
+            <h4>{title}</h4>
           </div>
         }
       >
-        <div className="px-6 py-4">
-          {downloadState.status === "loading" ? (
-            <div className="mb-6 flex flex-col items-center gap-4">
-              <Spinner />
-              <h3>Generating Zip file ...</h3>
-            </div>
-          ) : (
-            <>
-              <When
-                truthy={!isSelectingMoreThan100}
-                fallback={
-                  <p className="mb-4">
-                    Bulk downloading QR codes is only available for maximum 100
-                    codes at a time. Please select less codes to download.
-                  </p>
-                }
-              >
-                <h4 className="mb-1">
-                  Download qr codes for{" "}
-                  {allAssetsSelected ? "all" : selectedAssets.length} asset(s).
-                </h4>
-                <p className="mb-4">
-                  {allAssetsSelected ? "All" : selectedAssets.length} qr code(s)
-                  will be downloaded in a zip file.
-                </p>
-              </When>
-
-              <When truthy={downloadState.status === "success"}>
-                <p className="mb-4 text-success-500">
-                  Successfully downloaded qr codes.
-                </p>
-              </When>
-
-              {downloadState.status === "error" ? (
-                <p className="mb-4 text-error-500">{downloadState.error}</p>
-              ) : null}
-
-              <div className="flex w-full items-center justify-center gap-4">
+        <div
+          className={
+            isFullScreen ? "flex h-full flex-col px-4 pb-4" : "px-6 py-4"
+          }
+        >
+          {!canExportAssets ? (
+            <div className="flex flex-col gap-3">
+              <p className="text-gray-600">
+                Upgrade to make sharp, scannable QR labels for your whole
+                inventory at once: print a sheet on a regular printer, or send
+                one label at a time to a label printer. <UpgradeMessage />
+              </p>
+              <div className="mt-4 flex w-full justify-center gap-3">
                 <Button
                   type="button"
-                  className="flex-1"
                   variant="secondary"
                   onClick={handleClose}
-                  disabled={disabled}
+                  width="full"
                 >
+                  Not now
+                </Button>
+                <Button to="/account-details/subscription" width="full">
+                  Upgrade
+                </Button>
+              </div>
+            </div>
+          ) : isLoading || !data ? (
+            <div className="mb-6 flex flex-col items-center gap-4 py-6">
+              <Spinner />
+              <p className="font-medium text-gray-700">
+                Preparing your labels…
+              </p>
+            </div>
+          ) : apiErrorMessage ? (
+            <div className="py-6 text-center">
+              <p className="mb-4 text-error-500">{apiErrorMessage}</p>
+              <Button type="button" variant="secondary" onClick={handleClose}>
+                Close
+              </Button>
+            </div>
+          ) : isFullScreen ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setView("choose")}
+                className="mb-2 self-start text-sm text-gray-500 hover:text-gray-700"
+              >
+                ← Back
+              </button>
+              <div className="min-h-0 grow">
+                {view === "sheet" ? (
+                  <QrLabelSheet
+                    assets={data.assets}
+                    qrBaseUrl={data.qrBaseUrl}
+                    showBranding={data.showBranding}
+                  />
+                ) : (
+                  <QrLabelStockSheet
+                    assets={data.assets}
+                    qrBaseUrl={data.qrBaseUrl}
+                    showBranding={data.showBranding}
+                  />
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="mb-4 text-gray-600">
+                Pick the option that matches your printer. Each code is already
+                linked to its asset, so there is nothing to set up.
+              </p>
+
+              {data.skippedAssetCount > 0 ? (
+                <p className="mb-4 rounded-md border border-warning-300 bg-warning-50 p-3 text-sm text-warning-800">
+                  {data.skippedAssetCount} of the selected assets{" "}
+                  {data.skippedAssetCount === 1 ? "has" : "have"} no QR code
+                  yet, so {data.skippedAssetCount === 1 ? "it is" : "they are"}{" "}
+                  not included.
+                </p>
+              ) : null}
+
+              <div className="flex flex-col gap-3">
+                <JourneyCard
+                  icon={
+                    <Printer className="mt-0.5 size-5 shrink-0 text-primary-600" />
+                  }
+                  title="Print on a regular printer"
+                  body="Inkjet or laser. Plain paper you cut by hand, or Avery-style label sheets."
+                  onClick={() => setView("sheet")}
+                />
+                <JourneyCard
+                  icon={
+                    <Tags className="mt-0.5 size-5 shrink-0 text-primary-600" />
+                  }
+                  title="Print on a label printer"
+                  body="WASP, Brother, Dymo and similar. One ready-to-stick label per print, or download the files for your label software."
+                  onClick={() => setView("stock")}
+                />
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <Button type="button" variant="secondary" onClick={handleClose}>
                   Close
                 </Button>
-
-                <When truthy={downloadState.status !== "success"}>
-                  <Button
-                    type="button"
-                    className="flex-1"
-                    onClick={() => void handleBulkDownloadQr()}
-                    disabled={disabled || isSelectingMoreThan100}
-                  >
-                    Download
-                  </Button>
-                </When>
               </div>
             </>
           )}
         </div>
       </Dialog>
     </DialogPortal>
+  );
+}
+
+/** One journey option on the choose screen. */
+function JourneyCard({
+  icon,
+  title,
+  body,
+  onClick,
+}: {
+  icon: ReactNode;
+  title: string;
+  body: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 text-left hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
+    >
+      {icon}
+      <span>
+        <span className="block font-medium">{title}</span>
+        <span className="block text-sm text-gray-500">{body}</span>
+      </span>
+    </button>
   );
 }

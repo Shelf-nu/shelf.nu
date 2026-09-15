@@ -5,17 +5,18 @@
  * prop toggles), so its fetch state survives the user closing it, changing the
  * active filter/selection, and reopening it. Two distinct bugs are guarded here:
  *
- * 1. Stale-cache reuse: a second "Download QR codes" after a filter change must
- *    fetch fresh data for the now-current filters, not reuse the first response.
- * 2. Superseded slow response: dismissing the loading dialog mid-fetch and
- *    starting a new download must NOT let the first (slow) response complete and
- *    zip the previous filter's assets — the newest request always wins.
+ * 1. Stale-cache reuse: a second export after a filter change must fetch fresh
+ *    data for the now-current filters, not reuse the first response.
+ * 2. Superseded slow response: dismissing the dialog mid-fetch and reopening it
+ *    on a new selection must NOT let the first (slow) response complete and
+ *    label the previous filter's assets — the newest request always wins.
  *
- * Observable, implementation-agnostic signals: each download issues a fetch
- * whose URL reflects the then-current params, and only the latest request's
- * assets are ever rasterized into the zip.
+ * Observable, implementation-agnostic signals: each export issues a fetch whose
+ * URL reflects the then-current params, and only the latest request's assets
+ * ever reach the printable sheet.
  *
  * @see {@link file://./bulk-download-qr-dialog.tsx}
+ * @see {@link file://./../../hooks/use-api-query.ts}
  */
 
 import { act, render, screen, waitFor } from "@testing-library/react";
@@ -29,70 +30,25 @@ import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
 
 /**
  * Hoisted, mutable state read by the (hoisted) `vi.mock` factories:
- * - `searchParams`: what the mocked `useSearchParams` returns (the active filter)
- * - `renderedTitles`: titles of every asset actually rasterized into a zip, so a
- *   test can assert which request's assets were processed.
+ * `searchParams` is what the mocked `useSearchParams` returns — the active
+ * filter the dialog folds into its request URL.
  */
 const hoisted = vi.hoisted(() => ({
   searchParams: new URLSearchParams(),
-  renderedTitles: [] as string[],
 }));
 
 // why: the dialog imports `useSearchParams` from this cookie/org-context-aware
-// wrapper; in a unit test we only need it to surface the current filter params
-// so the dialog folds them into the request URL.
+// wrapper; in a unit test we only need it to surface the current filter params.
 vi.mock("~/hooks/search-params", () => ({
   useSearchParams: () => [hoisted.searchParams, vi.fn()] as const,
 }));
 
-// why: replace only `useLoaderData` so the dialog reads a small `totalItems`
-// (keeping the "more than 100" branch off) without running a real route loader.
+// why: replace only `useLoaderData` so the dialog reads the export entitlement
+// off the asset-index loader without running a real route loader. `false` here
+// would render the upsell instead of ever fetching.
 vi.mock("react-router", async (importActual) => {
   const actual = await importActual<Record<string, unknown>>();
-  return { ...actual, useLoaderData: () => ({ totalItems: 5 }) };
-});
-
-// why: happy-dom cannot rasterize a DOM node to an image, so html-to-image's
-// toBlob would throw. Resolve a tiny blob so the download path completes.
-vi.mock("html-to-image", () => ({
-  toBlob: vi.fn(() => Promise.resolve(new Blob(["x"], { type: "image/jpeg" }))),
-}));
-
-// why: avoids rendering <QrLabel> via renderToStaticMarkup (pulls in QR-codec
-// deps irrelevant to this test). It also records the title of each asset that
-// reaches rasterization, which is how the race test proves WHICH request's
-// assets were zipped.
-vi.mock("~/utils/component-to-html", () => ({
-  generateHtmlFromComponent: (element: { props?: { title?: string } }) => {
-    if (element?.props?.title) hoisted.renderedTitles.push(element.props.title);
-    return document.createElement("div");
-  },
-}));
-
-// why: QrLabel is only ever passed to the (mocked) generateHtmlFromComponent,
-// never rendered here, and its module chain (AddBarcodeDialog -> scan-barcode-tab
-// -> scanner -> lottie-web) touches canvas at import time and crashes under
-// happy-dom. A stub cuts that chain.
-vi.mock("~/components/code-preview/code-preview", () => ({
-  QrLabel: (props: { title?: string }) => props as unknown as null,
-}));
-
-// why: zip generation is irrelevant to the assertions and its Blob plumbing is
-// unreliable under happy-dom; a no-op archive lets processDownload reach its
-// success state deterministically.
-vi.mock("jszip", () => {
-  class FakeZip {
-    folder() {
-      return { file: () => undefined };
-    }
-    file() {
-      return undefined;
-    }
-    generateAsync() {
-      return Promise.resolve(new Blob(["zip"]));
-    }
-  }
-  return { default: FakeZip };
+  return { ...actual, useLoaderData: () => ({ canExportAssets: true }) };
 });
 
 /** Records every URL the dialog requests. */
@@ -114,19 +70,15 @@ const fetchControl = {
 /** Builds a valid loader payload whose assets match the requested ids. */
 function payloadFor(assetIds: string[]): BulkQrDownloadLoaderData {
   return {
+    skippedAssetCount: 0,
     assets: assetIds.map((id) => ({
       id,
       title: `Asset ${id}`,
-      sequentialId: null,
-      createdAt: new Date("2026-01-01T00:00:00.000Z"),
-      qr: {
-        id: `qr-${id}`,
-        src: "data:image/png;base64,xxx",
-        size: "medium" as const,
-      },
+      qrId: `qr-${id}`,
+      idText: `SAM-${id}`,
     })),
-    qrIdDisplayPreference: "QR_ID",
-    showShelfBranding: true,
+    qrBaseUrl: "https://eam.sh",
+    showBranding: true,
   };
 }
 
@@ -134,7 +86,6 @@ beforeEach(() => {
   fetchControl.mode = "auto";
   fetchControl.pending = [];
   hoisted.searchParams = new URLSearchParams();
-  hoisted.renderedTitles = [];
 
   // why: install the fetch spy AFTER MSW's interception (mirrors
   // use-api-query.test.ts) so the dialog's request is captured here and never
@@ -161,35 +112,39 @@ beforeEach(() => {
     } as Response);
   }) as typeof fetch);
   fetchSpy.mockClear();
-
-  // why: happy-dom does not implement object URLs; processDownload calls both.
-  globalThis.URL.createObjectURL = vi.fn(() => "blob:mock");
-  globalThis.URL.revokeObjectURL = vi.fn();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
+type Store = ReturnType<typeof createStore>;
+
 /**
- * Renders the dialog under a dedicated jotai store (so selection state persists
- * across rerenders) with the dialog kept open for the whole test — both bugs
- * only reproduce while component state survives close/reopen.
+ * The dialog as the asset index mounts it: permanently rendered, with only
+ * `isDialogOpen` toggling. Both bugs only reproduce while component state
+ * survives a close/reopen.
  */
-function renderDialog() {
-  const store = createStore();
-  const onClose = vi.fn();
-  const utils = render(
+function Harness({ store, open }: { store: Store; open: boolean }) {
+  return (
     <Provider store={store}>
-      <BulkDownloadQrDialog isDialogOpen onClose={onClose} />
+      <BulkDownloadQrDialog isDialogOpen={open} onClose={() => {}} />
     </Provider>
   );
-  return { store, onClose, ...utils };
+}
+
+function renderDialog() {
+  const store = createStore();
+  const { rerender } = render(<Harness store={store} open />);
+  return {
+    store,
+    setOpen: (open: boolean) => rerender(<Harness store={store} open={open} />),
+  };
 }
 
 /** Sets the active filter params + selected assets, flushing React effects. */
 async function setFilterAndSelection(
-  store: ReturnType<typeof createStore>,
+  store: Store,
   filterQuery: string,
   assetIds: string[]
 ) {
@@ -206,30 +161,28 @@ async function setFilterAndSelection(
 }
 
 describe("BulkDownloadQrDialog", () => {
-  it("refetches with the current params on a second download after filters change", async () => {
-    const user = userEvent.setup();
-    const { store } = renderDialog();
+  it("refetches with the current params on a second export after filters change", async () => {
+    const { store, setOpen } = renderDialog();
 
-    /* ---------- Download #1: category A, assets a1 + a2 ---------- */
+    /* ---------- Export #1: category A, assets a1 + a2 ---------- */
     await setFilterAndSelection(store, "category=cat-A", ["a1", "a2"]);
 
-    await user.click(await screen.findByRole("button", { name: "Download" }));
-    await screen.findByText(/successfully downloaded qr codes/i);
-
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
     const firstUrl = fetchSpy.mock.calls[0][0] as string;
     expect(firstUrl).toContain("category=cat-A");
     expect(firstUrl).toContain("assetIds=a1");
     expect(firstUrl).toContain("assetIds=a2");
 
-    /* ---------- Close to re-show the Download button (state persists) ---------- */
-    await user.click(screen.getByRole("button", { name: "Close" }));
-
-    /* ---------- Change filter to tag A, assets b9 ---------- */
+    /* ---------- Close, change filter to tag A / asset b9, reopen ---------- */
+    await act(async () => {
+      setOpen(false);
+      await Promise.resolve();
+    });
     await setFilterAndSelection(store, "tag=tag-A", ["b9"]);
-
-    /* ---------- Download #2 ---------- */
-    await user.click(await screen.findByRole("button", { name: "Download" }));
+    await act(async () => {
+      setOpen(true);
+      await Promise.resolve();
+    });
 
     // Fixed code issues a fresh fetch for the new params; the original bug
     // reused the cached response and never fetched again.
@@ -243,48 +196,58 @@ describe("BulkDownloadQrDialog", () => {
     expect(secondUrl).not.toEqual(firstUrl);
   });
 
-  it("ignores a slow superseded response and only zips the latest request's assets", async () => {
+  it("ignores a slow superseded response and only labels the latest request's assets", async () => {
     // Manually control fetch resolution to simulate a slow first request that
-    // resolves AFTER the user dismissed it and started a second download.
+    // resolves AFTER the user dismissed it and started a second export.
     fetchControl.mode = "manual";
     const user = userEvent.setup();
-    const { store } = renderDialog();
+    const { store, setOpen } = renderDialog();
 
-    /* ---------- Download #1: category A (will resolve LATE) ---------- */
+    /* ---------- Export #1: category A (will resolve LATE) ---------- */
     await setFilterAndSelection(store, "category=cat-A", ["a1", "a2"]);
-    await user.click(await screen.findByRole("button", { name: "Download" }));
     await waitFor(() => expect(fetchControl.pending).toHaveLength(1));
 
-    /* ---------- Dismiss the loading dialog mid-flight via the header X ---------- */
-    // The header close button is not gated by the loading state (unlike the body
-    // Close/Download buttons), so it — like Escape/backdrop — can cancel an
-    // in-flight download.
-    await user.click(screen.getByRole("button", { name: /close dialog/i }));
-
-    /* ---------- Download #2: tag A (the current request) ---------- */
-    await setFilterAndSelection(store, "tag=tag-A", ["b9"]);
-    await user.click(await screen.findByRole("button", { name: "Download" }));
-    await waitFor(() => expect(fetchControl.pending).toHaveLength(2));
-
-    /* ---------- The superseded request resolves FIRST, then the current one ---------- */
+    /* ---------- Dismiss mid-flight, then reopen on a new selection ---------- */
     await act(async () => {
-      fetchControl.pending[0].resolve(payloadFor(["a1", "a2"]));
+      setOpen(false);
       await Promise.resolve();
     });
+    await setFilterAndSelection(store, "tag=tag-A", ["b9"]);
+    await act(async () => {
+      setOpen(true);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(fetchControl.pending).toHaveLength(2));
+
+    /* ---------- The current request lands, THEN the slow superseded one ---------- */
+    // This ordering is the whole point: last-writer-wins would leave the
+    // previous filter's assets on screen. The mocked fetch deliberately ignores
+    // `AbortSignal`, so what is under test is the hook's `ignore` flag, not the
+    // browser cancelling the socket.
     await act(async () => {
       fetchControl.pending[1].resolve(payloadFor(["b9"]));
       await Promise.resolve();
     });
+    await act(async () => {
+      fetchControl.pending[0].resolve(payloadFor(["a1", "a2"]));
+      await Promise.resolve();
+    });
 
+    // The count comes straight off the payload the dialog kept.
     await waitFor(() =>
-      expect(
-        screen.getByText(/successfully downloaded qr codes/i)
-      ).toBeInTheDocument()
+      expect(screen.getByRole("heading", { level: 4 }).textContent).toBe(
+        "Make QR labels for 1 asset"
+      )
     );
 
-    // Only the latest request's assets are rasterized; the stale ones never are.
-    expect(hoisted.renderedTitles).toContain("Asset b9");
-    expect(hoisted.renderedTitles).not.toContain("Asset a1");
-    expect(hoisted.renderedTitles).not.toContain("Asset a2");
+    // And the sheet itself is built from the latest request's assets only.
+    // Queried by label text, not by role: the dialog backdrop is itself a
+    // `role="button"`, so its accessible name contains every option's copy.
+    await user.click(
+      screen.getByText("Print on a regular printer").closest("button")!
+    );
+    expect(screen.getByAltText("QR label for Asset b9")).toBeTruthy();
+    expect(screen.queryByAltText("QR label for Asset a1")).toBeNull();
+    expect(screen.queryByAltText("QR label for Asset a2")).toBeNull();
   });
 });
