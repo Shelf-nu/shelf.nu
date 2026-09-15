@@ -69,7 +69,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizations,
     });
 
-    const totalPages = Math.ceil(totalCustomFields / perPageParam);
+    // Divide by the resolved page size. The raw `per_page` param is 0 whenever
+    // the URL carries none.
+    const totalPages = Math.ceil(totalCustomFields / perPage);
 
     const header: HeaderData = {
       title: "Custom Fields",

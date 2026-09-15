@@ -439,14 +439,22 @@ export function BookingFormSchema({
     custodian: z
       .string()
       .transform((val, ctx) => {
-        if (!val && val === "") {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Please select a custodian",
-          });
-          return z.NEVER;
+        // The field carries the picker's selection as JSON. An unreadable value
+        // is a selection the form cannot use, so it is reported like a missing
+        // one; `JSON.parse` would otherwise throw out of the schema and turn a
+        // bad submission into a 500.
+        try {
+          if (val) {
+            return JSON.parse(val);
+          }
+        } catch {
+          // Falls through to the issue below.
         }
-        return JSON.parse(val);
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Please select a custodian",
+        });
+        return z.NEVER;
       })
       .pipe(
         z.object({

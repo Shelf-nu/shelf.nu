@@ -75,7 +75,9 @@ export async function action({ request }: ActionFunctionArgs) {
           .min(1, "Note content is required")
           .max(NOTE_MAX_CONTENT_LENGTH),
       })
-      .safeParse(await request.json());
+      // An unreadable body parses as `null`, which fails the schema and takes
+      // the 400 below instead of throwing a SyntaxError into the 500 branch.
+      .safeParse(await request.json().catch(() => null));
 
     if (!parsed.success) {
       return data(
