@@ -69,6 +69,7 @@ import {
   moveAssetLocationUnits,
   parseAssetValuation,
   placeUnplacedUnits,
+  resolveAssetAttachmentDisplayUrl,
   updateAsset,
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
@@ -100,6 +101,7 @@ import {
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
+import { formatBytes } from "~/utils/format-bytes";
 import { error, getParams, payload, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
 import {
@@ -177,6 +179,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
       include: getAssetOverviewFields(id, canUseBarcodes),
+    });
+
+    // asset.attachmentPath is a private-bucket storage path (see its schema
+    // comment) - resolve it to a short-lived signed URL now that
+    // requirePermission above gates access to this asset. Unconditional
+    // (not behind canEditAsset below) so view-only roles see it too.
+    const attachmentDisplayUrl = await resolveAssetAttachmentDisplayUrl({
+      attachmentPath: asset.attachmentPath,
+      assetId: asset.id,
     });
 
     /**
@@ -391,10 +402,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       // Same reasoning as the parent detail route: this payload carries
       // `custody[].custodian` and is reachable with `asset: read`.
-      asset: redactCustodianForViewer([{ ...asset, customFields }], {
-        canSeeAllCustody,
-        userId,
-      })[0],
+      asset: redactCustodianForViewer(
+        [{ ...asset, customFields, attachmentUrl: attachmentDisplayUrl }],
+        {
+          canSeeAllCustody,
+          userId,
+        }
+      )[0],
       currentOrganization,
       userId,
       lastScan,
@@ -1136,6 +1150,35 @@ export default function AssetOverview() {
                   />
                 )}
               />
+
+              {/* Attachment — read-only display; uploading/replacing/removing
+                  stays exclusive to the Edit page's AssetAttachmentUpload. */}
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
+                <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  Attachment
+                </span>
+                <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                  {asset.attachmentUrl ? (
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={asset.attachmentUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-primary-700 hover:text-primary-800"
+                      >
+                        {asset.attachmentOriginalName || "Attachment.pdf"}
+                      </a>
+                      {asset.attachmentSize ? (
+                        <span className="text-gray-500">
+                          {formatBytes(asset.attachmentSize)}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="text-gray-600">No attachment</span>
+                  )}
+                </div>
+              </li>
 
               {/* QT-aware: shows total value (per-unit × quantity) below the
                   per-unit Value row. Hidden for INDIVIDUAL assets and QT with
