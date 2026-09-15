@@ -1,0 +1,129 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - Date pickers survive a selection"
+tags:
+  - bookings
+  - create
+  - high-impact
+
+---
+# Test: opening and confirming the start and end date pickers leaves the create
+# form alive.
+#
+# This is a crash regression test, not a date-correctness test. On Android the
+# booking forms once passed `mode="datetime"` — an iOS-only value — to the
+# native picker. Opening it worked, but dismissing it threw
+# `Cannot read property 'dismiss' of undefined` out of the picker's unmount
+# cleanup, which unmounted the whole screen and left the app blank until a
+# force-quit. Shipped in 1.4.0 and reported from the field.
+#
+# The other create-booking flows never touch these fields — they rely on the
+# default tomorrow 09:00-17:00 window — so nothing else covers this path.
+#
+# RUN THIS ON BOTH PLATFORMS. The bug it guards is invisible on iOS.
+#
+# Requires (in the test org): GRANULAR WORKSPACE (TEAM). Creates nothing —
+# the form is abandoned at the end.
+
+- runFlow: ../../shared/login.yaml
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+- tapOn: "Bookings"
+- extendedWaitUntil:
+    visible: "Create booking"
+    timeout: 15000
+- tapOn: "Create booking"
+
+- extendedWaitUntil:
+    visible: "Booking name, required"
+    timeout: 15000
+
+# ── Start date ───────────────────────────────────────────────
+# Both fields are pre-seeded, so the a11y label is always the "tap to change"
+# variant. Regex full-matches in Maestro, hence the leading/trailing `.*`.
+- tapOn: ".*Starts.*tap to change.*"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      # Android runs two native dialogs back to back: date, then time.
+      - extendedWaitUntil:
+          visible: "OK"
+          timeout: 10000
+      - tapOn: "OK"
+      - extendedWaitUntil:
+          visible: "OK"
+          timeout: 10000
+      - tapOn: "OK"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      # iOS shows one inline picker; confirming closes it.
+      - waitForAnimationToEnd
+      - tapOn:
+          text: "15"
+          optional: true
+
+# The assertion that fails on the crash: the form is still mounted. A blank
+# screen has no "Ends" field, and the ErrorBoundary fallback reads "Error".
+- extendedWaitUntil:
+    visible: ".*Ends.*tap to change.*"
+    timeout: 10000
+- assertNotVisible: ".*Error.*"
+- takeScreenshot: booking-start-picker-survived
+
+# ── End date ─────────────────────────────────────────────────
+- tapOn: ".*Ends.*tap to change.*"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible: "OK"
+          timeout: 10000
+      - tapOn: "OK"
+      - extendedWaitUntil:
+          visible: "OK"
+          timeout: 10000
+      - tapOn: "OK"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - waitForAnimationToEnd
+      - tapOn:
+          text: "20"
+          optional: true
+
+- extendedWaitUntil:
+    visible: ".*Starts.*tap to change.*"
+    timeout: 10000
+- assertVisible: ".*Ends.*tap to change.*"
+- assertNotVisible: ".*Error.*"
+- takeScreenshot: booking-end-picker-survived
+
+# ── Cancelling a picker must not crash either ────────────────
+# Dismissing runs the same unmount path as confirming, so it failed the same
+# way. On Android the dialog's own Cancel; on iOS, re-tapping the field closes
+# the inline picker.
+- tapOn: ".*Starts.*tap to change.*"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible: "Cancel"
+          timeout: 10000
+      - tapOn: "Cancel"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - waitForAnimationToEnd
+      - tapOn: ".*Starts.*tap to change.*"
+
+- extendedWaitUntil:
+    visible: ".*Ends.*tap to change.*"
+    timeout: 10000
+- assertNotVisible: ".*Error.*"
+- takeScreenshot: booking-picker-cancel-survived
