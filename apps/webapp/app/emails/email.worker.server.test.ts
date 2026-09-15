@@ -48,4 +48,58 @@ describe("triggerEmail", () => {
       expect.objectContaining({ to: "user@example.com" })
     );
   });
+
+  it("sends to every address of a comma separated list", async () => {
+    vi.mocked(transporter.sendMail).mockClear();
+
+    await triggerEmail({
+      ...basePayload,
+      to: "support@shelf.nu, product@shelf.nu",
+    });
+
+    expect(transporter.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "support@shelf.nu, product@shelf.nu" })
+    );
+  });
+
+  it("drops only the soft-deleted address from a list", async () => {
+    vi.mocked(transporter.sendMail).mockClear();
+
+    await triggerEmail({
+      ...basePayload,
+      to: "support@shelf.nu, deleted+abc123@deleted.shelf.nu",
+    });
+
+    // The live inbox must still get the email, and the soft-deleted one must
+    // not: a second call would mean the guard only rewrote the first header
+    expect(transporter.sendMail).toHaveBeenCalledOnce();
+    expect(transporter.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "support@shelf.nu" })
+    );
+  });
+
+  it("skips soft-deleted addresses whatever the domain casing", async () => {
+    vi.mocked(transporter.sendMail).mockClear();
+
+    await triggerEmail({
+      ...basePayload,
+      to: "support@shelf.nu, deleted+abc123@DELETED.SHELF.NU",
+    });
+
+    expect(transporter.sendMail).toHaveBeenCalledOnce();
+    expect(transporter.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "support@shelf.nu" })
+    );
+  });
+
+  it("skips sending when every address in a list is soft-deleted", async () => {
+    vi.mocked(transporter.sendMail).mockClear();
+
+    await triggerEmail({
+      ...basePayload,
+      to: "a@deleted.shelf.nu, b@deleted.shelf.nu",
+    });
+
+    expect(transporter.sendMail).not.toHaveBeenCalled();
+  });
 });

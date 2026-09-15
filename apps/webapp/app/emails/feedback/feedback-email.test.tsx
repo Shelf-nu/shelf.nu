@@ -27,6 +27,7 @@ vi.mock("~/utils/logger", () => ({
 vi.mock("~/utils/env", () => ({
   SERVER_URL: "https://app.shelf.nu",
   SUPPORT_EMAIL: "support@shelf.nu",
+  FEEDBACK_EMAIL: undefined,
   SEND_ONBOARDING_EMAIL: false,
   ENABLE_PREMIUM_FEATURES: false,
   FREE_TRIAL_DAYS: "7",
@@ -41,6 +42,7 @@ vi.mock("~/utils/env", () => ({
 import {
   feedbackEmailText,
   feedbackEmailHtml,
+  resolveFeedbackRecipients,
   sendFeedbackEmail,
 } from "./feedback-email";
 
@@ -203,5 +205,52 @@ describe("sendFeedbackEmail", () => {
         subject: expect.stringContaining("New feedback [Error report]:"),
       })
     );
+  });
+});
+
+describe("resolveFeedbackRecipients", () => {
+  it("falls back to the support inbox when FEEDBACK_EMAIL is not set", () => {
+    expect(resolveFeedbackRecipients(undefined, "support@shelf.nu")).toBe(
+      "support@shelf.nu"
+    );
+    expect(resolveFeedbackRecipients("", "support@shelf.nu")).toBe(
+      "support@shelf.nu"
+    );
+    // A variable set to whitespace is a misconfiguration, not an override
+    expect(resolveFeedbackRecipients("   ", "support@shelf.nu")).toBe(
+      "support@shelf.nu"
+    );
+  });
+
+  it("delivers to every address of a comma separated list", () => {
+    expect(
+      resolveFeedbackRecipients(
+        "support@shelf.nu, product@shelf.nu",
+        "support@shelf.nu"
+      )
+    ).toBe("support@shelf.nu, product@shelf.nu");
+  });
+
+  it("trims addresses and drops empty entries", () => {
+    expect(
+      resolveFeedbackRecipients(
+        "  support@shelf.nu ,, product@shelf.nu ,",
+        "support@shelf.nu"
+      )
+    ).toBe("support@shelf.nu, product@shelf.nu");
+  });
+
+  it("de-duplicates repeated addresses regardless of case", () => {
+    // Otherwise the same person gets the same report twice
+    expect(
+      resolveFeedbackRecipients(
+        "support@shelf.nu,Support@Shelf.nu,product@shelf.nu",
+        "support@shelf.nu"
+      )
+    ).toBe("support@shelf.nu, product@shelf.nu");
+  });
+
+  it("returns an empty string when nothing is configured", () => {
+    expect(resolveFeedbackRecipients(undefined, undefined)).toBe("");
   });
 });
