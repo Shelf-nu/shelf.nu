@@ -513,6 +513,60 @@ export function hasAssetBookingConflicts(
 }
 
 /**
+ * One kit-driven slice of a kit on some booking: what the kit conflict rule
+ * reads. `checkedOutAt` / `checkedInAt` are the slice's own dispatch markers.
+ */
+export type KitBookingSlice = {
+  booking: { id: string; status: string };
+  checkedOutAt: Date | string | null;
+  checkedInAt: Date | string | null;
+};
+
+/**
+ * Whether a kit is held by another booking that overlaps the current one.
+ *
+ * A kit is one physical case, so it is exclusive the way an INDIVIDUAL asset
+ * is, and this mirrors {@link hasAssetBookingConflicts} with the kit as the
+ * holder: an overlapping RESERVED booking always conflicts, and an ONGOING or
+ * OVERDUE one conflicts while it still has the kit out. The asset rule cannot
+ * cover kits, because it exempts QUANTITY_TRACKED assets and a kit made only of
+ * those would otherwise never conflict.
+ *
+ * "Out" is read from the slice markers, never `Kit.status`: the markers are the
+ * per-booking record of what left (`booking-checkout-is-recorded-per-slice`),
+ * while a kit status can be left CHECKED_OUT by a flow that did not release it.
+ * Any one slice still out keeps the kit out.
+ *
+ * @param slices - Live kit-driven slices of ONE kit (`assetKitId` pointing at
+ *   one of its memberships) on bookings that overlap the current window
+ * @param currentBookingId - Booking being evaluated; its own slices never conflict
+ * @param options.ignoreReservedConflicts - Drop the "RESERVED always conflicts"
+ *   rule. Pass this ONLY when the current booking is itself already in flight
+ *   (ONGOING/OVERDUE) — see {@link outranksReservations}.
+ * @returns `true` when another booking holds the kit for an overlapping window
+ */
+export function hasKitBookingConflicts(
+  slices: KitBookingSlice[],
+  currentBookingId: string,
+  options?: { ignoreReservedConflicts?: boolean }
+): boolean {
+  const otherSlices = slices.filter((s) => s.booking.id !== currentBookingId);
+
+  const reservedElsewhere =
+    !options?.ignoreReservedConflicts &&
+    otherSlices.some((s) => s.booking.status === BookingStatus.RESERVED);
+  if (reservedElsewhere) return true;
+
+  return otherSlices.some(
+    (s) =>
+      (s.booking.status === BookingStatus.ONGOING ||
+        s.booking.status === BookingStatus.OVERDUE) &&
+      Boolean(s.checkedOutAt) &&
+      !s.checkedInAt
+  );
+}
+
+/**
  * Determines if an asset is already booked and unavailable for the current booking context.
  * Handles partial check-in logic properly.
  *

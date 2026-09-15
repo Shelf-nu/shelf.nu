@@ -173,6 +173,7 @@ import {
   isBookingEarlyCheckout,
   outranksReservations,
 } from "./helpers";
+import { findConflictingKits } from "./kit-conflicts.server";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import type { NotificationRecipient } from "./notification-recipients.server";
 import type {
@@ -1810,6 +1811,93 @@ export async function updateBasicBooking({
 }
 
 /**
+ * Refuses a booking write when another overlapping booking holds one of the
+ * kits it involves.
+ *
+ * A kit is one physical case, so it is exclusive the way an INDIVIDUAL asset
+ * is. The asset conflict check at each write checkpoint cannot provide that on
+ * its own: it exempts QUANTITY_TRACKED assets, so a kit made only of those
+ * would never be refused. Call this beside that check, over the same window.
+ *
+ * Only a LIVE kit-driven slice (`assetKitId` set) holds its kit. A detached row
+ * keeps `sourceKitId` but is a standalone asset, so it is dropped before the
+ * kit ids are resolved — {@link getKitIdsByBookingSlices} reads `sourceKitId`
+ * first and would otherwise attribute it to the kit.
+ *
+ * @param args.slices - The booking's slices, or the kit slices being added
+ * @param args.bookingId - The booking being written; its own slices never conflict
+ * @param args.from - Start of the window to check; nothing conflicts without one
+ * @param args.to - End of the window to check
+ * @param args.organizationId - Scopes every read
+ * @param args.ignoreReservedConflicts - Pass only when the booking is already
+ *   in flight, see {@link outranksReservations}
+ * @param args.action - Completes "Cannot …" in the message, e.g. "reserve booking"
+ * @param client - Pass the active `tx` when called inside a transaction
+ * @throws {ShelfError} 400 naming the kits another booking holds
+ */
+async function assertKitsNotBookedElsewhere(
+  {
+    slices,
+    bookingId,
+    from,
+    to,
+    organizationId,
+    ignoreReservedConflicts = false,
+    action,
+  }: {
+    slices: BookingSliceKitProvenance[];
+    bookingId: Booking["id"];
+    from: Date | string | null | undefined;
+    to: Date | string | null | undefined;
+    organizationId: Organization["id"];
+    ignoreReservedConflicts?: boolean;
+    action: string;
+  },
+  client: Pick<ExtendedPrismaClient, "assetKit" | "bookingAsset"> = db
+) {
+  // Truthiness rather than `!== null`, for the reason given in
+  // `resolveKitIdByAssetKitId`.
+  const liveKitSlices = slices.filter((slice) => Boolean(slice.assetKitId));
+  if (liveKitSlices.length === 0) return;
+
+  const assetIdsByKitId = await getKitIdsByBookingSlices({
+    slices: liveKitSlices,
+    organizationId,
+    client,
+  });
+
+  const conflicting = await findConflictingKits(
+    {
+      kitIds: [...assetIdsByKitId.keys()],
+      bookingId,
+      from,
+      to,
+      organizationId,
+      ignoreReservedConflicts,
+    },
+    client
+  );
+  if (conflicting.length === 0) return;
+
+  const names = conflicting
+    .slice(0, 3)
+    .map((kit) => kit.name)
+    .join(", ");
+  const more =
+    conflicting.length > 3 ? ` and ${conflicting.length - 3} more` : "";
+
+  throw new ShelfError({
+    cause: null,
+    status: 400,
+    label,
+    title: "Booking conflict",
+    message: `Cannot ${action}. Some kits are already booked or checked out for an overlapping period: ${names}${more}. Please remove them and try again.`,
+    additionalData: { bookingId, kitIds: conflicting.map((k) => k.id) },
+    shouldBeCaptured: false,
+  });
+}
+
+/**
  * Changes the status of a booking to RESERVED
  */
 export async function reserveBooking({
@@ -1940,6 +2028,15 @@ export async function reserveBooking({
         });
       }
     }
+
+    await assertKitsNotBookedElsewhere({
+      slices: bookingFound.bookingAssets,
+      bookingId: id,
+      from,
+      to,
+      organizationId,
+      action: "reserve booking",
+    });
 
     /** Validate the booking dates */
     if (!from || !to) {
@@ -3166,6 +3263,15 @@ export async function checkoutBooking({
       }
     }
 
+    await assertKitsNotBookedElsewhere({
+      slices: bookingFound.bookingAssets,
+      bookingId: id,
+      from,
+      to,
+      organizationId,
+      action: "check out booking",
+    });
+
     /**
      * Server-side validation: Block checkout if any INDIVIDUAL asset is
      * in custody. QUANTITY_TRACKED assets can have row-level status
@@ -3544,6 +3650,15 @@ export async function fulfilModelRequestsAndCheckout({
         });
       }
     }
+
+    await assertKitsNotBookedElsewhere({
+      slices: bookingFound.bookingAssets,
+      bookingId,
+      from,
+      to,
+      organizationId,
+      action: "check out booking",
+    });
 
     /**
      * Server-side validation: Block checkout if any INDIVIDUAL asset is
@@ -8266,6 +8381,25 @@ export async function partialCheckoutBooking({
       }
     }
 
+    // Every scanned asset, not only the legacy `assetIds` the asset check
+    // reads: quantity-tracked members arrive through `checkouts` alone, and a
+    // kit made only of those is exactly the case the asset rule exempts.
+    await assertKitsNotBookedElsewhere({
+      slices: bookingFound.bookingAssets
+        .filter((ba) => providedAssetIds.has(ba.asset.id))
+        .map((ba) => ({
+          assetId: ba.asset.id,
+          assetKitId: ba.assetKitId,
+          sourceKitId: ba.sourceKitId,
+        })),
+      bookingId: id,
+      from: bookingFound.from,
+      to: bookingFound.to,
+      organizationId,
+      ignoreReservedConflicts: inFlight,
+      action: "check out",
+    });
+
     // Defensive: skip assets already checked out for this booking — by record
     // OR by live CHECKED_OUT status (idempotent re-scan, incl. all-at-once
     // checkouts that left no records).
@@ -10866,8 +11000,20 @@ export async function extendBooking({
           !checkedInAssetIds.includes(asset.id)
       );
 
+    /**
+     * Kit memberships this booking still has out, read from the slice markers.
+     *
+     * A kit is one physical case, so one still out stays exclusive to this
+     * booking through the extension. The markers answer for quantity-tracked
+     * members too, whose asset status only flips to CHECKED_OUT once every unit
+     * booked on the asset has left.
+     */
+    const kitMembershipIdsStillOut = booking.bookingAssets.flatMap((ba) =>
+      ba.assetKitId && ba.checkedOutAt && !ba.checkedInAt ? [ba.assetKitId] : []
+    );
+
     /** Validate that there are still active assets to extend the booking for */
-    if (activeAssets.length === 0) {
+    if (activeAssets.length === 0 && kitMembershipIdsStillOut.length === 0) {
       throw new ShelfError({
         cause: null,
         label,
@@ -10879,7 +11025,32 @@ export async function extendBooking({
 
     /** Wrap conflict detection and update in a transaction to prevent race conditions */
     const updatedBooking = await db.$transaction(async (tx) => {
-      /** Checking if the booking period is clashing with any other booking containing the same active asset(s).*/
+      /**
+       * Every membership of the kits still out. A reservation holds a kit
+       * through any of its memberships, not only the ones this booking's slices
+       * point at.
+       */
+      let heldKitMembershipIds: string[] = [];
+      if (kitMembershipIdsStillOut.length > 0) {
+        const heldMemberships = await tx.assetKit.findMany({
+          where: { id: { in: kitMembershipIdsStillOut }, organizationId },
+          select: { kitId: true },
+        });
+        const heldKitIds = [...new Set(heldMemberships.map((m) => m.kitId))];
+        if (heldKitIds.length > 0) {
+          const memberships = await tx.assetKit.findMany({
+            where: { kitId: { in: heldKitIds }, organizationId },
+            select: { id: true },
+          });
+          heldKitMembershipIds = memberships.map((m) => m.id);
+        }
+      }
+
+      const activeAssetsClause: Prisma.BookingAssetWhereInput = {
+        assetId: { in: activeAssets.map((a) => a.id) },
+      };
+
+      /** Checking if the booking period is clashing with any other booking containing the same active asset(s) or kit(s).*/
       const clashingBookings: ClashingBooking[] = await tx.booking.findMany({
         where: {
           id: { not: booking.id },
@@ -10888,7 +11059,15 @@ export async function extendBooking({
             in: [BookingStatus.RESERVED],
           },
           bookingAssets: {
-            some: { assetId: { in: activeAssets.map((a) => a.id) } },
+            some:
+              heldKitMembershipIds.length > 0
+                ? {
+                    OR: [
+                      activeAssetsClause,
+                      { assetKitId: { in: heldKitMembershipIds } },
+                    ],
+                  }
+                : activeAssetsClause,
           },
           // Check for bookings that start within the extension period
           from: {
@@ -14625,6 +14804,24 @@ async function addScannedAssetsToBookingWithinTx(
           shouldBeCaptured: false,
         });
       }
+
+      // The client-supplied `kitId` is untrusted, so each kit is resolved from
+      // its org-proven membership row rather than from the spec.
+      await assertKitsNotBookedElsewhere(
+        {
+          slices: kitSlices.map((slice) => ({
+            assetId: slice.assetId,
+            assetKitId: slice.assetKitId,
+            sourceKitId: null,
+          })),
+          bookingId,
+          from: conflictBooking.from,
+          to: conflictBooking.to,
+          organizationId,
+          action: "add to booking",
+        },
+        tx
+      );
     }
   }
 
