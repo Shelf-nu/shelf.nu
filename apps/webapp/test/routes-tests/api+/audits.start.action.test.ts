@@ -29,10 +29,12 @@ const {
   createAuditSession,
   resolveAssetIdsForAudit,
   resolveUserFormatPrefsById,
+  sendAuditAssignedEmails,
 } = vi.hoisted(() => ({
   createAuditSession: vi.fn(),
   resolveAssetIdsForAudit: vi.fn(),
   resolveUserFormatPrefsById: vi.fn(),
+  sendAuditAssignedEmails: vi.fn(),
 }));
 
 // why: the action gates on permission; mock to grant it without hitting auth/DB.
@@ -80,12 +82,14 @@ vi.mock("~/modules/asset-index-settings/service.server", () => ({
   getAssetIndexSettings: vi.fn(),
 }));
 
-// why: no assignee → email branch never runs, but the module is imported at load.
-vi.mock("~/modules/audit/email-helpers", () => ({
-  sendAuditAssignedEmail: vi.fn(),
+// why: the assignment email fan-out loads the audit from the DB; stub it so
+// the tests can assert WHO gets emailed without a database.
+vi.mock("~/modules/audit/assignment-emails.server", () => ({
+  sendAuditAssignedEmails,
 }));
 
-// why: the action imports the global Prisma client at module load.
+// why: modules on the route's import graph touch the global Prisma client at
+// module load; nothing in these tests reaches the DB.
 vi.mock("~/database/db.server", () => ({
   db: { auditSession: { findFirst: vi.fn() } },
 }));
@@ -93,11 +97,14 @@ vi.mock("~/database/db.server", () => ({
 /**
  * Build a POST request + fake context carrying the acting user id.
  */
-function buildArgs(dueDate: string) {
+function buildArgs(dueDate?: string, extra: Record<string, string> = {}) {
   const formData = new FormData();
   formData.set("name", "Quarterly warehouse audit");
   formData.set("assetIds[0]", "asset-1");
-  formData.set("dueDate", dueDate);
+  if (dueDate) formData.set("dueDate", dueDate);
+  for (const [key, value] of Object.entries(extra)) {
+    formData.set(key, value);
+  }
 
   const request = new Request("https://app.shelf.nu/api/audits/start", {
     method: "POST",
@@ -141,5 +148,79 @@ describe("start-audit action — dueDate timezone round-trip", () => {
       "user-1",
       expect.objectContaining({ timeZone: "Europe/Moscow" })
     );
+  });
+});
+
+const blob = (userId: string) =>
+  JSON.stringify({ id: `tm-${userId}`, name: userId, userId });
+
+/**
+ * Who gets assigned and who gets told. The creator is "user-1" (see buildArgs).
+ */
+describe("start-audit action — assignees", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveAssetIdsForAudit.mockResolvedValue(["asset-1"]);
+    createAuditSession.mockResolvedValue({
+      session: { id: "session-1", dueDate: null },
+    });
+    resolveUserFormatPrefsById.mockResolvedValue({ timeZone: "Europe/London" });
+  });
+
+  it("forwards every selected assignee, deduplicated, and emails all but the creator", async () => {
+    const response = await action(
+      buildArgs(undefined, {
+        "assignees[0]": blob("user-2"),
+        "assignees[1]": blob("user-3"),
+        "assignees[2]": blob("user-2"),
+        "assignees[3]": blob("user-1"),
+      })
+    );
+
+    expect(createAuditSession).toHaveBeenCalledWith(
+      expect.objectContaining({ assigneeIds: ["user-2", "user-3", "user-1"] })
+    );
+    expect(sendAuditAssignedEmails).toHaveBeenCalledWith(
+      expect.objectContaining({
+        auditId: "session-1",
+        organizationId: "org-1",
+        recipientUserIds: ["user-2", "user-3"],
+      })
+    );
+    // The creator is among the assignees, so they land on the scanner.
+    expect((response as any).data.redirectTo).toBe("/audits/session-1/scan");
+  });
+
+  it("sends the creator to the overview when the audit is assigned only to others", async () => {
+    const response = await action(
+      buildArgs(undefined, { "assignees[0]": blob("user-2") })
+    );
+
+    expect((response as any).data.redirectTo).toBe(
+      "/audits/session-1/overview"
+    );
+  });
+
+  it("still accepts the singular pre-multi-assign field", async () => {
+    await action(buildArgs(undefined, { assignee: blob("user-5") }));
+
+    expect(createAuditSession).toHaveBeenCalledWith(
+      expect.objectContaining({ assigneeIds: ["user-5"] })
+    );
+    expect(sendAuditAssignedEmails).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientUserIds: ["user-5"] })
+    );
+  });
+
+  it("emails nobody and opens the scanner when no one is assigned", async () => {
+    const response = await action(buildArgs());
+
+    expect(createAuditSession).toHaveBeenCalledWith(
+      expect.objectContaining({ assigneeIds: [] })
+    );
+    expect(sendAuditAssignedEmails).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientUserIds: [] })
+    );
+    expect((response as any).data.redirectTo).toBe("/audits/session-1/scan");
   });
 });

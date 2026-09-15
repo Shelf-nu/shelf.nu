@@ -17,11 +17,13 @@ import { data, redirect } from "react-router";
 import { z } from "zod";
 import { DuplicateAuditDialog } from "~/components/audit/duplicate-audit-dialog";
 import { db } from "~/database/db.server";
+import { sendAuditAssignedEmails } from "~/modules/audit/assignment-emails.server";
 import {
   DUPLICATE_AUDIT_ALLOWED_STATUSES,
   duplicateAuditSession,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
@@ -157,10 +159,19 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const { newSession } = await duplicateAuditSession({
+    const { newSession, carriedOverAssigneeIds } = await duplicateAuditSession({
       auditSessionId: auditId,
       organizationId,
       userId,
+    });
+
+    // The carried-over team gets the same assignment email as on a fresh
+    // create; the person duplicating is never emailed about their own action.
+    void sendAuditAssignedEmails({
+      auditId: newSession.id,
+      organizationId,
+      recipientUserIds: carriedOverAssigneeIds.filter((id) => id !== userId),
+      hints: getClientHint(request),
     });
 
     sendNotification({

@@ -629,111 +629,82 @@ export async function createDueDateChangedNote({
 }
 
 /**
- * Creates an automatic note when an assignee is added to an audit.
+ * Creates ONE automatic note for an assignee change on an audit, naming every
+ * person added and every person removed in that edit. One note per edit, not
+ * one per person, so assigning a ten-person team does not push ten lines into
+ * the Activity tab.
  */
-export async function createAssigneeAddedNote({
+export async function createAssigneesChangedNote({
   auditSessionId,
   userId,
-  assigneeUserId,
+  addedUserIds,
+  removedUserIds,
   tx,
 }: {
   auditSessionId: string;
+  /** The user making the change. */
   userId: string;
-  assigneeUserId: string;
+  addedUserIds: string[];
+  removedUserIds: string[];
   tx: any; // Prisma transaction client
 }) {
-  const [updater, assignee] = await Promise.all([
-    tx.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        displayName: true,
-      },
-    }),
-    tx.user.findUnique({
-      where: { id: assigneeUserId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        displayName: true,
-      },
-    }),
-  ]);
-
-  if (!updater || !assignee) {
-    return; // Skip note creation if users not found
+  if (addedUserIds.length === 0 && removedUserIds.length === 0) {
+    return;
   }
 
-  const content = `${wrapUserLinkForNote({
-    ...updater,
-  })} added assignee: ${wrapUserLinkForNote({
-    ...assignee,
-  })}.`;
-
-  await tx.auditNote.create({
-    data: {
-      auditSessionId,
-      userId: updater.id,
-      type: "UPDATE",
-      content,
+  const userIds = Array.from(
+    new Set([userId, ...addedUserIds, ...removedUserIds])
+  );
+  const users: Array<UserNameFields & { id: string }> = await tx.user.findMany({
+    where: { id: { in: userIds } },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      displayName: true,
     },
   });
-}
+  const byId = new Map(users.map((user) => [user.id, user]));
 
-/**
- * Creates an automatic note when an assignee is removed from an audit.
- */
-export async function createAssigneeRemovedNote({
-  auditSessionId,
-  userId,
-  assigneeUserId,
-  tx,
-}: {
-  auditSessionId: string;
-  userId: string;
-  assigneeUserId: string;
-  tx: any; // Prisma transaction client
-}) {
-  const [updater, assignee] = await Promise.all([
-    tx.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        displayName: true,
-      },
-    }),
-    tx.user.findUnique({
-      where: { id: assigneeUserId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        displayName: true,
-      },
-    }),
-  ]);
-
-  if (!updater || !assignee) {
-    return; // Skip note creation if users not found
+  const updater = byId.get(userId);
+  if (!updater) {
+    return; // Skip note creation if the updater is not found
   }
 
-  const content = `${wrapUserLinkForNote({
-    ...updater,
-  })} removed assignee: ${wrapUserLinkForNote({
-    ...assignee,
-  })}.`;
+  const linkList = (ids: string[]) =>
+    ids
+      .map((id) => byId.get(id))
+      .filter((user): user is UserNameFields & { id: string } => !!user)
+      .map((user) => wrapUserLinkForNote({ ...user }));
+
+  const parts: string[] = [];
+  const added = linkList(addedUserIds);
+  if (added.length > 0) {
+    parts.push(
+      `added ${added.length === 1 ? "assignee" : "assignees"}: ${added.join(
+        ", "
+      )}`
+    );
+  }
+  const removed = linkList(removedUserIds);
+  if (removed.length > 0) {
+    parts.push(
+      `removed ${
+        removed.length === 1 ? "assignee" : "assignees"
+      }: ${removed.join(", ")}`
+    );
+  }
+
+  if (parts.length === 0) {
+    return; // Every referenced user is gone; nothing meaningful to record
+  }
 
   await tx.auditNote.create({
     data: {
       auditSessionId,
       userId: updater.id,
       type: "UPDATE",
-      content,
+      content: `${wrapUserLinkForNote({ ...updater })} ${parts.join(" and ")}.`,
     },
   });
 }

@@ -45,6 +45,9 @@ const StartAuditFromContextFormSchema = z.object({
       },
       { message: "Due date must be in the future" }
     ),
+  /** `assignees[i]` JSON blobs from AuditTeamMemberSelector. */
+  assignees: z.array(z.string()).optional(),
+  /** Pre-multi-assign singular field; still parsed server-side. */
   assignee: z.string().optional(),
 });
 
@@ -269,7 +272,7 @@ export function StartAuditFromContextDialog({
               <div className="!border-r">
                 <Separator className="md:hidden" />
                 <p className="p-3 pb-0 font-medium">
-                  Select assignee (optional).
+                  Select assignees (optional).
                 </p>
                 <p className="border-b p-3 ">
                   Admins can perform any audit. Choosing assignees also lets

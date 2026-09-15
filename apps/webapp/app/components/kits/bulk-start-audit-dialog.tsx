@@ -192,7 +192,7 @@ export default function KitsBulkStartAuditDialog() {
   const nameError = zo.errors.name()?.message;
   const descriptionError = zo.errors.description()?.message;
   const dueDateError = zo.errors.dueDate()?.message;
-  const assigneeError = zo.errors.assignee()?.message;
+  const assigneeError = zo.errors.assignees()?.message;
 
   return (
     <BulkUpdateDialogContent
