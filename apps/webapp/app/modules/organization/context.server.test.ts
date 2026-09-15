@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 
 import { getSelectedOrganization } from "./context.server";
+import type * as OrganizationService from "./service.server";
 import { getUserOrganizations } from "./service.server";
 
 // @vitest-environment node
@@ -27,7 +28,7 @@ vi.mock("~/database/db.server", () => ({
 // why: the membership read is the input these cases vary. `isSsoUser` stays
 // real — it is the decision under test.
 vi.mock("./service.server", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./service.server")>();
+  const actual = await importOriginal<typeof OrganizationService>();
   return { ...actual, getUserOrganizations: vi.fn() };
 });
 
