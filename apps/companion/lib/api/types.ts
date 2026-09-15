@@ -863,6 +863,13 @@ export type BookingDetailResponse = {
    */
   canQuickCheckin: boolean;
   /**
+   * False when the workspace requires explicit (scan/select) check-out for the
+   * caller's role. The app then hides the one-tap "Check Out All Assets", which
+   * the server refuses for that role; selecting or scanning assets stays.
+   * Absent on an older server, which never refuses it: read absence as `true`.
+   */
+  canQuickCheckout?: boolean;
+  /**
    * Per-booking lifecycle-action availability, computed server-side mirroring
    * the web ActionsDropdown gating (role + status + permission). The detail
    * screen shows only the enabled actions; the server endpoints enforce the
@@ -883,6 +890,16 @@ export type BookingActionResponse = {
     name: string;
     status: BookingStatus;
   };
+};
+
+/**
+ * Response of the fulfil-and-check-out endpoint. `remainingCount` is how many
+ * booked assets are still to check out: above 0 when the workspace requires
+ * explicit check-out and only the scanned units went out. Absent on an older
+ * server, which always checks out the whole booking.
+ */
+export type FulfilAndCheckoutResponse = BookingActionResponse & {
+  remainingCount?: number;
 };
 
 export type PartialCheckinResponse = {

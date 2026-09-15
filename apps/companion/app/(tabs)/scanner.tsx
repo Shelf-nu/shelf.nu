@@ -2033,12 +2033,11 @@ function ScannerContent() {
   };
 
   /**
-   * Submit the fulfil-and-check-out list: the scanned assets are matched
-   * against the booking's outstanding model reservations (materialising them)
-   * AND the booking is checked out (RESERVED -> ONGOING) in one atomic call.
-   * Mirrors the web `fulfil-and-checkout` scanner. The server rejects the
-   * submit if any reservation is still unassigned, so the operator gets a clear
-   * "still N to assign" error rather than a silent partial checkout.
+   * Submit the fulfil-and-check-out list. The server assigns the scanned units
+   * to the booking's outstanding model reservations and checks out either the
+   * whole booking or, under the workspace's explicit check-out requirement,
+   * only the scanned units. Mirrors the web `fulfil-and-checkout` scanner. The
+   * server refuses the check-out while any reservation is still unassigned.
    */
   const handleBookingFulfil = async () => {
     if (
@@ -2111,13 +2110,14 @@ function ScannerContent() {
     const kitIds = bookingCheckinItems
       .filter((i) => i.type === "kit")
       .map((i) => i.targetId);
-    const count = bookingCheckinItems.length;
+    // Units are asset rows only: a kit row is not a unit the server assigns.
+    const count = assetIds.length;
 
     Alert.alert(
       "Assign & check out",
-      `Assign ${count} scanned unit${count === 1 ? "" : "s"} and check out "${
-        bookingName || "this booking"
-      }"?`,
+      `Assign and check out the ${count} scanned unit${
+        count === 1 ? "" : "s"
+      } on "${bookingName || "this booking"}"?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -2134,7 +2134,7 @@ function ScannerContent() {
               }
             })();
 
-            const { error } = await api.fulfilAndCheckoutBooking(
+            const { data, error } = await api.fulfilAndCheckoutBooking(
               currentOrg.id,
               bookingId,
               assetIds,
@@ -2144,34 +2144,47 @@ function ScannerContent() {
             setIsBookingSubmitting(false);
 
             if (error) {
+              // A refusal after the assignment step leaves the scanned units
+              // on the booking. Re-reading the booking lets the add blockers
+              // flag them as already in this booking.
+              fetchBookingCtx();
               Alert.alert("Couldn't check out", error);
               return;
             }
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
-            Alert.alert(
-              "Checked out",
-              `Assigned ${count} unit${
-                count === 1 ? "" : "s"
-              } and checked out "${bookingName || "the booking"}".`,
-              [
-                {
-                  text: "OK",
-                  onPress: () => {
-                    setBookingCheckinItems([]);
-                    lastScanRef.current = "";
-                    markBookingDirty(bookingId);
-                    InteractionManager.runAfterInteractions(() => {
-                      pushIntoTab(
-                        "/(tabs)/bookings",
-                        `/(tabs)/bookings/${bookingId}`
-                      );
-                    });
-                  },
+            // Under the explicit check-out requirement only the scanned units
+            // go out, and the server says how many booked assets remain.
+            const remaining = data?.remainingCount ?? 0;
+            const message =
+              remaining > 0
+                ? `Assigned ${count} unit${
+                    count === 1 ? "" : "s"
+                  } and checked ${
+                    count === 1 ? "it" : "them"
+                  } out. ${remaining} more asset${
+                    remaining === 1 ? " is" : "s are"
+                  } still to check out.`
+                : `Assigned ${count} unit${
+                    count === 1 ? "" : "s"
+                  } and checked out "${bookingName || "the booking"}".`;
+            Alert.alert("Checked out", message, [
+              {
+                text: "OK",
+                onPress: () => {
+                  setBookingCheckinItems([]);
+                  lastScanRef.current = "";
+                  markBookingDirty(bookingId);
+                  InteractionManager.runAfterInteractions(() => {
+                    pushIntoTab(
+                      "/(tabs)/bookings",
+                      `/(tabs)/bookings/${bookingId}`
+                    );
+                  });
                 },
-              ]
-            );
+              },
+            ]);
           },
         },
       ]
