@@ -563,6 +563,51 @@ describe("ListAssetContent", () => {
       expect(tooltip.textContent).toMatch(/only 3/);
     });
 
+    it("renders no stock badge for a kit-driven QT row even when the loader reports no loose units", () => {
+      // A kit holding the asset's last units: the loose pool is 0/0, and the
+      // row is booked through the kit, so neither the red nor the amber badge
+      // applies. The same numbers on a standalone row are test (c)'s red case.
+      const kitRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 1,
+        isKitDriven: true,
+      } as unknown as AssetWithBooking;
+      // why: the loader map reports zero loose-pool units for this asset, the
+      // figure that would light the red badge on a standalone row.
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-reserved-kit",
+          status: "RESERVED",
+          bookingAssets: [{ assetId: kitRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: { [kitRow.id]: { bookable: 0, physicalNow: 0 } },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={kitRow}
+                isKitAsset
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(screen.queryByText("Insufficient stock")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Checked out elsewhere")
+      ).not.toBeInTheDocument();
+    });
+
     it("still renders the amber 'Checked out' AvailabilityBadge for an INDIVIDUAL row whose asset is checked out elsewhere", () => {
       // (d) — Regression guard: the QT short-circuits MUST NOT affect the
       // INDIVIDUAL path. An INDIVIDUAL asset with global CHECKED_OUT status

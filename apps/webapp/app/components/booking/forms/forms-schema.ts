@@ -156,10 +156,10 @@ function validateFutureDate(
   bufferStartTime: number,
   _timeZone?: string
 ): ValidationResult {
-  // why: `date` is now an absolute instant produced by `coerceLocalDate` in
-  // the user's zone, so a plain `new Date()` is the correct comparand.
-  // The previous toLocaleString/Date round-trip computed `now` in the wrong
-  // zone and triggered false "in the past" errors near the wall-clock moment.
+  // why: `date` is an absolute instant produced by `coerceLocalDate` in the
+  // user's zone, so a plain `new Date()` is the correct comparand. Converting
+  // `now` through a locale string first would compute it in a different zone
+  // and report near-future starts as being in the past.
   const now = new Date();
 
   // Only apply buffer if bufferStartTime is greater than 0
@@ -188,15 +188,13 @@ interface BookingFormSchemaParams {
    * read, but the whole object is taken deliberately — see below.
    *
    * REQUIRED, and typed as `ResolvedFormatPrefs` rather than a bare zone string
-   * or a browser-hints object, because BOTH weaker shapes have already shipped
-   * bugs:
+   * or a browser-hints object, because both weaker shapes give wrong answers:
    *
    * 1. OMITTING the zone. `coerceLocalDate` falls back to UTC, so every typed
    *    wall-clock time is read as UTC. For a user west of UTC that makes
    *    near-future starts look like the past, and "Start date must be in the
    *    future" blocks them for the length of their UTC offset (5 hours in US
-   *    Central, 7 in US Pacific). That shipped for three months while this
-   *    param was optional and one caller omitted it.
+   *    Central, 7 in US Pacific). Keep this parameter required.
    *
    * 2. Passing the BROWSER hint zone instead of the preference zone. Date
    *    DISPLAY resolves through `resolveFormatPrefs`, where a stored user
@@ -439,14 +437,22 @@ export function BookingFormSchema({
     custodian: z
       .string()
       .transform((val, ctx) => {
-        if (!val && val === "") {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Please select a custodian",
-          });
-          return z.NEVER;
+        // The field carries the picker's selection as JSON. An unreadable value
+        // is a selection the form cannot use, so it is reported like a missing
+        // one; `JSON.parse` would otherwise throw out of the schema and turn a
+        // bad submission into a 500.
+        try {
+          if (val) {
+            return JSON.parse(val);
+          }
+        } catch {
+          // Falls through to the issue below.
         }
-        return JSON.parse(val);
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Please select a custodian",
+        });
+        return z.NEVER;
       })
       .pipe(
         z.object({

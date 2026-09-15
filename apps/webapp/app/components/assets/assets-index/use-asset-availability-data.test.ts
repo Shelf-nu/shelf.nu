@@ -695,3 +695,68 @@ describe("returned-slice helpers", () => {
     ).toBe("2026-07-10T10:00:00.000Z");
   });
 });
+
+describe("useAssetAvailabilityData — custody-column shape (table view)", () => {
+  // The simple-mode TABLE view also ships `bookingAssets` on every row that
+  // sits on a live booking: `assetIndexFields` includes the pivot so the
+  // Custodian column can show the booking's custodian. That booking carries
+  // only `id`/`status`/custodian — no `from`/`to` — and the hook runs on every
+  // view, so a returned slice used to reach `returnedBarEnd` with an
+  // undefined start and throw from `toISOString()`.
+  const OUT = new Date("2026-08-25T16:09:43.466Z");
+  const BACK = new Date("2026-08-28T17:26:13.798Z");
+
+  /** One table-view row: an asset back from a still-OVERDUE booking. */
+  const custodyRow = (status: "ONGOING" | "OVERDUE" = "OVERDUE") => ({
+    id: "asset-1",
+    title: "Enlarger",
+    status: "AVAILABLE",
+    type: "INDIVIDUAL",
+    availableToBook: true,
+    category: null,
+    barcodes: [],
+    bookingAssets: [
+      {
+        id: "ba-1",
+        assetId: "asset-1",
+        bookingId: "b1",
+        assetKitId: null,
+        quantity: 1,
+        checkedOutAt: OUT,
+        checkedInAt: BACK,
+        booking: {
+          id: "b1",
+          status,
+          custodianTeamMember: { id: "tm-1", name: "Pat", userId: null },
+          custodianUser: null,
+        },
+      },
+    ],
+  });
+
+  it("(s) renders the table view for a returned slice whose booking has no period", () => {
+    const { result } = renderHook(() =>
+      useAssetAvailabilityData([custodyRow("OVERDUE")] as unknown as Items)
+    );
+    expect(result.current.resources).toHaveLength(1);
+    expect(result.current.events).toHaveLength(0);
+  });
+
+  it("(t) draws no bar from the custody-column shape for a still-out slice either", () => {
+    const row = custodyRow("ONGOING");
+    row.bookingAssets[0].checkedInAt = null as unknown as Date;
+    const { result } = renderHook(() =>
+      useAssetAvailabilityData([row] as unknown as Items)
+    );
+    expect(result.current.events).toHaveLength(0);
+  });
+
+  it("(u) returnedBarEnd keeps the check-in when the start cannot be read", () => {
+    expect(
+      returnedBarEnd("2026-07-10T12:00:00.000Z", undefined as unknown as string)
+    ).toBe("2026-07-10T12:00:00.000Z");
+    expect(returnedBarEnd("2026-07-10T12:00:00.000Z", "not a date")).toBe(
+      "2026-07-10T12:00:00.000Z"
+    );
+  });
+});

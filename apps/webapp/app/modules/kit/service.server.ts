@@ -4130,6 +4130,7 @@ export async function updateKitLocation({
         message: "Kit not found",
         label,
         shouldBeCaptured: false,
+        status: 404,
       });
     }
 
@@ -5213,6 +5214,7 @@ export async function updateKitAssets({
         additionalData: { userId, kitId },
         label: "Kit",
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 
