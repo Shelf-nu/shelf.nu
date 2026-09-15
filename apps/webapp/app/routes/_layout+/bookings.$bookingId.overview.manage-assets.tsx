@@ -8,7 +8,7 @@ import type {
   Prisma,
   Tag,
 } from "@prisma/client";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
   ActionFunctionArgs,
@@ -84,7 +84,10 @@ import {
   removeAssets,
   updateBookingAssets,
 } from "~/modules/booking/service.server";
-import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
+import {
+  getAssetModelAvailability,
+  getBookingModelTabData,
+} from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
@@ -188,6 +191,13 @@ export type AssetWithBooking = Asset & {
   // `BOOKING_WITH_ASSETS_INCLUDE`.
   qrCodes: { id: string }[];
   barcodes: { id: string; type: BarcodeType; value: string }[];
+  /**
+   * True when every free unit of this asset's model is promised to other
+   * bookings by a model reservation for the booking's window, so this unit
+   * cannot be booked by name here. Set by the manage-assets loader only;
+   * surfaces that do not compute it never show the matching badge.
+   */
+  modelReservedElsewhere?: boolean;
 };
 
 export const meta = () => [{ title: appendToMetaTitle("Manage assets") }];
@@ -289,12 +299,107 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       excludeBookingId: id,
     });
 
-    /** Attach availableQuantity and filter out fully-allocated qty assets */
+    /**
+     * Models of which this booking cannot take one more unit by name, because
+     * other bookings' model reservations leave the pool no room for it in
+     * this window. Mirrors the write-time guard for a single added unit:
+     * a draft must fit everything it would then hold (its named units plus
+     * the units of its own request still unassigned); an active booking
+     * already holds its units and its request, so a unit that fulfils that
+     * request is never refused and never flagged. A unit already on the
+     * booking claims nothing new. One availability read per distinct model
+     * on the page, through the same primitive the write paths use.
+     */
+    const isDraft = booking.status === BookingStatus.DRAFT;
+    const remainingByModel = new Map<string, number>();
+    for (const request of booking.modelRequests) {
+      if (request.fulfilledAt !== null) continue;
+      remainingByModel.set(
+        request.assetModelId,
+        (remainingByModel.get(request.assetModelId) ?? 0) +
+          Math.max(0, request.quantity - request.fulfilledQuantity)
+      );
+    }
+    const ownStandaloneAssetIds = new Set(
+      booking.bookingAssets
+        .filter((ba) => ba.assetKitId === null)
+        .map((ba) => ba.assetId)
+    );
+    const candidateModelIds = [
+      ...new Set(
+        assets.flatMap((a) =>
+          a.type === AssetType.INDIVIDUAL &&
+          a.assetModelId &&
+          !ownStandaloneAssetIds.has(a.id) &&
+          (isDraft || (remainingByModel.get(a.assetModelId) ?? 0) === 0)
+            ? [a.assetModelId]
+            : []
+        )
+      ),
+    ];
+    const exhaustedModelIds = new Set<string>();
+    if (booking.from && booking.to && candidateModelIds.length > 0) {
+      const [availabilities, heldRows] = await Promise.all([
+        Promise.all(
+          candidateModelIds.map((assetModelId) =>
+            getAssetModelAvailability({
+              assetModelId,
+              organizationId,
+              bookingId: id,
+              from: booking.from,
+              to: booking.to,
+            })
+          )
+        ),
+        // Standalone units of these models already on the booking. They are
+        // not in `availability` (it excludes this booking), so they count on
+        // the booking's side.
+        db.bookingAsset.findMany({
+          where: {
+            bookingId: id,
+            assetKitId: null,
+            asset: {
+              organizationId,
+              assetModelId: { in: candidateModelIds },
+              type: AssetType.INDIVIDUAL,
+            },
+          },
+          select: { asset: { select: { assetModelId: true } } },
+        }),
+      ]);
+      const heldByModel = new Map<string, number>();
+      for (const row of heldRows) {
+        const assetModelId = row.asset.assetModelId;
+        if (!assetModelId) continue;
+        heldByModel.set(assetModelId, (heldByModel.get(assetModelId) ?? 0) + 1);
+      }
+      candidateModelIds.forEach((assetModelId, index) => {
+        const held = heldByModel.get(assetModelId) ?? 0;
+        const remaining = remainingByModel.get(assetModelId) ?? 0;
+        // One more named unit, plus whatever the booking's own request still
+        // needs once that unit has fulfilled one of its units.
+        const footprint = held + 1 + Math.max(0, remaining - 1);
+        if (footprint > availabilities[index].available) {
+          exhaustedModelIds.add(assetModelId);
+        }
+      });
+    }
+
+    /**
+     * Attach the model flag, attach availableQuantity to qty-tracked rows and
+     * drop qty-tracked rows with nothing left to book.
+     */
     const assetsWithAvailability = assets
       .map((a) => {
-        if (a.type !== "QUANTITY_TRACKED") return a;
+        const modelReservedElsewhere =
+          a.type === AssetType.INDIVIDUAL &&
+          !!a.assetModelId &&
+          !ownStandaloneAssetIds.has(a.id) &&
+          exhaustedModelIds.has(a.assetModelId);
+        if (a.type !== "QUANTITY_TRACKED")
+          return { ...a, modelReservedElsewhere };
         const availableQuantity = availabilityByAsset.get(a.id)?.bookable ?? 0;
-        return { ...a, availableQuantity };
+        return { ...a, modelReservedElsewhere, availableQuantity };
       })
       .filter((a) => {
         if (a.type !== "QUANTITY_TRACKED") return true;
@@ -1220,14 +1325,20 @@ export default function AddAssetsToNewBooking() {
    * Set disabled items for assets.
    * QUANTITY_TRACKED assets are never disabled — they support partial
    * reservations, so the user must always be able to select/deselect
-   * them and adjust the quantity picker.
+   * them and adjust the quantity picker. An INDIVIDUAL unit whose model is
+   * fully reserved by other bookings for this window is disabled like an
+   * unbookable one: the write path refuses it.
    */
   useEffect(() => {
     const _disabledBulkItems = items.reduce<ListItemData[]>((acc, asset) => {
       /** Qty-tracked assets can always be selected to adjust quantity */
       if (isQuantityTracked(asset)) return acc;
 
-      if (!asset.availableToBook || asset.assetKits.length > 0) {
+      if (
+        !asset.availableToBook ||
+        asset.assetKits.length > 0 ||
+        asset.modelReservedElsewhere
+      ) {
         acc.push(asset);
       }
 
@@ -1568,6 +1679,7 @@ const RowComponent = ({
   item: AssetsFromViewItem & {
     location?: Prisma.LocationGetPayload<typeof LOCATION_WITH_HIERARCHY> | null;
     availableQuantity?: number;
+    modelReservedElsewhere?: boolean;
   };
   extraProps?: {
     quantities?: Record<string, number>;

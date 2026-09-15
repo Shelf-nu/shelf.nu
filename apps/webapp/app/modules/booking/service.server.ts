@@ -76,7 +76,10 @@ import {
   isQuantityTracked,
 } from "~/modules/asset/utils";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
-import { fulfilModelRequestsForAssets } from "~/modules/booking-model-request/service.server";
+import {
+  assertModelUnitsNotReservedElsewhere,
+  fulfilModelRequestsForAssets,
+} from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
@@ -1867,6 +1870,9 @@ export async function reserveBooking({
                   // guard's shortfall message (see the DRAFT → RESERVED
                   // transaction below).
                   unitOfMeasure: true,
+                  // Groups the standalone INDIVIDUAL rows by model for the
+                  // model reservation guard in the same transaction.
+                  assetModelId: true,
                   bookingAssets: {
                     ...createBookingConflictConditions({
                       currentBookingId: id,
@@ -2186,6 +2192,29 @@ export async function reserveBooking({
           }
         );
       }
+
+      /**
+       * Units booked by name claim the same pool that other bookings' model
+       * reservations draw from. Every standalone INDIVIDUAL row on the draft
+       * is checked here, in the transaction that flips the status, so a draft
+       * assembled before those reservations existed cannot commit past them.
+       * Kit-driven rows are reserved as one unit on the kit axis and
+       * quantity-tracked rows are judged by the guard above.
+       */
+      await assertModelUnitsNotReservedElsewhere({
+        assets: bookingFound.bookingAssets
+          .filter(
+            (ba) =>
+              ba.assetKitId == null && ba.asset.type === AssetType.INDIVIDUAL
+          )
+          .map((ba) => ba.asset),
+        bookingId: id,
+        bookingStatus: bookingFound.status,
+        organizationId,
+        from,
+        to,
+        tx,
+      });
 
       return tx.booking.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: bookingFound id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L1020; this is the write on that same proven id
@@ -9662,10 +9691,17 @@ export async function updateBookingAssets({
       // kit-driven invariant below (INDIVIDUAL assets can't legitimately be
       // both in the same booking). `title`/`unitOfMeasure` are selected too
       // so the QUANTITY_TRACKED availability guard below can build its
-      // shortfall message without a second read.
+      // shortfall message without a second read, and `assetModelId` groups
+      // the new standalone rows by model for the model reservation guard.
       const validAssets = await tx.asset.findMany({
         where: { id: { in: uniqueAssetIds }, organizationId },
-        select: { id: true, type: true, title: true, unitOfMeasure: true },
+        select: {
+          id: true,
+          type: true,
+          title: true,
+          unitOfMeasure: true,
+          assetModelId: true,
+        },
       });
       const validAssetIds = validAssets.map((a) => a.id);
 
@@ -9962,6 +9998,29 @@ export async function updateBookingAssets({
           (assetId: string) => !preExistingStandaloneAssetIds.has(assetId)
         )
       );
+
+      /**
+       * Units booked by name claim the same pool that other bookings' model
+       * reservations draw from. Only the standalone INDIVIDUAL rows that are
+       * new on this call can claim: kit slices are reserved as one unit on the
+       * kit axis, quantity-tracked rows are judged by the pool guard above,
+       * and a re-submitted row holds nothing new. Runs before the inserts and
+       * before fulfilment, while this booking's own requests are still
+       * outstanding.
+       */
+      await assertModelUnitsNotReservedElsewhere({
+        assets: validAssets.filter(
+          (asset) =>
+            newlyStandaloneAssetIds.has(asset.id) &&
+            asset.type === AssetType.INDIVIDUAL
+        ),
+        bookingId: id,
+        bookingStatus: lockedStatus,
+        organizationId,
+        from: b.from,
+        to: b.to,
+        tx,
+      });
 
       await Promise.all([
         // Standalone branch: upsert against the manual partial unique
@@ -10760,7 +10819,17 @@ export async function extendBooking({
           activeSchedulerReference: true,
           bookingAssets: {
             include: {
-              asset: { select: { id: true, status: true } },
+              // `type`, `assetModelId` and `title` feed the model guard that
+              // re-measures the booking against the extended window.
+              asset: {
+                select: {
+                  id: true,
+                  status: true,
+                  type: true,
+                  assetModelId: true,
+                  title: true,
+                },
+              },
             },
           },
           from: true,
@@ -10861,6 +10930,29 @@ export async function extendBooking({
           shouldBeCaptured: false,
         });
       }
+
+      /**
+       * The days being added may overlap model reservations that other
+       * bookings hold, which the clash check above cannot see: a
+       * `BookingModelRequest` names no asset. The booking's standalone
+       * INDIVIDUAL units are measured again against the pool for the new
+       * dates. Kit-driven rows are reserved on the kit axis.
+       */
+      await assertModelUnitsNotReservedElsewhere({
+        assets: booking.bookingAssets
+          .filter(
+            (ba) =>
+              ba.assetKitId == null && ba.asset.type === AssetType.INDIVIDUAL
+          )
+          .map((ba) => ba.asset),
+        bookingId: booking.id,
+        bookingStatus: booking.status,
+        windowChanged: true,
+        organizationId,
+        from: booking.from,
+        to: newEndDate,
+        tx,
+      });
 
       return tx.booking.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) at L2853; this is the write on that same proven id
@@ -14502,79 +14594,83 @@ async function addScannedAssetsToBookingWithinTx(
   });
 
   /**
+   * The window every overlap guard below measures against, read once through
+   * `tx` so the conflict guard, the quantity-tracked pool guard and the model
+   * pool guard all judge the same dates. Null ends mean a draft without dates:
+   * nothing overlaps, so the windowed guards skip.
+   */
+  const bookingWindow: { from: Date | null; to: Date | null } | null =
+    await tx.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { from: true, to: true },
+    });
+
+  /**
    * Conflict guard (mirrors the reserve/checkout guards): reject the add
    * when any scanned asset (standalone OR kit-driven) is already RESERVED
    * or CHECKED_OUT on a DIFFERENT booking whose window OVERLAPS this
    * booking's from/to. Runs inside the same tx as the writes below so the
    * read-then-write is atomic against concurrent reservations.
    *
-   * Adapted from the main-side guard that previously lived inline in
-   * `addScannedAssetsToBooking` (resolved during 2026-06-25 merge): we
-   * already have `allScannedAssetIds` (union of standalone + kit-driven),
-   * so we skip main's `tx.asset.findMany({where: {kitId: ...}})` expansion
-   * — pre-pivot main relied on `Asset.kitId`, which Phase 4a removed.
+   * `allScannedAssetIds` already unions standalone and kit-driven ids, so no
+   * kit-membership expansion is needed here.
    */
-  if (allScannedAssetIds.length > 0) {
-    const conflictBooking = await tx.booking.findFirst({
-      where: { id: bookingId, organizationId },
-      select: { from: true, to: true },
-    });
-
-    if (conflictBooking?.from && conflictBooking?.to) {
-      const candidates = await tx.asset.findMany({
-        where: { id: { in: allScannedAssetIds }, organizationId },
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          // Post-Phase-3a: bookings reach assets through the BookingAsset
-          // pivot. `hasAssetBookingConflicts` reads `asset.bookingAssets`
-          // (not `asset.bookings`) — the conflict-conditions helper now
-          // returns `Prisma.Asset$bookingAssetsArgs` accordingly.
-          bookingAssets: {
-            ...createBookingConflictConditions({
-              currentBookingId: bookingId,
-              fromDate: conflictBooking.from,
-              toDate: conflictBooking.to,
-            }),
-            select: {
-              booking: { select: { id: true, status: true } },
-            },
+  if (
+    allScannedAssetIds.length > 0 &&
+    bookingWindow?.from &&
+    bookingWindow.to
+  ) {
+    const candidates = await tx.asset.findMany({
+      where: { id: { in: allScannedAssetIds }, organizationId },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        // Bookings reach assets through the `BookingAsset` pivot, which is
+        // what `hasAssetBookingConflicts` reads and what the
+        // conflict-conditions helper returns.
+        bookingAssets: {
+          ...createBookingConflictConditions({
+            currentBookingId: bookingId,
+            fromDate: bookingWindow.from,
+            toDate: bookingWindow.to,
+          }),
+          select: {
+            booking: { select: { id: true, status: true } },
           },
         },
+      },
+    });
+
+    // Typed locally because `tx` is `any` (the dynamic extended Prisma
+    // client's tx type doesn't reduce to `Prisma.TransactionClient`).
+    type ConflictCandidate = {
+      id: string;
+      title: string;
+      status: string;
+      bookingAssets: Array<{ booking: { id: string; status: string } }>;
+    };
+    const conflicted = (candidates as ConflictCandidate[]).filter((asset) =>
+      hasAssetBookingConflicts(asset, bookingId)
+    );
+
+    if (conflicted.length > 0) {
+      const conflictedNames = conflicted
+        .slice(0, 3)
+        .map((asset) => asset.title)
+        .join(", ");
+      const additionalCount = conflicted.length > 3 ? conflicted.length - 3 : 0;
+      const additionalText =
+        additionalCount > 0 ? ` and ${additionalCount} more` : "";
+
+      throw new ShelfError({
+        cause: null,
+        label,
+        title: "Booking conflict",
+        message: `Cannot add to booking. Some assets are already booked or checked out for an overlapping period: ${conflictedNames}${additionalText}. Please remove them and try again.`,
+        status: 400,
+        shouldBeCaptured: false,
       });
-
-      // Typed locally because `tx` is `any` (the dynamic extended Prisma
-      // client's tx type doesn't reduce to `Prisma.TransactionClient`).
-      type ConflictCandidate = {
-        id: string;
-        title: string;
-        status: string;
-        bookingAssets: Array<{ booking: { id: string; status: string } }>;
-      };
-      const conflicted = (candidates as ConflictCandidate[]).filter((asset) =>
-        hasAssetBookingConflicts(asset, bookingId)
-      );
-
-      if (conflicted.length > 0) {
-        const conflictedNames = conflicted
-          .slice(0, 3)
-          .map((asset) => asset.title)
-          .join(", ");
-        const additionalCount =
-          conflicted.length > 3 ? conflicted.length - 3 : 0;
-        const additionalText =
-          additionalCount > 0 ? ` and ${additionalCount} more` : "";
-
-        throw new ShelfError({
-          cause: null,
-          label,
-          title: "Booking conflict",
-          message: `Cannot add to booking. Some assets are already booked or checked out for an overlapping period: ${conflictedNames}${additionalText}. Please remove them and try again.`,
-          status: 400,
-          shouldBeCaptured: false,
-        });
-      }
     }
   }
 
@@ -14669,11 +14765,6 @@ async function addScannedAssetsToBookingWithinTx(
   ];
 
   if (qtScannedAssetIds.length > 0) {
-    const bookingWindow = await tx.booking.findFirst({
-      where: { id: bookingId, organizationId },
-      select: { from: true, to: true },
-    });
-
     const preExistingQtyByAssetId = new Map<string, number>(
       preExistingStandaloneRows.map((row) => [row.assetId, row.quantity])
     );
@@ -14727,12 +14818,33 @@ async function addScannedAssetsToBookingWithinTx(
    * Assets missing from `scannedAssetsMetaById` aren't in this org; they are
    * skipped here and rejected by the FK on the create below.
    */
+  const newStandaloneScans = [...new Set(assetIds)]
+    .filter((assetId) => !preExistingStandaloneScannedIds.has(assetId))
+    .map((assetId) => scannedAssetsMetaById.get(assetId))
+    .filter((meta): meta is ScannedAssetMeta => meta !== undefined);
+
+  /**
+   * Units scanned by name claim the same pool that other bookings' model
+   * reservations draw from. Standalone INDIVIDUAL scans only: kit slices are
+   * reserved as one unit on the kit axis and quantity-tracked scans are judged
+   * by the pool guard above. Runs before fulfilment, while this booking's own
+   * requests are still outstanding and therefore still exempt their model.
+   */
+  await assertModelUnitsNotReservedElsewhere({
+    assets: newStandaloneScans.filter(
+      (meta) => meta.type === AssetType.INDIVIDUAL
+    ),
+    bookingId,
+    bookingStatus: scanTargetStatus,
+    organizationId,
+    from: bookingWindow?.from,
+    to: bookingWindow?.to,
+    tx,
+  });
+
   const modelRequestIdByAssetId = await fulfilModelRequestsForAssets({
     bookingId,
-    assets: [...new Set(assetIds)]
-      .filter((assetId) => !preExistingStandaloneScannedIds.has(assetId))
-      .map((assetId) => scannedAssetsMetaById.get(assetId))
-      .filter((meta): meta is ScannedAssetMeta => meta !== undefined),
+    assets: newStandaloneScans,
     organizationId,
     userId,
     tx,

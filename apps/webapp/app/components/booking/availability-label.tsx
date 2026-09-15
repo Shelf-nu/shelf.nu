@@ -18,11 +18,14 @@ import {
 } from "../shared/tooltip";
 
 /**
- * There are 4 reasons an asset can be unavailable:
+ * There are 5 reasons an asset can be unavailable:
  * 1. Its marked as not allowed for booking
  * 2. It is already in custody
  * 3. It is already booked for that period (within another booking)
  * 4. It is part of a kit and user is trying to add it individually
+ * 5. Every free unit of its model is reserved by model on other bookings
+ *    for that period (`asset.modelReservedElsewhere`, set by the picker
+ *    loader)
  * Each reason has its own tooltip and label
  */
 export function AvailabilityLabel({
@@ -202,6 +205,22 @@ export function AvailabilityLabel({
             "This asset is currently checked out as part of another booking and should be available for your selected date range period"
           )
         }
+      />
+    );
+  }
+
+  /**
+   * Every free unit of this asset's model is promised to other bookings by a
+   * model reservation for the selected period, so this unit cannot be booked
+   * by name. Same tone as "Already booked": the pool, not this unit, is taken.
+   * Sits after the unit-level reasons, which describe this unit itself.
+   */
+  if (asset.modelReservedElsewhere) {
+    return (
+      <AvailabilityBadge
+        badgeText="Reserved by model"
+        tooltipTitle="Model is reserved for this period"
+        tooltipContent="Other bookings reserved every free unit of this asset's model for the selected dates. Change the dates, or pick an asset of another model."
       />
     );
   }
