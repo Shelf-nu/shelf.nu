@@ -2780,9 +2780,7 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
     // Org scope comes off the rows themselves — every `Kit` carries it — so the
     // lookup cannot reach another workspace without widening the signature
     // every call site is bound to.
-    const organizationIds = [
-      ...new Set(kits.map((kit) => kit.organizationId)),
-    ];
+    const organizationIds = [...new Set(kits.map((kit) => kit.organizationId))];
     const custodianByKitId = await getBookingCustodiansHoldingKits(
       checkedOutKitIds,
       organizationIds
