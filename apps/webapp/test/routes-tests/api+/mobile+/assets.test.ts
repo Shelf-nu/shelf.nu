@@ -10,7 +10,10 @@
  * Also exercises the back-compat response shape: the loader must pipe assets
  * through `shapeMobileAssetResponse` so the in-App-Store companion (since
  * 2026-05-20) keeps receiving the legacy flat `kit` / `kitId` / `location` /
- * single-or-null `custody` shape rather than the new pivot arrays.
+ * single-or-null `custody` shape rather than the new pivot arrays. That
+ * flattening keeps only the FIRST kit membership, so the kit cases below pin
+ * both halves of what makes the resulting label honest: a deterministic order
+ * on the pivot, and the `kitCount` that says the named kit is one of several.
  *
  * @see {@link file://./assets.ts} for the loader under test
  * @see {@link file://./../../../modules/api/mobile-auth.server.ts} for the helper + select
@@ -206,6 +209,97 @@ describe("GET /api/mobile/assets", () => {
       location: null,
       custody: null,
     });
+  });
+
+  it("orders kit memberships oldest-first so a row always names the same kit", async () => {
+    // `shapeMobileAssetResponse` takes `assetKits[0]`, and only INDIVIDUAL
+    // assets are capped at one membership — so an unordered relation lets a
+    // quantity-tracked asset name a different kit on each refresh. Oldest
+    // first (id breaking same-transaction ties) is the primary kit the web
+    // asset index picks, so the two surfaces agree.
+    const args = createLoaderArgs({
+      request: new Request("http://localhost:3000/api/mobile/assets"),
+    });
+
+    await loader(args);
+
+    expect(findManyMock.mock.calls[0]![0]!.select).toMatchObject({
+      assetKits: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+    });
+  });
+
+  it("reports how many kits an asset belongs to alongside the named one", async () => {
+    // The row can only show one name, so `kitCount` is what stops it from
+    // presenting the primary kit of three as the asset's only kit.
+    findManyMock.mockResolvedValueOnce([
+      {
+        id: "asset-multi",
+        title: "Gaffer tape",
+        status: "AVAILABLE",
+        mainImage: null,
+        mainImageExpiration: null,
+        thumbnailImage: null,
+        availableToBook: true,
+        category: null,
+        type: "QUANTITY_TRACKED",
+        quantity: 30,
+        assetKits: [
+          { kit: { id: "kit-1", name: "Camera Kit" } },
+          { kit: { id: "kit-2", name: "Audio Kit" } },
+        ],
+        assetLocations: [],
+        custody: [],
+      },
+      {
+        id: "asset-single",
+        title: "Tripod",
+        status: "AVAILABLE",
+        mainImage: null,
+        mainImageExpiration: null,
+        thumbnailImage: null,
+        availableToBook: true,
+        category: null,
+        assetKits: [{ kit: { id: "kit-1", name: "Camera Kit" } }],
+        assetLocations: [],
+        custody: [],
+      },
+      {
+        id: "asset-kitless",
+        title: "Clapperboard",
+        status: "AVAILABLE",
+        mainImage: null,
+        mainImageExpiration: null,
+        thumbnailImage: null,
+        availableToBook: true,
+        category: null,
+        assetKits: [],
+        assetLocations: [],
+        custody: [],
+      },
+    ] as never);
+    countMock.mockResolvedValueOnce(3);
+
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request("http://localhost:3000/api/mobile/assets"),
+      })
+    );
+    assertIsDataWithResponseInit(response);
+    const body = response.data as {
+      assets: Array<{
+        id: string;
+        kit: { id: string; name: string } | null;
+        kitCount: number;
+      }>;
+    };
+
+    // The named kit is the first membership the (ordered) select returned.
+    expect(body.assets[0]).toMatchObject({
+      kit: { id: "kit-1", name: "Camera Kit" },
+      kitCount: 2,
+    });
+    expect(body.assets[1]).toMatchObject({ kitCount: 1 });
+    expect(body.assets[2]).toMatchObject({ kit: null, kitCount: 0 });
   });
 
   it("sends mainImageExpiration only when the asset's own image won the cascade", async () => {
