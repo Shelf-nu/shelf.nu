@@ -170,3 +170,152 @@ describe("KitRow bulk-selection checkbox", () => {
     expect(withoutCheckbox).toBe(withCheckbox);
   });
 });
+
+/**
+ * "Already booked" signal for a kit made only of QUANTITY_TRACKED members.
+ *
+ * `hasAssetBookingConflicts` exempts QUANTITY_TRACKED assets — several
+ * bookings may legitimately share one asset's free pool — so a QT-only kit
+ * needs its own kit-driven-slice check (`hasKitBookingConflicts`) to ever
+ * show this badge. `~/modules/booking/helpers` is deliberately NOT mocked
+ * here, unlike `test/components/booking/availability-label.test.tsx`, so the
+ * real conflict rule runs.
+ */
+describe("KitRow already-booked signal (QT-only kit)", () => {
+  const checkedOutKit = {
+    id: "kit-1",
+    name: "Fabric Kit",
+    image: null,
+    imageExpiration: null,
+    status: KitStatus.CHECKED_OUT,
+    category: null,
+    location: null,
+    qrCodes: [],
+    barcodes: [],
+  } as ComponentProps<typeof KitRow>["kit"];
+
+  const renderCheckedOutKitRow = (assets: AssetWithBooking[]) => {
+    mockUseUserRoleHelper.mockReturnValue({
+      isBase: false,
+      isSelfService: false,
+      isBaseOrSelfService: false,
+      roles: [OrganizationRoles.ADMIN],
+    });
+    // RESERVED (not ONGOING/OVERDUE): the "Already booked" badge is
+    // withheld while THIS booking is itself in progress, since a kit it
+    // already holds needs no such warning.
+    mockUseLoaderData.mockReturnValue({
+      booking: {
+        id: "booking-1",
+        status: BookingStatus.RESERVED,
+        assets: [],
+        custodianUser: null,
+      },
+    });
+
+    render(
+      <table>
+        <tbody>
+          <KitRow
+            kit={checkedOutKit}
+            isExpanded={false}
+            bookingStatus={BookingStatus.RESERVED}
+            bookingId="booking-1"
+            assets={assets}
+            partialCheckinDetails={{}}
+            shouldShowCheckinColumns={false}
+            partialCheckoutDetails={{}}
+            shouldShowCheckoutColumns={false}
+          />
+        </tbody>
+      </table>
+    );
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows 'Already booked' when the kit is held on another overlapping booking through its kit slice", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: true,
+        bookingAssets: [
+          {
+            // Kit-driven slice of THIS kit ("kit-1"), still out: checked out
+            // and not yet checked in, on an ONGOING booking that overlaps.
+            assetKitId: "ak-1",
+            sourceKitId: "kit-1",
+            checkedOutAt: new Date("2024-01-01T09:00:00Z"),
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.ONGOING },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderCheckedOutKitRow(assets);
+
+    expect(screen.getByText("Already booked")).toBeInTheDocument();
+  });
+
+  it("does not show 'Already booked' for a standalone row of the same asset on another booking", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: true,
+        bookingAssets: [
+          {
+            // Standalone slice (`assetKitId` null) — the asset's free pool,
+            // not a slice of this kit, so it must not trip the kit signal.
+            assetKitId: null,
+            sourceKitId: null,
+            checkedOutAt: new Date("2024-01-01T09:00:00Z"),
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.ONGOING },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderCheckedOutKitRow(assets);
+
+    expect(screen.queryByText("Already booked")).not.toBeInTheDocument();
+  });
+
+  it("does not show 'Already booked' for a kit member detached mid-booking on another overlapping booking", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: true,
+        bookingAssets: [
+          {
+            // Detached: the member was removed from "kit-1" mid-booking, so
+            // `assetKitId` is cleared while `sourceKitId` still names the
+            // kit. This is a standalone row now, not a live slice of the
+            // kit, even though the other booking overlaps and is RESERVED.
+            assetKitId: null,
+            sourceKitId: "kit-1",
+            checkedOutAt: null,
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.RESERVED },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderCheckedOutKitRow(assets);
+
+    expect(screen.queryByText("Already booked")).not.toBeInTheDocument();
+  });
+});

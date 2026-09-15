@@ -7,7 +7,11 @@ import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { resolveDisplayCode } from "~/modules/barcode/display";
-import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
+import {
+  hasAssetBookingConflicts,
+  hasKitBookingConflicts,
+} from "~/modules/booking/helpers";
+import type { KitBookingSlice } from "~/modules/booking/helpers";
 import type {
   PartialCheckinDetailsType,
   PartialCheckoutDetailsType,
@@ -102,11 +106,27 @@ export default function KitRow({
     bookingStatus
   );
 
-  // Kit is overlapping if it's not AVAILABLE and has conflicting bookings
-  // Use centralized booking conflict logic
+  /**
+   * Kit-driven slices of THIS kit across its member assets — rows whose
+   * `assetKitId` marks them kit-driven and whose `sourceKitId` names this
+   * kit specifically, never a standalone row of the same asset or a slice
+   * booked under a different kit.
+   */
+  const thisKitSlices: KitBookingSlice[] = assets.flatMap((asset) =>
+    (asset.bookingAssets ?? []).filter(
+      (ba) => ba.assetKitId !== null && ba.sourceKitId === kit.id
+    )
+  );
+
+  // Kit is overlapping if it's not AVAILABLE and has conflicting bookings.
+  // `hasAssetBookingConflicts` alone misses a kit made only of
+  // QUANTITY_TRACKED members — it exempts them, since several bookings may
+  // legitimately share a QT asset's free pool — so `hasKitBookingConflicts`
+  // is ORed in to catch a conflict recorded on the kit-driven slice instead.
   const isOverlapping =
     kit.status !== "AVAILABLE" &&
-    assets.some((asset) => hasAssetBookingConflicts(asset, bookingId));
+    (assets.some((asset) => hasAssetBookingConflicts(asset, bookingId)) ||
+      hasKitBookingConflicts(thisKitSlices, bookingId));
 
   // A kit "returned" as a unit only when EVERY one of its assets was actually
   // checked out — the same unanimity rule the lifecycle bar uses in unit mode
