@@ -3,7 +3,7 @@ import { z } from "zod";
 import { csvResponse } from "~/utils/csv-utf8";
 import { exportAssetsBackupToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
-import { error, getParams } from "~/utils/http.server";
+import { buildContentDisposition, error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, params }: LoaderFunctionArgs) {
@@ -23,7 +23,14 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     /** Join the rows with a new line */
     const csvString = await exportAssetsBackupToCsv({ organizationId });
 
-    return csvResponse(csvString);
+    return csvResponse(csvString, {
+      headers: {
+        "content-disposition": buildContentDisposition(null, {
+          fallback: "assets",
+          suffix: "-org-export",
+        }),
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
