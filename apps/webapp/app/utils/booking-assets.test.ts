@@ -451,6 +451,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
       })
     ).toBe("insufficient");
   });
@@ -463,6 +464,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
       })
     ).toBe("pending-return");
 
@@ -473,6 +475,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.DRAFT,
+        isKitDriven: false,
       })
     ).toBe("pending-return");
   });
@@ -487,6 +490,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
       })
     ).toBeNull();
   });
@@ -499,6 +503,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.CHECKED_OUT,
         bookingStatus: BookingStatus.ONGOING,
+        isKitDriven: false,
       })
     ).toBeNull();
   });
@@ -528,6 +533,27 @@ describe("resolveQtyStockBadgeVariant", () => {
     ).toBe("insufficient");
   });
 
+  it("(f) requires every caller to say whether the row is kit-driven", () => {
+    // Forgetting the flag on a surface that renders kit members is silent: the
+    // row still renders, and still gets a badge, measured against the wrong
+    // pool. Nothing observable breaks, so the compiler has to be the guard.
+    //
+    // The directive below IS that guard: make `isKitDriven` optional again and
+    // it stops suppressing anything, so `tsc` fails the build on an unused
+    // directive. (Keep any mention of the directive off the start of a comment
+    // line — TypeScript reads one there as real, wherever it appears.)
+    // @ts-expect-error - isKitDriven is deliberately required
+    const variant = resolveQtyStockBadgeVariant({
+      rowQty: 1,
+      availability: { bookable: 0, physicalNow: 0 },
+      contextStatus: AssetStatus.AVAILABLE,
+      bookingStatus: BookingStatus.RESERVED,
+    });
+
+    // Resolves at runtime without it — which is exactly why the type must object.
+    expect(variant).toBe("insufficient");
+  });
+
   it("does not warn amber once the booking has started (ONGOING/OVERDUE) even if rowQty exceeds physicalNow", () => {
     expect.assertions(2);
     // Row itself hasn't drawn from the pool yet (still AVAILABLE
@@ -539,6 +565,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.ONGOING,
+        isKitDriven: false,
       })
     ).toBeNull();
     expect(
@@ -547,6 +574,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.OVERDUE,
+        isKitDriven: false,
       })
     ).toBeNull();
   });
@@ -559,6 +587,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: undefined,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
       })
     ).toBeNull();
   });
@@ -571,6 +600,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.COMPLETE,
+        isKitDriven: false,
       })
     ).toBeNull();
     expect(
@@ -579,6 +609,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.ARCHIVED,
+        isKitDriven: false,
       })
     ).toBeNull();
   });
@@ -593,6 +624,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: { bookable: 10, physicalNow: 10 },
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
       })
     ).toBeNull();
   });

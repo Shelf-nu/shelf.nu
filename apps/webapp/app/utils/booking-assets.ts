@@ -763,21 +763,22 @@ export type QtyStockAvailability = {
  *   {@link isQtyRowCheckedOutOrFulfilled}.
  * @param args.bookingStatus - The parent booking's status.
  * @param args.isKitDriven - Whether the row is a kit-driven slice
- *   (`BookingAsset.assetKitId` set). Callers that render kit members pass
- *   it; it defaults to `false` for surfaces that only show loose rows.
+ *   (`BookingAsset.assetKitId` set). Required, not defaulted: a surface that
+ *   renders kit members and leaves it out would badge them against the loose
+ *   pool with nothing on screen to show the mistake.
  */
 export function resolveQtyStockBadgeVariant({
   rowQty,
   availability,
   contextStatus,
   bookingStatus,
-  isKitDriven = false,
+  isKitDriven,
 }: {
   rowQty: number;
   availability: QtyStockAvailability | undefined;
   contextStatus: string;
   bookingStatus: string;
-  isKitDriven?: boolean;
+  isKitDriven: boolean;
 }): "insufficient" | "pending-return" | null {
   if (!availability) return null;
 
