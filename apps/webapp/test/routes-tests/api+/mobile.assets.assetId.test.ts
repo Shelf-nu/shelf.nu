@@ -1,17 +1,23 @@
 /**
- * Test suite for GET /api/mobile/assets/:assetId — custody visibility.
+ * Test suite for GET /api/mobile/assets/:assetId.
  *
- * Pins the server-side custody-visibility parity fix: viewers without
- * custody-view permission (SELF_SERVICE/BASE without the org override) must
- * only receive their OWN `custodyList` entries plus a hidden-holders count
- * (`custodyListOthersCount`), and the legacy single `custody` field is
- * nulled unless the viewer can see all custody or IS the primary custodian —
- * mirroring the web (quantity-custody-list.tsx:121-126 and
- * assets.$assetId.overview.tsx:1826-1836 + asset-custody-card.tsx:63).
+ * Pins what the companion's asset detail screen may be sent:
  *
- * The filtering helpers from `mobile-custody-visibility.server` are NOT
- * mocked, so the real visibility logic is exercised end to end through the
- * loader.
+ * - Custody visibility. Viewers without custody-view permission
+ *   (SELF_SERVICE/BASE without the org override) receive only their OWN
+ *   `custodyList` entries plus a hidden-holders count
+ *   (`custodyListOthersCount`), and the legacy single `custody` field is null
+ *   unless the viewer can see all custody or IS the primary custodian. The web
+ *   behaves the same way: `QuantityCustodyList` filters and counts its rows,
+ *   and the asset overview hides `CustodyCard` through its `hasPermission`.
+ * - Custody through a booking. `activeBooking` names the booking an INDIVIDUAL
+ *   asset is checked out on, picked and gated the way the web asset overview
+ *   picks the booking its `CustodyCard` shows.
+ * - The projection. Rows destructured off the query result stay off the wire.
+ *
+ * The visibility helpers from `mobile-custody-visibility.server`, the booking
+ * read gate and the name resolvers are NOT mocked, so the real logic runs end
+ * to end through the loader.
  *
  * @see {@link file://../../../app/routes/api+/mobile+/assets.$assetId.ts}
  */
@@ -196,11 +202,70 @@ function buildAsset() {
       },
     ],
     assetKits: [],
+    // Active booking rows; none for this asset
+    bookingAssets: [],
     tags: [],
     qrCodes: [],
     organization: { currency: "USD" },
     notes: [],
     customFields: [],
+  };
+}
+
+/** The booking custody links a fixture booking may override. */
+type BookingCustodianOverrides = {
+  custodianTeamMember?: {
+    id: string;
+    name: string;
+    userId: string | null;
+  } | null;
+  custodianUser?: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    displayName: string | null;
+  } | null;
+};
+
+/**
+ * An INDIVIDUAL asset checked out on an ONGOING booking. A booking checkout
+ * writes no Custody row, so `custody` is empty and the holder is known only
+ * through the booking. The default custodian is a registered user whose
+ * display name, team-member name and legal name all differ, so an assertion
+ * can tell which one the response used.
+ *
+ * @param booking - Overrides for the booking's custody links
+ */
+function buildCheckedOutAsset(booking: BookingCustodianOverrides = {}) {
+  return {
+    ...buildAsset(),
+    title: "Camera A",
+    status: "CHECKED_OUT",
+    type: "INDIVIDUAL",
+    quantity: null,
+    unitOfMeasure: null,
+    custody: [],
+    bookingAssets: [
+      {
+        booking: {
+          id: "booking-1",
+          name: "Field shoot",
+          from: new Date("2026-03-02T09:30:00Z"),
+          custodianTeamMember: {
+            id: "tm-carol",
+            name: "Carol Member",
+            userId: "user-7",
+          },
+          custodianUser: {
+            id: "user-7",
+            firstName: "Carol",
+            lastName: "Legal",
+            displayName: "Caz",
+          },
+          ...booking,
+        },
+      },
+    ],
   };
 }
 
@@ -229,6 +294,7 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: true,
+      canSeeAllBookings: true,
     });
 
     (db.asset.findUnique as any).mockResolvedValue(buildAsset());
@@ -240,6 +306,7 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: false,
+      canSeeAllBookings: false,
     });
 
     const result = await loader(
@@ -276,6 +343,7 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: false,
+      canSeeAllBookings: false,
     });
     // Reorder so the caller's row is the primary (oldest) one
     const asset = buildAsset();
@@ -340,6 +408,7 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: true,
+      canSeeAllBookings: true,
     });
     (db.asset.findUnique as any).mockResolvedValue(buildAsset());
   });
@@ -390,4 +459,233 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
 
     expect(body.asset.assetModel).toBeNull();
   });
+});
+
+/**
+ * `activeBooking` follows the web asset overview's `CustodyCard` for custody
+ * held through a booking: the same gate (the asset is CHECKED_OUT), the same
+ * booking (the `bookingAssets` filter, first row), the same visibility (the
+ * viewer may see all custody), and INDIVIDUAL assets only.
+ */
+describe("GET /api/mobile/assets/:assetId — custody through a booking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+
+    (requireMobileAuth as any).mockResolvedValue({
+      user: mockUser,
+      authUser: { id: "auth-user-1", email: mockUser.email },
+    });
+    (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      canUseBarcodes: false,
+      canUseAudits: false,
+      canSeeAllCustody: true,
+      canSeeAllBookings: true,
+    });
+    (db.asset.findUnique as any).mockResolvedValue(buildCheckedOutAsset());
+  });
+
+  /** Runs the loader for `asset-1` and returns the parsed body. */
+  async function loadDetail() {
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    expect((result as unknown as Response).status).toBe(200);
+    return (result as unknown as Response).json();
+  }
+
+  /**
+   * Signs the caller in as a SELF_SERVICE member whose workspace grants the
+   * given overrides.
+   */
+  function asSelfServiceViewer(overrides: {
+    canSeeAllCustody: boolean;
+    canSeeAllBookings: boolean;
+  }) {
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "SELF_SERVICE",
+      canUseBarcodes: false,
+      canUseAudits: false,
+      ...overrides,
+    });
+  }
+
+  it("names the booking and its holder for a viewer who may see all custody", async () => {
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toEqual({
+      id: "booking-1",
+      name: "Field shoot",
+      from: "2026-03-02T09:30:00.000Z",
+      // The user's display name: the web card resolves the user link first
+      custodianName: "Caz",
+      canOpen: true,
+    });
+    // The raw rows only feed the field above
+    expect(body.asset).not.toHaveProperty("bookingAssets");
+  });
+
+  it("names a team-member custodian that has no user account", async () => {
+    (db.asset.findUnique as any).mockResolvedValue(
+      buildCheckedOutAsset({
+        custodianUser: null,
+        custodianTeamMember: {
+          id: "tm-dana",
+          name: "Dana Contractor",
+          userId: null,
+        },
+      })
+    );
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking.custodianName).toBe("Dana Contractor");
+  });
+
+  it("sends a null custodian name when the booking has no custodian", async () => {
+    (db.asset.findUnique as any).mockResolvedValue(
+      buildCheckedOutAsset({ custodianUser: null, custodianTeamMember: null })
+    );
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking.id).toBe("booking-1");
+    expect(body.asset.activeBooking.custodianName).toBeNull();
+  });
+
+  it("withholds the booking from a viewer who may not see custody", async () => {
+    asSelfServiceViewer({ canSeeAllCustody: false, canSeeAllBookings: false });
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toBeNull();
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("Field shoot");
+    expect(serialized).not.toContain("Caz");
+    expect(serialized).not.toContain("Carol");
+  });
+
+  it("withholds it from the booking's own custodian as well, like the web card", async () => {
+    asSelfServiceViewer({ canSeeAllCustody: false, canSeeAllBookings: false });
+    (db.asset.findUnique as any).mockResolvedValue(
+      buildCheckedOutAsset({
+        custodianTeamMember: {
+          id: "tm-me",
+          name: "Test User",
+          userId: "user-1",
+        },
+        custodianUser: {
+          id: "user-1",
+          firstName: "Test",
+          lastName: "User",
+          displayName: null,
+        },
+      })
+    );
+
+    const body = await loadDetail();
+
+    // The web card's "is it yours" check reads the CUSTODY row's user, and a
+    // booking checkout writes no custody row, so only the permission counts.
+    expect(body.asset.activeBooking).toBeNull();
+  });
+
+  it("ignores booking rows on a quantity-tracked asset", async () => {
+    (db.asset.findUnique as any).mockResolvedValue({
+      ...buildAsset(),
+      status: "CHECKED_OUT",
+      bookingAssets: buildCheckedOutAsset().bookingAssets,
+    });
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toBeNull();
+    // Its custody is the quantity breakdown, which still arrives
+    expect(body.asset.quantityBreakdown).not.toBeNull();
+    expect(body.asset).not.toHaveProperty("bookingAssets");
+  });
+
+  it("sends null, and no raw rows, when the asset is on no active booking", async () => {
+    (db.asset.findUnique as any).mockResolvedValue({
+      ...buildCheckedOutAsset(),
+      bookingAssets: [],
+    });
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toBeNull();
+    expect(body.asset).not.toHaveProperty("bookingAssets");
+  });
+
+  it("sends null for an asset staged onto an ongoing booking but not checked out", async () => {
+    (db.asset.findUnique as any).mockResolvedValue({
+      ...buildCheckedOutAsset(),
+      // Assets added to an ONGOING booking stay AVAILABLE until checked out
+      status: "AVAILABLE",
+    });
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toBeNull();
+  });
+
+  it("shows the booking as closed to a viewer who may see custody but not other people's bookings", async () => {
+    asSelfServiceViewer({ canSeeAllCustody: true, canSeeAllBookings: false });
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toEqual({
+      id: "booking-1",
+      name: "Field shoot",
+      from: "2026-03-02T09:30:00.000Z",
+      custodianName: "Caz",
+      canOpen: false,
+    });
+  });
+
+  it.each([
+    [
+      "user link",
+      {
+        custodianTeamMember: {
+          id: "tm-me",
+          name: "Test User",
+          userId: null,
+        },
+        custodianUser: {
+          id: "user-1",
+          firstName: "Test",
+          lastName: "User",
+          displayName: null,
+        },
+      },
+    ],
+    [
+      "team-member link",
+      {
+        custodianTeamMember: {
+          id: "tm-me",
+          name: "Test User",
+          userId: "user-1",
+        },
+        custodianUser: null,
+      },
+    ],
+  ] satisfies [string, BookingCustodianOverrides][])(
+    "lets the booking's custodian open it through the %s",
+    async (_link, booking) => {
+      asSelfServiceViewer({ canSeeAllCustody: true, canSeeAllBookings: false });
+      (db.asset.findUnique as any).mockResolvedValue(
+        buildCheckedOutAsset(booking)
+      );
+
+      const body = await loadDetail();
+
+      expect(body.asset.activeBooking.canOpen).toBe(true);
+    }
+  );
 });
