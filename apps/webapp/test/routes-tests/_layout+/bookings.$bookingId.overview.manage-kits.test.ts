@@ -1240,4 +1240,71 @@ describe("manage-kits loader — Models tab payload", () => {
       }
     });
   });
+
+  describe("kit query selects assetKits.id and keeps bookingAssets as an include", () => {
+    /** The path from the kit include down to the `assetKits` relation. */
+    type AssetKitsInclude = {
+      select: {
+        id?: boolean;
+        asset: {
+          select: {
+            bookingAssets: Record<string, unknown>;
+          };
+        };
+      };
+    };
+
+    /** Runs the loader and digs out the kit query's `assetKits` clause. */
+    async function readAssetKitsInclude(): Promise<AssetKitsInclude> {
+      // why: the loader awaits the Models tab payload before it queries kits;
+      // this is the minimal payload that lets it get there.
+      vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+        showModelsTab: false,
+        assetModels: [],
+        initialAssetModels: [],
+        totalAssetModels: 0,
+        matchedAssetModels: 0,
+        modelRequests: [],
+      });
+
+      await loader(
+        createLoaderArgs({ context: mockContext, params: mockParams })
+      );
+
+      const args = vi.mocked(kitService.getPaginatedAndFilterableKits).mock
+        .calls[0]?.[0];
+      if (!args?.extraInclude) {
+        throw new Error("Expected the loader to query kits with an include");
+      }
+
+      // `extraInclude` is typed as the generic `Prisma.KitInclude`, whose
+      // relations are `boolean | args` unions; this names the one shape the
+      // loader builds.
+      const include = args.extraInclude as unknown as {
+        assetKits: AssetKitsInclude;
+      };
+      return include.assetKits;
+    }
+
+    it("selects the membership's own id, not just its asset", async () => {
+      const assetKits = await readAssetKitsInclude();
+
+      // `BookingAsset.assetKitId` points at THIS id, not at `Kit.id` —
+      // without it a kit-driven slice can't be matched back to the
+      // membership that produced it, and `getKitAvailabilityStatus` can't
+      // scope a conflict check to one kit's own slices.
+      expect(assetKits.select.id).toBe(true);
+    });
+
+    it("keeps the nested bookingAssets as an `include`, not narrowed to a `select`", async () => {
+      const assetKits = await readAssetKitsInclude();
+      const bookingAssetsClause = assetKits.select.asset.select.bookingAssets;
+
+      // An `include` carries every BookingAsset scalar (assetKitId,
+      // checkedOutAt, checkedInAt) implicitly; narrowing it to a `select`
+      // would silently drop whichever of those a future edit forgets to list.
+      expect(bookingAssetsClause).toHaveProperty("include");
+      expect(bookingAssetsClause).not.toHaveProperty("select");
+    });
+  });
 });

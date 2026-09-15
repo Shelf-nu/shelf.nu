@@ -138,11 +138,44 @@ export type AssetWithBooking = Asset & {
   /** Cover image of the asset's model, rendered when the asset has no image
    * of its own. See `~/modules/asset/image-resolution`. */
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
-  bookingAssets: { booking: Booking }[];
+  bookingAssets: {
+    booking: Booking;
+    /**
+     * `assetKitId` / `sourceKitId` / `checkedOutAt` / `checkedInAt` below are
+     * populated by the booking-overview loader (`bookings.$bookingId.overview.tsx`)
+     * for its kit-conflict checks. The manage-assets picker builds its own
+     * `AssetWithBooking` rows and leaves this group unset — those rows reach
+     * consumers only through casts that never read it, so the gap is silent
+     * rather than a type error.
+     *
+     * Discriminates a standalone slice (`null`) from a kit-driven one (the
+     * live `AssetKit` membership id this row was booked under) — mirrors
+     * `BookingAsset.assetKitId`. Scopes a kit's conflict check to slices
+     * booked under ONE of its memberships, never a standalone row of the
+     * same asset on another booking.
+     */
+    assetKitId: string | null;
+    /**
+     * The kit this slice was booked under, surviving the membership itself
+     * being removed (`BookingAsset.sourceKitId`) — the durable "which kit"
+     * key `hasKitBookingConflicts` callers match a kit's own id against.
+     */
+    sourceKitId: string | null;
+    /**
+     * The slice's own dispatch markers, read by `hasKitBookingConflicts` —
+     * see `KitBookingSlice` in `~/modules/booking/helpers`.
+     */
+    checkedOutAt: Date | string | null;
+    checkedInAt: Date | string | null;
+  }[];
   custody: Custody | null;
   category: Category;
   tags: Pick<Tag, "id" | "name" | "color">[];
-  assetKits: { kitId: string; kit?: { id: string; name: string } }[];
+  assetKits: {
+    id: string;
+    kitId: string;
+    kit?: { id: string; name: string };
+  }[];
   qrScanned: string;
   /** Quantity booked from the BookingAsset pivot (present for QUANTITY_TRACKED assets) */
   bookedQuantity?: number | null;
