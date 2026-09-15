@@ -9,6 +9,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
+import { assertAuditAcceptsComments } from "~/modules/audit/service.server";
 import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -107,12 +108,13 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Org-scoped session + asset-in-session + assignee scoping (shared with
     // the image route; unit-tested in mobile-evidence.server.test.ts).
-    await requireAuditAssetInSession({
+    const { auditStatus } = await requireAuditAssetInSession({
       auditSessionId,
       auditAssetId,
       organizationId,
       userId: user.id,
     });
+    assertAuditAcceptsComments(auditStatus, { auditSessionId, organizationId });
 
     const note = await db.auditNote.create({
       data: {

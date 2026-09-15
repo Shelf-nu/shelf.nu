@@ -30,7 +30,7 @@ vi.mock("~/database/db.server", () => ({
       .mockImplementation((cb: (tx: unknown) => unknown) => cb(db)),
     auditSession: {
       findFirst: vi.fn(),
-      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn(),
     },
     auditScan: {
       findFirst: vi.fn(),
@@ -84,6 +84,11 @@ beforeEach(() => {
   // the values it queued rather than a predecessor's.
   vi.mocked(db.auditAsset.count).mockReset();
   vi.mocked(db.auditSession.findFirst).mockResolvedValue(session as never);
+  // The counter write is guarded on the audit still being live, and refuses
+  // unless it matched the one audit.
+  vi.mocked(db.auditSession.updateMany).mockResolvedValue({
+    count: 1,
+  } as never);
   // Recomputed counts after the removal: found, missing, unexpected.
   vi.mocked(db.auditAsset.count)
     .mockResolvedValueOnce(2 as never)
@@ -138,8 +143,12 @@ describe("removeAuditScan", () => {
 
     await removeAuditScan(ARGS);
 
-    expect(db.auditSession.update).toHaveBeenCalledWith({
-      where: { id: "audit-1" },
+    expect(db.auditSession.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "audit-1",
+        organizationId: "org-1",
+        status: { in: ["PENDING", "ACTIVE"] },
+      },
       data: {
         foundAssetCount: 2,
         missingAssetCount: 2,
@@ -218,7 +227,7 @@ describe("removeAuditScan", () => {
 
     expect(result.removed).toBe(false);
     expect(db.auditScan.delete).not.toHaveBeenCalled();
-    expect(db.auditSession.update).not.toHaveBeenCalled();
+    expect(db.auditSession.updateMany).not.toHaveBeenCalled();
   });
 
   it("refuses removal from an audit that is no longer live", async () => {
@@ -228,13 +237,27 @@ describe("removeAuditScan", () => {
     } as never);
 
     await expect(removeAuditScan(ARGS)).rejects.toThrow(/no longer live/i);
-    // The status is re-read INSIDE the transaction (an audit can complete
-    // between a check outside it and the write), so the assertion is that
+    // The status is read inside the transaction, so the assertion is that
     // nothing was mutated — a stronger claim than "no transaction opened".
     expect(db.auditScan.delete).not.toHaveBeenCalled();
     expect(db.auditAsset.update).not.toHaveBeenCalled();
     expect(db.auditAsset.delete).not.toHaveBeenCalled();
-    expect(db.auditSession.update).not.toHaveBeenCalled();
+    expect(db.auditSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the audit stops being live after the check", async () => {
+    // A complete or cancel can commit between the in-transaction read and the
+    // counter write. The write carries the status itself, so it matches nothing
+    // and the removal is refused — the transaction then rolls back the delete.
+    vi.mocked(db.auditScan.findFirst).mockResolvedValue({
+      id: "scan-1",
+      auditAsset: { id: "aa-1", expected: true },
+    } as never);
+    vi.mocked(db.auditSession.updateMany).mockResolvedValue({
+      count: 0,
+    } as never);
+
+    await expect(removeAuditScan(ARGS)).rejects.toMatchObject({ status: 409 });
   });
 
   it("404s for a session outside the caller's organization", async () => {
@@ -242,6 +265,6 @@ describe("removeAuditScan", () => {
 
     await expect(removeAuditScan(ARGS)).rejects.toThrow(/not found/i);
     expect(db.auditScan.findFirst).not.toHaveBeenCalled();
-    expect(db.auditSession.update).not.toHaveBeenCalled();
+    expect(db.auditSession.updateMany).not.toHaveBeenCalled();
   });
 });
