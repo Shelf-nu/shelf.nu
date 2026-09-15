@@ -3,7 +3,11 @@ import type { Booking } from "@prisma/client";
 import { BookingStatus, KitStatus } from "@prisma/client";
 import { Link, useLoaderData } from "react-router";
 import { isQuantityTracked } from "~/modules/asset/utils";
-import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
+import {
+  hasAssetBookingConflicts,
+  hasKitBookingConflicts,
+} from "~/modules/booking/helpers";
+import type { KitBookingSlice } from "~/modules/booking/helpers";
 import { hasCustody } from "~/modules/custody/utils";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import type { KitForBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-kits";
@@ -415,13 +419,30 @@ export function getKitAvailabilityStatus(
     hasAssetBookingConflicts(asset, currentBookingId)
   );
 
+  /**
+   * `hasAssetBookingConflicts` exempts QUANTITY_TRACKED assets — several
+   * bookings may legitimately share one asset's free pool — so a kit made
+   * only of those never trips the check above. A kit is exclusive the way
+   * an INDIVIDUAL asset is: collect each membership's OWN kit-driven slices
+   * (a row whose `assetKitId` matches THIS membership's id, never a
+   * standalone row of the same asset or a slice booked under a different
+   * membership) and let `hasKitBookingConflicts` decide.
+   */
+  const kitHasUnavailableBooking = kit.assetKits.some((ak) => {
+    const slices: KitBookingSlice[] = (ak.asset?.bookingAssets ?? []).filter(
+      (ba) => ba.assetKitId === ak.id
+    );
+    return hasKitBookingConflicts(slices, currentBookingId);
+  });
+
   return {
     isCheckedOut,
     isCheckedOutInANonConflictingBooking,
     isInCustody,
     isKitWithoutAssets,
     someAssetMarkedUnavailable,
-    someAssetHasUnavailableBooking,
+    someAssetHasUnavailableBooking:
+      someAssetHasUnavailableBooking || kitHasUnavailableBooking,
     isKitUnavailable: [isInCustody, isKitWithoutAssets].some(Boolean),
   };
 }

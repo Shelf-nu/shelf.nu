@@ -272,18 +272,52 @@ export type AssetDetail = {
    */
   custodyListOthersCount?: number;
   /**
-   * Number of AssetLocation placements the asset currently has. A location
-   * update is a pivot REPLACE, so > 1 drives the multi-placement collapse
-   * warning in the move sheet. Absent on older servers.
+   * Full per-row placement breakdown: manual rows first, then kit-driven
+   * rows (marked `viaKit`, read-only — they change through the kit). Feeds
+   * the detail screen's placements card and seeds the placements editor.
+   * Absent on older servers; fall back to the flat `location` field.
+   */
+  placements?: AssetPlacement[];
+  /**
+   * Number of AssetLocation placements the asset currently has. Absent on
+   * older servers.
    */
   placementCount?: number;
   /**
    * Units placed at the primary location (the per-row AssetLocation.quantity,
-   * NOT workspace stock) — the move sheet's pre-fill. `null` when the asset
-   * is unplaced; absent on older servers.
+   * NOT workspace stock). `null` when the asset is unplaced; absent on older
+   * servers.
    */
   locationQuantity?: number | null;
 } & AssetQuantityFields;
+
+/**
+ * One placement row of an asset: where units sit and whether the row is
+ * owned by a kit. `quantity` is the per-row AssetLocation.quantity (units
+ * placed at that location — NOT workspace stock). Kit-driven rows
+ * (`viaKit` set) are read-only in the placements editor: they change
+ * through the kit's own flows.
+ */
+export type AssetPlacement = {
+  locationId: string;
+  locationName: string;
+  quantity: number;
+  viaKit: { id: string; name: string } | null;
+};
+
+/**
+ * Response of the mobile manage-placements endpoint: the refreshed flat
+ * `location` plus the committed placement set (manual + kit rows), so the
+ * caller can update state without a second round trip.
+ */
+export type ManagePlacementsResponse = {
+  asset: {
+    id: string;
+    title: string;
+    location: { id: string; name: string } | null;
+  };
+  placements: AssetPlacement[];
+};
 
 /**
  * Kit shape returned by the scanner's QR/barcode resolvers. The per-asset
@@ -648,6 +682,12 @@ export type BookingAsset = {
   mainImage: string | null;
   kitId: string | null;
   category: { id: string; name: string; color: string } | null;
+  /**
+   * Where the asset sits: its primary placement, or null when it is unplaced.
+   * Optional because an older server does not send it, in which case the row
+   * shows no location line.
+   */
+  location?: { id: string; name: string } | null;
   kit: { id: string; name: string } | null;
   // Quantity-tracked fields. The server sends `quantity` for every asset;
   // `type`/`unitOfMeasure`/`consumptionType` + the `remaining*` counts are what
@@ -823,6 +863,13 @@ export type BookingDetailResponse = {
    */
   canQuickCheckin: boolean;
   /**
+   * False when the workspace requires explicit (scan/select) check-out for the
+   * caller's role. The app then hides the one-tap "Check Out All Assets", which
+   * the server refuses for that role; selecting or scanning assets stays.
+   * Absent on an older server, which never refuses it: read absence as `true`.
+   */
+  canQuickCheckout?: boolean;
+  /**
    * Per-booking lifecycle-action availability, computed server-side mirroring
    * the web ActionsDropdown gating (role + status + permission). The detail
    * screen shows only the enabled actions; the server endpoints enforce the
@@ -843,6 +890,16 @@ export type BookingActionResponse = {
     name: string;
     status: BookingStatus;
   };
+};
+
+/**
+ * Response of the fulfil-and-check-out endpoint. `remainingCount` is how many
+ * booked assets are still to check out: above 0 when the workspace requires
+ * explicit check-out and only the scanned units went out. Absent on an older
+ * server, which always checks out the whole booking.
+ */
+export type FulfilAndCheckoutResponse = BookingActionResponse & {
+  remainingCount?: number;
 };
 
 export type PartialCheckinResponse = {
