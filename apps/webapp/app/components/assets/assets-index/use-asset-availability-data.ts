@@ -31,7 +31,9 @@ type BookingSlice = {
 
 /** Simple-mode `asset.bookingAssets[]` element: pivot row + nested booking.
  * The Prisma include returns every BookingAsset scalar, so the two slice
- * markers arrive here as Dates without being named in the loader's select. */
+ * markers arrive here as Dates without being named in the loader's select.
+ * The nested booking is the full availability select OR the custody-column
+ * select without `from`/`to` (see `hasBarPeriod`). */
 type SimpleModeBookingAsset = {
   booking: AdvancedAssetBooking;
   assetKitId?: string | null;
@@ -98,10 +100,32 @@ export function returnedBarEnd(
   from: string | Date
 ): string {
   const start = toMillis(from);
+  // A start that cannot be read (missing, or a string `Date` rejects) leaves
+  // nothing to push the end past, and `toISOString()` throws on the NaN it
+  // would otherwise produce. The check-in instant stands on its own.
+  if (!Number.isFinite(start)) return returnedAt;
   const end = toMillis(returnedAt);
   return end > start
     ? returnedAt
     : new Date(start + MIN_RETURNED_BAR_MS).toISOString();
+}
+
+/**
+ * Whether a booking carries the period a bar is drawn over.
+ *
+ * Simple mode ships `bookingAssets` in two shapes. The availability include
+ * (`data.server.ts`) selects the booking's `from`/`to`. The custody-column
+ * include (`assetIndexFields`) runs on EVERY simple-mode row that sits on a
+ * live booking, table view included, and selects only `id`/`status` and the
+ * custodian so the Custodian column can name who has the asset. This hook
+ * runs on every view, so the second shape reaches it too: a slice without a
+ * period is custody data, not a bar, and is skipped before any date math.
+ */
+function hasBarPeriod(booking: {
+  from?: string | Date | null;
+  to?: string | Date | null;
+}): boolean {
+  return Boolean(booking.from && booking.to);
 }
 
 /**
@@ -207,6 +231,7 @@ export function useAssetAvailabilityData(items: Items) {
       // different assets stays as distinct resource rows.
       const groups = new Map<string, BookingSlice[]>();
       for (const slice of slices) {
+        if (!hasBarPeriod(slice.booking)) continue;
         const existing = groups.get(slice.booking.id);
         if (existing) existing.push(slice);
         else groups.set(slice.booking.id, [slice]);
