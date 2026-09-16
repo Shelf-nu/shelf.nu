@@ -20,7 +20,6 @@
  * @see {@link file://./service.server.ts} requireAuditAssignee
  * @see {@link file://./../api/mobile-auth.server.ts} getMobileUserContext
  */
-import type { AuditStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
 import { requireAuditAssignee } from "~/modules/audit/service.server";
@@ -36,8 +35,6 @@ import { ShelfError } from "~/utils/error";
  * @param args.auditAssetId - The scanned AuditAsset id from the request
  * @param args.organizationId - The caller's resolved organization id
  * @param args.userId - The authenticated user id
- * @returns The audit's status, so a caller can apply its own status rule
- *   without reading the session again
  * @throws {ShelfError} 404 if session not in org or asset not in session;
  *   403 if a BASE/SELF_SERVICE caller is not an assignee
  */
@@ -51,10 +48,10 @@ export async function requireAuditAssetInSession({
   auditAssetId: string;
   organizationId: string;
   userId: string;
-}): Promise<{ auditStatus: AuditStatus }> {
+}): Promise<void> {
   const session = await db.auditSession.findFirst({
     where: { id: auditSessionId, organizationId },
-    select: { id: true, status: true },
+    select: { id: true },
   });
   if (!session) {
     throw new ShelfError({
@@ -94,6 +91,4 @@ export async function requireAuditAssetInSession({
     userId,
     isSelfServiceOrBase,
   });
-
-  return { auditStatus: session.status };
 }

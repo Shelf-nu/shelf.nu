@@ -27,6 +27,7 @@ import {
   recordAuditScan,
   requireAuditAssignee,
   completeAuditSession,
+  createWhileAuditAcceptsComments,
 } from "./service.server";
 
 // why: storage.server calls Supabase over HTTP; mock so delete tests stay offline
@@ -145,6 +146,8 @@ vi.mock("~/database/db.server", () => {
       findUnique: vi.fn(),
     },
     $transaction: vi.fn(),
+    // why: comment writes lock the audit row with a raw SELECT ... FOR UPDATE.
+    $queryRaw: vi.fn(),
   };
 
   mockDb.$transaction.mockImplementation((cb: any) => cb(mockDb));
@@ -203,6 +206,7 @@ const mockDb = db as unknown as {
     findUnique: ReturnType<typeof vi.fn>;
   };
   $transaction: ReturnType<typeof vi.fn>;
+  $queryRaw: ReturnType<typeof vi.fn>;
 };
 
 describe("audit service", () => {
@@ -3011,5 +3015,58 @@ describe("audit status guards", () => {
         userId: "user-1",
       })
     ).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+/**
+ * Comments are written against the locked audit row.
+ *
+ * Reading the status and then inserting leaves room for a completion to commit
+ * in between. The write takes the audit row with FOR UPDATE and reads the status
+ * from it, so a finished audit refuses the comment whichever commits first.
+ */
+describe("createWhileAuditAcceptsComments", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const run = (write = vi.fn().mockResolvedValue("note")) =>
+    createWhileAuditAcceptsComments(
+      { auditSessionId: "audit-1", organizationId: "org-1" },
+      write
+    );
+
+  it("locks the audit row before reading its status", async () => {
+    mockDb.$queryRaw.mockResolvedValue([{ status: "ACTIVE" }]);
+
+    await run();
+
+    const sql = (mockDb.$queryRaw.mock.calls[0][0] as string[]).join("?");
+    expect(sql).toContain('FROM "AuditSession"');
+    expect(sql).toContain("FOR UPDATE");
+  });
+
+  it("writes through the transaction while the audit is open", async () => {
+    mockDb.$queryRaw.mockResolvedValue([{ status: "PENDING" }]);
+    const write = vi.fn().mockResolvedValue("note");
+
+    await expect(run(write)).resolves.toBe("note");
+    expect(write).toHaveBeenCalledWith(mockDb);
+  });
+
+  it("refuses without writing once the audit is finished", async () => {
+    mockDb.$queryRaw.mockResolvedValue([{ status: "COMPLETED" }]);
+    const write = vi.fn();
+
+    await expect(run(write)).rejects.toMatchObject({ status: 400 });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 for an audit outside the organization", async () => {
+    mockDb.$queryRaw.mockResolvedValue([]);
+    const write = vi.fn();
+
+    await expect(run(write)).rejects.toMatchObject({ status: 404 });
+    expect(write).not.toHaveBeenCalled();
   });
 });

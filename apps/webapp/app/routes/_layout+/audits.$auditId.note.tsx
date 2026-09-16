@@ -5,7 +5,7 @@ import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
 import { createAuditNote } from "~/modules/audit/note-service.server";
 import {
-  assertAuditAcceptsComments,
+  createWhileAuditAcceptsComments,
   requireAuditAssigneeForBaseSelfService,
 } from "~/modules/audit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -48,7 +48,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       select: {
         id: true,
         organizationId: true,
-        status: true,
         assignments: {
           select: { userId: true },
         },
@@ -84,23 +83,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
-        assertAuditAcceptsComments(audit.status, {
-          auditSessionId: auditId,
-          organizationId,
-        });
+        // Created only while the audit still accepts comments, checked on the
+        // locked row so a completion cannot slip in between.
+        const note = await createWhileAuditAcceptsComments(
+          { auditSessionId: auditId, organizationId },
+          (tx) =>
+            createAuditNote({
+              content,
+              type: "COMMENT",
+              userId,
+              auditSessionId: auditId,
+              tx,
+            })
+        );
 
+        // After the write, so a refused comment is never announced as created.
         sendNotification({
           title: "Note created",
           message: "Your audit note has been created successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
-        });
-
-        const note = await createAuditNote({
-          content,
-          type: "COMMENT",
-          userId,
-          auditSessionId: auditId,
         });
 
         return data(payload({ note }));

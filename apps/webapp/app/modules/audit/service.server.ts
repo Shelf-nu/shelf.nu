@@ -107,6 +107,60 @@ export function assertAuditAcceptsComments(
   }
 }
 
+/**
+ * Runs a comment write while the audit is held open for it.
+ *
+ * Checking the status and then inserting leaves a gap: a complete or cancel can
+ * commit in between, and the comment lands on a finished audit. Locking the
+ * audit row first closes it in both orders. If the transition commits first, the
+ * lock waits for it and then reads the finished status, so the comment is
+ * refused. If the comment takes the lock first, the transition's own guarded
+ * write waits, and the comment becomes part of the audit before it closes.
+ *
+ * A comment write takes no audit-asset row locks, so locking the session first
+ * here cannot invert the order the scan path uses.
+ *
+ * @param auditSessionId - The audit the comment belongs to
+ * @param organizationId - Its organization
+ * @param write - Creates the comment, through the transaction it is handed
+ * @returns Whatever `write` returns
+ * @throws {ShelfError} 404 when the audit is not in the organization; 400 when
+ *   it no longer accepts comments
+ */
+export async function createWhileAuditAcceptsComments<T>(
+  {
+    auditSessionId,
+    organizationId,
+  }: { auditSessionId: string; organizationId: string },
+  write: (tx: Omit<ExtendedPrismaClient, ITXClientDenyList>) => Promise<T>
+): Promise<T> {
+  return db.$transaction(async (tx) => {
+    const [session] = await tx.$queryRaw<{ status: AuditStatus }[]>`
+      SELECT status FROM "AuditSession"
+      WHERE id = ${auditSessionId} AND "organizationId" = ${organizationId}
+      FOR UPDATE
+    `;
+
+    if (!session) {
+      throw new ShelfError({
+        cause: null,
+        message: "Audit not found",
+        additionalData: { auditSessionId, organizationId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    assertAuditAcceptsComments(session.status, {
+      auditSessionId,
+      organizationId,
+    });
+
+    return write(tx);
+  });
+}
+
 export const AUDIT_LIST_INCLUDE = {
   createdBy: {
     select: {

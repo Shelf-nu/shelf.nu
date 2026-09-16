@@ -37,24 +37,17 @@ const args = {
 describe("requireAuditAssetInSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (db.auditSession.findFirst as any).mockResolvedValue({
-      id: "session-1",
-      status: "ACTIVE",
-    });
+    (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
     (db.auditAsset.findFirst as any).mockResolvedValue({ id: "audit-asset-1" });
     (getMobileUserContext as any).mockResolvedValue({ roles: ["ADMIN"] });
     (requireAuditAssignee as any).mockResolvedValue(undefined);
   });
 
-  it("resolves with the audit's status when session+asset+assignee all pass", async () => {
-    // The status comes back so a caller can apply its own status rule without
-    // reading the session a second time.
-    await expect(requireAuditAssetInSession(args)).resolves.toEqual({
-      auditStatus: "ACTIVE",
-    });
+  it("resolves when session+asset+assignee all pass", async () => {
+    await expect(requireAuditAssetInSession(args)).resolves.toBeUndefined();
     expect(db.auditSession.findFirst).toHaveBeenCalledWith({
       where: { id: "session-1", organizationId: "org-1" },
-      select: { id: true, status: true },
+      select: { id: true },
     });
     expect(db.auditAsset.findFirst).toHaveBeenCalledWith({
       where: { id: "audit-asset-1", auditSessionId: "session-1" },

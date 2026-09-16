@@ -41,7 +41,7 @@ import {
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
-  assertAuditAcceptsComments,
+  createWhileAuditAcceptsComments,
   requireAuditAssignee,
   requireAuditAssigneeForBaseSelfService,
 } from "~/modules/audit/service.server";
@@ -240,7 +240,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         auditSessionId: auditId,
         auditSession: { organizationId },
       },
-      select: { id: true, auditSession: { select: { status: true } } },
+      select: { id: true },
     });
 
     if (!auditAssetInSession) {
@@ -269,11 +269,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       // mirrors the image-evidence path and the mobile note route.
       const content = stripMarkdocDelimiters(rawContent ?? "");
 
-      assertAuditAcceptsComments(auditAssetInSession.auditSession.status, {
-        auditSessionId: auditId,
-        organizationId,
-      });
-
       if (!content) {
         throw new ShelfError({
           cause: null,
@@ -287,26 +282,32 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
-      const note = await db.auditNote.create({
-        data: {
-          content,
-          auditSessionId: auditId,
-          auditAssetId: auditAssetId,
-          userId,
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              displayName: true,
-              email: true,
-              profilePicture: true,
+      // Created only while the audit still accepts comments, checked on the
+      // locked row so a completion cannot slip in between.
+      const note = await createWhileAuditAcceptsComments(
+        { auditSessionId: auditId, organizationId },
+        (tx) =>
+          tx.auditNote.create({
+            data: {
+              content,
+              auditSessionId: auditId,
+              auditAssetId: auditAssetId,
+              userId,
             },
-          },
-        },
-      });
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  displayName: true,
+                  email: true,
+                  profilePicture: true,
+                },
+              },
+            },
+          })
+      );
 
       return payload({ note });
     }

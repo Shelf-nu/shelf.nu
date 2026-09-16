@@ -21,12 +21,14 @@ import { action } from "~/routes/_layout+/audits.$auditId.note";
 
 // @vitest-environment node
 
-// why: the audit lookup and the delete are the database calls under test; their
-// arguments and results are asserted directly.
+// why: the audit lookup, the locked status read and the delete are the database
+// calls under test; their arguments and results are asserted directly.
 vi.mock("~/database/db.server", () => ({
   db: {
     auditSession: { findFirst: vi.fn() },
     auditNote: { deleteMany: vi.fn() },
+    $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -71,9 +73,13 @@ describe("add a comment to an audit", () => {
     vi.mocked(db.auditSession.findFirst).mockResolvedValue({
       id: "audit-1",
       organizationId: "org-1",
-      status,
       assignments: [],
     } as never);
+    vi.mocked(db.$transaction).mockImplementation(((
+      cb: (tx: unknown) => unknown
+    ) => cb(db)) as never);
+    // The status as read on the locked audit row, inside the write's transaction.
+    vi.mocked(db.$queryRaw).mockResolvedValue([{ status }] as never);
 
     const response = await action(
       createActionArgs({
@@ -97,10 +103,12 @@ describe("add a comment to an audit", () => {
     } as never);
   });
 
-  it("adds a comment to an audit that is still open", async () => {
+  it("adds a comment to an audit that is still open, inside the locked transaction", async () => {
     await addComment("ACTIVE");
 
-    expect(createAuditNote).toHaveBeenCalled();
+    expect(createAuditNote).toHaveBeenCalledWith(
+      expect.objectContaining({ auditSessionId: "audit-1", tx: db })
+    );
   });
 
   it.each(["COMPLETED", "CANCELLED", "ARCHIVED"])(

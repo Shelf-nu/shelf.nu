@@ -38,15 +38,18 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 }));
 
 // why: external guard — session/org/asset/assignee scoping is unit-tested
-// in mobile-evidence.server.test.ts; here it supplies the audit's status.
+// in mobile-evidence.server.test.ts; here we only assert it is invoked.
 vi.mock("~/modules/audit/mobile-evidence.server", () => ({
   requireAuditAssetInSession: vi.fn(),
 }));
 
-// why: external database — don't hit the real DB
+// why: external database — don't hit the real DB. The comment is written
+// inside a transaction that first locks the audit row and reads its status.
 vi.mock("~/database/db.server", () => ({
   db: {
     auditNote: { create: vi.fn() },
+    $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -113,9 +116,12 @@ describe("POST /api/mobile/audits/note", () => {
       canUseAudits: true,
     });
     (requireMobilePermission as any).mockResolvedValue(undefined);
-    (requireAuditAssetInSession as any).mockResolvedValue({
-      auditStatus: "ACTIVE",
-    });
+    (requireAuditAssetInSession as any).mockResolvedValue(undefined);
+    (db.$transaction as any).mockImplementation(
+      (cb: (tx: unknown) => unknown) => cb(db)
+    );
+    // The locked audit row the comment is written against.
+    (db.$queryRaw as any).mockResolvedValue([{ status: "ACTIVE" }]);
   });
 
   it("creates a condition note scoped to the auditAsset and returns it", async () => {
@@ -148,7 +154,7 @@ describe("POST /api/mobile/audits/note", () => {
     "refuses a note on a %s audit",
     async (auditStatus) => {
       // A finished audit is a record; its receipt prints the notes it holds.
-      (requireAuditAssetInSession as any).mockResolvedValue({ auditStatus });
+      (db.$queryRaw as any).mockResolvedValue([{ status: auditStatus }]);
 
       const result = await action(
         createActionArgs({ request: createNoteRequest(validBody) })
