@@ -114,6 +114,9 @@ describe("otp action — confirming the code", () => {
     expect(response.headers.getSetCookie()).toEqual([
       "selected-organization-id=org",
     ]);
+    expect(createUser).toHaveBeenCalledWith(
+      expect.objectContaining({ signupIntent: null })
+    );
   });
 
   it("hands the intent on to onboarding with a fresh window", async () => {
@@ -129,7 +132,11 @@ describe("otp action — confirming the code", () => {
       "selected-organization-id=org"
     );
     await expect(signupIntentSetBy(response)).resolves.toEqual(intent);
+    // The new account records the intent on its signup event.
     expect(createUser).toHaveBeenCalledTimes(1);
+    expect(createUser).toHaveBeenCalledWith(
+      expect.objectContaining({ signupIntent: intent })
+    );
   });
 
   it("applies the link's in-app redirectTo", async () => {

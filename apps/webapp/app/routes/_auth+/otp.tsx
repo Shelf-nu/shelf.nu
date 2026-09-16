@@ -94,6 +94,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const authSession = await verifyOtpAndSignin(email, otp);
         const userExists = Boolean(await findUserByEmail(email));
 
+        // What the signup link asked for, carried by cookie. A new account
+        // records it on its signup event; the cookie then travels on for
+        // onboarding to store and act on, and `redirectTo` decides the
+        // landing page below.
+        const signupIntent = await readSignupIntent(request);
+
         if (!userExists) {
           try {
             const username = await generateUniqueUsername(authSession.email);
@@ -108,6 +114,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
               ...authSession,
               username,
               formatPrefs,
+              signupIntent,
             });
           } catch (createError) {
             // Handle race condition: if a concurrent request already
@@ -129,12 +136,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
           request,
         });
 
-        // The signup link may have said where to land (`redirectTo`); the
-        // rest of the intent travels on for onboarding to act on. A user who
-        // still has to onboard is sent there first by the app layout, so the
-        // destination only applies once they are through.
-        const signupIntent = await readSignupIntent(request);
-
+        // A user who still has to onboard is sent there first by the app
+        // layout, so the link's `redirectTo` only applies once they are through.
         return redirect(safeRedirect(signupIntent?.redirectTo, "/assets"), {
           headers: [
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
