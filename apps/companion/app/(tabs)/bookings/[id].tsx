@@ -52,6 +52,7 @@ import {
   type CheckinDispositionValue,
 } from "@/components/checkin-disposition-sheet";
 import { announce } from "@/lib/a11y";
+import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
 import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
@@ -235,6 +236,13 @@ export default function BookingDetailScreen() {
 
   const lastFetchedAt = useRef(0);
 
+  /**
+   * Held while a check-in or check-out request runs, so a second tap cannot
+   * send it twice. A ref rather than state: a state flag cannot block a tap
+   * delivered in the same tick.
+   */
+  const bookingSubmitLock = useRef(false);
+
   const fetchBooking = useCallback(async () => {
     if (!id || !currentOrg) return;
     const { data, error: fetchErr } = await api.booking(id, currentOrg.id);
@@ -376,42 +384,51 @@ export default function BookingDetailScreen() {
 
   // Send the check-in. `assetIds` = INDIVIDUAL rows (a bare QT id would default
   // to all-remaining server-side); `checkins` = per-QT-asset dispositions.
+  // `closeSheet` runs only once the server accepts, so a refused check-in keeps
+  // the disposition sheet open with every collected disposition intact.
   const submitCheckin = async (
     assetIds: string[],
-    checkins: CheckinDisposition[]
+    checkins: CheckinDisposition[],
+    closeSheet?: () => void
   ) => {
     if (!booking || !currentOrg) return;
-    setIsActioning(true);
-    const { data, error: err } = await api.partialCheckinBooking(
-      currentOrg.id,
-      booking.id,
-      assetIds,
-      getTimeZone(),
-      checkins.length > 0 ? checkins : undefined
-    );
-    setIsActioning(false);
-    if (err) {
-      Alert.alert("Error", err);
-      return;
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // Mutation changed this booking — force the list to refetch.
-    markBookingsListDirty();
-    const msg = data?.isComplete
-      ? `All assets checked in. "${booking.name}" is now complete.`
-      : `${data?.checkedInCount ?? "Some"} checked in, ${
-          data?.remainingCount ?? "some"
-        } remaining.`;
-    Alert.alert("Checked In", msg, [
-      {
-        text: "OK",
-        onPress: () => {
-          setSelectedAssetIds(new Set());
-          setSelectMode(null);
-          fetchBooking();
-        },
+    const orgId = currentOrg.id;
+    const bookingId = booking.id;
+    const bookingName = booking.name;
+    await submitFromSheet({
+      lock: bookingSubmitLock,
+      request: () =>
+        api.partialCheckinBooking(
+          orgId,
+          bookingId,
+          assetIds,
+          getTimeZone(),
+          checkins.length > 0 ? checkins : undefined
+        ),
+      onAccepted: ({ data }) => {
+        closeSheet?.();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Mutation changed this booking — force the list to refetch.
+        markBookingsListDirty();
+        const msg = data?.isComplete
+          ? `All assets checked in. "${bookingName}" is now complete.`
+          : `${data?.checkedInCount ?? "Some"} checked in, ${
+              data?.remainingCount ?? "some"
+            } remaining.`;
+        Alert.alert("Checked In", msg, [
+          {
+            text: "OK",
+            onPress: () => {
+              setSelectedAssetIds(new Set());
+              setSelectMode(null);
+              fetchBooking();
+            },
+          },
+        ]);
       },
-    ]);
+      setSubmitting: setIsActioning,
+      showError: (message) => Alert.alert("Error", message),
+    });
   };
 
   const handlePartialCheckin = () => {
@@ -453,43 +470,52 @@ export default function BookingDetailScreen() {
   };
 
   // Send the check-out. `assetIds` = INDIVIDUAL rows (implicit 1 unit);
-  // `checkouts` = per-QT-asset quantities the picker collected.
+  // `checkouts` = per-QT-asset quantities the picker collected. `closeSheet`
+  // runs only once the server accepts, so a refused check-out keeps the
+  // quantity sheet open with every collected quantity intact.
   const submitCheckout = async (
     assetIds: string[],
-    checkouts: CheckoutDisposition[]
+    checkouts: CheckoutDisposition[],
+    closeSheet?: () => void
   ) => {
     if (!booking || !currentOrg) return;
-    setIsActioning(true);
-    const { data, error: err } = await api.partialCheckoutBooking(
-      currentOrg.id,
-      booking.id,
-      assetIds,
-      getTimeZone(),
-      checkouts.length > 0 ? checkouts : undefined
-    );
-    setIsActioning(false);
-    if (err) {
-      Alert.alert("Error", err);
-      return;
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // Mutation changed this booking — force the list to refetch.
-    markBookingsListDirty();
-    const msg = data?.isComplete
-      ? `All assets are now checked out for "${booking.name}".`
-      : `${data?.checkedOutCount ?? "Some"} checked out, ${
-          data?.remainingCount ?? "some"
-        } still reserved.`;
-    Alert.alert("Checked Out", msg, [
-      {
-        text: "OK",
-        onPress: () => {
-          setSelectedAssetIds(new Set());
-          setSelectMode(null);
-          fetchBooking();
-        },
+    const orgId = currentOrg.id;
+    const bookingId = booking.id;
+    const bookingName = booking.name;
+    await submitFromSheet({
+      lock: bookingSubmitLock,
+      request: () =>
+        api.partialCheckoutBooking(
+          orgId,
+          bookingId,
+          assetIds,
+          getTimeZone(),
+          checkouts.length > 0 ? checkouts : undefined
+        ),
+      onAccepted: ({ data }) => {
+        closeSheet?.();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Mutation changed this booking — force the list to refetch.
+        markBookingsListDirty();
+        const msg = data?.isComplete
+          ? `All assets are now checked out for "${bookingName}".`
+          : `${data?.checkedOutCount ?? "Some"} checked out, ${
+              data?.remainingCount ?? "some"
+            } still reserved.`;
+        Alert.alert("Checked Out", msg, [
+          {
+            text: "OK",
+            onPress: () => {
+              setSelectedAssetIds(new Set());
+              setSelectMode(null);
+              fetchBooking();
+            },
+          },
+        ]);
       },
-    ]);
+      setSubmitting: setIsActioning,
+      showError: (message) => Alert.alert("Error", message),
+    });
   };
 
   const handlePartialCheckout = () => {
@@ -2242,6 +2268,7 @@ export default function BookingDetailScreen() {
               ? "Next"
               : "Check out"
           }
+          isSubmitting={isActioning}
           onSubmit={(quantity) => {
             const cur = checkoutQueue.queue[checkoutQueue.index];
             const collected = [
@@ -2255,9 +2282,12 @@ export default function BookingDetailScreen() {
                 collected,
               });
             } else {
-              const { individualIds } = checkoutQueue;
-              setCheckoutQueue(null);
-              void submitCheckout(individualIds, collected);
+              // The last asset submits with the sheet still open. The queue
+              // clears only once the server accepts, so a refusal keeps every
+              // collected quantity for a retry.
+              void submitCheckout(checkoutQueue.individualIds, collected, () =>
+                setCheckoutQueue(null)
+              );
             }
           }}
           onClose={() => setCheckoutQueue(null)}
@@ -2285,6 +2315,7 @@ export default function BookingDetailScreen() {
           }
           unitOfMeasure={checkinQueue.queue[checkinQueue.index].unitOfMeasure}
           isLast={checkinQueue.index + 1 >= checkinQueue.queue.length}
+          isSubmitting={isActioning}
           onSubmit={(value: CheckinDispositionValue) => {
             const cur = checkinQueue.queue[checkinQueue.index];
             const collected = [
@@ -2304,9 +2335,12 @@ export default function BookingDetailScreen() {
                 collected,
               });
             } else {
-              const { individualIds } = checkinQueue;
-              setCheckinQueue(null);
-              void submitCheckin(individualIds, collected);
+              // The last asset submits with the sheet still open. The queue
+              // clears only once the server accepts, so a refusal keeps every
+              // collected disposition for a retry.
+              void submitCheckin(checkinQueue.individualIds, collected, () =>
+                setCheckinQueue(null)
+              );
             }
           }}
           onClose={() => setCheckinQueue(null)}

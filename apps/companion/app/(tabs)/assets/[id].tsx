@@ -54,6 +54,7 @@ import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
 import { useImageUpload } from "@/hooks/use-image-upload";
+import { useSheetSubmit } from "@/hooks/use-sheet-submit";
 // Lazy-loaded: ~50KB library only needed when viewing QR codes on asset detail
 let QRCode: typeof import("react-native-qrcode-svg").default | null = null;
 try {
@@ -125,6 +126,13 @@ export default function AssetDetailScreen() {
     performAssignQuantity,
     performReleaseQuantity,
   } = useCustodyActions({ asset, currentOrg, fetchAsset, isSelfService });
+
+  // The placements and stock sheets submit through this: each stays open,
+  // showing the save in progress, until the server accepts its change.
+  const submitFromSheet = useSheetSubmit({
+    refresh: fetchAsset,
+    setSubmitting: setIsActionLoading,
+  });
 
   // Image upload
   const { isUploadingImage, handleImagePress } = useImageUpload({
@@ -257,25 +265,19 @@ export default function AssetDetailScreen() {
    * Replaces the manual placement set (QUANTITY_TRACKED) and refreshes.
    * The sheet already validated the sum client-side; the server re-checks
    * everything against the row-locked asset and reports conflicts (409)
-   * through the same error alert.
+   * through the error alert. The sheet closes only once the server accepts
+   * the set, so a refusal leaves the edited rows on screen to fix or retry.
    */
   const performSavePlacements = async (
     nextPlacements: { locationId: string; quantity: number }[]
   ) => {
     if (!currentOrg || !asset) return;
-    setShowPlacementsSheet(false);
-    setIsActionLoading(true);
-    const { error: err } = await api.managePlacements(
-      currentOrg.id,
-      asset.id,
-      nextPlacements
+    const orgId = currentOrg.id;
+    const assetId = asset.id;
+    await submitFromSheet(
+      () => api.managePlacements(orgId, assetId, nextPlacements),
+      () => setShowPlacementsSheet(false)
     );
-    if (err) Alert.alert("Error", err);
-    else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await fetchAsset();
-    }
-    setIsActionLoading(false);
   };
 
   // ── Adjust Quantity (stock) ─────────────────────────
@@ -284,6 +286,8 @@ export default function AssetDetailScreen() {
    * Applies a stock adjustment and refreshes the asset. Web
    * QuickAdjustDialog parity: Add maps to RESTOCK, Remove maps to LOSS —
    * the server writes the ConsumptionLog row and fires the low-stock alert.
+   * The sheet closes only once the server accepts the adjustment, so a
+   * refusal keeps the entered quantity and note.
    */
   const performAdjustQuantity = async (args: {
     direction: "add" | "subtract";
@@ -291,20 +295,18 @@ export default function AssetDetailScreen() {
     note?: string;
   }) => {
     if (!currentOrg || !asset) return;
-    setShowAdjustSheet(false);
-    setIsActionLoading(true);
-    const { error: err } = await api.adjustQuantity(currentOrg.id, asset.id, {
-      quantity: args.quantity,
-      direction: args.direction,
-      category: args.direction === "add" ? "RESTOCK" : "LOSS",
-      note: args.note,
-    });
-    if (err) Alert.alert("Error", err);
-    else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await fetchAsset();
-    }
-    setIsActionLoading(false);
+    const orgId = currentOrg.id;
+    const assetId = asset.id;
+    await submitFromSheet(
+      () =>
+        api.adjustQuantity(orgId, assetId, {
+          quantity: args.quantity,
+          direction: args.direction,
+          category: args.direction === "add" ? "RESTOCK" : "LOSS",
+          note: args.note,
+        }),
+      () => setShowAdjustSheet(false)
+    );
   };
 
   // ── Notes Action ────────────────────────────────────
@@ -997,6 +999,7 @@ export default function AssetDetailScreen() {
                 totalQuantity={asset.quantity ?? 1}
                 unitOfMeasure={asset.unitOfMeasure}
                 initialPlacements={placements}
+                isSubmitting={isActionLoading}
                 onSave={(next) => void performSavePlacements(next)}
                 onClose={() => setShowPlacementsSheet(false)}
               />
@@ -1009,6 +1012,7 @@ export default function AssetDetailScreen() {
                 // real floor (in-custody + peak concurrent reservations).
                 availableQuantity={assignMax}
                 unitOfMeasure={asset.unitOfMeasure}
+                isSubmitting={isActionLoading}
                 onSubmit={(args) => void performAdjustQuantity(args)}
                 onClose={() => setShowAdjustSheet(false)}
               />
@@ -1026,10 +1030,12 @@ export default function AssetDetailScreen() {
                 defaultValue={1}
                 unitOfMeasure={asset.unitOfMeasure}
                 confirmLabel={isSelfService ? "Take" : "Assign"}
+                isSubmitting={isActionLoading}
                 onSubmit={(quantity) => {
-                  const member = assignQtyMember;
-                  setAssignQtyMember(null);
-                  if (member) void performAssignQuantity(member, quantity);
+                  if (!assignQtyMember) return;
+                  void performAssignQuantity(assignQtyMember, quantity, () =>
+                    setAssignQtyMember(null)
+                  );
                 }}
                 onClose={() => setAssignQtyMember(null)}
               />
@@ -1069,16 +1075,15 @@ export default function AssetDetailScreen() {
                 }
                 confirmLabel={isConsumable ? "Confirm" : "Release"}
                 destructive
+                isSubmitting={isActionLoading}
                 onSubmit={(quantity, consumed) => {
-                  const entry = releaseQtyEntry;
-                  setReleaseQtyEntry(null);
-                  if (entry) {
-                    void performReleaseQuantity(
-                      entry.custodian.id,
-                      quantity,
-                      consumed
-                    );
-                  }
+                  if (!releaseQtyEntry) return;
+                  void performReleaseQuantity(
+                    releaseQtyEntry.custodian.id,
+                    quantity,
+                    consumed,
+                    () => setReleaseQtyEntry(null)
+                  );
                 }}
                 onClose={() => setReleaseQtyEntry(null)}
               />
