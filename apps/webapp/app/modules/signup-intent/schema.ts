@@ -24,6 +24,7 @@ import { z } from "zod";
 /** Plans a signup link may ask for. Anything else is ignored. */
 export const SIGNUP_PLANS = ["team", "plus"] as const;
 
+/** One of {@link SIGNUP_PLANS}: the plan a signup link asked for. */
 export type SignupPlan = (typeof SIGNUP_PLANS)[number];
 
 /** Campaign values are labels for reporting; anything longer is not one. */
@@ -61,6 +62,11 @@ const trialValue = z.preprocess((value) => {
   return undefined;
 }, z.boolean());
 
+/**
+ * The shape of a carried intent. Validates both the values read from the
+ * signup URL (as strings) and the stored cookie payload (already typed), so
+ * the two can never drift apart.
+ */
 export const SignupIntentSchema = z.object({
   plan: planValue.optional(),
   trial: trialValue.optional(),

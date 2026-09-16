@@ -67,10 +67,12 @@ vi.mock("~/modules/business-intel/service.server", () => ({
 vi.mock("~/modules/organization/service.server", () => ({
   getOrganizationById: vi.fn(),
 }));
-// why: preventing Stripe and Supabase calls during the test
+// why: preventing Stripe calls during the test
 vi.mock("~/utils/stripe.server", () => ({
   createStripeCustomer: vi.fn(),
 }));
+// why: the password-setting branch signs the user in through Supabase; these
+// tests submit as a password signup, so the auth service must not be reached.
 vi.mock("~/modules/auth/service.server", () => ({
   signInWithEmail: vi.fn(),
   getAuthUserById: vi.fn(),

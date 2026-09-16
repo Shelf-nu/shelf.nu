@@ -40,6 +40,11 @@ const StoredSignupIntentSchema = SignupIntentSchema.extend({
   expiresAt: z.number().int().positive(),
 });
 
+/**
+ * The cookie itself. Signed with the session secret and scoped to the whole
+ * site, because the signup flow spans `/join`, `/send-otp`, `/otp` and
+ * `/onboarding`.
+ */
 export const signupIntentCookie = createCookie(COOKIE_NAME, {
   path: "/",
   httpOnly: true,

@@ -27,12 +27,14 @@ vi.mock("~/utils/stripe.server", () => ({
   getStripeCustomer: vi.fn(),
   getStripePricesForTrialPlanSelection: vi.fn(),
 }));
+// why: the add-on price lookups are Stripe calls as well
 vi.mock("~/modules/audit/addon.server", () => ({
   getAuditAddonPrices: vi.fn(),
 }));
 vi.mock("~/modules/barcode/addon.server", () => ({
   getBarcodeAddonPrices: vi.fn(),
 }));
+// why: the loader only needs a user with no Stripe customer; no database here
 vi.mock("~/modules/user/service.server", () => ({
   getUserByID: vi.fn(),
 }));

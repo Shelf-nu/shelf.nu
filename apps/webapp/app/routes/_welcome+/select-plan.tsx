@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Currency, Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
-import { useLoaderData, useNavigation } from "react-router";
+import { useLoaderData } from "react-router";
 import { Form } from "~/components/custom-form";
 import { ShelfSymbolLogo } from "~/components/marketing/logos";
 import { Button } from "~/components/shared/button";
@@ -22,7 +22,6 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatCurrency } from "~/utils/currency";
 import { makeShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -102,7 +101,7 @@ export default function SelectPlan() {
   const [searchParams] = useSearchParams();
   // Someone sent here by their signup link never saw the Personal/Team
   // question, so the page offers the way back and leads with what they asked
-  // for. Everyone else sees the page as it always was.
+  // for. Without a Team intent there is no escape link and one trial button.
   const arrivedWithTeamIntent = planIntent?.plan === "team";
   const leadsWithSubscribe = arrivedWithTeamIntent && !planIntent.trial;
   type BillingInterval = "month" | "year";
@@ -133,9 +132,7 @@ export default function SelectPlan() {
     () => searchParams.get("withBarcodes") === "true"
   );
 
-  const navigation = useNavigation();
   const activePrice = selectedPlan ? planPrices[selectedPlan] : null;
-  const disabled = isFormProcessing(navigation.state) || !activePrice;
 
   const hasAuditPrices = !!(auditPrices.month || auditPrices.year);
   const hasBarcodePrices = !!(barcodePrices.month || barcodePrices.year);
@@ -570,7 +567,7 @@ export default function SelectPlan() {
 
         <SelectPlanSubmitButtons
           planIntent={planIntent}
-          disabled={disabled}
+          noPriceSelected={!activePrice}
           freeTrialDays={config.freeTrialDays}
         />
       </Form>

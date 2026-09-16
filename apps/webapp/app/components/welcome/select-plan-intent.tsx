@@ -5,12 +5,13 @@
  * question on `/welcome` and lands on `/select-plan` directly. That page then
  * needs a way back to the free Personal workspace, and its calls to action
  * ordered by what the link asked for (trial first, or subscribe first).
- * Without an intent the page shows the single trial button it always had.
+ * Without a Team intent the page renders one primary trial button.
  *
  * @see {@link file://./../../routes/_welcome+/select-plan.tsx}
  * @see {@link file://./../../modules/signup-intent/schema.ts}
  */
 import { Button } from "~/components/shared/button";
+import { useDisabled } from "~/hooks/use-disabled";
 import type { PlanIntent } from "~/modules/signup-intent/schema";
 
 /**
@@ -34,23 +35,27 @@ export function PersonalWorkspaceEscapeLink() {
 
 /**
  * The plan form's submit buttons. Both post to the subscription action; the
- * `intent` value tells it whether to open a trial or a Stripe checkout.
+ * `intent` value tells it whether to open a trial or a Stripe checkout. The
+ * buttons disable themselves while the form submits, and stay disabled while
+ * no price is selected, since the action needs one.
  *
  * @param planIntent - The plan the signup link asked for, if any. A Team
  *   intent offers both actions with the requested one first; anything else
- *   keeps the single trial button.
- * @param disabled - Whether the form is submitting or has no price selected
+ *   renders one primary trial button.
+ * @param noPriceSelected - Whether the form has no Stripe price to post yet
  * @param freeTrialDays - Length of the trial, from `config.freeTrialDays`
  */
 export function SelectPlanSubmitButtons({
   planIntent,
-  disabled,
+  noPriceSelected,
   freeTrialDays,
 }: {
   planIntent: PlanIntent | null;
-  disabled: boolean;
+  noPriceSelected: boolean;
   freeTrialDays: number;
 }) {
+  const disabled = useDisabled() || noPriceSelected;
+
   const trialButton = (primary: boolean) => (
     <Button
       width="full"

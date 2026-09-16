@@ -25,18 +25,23 @@ import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { action } from "~/routes/_auth+/otp";
 
-// why: exercise the OTP action without Supabase/Prisma; the tests assert on
-// the redirect and the cookies it carries.
+// why: code verification is a Supabase call; the tests assert on the
+// redirect and the cookies it carries.
 vi.mock("~/modules/auth/service.server", () => ({
   verifyOtpAndSignin: vi.fn(),
 }));
+// why: the new-user branch creates a database row; the tests only check that
+// it is reached, not what it writes.
 vi.mock("~/modules/user/service.server", () => ({
   createUser: vi.fn(),
   findUserByEmail: vi.fn(),
 }));
+// why: username generation queries the database for collisions
 vi.mock("~/modules/user/utils.server", () => ({
   generateUniqueUsername: vi.fn(),
 }));
+// why: the workspace cookie is a fixed string here so the intent cookie can
+// be told apart from it in the response headers
 vi.mock("~/modules/organization/context.server", () => ({
   getSelectedOrganization: vi.fn(),
   setSelectedOrganizationIdCookie: vi.fn(),

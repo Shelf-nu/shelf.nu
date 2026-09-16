@@ -20,11 +20,13 @@ import { findUserByEmail } from "~/modules/user/service.server";
 import { validateNonSSOSignup } from "~/utils/sso.server";
 import { action, loader } from "~/routes/_auth+/join";
 
-// why: exercise the signup route without Supabase or Prisma; the tests assert
-// on what the responses carry, not on account creation.
+// why: account creation is a Supabase call; the tests assert on what the
+// responses carry, not on the account.
 vi.mock("~/modules/auth/service.server", () => ({
   signUpWithEmailPass: vi.fn(),
 }));
+// why: the duplicate-email check is a database lookup; each test decides
+// whether the address is taken.
 vi.mock("~/modules/user/service.server", () => ({
   findUserByEmail: vi.fn(),
 }));
@@ -37,10 +39,6 @@ vi.mock("~/utils/sso.server", () => ({
 // module-level connect rejects in a DB-less test env.
 vi.mock("~/database/db.server", () => ({ db: {} }));
 
-// why: mocking Remix's data() so loader and action results are readable
-// Responses (status, headers, JSON body) rather than internal payload objects.
-// Headers go through `new Headers()` because the loader passes them as
-// `[name, value]` tuples, exactly as the real data() accepts them.
 const createDataMock = vi.hoisted(() => {
   return () =>
     vi.fn((body: unknown, init?: ResponseInit) => {
@@ -53,6 +51,10 @@ const createDataMock = vi.hoisted(() => {
     });
 });
 
+// why: mocking Remix's data() so loader and action results are readable
+// Responses (status, headers, JSON body) rather than internal payload objects.
+// Headers go through `new Headers()` because the loader passes them as
+// `[name, value]` tuples, exactly as the real data() accepts them.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual("react-router");
   return { ...actual, data: createDataMock() };
