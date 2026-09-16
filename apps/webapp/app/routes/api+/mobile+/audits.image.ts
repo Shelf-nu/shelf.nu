@@ -9,6 +9,7 @@ import {
 import { createAuditImageEvidenceNote } from "~/modules/audit/helpers.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
 import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
+import { assertAuditAcceptsCommentsOnLockedRow } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -115,6 +116,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // Shared, sanitized, transactional evidence-note writer (same helper
     // the webapp scan route uses — Markdoc injection closed there too).
     await db.$transaction(async (tx) => {
+      // Evidence reaches the feed as a note, so a finished audit refuses it —
+      // the same rule the web upload applies, checked on the locked row.
+      await assertAuditAcceptsCommentsOnLockedRow(tx, {
+        auditSessionId,
+        organizationId,
+      });
+
       await createAuditImageEvidenceNote({
         tx,
         auditSessionId,

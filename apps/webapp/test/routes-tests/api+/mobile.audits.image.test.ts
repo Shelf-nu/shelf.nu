@@ -53,9 +53,13 @@ vi.mock("~/modules/audit/mobile-evidence.server", () => ({
 // why: external database — don't hit the real DB. $transaction runs the
 // callback with an opaque tx; createAuditImageEvidenceNote is mocked so it
 // never touches the tx.
+// why: the evidence note is written in a transaction that first locks the audit
+// row and reads its status, so the stub transaction carries that read.
+const txStub = vi.hoisted(() => ({ $queryRaw: vi.fn() }));
+
 vi.mock("~/database/db.server", () => ({
   db: {
-    $transaction: vi.fn(async (fn: any) => fn({})),
+    $transaction: vi.fn(async (fn: any) => fn(txStub)),
   },
 }));
 
@@ -137,6 +141,8 @@ describe("POST /api/mobile/audits/image", () => {
     });
     (requireMobilePermission as any).mockResolvedValue(undefined);
     (requireAuditAssetInSession as any).mockResolvedValue(undefined);
+    // The locked audit row the evidence note is written against.
+    txStub.$queryRaw.mockResolvedValue([{ status: "ACTIVE" }]);
     // Default: uploadAuditImage returns the new bounded shape
     (uploadAuditImage as any).mockResolvedValue({
       image: { id: "img-1" },
@@ -239,6 +245,27 @@ describe("POST /api/mobile/audits/image", () => {
       expect.objectContaining({ content: rawContent })
     );
   });
+
+  it.each(["COMPLETED", "CANCELLED", "ARCHIVED"])(
+    "refuses evidence on a %s audit",
+    async (status) => {
+      // Evidence reaches the activity feed as a note, so a finished audit
+      // refuses it for the same reason it refuses comments.
+      txStub.$queryRaw.mockResolvedValue([{ status }]);
+
+      const result = await action(
+        createActionArgs({
+          request: createImageRequest({
+            auditSessionId: "session-1",
+            auditAssetId: "audit-asset-1",
+          }),
+        })
+      );
+
+      expect((result as unknown as Response).status).toBe(400);
+      expect(createAuditImageEvidenceNote).not.toHaveBeenCalled();
+    }
+  );
 
   it("returns 403 when the workspace lacks the Audits add-on (revenue bypass closed)", async () => {
     (getMobileUserContext as any).mockResolvedValue({

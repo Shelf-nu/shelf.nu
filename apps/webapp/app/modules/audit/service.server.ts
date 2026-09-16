@@ -135,29 +135,54 @@ export async function createWhileAuditAcceptsComments<T>(
   write: (tx: Omit<ExtendedPrismaClient, ITXClientDenyList>) => Promise<T>
 ): Promise<T> {
   return db.$transaction(async (tx) => {
-    const [session] = await tx.$queryRaw<{ status: AuditStatus }[]>`
-      SELECT status FROM "AuditSession"
-      WHERE id = ${auditSessionId} AND "organizationId" = ${organizationId}
-      FOR UPDATE
-    `;
-
-    if (!session) {
-      throw new ShelfError({
-        cause: null,
-        message: "Audit not found",
-        additionalData: { auditSessionId, organizationId },
-        label,
-        status: 404,
-        shouldBeCaptured: false,
-      });
-    }
-
-    assertAuditAcceptsComments(session.status, {
+    await assertAuditAcceptsCommentsOnLockedRow(tx, {
       auditSessionId,
       organizationId,
     });
 
     return write(tx);
+  });
+}
+
+/**
+ * Takes the audit row and refuses unless it still accepts comments.
+ *
+ * For a caller that already has a transaction of its own; everything else goes
+ * through {@link createWhileAuditAcceptsComments}.
+ *
+ * @param tx - The caller's transaction, which must hold the lock until it ends
+ * @param auditSessionId - The audit the comment belongs to
+ * @param organizationId - Its organization
+ * @throws {ShelfError} 404 when the audit is not in the organization; 400 when
+ *   it no longer accepts comments
+ */
+export async function assertAuditAcceptsCommentsOnLockedRow(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    auditSessionId,
+    organizationId,
+  }: { auditSessionId: string; organizationId: string }
+): Promise<void> {
+  const [session] = await tx.$queryRaw<{ status: AuditStatus }[]>`
+    SELECT status FROM "AuditSession"
+    WHERE id = ${auditSessionId} AND "organizationId" = ${organizationId}
+    FOR UPDATE
+  `;
+
+  if (!session) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { auditSessionId, organizationId },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  assertAuditAcceptsComments(session.status, {
+    auditSessionId,
+    organizationId,
   });
 }
 

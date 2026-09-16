@@ -41,6 +41,8 @@ import {
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
+  assertAuditAcceptsComments,
+  assertAuditAcceptsCommentsOnLockedRow,
   createWhileAuditAcceptsComments,
   requireAuditAssignee,
   requireAuditAssigneeForBaseSelfService,
@@ -382,6 +384,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "upload-image" || intent === "upload-images") {
+      // Evidence reaches the feed as a note, so a finished audit refuses the
+      // whole upload. Checked before the files are stored — the note write
+      // below re-checks on the locked row, and refusing only there would leave
+      // the uploaded images behind.
+      const auditForUpload = await db.auditSession.findFirst({
+        where: { id: auditId, organizationId },
+        select: { status: true },
+      });
+
+      if (auditForUpload) {
+        assertAuditAcceptsComments(auditForUpload.status, {
+          auditSessionId: auditId,
+          organizationId,
+        });
+      }
+
       // Get optional note content
       const noteContent = formData.get("content") as string | null;
 
@@ -431,6 +449,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       // Create a note in a transaction to track the image uploads.
       await db.$transaction(async (tx) => {
+        await assertAuditAcceptsCommentsOnLockedRow(tx, {
+          auditSessionId: auditId,
+          organizationId,
+        });
+
         const imageIds = uploadedImages.map((img) => img.id);
 
         if (intent === "upload-image") {
@@ -1035,6 +1058,13 @@ export default function AuditAssetDetails() {
             {AUDIT_CLOSED_TO_COMMENTS_MESSAGE}
           </p>
         )}
+        {/* A page opened while the audit was still running can submit after it
+            closed, so the server's refusal is rendered here rather than lost. */}
+        {actionData && "error" in actionData && actionData.error ? (
+          <p className="mt-2 text-sm text-error-500" role="alert">
+            {actionData.error.message}
+          </p>
+        ) : null}
       </div>
 
       {/* Notes section - scrollable, takes remaining space */}

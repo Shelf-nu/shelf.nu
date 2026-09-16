@@ -1,5 +1,8 @@
 /**
- * Deleting a note from an audit's activity feed.
+ * Comments on an audit's activity feed: adding one, and deleting one.
+ *
+ * A finished audit accepts no new comments, and the check runs on the audit row
+ * the write locks, so a completion committing mid-request cannot slip one in.
  *
  * Only comments are the author's to delete. The audit's own activity entries —
  * started, scanned, removed, completed — are UPDATE notes that carry the acting
@@ -7,6 +10,7 @@
  * of what they did.
  *
  * @see {@link file://./../../../app/routes/_layout+/audits.$auditId.note.tsx}
+ * @see {@link file://./../../../app/modules/audit/comment-policy.ts}
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
