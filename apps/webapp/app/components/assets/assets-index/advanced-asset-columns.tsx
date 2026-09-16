@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
 import type { AssetStatus } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
@@ -9,6 +9,7 @@ import {
   PopoverContent,
 } from "@radix-ui/react-popover";
 import { Link, useLoaderData } from "react-router";
+import { StockStatusBadge } from "~/components/assets/stock-status-badge";
 import { EventCardContent } from "~/components/calendar/event-card";
 import LineBreakText from "~/components/layout/line-break-text";
 import { LocationBadge } from "~/components/location/location-badge";
@@ -67,6 +68,7 @@ import { Td } from "./advanced-columns/td";
 import AssetQuickActions from "./asset-quick-actions";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { ListItemTagsColumn } from "./list-item-tags-column";
+import { resolveReservedDisplay } from "./reserved-display";
 import { AssetImage } from "../asset-image/component";
 import { AssetStatusBadge } from "../asset-status-badge";
 import { CategoryBadge } from "../category-badge";
@@ -365,6 +367,79 @@ export function AdvancedIndexColumn({
         </Td>
       );
 
+    case "available":
+      // Units free to hand over right now: total minus custody, kits and
+      // checked-out. Deliberately NOT reduced by future reservations — those
+      // units are still physically on the shelf — which is why `reserved` sits
+      // next to it as its own column rather than in a tooltip.
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) && item.available != null ? (
+            `${item.available}${
+              item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
+            }`
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
+
+    case "reserved":
+      // Units promised to future RESERVED bookings.
+      //
+      // NOT gated on quantity-tracking, unlike the two columns either side of
+      // it. An individually-tracked asset is a pool of one, and it can be
+      // reserved exactly like a pool can — so a booked camera reads 1 here.
+      // Gating it produced the worst outcome in the whole change: a user booked
+      // an asset, looked at a column headed "Reserved", and saw a dash. The
+      // number was already in the query; the cell was throwing it away.
+      //
+      // It is also the only one of the three new columns that says anything to
+      // a workspace with no quantity assets at all, and it says something the
+      // row could not say before: `AssetStatus` has no RESERVED member, so a
+      // booked-but-not-yet-collected asset reads "Available" in the Status
+      // badge and only confesses in "Upcoming Bookings", eighteen columns to
+      // the right.
+      return <ReservedCell item={item} />;
+
+    case "stockStatus":
+      // Derived verdict. The badge owns the "no reorder point renders blank"
+      // and "INDIVIDUAL renders blank" rules, so this cell stays a pass-through
+      // and every surface showing the verdict agrees.
+      //
+      // The breakdown makes the badge hoverable with THIS row's figures, so
+      // "how bad is it" no longer means opening the asset page. Passed only for
+      // quantity assets: an individual asset has no pool, and the values would
+      // all be null.
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          <StockStatusBadge
+            status={item.stockStatus}
+            breakdown={
+              isQuantityTracked(item) && item.available != null
+                ? {
+                    total: item.quantity ?? 0,
+                    available: item.available,
+                    inCustody: item.inCustody ?? 0,
+                    inKits: item.inKits ?? 0,
+                    checkedOut: item.checkedOut ?? 0,
+                    largestUpcomingBooking: item.largestUpcomingBooking ?? 0,
+                    minQuantity: item.minQuantity,
+                    unitOfMeasure: item.unitOfMeasure,
+                    // Named culprit for a SHORT row, so the hover can link to
+                    // the booking instead of leaving the reader to find it.
+                    topBooking:
+                      item.topBookingId && item.topBookingName
+                        ? { id: item.topBookingId, name: item.topBookingName }
+                        : null,
+                    assetId: item.id,
+                  }
+                : null
+            }
+          />
+        </Td>
+      );
+
     case "upcomingBookings":
       return <UpcomingBookingsColumn bookings={item.bookings} />;
 
@@ -375,6 +450,72 @@ export function AdvancedIndexColumn({
         </Td>
       );
   }
+}
+
+/**
+ * The `Reserved` cell.
+ *
+ * Split out of the switch because it is the only new cell that has to render a
+ * state the rest of the row cannot express: **more units promised than the
+ * workspace owns**.
+ *
+ * That state is why this component exists. A row reading `Free now 10 pcs ·
+ * Total quantity 10 pcs · Reserved 12 · Short` is self-contradicting on its
+ * face — three cells look healthy and only the pill objects. The cause is that
+ * `Free now` answers "on the shelf today" while `Short` answers "when that
+ * booking starts", and nothing marked the two apart. The cell that actually
+ * holds the contradiction, `Reserved 12` against a total of 10, was rendered in
+ * the same grey as a harmless `0`.
+ *
+ * So when the claim exceeds the pool it is drawn in the SAME violet as the
+ * `Short` badge and names the shortfall: `12 pcs · 2 short`.
+ *
+ * **Never "12 of 10".** That was the first attempt and it is unreadable: "of"
+ * asks to be read as part-of-whole, which has no meaning once the first number
+ * exceeds the second. The gap is also the number somebody can act on — nobody
+ * orders "12 of 10", they order 2. Reserve "X of Y" for surfaces where X is
+ * genuinely capped by Y, like the booking quantity dialogs.
+ *
+ * @param props.item - The row.
+ * @returns The table cell.
+ */
+function ReservedCell({ item }: { item: AdvancedIndexAsset }) {
+  if (item.reserved == null) {
+    return (
+      <Td className="w-full max-w-none whitespace-nowrap">
+        <EmptyTableValue />
+      </Td>
+    );
+  }
+
+  // The rule itself lives in `resolveReservedDisplay`, pure and unit-tested —
+  // the sum-vs-pool trap it guards against is invisible to both the compiler
+  // and a glance at this file.
+  const { text, isOversold, title } = resolveReservedDisplay({
+    reserved: item.reserved,
+    quantity: isQuantityTracked(item) ? item.quantity ?? null : null,
+    stockStatus: item.stockStatus ?? null,
+    largestUpcomingBooking: item.largestUpcomingBooking ?? 0,
+    inCustody: item.inCustody ?? 0,
+    inKits: item.inKits ?? 0,
+    checkedOut: item.checkedOut ?? 0,
+    unitOfMeasure: item.unitOfMeasure,
+  });
+
+  return (
+    <Td className="w-full max-w-none whitespace-nowrap">
+      {/* Tailwind class, not an inline hex. `BADGE_COLORS` is the palette for
+          Badge components (see the repo rule); reaching into it for the colour
+          of a bare table cell was borrowing a token for something it does not
+          govern, and it hard-codes a value the design system cannot restyle. */}
+      <span
+        className={tw(isOversold && "font-medium text-amber-600")}
+        title={title ?? undefined}
+      >
+        {text}
+      </span>
+    </Td>
+  );
 }
 
 function TextColumn({
@@ -424,6 +565,65 @@ function StatusColumn({
   availableToBook?: boolean;
   asset?: AdvancedIndexAsset;
 }) {
+  /**
+   * The index query already computed every claim on the pool, so hand the badge
+   * those numbers rather than letting it re-derive from row relations it does
+   * not carry. Deriving locally produced reserved/checkedOut = 0, which made
+   * the badge render the raw status and then silently rewrite itself on hover
+   * once the lazy per-row fetch landed.
+   *
+   * `available` is the server's figure, so this badge, the `Available` column
+   * and the `Stock status` column are three renderings of ONE calculation.
+   * Null for INDIVIDUAL assets, which fall through to the plain status shell.
+   */
+  const quantityBreakdown = useMemo(() => {
+    if (!asset || !isQuantityTracked(asset) || asset.available == null) {
+      return null;
+    }
+    return {
+      total: asset.quantity ?? 0,
+      inCustody: asset.inCustody ?? 0,
+      inKits: asset.inKits ?? 0,
+      reserved: asset.reserved ?? 0,
+      checkedOut: asset.checkedOut ?? 0,
+      /**
+       * **Not the `Free now` figure.** `available` feeds only the label choice
+       * in `getQuantityBadgeLabelAndColor` ("Reserved" vs "Partially
+       * reserved"), which asks *is there anything left to PROMISE* — so it has
+       * to subtract reservations, and it is allowed to go negative.
+       *
+       * Passing the server's free-now number here instead made the index badge
+       * read "Partially reserved" while the asset page, which derives the same
+       * label through `getQuantityData`, read "Reserved" — the same asset
+       * described two different ways at the same moment. So this reproduces
+       * `getQuantityData`'s formula exactly, field for field, rather than
+       * substituting a number that merely looks similar.
+       */
+      available:
+        (asset.quantity ?? 0) -
+        (asset.inCustody ?? 0) -
+        (asset.reserved ?? 0) -
+        (asset.checkedOut ?? 0),
+      /**
+       * The DISPLAY figure, and the server's own, so the tooltip footer, the
+       * `Free now` column and the `Stock status` pill are three renderings of
+       * ONE calculation and cannot drift apart.
+       */
+      freeNow: asset.available,
+      /**
+       * Empty on purpose. An asset can carry hundreds of future bookings, and
+       * shipping a per-booking list for every row of the index just so a hover
+       * card can list them would blow up the payload for the busiest customers
+       * — the ones this feature is for. The card degrades to totals plus the
+       * `nextReservedFrom` scalar below, which is the part that actually
+       * reconciles "12 reserved" with "10 free right now".
+       */
+      bookingAssets: [],
+      assetKits: [],
+      nextReservedFrom: asset.nextReservedFrom ?? null,
+    };
+  }, [asset]);
+
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
       <AssetStatusBadge
@@ -431,6 +631,7 @@ function StatusColumn({
         status={status}
         availableToBook={availableToBook ?? true}
         asset={asset}
+        quantityBreakdown={quantityBreakdown}
       />
     </Td>
   );

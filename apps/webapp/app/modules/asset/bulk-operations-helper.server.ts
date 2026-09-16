@@ -3,7 +3,11 @@ import { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
-import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
+import {
+  generateWhereClause,
+  parseFiltersWithHierarchy,
+  POOL_AGGREGATE_JOIN,
+} from "./query.server";
 import type { AllowedCustodianFilterIds } from "./utils.server";
 import { getAssetsWhereInput } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
@@ -50,6 +54,13 @@ export function buildAdvancedFilteredAssetIdsQuery(
     LEFT JOIN public."Custody" cu ON cu."assetId" = a.id
     LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
     LEFT JOIN public."User" u ON tm."userId" = u.id
+    -- Same pool aggregates the index query uses. Unconditional here, unlike the
+    -- paginated cheap phase: this builder receives a pre-built WHERE and cannot
+    -- see whether it references pool.*, and a select-all bulk action on a
+    -- "Stock status is Running low" view would otherwise die with
+    -- "missing FROM-clause entry for table pool". This path runs once per bulk
+    -- action, not once per page load, so the cost is not worth a gate.
+    ${POOL_AGGREGATE_JOIN}
     ${whereClause}
   `;
 }

@@ -40,6 +40,14 @@ const uiFieldTypeNames: Record<UIFieldType, string> = {
  * Determines how a field should be presented and interacted with in the UI
  * Used for generating appropriate form controls and filter interfaces
  *
+ * `stockStatus`, `available` and `reserved` are DERIVED — no such column exists
+ * on `Asset`. They are typed here like stored fields so the filter UI offers the
+ * right operators; the SQL layer maps them to computed expressions. This map
+ * MUST stay in step with `getQueryFieldType` in
+ * `modules/asset/field-type-mapping.ts`, which decides which SQL builder runs:
+ * updating only one is silent, and produced a 500 (`column a.stockStatus does
+ * not exist`) the first time.
+ *
  * @param column - Column configuration object
  * @param friendlyName - Whether to return a user-friendly name instead of the technical type
  * @returns The UI field type or its friendly name
@@ -67,6 +75,7 @@ export function getUIFieldType({
     case "type":
     case "upcomingBookings":
     case "assetModel":
+    case "stockStatus":
       fieldType = "enum";
       break;
     case "description":
@@ -75,6 +84,8 @@ export function getUIFieldType({
     case "valuation":
     case "quantity":
     case "minQuantity":
+    case "available":
+    case "reserved":
       fieldType = "number";
       break;
     case "availableToBook":

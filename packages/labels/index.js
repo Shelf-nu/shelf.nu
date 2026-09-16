@@ -38,6 +38,26 @@ export const ASSET_QTY_STATUS_LABELS = Object.freeze({
   PARTIALLY_RESERVED: "Partially reserved",
 });
 
+// Labels for the quantity FIGURES on a pool (not its status badge).
+//
+// `FREE_NOW` is the physical count: total minus custody, kits and checked-out.
+// It is deliberately NOT called "Available" — three different things in this
+// product were called that at once (this figure, the `Available` status badge,
+// and the `Available to book` flag), and only this one is time-bound. Without
+// the word "now" a row reading "Available 10" beside "Reserved 12" looks like a
+// contradiction rather than two facts about different moments.
+//
+// It lives here because the figure is rendered on the assets index, the asset
+// page, the reports PDF and the mobile asset screen. Renaming it in one place
+// and not the others is worse than not renaming it at all: the same number ends
+// up with two names in one product. One constant, one edit.
+export const ASSET_QUANTITY_FIGURE_LABELS = Object.freeze({
+  TOTAL: "Total quantity",
+  FREE_NOW: "Free now",
+  IN_CUSTODY: "In custody",
+  RESERVED: "Reserved",
+});
+
 // Booking-context pseudo-statuses an asset row can show inside a booking
 // (web canonical: the enum path in asset-status-badge/status-labels.ts).
 export const ASSET_BOOKING_PSEUDO_STATUS_LABELS = Object.freeze({
@@ -338,4 +358,22 @@ export const ASSET_TYPE_ADJECTIVES = Object.freeze({
 export const CONSUMPTION_TYPE_ADJECTIVES = Object.freeze({
   ONE_WAY: "used up",
   TWO_WAY: "returnable",
+});
+
+// Stock-status verdicts for the assets-index `Stock status` column. Derived
+// per QUANTITY_TRACKED asset by `classifyStockStatus` in
+// @shelf/quantity-control; INDIVIDUAL assets get no verdict and render blank.
+//
+// Deliberately NOT stock-shop words. Shelf serves two cohorts and one of them
+// rents returnable equipment: "Out of stock" on a fully booked camera pool is
+// both the wrong noun and the wrong instruction (buy more vs. wait for the
+// return). NONE_FREE / LOW / ENOUGH read correctly for a consumable and for a
+// pooled asset alike. NO_THRESHOLD has no label on purpose — the cell renders
+// an em dash, because a badge there reads as a level, and "nobody set a floor"
+// is the absence of an opinion, not a healthy one.
+export const STOCK_STATUS_LABELS = Object.freeze({
+  SHORT: "Short",
+  NONE_FREE: "None free",
+  LOW: "Running low",
+  ENOUGH: "Enough",
 });

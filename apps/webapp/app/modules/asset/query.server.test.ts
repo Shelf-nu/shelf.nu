@@ -1344,9 +1344,24 @@ describe("generateWhereClause - lowStockOnly", () => {
     const sql = getSqlString(
       generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
     );
-    expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
     expect(sql).toContain(`a."minQuantity" IS NOT NULL`);
-    expect(sql).toContain(`a."quantity" <= a."minQuantity"`);
+    // Compares AVAILABLE against the threshold, via the shared pool expression.
+    expect(sql).toContain(`pool.in_custody`);
+    expect(sql).toContain(`<= a."minQuantity"`);
+  });
+
+  it("compares AVAILABLE, not total quantity, against the threshold", () => {
+    // why: this is the defect the unification closes, and a total-based
+    // predicate would pass every other assertion in this file. The toggle used
+    // to read `a."quantity" <= a."minQuantity"`, which disagreed with the
+    // low-stock EMAIL (available-based) the moment any unit was in custody:
+    // 6 total, 2 in custody, threshold 5 → the alert fired and this filter
+    // could not find the row. Two of the three thresholded assets in the dev
+    // workspace were invisible to the old predicate.
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
+    );
+    expect(sql).not.toContain(`a."quantity" <= a."minQuantity"`);
   });
 });
 
@@ -1637,7 +1652,9 @@ describe("custodian display name", () => {
     // the custody JSON projection and inside BOOKING_CUSTODIAN_NAME's COALESCE,
     // so a bare `toContain` over the whole query stays green even when the
     // grouping column is removed — which is the only thing this guards.
-    const groupBy = sql.match(/GROUP BY [^\n]*/)?.[0] ?? "";
+    // Anchor on `a.id`: the per-asset pool LATERAL carries its own GROUP BY
+    // earlier in the text, and the outer clause is the one under test.
+    const groupBy = sql.match(/GROUP BY a\.id[^\n]*/)?.[0] ?? "";
 
     expect(groupBy).toContain('bu."displayName"');
   });

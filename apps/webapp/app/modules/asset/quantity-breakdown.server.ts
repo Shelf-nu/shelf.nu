@@ -70,8 +70,17 @@ export async function getAssetQuantityRows(
         select: {
           quantity: true,
           assetKitId: true,
-          booking: { select: { id: true, name: true, status: true } },
+          // `from` lets the tooltip say WHEN, which is the fact that reconciles
+          // "12 reserved" with "10 free right now" — those units have not left
+          // the shelf yet. Without it the two lines read as a contradiction.
+          booking: {
+            select: { id: true, name: true, status: true, from: true },
+          },
         },
+        // Soonest first. The tooltip renders only the first few slices for a
+        // heavily-booked asset, so the order decides WHICH ones survive the
+        // cut — and the booking starting next is the one worth showing.
+        orderBy: { booking: { from: "asc" } },
       },
       assetKits: {
         select: {

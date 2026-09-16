@@ -74,11 +74,23 @@ export function generateWhereClause(
   }
 
   if (lowStockOnly) {
-    // Low stock = a QUANTITY_TRACKED asset whose stock is at/below its
-    // reorder threshold. Deliberately stock-vs-threshold only, NOT
-    // custody-aware (a one-line change could add a custody-aware variant
-    // later if that's ever wanted) — keeps this fast and simple.
-    whereClause = Prisma.sql`${whereClause} AND a."type" = 'QUANTITY_TRACKED' AND a."minQuantity" IS NOT NULL AND a."quantity" <= a."minQuantity"`;
+    // The "Low stock only" quick toggle, now resolved through the SAME verdict
+    // the Stock status column and the low-stock email use.
+    //
+    // It used to compare TOTAL quantity against the threshold, while the alert
+    // (`isLowStock`) compares AVAILABLE. Those disagree the moment any unit is
+    // in custody: an asset with 6 total, 2 in custody and a threshold of 5 is
+    // low by the alert's reckoning (4 <= 5) and NOT low by the filter's
+    // (6 > 5) — so the email fired and this toggle could not find the row.
+    // Expressed as the ALERT's predicate (`isLowStock`: a threshold is set and
+    // available is at or below it) rather than as `verdict = 'LOW'`.
+    //
+    // The verdict is a priority ladder, so an asset with a threshold that has
+    // run out entirely reads NONE_FREE, not LOW — matching only 'LOW' silently
+    // dropped the most urgent rows from a toggle whose own label reads "at or
+    // below reorder threshold". Zero is at or below any threshold, and the
+    // alert emails about it, so the toggle must find it.
+    whereClause = Prisma.sql`${whereClause} AND a."minQuantity" IS NOT NULL AND ${POOL_AVAILABLE_EXPR} <= a."minQuantity"`;
   }
 
   // Add asset IDs filter if provided
@@ -394,24 +406,33 @@ function addNumberFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
    * "operator does not exist: integer = text" error from Prisma's
    * parameterized queries sending values as text.
    */
-  const col = Prisma.raw(filter.name);
+  // Computed columns have no physical `Asset` column to point at. Map them to
+  // the SAME expressions the projection uses, so a filter can never disagree
+  // with the number it is filtering. Anything else falls through to `a."col"`.
+  const computed: Record<string, Prisma.Sql> = {
+    available: Prisma.sql`${POOL_AVAILABLE_EXPR}`,
+    reserved: Prisma.sql`${POOL_RESERVED_EXPR}`,
+  };
+  const target = computed[filter.name]
+    ? Prisma.sql`(${computed[filter.name]})::float`
+    : Prisma.sql`a."${Prisma.raw(filter.name)}"::float`;
   const val = Number(filter.value);
   switch (filter.operator) {
     case "is":
-      return Prisma.sql`${whereClause} AND a."${col}"::float = ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} = ${val}`;
     case "isNot":
-      return Prisma.sql`${whereClause} AND a."${col}"::float != ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} != ${val}`;
     case "gt":
-      return Prisma.sql`${whereClause} AND a."${col}"::float > ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} > ${val}`;
     case "lt":
-      return Prisma.sql`${whereClause} AND a."${col}"::float < ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} < ${val}`;
     case "gte":
-      return Prisma.sql`${whereClause} AND a."${col}"::float >= ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} >= ${val}`;
     case "lte":
-      return Prisma.sql`${whereClause} AND a."${col}"::float <= ${val}`;
+      return Prisma.sql`${whereClause} AND ${target} <= ${val}`;
     case "between": {
       const [min, max] = filter.value as [number, number];
-      return Prisma.sql`${whereClause} AND a."${col}"::float BETWEEN ${Number(
+      return Prisma.sql`${whereClause} AND ${target} BETWEEN ${Number(
         min
       )} AND ${Number(max)}`;
     }
@@ -501,6 +522,40 @@ function addDateFilter(
 }
 
 function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
+  // Derived verdict, not a stored enum — compared as text against the same
+  // expression the column renders. This is the whole reason Stock status is one
+  // enum column rather than three more bespoke URL params like `lowStockOnly`:
+  // it arrives here through the ordinary filter path and gets is / isNot /
+  // containsAny for free.
+  if (filter.name === "stockStatus") {
+    switch (filter.operator) {
+      case "is":
+        return Prisma.sql`${whereClause} AND (${POOL_STOCK_STATUS_EXPR}) = ${String(
+          filter.value
+        ).trim()}`;
+      case "isNot":
+        // NULL (an individually-tracked asset) is not "some other status" — it
+        // has no verdict at all, so `IS DISTINCT FROM` would wrongly include
+        // every individual asset in a "Stock status is not Enough" filter.
+        return Prisma.sql`${whereClause} AND (${POOL_STOCK_STATUS_EXPR}) IS NOT NULL AND (${POOL_STOCK_STATUS_EXPR}) != ${String(
+          filter.value
+        ).trim()}`;
+      case "containsAny": {
+        const values = String(filter.value)
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+        if (values.length === 0) return whereClause;
+        return Prisma.sql`${whereClause} AND (${POOL_STOCK_STATUS_EXPR}) = ANY(ARRAY[${Prisma.join(
+          values.map((v) => Prisma.sql`${v}`),
+          ", "
+        )}])`;
+      }
+      default:
+        return whereClause;
+    }
+  }
+
   if (filter.name === "status") {
     switch (filter.operator) {
       case "is": {
@@ -1655,6 +1710,40 @@ export function parseSortingOptions(sortBy: string[]): {
         // Use regular sorting for non-text columns
         orderByParts.push(`"${columnName}" ${field.direction}`);
       }
+    } else if (
+      field.name === "available" ||
+      field.name === "reserved" ||
+      field.name === "stockStatus"
+    ) {
+      // Computed columns. The cheap phase emits these aliases (gated on
+      // `detectPoolKeys`), so ORDER BY can reference them by name exactly like
+      // a stored column.
+      //
+      // Stock status sorts by SEVERITY, not alphabetically — "worst first" is
+      // the only ordering anyone wants from it, and `Enough` < `Low` < `None
+      // free` < `Short` alphabetically is meaningless. The ranks mirror
+      // STOCK_STATUS_SEVERITY in @shelf/quantity-control. NULL (individually
+      // tracked) sorts last in both directions via NULLS LAST, so an ascending
+      // "worst first" never buries real problems under rows that have no
+      // verdict.
+      if (field.name === "stockStatus") {
+        orderByParts.push(
+          `CASE "assetStockStatus"
+             WHEN 'SHORT' THEN 0
+             WHEN 'NONE_FREE' THEN 1
+             WHEN 'LOW' THEN 2
+             WHEN 'ENOUGH' THEN 3
+             WHEN 'NO_THRESHOLD' THEN 4
+             ELSE NULL
+           END ${field.direction} NULLS LAST`
+        );
+      } else {
+        const alias =
+          field.name === "available"
+            ? "assetAvailable"
+            : "assetReservedDisplay";
+        orderByParts.push(`"${alias}" ${field.direction} NULLS LAST`);
+      }
     } else if (field.name === "qrId") {
       orderByParts.push(getNormalizedSortExpression(`"qrId"`, field.direction));
     } else if (field.name === "kit") {
@@ -2150,6 +2239,22 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a."unitOfMeasure" AS "assetUnitOfMeasure",
       a."minQuantity" AS "assetMinQuantity",
       a."consumptionType" AS "assetConsumptionType",
+      -- Quantity-pool figures, from the single "pool" LATERAL in
+      -- assetQueryJoins. They live in a join rather than inline subqueries so
+      -- the WHERE clause and ORDER BY can reference the SAME values by alias —
+      -- a filter cannot silently disagree with the column it filters.
+      pool.in_kits AS "assetInKits",
+      pool.largest_booking AS "assetLargestUpcomingBooking",
+      pool.next_reserved_from AS "assetNextReservedFrom",
+      pool.top_booking_id AS "assetTopBookingId",
+      pool.top_booking_name AS "assetTopBookingName",
+      pool.checked_out AS "assetCheckedOut",
+      pool.in_custody AS "assetInCustodyUnits",
+      -- Derived here, not in the outer projection, so there is exactly ONE
+      -- definition of each and the filter/sort reference the same expressions.
+      ${POOL_AVAILABLE_EXPR} AS "assetAvailable",
+      ${POOL_RESERVED_EXPR} AS "assetReservedDisplay",
+      ${POOL_STOCK_STATUS_EXPR} AS "assetStockStatus",
       a."availableToBook" AS "assetAvailableToBook",
       k.id AS "assetKitId",
       a."categoryId" AS "assetCategoryId",
@@ -2279,6 +2384,128 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
   `;
 };
 
+/**
+ * Quantity-pool aggregates for one asset, as a LATERAL join aliased `pool`.
+ *
+ * Everything the `Available` / `Reserved` / `Stock status` columns need, and
+ * everything filtering and sorting on them needs, computed once per asset.
+ *
+ * A LATERAL rather than inline scalar subqueries in the SELECT list, because a
+ * value in the SELECT list is invisible to the WHERE clause — SQL evaluates
+ * WHERE first. Putting them here means the projection, the filter and the sort
+ * all reference the same aliases, so a filter can never disagree with the
+ * column it filters. It also cannot fan the asset out into duplicate rows the
+ * way a plain join on AssetKit or BookingAsset would (an asset can sit in many
+ * kits and on many bookings) — the same hazard the custody_agg LATERAL exists
+ * for.
+ *
+ * All values are 0 for INDIVIDUAL assets, whose `quantity` is NULL; the
+ * renderers gate on `type` anyway.
+ */
+export const POOL_AGGREGATE_JOIN = Prisma.sql`
+  LEFT JOIN LATERAL (
+    SELECT
+      COALESCE((
+        SELECT SUM(ak_q.quantity)::int
+        FROM public."AssetKit" ak_q
+        WHERE ak_q."assetId" = a.id
+      ), 0) AS in_kits,
+      COALESCE((
+        SELECT SUM(cu_q.quantity)::int
+        FROM public."Custody" cu_q
+        WHERE cu_q."assetId" = a.id
+      ), 0) AS in_custody,
+      -- Reserved and checked-out share one scan of the booking pivot.
+      COALESCE((
+        SELECT SUM(CASE WHEN bk_p.status = 'RESERVED' THEN ba_p.quantity END)::int
+        FROM public."BookingAsset" ba_p
+        JOIN public."Booking" bk_p ON ba_p."bookingId" = bk_p.id
+        WHERE ba_p."assetId" = a.id
+          AND bk_p.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+      ), 0) AS reserved,
+      COALESCE((
+        SELECT SUM(CASE WHEN bk_p.status IN ('ONGOING', 'OVERDUE') THEN ba_p.quantity END)::int
+        FROM public."BookingAsset" ba_p
+        JOIN public."Booking" bk_p ON ba_p."bookingId" = bk_p.id
+        WHERE ba_p."assetId" = a.id
+          AND bk_p.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+      ), 0) AS checked_out,
+      -- The LARGEST single upcoming booking, not the sum, AND which booking it
+      -- is. Summing across bookings that never overlap in time double-counts:
+      -- 8 tripods on Monday plus 8 on Friday from a pool of 10 would report
+      -- over-commitment when peak demand is only 8. A lower bound on peak can
+      -- never false-alarm.
+      --
+      -- The id and name come from the SAME grouped scan that produces the
+      -- figure, so naming the culprit costs nothing extra. Without them a
+      -- SHORT row can say "2 short" and nothing else: the user is told they
+      -- have a problem and given no way to find it, which is the difference
+      -- between a diagnosis and a tool.
+      COALESCE(top_booking.units, 0)::int AS largest_booking,
+      top_booking.id AS top_booking_id,
+      top_booking.name AS top_booking_name,
+      -- The START of the soonest upcoming booking. ONE scalar, not a list: an
+      -- asset can carry hundreds of future bookings and the index must not pay
+      -- per-booking payload for a hover card. This is the fact that reconciles
+      -- "12 reserved" with "10 free right now" — the units have not left the
+      -- shelf yet, and this says when they will.
+      (
+        SELECT MIN(bk_f.from)
+        FROM public."BookingAsset" ba_f
+        JOIN public."Booking" bk_f ON ba_f."bookingId" = bk_f.id
+        WHERE ba_f."assetId" = a.id AND bk_f.status = 'RESERVED'
+      ) AS next_reserved_from
+    -- A one-row anchor so the nested LATERAL below can be joined. The body was
+    -- previously a FROM-less SELECT of scalar subqueries.
+    FROM (SELECT 1) AS anchor
+    LEFT JOIN LATERAL (
+      SELECT bk_t.id, bk_t.name, SUM(ba_t.quantity)::int AS units
+      FROM public."BookingAsset" ba_t
+      JOIN public."Booking" bk_t ON ba_t."bookingId" = bk_t.id
+      WHERE ba_t."assetId" = a.id AND bk_t.status = 'RESERVED'
+      GROUP BY bk_t.id, bk_t.name
+      -- Tie-break on the booking id so the same booking is named
+      -- on every render rather than flapping between equals.
+      ORDER BY SUM(ba_t.quantity) DESC, bk_t.id
+      LIMIT 1
+    ) AS top_booking ON TRUE
+  ) pool ON TRUE`;
+
+/**
+ * Units free to hand over right now. The ONE definition — referenced by the
+ * projection, the `available` filter and the `available` sort.
+ *
+ * Reserved units are deliberately not subtracted: they are still physically on
+ * the shelf, which is why `Reserved` ships as its own column.
+ */
+const POOL_AVAILABLE_EXPR = Prisma.raw(
+  `GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0)`
+);
+
+/**
+ * The stock verdict. SQL twin of `classifyStockStatus`
+ * (`@shelf/quantity-control`), which stays the tested source of truth and feeds
+ * mobile. Precedence is load-bearing and identical in both; the pair is pinned
+ * to one shared case matrix.
+ */
+const POOL_STOCK_STATUS_EXPR = Prisma.raw(`CASE
+    WHEN a.type <> 'QUANTITY_TRACKED' THEN NULL
+    WHEN (pool.in_custody + pool.in_kits + pool.checked_out + pool.largest_booking)
+         > COALESCE(a.quantity, 0) THEN 'SHORT'
+    WHEN GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0) <= 0
+         THEN 'NONE_FREE'
+    WHEN a."minQuantity" IS NOT NULL
+         AND GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0)
+             <= a."minQuantity" THEN 'LOW'
+    WHEN a."minQuantity" IS NULL THEN 'NO_THRESHOLD'
+    ELSE 'ENOUGH'
+  END`);
+
+/** Units reserved, capped at the pool size (1 for an individually-tracked asset). */
+const POOL_RESERVED_EXPR = Prisma.raw(
+  `CASE WHEN a.type = 'INDIVIDUAL' THEN LEAST(pool.reserved, 1) ELSE pool.reserved END`
+);
+
 export const assetQueryJoins = Prisma.sql`
   FROM public."Asset" a
   -- Kit membership goes through the AssetKit pivot. AssetKit has no
@@ -2406,6 +2633,7 @@ export const assetQueryJoins = Prisma.sql`
   ) b ON TRUE
   LEFT JOIN public."User" bu ON b."custodianUserId" = bu.id
   LEFT JOIN public."TeamMember" btm ON b."custodianTeamMemberId" = btm.id
+  ${POOL_AGGREGATE_JOIN}
 `;
 
 /**
@@ -2477,6 +2705,16 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'quantity', aq."assetQuantity",
           'unitOfMeasure', aq."assetUnitOfMeasure",
           'minQuantity', aq."assetMinQuantity",
+          'available', aq."assetAvailable",
+          'reserved', aq."assetReservedDisplay",
+          'stockStatus', aq."assetStockStatus",
+          'inCustody', aq."assetInCustodyUnits",
+          'inKits', aq."assetInKits",
+          'checkedOut', aq."assetCheckedOut",
+          'largestUpcomingBooking', aq."assetLargestUpcomingBooking",
+          'nextReservedFrom', aq."assetNextReservedFrom",
+          'topBookingId', aq."assetTopBookingId",
+          'topBookingName', aq."assetTopBookingName",
           'consumptionType', aq."assetConsumptionType",
           'availableToBook', aq."assetAvailableToBook",
           'kitId', aq."assetKitId",
@@ -2677,6 +2915,30 @@ const CHEAP_CUSTODY_JOINS = Prisma.sql`
     LEFT JOIN public."TeamMember" btm ON b."custodianTeamMemberId" = btm.id
 `;
 
+/** The three columns whose values come from the `pool` LATERAL. */
+const POOL_COLUMN_NAMES = ["available", "reserved", "stockStatus"] as const;
+
+/**
+ * Whether the cheap phase needs the `pool` LATERAL and its derived selects.
+ *
+ * The cheap phase runs on EVERY index load, so the pool join is gated rather
+ * than always-on: it is five correlated aggregates per asset and most page
+ * loads neither filter nor sort on them. Miss the gate and the query fails with
+ * `missing FROM-clause entry for table "pool"`, so over-inclusion is the safe
+ * direction — the same reasoning as `detectActiveSortKeys`.
+ *
+ * @param filters - Parsed filters for this request.
+ * @param sortBy - Raw sort specs (`field:direction[:fieldType]`).
+ * @returns `true` when a pool column is filtered or sorted on.
+ */
+function detectPoolKeys(filters: Filter[], sortBy: string[]): boolean {
+  const names: string[] = [...POOL_COLUMN_NAMES];
+  return (
+    filters.some((f) => names.includes(f.name)) ||
+    sortBy.some((spec) => names.includes(spec.split(":")[0] ?? ""))
+  );
+}
+
 /**
  * Detects which sort-only subquery selects the cheap phase must emit so that
  * every alias the `ORDER BY` references also exists in the slim SELECT. Missing
@@ -2737,6 +2999,13 @@ export type BuildAdvancedAssetsQueryParams = {
   sortBy: string[];
   /** Parsed filters, used to detect whether a custody filter is active. */
   parsedFilters: Filter[];
+  /**
+   * Whether the "Low stock only" toggle is on. Its predicate resolves through
+   * the shared stock-status expression, so it needs the `pool` LATERAL exactly
+   * like a `stockStatus` filter does — without this the slim phase omits the
+   * join and Postgres reports a missing FROM-clause entry.
+   */
+  lowStockOnly?: boolean;
   /** Include the bookings jsonb aggregation (availability calendar / column). */
   withBookings: boolean;
   /** Include the barcodes jsonb aggregation. */
@@ -2770,6 +3039,7 @@ export function buildAdvancedAssetsQuery({
   customFieldSortings,
   sortBy,
   parsedFilters,
+  lowStockOnly = false,
   withBookings,
   withBarcodes,
   paginationClause,
@@ -2791,6 +3061,19 @@ export function buildAdvancedAssetsQuery({
   // active. The custody CASE select itself is only needed for the sort.
   const custodyFilterActive = parsedFilters.some((f) => f.name === "custody");
   const custodyJoinsActive = custodyFilterActive || custodySort;
+
+  // The pool LATERAL is needed when the WHERE references pool.* (a filter on
+  // available / reserved / stockStatus) or the ORDER BY references one of the
+  // derived aliases. Gated because it is five correlated aggregates per asset
+  // and the cheap phase runs on every index load.
+  const poolActive = lowStockOnly || detectPoolKeys(parsedFilters, sortBy);
+  const poolJoin = poolActive ? POOL_AGGREGATE_JOIN : Prisma.empty;
+  const poolSelects = poolActive
+    ? Prisma.sql`,
+      ${POOL_AVAILABLE_EXPR} AS "assetAvailable",
+      ${POOL_RESERVED_EXPR} AS "assetReservedDisplay",
+      ${POOL_STOCK_STATUS_EXPR} AS "assetStockStatus"`
+    : Prisma.empty;
 
   // Base name-joins are gated so the slim phase stays O(1) joins under the
   // common default sort. Search no longer references c.name / l.name at the
@@ -2868,9 +3151,10 @@ export function buildAdvancedAssetsQuery({
           a.status AS "assetStatus",
           a.type AS "assetType",
           a.description AS "assetDescription",
-          a."availableToBook" AS "assetAvailableToBook"${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${customFieldSelect}
+          a."availableToBook" AS "assetAvailableToBook"${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${customFieldSelect}${poolSelects}
         ${baseJoins}
         ${custodyJoins}
+        ${poolJoin}
         ${whereClause}
       ),
       sorted_asset_query AS (
@@ -2906,7 +3190,7 @@ export function buildAdvancedAssetsQuery({
         })}
         ${assetQueryJoins}
         WHERE a.id = saq."assetId"
-        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."displayName", bu."profilePicture", btm.id, btm.name, am.id, am.name
+        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."displayName", bu."profilePicture", btm.id, btm.name, am.id, am.name, pool.in_kits, pool.in_custody, pool.reserved, pool.checked_out, pool.largest_booking, pool.next_reserved_from, pool.top_booking_id, pool.top_booking_name
       ) aq ON TRUE;
     `;
 }

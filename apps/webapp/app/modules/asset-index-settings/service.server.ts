@@ -350,6 +350,45 @@ export async function removeCustomFieldFromAssetIndexSettings({
 }
 
 /**
+ * Splices new columns into an existing, user-customised column list at the
+ * positions they hold in {@link defaultFields}, shifting whatever sits at or
+ * after each insertion point.
+ *
+ * Existing users have reordered and hidden columns to taste, so their saved
+ * list is the source of truth for everything already in it — this only decides
+ * where a column they have never seen should first appear. Insertions are
+ * applied in ascending default position so each shift accounts for the ones
+ * before it; a field whose default position is past the end of the list simply
+ * lands at the end, which is the old append behaviour.
+ *
+ * @param existing - The user's saved columns, positions untouched except where shifted.
+ * @param toAdd - Columns missing from `existing`, carrying their default position.
+ * @returns A new array — neither input is mutated.
+ *
+ * Exported for tests: this decides what EVERY existing customer sees the first
+ * time a new column ships, and getting it wrong is invisible until someone
+ * opens the index.
+ */
+export function insertColumnsAtDefaultPositions(
+  existing: Column[],
+  toAdd: Column[]
+): Column[] {
+  const ascending = [...toAdd].sort((a, b) => a.position - b.position);
+
+  return ascending.reduce<Column[]>(
+    (columns, incoming) => [
+      ...columns.map((column) =>
+        column.position >= incoming.position
+          ? { ...column, position: column.position + 1 }
+          : column
+      ),
+      { ...incoming },
+    ],
+    [...existing]
+  );
+}
+
+/**
  * Updates the AssetIndexSettings for all users in an organization when new custom fields are created
  * @param newCustomFields - The newly created or updated custom fields
  * @param organizationId - The organization ID
@@ -439,12 +478,22 @@ async function validateColumns({
       (name) => !existingDefaultFields.includes(name)
     );
 
-    // If default fields are missing, add them from our static defaults
+    // If default fields are missing, add them from our static defaults —
+    // AT their default position, not appended.
+    //
+    // Appending was fine while every new field belonged at the end. It stopped
+    // being fine with the quantity-pool columns, whose whole point is to sit
+    // beside `status`: appended, they landed past every custom field, roughly
+    // 3000px off the right edge of a real workspace's table. A column nobody
+    // scrolls to is a column that does not exist.
     if (missingDefaultFields.length > 0) {
       const fieldsToAdd = defaultFields.filter((field) =>
         missingDefaultFields.includes(field.name)
       );
-      updatedColumns = [...updatedColumns, ...fieldsToAdd];
+      updatedColumns = insertColumnsAtDefaultPositions(
+        updatedColumns,
+        fieldsToAdd
+      );
       needsUpdate = true;
     }
 

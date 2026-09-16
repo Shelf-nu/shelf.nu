@@ -59,6 +59,7 @@ import {
   renderBulkAssetTitle,
   updateAsset,
   uploadDuplicateAssetMainImage,
+  bulkUpdateAssetMinQuantity,
 } from "./service.server";
 
 // why: isolating asset service logic from actual database operations
@@ -5941,5 +5942,163 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
       expect(content).toContain("asset-individual");
       expect(content).not.toContain("asset-qty");
     }
+  });
+});
+
+describe("bulkUpdateAssetMinQuantity", () => {
+  const mockAssetFindMany = db.asset.findMany as ReturnType<typeof vitest.fn>;
+  const mockAssetUpdateMany = db.asset.updateMany as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockRecordEvents = recordEvents as ReturnType<typeof vitest.fn>;
+  const mockLowStock = checkAndNotifyLowStock as ReturnType<typeof vitest.fn>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockAssetUpdateMany.mockResolvedValue({ count: 2 });
+  });
+
+  /** Args every case shares; `settings` is only read by the mocked resolver. */
+  const args = {
+    organizationId: "org-1",
+    userId: "user-1",
+    settings: {} as never,
+  };
+
+  it("only asks the database for QUANTITY_TRACKED assets in the caller's org", async () => {
+    // why: the org scope is the IDOR guard for every id used downstream, and
+    // the type filter is what makes a mixed selection safe to submit — the
+    // dialog is reachable from a list containing individually-tracked assets.
+    mockAssetFindMany.mockResolvedValue([]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1"],
+      minQuantity: 5,
+    });
+
+    expect(mockAssetFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org-1",
+          type: "QUANTITY_TRACKED",
+        }),
+      })
+    );
+  });
+
+  it("writes and emits ASSET_MIN_QUANTITY_CHANGED only for rows that change", async () => {
+    mockAssetFindMany.mockResolvedValue([
+      { id: "asset-1", minQuantity: null }, // null -> 5, changes
+      { id: "asset-2", minQuantity: 5 }, // already 5, no-op
+    ]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1", "asset-2"],
+      minQuantity: 5,
+    });
+
+    expect(mockAssetUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["asset-1"] } },
+        data: { minQuantity: 5 },
+      })
+    );
+    expect(mockRecordEvents.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        action: "ASSET_MIN_QUANTITY_CHANGED",
+        entityId: "asset-1",
+        field: "minQuantity",
+        fromValue: null,
+        toValue: 5,
+      }),
+    ]);
+  });
+
+  it("does not write at all when nothing would change", async () => {
+    // why: re-applying the same threshold is a normal accident on a bulk
+    // action, and it must not fill the activity feed with no-op entries.
+    mockAssetFindMany.mockResolvedValue([{ id: "asset-1", minQuantity: 5 }]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1"],
+      minQuantity: 5,
+    });
+
+    expect(mockAssetUpdateMany).not.toHaveBeenCalled();
+    expect(mockRecordEvents).not.toHaveBeenCalled();
+  });
+
+  it("clears the threshold when passed null", async () => {
+    mockAssetFindMany.mockResolvedValue([{ id: "asset-1", minQuantity: 5 }]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1"],
+      minQuantity: null,
+    });
+
+    expect(mockAssetUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { minQuantity: null } })
+    );
+  });
+
+  it("refreshes the low-stock marker SILENTLY, once per changed asset", async () => {
+    // why: this is the guard against a mailbox flood. The notifier emails the
+    // owner AND every admin, so a threshold set across a large catalogue would
+    // otherwise send hundreds of emails for a change the user just made and can
+    // already see on screen. The marker still has to be updated, or the next
+    // stock movement fires the alert we meant to suppress.
+    mockAssetFindMany.mockResolvedValue([
+      { id: "asset-1", minQuantity: null },
+      { id: "asset-2", minQuantity: null },
+    ]);
+
+    await bulkUpdateAssetMinQuantity({
+      ...args,
+      assetIds: ["asset-1", "asset-2"],
+      minQuantity: 5,
+    });
+
+    expect(mockLowStock).toHaveBeenCalledTimes(2);
+    for (const call of mockLowStock.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({ silent: true }));
+    }
+  });
+
+  it("still commits the threshold when the low-stock refresh throws", async () => {
+    // why: notifications are best-effort. A failed marker update must never
+    // roll back a write the user already saw succeed.
+    mockAssetFindMany.mockResolvedValue([{ id: "asset-1", minQuantity: null }]);
+    mockLowStock.mockRejectedValueOnce(new Error("notifier down"));
+
+    await expect(
+      bulkUpdateAssetMinQuantity({
+        ...args,
+        assetIds: ["asset-1"],
+        minQuantity: 5,
+      })
+    ).resolves.toBe(1);
+
+    expect(mockAssetUpdateMany).toHaveBeenCalled();
+  });
+
+  it("returns 0 when the selection held nothing to change", () => {
+    // why: the route builds its confirmation from this number. Returning a
+    // truthy value regardless is what let it claim "reorder point set" for a
+    // selection of individually-tracked assets, where nothing was written.
+    mockAssetFindMany.mockResolvedValue([]);
+
+    return expect(
+      bulkUpdateAssetMinQuantity({
+        organizationId: "org-1",
+        userId: "user-1",
+        settings: {} as never,
+        assetIds: ["asset-1"],
+        minQuantity: 5,
+      })
+    ).resolves.toBe(0);
   });
 });

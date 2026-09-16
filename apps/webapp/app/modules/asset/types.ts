@@ -18,6 +18,7 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
+import type { StockStatus } from "@shelf/quantity-control";
 import type { assetIndexFields } from "./fields";
 
 export interface ICustomFieldValueJson {
@@ -217,6 +218,52 @@ export type AdvancedIndexAsset = Pick<
   | "availableToBook"
 > & {
   qrId: string; // QR code will always be available
+  /**
+   * Units free to hand over right now: `quantity` minus custody, kit
+   * allocations and checked-out units. Computed in the index SQL, not stored.
+   *
+   * Deliberately NOT reduced by future reservations — a reserved unit is still
+   * physically on the shelf — so read it alongside `reserved` rather than on
+   * its own. `null` for INDIVIDUAL assets, which have no pool.
+   */
+  available: number | null;
+  /** Units committed to RESERVED bookings. `null` for INDIVIDUAL assets. */
+  reserved: number | null;
+  /** Units held by custodians. Feeds the badge; `null` for INDIVIDUAL assets. */
+  inCustody: number | null;
+  /** Units earmarked to kits. `null` for INDIVIDUAL assets. */
+  inKits: number | null;
+  /** Units out on ONGOING/OVERDUE bookings. `null` for INDIVIDUAL assets. */
+  checkedOut: number | null;
+  /**
+   * The largest SINGLE upcoming booking's claim — not the sum of all of them.
+   * This is the figure the `Short` verdict is computed from, so it is also the
+   * figure the badge's tooltip must quote; showing `reserved` there could
+   * contradict the badge whenever an asset has several future bookings.
+   */
+  largestUpcomingBooking: number | null;
+  /**
+   * Start of the SOONEST upcoming (RESERVED) booking, or null when there is
+   * none. A single scalar on purpose: an asset may carry hundreds of future
+   * bookings, and the index must not ship a per-booking list just so a hover
+   * card can say "those units leave on the 2nd". Serialised as a string.
+   */
+  nextReservedFrom: string | null;
+  /**
+   * The single upcoming booking claiming the MOST units of this pool — the one
+   * the `SHORT` verdict is computed from. Null when there are no upcoming
+   * bookings. Carried so a `Short` row can NAME the booking instead of only
+   * announcing that a problem exists.
+   */
+  topBookingId: string | null;
+  topBookingName: string | null;
+  /**
+   * Derived pool verdict powering the `Stock status` column. Computed in SQL as
+   * the twin of `classifyStockStatus` (`@shelf/quantity-control`), which stays
+   * the tested source of truth and feeds mobile — the two are pinned to the
+   * same case matrix. `null` for INDIVIDUAL assets.
+   */
+  stockStatus: StockStatus | null;
   assetModelId?: string | null;
   assetModelName?: string | null;
   /** The model's cover image, used when the asset has none of its own.

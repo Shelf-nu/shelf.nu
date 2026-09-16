@@ -16,7 +16,9 @@
 
 import type React from "react";
 import type { ConsumptionType } from "@prisma/client";
+import { ASSET_QUANTITY_FIGURE_LABELS } from "@shelf/labels";
 import { TriangleAlertIcon } from "lucide-react";
+import { Link } from "react-router";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
@@ -105,6 +107,16 @@ export interface QuantityOverviewCardProps {
    * the separate "Checked out (bookings)" row for what's actually gone.
    */
   reservedQuantity?: number;
+  /**
+   * Set when the pool is promised beyond its size. The card previously listed
+   * four numbers and never said the asset was over-committed, so the page you
+   * land on to FIX the problem was the one page that did not mention it.
+   */
+  overCommitment?: {
+    shortBy: number;
+    asks: number;
+    booking: { id: string; name: string } | null;
+  } | null;
   /**
    * Count of distinct upcoming bookings contributing to `reservedQuantity`.
    * Used only by the explanatory tooltip next to the "Reserved (bookings)"
@@ -220,6 +232,7 @@ export function QuantityOverviewCard({
   inLocationsQuantity,
   inLocationsManualQuantity,
   reservedQuantity,
+  overCommitment,
   reservingBookingCount,
   checkedOutQuantity,
   canUpdate = false,
@@ -306,10 +319,47 @@ export function QuantityOverviewCard({
         ) : null}
       </div>
 
+      {/*
+        The problem, stated, in the same shape the page already uses for
+        "here is a fact about this asset, here is what to do about it" — the
+        unplaced-units card a few sections down. Gray body text, the number in
+        semibold, the action as an ordinary link. An invented coloured alert
+        panel would shout louder than anything else on the page and match
+        nothing else in the product.
+      */}
+      {overCommitment ? (
+        <div className="border-b border-gray-100 px-4 py-3">
+          <p className="text-[14px] text-gray-600">
+            <span className="font-medium text-gray-900">
+              {overCommitment.booking
+                ? overCommitment.booking.name
+                : "A booking"}
+            </span>{" "}
+            asks for {formatWithUnit(overCommitment.asks, unit)} and you own{" "}
+            {formatWithUnit(qty, unit)} &mdash; promised{" "}
+            <span className="font-medium text-gray-900">
+              {formatWithUnit(overCommitment.shortBy, unit)}
+            </span>{" "}
+            more than you have.
+          </p>
+          {overCommitment.booking ? (
+            <Link
+              to={`/bookings/${overCommitment.booking.id}`}
+              className="mt-1 inline-block text-[14px] text-gray-700 underline decoration-gray-300 underline-offset-2 hover:text-gray-900 hover:decoration-gray-500"
+            >
+              Open booking
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Detail rows */}
-      <OverviewRow label="Total quantity" value={formatWithUnit(qty, unit)} />
       <OverviewRow
-        label="Available"
+        label={ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
+        value={formatWithUnit(qty, unit)}
+      />
+      <OverviewRow
+        label={ASSET_QUANTITY_FIGURE_LABELS.FREE_NOW}
         value={formatWithUnit(available, unit)}
         warning={isLowStock}
       />
