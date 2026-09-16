@@ -9,7 +9,10 @@ import {
 import { createAuditImageEvidenceNote } from "~/modules/audit/helpers.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
 import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
-import { assertAuditAcceptsCommentsOnLockedRow } from "~/modules/audit/service.server";
+import {
+  assertAuditAcceptsComments,
+  assertAuditAcceptsCommentsOnLockedRow,
+} from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -92,6 +95,21 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       userId: user.id,
     });
+
+    // Evidence reaches the feed as a note, so a finished audit refuses the
+    // upload before the file is stored — refusing only at the note write below
+    // would leave the stored image behind with nothing pointing at it.
+    const auditForUpload = await db.auditSession.findFirst({
+      where: { id: auditSessionId, organizationId },
+      select: { status: true },
+    });
+
+    if (auditForUpload) {
+      assertAuditAcceptsComments(auditForUpload.status, {
+        auditSessionId,
+        organizationId,
+      });
+    }
 
     // Single bounded parse: the file stream AND the optional `content`
     // text field come from `parseFileFormData` (maxFileSize enforced;
