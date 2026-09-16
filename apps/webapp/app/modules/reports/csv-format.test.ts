@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
 
-import { formatDateForCsv } from "./csv-format";
+import { escapeCsvField, formatDateForCsv } from "./csv-format";
 
 /** DD/MM/YYYY, 12h, UTC — a numeric-format user. */
 const ddmm: ResolvedFormatPrefs = {
@@ -56,5 +56,24 @@ describe("formatDateForCsv", () => {
 
   it("returns an empty string for a null date", () => {
     expect(formatDateForCsv(null, ddmm)).toBe("");
+  });
+});
+
+describe("escapeCsvField", () => {
+  it("neutralises a formula marker, also behind a leading control character", () => {
+    expect(escapeCsvField("=SUM(A1)")).toBe("'=SUM(A1)");
+    // A tab is not a separator, so the field stays unquoted but still
+    // carries the neutralising apostrophe.
+    expect(escapeCsvField("\t=cmd|' /C calc'!A0")).toBe(
+      "'\t=cmd|' /C calc'!A0"
+    );
+    expect(escapeCsvField("\r+1")).toBe('"\'\r+1"');
+    expect(escapeCsvField("\n@x")).toBe('"\'\n@x"');
+  });
+
+  it("leaves ordinary text alone and quotes separators", () => {
+    expect(escapeCsvField("Cameras")).toBe("Cameras");
+    expect(escapeCsvField("a,b")).toBe('"a,b"');
+    expect(escapeCsvField('say "hi"')).toBe('"say ""hi"""');
   });
 });

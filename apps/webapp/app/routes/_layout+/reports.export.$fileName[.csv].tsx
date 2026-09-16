@@ -9,7 +9,7 @@
 
 import { data, type LoaderFunctionArgs } from "react-router";
 
-import { formatDateForCsv } from "~/modules/reports/csv-format";
+import { buildCsv, formatDateForCsv } from "~/modules/reports/csv-format";
 import { resolveReportFilters } from "~/modules/reports/filters.server";
 import {
   resolveTimeframe,
@@ -479,53 +479,6 @@ function formatReturnStatus(
   }
 
   return latenessMs > 0 ? `${value} late` : `${value} early`;
-}
-
-/**
- * Assembles a CSV document, escaping EVERY cell.
- *
- * Escaping lives here and nowhere else. Headers and body cells alike pass
- * through {@link escapeCsvField}, so a contributor adding a column gets a safe
- * cell with no per-field decision to make. Cells carry user-controlled
- * workspace values — custodian and member names, categories, locations — so
- * the guarantee has to be unconditional rather than applied where it looks
- * needed.
- *
- * Callers pass raw values: a cell escaped before it arrives is escaped twice.
- *
- * @param headers - Column headers, escaped like any other cell
- * @param rows - Row cells, already stringified and formatted, NOT escaped
- * @returns The complete CSV document
- */
-function buildCsv(headers: string[], rows: string[][]): string {
-  return [
-    headers.map(escapeCsvField).join(","),
-    ...rows.map((row) => row.map(escapeCsvField).join(",")),
-  ].join("\n");
-}
-
-/**
- * Escape a field for CSV format.
- */
-function escapeCsvField(field: string): string {
-  // Neutralize spreadsheet formula injection (CWE-1236): a value starting with
-  // =, +, -, or @ can execute as a formula in Excel/Google Sheets. Prefix such
-  // values with a single quote so the cell is treated as literal text. Applied
-  // here in the shared helper so every report export is protected.
-  const safeField = /^[=+\-@]/.test(field) ? `'${field}` : field;
-  // `\r` is quoted alongside `\n`: a bare carriage return terminates a record in
-  // consumers that accept CR as a line ending, so an unquoted one lets a
-  // user-controlled value split the row and forge structure — which also puts
-  // the injected content at the start of a "line", back inside formula range.
-  if (
-    safeField.includes(",") ||
-    safeField.includes('"') ||
-    safeField.includes("\n") ||
-    safeField.includes("\r")
-  ) {
-    return `"${safeField.replace(/"/g, '""')}"`;
-  }
-  return safeField;
 }
 
 /**

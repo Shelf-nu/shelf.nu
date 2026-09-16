@@ -173,6 +173,7 @@ describe("manage-kits route validation", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      canUseAdvancedReports: false,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -916,6 +917,7 @@ describe("manage-kits loader — Models tab payload", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      canUseAdvancedReports: false,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({

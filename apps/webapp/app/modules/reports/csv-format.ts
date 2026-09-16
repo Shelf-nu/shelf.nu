@@ -1,31 +1,25 @@
 /**
- * CSV date formatting for report exports.
+ * CSV formatting shared by the report exports.
  *
- * Extracted from the CSV export route so it can be unit-tested without importing
- * the route's server graph (`helpers.server` → Prisma). Depends only on the pure
- * {@link formatDate}, so the export cells render in exactly the same format the
- * user sees in the UI.
+ * Cells are formatted RAW by the value helpers and escaped exactly once, in
+ * {@link buildCsv}, so a value is never quoted twice. Every report export
+ * route builds its document through this module.
  *
  * @see {@link file://../../routes/_layout+/reports.export.$fileName[.csv].tsx}
- * @see {@link file://../../utils/date-format.ts} formatDate — the pure formatter
+ * @see {@link file://../../routes/_layout+/reports.builder.export.$fileName[.csv].tsx}
  */
+
 import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 
 /**
- * Format a date for CSV export in the acting user's display format.
+ * Formats a date for a CSV cell in the acting user's preferences.
  *
- * Renders the value through {@link formatDate} with the resolved prefs so the
- * exported cell matches what the user sees in the UI (numeric-vs-name order,
- * separator, timezone). No shape options are passed, so the user's preference —
- * not a hardcoded style — decides the output.
+ * Returned raw: quoting is {@link buildCsv}'s job, and a pre-quoted value
+ * would be quoted a second time there.
  *
- * @param date - the date to format, or `null` (renders an empty cell)
- * @param prefs - the acting user's resolved date/time format preferences
- * @param opts - optional flags; `includeTime` appends the time part for datetime
- *   columns (leave unset for date-only columns)
- * @returns the formatted string, UNQUOTED; empty string for `null`. Month-name
- *   prefs produce a comma (e.g. `Jul 6, 2026`) — quoting that is the caller's
- *   responsibility, and the export route does it centrally for every cell.
+ * @param date - The value, or `null` for an empty cell
+ * @param prefs - The user's resolved date/time preferences
+ * @param opts.includeTime - Append the time of day
  */
 export function formatDateForCsv(
   date: Date | null,
@@ -33,13 +27,44 @@ export function formatDateForCsv(
   opts?: { includeTime?: boolean }
 ): string {
   if (!date) return "";
-  // Returned RAW, deliberately. Quoting is the caller's job: the export route
-  // sends every cell through `escapeCsvField` via `buildCsv`, so pre-quoting
-  // here would be quoted a second time — a month-name date came out as
-  // `"""Jul 6, 2026"""` rather than `"Jul 6, 2026"`.
-  //
-  // This function used to quote because its result bypassed the escaper
-  // entirely. Central escaping removed that need and made the pre-quoting a
-  // bug, so the responsibility now lives in exactly one place.
   return formatDate(date, prefs, { includeTime: opts?.includeTime });
+}
+
+/**
+ * Builds a CSV document from a header row and data rows.
+ *
+ * @param headers - Column headers, escaped like any other cell
+ * @param rows - Row cells, already stringified and formatted, NOT escaped
+ * @returns The complete CSV document
+ */
+export function buildCsv(headers: string[], rows: string[][]): string {
+  return [
+    headers.map(escapeCsvField).join(","),
+    ...rows.map((row) => row.map(escapeCsvField).join(",")),
+  ].join("\n");
+}
+
+/**
+ * Escapes one field for CSV.
+ *
+ * Neutralizes spreadsheet formula injection (CWE-1236): a value starting with
+ * `=`, `+`, `-` or `@` can execute as a formula in Excel or Google Sheets, so
+ * such values get a leading single quote and read as literal text. Quotes a
+ * field holding a comma, a quote, a newline or a carriage return; a bare
+ * carriage return would end the record in consumers that accept CR as a line
+ * ending and let a user-controlled value forge a row.
+ */
+export function escapeCsvField(field: string): string {
+  // Excel also treats a formula marker after a leading tab, CR or LF as a
+  // formula once the cell is imported, so those prefixes count too.
+  const safeField = /^[=+\-@\t\r\n]/.test(field) ? `'${field}` : field;
+  if (
+    safeField.includes(",") ||
+    safeField.includes('"') ||
+    safeField.includes("\n") ||
+    safeField.includes("\r")
+  ) {
+    return `"${safeField.replace(/"/g, '""')}"`;
+  }
+  return safeField;
 }

@@ -104,7 +104,7 @@ function stripNameSuffix(name: string | null | undefined): string {
  * format from the same organization setting, so the currency always agrees
  * even though those surfaces apply the viewer's locale.
  */
-function formatKpiCurrency(value: number, currency: Currency): string {
+export function formatKpiCurrency(value: number, currency: Currency): string {
   return formatCurrency({ value, currency, locale: "en-US" });
 }
 

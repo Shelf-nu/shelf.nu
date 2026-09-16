@@ -111,6 +111,7 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      canUseAdvancedReports: false,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -375,6 +376,7 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      canUseAdvancedReports: false,
     });
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "someone-elses-booking",

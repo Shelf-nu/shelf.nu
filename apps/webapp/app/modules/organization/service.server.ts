@@ -432,6 +432,8 @@ const ORGANIZATION_SELECT_FIELDS = {
   usedBarcodeTrial: true,
   auditsEnabled: true,
   usedAuditTrial: true,
+  advancedReportsEnabled: true,
+  usedAdvancedReportsTrial: true,
   hasSequentialIdsMigrated: true,
   qrIdDisplayPreference: true,
   showShelfBranding: true,
@@ -666,6 +668,42 @@ export async function toggleBarcodeEnabled({
       message:
         "Something went wrong while toggling barcode functionality. Please try again or contact support.",
       additionalData: { organizationId, barcodesEnabled },
+      label,
+    });
+  }
+}
+
+/**
+ * Switches the Advanced Reports add-on (the report builder) for a workspace.
+ * Used by the Shelf admin dashboard; the Stripe subscription flow is the
+ * other writer of this flag.
+ *
+ * @param args.organizationId - The workspace to switch
+ * @param args.advancedReportsEnabled - The new state
+ * @returns The updated organization
+ * @throws {ShelfError} When the update fails
+ */
+export async function toggleAdvancedReportsEnabled({
+  organizationId,
+  advancedReportsEnabled,
+}: {
+  organizationId: string;
+  advancedReportsEnabled: boolean;
+}) {
+  try {
+    return await db.organization.update({
+      where: { id: organizationId },
+      data: {
+        advancedReportsEnabled,
+        advancedReportsEnabledAt: advancedReportsEnabled ? new Date() : null,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while toggling the report builder. Please try again or contact support.",
+      additionalData: { organizationId, advancedReportsEnabled },
       label,
     });
   }

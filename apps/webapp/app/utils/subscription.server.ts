@@ -423,3 +423,12 @@ export const canUseBarcodes = (org: { barcodesEnabled: boolean }) => {
   return org.barcodesEnabled;
 };
 /** End Barcode Add-on */
+
+/** Advanced Reports Add-on (the report builder under /reports/builder) */
+export const canUseAdvancedReports = (org: {
+  advancedReportsEnabled: boolean;
+}) => {
+  if (!premiumIsEnabled) return true;
+  return org.advancedReportsEnabled;
+};
+/** End Advanced Reports Add-on */

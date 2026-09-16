@@ -13,7 +13,12 @@
 import { DateTime } from "luxon";
 import { describe, expect, it } from "vitest";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
-import { resolveTimeframe, toZonedBoundaryISO } from "./timeframe";
+import {
+  TIMEFRAME_PRESETS,
+  isTimeframePreset,
+  resolveTimeframe,
+  toZonedBoundaryISO,
+} from "./timeframe";
 
 /**
  * Guard: the custom-range label must render in the user's OWN date format —
@@ -160,5 +165,17 @@ describe("resolveTimeframe — unreadable custom boundaries", () => {
     expect(result.preset).toBe("custom");
     expect(result.from).toEqual(from);
     expect(result.to).toEqual(to);
+  });
+});
+
+describe("isTimeframePreset", () => {
+  it("accepts every supported preset and nothing else", () => {
+    for (const preset of TIMEFRAME_PRESETS) {
+      expect(isTimeframePreset(preset)).toBe(true);
+    }
+    expect(isTimeframePreset("last_365d")).toBe(false);
+    expect(isTimeframePreset("")).toBe(false);
+    expect(isTimeframePreset(null)).toBe(false);
+    expect(isTimeframePreset(undefined)).toBe(false);
   });
 });
