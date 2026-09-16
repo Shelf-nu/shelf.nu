@@ -17,6 +17,10 @@ import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
+import {
+  readSignupIntent,
+  signupIntentHeaders,
+} from "~/modules/signup-intent/cookie.server";
 import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -125,9 +129,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
           request,
         });
 
-        return redirect(safeRedirect("/assets"), {
+        // The signup link may have said where to land (`redirectTo`); the
+        // rest of the intent travels on for onboarding to act on. A user who
+        // still has to onboard is sent there first by the app layout, so the
+        // destination only applies once they are through.
+        const signupIntent = await readSignupIntent(request);
+
+        return redirect(safeRedirect(signupIntent?.redirectTo, "/assets"), {
           headers: [
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+            ...(await signupIntentHeaders(signupIntent)),
           ],
         });
       }

@@ -44,10 +44,15 @@ import {
 } from "~/modules/onboarding/constants";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getOrganizationById } from "~/modules/organization/service.server";
+import {
+  clearSignupIntentHeaders,
+  readSignupIntent,
+} from "~/modules/signup-intent/cookie.server";
+import { resolveOnboardingDestination } from "~/modules/signup-intent/schema";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
-import { SMTP_FROM } from "~/utils/env";
+import { ENABLE_PREMIUM_FEATURES, SMTP_FROM } from "~/utils/env";
 import { isZodValidationError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -399,6 +404,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       ...accountFields
     } = payload;
 
+    // What the signup link asked for, carried here by cookie. This request
+    // consumes it: stored for attribution below, used to pick where the user
+    // lands, and cleared on the way out. A failed submission leaves it in
+    // place for the retry.
+    const signupIntent = await readSignupIntent(request);
+
     // Separate user account fields from business intel fields
     const userUpdatePayload: typeof accountFields & {
       id: string;
@@ -433,6 +444,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
         primaryUseCase,
         currentSolution,
         timeline,
+        signupPlan: signupIntent?.plan,
+        signupTrial: signupIntent?.trial,
+        utmSource: signupIntent?.utmSource,
+        utmMedium: signupIntent?.utmMedium,
+        utmCampaign: signupIntent?.utmCampaign,
+        utmContent: signupIntent?.utmContent,
       });
     }
 
@@ -484,9 +501,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
       );
     }
 
-    return redirect(redirectViaInvite ? `/assets` : `/welcome`, {
-      headers,
-    });
+    if (signupIntent) {
+      headers.push(...(await clearSignupIntentHeaders()));
+    }
+
+    return redirect(
+      resolveOnboardingDestination({
+        redirectViaInvite,
+        signupIntent,
+        premiumFeaturesEnabled: ENABLE_PREMIUM_FEATURES,
+      }),
+      { headers }
+    );
   } catch (cause) {
     const reason = makeShelfError(
       cause,

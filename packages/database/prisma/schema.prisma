@@ -192,6 +192,16 @@ model UserBusinessIntel {
   currentSolution      String? // How they currently track assets
   timeline             String? // When they need Shelf working
 
+  // Signup attribution: what the signup link asked for and where it came from.
+  // Read from `/join?plan=…&trial=…&utm_*=…`, written once when the user
+  // completes onboarding. Steers nothing after that; kept for reporting.
+  signupPlan  String? // Plan the link asked for: "team" | "plus"
+  signupTrial Boolean? // Whether the link asked to start with a trial
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+
   // Relationships
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String @unique
@@ -205,6 +215,8 @@ model UserBusinessIntel {
   @@index([companyName]) // For company-based analytics
   @@index([jobTitle]) // For role-based analytics
   @@index([teamSize]) // For team size analytics
+  @@index([utmSource]) // For campaign attribution
+  @@index([utmCampaign]) // For campaign attribution
 }
 
 model Asset {

@@ -1,0 +1,145 @@
+// @vitest-environment node
+
+/**
+ * Code confirmation: where the signup link's `redirectTo` is applied and the
+ * rest of the intent is handed on to onboarding.
+ *
+ * @see {@link file://./../../../app/routes/_auth+/otp.tsx}
+ * @see {@link file://./../../../app/modules/signup-intent/cookie.server.ts}
+ */
+import type { ActionFunctionArgs } from "react-router";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { USER_EMAIL, USER_ID, ORGANIZATION_ID } from "@mocks/user";
+
+import { verifyOtpAndSignin } from "~/modules/auth/service.server";
+import {
+  getSelectedOrganization,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
+import {
+  readSignupIntent,
+  serializeSignupIntent,
+} from "~/modules/signup-intent/cookie.server";
+import { createUser, findUserByEmail } from "~/modules/user/service.server";
+import { generateUniqueUsername } from "~/modules/user/utils.server";
+import { action } from "~/routes/_auth+/otp";
+
+// why: exercise the OTP action without Supabase/Prisma; the tests assert on
+// the redirect and the cookies it carries.
+vi.mock("~/modules/auth/service.server", () => ({
+  verifyOtpAndSignin: vi.fn(),
+}));
+vi.mock("~/modules/user/service.server", () => ({
+  createUser: vi.fn(),
+  findUserByEmail: vi.fn(),
+}));
+vi.mock("~/modules/user/utils.server", () => ({
+  generateUniqueUsername: vi.fn(),
+}));
+vi.mock("~/modules/organization/context.server", () => ({
+  getSelectedOrganization: vi.fn(),
+  setSelectedOrganizationIdCookie: vi.fn(),
+}));
+// why: importing the otp route transitively loads ~/database/db.server, whose
+// module-level connect rejects in a DB-less test env.
+vi.mock("~/database/db.server", () => ({ db: {} }));
+
+function confirmArgs(cookie?: string) {
+  const headers = new Headers({
+    "Content-Type": "application/x-www-form-urlencoded",
+  });
+  if (cookie) {
+    headers.set("Cookie", cookie);
+  }
+  return {
+    request: new Request("http://localhost:3000/otp", {
+      method: "POST",
+      headers,
+      body: new URLSearchParams({ email: USER_EMAIL, otp: "123456" }),
+    }),
+    context: { isAuthenticated: false, setSession: vi.fn() },
+    params: {},
+  } as unknown as ActionFunctionArgs;
+}
+
+async function intentCookie(
+  intent: Parameters<typeof serializeSignupIntent>[0]
+) {
+  return (await serializeSignupIntent(intent)).split(";")[0];
+}
+
+async function signupIntentSetBy(response: Response) {
+  const setCookie = response.headers
+    .getSetCookie()
+    .find((value) => value.startsWith("signup-intent="));
+  if (!setCookie) {
+    return null;
+  }
+  return readSignupIntent(
+    new Request("http://localhost:3000/onboarding", {
+      headers: { Cookie: setCookie.split(";")[0] },
+    })
+  );
+}
+
+describe("otp action — confirming the code", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(verifyOtpAndSignin).mockResolvedValue({
+      userId: USER_ID,
+      email: USER_EMAIL,
+    } as never);
+    vi.mocked(findUserByEmail).mockResolvedValue(null);
+    vi.mocked(generateUniqueUsername).mockResolvedValue("new-person");
+    vi.mocked(createUser).mockResolvedValue({ id: USER_ID } as never);
+    vi.mocked(getSelectedOrganization).mockResolvedValue({
+      organizationId: ORGANIZATION_ID,
+    } as never);
+    vi.mocked(setSelectedOrganizationIdCookie).mockResolvedValue(
+      "selected-organization-id=org"
+    );
+  });
+
+  it("lands on the assets page and sets only the workspace cookie without an intent", async () => {
+    const response = (await action(confirmArgs())) as Response;
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.getSetCookie()).toEqual([
+      "selected-organization-id=org",
+    ]);
+  });
+
+  it("hands the intent on to onboarding with a fresh window", async () => {
+    const intent = { plan: "team" as const, trial: true, utmSource: "website" };
+
+    const response = (await action(
+      confirmArgs(await intentCookie(intent))
+    )) as Response;
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.getSetCookie()[0]).toBe(
+      "selected-organization-id=org"
+    );
+    await expect(signupIntentSetBy(response)).resolves.toEqual(intent);
+    expect(createUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies the link's in-app redirectTo", async () => {
+    const response = (await action(
+      confirmArgs(await intentCookie({ redirectTo: "/qr/abc?x=1" }))
+    )) as Response;
+
+    expect(response.headers.get("Location")).toBe("/qr/abc?x=1");
+  });
+
+  it("never follows a redirectTo off our origin", async () => {
+    const response = (await action(
+      confirmArgs(await intentCookie({ redirectTo: "https://evil.example/x" }))
+    )) as Response;
+
+    expect(response.headers.get("Location")).toBe("/assets");
+  });
+});

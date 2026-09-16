@@ -132,6 +132,12 @@ describe("onboarding action validation", () => {
       primaryUseCase: null,
       currentSolution: null,
       timeline: null,
+      signupPlan: null,
+      signupTrial: null,
+      utmSource: null,
+      utmMedium: null,
+      utmCampaign: null,
+      utmContent: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
