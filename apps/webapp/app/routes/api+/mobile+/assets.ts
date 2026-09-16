@@ -1,6 +1,7 @@
 import { AssetStatus, type Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import { resolveMobileAssetSearchWhere } from "~/modules/api/mobile-asset-search.server";
 import {
   getMobileUserContext,
@@ -31,12 +32,11 @@ import { makeShelfError, ShelfError } from "~/utils/error";
  * web indexes use, in a single query.
  *
  * Image URLs are returned with the model-image cascade already resolved
- * (`shapeMobileAssetResponse`), not re-signed. `mainImageExpiration` is only
- * sent when the asset's OWN signed URL won the cascade — model cover images
- * are public and never expire. Mobile clients should call
- * `/api/mobile/asset/refresh-image/:assetId` lazily when they detect an
- * expired URL — keeps this loader read-only and avoids fanning out N writes
- * per paginated read.
+ * (`shapeMobileAssetResponse`). An asset's own URL is signed and stops loading
+ * once `mainImageExpiration` passes, and the companion has no repair flow, so
+ * the lapsed ones are re-signed before the page is sent.
+ * `mainImageExpiration` is only sent when the asset's OWN signed URL won the
+ * cascade — model cover images are public and never expire.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -218,10 +218,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // Single query: the UNION already searches all 10 sources in one shot,
     // so there is no narrow/fallback two-query dance to run any more.
-    const [assets, totalCount] = await fetchPage({
+    const [storedAssets, totalCount] = await fetchPage({
       ...baseWhere,
       ...searchWhere,
     });
+
+    // A signed image URL stops loading once `mainImageExpiration` passes, and
+    // the companion renders a lapsed one as an empty tile, so re-sign the
+    // lapsed rows before the page is shaped.
+    const assets = await refreshExpiredMobileAssetImages(
+      storedAssets,
+      organizationId
+    );
 
     // Flatten kit/location/custody pivots into the legacy flat shape via the
     // shared helper, then re-attach `mainImageExpiration` — a list-only extra

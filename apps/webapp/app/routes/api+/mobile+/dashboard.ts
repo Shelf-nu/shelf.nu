@@ -1,5 +1,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -79,7 +80,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       teamMemberCount,
       assetsByStatus,
       myCustodyCount,
-      newestAssets,
+      storedNewestAssets,
       upcomingBookingsResult,
       activeBookingsResult,
       overdueBookingsResult,
@@ -133,6 +134,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           status: true,
           mainImage: true,
           thumbnailImage: true,
+          // Drives the re-sign below; the companion cannot repair a lapsed
+          // signed URL, so Home would show empty tiles without it.
+          mainImageExpiration: true,
           // Model cover image; `serializeAssetImage` below resolves the cascade
           ...ASSET_MODEL_IMAGE_SELECT,
           category: { select: { id: true, name: true, color: true } },
@@ -296,6 +300,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       custodianTeamMember?: { name: string; userId: string | null } | null;
       _count?: { bookingAssets: number };
     };
+
+    // Home shows each new asset's photo, and a lapsed signed URL arrives blank
+    // because the companion cannot repair it, so re-sign those first.
+    const newestAssets = await refreshExpiredMobileAssetImages(
+      storedNewestAssets,
+      organizationId
+    );
 
     // Format booking results
     const formatBooking = (b: MobileDashboardBooking) => ({

@@ -12,6 +12,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
@@ -129,6 +130,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 type: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Drives the re-sign below, the same way the kit's own image
+                // is re-signed: the companion repairs neither.
+                mainImageExpiration: true,
                 // Model cover image; collapsed into the flat image fields by
                 // `serializeAssetImage` below, so a member asset inheriting
                 // its model's photo is not blank on the kit detail screen.
@@ -169,8 +173,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // `location` field the companion's kit screen still reads (preserves
     // the existing mobile JSON contract).
     const { assetKits, ...kitData } = kit;
+
+    // Member photos are signed URLs the companion cannot repair either, so the
+    // lapsed ones are re-signed before the kit screen receives them.
+    const refreshedAssetById = new Map(
+      (
+        await refreshExpiredMobileAssetImages(
+          assetKits.map((ak) => ak.asset),
+          organizationId
+        )
+      ).map((asset) => [asset.id, asset])
+    );
+
     const assets = assetKits.map((ak) => {
-      const { assetLocations, ...rest } = ak.asset;
+      // `mainImageExpiration` only steers the re-sign above, so it is taken out
+      // with the pivot and the member row keeps the shape the companion reads.
+      const {
+        assetLocations,
+        mainImageExpiration: _mainImageExpiration,
+        ...rest
+      } = refreshedAssetById.get(ak.asset.id) ?? ak.asset;
       return {
         // Resolves the model-image cascade and drops the nested `assetModel`,
         // so the companion keeps one source of truth for the image.

@@ -17,6 +17,7 @@
  */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -99,15 +100,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
       pickerParams.set("per_page", String(MOBILE_PICKER_MAX_PAGE_SIZE));
     }
 
-    const { assets, page, perPage, totalAssets, totalPages } =
-      await getPaginatedAndFilterableAssets({
-        request,
-        organizationId,
-        // Mobile asset picker: ignores the custodian-filter seed, so scope it
-        // rather than fetch a roster the response never returns.
-        canSeeAllCustody: false,
-        filters: pickerParams.toString(),
-      });
+    const {
+      assets: storedAssets,
+      page,
+      perPage,
+      totalAssets,
+      totalPages,
+    } = await getPaginatedAndFilterableAssets({
+      request,
+      organizationId,
+      // Mobile asset picker: ignores the custodian-filter seed, so scope it
+      // rather than fetch a roster the response never returns.
+      canSeeAllCustody: false,
+      filters: pickerParams.toString(),
+    });
+
+    // Every picker row shows the asset's photo, and a lapsed signed URL arrives
+    // blank because the companion cannot repair it. Re-sign those first.
+    const assets = await refreshExpiredMobileAssetImages(
+      storedAssets,
+      organizationId
+    );
 
     // Resolve the workspace's display code (QR Code ID by default, or a SAM ID
     // / barcode per the org's preference) for each asset so the mobile picker

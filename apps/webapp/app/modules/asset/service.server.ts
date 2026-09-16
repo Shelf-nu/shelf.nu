@@ -5570,12 +5570,30 @@ export function isStorageObjectNotFound(error: unknown): boolean {
 }
 
 /**
+ * The most expired asset images one response re-signs.
+ *
+ * Re-signing runs on the request path, one storage call per image. A list with
+ * no pagination (a booking, a kit, an audit) can hold hundreds of assets whose
+ * links have all lapsed, and an uncapped pass could outlast a client's request
+ * timeout. Pass this as `maxRefreshes` on such paths: rows past the cap keep
+ * their stored URL for that response, and because the re-signed rows are
+ * written back, each later load repairs the next slice.
+ */
+export const ASSET_IMAGE_RESIGNS_PER_RESPONSE = 300;
+
+/**
  * Refreshes expired signed URLs for asset images server-side.
  * Prevents N+1 client-side calls to /api/asset/refresh-main-image.
  *
  * Only refreshes existing thumbnail URLs — does not generate missing
  * thumbnails, as that requires downloading + re-uploading images
  * which is too expensive for a batch operation.
+ *
+ * @param assets - Rows carrying the image columns, in response order.
+ * @param options.maxRefreshes - Re-sign at most this many expired rows, taken
+ *   in input order so the rows a list shows first are repaired first. Unbounded
+ *   when omitted; see {@link ASSET_IMAGE_RESIGNS_PER_RESPONSE}.
+ * @returns The same rows, with each re-signed URL merged in.
  */
 export async function refreshExpiredAssetImages<
   T extends {
@@ -5585,14 +5603,16 @@ export async function refreshExpiredAssetImages<
     mainImageExpiration: Date | null;
     thumbnailImage?: string | null;
   },
->(assets: T[]): Promise<T[]> {
+>(assets: T[], options: { maxRefreshes?: number } = {}): Promise<T[]> {
   const now = new Date();
-  const expiredAssets = assets.filter(
-    (a) =>
-      a.mainImage &&
-      a.mainImageExpiration &&
-      new Date(a.mainImageExpiration) < now
-  );
+  const expiredAssets = assets
+    .filter(
+      (a) =>
+        a.mainImage &&
+        a.mainImageExpiration &&
+        new Date(a.mainImageExpiration) < now
+    )
+    .slice(0, options.maxRefreshes);
 
   if (expiredAssets.length === 0) return assets;
 

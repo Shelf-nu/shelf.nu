@@ -453,6 +453,10 @@ export const MOBILE_ASSET_SELECT = {
   sequentialId: true,
   mainImage: true,
   thumbnailImage: true,
+  // Tells the scanner paths whether the signed URL above has lapsed, so they
+  // can re-sign it. `shapeMobileAssetResponse` drops it again, leaving the
+  // response shape unchanged.
+  mainImageExpiration: true,
   // Cover image of the asset's model. `shapeMobileAssetResponse` resolves the
   // cascade into `mainImage`/`thumbnailImage` before the row leaves the server,
   // so the companion inherits model images with no client release.
@@ -677,6 +681,13 @@ export function shapeMobileAssetResponse(asset: {
   sequentialId: string | null;
   mainImage: string | null;
   thumbnailImage: string | null;
+  /**
+   * Carried by rows selected through `MOBILE_ASSET_SELECT`, and dropped below
+   * rather than forwarded: the read paths re-sign a lapsed URL server-side, so
+   * the app has no use for the expiry and the response shape stays as it was.
+   * Optional because callers that hand-build this argument omit it.
+   */
+  mainImageExpiration?: Date | null;
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
   availableToBook: boolean;
   category: { name: string } | null;
@@ -693,7 +704,13 @@ export function shapeMobileAssetResponse(asset: {
     custodian: { id: string; name: string; userId: string | null };
   }>;
 }): MobileAssetResponse {
-  const { assetKits, assetLocations, custody, ...rest } = asset;
+  const {
+    assetKits,
+    assetLocations,
+    custody,
+    mainImageExpiration: _mainImageExpiration,
+    ...rest
+  } = asset;
   const kit = assetKits[0]?.kit ?? null;
   /**
    * Collapse the model-image cascade before the row leaves the server. The

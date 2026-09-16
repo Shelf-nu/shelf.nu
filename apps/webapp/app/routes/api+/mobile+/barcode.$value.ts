@@ -13,6 +13,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { refreshExpiredMobileAssetImage } from "~/modules/api/mobile-asset-images.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -195,6 +196,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
+    // The scanned asset may live in a sibling workspace, so the re-sign is
+    // scoped to the OWNING one. Without it the scan card shows no photo,
+    // because the companion cannot repair a lapsed signed URL.
+    const refreshedAsset = foundBarcode.asset
+      ? await refreshExpiredMobileAssetImage(
+          foundBarcode.asset,
+          foundOrganizationId
+        )
+      : null;
+
     return data({
       barcode: {
         id: foundBarcode.id,
@@ -210,9 +221,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // the flat `asset.kit` / `.location` / `.custody` shape the companion
         // build in the App Store consumes. Mirrors qr.$qrId.ts; see
         // MOBILE_ASSET_SELECT for the full shape.
-        asset: foundBarcode.asset
-          ? shapeMobileAssetResponse(foundBarcode.asset)
-          : null,
+        asset: refreshedAsset ? shapeMobileAssetResponse(refreshedAsset) : null,
         // Kit-linked barcodes return the kit so the scanner can batch-operate
         // on it. shapeMobileKitResponse handles null pass-through.
         kit: shapeMobileKitResponse(foundBarcode.kit ?? null),

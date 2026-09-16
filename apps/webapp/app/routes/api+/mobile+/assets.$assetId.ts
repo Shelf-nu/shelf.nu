@@ -2,6 +2,7 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
 import { db } from "~/database/db.server";
+import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
@@ -46,7 +47,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       organizationId
     );
 
-    const asset = await db.asset.findUnique({
+    const storedAsset = await db.asset.findUnique({
       where: {
         // why: inline-scope to org so cross-org probes 404 — matches the
         // pattern used by every other mobile route.
@@ -186,9 +187,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       },
     });
 
-    if (!asset) {
+    if (!storedAsset) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
+
+    // The asset's own image is a signed URL that stops loading once
+    // `mainImageExpiration` passes, and the companion cannot repair it, so
+    // re-sign a lapsed one before the detail screen receives it.
+    const [asset] = await refreshExpiredMobileAssetImages(
+      [storedAsset],
+      organizationId
+    );
 
     // Flatten kit / location / custody via the shared mobile shaper so the
     // legacy companion contract (`asset.kit`, `asset.kitId`, `asset.location`,

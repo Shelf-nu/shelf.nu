@@ -24,6 +24,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { refreshExpiredMobileAssetImage } from "~/modules/api/mobile-asset-images.server";
 import {
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
@@ -157,6 +158,12 @@ async function resolveSamShapedBarcode({
     return null;
   }
 
+  // The scan card shows the asset's photo, and the companion cannot repair a
+  // signed URL that has lapsed, so re-sign it before the card is built.
+  const barcodeAsset = barcode.asset
+    ? await refreshExpiredMobileAssetImage(barcode.asset, organizationId)
+    : null;
+
   return {
     ok: true,
     // A barcode has no QR record, so there is nothing to record a scan
@@ -171,7 +178,7 @@ async function resolveSamShapedBarcode({
       organizationId,
       // Flatten the pivot shape (assetKits/assetLocations/custody) into the
       // legacy flat shape the companion expects, exactly as the QR path does.
-      asset: barcode.asset ? shapeMobileAssetResponse(barcode.asset) : null,
+      asset: barcodeAsset ? shapeMobileAssetResponse(barcodeAsset) : null,
       kit: shapeMobileKitResponse(barcode.kit),
     },
   };
@@ -235,6 +242,13 @@ export async function resolveMobileScannedCode({
       };
     }
 
+    // Same re-sign as every other mobile read path: a lapsed signed URL is one
+    // the companion cannot repair, so it would show the card with no photo.
+    const refreshedAsset = await refreshExpiredMobileAssetImage(
+      asset,
+      organizationId
+    );
+
     return {
       ok: true,
       // No backing QR record, so nothing to record a scan against.
@@ -246,7 +260,7 @@ export async function resolveMobileScannedCode({
         organizationId,
         // Flatten the new pivot shape (assetKits/assetLocations/custody) into
         // the legacy flat shape the companion expects (quantities restructure).
-        asset: shapeMobileAssetResponse(asset),
+        asset: shapeMobileAssetResponse(refreshedAsset),
         kit: null,
       },
     };
@@ -310,6 +324,12 @@ export async function resolveMobileScannedCode({
       })
     : null;
 
+  // Re-sign a lapsed photo against the workspace that OWNS the code, which is
+  // not always the caller's own.
+  const refreshedQrAsset = asset
+    ? await refreshExpiredMobileAssetImage(asset, qr.organizationId)
+    : null;
+
   // Kit-linked QR: return the kit so the scanner can batch-operate on it
   // (web parity — all web scanner drawers accept kits).
   const kit =
@@ -330,7 +350,9 @@ export async function resolveMobileScannedCode({
       organizationId: qr.organizationId,
       // Flatten the new pivot shape (assetKits/assetLocations/custody) into the
       // legacy flat shape the companion expects (quantities restructure).
-      asset: asset ? shapeMobileAssetResponse(asset) : null,
+      asset: refreshedQrAsset
+        ? shapeMobileAssetResponse(refreshedQrAsset)
+        : null,
       kit: shapeMobileKitResponse(kit),
     },
   };

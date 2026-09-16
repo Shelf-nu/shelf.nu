@@ -15,6 +15,10 @@ import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
+  ASSET_IMAGE_RESIGNS_PER_RESPONSE,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
   AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
   auditAcceptsComments,
 } from "~/modules/audit/comment-policy";
@@ -774,6 +778,9 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Drives the re-sign below. The audit rows are read by the
+                // companion, which cannot repair a lapsed signed URL.
+                mainImageExpiration: true,
                 // Model cover image for assets with no image of their own
                 ...ASSET_MODEL_IMAGE_SELECT,
                 // Asset-code resolution: surface code data so the audit
@@ -872,6 +879,32 @@ export async function getAuditSessionDetails({
       });
     }
 
+    /**
+     * An asset photo is a signed URL that stops loading once
+     * `mainImageExpiration` passes. The web repairs that in the browser, but
+     * the companion audit screen reads this same payload and has no repair
+     * flow, so it draws a lapsed URL as an empty tile. Re-sign server-side
+     * instead, scoped to the workspace that owns the session — which is not
+     * always the caller's own, since a sibling-workspace session resolves here
+     * too.
+     */
+    const refreshedAssetById = new Map(
+      (
+        await refreshExpiredAssetImages(
+          session.assets
+            .map((auditAsset) => auditAsset.asset)
+            .filter((asset): asset is NonNullable<typeof asset> => !!asset)
+            .map((asset) => ({
+              ...asset,
+              organizationId: session.organizationId,
+            })),
+          // An audit can list hundreds of assets, so one load repairs a bounded
+          // slice and the next load picks up the rest.
+          { maxRefreshes: ASSET_IMAGE_RESIGNS_PER_RESPONSE }
+        )
+      ).map((asset) => [asset.id, asset])
+    );
+
     const expectedAssets: AuditExpectedAsset[] = session.assets
       .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
       .map((auditAsset) => {
@@ -901,10 +934,13 @@ export async function getAuditSessionDetails({
          * Placeholder stays `null` so the existing client-side "no image"
          * branches keep working — same contract as `serializeAssetImage`.
          */
+        const refreshedAsset = auditAsset.asset
+          ? refreshedAssetById.get(auditAsset.asset.id) ?? auditAsset.asset
+          : null;
         const image = resolveAssetImage({
-          mainImage: auditAsset.asset?.mainImage ?? null,
-          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
-          assetModel: auditAsset.asset?.assetModel ?? null,
+          mainImage: refreshedAsset?.mainImage ?? null,
+          thumbnailImage: refreshedAsset?.thumbnailImage ?? null,
+          assetModel: refreshedAsset?.assetModel ?? null,
         });
         const hasImage = image.source !== "placeholder";
 

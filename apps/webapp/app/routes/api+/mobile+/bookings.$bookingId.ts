@@ -7,6 +7,7 @@ import {
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -164,6 +165,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 consumptionType: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Drives the re-sign below: a lapsed signed URL is repaired
+                // server-side, since the companion has no repair flow.
+                mainImageExpiration: true,
                 // Model cover image; collapsed into the flat image fields by
                 // `serializeAssetImage` below, so an asset inheriting its
                 // model's photo is not blank on the companion booking screen.
@@ -299,10 +303,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
     }
 
+    // A signed image URL stops loading once `mainImageExpiration` passes, and
+    // the companion cannot repair it, so an asset whose photo has lapsed shows
+    // as an empty tile on the booking screen. Re-sign those before the rows are
+    // shaped; the collapse above already reduced them to one row per asset.
+    const refreshedAssetById = new Map(
+      (
+        await refreshExpiredMobileAssetImages(
+          Array.from(byAssetId.values(), (row) => row.first.asset),
+          organizationId
+        )
+      ).map((asset) => [asset.id, asset])
+    );
+
     const assets = Array.from(byAssetId.values()).map((row) => {
       // `assetLocations` is taken out here so the pivot never reaches the
       // payload; it is sent only as the flat `location` below.
-      const { assetKits, assetLocations, ...rest } = row.first.asset;
+      // `mainImageExpiration` only steers the re-sign above, so it is taken out
+      // too and the row keeps the shape the companion reads.
+      const {
+        assetKits,
+        assetLocations,
+        mainImageExpiration: _mainImageExpiration,
+        ...rest
+      } = refreshedAssetById.get(row.assetId) ?? row.first.asset;
       // why: no `sourceKitId` fallback for detached kit residue here. This
       // response collapses per asset rather than grouping by kit, and the
       // unanimous rule below deliberately reports `null` rather than guessing
