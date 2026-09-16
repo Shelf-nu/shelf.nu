@@ -8,9 +8,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const envMock = vi.hoisted(() => ({ POSTHOG_API_KEY: "test-key" as string }));
 // why: the wrapper reads the key once, on first use; a getter lets the test
 // decide whether PostHog is configured before the module is imported.
-const envMock = vi.hoisted(() => ({ POSTHOG_API_KEY: "test-key" as string }));
 vi.mock("~/utils/env", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("~/utils/env");
   return {
@@ -22,8 +22,8 @@ vi.mock("~/utils/env", async () => {
   };
 });
 
-// why: no network — record what the wrapper hands to the PostHog client.
 const captureMock = vi.hoisted(() => vi.fn());
+// why: no network — record what the wrapper hands to the PostHog client.
 vi.mock("posthog-node", () => ({
   PostHog: class {
     capture = captureMock;

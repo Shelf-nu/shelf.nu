@@ -1,5 +1,8 @@
 import { Roles, AssetIndexMode, OrganizationRoles } from "@prisma/client";
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
+import {
+  PrismaClientKnownRequestError,
+  type ITXClientDenyList,
+} from "@prisma/client/runtime/library";
 
 import { matchRequestUrl, http, HttpResponse } from "msw";
 import { server } from "@mocks";
@@ -16,7 +19,7 @@ import {
   USER_ID,
   USER_PASSWORD,
 } from "@mocks/user";
-import { db } from "~/database/db.server";
+import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
 
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
@@ -660,13 +663,19 @@ describe(createUser.name, () => {
  * PostHog funnels agree with the business-intel record.
  */
 describe("createUser — signup attribution on the signup event", () => {
+  /** The client shape a `$transaction` callback receives. */
+  type TransactionClient = Omit<ExtendedPrismaClient, ITXClientDenyList>;
+
   beforeEach(() => {
     vitest.clearAllMocks();
     // @ts-expect-error missing vitest type
     db.user.create.mockResolvedValue(newUserMock);
     // why: the mocked $transaction just invokes the callback with the mocked db
     // @ts-expect-error missing vitest type
-    db.$transaction.mockImplementation((callback: any) => callback(db));
+    db.$transaction.mockImplementation(
+      (callback: (tx: TransactionClient) => Promise<unknown>) =>
+        callback(db as unknown as TransactionClient)
+    );
   });
 
   it("puts the plan, trial and campaign on the event and sets them once on the person", async () => {
