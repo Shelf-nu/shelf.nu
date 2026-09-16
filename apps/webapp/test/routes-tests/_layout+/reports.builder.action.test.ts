@@ -45,15 +45,19 @@ vi.mock("~/modules/reports/saved/service.server", () => ({
   deleteSavedReport: vi.fn(),
 }));
 
-// why: the loader in the same route file imports the query compiler and the
-// filter resolver, which need the database; the action never calls them.
+// why: the loader in the same route file imports the query compiler, which
+// needs the database; the action never calls it.
 vi.mock("~/modules/reports/builder/compile.server", () => ({
   runBuilderReport: vi.fn(),
 }));
+// why: the loader's filter resolver verifies ids against the database; the
+// action never calls it.
 vi.mock("~/modules/reports/filters.server", () => ({
   resolveReportFilters: vi.fn(),
   loadReportFilterOptions: vi.fn(),
 }));
+// why: the loader reads the user's format preferences from the database; the
+// action never calls it.
 vi.mock("~/utils/date-format.server", () => ({
   resolveUserFormatPrefsById: vi.fn(),
 }));

@@ -1,3 +1,11 @@
+/**
+ * Tests for the saved-report service: the calls it makes to Prisma, the
+ * workspace scoping of every write, and the statuses it throws (400 empty
+ * name or cap, 404 outside the workspace, 409 duplicate name).
+ *
+ * @see {@link file://./service.server.ts}
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShelfError } from "~/utils/error";
 import { MAX_SAVED_REPORTS } from "./constants";

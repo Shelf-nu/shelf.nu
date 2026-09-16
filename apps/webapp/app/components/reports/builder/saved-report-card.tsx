@@ -11,6 +11,7 @@ import { ArrowRight, BookMarked } from "lucide-react";
 import { Link } from "react-router";
 import { DateS } from "~/components/shared/date";
 import { describeSavedReportQuery } from "~/modules/reports/saved/describe";
+import { savedReportHref } from "~/modules/reports/saved/query";
 
 /** Props for {@link SavedReportCard}. */
 type Props = {
@@ -28,10 +29,7 @@ type Props = {
 /** Renders a saved report as a card linking to the builder. */
 export function SavedReportCard({ report }: Props) {
   return (
-    <Link
-      to={{ pathname: "/reports/builder", search: `?${report.query}` }}
-      prefetch="intent"
-    >
+    <Link to={savedReportHref(report)} prefetch="intent">
       <div className="group relative cursor-pointer rounded-lg border border-gray-200 bg-white p-5 transition-all hover:border-gray-300 hover:shadow-sm">
         <div className="mb-3 flex size-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600">
           <BookMarked className="size-5" />

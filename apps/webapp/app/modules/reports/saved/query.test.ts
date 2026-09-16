@@ -1,7 +1,17 @@
+/**
+ * Tests for the saved-report query string: which keys survive sanitising,
+ * how set-valued filters are put in a canonical order, and how a saved report
+ * is opened and recognised.
+ *
+ * @see {@link file://./query.ts}
+ */
+
 import { describe, expect, it } from "vitest";
 import {
+  SAVED_REPORT_ID_PARAM,
   SAVED_REPORT_QUERY_KEYS,
   sanitizeSavedReportQuery,
+  savedReportHref,
   savedReportQueryEquals,
 } from "./query";
 
@@ -35,6 +45,22 @@ describe("sanitizeSavedReportQuery", () => {
     expect(a).toBe("dataset=assets&measure=units");
   });
 
+  it("sorts set-valued filters but keeps scalar order", () => {
+    expect(
+      sanitizeSavedReportQuery("dataset=assets&category=c2&category=c1")
+    ).toBe("dataset=assets&category=c1&category=c2");
+    // Two data-set values are not a set: the page reads the first one.
+    expect(sanitizeSavedReportQuery("dataset=custody&dataset=assets")).toBe(
+      "dataset=custody&dataset=assets"
+    );
+  });
+
+  it("drops the saved-report marker itself", () => {
+    expect(
+      sanitizeSavedReportQuery(`dataset=assets&${SAVED_REPORT_ID_PARAM}=rep-1`)
+    ).toBe("dataset=assets");
+  });
+
   it("accepts URLSearchParams", () => {
     const params = new URLSearchParams({ dataset: "custody", page: "2" });
     expect(sanitizeSavedReportQuery(params)).toBe("dataset=custody");
@@ -56,6 +82,15 @@ describe("savedReportQueryEquals", () => {
     ).toBe(true);
   });
 
+  it("ignores the order of set-valued filters", () => {
+    expect(
+      savedReportQueryEquals(
+        "dataset=assets&status=AVAILABLE&status=IN_CUSTODY",
+        "dataset=assets&status=IN_CUSTODY&status=AVAILABLE"
+      )
+    ).toBe(true);
+  });
+
   it("sees a different filter value", () => {
     expect(
       savedReportQueryEquals(
@@ -71,5 +106,13 @@ describe("SAVED_REPORT_QUERY_KEYS", () => {
     expect(SAVED_REPORT_QUERY_KEYS.has("categories")).toBe(true);
     expect(SAVED_REPORT_QUERY_KEYS.has("cf")).toBe(true);
     expect(SAVED_REPORT_QUERY_KEYS.has("timeframe")).toBe(true);
+  });
+});
+
+describe("savedReportHref", () => {
+  it("opens the builder with the stored query and the report marker", () => {
+    expect(
+      savedReportHref({ id: "rep-1", query: "dataset=assets&groupBy=category" })
+    ).toBe("/reports/builder?dataset=assets&groupBy=category&saved=rep-1");
   });
 });

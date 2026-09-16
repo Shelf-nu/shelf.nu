@@ -24,9 +24,12 @@ import {
 import { BookMarked, Check, Pencil, Save, Trash2 } from "lucide-react";
 import { useFetcher, useLocation, useNavigate } from "react-router";
 import { Button } from "~/components/shared/button";
+import { useSearchParams } from "~/hooks/search-params";
 import { describeSavedReportQuery } from "~/modules/reports/saved/describe";
 import {
+  SAVED_REPORT_ID_PARAM,
   sanitizeSavedReportQuery,
+  savedReportHref,
   savedReportQueryEquals,
 } from "~/modules/reports/saved/query";
 import { isFormProcessing } from "~/utils/form";
@@ -103,6 +106,7 @@ export function SavedReportsMenu({ savedReports, disabled }: Props) {
   const [ui, dispatch] = useReducer(uiReducer, INITIAL_UI);
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const saveFetcher = useFetcher<DataOrErrorResponse>({ key: "save-report" });
   const renameFetcher = useFetcher<DataOrErrorResponse>({
@@ -128,13 +132,19 @@ export function SavedReportsMenu({ savedReports, disabled }: Props) {
   }, [renameSucceeded]);
 
   const currentQuery = sanitizeSavedReportQuery(location.search);
-  const activeReport = savedReports.find((report) =>
-    savedReportQueryEquals(report.query, currentQuery)
-  );
+  // The page opened from a saved report carries its id, which settles the
+  // case of two saved reports with the same query. A page reached any other
+  // way (a pasted link, the builder bar) is matched on its query.
+  const openedId = searchParams.get(SAVED_REPORT_ID_PARAM);
+  const activeReport =
+    savedReports.find((report) => report.id === openedId) ??
+    savedReports.find((report) =>
+      savedReportQueryEquals(report.query, currentQuery)
+    );
 
   const openReport = (report: SavedReportListItem) => {
     dispatch({ type: "setOpen", open: false });
-    void navigate({ pathname: "/reports/builder", search: `?${report.query}` });
+    void navigate(savedReportHref(report));
   };
 
   return (

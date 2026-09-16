@@ -15,10 +15,35 @@
  */
 
 import { BUILDER_SPEC_PARAM } from "../builder/spec";
-import { ALL_REPORT_FILTER_PARAM_KEYS } from "../filter-params";
+import {
+  ALL_REPORT_FILTER_PARAM_KEYS,
+  REPORT_FILTER_PARAM,
+} from "../filter-params";
 
 /** Timeframe keys written by the timeframe picker. */
 const TIMEFRAME_PARAM_KEYS = ["timeframe", "from", "to"] as const;
+
+/**
+ * Filter keys whose repeated values form a set (the filter resolves them into
+ * one `IN` predicate), so their order carries no meaning. They are stored
+ * sorted, which makes two ways of writing the same filter the same string.
+ * Scalar keys (data set, grouping, measure, timeframe) keep their order: the
+ * page reads the first value, so sorting could change what runs.
+ */
+const SET_VALUED_KEYS: ReadonlySet<string> = new Set([
+  REPORT_FILTER_PARAM.category,
+  REPORT_FILTER_PARAM.location,
+  REPORT_FILTER_PARAM.status,
+  REPORT_FILTER_PARAM.assetModel,
+  REPORT_FILTER_PARAM.customField,
+]);
+
+/**
+ * URL key that names the saved report a builder page was opened from. It is
+ * not part of the stored query (the sanitiser drops it), so it only tells the
+ * page which entry to mark as open when two saved reports share one query.
+ */
+export const SAVED_REPORT_ID_PARAM = "saved";
 
 /** Every query key a saved report may carry. */
 export const SAVED_REPORT_QUERY_KEYS: ReadonlySet<string> = new Set([
@@ -45,20 +70,32 @@ export function sanitizeSavedReportQuery(
   // Iterate the whitelist, not the input: the output order then never depends
   // on how the user's URL happened to be arranged.
   for (const key of SAVED_REPORT_QUERY_KEYS) {
-    for (const value of source.getAll(key)) {
-      if (value !== "") kept.append(key, value);
-    }
+    const values = source.getAll(key).filter((value) => value !== "");
+    const ordered = SET_VALUED_KEYS.has(key) ? [...values].sort() : values;
+    for (const value of ordered) kept.append(key, value);
   }
   return kept.toString();
 }
 
 /**
  * Whether two query strings describe the same report once sanitised.
- * Used to mark the saved report that matches the page currently shown.
+ * Used to mark the saved report that matches the page currently shown when
+ * the URL does not name one (see {@link SAVED_REPORT_ID_PARAM}).
  */
 export function savedReportQueryEquals(
   a: string | URLSearchParams,
   b: string | URLSearchParams
 ): boolean {
   return sanitizeSavedReportQuery(a) === sanitizeSavedReportQuery(b);
+}
+
+/**
+ * The URL to open a saved report: its stored query plus the marker that names
+ * it, so the page can tell it apart from another saved report with the same
+ * query.
+ */
+export function savedReportHref(report: { id: string; query: string }): string {
+  const params = new URLSearchParams(report.query);
+  params.set(SAVED_REPORT_ID_PARAM, report.id);
+  return `/reports/builder?${params.toString()}`;
 }
