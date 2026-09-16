@@ -1,3 +1,14 @@
+/**
+ * Booking "Add assets" picker: `/bookings/:bookingId/overview/manage-assets`.
+ *
+ * The loader lists the workspace's assets for the picker (paginated and
+ * filterable) with each row's fitness for THIS booking: kit membership that
+ * blocks a direct add, overlap with other bookings, and the windowed
+ * free-unit count for quantity-tracked assets. The action writes the
+ * selection to the booking through `updateBookingAssets`, which owns the
+ * conflict and quantity guards. Also exports `AssetWithBooking`, the row
+ * shape the booking overview list renders.
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Asset,
@@ -127,11 +138,44 @@ export type AssetWithBooking = Asset & {
   /** Cover image of the asset's model, rendered when the asset has no image
    * of its own. See `~/modules/asset/image-resolution`. */
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
-  bookingAssets: { booking: Booking }[];
+  bookingAssets: {
+    booking: Booking;
+    /**
+     * `assetKitId` / `sourceKitId` / `checkedOutAt` / `checkedInAt` below are
+     * populated by the booking-overview loader (`bookings.$bookingId.overview.tsx`)
+     * for its kit-conflict checks. The manage-assets picker builds its own
+     * `AssetWithBooking` rows and leaves this group unset — those rows reach
+     * consumers only through casts that never read it, so the gap is silent
+     * rather than a type error.
+     *
+     * Discriminates a standalone slice (`null`) from a kit-driven one (the
+     * live `AssetKit` membership id this row was booked under) — mirrors
+     * `BookingAsset.assetKitId`. Scopes a kit's conflict check to slices
+     * booked under ONE of its memberships, never a standalone row of the
+     * same asset on another booking.
+     */
+    assetKitId: string | null;
+    /**
+     * The kit this slice was booked under, surviving the membership itself
+     * being removed (`BookingAsset.sourceKitId`) — the durable "which kit"
+     * key `hasKitBookingConflicts` callers match a kit's own id against.
+     */
+    sourceKitId: string | null;
+    /**
+     * The slice's own dispatch markers, read by `hasKitBookingConflicts` —
+     * see `KitBookingSlice` in `~/modules/booking/helpers`.
+     */
+    checkedOutAt: Date | string | null;
+    checkedInAt: Date | string | null;
+  }[];
   custody: Custody | null;
   category: Category;
   tags: Pick<Tag, "id" | "name" | "color">[];
-  assetKits: { kitId: string; kit?: { id: string; name: string } }[];
+  assetKits: {
+    id: string;
+    kitId: string;
+    kit?: { id: string; name: string };
+  }[];
   qrScanned: string;
   /** Quantity booked from the BookingAsset pivot (present for QUANTITY_TRACKED assets) */
   bookedQuantity?: number | null;
@@ -179,6 +223,14 @@ export type AssetWithBooking = Asset & {
    * bookings ever see it). Absent on surfaces that don't project it.
    */
   isRemovedFromKit?: boolean | null;
+  /**
+   * True when this row is a live kit-driven slice (`BookingAsset.assetKitId`
+   * set): its units come out of the kit's allocation (`AssetKit.quantity`),
+   * not the loose pool, so the workspace-availability stock badges do not
+   * apply to it. Resolved by the booking-overview loader; absent on surfaces
+   * that don't project it.
+   */
+  isKitDriven?: boolean | null;
   // Pickup location rendered in the booking Location column. On the
   // pivot model this comes from `assetLocations[0].location` via the
   // loader's `getPrimaryLocation` normalisation.

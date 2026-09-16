@@ -27,9 +27,11 @@ import {
   getPartiallyCheckedInAssetIds,
 } from "~/modules/booking/service.server";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -378,13 +380,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // checked out. The shared checkout service hard-blocks the RESERVED →
     // ONGOING transition until every `BookingModelRequest` is assigned to
     // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // `fulfilledAt: null` row remains). Fold that into the state flag so the app
-    // never offers a "Check Out" the server would reject — the app instead
-    // guides the operator to assign the reserved units first (see the
-    // booking-detail "Assign to check out" CTA).
-    const hasOutstandingModelRequests = booking.modelRequests.some(
-      (mr) => mr.fulfilledAt === null
-    );
+    // request is outstanding). Read through the same predicate the service
+    // uses, and fold it into the state flag so the app never offers a "Check
+    // Out" the server would reject — the app instead guides the operator to
+    // assign the reserved units first (see the booking-detail "Assign to
+    // check out" CTA).
+    const hasOutstandingModelRequests =
+      getOutstandingModelRequests(booking.modelRequests).length > 0;
 
     const canCheckoutByState =
       booking.status === "RESERVED" &&
@@ -407,10 +409,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
       hasCheckinable;
 
-    // Quick "check in all" is disallowed when the workspace requires EXPLICIT
-    // (scan/select) check-in for the caller's role — mirror the web policy
-    // (the `checkIn` case of the booking overview action) so the app never
-    // offers an action the web / workspace settings forbid.
+    // Quick "check in all" and "check out all" are disallowed when the
+    // workspace requires EXPLICIT (scan/select) check-in or check-out for the
+    // caller's role. Mirrors the web booking action's `checkIn`, `checkOut` and
+    // `checkOutRemaining` guards, so the app never offers an action the web /
+    // workspace settings forbid.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const canQuickCheckin = !(
@@ -419,6 +422,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (effectiveRole === OrganizationRoles.SELF_SERVICE &&
         bookingSettings.requireExplicitCheckinForSelfService)
     );
+    const canQuickCheckout = !isExplicitCheckoutRequired({
+      role: effectiveRole,
+      bookingSettings,
+    });
 
     // Per-booking lifecycle-action availability, mirroring the web
     // ActionsDropdown gating (actions-dropdown.tsx) so the app surfaces exactly
@@ -742,6 +749,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckout,
       canCheckin,
       canQuickCheckin,
+      canQuickCheckout,
       bookingActions,
     });
   } catch (cause) {

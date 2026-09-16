@@ -37,9 +37,10 @@ const ROLE_PERMISSIONS = { OWNER: { qr: ["read", "update"] } };
 
 Existing mirrors:
 
-| Companion file                                    | Canonical source                        | Extraction target |
-| ------------------------------------------------- | --------------------------------------- | ----------------- |
-| `lib/booking-kit-rows.ts` → `describeBookingRows` | `apps/webapp/app/utils/booking-rows.ts` | `@shelf/labels`   |
+| Companion file                                                            | Canonical source                                                                  | Extraction target                             |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------- |
+| `lib/booking-kit-rows.ts` → `describeBookingRows`                         | `apps/webapp/app/utils/booking-rows.ts`                                           | `@shelf/labels`                               |
+| `app/(tabs)/bookings/[id].tsx` → the `outstandingModelRequests` predicate | `apps/webapp/app/utils/booking-model-requests.ts` → `getOutstandingModelRequests` | a pure `packages/*` booking module (none yet) |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`
 (packages/permissions). If you create a new mirror, add it to this table; when

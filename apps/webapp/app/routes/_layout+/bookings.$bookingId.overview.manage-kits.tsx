@@ -114,6 +114,10 @@ export type KitForBooking = Prisma.KitGetPayload<{
     barcodes: { select: { id: true; type: true; value: true } };
     assetKits: {
       select: {
+        // The membership row's own id — `BookingAsset.assetKitId` points at
+        // this, not at `Kit.id`, so `getKitAvailabilityStatus` needs it to
+        // scope a kit-driven slice to the membership that produced it.
+        id: true;
         asset: {
           select: {
             id: true;
@@ -241,6 +245,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           location: LOCATION_WITH_HIERARCHY,
           assetKits: {
             select: {
+              // The membership row's own id — `BookingAsset.assetKitId`
+              // points at this, not at `Kit.id`, so `getKitAvailabilityStatus`
+              // needs it to scope a kit-driven slice to the membership that
+              // produced it.
+              id: true,
               asset: {
                 select: {
                   id: true,
