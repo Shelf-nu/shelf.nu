@@ -16,9 +16,9 @@ import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import {
-  labelForPreference,
   QR_CODES_ORDER_BY,
   resolveDisplayCode,
+  serializeDisplayCode,
 } from "~/modules/barcode/display";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { canUseBarcodes } from "~/utils/subscription.server";
@@ -321,16 +321,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           shaped.imageSource,
           mainImageExpiration
         ),
-        // The label the operator reads off the physical tag. Same shape the
-        // booking picker already ships, so the two lists agree.
-        displayCode: resolvedCode.value
-          ? {
-              value: resolvedCode.value,
-              label: labelForPreference(resolvedCode.type),
-              type: resolvedCode.type,
-              isFallback: resolvedCode.isFallback,
-            }
-          : null,
+        // The label the operator reads off the physical tag, in the same
+        // shape the detail endpoints send.
+        displayCode: serializeDisplayCode(resolvedCode),
       };
     });
 

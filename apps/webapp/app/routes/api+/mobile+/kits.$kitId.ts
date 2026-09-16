@@ -22,9 +22,9 @@ import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibili
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
-  labelForPreference,
   QR_CODES_ORDER_BY,
   resolveDisplayCode,
+  serializeDisplayCode,
 } from "~/modules/barcode/display";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -256,14 +256,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         organization: { currency: kitOrganization.currency },
         // The identifier to SHOW for this kit, already resolved — see the
         // asset detail endpoint for the full contract.
-        displayCode: resolvedCode.value
-          ? {
-              value: resolvedCode.value,
-              label: labelForPreference(resolvedCode.type),
-              type: resolvedCode.type,
-              isFallback: resolvedCode.isFallback,
-            }
-          : null,
+        displayCode: serializeDisplayCode(resolvedCode),
         barcodes: barcodesAllowed ? kitBarcodes : [],
       },
     });

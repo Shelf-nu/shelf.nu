@@ -281,3 +281,99 @@ export function resolveDisplayCode({
     }
   }
 }
+
+/** Why a resolved code is not the one its workspace prefers. */
+export type CodeFallbackExplanation = {
+  /** One sentence naming the preferred code and why it is not shown. */
+  text: string;
+  /**
+   * Whether the entity could ever carry the preferred code. False for a kit on
+   * a SAM ID workspace: `Kit` has no `sequentialId`, so advice to add one is
+   * advice nobody can follow.
+   */
+  fixable: boolean;
+};
+
+/**
+ * Words a fallback: which code the workspace prefers, and why this entity is
+ * not showing it.
+ *
+ * The one wording of a fallback. The web badge's tooltip and the mobile API's
+ * `displayCode` payload both read it, so the two apps explain a fallback in the
+ * same words.
+ *
+ * @param resolved - The output of {@link resolveDisplayCode}, or the fields of
+ *   it this reads
+ * @returns The explanation, or `null` when the resolved code is the preferred
+ *   one
+ */
+export function describeCodeFallback(
+  resolved: Pick<
+    ResolvedDisplayCode,
+    "type" | "isFallback" | "workspacePreference" | "entityKind"
+  >
+): CodeFallbackExplanation | null {
+  if (!resolved.isFallback) return null;
+
+  const preferredLabel = labelForPreference(resolved.workspacePreference);
+
+  // Only SAM_ID can make a kit fall back for want of a code it can never
+  // have. Kits carry their own QR and barcodes, so every other preference
+  // reads the same for a kit as for an asset.
+  if (
+    resolved.entityKind === "kit" &&
+    resolved.workspacePreference === "SAM_ID"
+  ) {
+    return {
+      text: `Your workspace prefers ${preferredLabel}, which kits do not have. Showing the ${labelForPreference(
+        resolved.type
+      )} instead.`,
+      fixable: false,
+    };
+  }
+
+  return {
+    text: `Your workspace prefers ${preferredLabel} but this item has no ${preferredLabel}.`,
+    fixable: true,
+  };
+}
+
+/** A resolved code as the mobile API sends it. */
+export type DisplayCodePayload = {
+  /** The code's value: a QR id, a SAM ID, or a barcode value. */
+  value: string;
+  /** Names the code that IS shown ("Code 128"), never the preference. */
+  label: string;
+  /** The type of the code shown, so the client can pick a renderer. */
+  type: QrIdDisplayPreference;
+  /** True when the workspace's preferred code could not be shown. */
+  isFallback: boolean;
+  /**
+   * The sentence explaining a fallback, from {@link describeCodeFallback}.
+   * `null` unless `isFallback`.
+   */
+  fallbackNote: string | null;
+};
+
+/**
+ * Shapes a resolved code for a mobile API response.
+ *
+ * Every mobile route that sends `displayCode` builds it here, so the contract
+ * the companion reads is the same on every endpoint.
+ *
+ * @param resolved - The output of {@link resolveDisplayCode}
+ * @returns The payload, or `null` when the entity has no code to show
+ */
+export function serializeDisplayCode(
+  resolved: ResolvedDisplayCode
+): DisplayCodePayload | null {
+  if (!resolved.value) return null;
+
+  return {
+    value: resolved.value,
+    label: labelForPreference(resolved.type),
+    type: resolved.type,
+    isFallback: resolved.isFallback,
+    fallbackNote: describeCodeFallback(resolved)?.text ?? null,
+  };
+}

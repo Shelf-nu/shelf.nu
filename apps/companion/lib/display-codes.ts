@@ -10,7 +10,9 @@
  * screen shows the workspace's choice without the app ever needing to know
  * what the preference is. Re-deriving the choice on the client would drift the
  * moment a workspace changed its preference, since an installed build cannot
- * be updated in step with the server.
+ * be updated in step with the server. The same holds for the words: when the
+ * preference could not be honoured, the server sends the sentence that says
+ * so, and this module passes it through.
  *
  * Pure, and deliberately free of React Native, Expo and `@/`-aliased imports so
  * it runs under the `lib/**` node test runner — which is what lets the whole
@@ -34,8 +36,9 @@ export type BarcodeSymbology =
 /** The server-resolved code, narrowed to the fields this selection reads. */
 export type DisplayCodeInput = {
   value: string;
-  label: string;
   isFallback: boolean;
+  /** The server's explanation of a fallback; absent on older servers. */
+  fallbackNote?: string | null;
 };
 
 /** One selectable code: the Shelf QR, or one of the entity's barcodes. */
@@ -66,10 +69,12 @@ export type CodeSelection = {
    */
   title: string;
   /**
-   * The preference that could not be honoured, for the explanatory line —
-   * null whenever the resolved code IS the preferred one.
+   * The explanatory line under the code: the server's sentence naming the
+   * preference that could not be honoured. Null whenever the resolved code IS
+   * the preferred one, and against an older server that sends no sentence —
+   * the app never words this itself, because it does not know the preference.
    */
-  unmetPreference: string | null;
+  fallbackNote: string | null;
 };
 
 /** Names a code by TYPE only — the heading has no room for its value. */
@@ -136,7 +141,9 @@ export function buildCodeSelection({
       codes.length > 1
         ? "CODES"
         : (codes[0] ? codeTypeLabel(codes[0]) : "CODE").toUpperCase(),
-    unmetPreference:
-      displayCode?.isFallback && displayCode.label ? displayCode.label : null,
+    fallbackNote:
+      displayCode?.isFallback && displayCode.fallbackNote
+        ? displayCode.fallbackNote
+        : null,
   };
 }

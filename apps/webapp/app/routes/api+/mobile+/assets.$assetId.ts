@@ -20,9 +20,9 @@ import {
   shapeMobileAssetPlacements,
 } from "~/modules/asset/utils";
 import {
-  labelForPreference,
   QR_CODES_ORDER_BY,
   resolveDisplayCode,
+  serializeDisplayCode,
 } from "~/modules/barcode/display";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -450,19 +450,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // inherit a workspace's preference with no app release — the same
         // reason the image cascade is resolved server-side.
         //
-        // `label` names the code type ("Code 128"), `type` lets the client
-        // pick a renderer, and `isFallback` marks a preference that could not
-        // be honoured (workspace wants Code 128, this asset has none) so the
-        // screen can say so instead of silently showing something else.
-        // Null only when the asset has no resolvable code at all.
-        displayCode: resolvedCode.value
-          ? {
-              value: resolvedCode.value,
-              label: labelForPreference(resolvedCode.type),
-              type: resolvedCode.type,
-              isFallback: resolvedCode.isFallback,
-            }
-          : null,
+        // `label` names the code that is shown ("Code 128"), never the
+        // preference, and `type` lets the client pick a renderer. On a
+        // preference that could not be honoured (workspace wants Code 128, this
+        // asset has none) `isFallback` is set and `fallbackNote` says why, so
+        // the screen can explain itself instead of silently showing something
+        // else. Null only when the asset has no resolvable code at all.
+        displayCode: serializeDisplayCode(resolvedCode),
         // Every alternative code on the asset, so the detail screen can offer
         // the same code switcher the web preview does. Add-on gated: a
         // workspace without alternative barcodes must not receive barcode

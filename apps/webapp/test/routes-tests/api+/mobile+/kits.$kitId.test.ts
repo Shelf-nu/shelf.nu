@@ -384,6 +384,7 @@ describe("GET /api/mobile/kits/:kitId — display code", () => {
       label: "Code 128",
       type: "Code128",
       isFallback: false,
+      fallbackNote: null,
     });
     expect(kit.barcodes).toEqual([
       { id: "bc-k1", type: "Code128", value: "KIT-000042" },
@@ -393,7 +394,8 @@ describe("GET /api/mobile/kits/:kitId — display code", () => {
   it("falls back to the QR for a SAM ID preference, since kits have no SAM ID", async () => {
     // why: `Kit` has no `sequentialId` column. The fallback must be MARKED so
     // the screen can explain itself rather than appearing to ignore the
-    // workspace setting.
+    // workspace setting, and in words that do not ask for a SAM ID a kit can
+    // never have.
     canUseBarcodesMock.mockReturnValue(true);
 
     const kit = await loadKit(
@@ -405,6 +407,8 @@ describe("GET /api/mobile/kits/:kitId — display code", () => {
       label: "QR Code ID",
       type: "QR_ID",
       isFallback: true,
+      fallbackNote:
+        "Your workspace prefers SAM ID, which kits do not have. Showing the QR Code ID instead.",
     });
   });
 

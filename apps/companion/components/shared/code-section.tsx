@@ -166,7 +166,7 @@ export const CodeSection = memo(function CodeSection({
   // Every decision about WHICH code shows and how the section is worded lives
   // in `buildCodeSelection`, which is pure and unit-tested; this component only
   // draws the result and owns the switch between them.
-  const { codes, leadKey, title, unmetPreference } = useMemo(
+  const { codes, leadKey, title, fallbackNote } = useMemo(
     () => buildCodeSelection({ displayCode, barcodes, qrCodes }),
     [displayCode, barcodes, qrCodes]
   );
@@ -261,13 +261,10 @@ export const CodeSection = memo(function CodeSection({
             {selected.value}
           </Text>
 
-          {unmetPreference ? (
+          {fallbackNote ? (
             // Say what happened rather than quietly showing a different code:
             // the reader is holding a label and needs to know why it disagrees.
-            <Text style={styles.codeNoteText}>
-              This workspace shows {unmetPreference}, which this item
-              doesn&apos;t have yet.
-            </Text>
+            <Text style={styles.codeNoteText}>{fallbackNote}</Text>
           ) : null}
         </View>
       </View>

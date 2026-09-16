@@ -534,12 +534,14 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
       label: "Code 128",
       type: "Code128",
       isFallback: false,
+      fallbackNote: null,
     });
   });
 
   it("marks a preference it could not honour instead of silently showing the QR", async () => {
     // why: workspace wants Code 128 but this asset has none. The value has to
-    // fall back to the QR, and the screen must be able to say so.
+    // fall back to the QR, and the screen must be able to say so. `label`
+    // names the QR actually shown; only `fallbackNote` names the preference.
     assetFindUniqueMock.mockResolvedValue(
       buildAssetWithCodes({
         qrIdDisplayPreference: "Code128",
@@ -555,6 +557,8 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
       label: "QR Code ID",
       type: "QR_ID",
       isFallback: true,
+      fallbackNote:
+        "Your workspace prefers Code 128 but this item has no Code 128.",
     });
   });
 

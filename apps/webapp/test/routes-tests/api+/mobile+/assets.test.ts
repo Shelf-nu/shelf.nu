@@ -718,6 +718,7 @@ describe("GET /api/mobile/assets — display code", () => {
       label: "Code 128",
       type: "Code128",
       isFallback: false,
+      fallbackNote: null,
     });
   });
 
@@ -748,7 +749,10 @@ describe("GET /api/mobile/assets — display code", () => {
 
     expect(asset.displayCode).toMatchObject({
       value: "qr-abc123",
+      label: "QR Code ID",
       isFallback: true,
+      fallbackNote:
+        "Your workspace prefers Code 128 but this item has no Code 128.",
     });
   });
 

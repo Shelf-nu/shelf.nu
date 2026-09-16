@@ -235,10 +235,21 @@ export type CodeDisplayType = "QR_ID" | "SAM_ID" | BarcodeSymbology;
  */
 export type ResolvedDisplayCode = {
   value: string;
-  /** Human label for the code type, e.g. "Code 128". */
+  /**
+   * Human label for the type of the code that is SHOWN, e.g. "Code 128". On a
+   * fallback this names the Shelf QR shown in the preference's place, never
+   * the preference itself — `fallbackNote` is what names that.
+   */
   label: string;
   type: CodeDisplayType;
   isFallback: boolean;
+  /**
+   * One sentence explaining a fallback, worded by the server so it matches the
+   * web app ("Your workspace prefers Code 128 but this item has no Code 128.").
+   * `null` unless `isFallback`. Absent on older servers, which the app treats
+   * as "no note" rather than guessing at the words.
+   */
+  fallbackNote?: string | null;
 };
 
 export type AssetDetail = {
@@ -292,8 +303,9 @@ export type AssetDetail = {
    * an installed build follow a preference change with no app release.
    *
    * `isFallback` marks a preference that could not be honoured (the workspace
-   * prints Code 128, this asset has none), so the screen can say so rather
-   * than quietly showing a different code.
+   * prints Code 128, this asset has none), and `fallbackNote` says so in
+   * words, so the screen can explain itself rather than quietly showing a
+   * different code.
    *
    * Absent on older servers — treat a missing value as "show the QR".
    */
