@@ -4,18 +4,16 @@
  * Serves the companion's Assets tab and its My Custody view: a paginated,
  * searchable, status-filterable asset list in the flat legacy shape the app
  * reads. Org-scoped behind the mobile bearer auth, with custody holders
- * filtered per viewer the same way the asset detail route filters them. Each
- * asset photo whose signed URL has lapsed is re-signed before the page is
- * sent, because the companion draws image URLs exactly as it receives them.
- * See the loader docblock for the request contract.
+ * filtered per viewer the same way the asset detail route filters them. Lapsed
+ * asset photo URLs are re-signed before the page is sent. See the loader
+ * docblock for the request contract.
  *
  * @see {@link file://./assets.$assetId.ts} the detail twin of this route
- * @see {@link file://./../../../modules/api/mobile-asset-images.server.ts}
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
  */
 import { AssetStatus, type Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
-import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import { resolveMobileAssetSearchWhere } from "~/modules/api/mobile-asset-search.server";
 import {
   getMobileUserContext,
@@ -30,6 +28,10 @@ import {
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 
 /**
@@ -46,9 +48,7 @@ import { makeShelfError, ShelfError } from "~/utils/error";
  * web indexes use, in a single query.
  *
  * Image URLs are returned with the model-image cascade already resolved
- * (`shapeMobileAssetResponse`). An asset's own URL is signed and stops loading
- * once `mainImageExpiration` passes, and the companion has no repair flow, so
- * the lapsed ones are re-signed before the page is sent.
+ * (`shapeMobileAssetResponse`), after lapsed ones are re-signed.
  * `mainImageExpiration` is only sent when the asset's OWN signed URL won the
  * cascade — model cover images are public and never expire.
  */
@@ -237,13 +237,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...searchWhere,
     });
 
-    // A signed image URL stops loading once `mainImageExpiration` passes, and
-    // the companion renders a lapsed one as an empty tile, so re-sign the
-    // lapsed rows before the page is shaped.
-    const assets = await refreshExpiredMobileAssetImages(
-      storedAssets,
-      organizationId
-    );
+    const assets = await refreshExpiredAssetImages(storedAssets, {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
 
     // Flatten kit/location/custody pivots into the legacy flat shape via the
     // shared helper, then re-attach `mainImageExpiration`, which the list

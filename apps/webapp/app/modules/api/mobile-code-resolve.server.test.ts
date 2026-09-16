@@ -2,7 +2,10 @@ import type { Mock } from "vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
-import { requireOrganizationAccess } from "~/modules/api/mobile-auth.server";
+import {
+  requireOrganizationAccess,
+  resignAndShapeMobileAsset,
+} from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
@@ -46,7 +49,11 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireOrganizationAccess: vi.fn(),
   MOBILE_ASSET_SELECT: {},
   MOBILE_KIT_SELECT: {},
-  shapeMobileAssetResponse: (asset: unknown) => asset,
+  // why: the shared re-sign-then-shape step has its own tests in
+  // mobile-auth.server.test.ts; here it passes the row through so the
+  // resolver's routing is what the assertions see, including which workspace
+  // it hands the step.
+  resignAndShapeMobileAsset: vi.fn((asset: unknown) => Promise.resolve(asset)),
   shapeMobileKitResponse: (kit: unknown) => kit,
 }));
 
@@ -74,6 +81,7 @@ const membershipFindUnique = vi.mocked(db.userOrganization.findUnique);
 const requireOrgAccess = vi.mocked(requireOrganizationAccess);
 const barcodeByValue = vi.mocked(getBarcodeByValue);
 const barcodesCapability = vi.mocked(canUseBarcodes);
+const resignAndShape = vi.mocked(resignAndShapeMobileAsset);
 
 /**
  * The two handles the SAM tests drive, narrowed to the shape the resolver
@@ -275,6 +283,11 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
     expect(barcodeByValue).toHaveBeenCalledWith(
       expect.objectContaining({ value: SAM_SHAPED, organizationId: ORG_ID })
     );
+    // The asset goes through the shared photo re-sign for this workspace.
+    expect(resignAndShape).toHaveBeenCalledWith(
+      { id: "asset-1", title: "Asset one" },
+      ORG_ID
+    );
   });
 
   it("resolves a kit-linked barcode with the kit shaped as the QR path shapes it", async () => {
@@ -363,5 +376,42 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
     });
     expect(barcodeByValue).not.toHaveBeenCalled();
     expect(organizationFindUnique).not.toHaveBeenCalled();
+    expect(resignAndShape).toHaveBeenCalledWith(
+      { id: "asset-9", title: "Asset nine" },
+      ORG_ID
+    );
+  });
+});
+
+/**
+ * A QR code can belong to a sibling workspace the caller is a member of. Its
+ * asset photo is re-signed through the shared step against the workspace that
+ * owns the code, not the caller's current one.
+ */
+describe("resolveMobileScannedCode photo re-sign on the QR path", () => {
+  it("hands the asset to the shared step with the workspace that owns the code", async () => {
+    // why: casts — narrow selected shapes, not full Prisma rows.
+    qrFindUnique.mockResolvedValue({
+      id: "qr-sibling",
+      assetId: "asset-7",
+      kitId: null,
+      organizationId: "org-sibling",
+    } as any);
+    membershipFindUnique.mockResolvedValue({ id: "membership-2" } as any);
+    assetFindFirst.mockResolvedValue({ id: "asset-7", title: "Asset seven" });
+
+    const result = await resolveMobileScannedCode(resolveArgs("qr-sibling"));
+
+    expect(resignAndShape).toHaveBeenCalledWith(
+      { id: "asset-7", title: "Asset seven" },
+      "org-sibling"
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      qr: {
+        organizationId: "org-sibling",
+        asset: { id: "asset-7", title: "Asset seven" },
+      },
+    });
   });
 });

@@ -5,11 +5,10 @@
  * one row per asset with their kit slices, the kits those rows group under,
  * model reservations, check-in state and the action flags the screen needs.
  * Org-scoped behind the mobile bearer auth, with drafts private to their
- * creator and a custody gate on the loaded row. Asset photos and kit images
- * whose signed URLs have lapsed are re-signed before the response is sent,
- * because the companion draws image URLs exactly as it receives them.
+ * creator and a custody gate on the loaded row. Lapsed asset photo and kit image
+ * URLs are re-signed before the response is sent.
  *
- * @see {@link file://./../../../modules/api/mobile-asset-images.server.ts}
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
  * @see {@link file://./../../../modules/kit/service.server.ts} refreshExpiredKitImages
  */
 import {
@@ -21,7 +20,6 @@ import {
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -31,6 +29,10 @@ import {
 import { ASSET_LOCATIONS_INCLUDE } from "~/modules/asset/fields";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import { computeDispatchedUnitsByAsset } from "~/modules/booking/checkout-attribution";
 import { isBookingArchivable } from "~/modules/booking/helpers";
@@ -179,8 +181,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 consumptionType: true,
                 mainImage: true,
                 thumbnailImage: true,
-                // Drives the re-sign below: a lapsed signed URL is repaired
-                // server-side, since the companion has no repair flow.
+                // Lets the re-sign below tell a lapsed photo URL.
                 mainImageExpiration: true,
                 // Model cover image; collapsed into the flat image fields by
                 // `serializeAssetImage` below, so an asset inheriting its
@@ -317,30 +318,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
     }
 
-    // A signed image URL stops loading once `mainImageExpiration` passes, and
-    // the companion cannot repair it, so an asset whose photo has lapsed shows
-    // as an empty tile on the booking screen. Re-sign those before the rows are
-    // shaped; the collapse above already reduced them to one row per asset.
-    const refreshedAssetById = new Map(
-      (
-        await refreshExpiredMobileAssetImages(
-          Array.from(byAssetId.values(), (row) => row.first.asset),
-          organizationId
-        )
-      ).map((asset) => [asset.id, asset])
+    const collapsedRows = Array.from(byAssetId.values());
+    // The result lines up with `collapsedRows`, one entry per asset.
+    const refreshedAssets = await refreshExpiredAssetImages(
+      collapsedRows.map((row) => row.first.asset),
+      { organizationId, ...ASSET_IMAGE_RESIGN_LIMITS }
     );
 
-    const assets = Array.from(byAssetId.values()).map((row) => {
+    const assets = collapsedRows.map((row, index) => {
       // `assetLocations` is taken out here so the pivot never reaches the
       // payload; it is sent only as the flat `location` below.
-      // `mainImageExpiration` only steers the re-sign above, so it is taken out
-      // too and the row keeps the shape the companion reads.
+      // `mainImageExpiration` only steers the re-sign above.
       const {
         assetKits,
         assetLocations,
         mainImageExpiration: _mainImageExpiration,
         ...rest
-      } = refreshedAssetById.get(row.assetId) ?? row.first.asset;
+      } = refreshedAssets[index];
       // why: no `sourceKitId` fallback for detached kit residue here. This
       // response collapses per asset rather than grouping by kit, and the
       // unanimous rule below deliberately reports `null` rather than guessing

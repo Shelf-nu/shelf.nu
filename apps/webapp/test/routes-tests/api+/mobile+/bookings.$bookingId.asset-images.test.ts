@@ -5,10 +5,11 @@
  * An asset's `mainImage` is a signed storage URL that stops loading once
  * `mainImageExpiration` passes, and the companion has no repair flow: it draws a
  * lapsed URL as an empty tile. So the loader hands its rows to
- * `refreshExpiredMobileAssetImages` before it answers. What the app depends on:
+ * `refreshExpiredAssetImages` before it answers. What the app depends on:
  *
  * 1. The row it renders carries the URL the repair returned, not the stored one.
- * 2. The repair is scoped to the caller's workspace.
+ * 2. The repair is scoped to the caller's workspace and bounded by
+ *    `ASSET_IMAGE_RESIGN_LIMITS`.
  * 3. The repair runs once per asset, even when the booking holds several slices
  *    of the same quantity-tracked asset.
  * 4. The expiry that steers the repair is not sent, so the row keeps its shape.
@@ -21,13 +22,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
-import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import type * as AssetServiceServer from "~/modules/asset/service.server";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 
 import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
 
@@ -79,20 +84,26 @@ vi.mock("~/utils/permissions/permission.validator.server", () => ({
 // why: the repair signs URLs against Supabase Storage and writes them back. It
 // has its own unit test; here it answers with a known fresh URL so the test can
 // see whether the loader serves what the repair returned.
-vi.mock("~/modules/api/mobile-asset-images.server", () => ({
-  refreshExpiredMobileAssetImages: vi.fn(
-    (assets: Array<{ id: string; mainImage: string | null }>) =>
-      Promise.resolve(
-        assets.map((asset) => ({
-          ...asset,
-          mainImage: `https://storage.test/sign/assets/${asset.id}.png?token=new`,
-        }))
-      )
-  ),
-}));
+vi.mock("~/modules/asset/service.server", async () => {
+  const actual = await vi.importActual<typeof AssetServiceServer>(
+    "~/modules/asset/service.server"
+  );
+  return {
+    ...actual,
+    refreshExpiredAssetImages: vi.fn(
+      (assets: Array<{ id: string; mainImage: string | null }>) =>
+        Promise.resolve(
+          assets.map((asset) => ({
+            ...asset,
+            mainImage: `https://storage.test/sign/assets/${asset.id}.png?token=new`,
+          }))
+        )
+    ),
+  };
+});
 
 const findFirstMock = vi.mocked(db.booking.findFirst);
-const refreshMock = vi.mocked(refreshExpiredMobileAssetImages);
+const refreshMock = vi.mocked(refreshExpiredAssetImages);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -191,8 +202,14 @@ describe("GET /api/mobile/bookings/:bookingId — asset photos", () => {
     await get();
 
     expect(refreshMock).toHaveBeenCalledTimes(1);
-    const [rows, organizationId] = refreshMock.mock.calls[0];
-    expect(organizationId).toBe("org-1");
-    expect(rows.map((row) => row.id)).toEqual(["asset-1", "asset-2"]);
+    const [rows, options] = refreshMock.mock.calls[0];
+    expect(options).toEqual({
+      organizationId: "org-1",
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
+    expect(rows.map((row: { id: string }) => row.id)).toEqual([
+      "asset-1",
+      "asset-2",
+    ]);
   });
 });

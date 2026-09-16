@@ -12,7 +12,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
@@ -22,6 +21,10 @@ import {
 import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibility.server";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -130,8 +133,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 type: true,
                 mainImage: true,
                 thumbnailImage: true,
-                // Drives the re-sign below, the same way the kit's own image
-                // is re-signed: the companion repairs neither.
+                // Lets the re-sign below tell a lapsed photo URL.
                 mainImageExpiration: true,
                 // Model cover image; collapsed into the flat image fields by
                 // `serializeAssetImage` below, so a member asset inheriting
@@ -161,11 +163,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    // A kit's `image` is a signed storage URL that stops working once
-    // `imageExpiration` passes, and the app has no way to renew it. Re-sign a
-    // lapsed one so the kit screen never receives a dead link. `organizationId`
-    // only scopes that write-back, so it is dropped before the response.
-    const [refreshedKit] = await refreshExpiredKitImages([storedKit]);
+    // Re-sign the kit image and the member photos together; neither needs the
+    // other. `organizationId` only scopes the kit write-back, so it is dropped
+    // before the response. The member result lines up with `assetKits`.
+    const [[refreshedKit], refreshedMembers] = await Promise.all([
+      refreshExpiredKitImages([storedKit]),
+      refreshExpiredAssetImages(
+        storedKit.assetKits.map((ak) => ak.asset),
+        { organizationId, ...ASSET_IMAGE_RESIGN_LIMITS }
+      ),
+    ]);
     const { organizationId: _organizationId, ...kit } = refreshedKit;
 
     // Flatten the AssetKit pivot into the asset list the companion expects.
@@ -173,26 +180,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // `location` field the companion's kit screen still reads (preserves
     // the existing mobile JSON contract).
     const { assetKits, ...kitData } = kit;
-
-    // Member photos are signed URLs the companion cannot repair either, so the
-    // lapsed ones are re-signed before the kit screen receives them.
-    const refreshedAssetById = new Map(
-      (
-        await refreshExpiredMobileAssetImages(
-          assetKits.map((ak) => ak.asset),
-          organizationId
-        )
-      ).map((asset) => [asset.id, asset])
-    );
-
-    const assets = assetKits.map((ak) => {
-      // `mainImageExpiration` only steers the re-sign above, so it is taken out
-      // with the pivot and the member row keeps the shape the companion reads.
+    const assets = assetKits.map((ak, index) => {
+      // `mainImageExpiration` only steers the re-sign above.
       const {
         assetLocations,
         mainImageExpiration: _mainImageExpiration,
         ...rest
-      } = refreshedAssetById.get(ak.asset.id) ?? ak.asset;
+      } = refreshedMembers[index];
       return {
         // Resolves the model-image cascade and drops the nested `assetModel`,
         // so the companion keeps one source of truth for the image.

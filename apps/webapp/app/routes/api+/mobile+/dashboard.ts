@@ -3,15 +3,13 @@
  *
  * Serves the companion's Home screen in one request: KPI counts, assets by
  * status, the newest assets, upcoming, active and overdue bookings, and active
- * audits. Org-scoped behind the mobile bearer auth. The newest assets' photos
- * are re-signed when their signed URLs have lapsed, because the companion draws
- * image URLs exactly as it receives them.
+ * audits. Org-scoped behind the mobile bearer auth. Lapsed photo URLs on the
+ * newest assets are re-signed before the response is sent.
  *
- * @see {@link file://./../../../modules/api/mobile-asset-images.server.ts}
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
  */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
-import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import {
   requireMobileAuth,
   requireOrganizationAccess,
@@ -19,6 +17,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import {
   getBookings,
   resolveCustodianScope,
@@ -145,8 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           status: true,
           mainImage: true,
           thumbnailImage: true,
-          // Drives the re-sign below; the companion cannot repair a lapsed
-          // signed URL, so Home would show empty tiles without it.
+          // Lets the re-sign below tell a lapsed photo URL.
           mainImageExpiration: true,
           // Model cover image; `serializeAssetImage` below resolves the cascade
           ...ASSET_MODEL_IMAGE_SELECT,
@@ -312,12 +313,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       _count?: { bookingAssets: number };
     };
 
-    // Home shows each new asset's photo, and a lapsed signed URL arrives blank
-    // because the companion cannot repair it, so re-sign those first.
-    const newestAssets = await refreshExpiredMobileAssetImages(
-      storedNewestAssets,
-      organizationId
-    );
+    const newestAssets = await refreshExpiredAssetImages(storedNewestAssets, {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
 
     // Format booking results
     const formatBooking = (b: MobileDashboardBooking) => ({

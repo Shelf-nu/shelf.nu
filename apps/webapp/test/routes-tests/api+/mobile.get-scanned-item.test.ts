@@ -34,22 +34,11 @@ vitest.mock("react-router", async () => {
 });
 
 // why: external auth — we don't want to hit Supabase in tests
-vitest.mock("~/modules/api/mobile-auth.server", () => ({
-  requireMobileAuth: vitest.fn(),
-  requireOrganizationAccess: vitest.fn(),
-  MOBILE_ASSET_SELECT: {
-    id: true,
-    title: true,
-    status: true,
-    mainImage: true,
-    category: { select: { name: true } },
-    location: { select: { name: true } },
-  },
-  MOBILE_KIT_SELECT: { id: true, name: true },
+vitest.mock("~/modules/api/mobile-auth.server", () => {
   // why: the whole module is mocked to keep Supabase out of these tests, so the
   // pure shape helpers must be provided too. These mirror the real ones (flatten
   // the quantities pivot shape into the flat shape the companion expects).
-  shapeMobileAssetResponse: (asset: any) => {
+  const shapeAsset = (asset: any) => {
     const { assetKits, assetLocations, custody, ...rest } = asset;
     const kit = assetKits[0]?.kit ?? null;
     return {
@@ -59,9 +48,27 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
       location: assetLocations[0]?.location ?? null,
       custody: custody[0] ?? null,
     };
-  },
-  shapeMobileKitResponse: (kit: any) => kit ?? null,
-}));
+  };
+  return {
+    requireMobileAuth: vitest.fn(),
+    requireOrganizationAccess: vitest.fn(),
+    MOBILE_ASSET_SELECT: {
+      id: true,
+      title: true,
+      status: true,
+      mainImage: true,
+      category: { select: { name: true } },
+      location: { select: { name: true } },
+    },
+    MOBILE_KIT_SELECT: { id: true, name: true },
+    shapeMobileAssetResponse: shapeAsset,
+    // why: the resolver sends a scanned asset through the shared photo re-sign
+    // step before shaping. That step has its own tests, so here it only shapes.
+    resignAndShapeMobileAsset: (asset: any) =>
+      Promise.resolve(shapeAsset(asset)),
+    shapeMobileKitResponse: (kit: any) => kit ?? null,
+  };
+});
 
 // why: external database — we don't want to hit the real database in tests
 vitest.mock("~/database/db.server", () => ({

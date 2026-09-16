@@ -4,17 +4,15 @@
  * Serves the companion's asset screen: status, category, location, custody and
  * kit memberships, plus the detail-only fields that screen renders. Org-scoped
  * behind the mobile bearer auth, with custody holders filtered per viewer. A
- * lapsed asset photo URL is re-signed before the response is shaped, because
- * the companion draws image URLs exactly as it receives them.
+ * lapsed asset photo URL is re-signed before the response is shaped.
  *
  * @see {@link file://./assets.ts} the list twin of this route
- * @see {@link file://./../../../modules/api/mobile-asset-images.server.ts}
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
  */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
 import { db } from "~/database/db.server";
-import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
@@ -28,6 +26,10 @@ import {
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import {
   isQuantityTracked,
   shapeMobileAssetPlacements,
@@ -203,13 +205,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
 
-    // The asset's own image is a signed URL that stops loading once
-    // `mainImageExpiration` passes, and the companion cannot repair it, so
-    // re-sign a lapsed one before the detail screen receives it.
-    const [asset] = await refreshExpiredMobileAssetImages(
-      [storedAsset],
-      organizationId
-    );
+    const [asset] = await refreshExpiredAssetImages([storedAsset], {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
 
     // Flatten kit / location / custody via the shared mobile shaper so the
     // legacy companion contract (`asset.kit`, `asset.kitId`, `asset.location`,

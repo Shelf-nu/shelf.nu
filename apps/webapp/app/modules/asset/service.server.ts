@@ -5570,40 +5570,82 @@ export function isStorageObjectNotFound(error: unknown): boolean {
 }
 
 /**
- * The most expired asset images one response re-signs.
+ * Bounds for one {@link refreshExpiredAssetImages} call on a read path.
  *
- * Re-signing runs on the request path, one storage call per image. A list with
- * no pagination (a booking, a kit, an audit) can hold hundreds of assets whose
- * links have all lapsed, and an uncapped pass could outlast a client's request
- * timeout. Pass this as `maxRefreshes` on such paths: rows past the cap keep
- * their stored URL for that response, and because the re-signed rows are
- * written back, each later load repairs the next slice.
+ * Signing runs on the request path, one storage call per image, and
+ * `createSignedUrl` retries with backoff when storage is slow or rate-limited.
+ * A list without pagination (a booking, a kit, an audit) can hold hundreds of
+ * lapsed photos, so an unbounded pass could outlast a client's request timeout.
+ * With these bounds a call re-signs at most `maxRefreshes` rows and starts no
+ * new batch once `timeBudgetMs` has passed, so the worst case is one batch past
+ * the budget. Rows it does not reach keep their stored URL for that response;
+ * the rows it re-signs are written back, so each later load repairs the next
+ * slice.
  */
-export const ASSET_IMAGE_RESIGNS_PER_RESPONSE = 300;
+export const ASSET_IMAGE_RESIGN_LIMITS = {
+  maxRefreshes: 100,
+  timeBudgetMs: 2_500,
+} as const;
+
+/** The image columns a row needs for its lapsed photo to be re-signed. */
+type ResignableAssetImageRow = {
+  id: string;
+  mainImage: string | null;
+  mainImageExpiration: Date | null;
+  thumbnailImage?: string | null;
+};
+
+/** Optional bounds for one re-sign pass; see {@link ASSET_IMAGE_RESIGN_LIMITS}. */
+type AssetImageResignBounds = {
+  /** Re-sign at most this many lapsed rows, taken in input order. */
+  maxRefreshes?: number;
+  /** Start no new batch once this many milliseconds have passed. */
+  timeBudgetMs?: number;
+};
 
 /**
- * Refreshes expired signed URLs for asset images server-side.
- * Prevents N+1 client-side calls to /api/asset/refresh-main-image.
+ * Re-signs lapsed asset photo URLs server-side.
  *
- * Only refreshes existing thumbnail URLs — does not generate missing
- * thumbnails, as that requires downloading + re-uploading images
- * which is too expensive for a batch operation.
+ * `Asset.mainImage` and `Asset.thumbnailImage` are signed storage URLs that stop
+ * loading once `mainImageExpiration` passes. The web can repair one from the
+ * browser, but the companion app draws the URL it receives and has no repair
+ * flow, so every read path that sends asset photos to it re-signs them here
+ * first. On web lists it also saves N+1 calls to /api/asset/refresh-main-image.
  *
- * @param assets - Rows carrying the image columns, in response order.
- * @param options.maxRefreshes - Re-sign at most this many expired rows, taken
- *   in input order so the rows a list shows first are repaired first. Unbounded
- *   when omitted; see {@link ASSET_IMAGE_RESIGNS_PER_RESPONSE}.
- * @returns The same rows, with each re-signed URL merged in.
+ * Only existing thumbnail URLs are re-signed. A missing thumbnail is not
+ * generated, which would mean downloading and re-uploading the image.
+ *
+ * Each re-signed URL is written back to its asset in a deferred `updateMany`,
+ * guarded on the URL that was read. That write also bumps `Asset.updatedAt`, so
+ * opening a large booking, kit or audit refreshes "updated at" on every asset it
+ * re-signs.
+ *
+ * The write-back is scoped to a workspace: a row that carries `organizationId`
+ * uses its own, and rows selected without it take `options.organizationId`,
+ * which the overloads require in that case.
+ *
+ * @param assets - Rows carrying the image columns.
+ * @param options - The owning workspace for rows without one, and the bounds
+ *   from {@link ASSET_IMAGE_RESIGN_LIMITS}. Unbounded when omitted.
+ * @returns The rows in input order, index for index, with re-signed URLs merged
+ *   in. A row that was not re-signed is returned as it came in.
  */
 export async function refreshExpiredAssetImages<
-  T extends {
-    id: string;
-    organizationId: string;
-    mainImage: string | null;
-    mainImageExpiration: Date | null;
-    thumbnailImage?: string | null;
-  },
->(assets: T[], options: { maxRefreshes?: number } = {}): Promise<T[]> {
+  T extends ResignableAssetImageRow & { organizationId: string },
+>(
+  assets: T[],
+  options?: AssetImageResignBounds & { organizationId?: string }
+): Promise<T[]>;
+export async function refreshExpiredAssetImages<
+  T extends ResignableAssetImageRow,
+>(
+  assets: T[],
+  options: AssetImageResignBounds & { organizationId: string }
+): Promise<T[]>;
+export async function refreshExpiredAssetImages(
+  assets: Array<ResignableAssetImageRow & { organizationId?: string }>,
+  options: AssetImageResignBounds & { organizationId?: string } = {}
+): Promise<Array<ResignableAssetImageRow & { organizationId?: string }>> {
   const now = new Date();
   const expiredAssets = assets
     .filter(
@@ -5612,7 +5654,13 @@ export async function refreshExpiredAssetImages<
         a.mainImageExpiration &&
         new Date(a.mainImageExpiration) < now
     )
-    .slice(0, options.maxRefreshes);
+    .slice(0, options.maxRefreshes)
+    .flatMap((a) => {
+      const ownerOrganizationId = a.organizationId ?? options.organizationId;
+      // The overloads guarantee a workspace; a row without one is never signed,
+      // so a write-back can never run unscoped.
+      return ownerOrganizationId ? [{ ...a, ownerOrganizationId }] : [];
+    });
 
   if (expiredAssets.length === 0) return assets;
 
@@ -5648,7 +5696,7 @@ export async function refreshExpiredAssetImages<
       args: {
         where: {
           id: asset.id,
-          organizationId: asset.organizationId,
+          organizationId: asset.ownerOrganizationId,
           mainImage: asset.mainImage,
         },
         data: { mainImageExpiration: backoffExpiration },
@@ -5722,7 +5770,7 @@ export async function refreshExpiredAssetImages<
         args: {
           where: {
             id: asset.id,
-            organizationId: asset.organizationId,
+            organizationId: asset.ownerOrganizationId,
             mainImage: asset.mainImage,
             ...(updateData.thumbnailImage !== undefined
               ? { thumbnailImage: asset.thumbnailImage }
@@ -5784,7 +5832,17 @@ export async function refreshExpiredAssetImages<
     thumbnailImage?: string;
   } | null>[] = [];
 
+  const startedAt = Date.now();
   for (let i = 0; i < expiredAssets.length; i += BATCH_SIZE) {
+    // Start no new batch once the time budget is spent. Rows not reached keep
+    // their stored URL and get no backoff, so the next load picks them up.
+    if (
+      i > 0 &&
+      options.timeBudgetMs !== undefined &&
+      Date.now() - startedAt >= options.timeBudgetMs
+    ) {
+      break;
+    }
     const batch = expiredAssets.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.allSettled(
       batch.map((asset) => refreshAsset(asset))

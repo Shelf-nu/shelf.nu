@@ -655,6 +655,101 @@ describe("refreshExpiredAssetImages", () => {
     ...overrides,
   });
 
+  it("scopes the write-back to options.organizationId for rows without their own", async () => {
+    const { organizationId: _organizationId, ...row } = makeAsset();
+
+    const [result] = await refreshExpiredAssetImages([row], {
+      organizationId: "org-owner",
+    });
+
+    expect(result.mainImage).toBe("https://new-signed-url.com");
+    await vi.waitFor(() =>
+      expect(mockUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: "asset-1",
+            organizationId: "org-owner",
+          }),
+        })
+      )
+    );
+  });
+
+  it("re-signs at most maxRefreshes lapsed rows, first rows first", async () => {
+    const assets = ["asset-a", "asset-b", "asset-c"].map((id) =>
+      makeAsset({ id })
+    );
+
+    const result = await refreshExpiredAssetImages(assets, {
+      maxRefreshes: 2,
+    });
+
+    expect(result.map((asset) => asset.mainImage)).toEqual([
+      "https://new-signed-url.com",
+      "https://new-signed-url.com",
+      "https://old-signed-url.com",
+    ]);
+    expect(mockCreateSignedUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts no new batch once the time budget is spent, even with a slow signer", async () => {
+    vitest.useFakeTimers();
+    try {
+      // Every signing call takes a second, as it can when storage is throttled.
+      mockCreateSignedUrl.mockImplementation(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve("https://new-signed-url.com"), 1_000)
+          )
+      );
+      // Three batches of ten lapsed rows.
+      const assets = Array.from({ length: 30 }, (_, index) =>
+        makeAsset({ id: `asset-${index}` })
+      );
+
+      const pending = refreshExpiredAssetImages(assets, {
+        timeBudgetMs: 1_500,
+      });
+      // Batch one ends at 1s, inside the budget, so batch two starts. Batch two
+      // ends at 2s, past the budget, so batch three never starts.
+      await vitest.advanceTimersByTimeAsync(2_000);
+      const result = await pending;
+
+      expect(
+        result.filter(
+          (asset) => asset.mainImage === "https://new-signed-url.com"
+        )
+      ).toHaveLength(20);
+      expect(
+        result
+          .slice(20)
+          .every((asset) => asset.mainImage === "https://old-signed-url.com")
+      ).toBe(true);
+      expect(mockCreateSignedUrl).toHaveBeenCalledTimes(20);
+    } finally {
+      vitest.useRealTimers();
+    }
+  });
+
+  it("returns rows index for index with the input, repeated ids included", async () => {
+    const lapsed = makeAsset({ id: "asset-1" });
+    const fresh = makeAsset({
+      id: "asset-2",
+      mainImageExpiration: new Date(Date.now() + 60_000),
+    });
+
+    const result = await refreshExpiredAssetImages([
+      lapsed,
+      fresh,
+      { ...lapsed },
+    ]);
+
+    expect(result).toHaveLength(3);
+    expect(result[0].mainImage).toBe("https://new-signed-url.com");
+    expect(result[1]).toBe(fresh);
+    expect(result[2].mainImage).toBe("https://new-signed-url.com");
+  });
+
   it("returns assets unchanged when none are expired", async () => {
     const assets = [
       makeAsset({
