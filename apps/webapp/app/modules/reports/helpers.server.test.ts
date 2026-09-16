@@ -38,6 +38,11 @@ vi.mock("~/database/db.server", () => ({
     location: {
       count: vi.fn(),
     },
+    // why: the distribution report names its asset-model buckets from the
+    // AssetModel table.
+    assetModel: {
+      findMany: vi.fn(),
+    },
     // why: `bookingStatusTransitionCounts` issues `db.$queryRaw` for the
     // chart series. We stub it to a resolved empty array so the hero-data
     // path is not coupled to chart math.
@@ -47,6 +52,7 @@ vi.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 
+import { buildReportAssetFilter } from "./asset-filter";
 import {
   assetDistributionReport,
   bookingComplianceReport,
@@ -503,6 +509,9 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     vi.mocked(db.category.findMany).mockResolvedValue([
       { id: "cat-1", name: "Cameras" },
     ] as any);
+    vi.mocked(db.assetModel.findMany).mockResolvedValue([
+      { id: "model-1", name: "Sony A7 IV" },
+    ] as any);
   });
 
   it("sums category buckets as valuation × stock, matching the headline", async () => {
@@ -586,7 +595,7 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     expect(noLocation?.assetCount).toBe(1);
   });
 
-  it("reads the asset table once for all three breakdowns", async () => {
+  it("reads the asset table once for all four breakdowns", async () => {
     vi.mocked(db.asset.findMany).mockResolvedValue([] as any);
 
     await assetDistributionReport({
@@ -595,6 +604,94 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
     });
 
     expect(vi.mocked(db.asset.findMany)).toHaveBeenCalledTimes(1);
+  });
+
+  it("buckets assets by model, with modelless assets under 'No model'", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        id: "a-1",
+        categoryId: null,
+        assetModelId: "model-1",
+        status: "AVAILABLE",
+        valuation: 100,
+        quantity: null,
+        assetLocations: [],
+      },
+      {
+        id: "a-2",
+        categoryId: null,
+        assetModelId: "model-1",
+        status: "AVAILABLE",
+        valuation: 50,
+        quantity: 2,
+        assetLocations: [],
+      },
+      {
+        id: "a-3",
+        categoryId: null,
+        assetModelId: null,
+        status: "AVAILABLE",
+        valuation: null,
+        quantity: null,
+        assetLocations: [],
+      },
+    ] as any);
+
+    const result = await assetDistributionReport({
+      organizationId: "org-1",
+      currency: "USD",
+    });
+
+    const byAssetModel = result.distributionBreakdown!.byAssetModel;
+    expect(byAssetModel[0]).toMatchObject({
+      id: "model-1",
+      groupName: "Sony A7 IV",
+      assetCount: 2,
+      // 100 × 1 + 50 × 2: per-unit valuation × stock, like the other buckets.
+      totalValue: 200,
+      percentage: 67,
+    });
+    expect(byAssetModel[1]).toMatchObject({
+      id: "no-model",
+      groupName: "No model",
+      assetCount: 1,
+      totalValue: null,
+    });
+    // Model names are looked up org-scoped, and only for models that appear.
+    expect(vi.mocked(db.assetModel.findMany)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["model-1"] }, organizationId: "org-1" },
+      })
+    );
+  });
+
+  it("narrows the asset read, the count and the money sum to the same filter", async () => {
+    vi.mocked(db.asset.findMany).mockResolvedValue([] as any);
+    const assetFilter = buildReportAssetFilter({ categoryIds: ["cat-1"] });
+
+    await assetDistributionReport({
+      organizationId: "org-1",
+      currency: "USD",
+      assetFilter,
+    });
+
+    const expectedWhere = {
+      AND: [{ organizationId: "org-1" }, { categoryId: { in: ["cat-1"] } }],
+    };
+    expect(vi.mocked(db.asset.findMany)).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedWhere })
+    );
+    expect(vi.mocked(db.asset.count)).toHaveBeenCalledWith({
+      where: expectedWhere,
+    });
+    // The raw money sum carries the same filter as a SQL fragment.
+    const rawCall = vi.mocked(db.$queryRaw).mock.calls[0]?.[0] as {
+      sql: string;
+    };
+    expect(rawCall.sql).toContain('"categoryId" IN');
+    // Category/location counts come from the filtered rows, not org totals.
+    expect(vi.mocked(db.category.count)).not.toHaveBeenCalled();
+    expect(vi.mocked(db.location.count)).not.toHaveBeenCalled();
   });
 });
 

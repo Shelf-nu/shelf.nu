@@ -10,6 +10,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 
 import { formatDateForCsv } from "~/modules/reports/csv-format";
+import { resolveReportFilters } from "~/modules/reports/filters.server";
 import {
   resolveTimeframe,
   bookingComplianceReport,
@@ -131,12 +132,17 @@ export const loader = async ({
       formatPrefs
     );
 
-    // Generate CSV based on report type. Each case parses the same filter
-    // params its page-loader counterpart honors (see reports.$reportId.tsx)
-    // and hands them to the same query function — the client forwards the
-    // page's full query string, so the CSV contains exactly the rows the
-    // filtered page shows. Paging is the one deliberate difference: exports
-    // always read page 1 with a 10k page size.
+    // The client forwards the page's full query string, and the filters are
+    // resolved by the same function the page loader uses, so each case hands
+    // its query function exactly the filters the filtered page showed. Paging
+    // is the one deliberate difference: exports always read page 1 with a 10k
+    // page size.
+    const reportFilters = await resolveReportFilters({
+      organizationId,
+      searchParams,
+      reportDef,
+    });
+
     let csvString: string;
 
     switch (reportId) {
@@ -152,6 +158,12 @@ export const loader = async ({
           timeframe,
           // Anchor trend-chart axis labels in the acting user's timezone (D2).
           timeZone: formatPrefs.timeZone,
+          statusFilter:
+            reportFilters.bookingStatuses.length > 0
+              ? reportFilters.bookingStatuses
+              : undefined,
+          custodianTeamMemberId: reportFilters.teamMemberId ?? undefined,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000, // Export up to 10k rows
           sortBy,
@@ -168,8 +180,8 @@ export const loader = async ({
         const reportData = await custodySnapshotReport({
           organizationId,
           currency,
-          teamMemberId: searchParams.get("teamMember") || undefined,
-          locationId: searchParams.get("location") || undefined,
+          teamMemberId: reportFilters.teamMemberId ?? undefined,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -184,7 +196,8 @@ export const loader = async ({
         const reportData = await overdueItemsReport({
           organizationId,
           currency,
-          custodianId: searchParams.get("custodian") || undefined,
+          custodianTeamMemberId: reportFilters.teamMemberId ?? undefined,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -204,8 +217,7 @@ export const loader = async ({
           organizationId,
           currency,
           idleThresholdDays: idleThreshold,
-          categoryId: searchParams.get("category") || undefined,
-          locationId: searchParams.get("location") || undefined,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -220,8 +232,7 @@ export const loader = async ({
         const reportData = await topBookedAssetsReport({
           organizationId,
           timeframe,
-          categoryId: searchParams.get("category") || undefined,
-          locationId: searchParams.get("location") || undefined,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -248,15 +259,7 @@ export const loader = async ({
         const reportData = await assetInventoryReport({
           organizationId,
           currency,
-          categoryIds:
-            searchParams.get("categories")?.split(",").filter(Boolean) ||
-            undefined,
-          locationIds:
-            searchParams.get("locations")?.split(",").filter(Boolean) ||
-            undefined,
-          statuses:
-            searchParams.get("statuses")?.split(",").filter(Boolean) ||
-            undefined,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -271,8 +274,7 @@ export const loader = async ({
         const reportData = await assetUtilizationReport({
           organizationId,
           timeframe,
-          categoryId: searchParams.get("category") || undefined,
-          locationId: searchParams.get("location") || undefined,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -286,8 +288,8 @@ export const loader = async ({
         const reportData = await assetActivityReport({
           organizationId,
           timeframe,
-          assetId: searchParams.get("asset") || undefined,
-          categoryId: searchParams.get("category") || undefined,
+          assetId: reportFilters.assetId ?? undefined,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -302,6 +304,7 @@ export const loader = async ({
         const reportData = await assetDistributionReport({
           organizationId,
           currency,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -310,13 +313,10 @@ export const loader = async ({
       }
 
       case "monthly-booking-trends": {
-        // why: the page's category/location params are deliberately NOT
-        // forwarded — `monthlyBookingTrendsReport` accepts but ignores them,
-        // and forwarding dead filters would claim a filtering this export
-        // does not perform.
         const reportData = await monthlyBookingTrendsReport({
           organizationId,
           timeframe,
+          assetFilter: reportFilters.assetFilter,
           page: 1,
           pageSize: 10000,
         });
@@ -813,6 +813,7 @@ function generateDistributionCsv(breakdown: DistributionBreakdown): string {
     ...formatRows("Category", breakdown.byCategory),
     ...formatRows("Location", breakdown.byLocation),
     ...formatRows("Status", breakdown.byStatus),
+    ...formatRows("Asset model", breakdown.byAssetModel),
   ];
 
   return buildCsv(headers, allRows);
