@@ -8,7 +8,7 @@ import {
 } from "@react-email/components";
 import parser from "ua-parser-js";
 import type { FeedbackErrorContext } from "~/modules/feedback/schema";
-import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
+import { FEEDBACK_EMAIL, SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { LogoForEmail } from "../logo";
@@ -41,9 +41,46 @@ interface FeedbackEmailProps {
 type DetailRow = { label: string; value: string; href?: string };
 
 /**
- * Emails a user-submitted feedback entry (issue/idea/error report) to
- * SUPPORT_EMAIL with reply-to set to the submitter. Fire-and-forget:
- * failures are logged, never surfaced to the user.
+ * Resolves the internal recipients of the feedback email.
+ *
+ * `FEEDBACK_EMAIL` accepts a comma separated list so a report can land in
+ * more than one inbox; when it is not set we fall back to `SUPPORT_EMAIL`,
+ * which is where every deployment sent feedback before. Addresses are
+ * trimmed and de-duplicated (case-insensitively) because nodemailer happily
+ * delivers the same message twice when an address is repeated.
+ *
+ * Pure and exported so the resolution can be tested without re-mocking the
+ * env module for every case.
+ */
+export function resolveFeedbackRecipients(
+  feedbackEmail: string | undefined,
+  supportEmail: string | undefined
+) {
+  const configured = feedbackEmail?.trim() ? feedbackEmail : supportEmail;
+  const seen = new Set<string>();
+
+  return (configured ?? "")
+    .split(",")
+    .map((address) => address.trim())
+    .filter((address) => {
+      if (!address) {
+        return false;
+      }
+      const key = address.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .join(", ");
+}
+
+/**
+ * Emails a user-submitted feedback entry (issue/idea/error report) to the
+ * internal feedback recipients (see {@link resolveFeedbackRecipients}) with
+ * reply-to set to the submitter. Fire-and-forget: failures are logged, never
+ * surfaced to the user.
  */
 export const sendFeedbackEmail = async (props: FeedbackEmailProps) => {
   try {
@@ -54,11 +91,23 @@ export const sendFeedbackEmail = async (props: FeedbackEmailProps) => {
       sanitized.length > 50 ? `${sanitized.slice(0, 50)}...` : sanitized;
     const subject = `New feedback [${typeLabel}]: ${subjectPreview}`;
 
+    const to = resolveFeedbackRecipients(FEEDBACK_EMAIL, SUPPORT_EMAIL);
+    if (!to) {
+      /* Neither variable is set: sending would fail inside nodemailer and
+       * burn 15 queue retries on a config problem, so say so once instead. */
+      throw new ShelfError({
+        cause: null,
+        message:
+          "No feedback recipient configured. Set SUPPORT_EMAIL or FEEDBACK_EMAIL.",
+        label: "Email",
+      });
+    }
+
     const html = await feedbackEmailHtml(props);
     const text = feedbackEmailText(props);
 
     void sendEmail({
-      to: SUPPORT_EMAIL,
+      to,
       subject,
       html,
       text,
