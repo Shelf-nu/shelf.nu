@@ -81,8 +81,24 @@ export function resolveDrawerHeight({
   hasBody,
   collapsedHeight,
 }: ResolveDrawerHeightArgs): number {
+  // Chrome that cannot give up height: the handle and title line the floor
+  // stands for, plus the pinned footer. The custom header is deliberately
+  // excluded — it shrinks and scrolls, so it is not owed room here, and
+  // counting it would make an expanded drawer grow to hold a header that was
+  // always going to yield.
+  //
+  // An expanded drawer is never smaller than this. In scanner mode the gap
+  // reserved for the camera is a preference, not a guarantee: a viewfinder is
+  // worth less than a reachable action, and the footer is `shrink-0` precisely
+  // so the drawer's action never sits behind a scrollbar of its own.
+  const unshrinkableChrome = MIN_DRAWER_HEIGHT + footerHeight;
+
   const natural = expanded
-    ? viewportHeight - (isScannerMode ? SCANNER_VIEWFINDER_GAP : DRAWER_TOP_GAP)
+    ? Math.max(
+        viewportHeight -
+          (isScannerMode ? SCANNER_VIEWFINDER_GAP : DRAWER_TOP_GAP),
+        unshrinkableChrome
+      )
     : chromeHeight ??
       (hasBody ? collapsedHeight : MIN_DRAWER_HEIGHT) + footerHeight;
 

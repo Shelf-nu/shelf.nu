@@ -107,6 +107,36 @@ describe("resolveDrawerHeight", () => {
       );
     });
 
+    it("grows past the viewfinder gap rather than push the pinned footer off", () => {
+      // Drawers with no custom header (update-location, assign-custody,
+      // release-custody) have an empty header wrapper, so nothing there can
+      // give up height. Their footer is `shrink-0` by design — the action must
+      // never sit behind its own scrollbar — so the drawer itself has to be
+      // tall enough to hold it. The camera yields, not the submit button.
+      const height = resolveDrawerHeight({
+        ...baseArgs,
+        expanded: true,
+        isScannerMode: true,
+        footerHeight: 460,
+      });
+
+      expect(height).toBe(MIN_DRAWER_HEIGHT + 460);
+      expect(height).toBeGreaterThan(VH - SCANNER_VIEWFINDER_GAP);
+    });
+
+    it("still clamps when even the unshrinkable chrome outgrows the screen", () => {
+      // The ceiling wins regardless: a drawer taller than its viewport puts
+      // its own drag handle off the top, which is worse than a clipped footer.
+      const height = resolveDrawerHeight({
+        ...baseArgs,
+        expanded: true,
+        isScannerMode: true,
+        footerHeight: 900,
+      });
+
+      expect(height).toBe(VH - DRAWER_TOP_GAP);
+    });
+
     it("stays on-screen on a viewport shorter than the scanner gap", () => {
       const height = resolveDrawerHeight({
         ...baseArgs,
