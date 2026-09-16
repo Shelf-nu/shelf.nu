@@ -55,7 +55,9 @@ export function buildCsv(headers: string[], rows: string[][]): string {
  * ending and let a user-controlled value forge a row.
  */
 export function escapeCsvField(field: string): string {
-  const safeField = /^[=+\-@]/.test(field) ? `'${field}` : field;
+  // Excel also treats a formula marker after a leading tab, CR or LF as a
+  // formula once the cell is imported, so those prefixes count too.
+  const safeField = /^[=+\-@\t\r\n]/.test(field) ? `'${field}` : field;
   if (
     safeField.includes(",") ||
     safeField.includes('"') ||

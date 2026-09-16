@@ -10,6 +10,7 @@
  * @see {@link file://./compile.server.ts}
  */
 
+import type { Category, TeamMember, User } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -28,9 +29,23 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 import { db } from "~/database/db.server";
+
+/**
+ * The name lookups select a few columns, so their fixtures carry only those.
+ * The fixture is checked against the selected shape and then widened to the
+ * model type the mocked Prisma method declares.
+ */
+function lookupRows<Model>(rows: Partial<Model>[]): Model[] {
+  return rows as Model[];
+}
 import { buildReportAssetFilter } from "../asset-filter";
 import type { ResolvedTimeframe } from "../types";
-import { compileBuilderQueries, runBuilderReport } from "./compile.server";
+import {
+  compileBuilderQueries,
+  runBuilderReport,
+  type GroupedRow,
+  type TotalsRow,
+} from "./compile.server";
 import type { BuilderSpec } from "./spec";
 
 const TIMEFRAME: ResolvedTimeframe = {
@@ -54,6 +69,27 @@ function compile(spec: BuilderSpec, filter = EMPTY_FILTER) {
 }
 
 describe("compileBuilderQueries", () => {
+  it("keeps the grouping's joins out of the headline totals", () => {
+    for (const [groupBy, join] of [
+      ["location", 'LEFT JOIN "AssetLocation"'],
+      ["kit", 'LEFT JOIN "AssetKit"'],
+    ] as const) {
+      for (const dataset of ["assets", "custody"] as const) {
+        const { grouped, totals } = compile({
+          dataset,
+          groupBy,
+          customFieldId: null,
+          measure: dataset === "assets" ? "units" : "custodyUnits",
+        });
+        expect(grouped).toContain(join);
+        expect(totals).not.toContain(join);
+        // The number of groups rides along with the grouped rows.
+        expect(grouped).toContain('COUNT(*) OVER ()::int AS "groupCount"');
+        expect(totals).not.toContain("groupCount");
+      }
+    }
+  });
+
   it("scopes every dataset to the workspace and reads the mapped `value` column", () => {
     for (const dataset of ["assets", "bookings", "custody"] as const) {
       const { grouped, totals, values } = compile({
@@ -187,22 +223,28 @@ describe("compileBuilderQueries", () => {
 describe("runBuilderReport", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(db.category.findMany).mockResolvedValue([
-      { id: "cat-1", name: "Cameras" },
-    ] as any);
+    vi.mocked(db.category.findMany).mockResolvedValue(
+      lookupRows<Category>([{ id: "cat-1", name: "Cameras" }])
+    );
   });
 
   it("shapes rows, share, KPIs and the chart from the two queries", async () => {
     vi.mocked(db.$queryRaw)
       // grouped
       .mockResolvedValueOnce([
-        { key: "cat-1", assetCount: 6, units: 6, totalValue: 600 },
-        { key: null, assetCount: 2, units: 5, totalValue: 0 },
-      ] as any)
+        {
+          key: "cat-1",
+          groupCount: 2,
+          assetCount: 6,
+          units: 6,
+          totalValue: 600,
+        },
+        { key: null, groupCount: 2, assetCount: 2, units: 5, totalValue: 0 },
+      ] satisfies GroupedRow[])
       // totals
       .mockResolvedValueOnce([
-        { groupCount: 2, assetCount: 8, units: 11, totalValue: 600 },
-      ] as any);
+        { assetCount: 8, units: 11, totalValue: 600 },
+      ] satisfies TotalsRow[]);
 
     const result = await runBuilderReport({
       organizationId: "org-1",
@@ -256,8 +298,8 @@ describe("runBuilderReport", () => {
 
   it("falls back to the dataset's first grouping when the custom field is not verified", async () => {
     vi.mocked(db.$queryRaw)
-      .mockResolvedValueOnce([] as any)
-      .mockResolvedValueOnce([{ groupCount: 0 }] as any);
+      .mockResolvedValueOnce([] satisfies GroupedRow[])
+      .mockResolvedValueOnce([{}] satisfies TotalsRow[]);
 
     const result = await runBuilderReport({
       organizationId: "org-1",
@@ -285,21 +327,21 @@ describe("runBuilderReport", () => {
       .mockResolvedValueOnce([
         {
           key: "cat-1",
-          custodyCount: 3,
-          custodyUnits: 3,
-          totalValue: 90,
-          avgDaysInCustody: 12.34,
-        },
-      ] as any)
-      .mockResolvedValueOnce([
-        {
           groupCount: 1,
           custodyCount: 3,
           custodyUnits: 3,
           totalValue: 90,
           avgDaysInCustody: 12.34,
         },
-      ] as any);
+      ] satisfies GroupedRow[])
+      .mockResolvedValueOnce([
+        {
+          custodyCount: 3,
+          custodyUnits: 3,
+          totalValue: 90,
+          avgDaysInCustody: 12.34,
+        },
+      ] satisfies TotalsRow[]);
 
     const result = await runBuilderReport({
       organizationId: "org-1",
@@ -325,6 +367,7 @@ describe("runBuilderReport", () => {
       .mockResolvedValueOnce([
         {
           key: "tm-1",
+          groupCount: 2,
           bookingCount: 4,
           assetsBooked: 2,
           unitsBooked: 4,
@@ -332,27 +375,37 @@ describe("runBuilderReport", () => {
         },
         {
           key: "user:u-1",
+          groupCount: 2,
           bookingCount: 1,
           assetsBooked: 1,
           unitsBooked: 1,
           daysBooked: 2,
         },
-      ] as any)
+      ] satisfies GroupedRow[])
       .mockResolvedValueOnce([
         {
-          groupCount: 2,
           bookingCount: 5,
           assetsBooked: 3,
           unitsBooked: 5,
           daysBooked: 11,
         },
-      ] as any);
-    vi.mocked(db.teamMember.findMany).mockResolvedValue([
-      { id: "tm-1", name: "Sam Stone", user: null },
-    ] as any);
-    vi.mocked(db.user.findMany).mockResolvedValue([
-      { id: "u-1", firstName: "Ada", lastName: "Lovelace", displayName: null },
-    ] as any);
+      ] satisfies TotalsRow[]);
+    vi.mocked(db.teamMember.findMany).mockResolvedValue(
+      // The custodian lookup selects the member with its user relation.
+      lookupRows<TeamMember & { user: User | null }>([
+        { id: "tm-1", name: "Sam Stone", user: null },
+      ])
+    );
+    vi.mocked(db.user.findMany).mockResolvedValue(
+      lookupRows<User>([
+        {
+          id: "u-1",
+          firstName: "Ada",
+          lastName: "Lovelace",
+          displayName: null,
+        },
+      ])
+    );
 
     const result = await runBuilderReport({
       organizationId: "org-1",

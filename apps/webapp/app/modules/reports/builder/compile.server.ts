@@ -86,15 +86,17 @@ const label = "Report" as const;
 /** Row key used for the bucket of things with no value for the grouping. */
 export const NO_GROUP_KEY = "none";
 
-/** Grouped-query row: the key plus every measure the dataset computes. */
-type GroupedRow = { key: string | null } & Partial<
+/**
+ * Grouped-query row: the key, every measure the dataset computes, and the
+ * number of groups the whole result has (a window count, so it survives the
+ * LIMIT on the statement).
+ */
+export type GroupedRow = { key: string | null; groupCount: number } & Partial<
   Record<BuilderMeasure, number>
 >;
 
-/** Ungrouped-query row: the totals plus how many groups exist. */
-type TotalsRow = { groupCount: number } & Partial<
-  Record<BuilderMeasure, number>
->;
+/** Totals-query row: every measure over the ungrouped set. */
+export type TotalsRow = Partial<Record<BuilderMeasure, number>>;
 
 /** SQL pieces a grouping contributes to the `keyed` CTE. */
 interface GroupSql {
@@ -306,7 +308,14 @@ function measureColumns(dataset: BuilderDataset): Prisma.Sql {
 }
 
 /**
- * Builds the grouped query and its ungrouped twin for a spec.
+ * Builds the grouped query and the headline-totals query for a spec.
+ *
+ * The totals run over the set keyed with no grouping at all. A grouping's
+ * join can repeat a row (a quantity-tracked asset placed at two locations
+ * appears once per placement), which is right for the rows of that grouping
+ * but must never leak into the headline: the same filters give the same
+ * totals whatever the grouping. The grouped statement carries the number of
+ * groups as a window count.
  *
  * Exported for tests, which assert on the SQL text: mapped column names,
  * status exclusions, and the absence of any user-supplied text.
@@ -326,22 +335,27 @@ export function compileBuilderQueries(args: {
     timeZone,
     organizationId
   );
-  const ctes = Prisma.sql`WITH ${filteredAssetsCte(
-    organizationId,
-    assetFilter
-  )},
-    ${keyedCte(spec.dataset, group, organizationId, timeframe)}`;
+  const ungrouped = groupSql(
+    spec.dataset,
+    "none",
+    null,
+    timeZone,
+    organizationId
+  );
+  const ctesFor = (g: GroupSql) =>
+    Prisma.sql`WITH ${filteredAssetsCte(organizationId, assetFilter)},
+    ${keyedCte(spec.dataset, g, organizationId, timeframe)}`;
   const columns = measureColumns(spec.dataset);
 
-  const grouped = Prisma.sql`${ctes}
-    SELECT key, ${columns}
+  const grouped = Prisma.sql`${ctesFor(group)}
+    SELECT key, ${columns}, COUNT(*) OVER ()::int AS "groupCount"
     FROM keyed
     GROUP BY key
     ORDER BY ${MEASURE_COLUMN[spec.measure]} DESC NULLS LAST, key ASC NULLS LAST
     LIMIT ${BUILDER_MAX_GROUPS + 1}`;
 
-  const totals = Prisma.sql`${ctes}
-    SELECT COUNT(DISTINCT COALESCE(key, '__none__'))::int AS "groupCount", ${columns}
+  const totals = Prisma.sql`${ctesFor(ungrouped)}
+    SELECT ${columns}
     FROM keyed`;
 
   return { grouped, totals };
@@ -513,7 +527,7 @@ export async function runBuilderReport(
       db.$queryRaw<GroupedRow[]>(grouped),
       db.$queryRaw<TotalsRow[]>(totals),
     ]);
-    const totalsRow: TotalsRow = totalsRows[0] ?? { groupCount: 0 };
+    const totalsRow: TotalsRow = totalsRows[0] ?? {};
 
     const truncated = groupedRows.length > BUILDER_MAX_GROUPS;
     const kept = truncated
@@ -546,7 +560,7 @@ export async function runBuilderReport(
       };
     });
 
-    const groupCount = Number(totalsRow.groupCount ?? 0);
+    const groupCount = Number(groupedRows[0]?.groupCount ?? 0);
     const top = rows[0];
     // A custom-field grouping is named after the field ("Condition groups").
     const groupLabel =

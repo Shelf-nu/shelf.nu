@@ -19,6 +19,7 @@ import type { ReportDefinition, ReportKpi } from "../types";
 
 /** The tables a custom report can count. */
 export const BUILDER_DATASETS = ["assets", "bookings", "custody"] as const;
+/** One of the tables a custom report can count. */
 export type BuilderDataset = (typeof BUILDER_DATASETS)[number];
 
 /** Every grouping the builder knows; each dataset allows a subset. */
@@ -33,6 +34,7 @@ export const BUILDER_GROUP_BYS = [
   "custodian",
   "month",
 ] as const;
+/** One grouping a custom report can use. */
 export type BuilderGroupBy = (typeof BUILDER_GROUP_BYS)[number];
 
 /** Every measure the builder knows; each dataset computes a subset. */
@@ -48,6 +50,7 @@ export const BUILDER_MEASURES = [
   "custodyUnits",
   "avgDaysInCustody",
 ] as const;
+/** One measure a custom report can compute. */
 export type BuilderMeasure = (typeof BUILDER_MEASURES)[number];
 
 /** Groupings available per dataset, in menu order. */

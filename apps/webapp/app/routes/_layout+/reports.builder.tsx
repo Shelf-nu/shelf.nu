@@ -37,11 +37,14 @@ import {
   loadReportFilterOptions,
   resolveReportFilters,
 } from "~/modules/reports/filters.server";
-import { resolveTimeframe } from "~/modules/reports/timeframe";
-import type { TimeframePreset } from "~/modules/reports/types";
+import {
+  isTimeframePreset,
+  resolveTimeframe,
+} from "~/modules/reports/timeframe";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import { SUPPORT_EMAIL } from "~/utils/env";
 import {
   PermissionAction,
   PermissionEntity,
@@ -50,6 +53,7 @@ import { requirePermission } from "~/utils/roles.server";
 import { canUseAdvancedReports } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
+/** Browser tab title for the builder page. */
 export const meta: MetaFunction = () => [
   { title: appendToMetaTitle("Report builder") },
 ];
@@ -90,14 +94,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       locked: true as const,
       isOwner: role === "OWNER",
       header: HEADER,
+      supportEmail: SUPPORT_EMAIL,
     });
   }
 
   const url = new URL(request.url);
   const requestedSpec = parseBuilderSpec(url.searchParams);
 
-  const timeframePreset =
-    (url.searchParams.get("timeframe") as TimeframePreset) || "last_30d";
+  // An unknown preset falls back to the default *with* the user's format
+  // preferences; the resolver's own fallback would use UTC boundaries.
+  const rawPreset = url.searchParams.get("timeframe");
+  const timeframePreset = isTimeframePreset(rawPreset) ? rawPreset : "last_30d";
   const customFrom = url.searchParams.get("from");
   const customTo = url.searchParams.get("to");
 
@@ -153,6 +160,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     truncated: result.truncated,
     computedMs: result.computedMs,
     timeframe,
+    currency: currentOrganization.currency,
     // Filter bar inputs; the paged pick-lists are spread onto the top level
     // because the shared `DynamicDropdown` reads them from loader data by key.
     ...filterOptions,
@@ -162,6 +170,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   });
 }
 
+/** The builder page: locked card, or bar + filters + results. */
 export default function ReportBuilderPage() {
   const loaderData = useLoaderData<typeof loader>();
   const navigation = useNavigation();
@@ -179,7 +188,10 @@ export default function ReportBuilderPage() {
       <>
         <Header />
         <div className="px-4 pb-4 md:mt-4 md:px-0">
-          <AdvancedReportsLocked isOwner={loaderData.isOwner} />
+          <AdvancedReportsLocked
+            isOwner={loaderData.isOwner}
+            supportEmail={loaderData.supportEmail}
+          />
         </div>
       </>
     );
@@ -195,6 +207,7 @@ export default function ReportBuilderPage() {
     truncated,
     computedMs,
     timeframe,
+    currency,
     filterOptions,
     filterConfigs,
     activeFilters,
@@ -242,6 +255,7 @@ export default function ReportBuilderPage() {
             chartSeries={chartSeries}
             totalGroups={totalGroups}
             truncated={truncated}
+            currency={currency}
             onClearFilters={activeFilters.length > 0 ? clearFilters : undefined}
           />
         </div>

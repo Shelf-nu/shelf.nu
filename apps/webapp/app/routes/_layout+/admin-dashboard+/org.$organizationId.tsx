@@ -296,6 +296,15 @@ export const action = async ({
 export default function OrgPage() {
   const { organization } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+  // The add-on switch has its own fetcher so its failure message never shows
+  // under another toggle, and the switch can fall back to the saved value.
+  const advancedReportsFetcher = useFetcher<typeof action>();
+  const advancedReportsError =
+    advancedReportsFetcher.data &&
+    "error" in advancedReportsFetcher.data &&
+    advancedReportsFetcher.data.error
+      ? advancedReportsFetcher.data.error.message
+      : null;
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -417,9 +426,9 @@ export default function OrgPage() {
             Enable or disable the report builder (Advanced Reports add-on) for
             this workspace
           </p>
-          <fetcher.Form
+          <advancedReportsFetcher.Form
             method="post"
-            onChange={(e) => fetcher.submit(e.currentTarget)}
+            onChange={(e) => advancedReportsFetcher.submit(e.currentTarget)}
           >
             <div className="flex justify-between gap-3">
               <div>
@@ -427,9 +436,12 @@ export default function OrgPage() {
                   Enable Advanced Reports
                 </p>
               </div>
+              {/* Keyed on the saved value: after a failed update the loader
+                  revalidates and the uncontrolled switch remounts on it. */}
               <Switch
+                key={`advanced-reports-${organization.advancedReportsEnabled}`}
                 name={"advancedReportsEnabled"}
-                disabled={isFormProcessing(fetcher.state)}
+                disabled={isFormProcessing(advancedReportsFetcher.state)}
                 defaultChecked={organization.advancedReportsEnabled}
                 required
                 title={"Toggle Advanced Reports"}
@@ -440,7 +452,12 @@ export default function OrgPage() {
                 name="intent"
               />
             </div>
-          </fetcher.Form>
+            {advancedReportsError ? (
+              <p className="mt-2 text-sm text-error-500">
+                {advancedReportsError}
+              </p>
+            ) : null}
+          </advancedReportsFetcher.Form>
           <hr className="border-1 border-gray-700" />
           <h4>Enable/Disabled Workspace</h4>
           <fetcher.Form

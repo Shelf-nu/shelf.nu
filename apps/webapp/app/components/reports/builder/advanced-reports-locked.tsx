@@ -13,10 +13,12 @@ import { Button } from "~/components/shared/button";
 type Props = {
   /** Owners see the "ask us" call to action; others are told to ask an owner. */
   isOwner: boolean;
+  /** Where the owner's "ask us" mail goes; comes from the server's config. */
+  supportEmail: string;
 };
 
 /** Renders the locked-state card. */
-export function AdvancedReportsLocked({ isOwner }: Props) {
+export function AdvancedReportsLocked({ isOwner, supportEmail }: Props) {
   return (
     <div className="mx-auto max-w-xl rounded border border-gray-200 bg-white p-8 text-center">
       <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-primary-50 text-primary-600">
@@ -42,7 +44,7 @@ export function AdvancedReportsLocked({ isOwner }: Props) {
         {isOwner ? (
           <Button
             as="a"
-            href="mailto:support@shelf.nu?subject=Advanced%20Reports"
+            href={`mailto:${supportEmail}?subject=Advanced%20Reports`}
             variant="primary"
           >
             Contact us

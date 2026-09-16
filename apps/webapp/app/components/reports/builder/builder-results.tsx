@@ -13,6 +13,7 @@
  */
 
 import { useMemo } from "react";
+import type { Currency } from "@prisma/client";
 import type { ColumnDef } from "@tanstack/react-table";
 import { BarChart } from "~/components/reports/bar-chart";
 import { ChartCard } from "~/components/reports/chart-card";
@@ -23,6 +24,7 @@ import {
   BUILDER_MAX_GROUPS,
   DATASET_MEASURES,
   GROUP_BY_LABELS,
+  AVERAGE_MEASURES,
   MEASURE_FORMAT,
   MEASURE_LABELS,
   type BuilderMeasure,
@@ -30,10 +32,14 @@ import {
   type BuilderSpec,
 } from "~/modules/reports/builder/spec";
 import type { ChartSeries, ReportKpi } from "~/modules/reports/types";
+import { useHints } from "~/utils/client-hints";
+import { formatCurrency } from "~/utils/currency";
 import { tw } from "~/utils/tw";
 
 /** Props for {@link BuilderResults}. */
 type Props = {
+  /** Workspace currency for the money measure in the chart tooltip. */
+  currency: Currency;
   spec: BuilderSpec;
   /** Display name of the custom field when grouping by one. */
   customFieldName: string | null;
@@ -99,12 +105,35 @@ export function BuilderResults({
   chartSeries,
   totalGroups,
   truncated,
+  currency,
   onClearFilters,
 }: Props) {
+  const { locale } = useHints();
   const groupLabel =
     spec.groupBy === "customField" && customFieldName
       ? customFieldName
       : GROUP_BY_LABELS[spec.groupBy];
+
+  // The chart shows the largest groups. For summed measures the compiler
+  // appends one synthetic "Other" point holding the rest; an average cannot
+  // be pooled that way, so those charts simply stop at the last shown group.
+  const chartPoints = chartSeries[0]?.data.length ?? 0;
+  const hasOtherBucket = !AVERAGE_MEASURES.includes(spec.measure);
+  const chartSubtitle =
+    rows.length > chartPoints
+      ? hasOtherBucket
+        ? `Largest ${chartPoints - 1} groups; the rest are "Other"`
+        : `Largest ${chartPoints} groups shown`
+      : undefined;
+
+  const measureFormat = MEASURE_FORMAT[spec.measure];
+  const formatTooltipValue = (value: number) => {
+    if (measureFormat === "duration") return `${value} days`;
+    if (measureFormat === "currency") {
+      return formatCurrency({ value, currency, locale });
+    }
+    return value.toLocaleString(locale);
+  };
 
   const columns = useMemo<ColumnDef<BuilderRow, unknown>[]>(() => {
     const measureColumns = DATASET_MEASURES[spec.dataset].map(
@@ -167,23 +196,13 @@ export function BuilderResults({
           title={`${
             MEASURE_LABELS[spec.measure]
           } by ${groupLabel.toLowerCase()}`}
-          subtitle={
-            rows.length > chartSeries[0].data.length
-              ? `Largest ${
-                  chartSeries[0].data.length - 1
-                } groups; the rest are "Other"`
-              : undefined
-          }
+          subtitle={chartSubtitle}
         >
           <div className="h-64">
             <BarChart
               series={chartSeries}
               radius={4}
-              tooltipFormatter={(value) =>
-                MEASURE_FORMAT[spec.measure] === "duration"
-                  ? `${value} days`
-                  : `${value.toLocaleString()}`
-              }
+              tooltipFormatter={formatTooltipValue}
             />
           </div>
         </ChartCard>

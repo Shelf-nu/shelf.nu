@@ -28,8 +28,10 @@ import {
   loadReportFilterOptions,
   resolveReportFilters,
 } from "~/modules/reports/filters.server";
-import { resolveTimeframe } from "~/modules/reports/timeframe";
-import type { TimeframePreset } from "~/modules/reports/types";
+import {
+  isTimeframePreset,
+  resolveTimeframe,
+} from "~/modules/reports/timeframe";
 import { getClientHint } from "~/utils/client-hints";
 import { csvResponse } from "~/utils/csv-utf8";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -67,8 +69,12 @@ export const loader = async ({
     const searchParams = getCurrentSearchParams(request);
     const spec = parseBuilderSpec(searchParams);
 
-    const timeframePreset =
-      (searchParams.get("timeframe") as TimeframePreset) || "last_30d";
+    // Same fallback rule as the page: an unknown preset resolves to the
+    // default in the user's own time zone, never the resolver's UTC fallback.
+    const rawPreset = searchParams.get("timeframe");
+    const timeframePreset = isTimeframePreset(rawPreset)
+      ? rawPreset
+      : "last_30d";
     const customFrom = searchParams.get("from");
     const customTo = searchParams.get("to");
 
@@ -131,7 +137,9 @@ export const loader = async ({
     return csvResponse(buildCsv(headers, rows), {
       headers: {
         "content-disposition": `attachment; filename="${fileName}.csv"`,
-        "cache-control": "no-cache",
+        // Report rows are workspace data: no shared or browser cache may
+        // keep a copy once the download has been served.
+        "cache-control": "private, no-store",
       },
     });
   } catch (cause) {
