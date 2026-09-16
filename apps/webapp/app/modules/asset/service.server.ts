@@ -4903,6 +4903,7 @@ export async function createAssetsFromContentImport({
           },
           label: "Assets",
           shouldBeCaptured: false,
+          status: 400,
         });
       }
 
@@ -4922,6 +4923,7 @@ export async function createAssetsFromContentImport({
           },
           label: "Assets",
           shouldBeCaptured: false,
+          status: 400,
         });
       }
 
@@ -4943,6 +4945,7 @@ export async function createAssetsFromContentImport({
           },
           label: "Assets",
           shouldBeCaptured: false,
+          status: 400,
         });
       }
 
@@ -5048,6 +5051,7 @@ export async function createAssetsFromContentImport({
           ...(isShelfError && cause.additionalData),
         },
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 
@@ -6162,6 +6166,7 @@ export async function bulkCheckOutAssets({
           "All selected assets are quantity-tracked. Quantity-tracked assets must be assigned custody individually with a specific quantity.",
         label: "Assets",
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 
@@ -6176,6 +6181,7 @@ export async function bulkCheckOutAssets({
           "There are some unavailable assets. Please make sure you are selecting only available assets.",
         label: "Assets",
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 
@@ -6428,6 +6434,7 @@ export async function bulkCheckInAssets({
           "All selected assets are quantity-tracked. Quantity-tracked assets must have custody released individually.",
         label: "Assets",
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 
@@ -6442,6 +6449,7 @@ export async function bulkCheckInAssets({
           "There are some assets without custody. Please make sure you are selecting assets with custody.",
         label: "Assets",
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 

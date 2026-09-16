@@ -18,7 +18,7 @@
 import { OrganizationRoles, OrganizationType, Roles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { transferOwnership } from "./service.server";
+import { isSsoUser, transferOwnership } from "./service.server";
 
 // @vitest-environment node
 
@@ -30,7 +30,10 @@ const SHELF_ADMIN_ID = "user-shelf-admin";
 
 type MockDb = {
   $transaction: <T>(callback: (tx: MockDb) => Promise<T>) => Promise<T>;
-  user: { findUniqueOrThrow: ReturnType<typeof vi.fn> };
+  user: {
+    findUniqueOrThrow: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
+  };
   userOrganization: {
     findMany: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
@@ -43,7 +46,7 @@ const dbMock = vi.hoisted<MockDb>(() => ({
     <T>(callback: (tx: MockDb) => Promise<T>): Promise<T> =>
       callback(dbMock as MockDb)
   ) as <T>(callback: (tx: MockDb) => Promise<T>) => Promise<T>,
-  user: { findUniqueOrThrow: vi.fn() },
+  user: { findUniqueOrThrow: vi.fn(), findUnique: vi.fn() },
   userOrganization: { findMany: vi.fn(), update: vi.fn() },
   organization: { update: vi.fn() },
 }));
@@ -185,5 +188,45 @@ describe("transferOwnership authorization", () => {
       where: { id: `uo-${OWNER_ID}` },
       data: { roles: { set: [OrganizationRoles.ADMIN] } },
     });
+  });
+});
+
+describe("isSsoUser", () => {
+  /**
+   * The SSO flag is carried on every membership, so it is usually read from the
+   * list the caller already has. A user with no memberships has no row to read
+   * it from, and that user — an SSO account with nowhere to land — is the one
+   * the pending-assignment page exists for.
+   */
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads the flag from the memberships without another query", async () => {
+    await expect(
+      isSsoUser({
+        userId: "user-1",
+        userOrganizations: [{ user: { sso: true } }],
+      })
+    ).resolves.toBe(true);
+    expect(dbMock.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("answers for an SSO user with no memberships at all", async () => {
+    // why: the user row is the only place left to read the flag from.
+    dbMock.user.findUnique.mockResolvedValue({ sso: true });
+
+    await expect(
+      isSsoUser({ userId: "user-1", userOrganizations: [] })
+    ).resolves.toBe(true);
+  });
+
+  it("answers false for a password user with no memberships", async () => {
+    // why: as above, for an account that does not use SSO.
+    dbMock.user.findUnique.mockResolvedValue({ sso: false });
+
+    await expect(
+      isSsoUser({ userId: "user-1", userOrganizations: [] })
+    ).resolves.toBe(false);
   });
 });

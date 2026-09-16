@@ -87,6 +87,25 @@ const DropdownMenuContent = React.forwardRef<
           className
         )}
         {...props}
+        // A modal Radix Dialog — every `Sheet`, and so every route rendered
+        // through `ContextualSidebar` — mounts `react-remove-scroll`, which
+        // cancels any `wheel` whose target sits outside the dialog content.
+        // Portalled menu content counts as outside, so without this a long
+        // menu cannot be scrolled by wheel inside a sheet; only dragging the
+        // scrollbar works, since that is a pointer interaction rather than a
+        // wheel event.
+        //
+        // React attaches portal listeners to the portal container, which is a
+        // descendant of the `document` remove-scroll listens on, so stopping
+        // here runs first and keeps the event alive.
+        onWheel={(event) => {
+          event.stopPropagation();
+          props.onWheel?.(event);
+        }}
+        onTouchMove={(event) => {
+          event.stopPropagation();
+          props.onTouchMove?.(event);
+        }}
       />
     </DropdownMenuPrimitive.Portal>
   );
