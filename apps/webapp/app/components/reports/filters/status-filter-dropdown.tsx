@@ -22,7 +22,6 @@ import { ChevronRight } from "~/components/icons/library";
 import { useSearchParams } from "~/hooks/search-params";
 import { REPORT_FILTER_PARAM } from "~/modules/reports/filter-params";
 import type { ReportStatusOption } from "~/modules/reports/types";
-import { handleActivationKeyPress } from "~/utils/keyboard";
 import { toggleSearchParamValue } from "./search-param-utils";
 
 /** Props for {@link StatusFilterDropdown}. */
@@ -76,27 +75,18 @@ export function StatusFilterDropdown({ options, disabled }: Props) {
             {options.map((option) => {
               const checked = selected.includes(option.value);
               return (
-                <div
+                <label
                   key={option.value}
-                  role="option"
-                  aria-selected={checked}
-                  tabIndex={0}
                   className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  onClick={() => toggle(option.value)}
-                  onKeyDown={handleActivationKeyPress(() =>
-                    toggle(option.value)
-                  )}
                 >
                   <input
                     type="checkbox"
-                    readOnly
-                    tabIndex={-1}
                     checked={checked}
+                    onChange={() => toggle(option.value)}
                     className="size-4 rounded border-gray-300 text-primary-600"
-                    aria-label={option.label}
                   />
                   <span>{option.label}</span>
-                </div>
+                </label>
               );
             })}
           </div>

@@ -785,7 +785,8 @@ function formatActivityType(type: string): string {
 /**
  * Generate CSV for Asset Distribution report.
  *
- * Exports all three breakdowns (by category, location, and status) in a single CSV.
+ * Exports all four breakdowns (by category, location, status and asset model)
+ * in a single CSV.
  * Each section is labeled with a "Breakdown Type" column for clarity.
  */
 function generateDistributionCsv(breakdown: DistributionBreakdown): string {

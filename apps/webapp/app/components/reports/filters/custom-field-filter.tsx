@@ -32,7 +32,6 @@ import {
   REPORT_FILTER_PARAM,
 } from "~/modules/reports/filter-params";
 import type { ReportCustomFieldOption } from "~/modules/reports/types";
-import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
 import { appendSearchParamValue } from "./search-param-utils";
 
@@ -172,6 +171,11 @@ export function CustomFieldFilter({ customFields, disabled }: Props) {
           <div className="flex items-center border-b border-gray-200">
             <Search className="ml-3 size-4 text-gray-500" />
             <input
+              aria-label={
+                field
+                  ? `Search values for ${field.name}`
+                  : "Search custom fields"
+              }
               placeholder={field ? "Search values" : "Search fields"}
               className="w-full border-0 p-2 text-sm focus:border-0 focus:ring-0"
               value={query}
@@ -182,41 +186,30 @@ export function CustomFieldFilter({ customFields, disabled }: Props) {
           <div className="max-h-[300px] overflow-y-auto">
             {!field
               ? visibleFields.map((f) => (
-                  <div
+                  <button
                     key={f.id}
-                    role="option"
-                    aria-selected={false}
-                    tabIndex={0}
-                    className="flex cursor-pointer items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    type="button"
+                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
                     onClick={() => {
                       setField(f);
                       setQuery("");
                     }}
-                    onKeyDown={handleActivationKeyPress(() => {
-                      setField(f);
-                      setQuery("");
-                    })}
                   >
                     <span className="truncate font-medium">{f.name}</span>
                     <span className="ml-2 shrink-0 text-xs text-gray-500">
                       {typeLabel(f.type)}
                     </span>
-                  </div>
+                  </button>
                 ))
               : visibleValues.map((value) => (
-                  <div
+                  <button
                     key={value}
-                    role="option"
-                    aria-selected={false}
-                    tabIndex={0}
-                    className="cursor-pointer truncate px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    type="button"
+                    className="block w-full truncate px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
                     onClick={() => applyValue(value)}
-                    onKeyDown={handleActivationKeyPress(() =>
-                      applyValue(value)
-                    )}
                   >
                     {valueLabel(field, value)}
-                  </div>
+                  </button>
                 ))}
 
             {!field && visibleFields.length === 0 ? (
