@@ -1,6 +1,7 @@
 import type { Barcode, Organization, User, Asset, Kit } from "@prisma/client";
 import { BarcodeType } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { decodeCsvListCell } from "~/utils/csv-cells";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -772,11 +773,10 @@ export async function parseBarcodesFromImportData({
           typeof columnValue === "string" &&
           columnValue.trim()
         ) {
-          // Split comma-separated values and validate each
-          const values = columnValue
-            .split(",")
-            .map((v) => v.trim())
-            .filter(Boolean);
+          // One cell may carry several barcodes of this type. A value may
+          // itself contain a comma, so it is read back quote-aware — see
+          // `decodeCsvListCell`.
+          const values = decodeCsvListCell(columnValue);
           values.forEach((value) => {
             // Validate barcode format (preserve case for ExternalQR)
             const normalizedValue = normalizeBarcodeValue(type, value);

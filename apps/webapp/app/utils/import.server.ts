@@ -1,4 +1,5 @@
 import type { CreateAssetFromContentImportPayload } from "~/modules/asset/types";
+import { decodeCsvListCell } from "./csv-cells";
 import { ShelfError } from "./error";
 import { id } from "./id/id.server";
 
@@ -54,7 +55,9 @@ export function extractCSVDataFromContentImport(
       entry.map((value, index) => {
         switch (headers[index]) {
           case "tags":
-            return [headers[index], value.split(",").map((tag) => tag.trim())];
+            // A tag name may contain a comma ("Berlin, DE"), so the cell is
+            // read back quote-aware — see `decodeCsvListCell`.
+            return [headers[index], decodeCsvListCell(value ?? "")];
           case "imageUrl":
             // Return empty string if URL is empty/undefined, otherwise trim
             return [headers[index], value?.trim() || ""];

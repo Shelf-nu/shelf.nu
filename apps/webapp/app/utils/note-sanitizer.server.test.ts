@@ -49,6 +49,17 @@ describe("sanitizeNoteContent", () => {
     expect(sanitize(content)).toBe("Description changed Old text -> New text.");
   });
 
+  it("reads through attribute values containing a percent sign", () => {
+    // `%` is ordinary text in a title or a description, and it must not leave
+    // raw tag syntax in the CSV/PDF a customer downloads.
+    const content =
+      '{% link to="/assets/1" text="Summer Sale 50% Off" /%} description set to {% description newText="Battery at 30% capacity" /%}.';
+
+    expect(sanitize(content)).toBe(
+      "Summer Sale 50% Off description set to Battery at 30% capacity."
+    );
+  });
+
   it("cleans markdown formatting while preserving line breaks", () => {
     const content = `# Heading
 
