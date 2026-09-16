@@ -3,6 +3,7 @@ import type {
   BookingsResponse,
   BookingDetailResponse,
   BookingActionResponse,
+  FulfilAndCheckoutResponse,
   CheckinDisposition,
   CheckoutDisposition,
   PartialCheckinResponse,
@@ -95,11 +96,13 @@ export const bookingsApi = {
     ),
 
   /**
-   * Fulfil outstanding book-by-model reservations by scanning concrete units,
-   * then check the booking out (RESERVED -> ONGOING) in one atomic step.
+   * Fulfil outstanding book-by-model reservations by scanning concrete units.
+   * The server assigns the scanned units and checks out either the whole
+   * booking or, under the workspace's explicit check-out requirement, only the
+   * scanned units (`remainingCount` says how many booked assets are left).
    * Mirrors the web `fulfil-and-checkout` scanner: each scanned asset is
    * matched against an outstanding `BookingModelRequest` (materialising it);
-   * the server rejects the submit if any reservation is still unassigned.
+   * the server refuses the check-out if any reservation is still unassigned.
    */
   fulfilAndCheckoutBooking: (
     orgId: string,
@@ -108,7 +111,7 @@ export const bookingsApi = {
     kitIds: string[] = [],
     timeZone?: string
   ) =>
-    apiFetch<BookingActionResponse>(
+    apiFetch<FulfilAndCheckoutResponse>(
       `/api/mobile/bookings/fulfil-and-checkout?orgId=${orgId}`,
       {
         method: "POST",

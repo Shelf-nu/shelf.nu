@@ -26,7 +26,7 @@ import {
   selectedBulkItemsCountAtom,
   setDisabledBulkItemsAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
+  seedFormSelectionAtom,
 } from "~/atoms/list";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import {
@@ -114,6 +114,10 @@ export type KitForBooking = Prisma.KitGetPayload<{
     barcodes: { select: { id: true; type: true; value: true } };
     assetKits: {
       select: {
+        // The membership row's own id — `BookingAsset.assetKitId` points at
+        // this, not at `Kit.id`, so `getKitAvailabilityStatus` needs it to
+        // scope a kit-driven slice to the membership that produced it.
+        id: true;
         asset: {
           select: {
             id: true;
@@ -241,6 +245,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           location: LOCATION_WITH_HIERARCHY,
           assetKits: {
             select: {
+              // The membership row's own id — `BookingAsset.assetKitId`
+              // points at this, not at `Kit.id`, so `getKitAvailabilityStatus`
+              // needs it to scope a kit-driven slice to the membership that
+              // produced it.
+              id: true,
               asset: {
                 select: {
                   id: true,
@@ -250,7 +259,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                   custody: true,
                   bookingAssets: {
                     /**
-                     * Important to make sure the bookings are overlapping the period of the current booking
+                     * Only bookings whose period overlaps this one make a kit
+                     * unavailable, so the picker's rows are filtered to those.
+                     *
+                     * Two intervals overlap when each starts before the other
+                     * ends: the other booking's `from` must not fall after this
+                     * booking's `to`, and its `to` must not fall before this
+                     * booking's `from`. Both comparisons cross between the two
+                     * bookings — a clause comparing a candidate's `from` and
+                     * `to` against the SAME endpoint of this booking narrows to
+                     * containment or, if the endpoints are the wrong way round,
+                     * to nothing at all.
+                     *
+                     * The second clause is containment, which the first already
+                     * covers. It is kept so this predicate stays identical to
+                     * the three siblings that answer the same question — the
+                     * booking overview, `getKitAvailability` and the scanner's
+                     * picker metadata — since a picker that disagrees with them
+                     * offers kits the save then refuses.
                      */
                     where: {
                       booking: {
@@ -265,12 +291,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                           booking.to && {
                             OR: [
                               {
-                                from: { lte: booking.from },
-                                to: { gte: booking.to },
+                                from: { lte: booking.to },
+                                to: { gte: booking.from },
                               },
                               {
                                 from: { gte: booking.from },
-                                to: { lte: booking.from },
+                                to: { lte: booking.to },
                               },
                             ],
                           }),
@@ -728,7 +754,7 @@ export default function AddKitsToBooking() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const seedFormSelection = useSetAtom(seedFormSelectionAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
@@ -778,7 +804,7 @@ export default function AddKitsToBooking() {
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
-    setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
+    seedFormSelection(bookingKitIds.map((kitId) => ({ id: kitId })));
   }
 
   /**

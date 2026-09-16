@@ -1798,6 +1798,9 @@ model BookingSettings {
   requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
 
+  requireExplicitCheckoutForAdmin       Boolean @default(false) // When true, admins must use explicit check-out (scan or select) instead of quick check-out
+  requireExplicitCheckoutForSelfService Boolean @default(false) // When true, self-service users must use explicit check-out (scan or select) instead of quick check-out
+
   // Progressive check-in/out settings
   countKitsAsSingleUnit Boolean @default(false) // When true, the booking check-in progress bar treats each kit as one unit instead of counting the assets inside it
 

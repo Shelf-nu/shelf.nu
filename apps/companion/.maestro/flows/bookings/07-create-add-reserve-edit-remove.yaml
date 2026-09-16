@@ -20,7 +20,9 @@ tags:
     visible: ".*Current workspace.*"
     timeout: 8000
 - tapOn: ".*Current workspace.*"
-- tapOn: "GRANULAR WORKSPACE"
+# The picker renders the active workspace as "NAME (current)", so a bare name
+# misses when the session already sits in it.
+- tapOn: "GRANULAR WORKSPACE.*"
 - waitForAnimationToEnd
 
 # ── Create a DRAFT ──
@@ -116,9 +118,9 @@ tags:
 - tapOn: "Select assets to remove"
 - tapOn: ".*3B Scientific.*"
 - extendedWaitUntil:
-    visible: ".*Remove 1 selected.*"
+    visible: "Remove 1 Asset"
     timeout: 10000
-- tapOn: ".*Remove 1 selected.*"
+- tapOn: "Remove 1 Asset"
 - extendedWaitUntil:
     visible: "Remove Selected"
     timeout: 10000
