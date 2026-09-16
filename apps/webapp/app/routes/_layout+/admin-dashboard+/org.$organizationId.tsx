@@ -28,6 +28,7 @@ import {
   toggleWorkspaceDisabled,
   toggleBarcodeEnabled,
   toggleAuditEnabled,
+  toggleAdvancedReportsEnabled,
 } from "~/modules/organization/service.server";
 import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -117,6 +118,7 @@ export const action = async ({
           "disableWorkspace",
           "toggleBarcodes",
           "toggleAudits",
+          "toggleAdvancedReports",
         ]),
       })
     );
@@ -183,6 +185,27 @@ export const action = async ({
 
         return payload({
           message: `Audits ${auditsEnabled ? "enabled" : "disabled"}`,
+        });
+      }
+      case "toggleAdvancedReports": {
+        const { advancedReportsEnabled } = parseData(
+          await request.formData(),
+          z.object({
+            advancedReportsEnabled: z
+              .string()
+              .transform((val) => val === "on")
+              .default("false"),
+          })
+        );
+        await toggleAdvancedReportsEnabled({
+          organizationId,
+          advancedReportsEnabled,
+        });
+
+        return payload({
+          message: `Advanced Reports ${
+            advancedReportsEnabled ? "enabled" : "disabled"
+          }`,
         });
       }
       case "updateSsoDetails": {
@@ -386,6 +409,36 @@ export default function OrgPage() {
                 title={"Toggle Audits"}
               />
               <input type="hidden" value="toggleAudits" name="intent" />
+            </div>
+          </fetcher.Form>
+          <hr className="border-1 border-gray-700" />
+          <h4>Enable/Disable Advanced Reports</h4>
+          <p>
+            Enable or disable the report builder (Advanced Reports add-on) for
+            this workspace
+          </p>
+          <fetcher.Form
+            method="post"
+            onChange={(e) => fetcher.submit(e.currentTarget)}
+          >
+            <div className="flex justify-between gap-3">
+              <div>
+                <p className="text-[14px] font-medium text-gray-700">
+                  Enable Advanced Reports
+                </p>
+              </div>
+              <Switch
+                name={"advancedReportsEnabled"}
+                disabled={isFormProcessing(fetcher.state)}
+                defaultChecked={organization.advancedReportsEnabled}
+                required
+                title={"Toggle Advanced Reports"}
+              />
+              <input
+                type="hidden"
+                value="toggleAdvancedReports"
+                name="intent"
+              />
             </div>
           </fetcher.Form>
           <hr className="border-1 border-gray-700" />

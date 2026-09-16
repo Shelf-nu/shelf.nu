@@ -90,6 +90,7 @@ function mockPermission(canSeeAllCustody: boolean) {
     canSeeAllCustody,
     canUseBarcodes: false,
     canUseAudits: false,
+    canUseAdvancedReports: false,
   });
 }
 

@@ -16,6 +16,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import Header from "~/components/layout/header";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 
+import { BUILDER_REPORT_DEF } from "~/modules/reports/builder/spec";
 import {
   REPORTS,
   REPORT_CATEGORIES,
@@ -28,6 +29,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { canUseAdvancedReports } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -38,7 +40,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  await requirePermission({
+  const { currentOrganization } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.reports,
@@ -58,11 +60,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     reports: REPORTS,
     reportsByCategory,
     categories: REPORT_CATEGORIES,
+    // The builder card appears only for workspaces with the add-on; the
+    // page itself still explains the add-on to anyone who lands on it.
+    builderEnabled: canUseAdvancedReports(currentOrganization),
   });
 }
 
 export default function ReportsIndex() {
-  const { reportsByCategory, categories } = useLoaderData<typeof loader>();
+  const { reportsByCategory, categories, builderEnabled } =
+    useLoaderData<typeof loader>();
 
   // Filter to only show categories with reports
   const visibleCategories = Object.entries(reportsByCategory).filter(
@@ -80,6 +86,23 @@ export default function ReportsIndex() {
       {/* Content area matching app patterns */}
       <ListContentWrapper>
         <div className="space-y-6">
+          {builderEnabled ? (
+            <section>
+              <div className="mb-3">
+                <h3 className="text-sm font-medium text-gray-900">
+                  Build your own
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Pick the data, group it, choose a measure and filter it your
+                  way
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <ReportCard report={BUILDER_REPORT_DEF} />
+              </div>
+            </section>
+          ) : null}
+
           {visibleCategories.map(([categoryKey, reports]) => {
             const category = categories[categoryKey as keyof typeof categories];
 

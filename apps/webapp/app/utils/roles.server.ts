@@ -216,6 +216,10 @@ export async function requirePermission({
   // Determine if user can use audits based on organization settings
   const canUseAudits = currentOrganization.auditsEnabled ?? false;
 
+  // Determine if user can use the report builder based on organization settings
+  const canUseAdvancedReports =
+    currentOrganization.advancedReportsEnabled ?? false;
+
   return {
     organizations,
     organizationId,
@@ -227,6 +231,7 @@ export async function requirePermission({
     canSeeAllCustody,
     canUseBarcodes,
     canUseAudits,
+    canUseAdvancedReports,
   };
 }
 

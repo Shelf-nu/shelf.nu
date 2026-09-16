@@ -174,6 +174,7 @@ describe("manage-assets route validation", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      canUseAdvancedReports: false,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -1188,6 +1189,7 @@ describe("manage-assets loader — Models tab payload", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      canUseAdvancedReports: false,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
