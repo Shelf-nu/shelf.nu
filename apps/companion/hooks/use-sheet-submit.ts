@@ -1,7 +1,7 @@
 /**
  * React binding for {@link submitFromSheet}: supplies the lock, the error
- * alert and the success haptic, so a caller names only the request and how to
- * close its sheet.
+ * alert, the success haptic and the notice for a save whose reload failed, so
+ * a caller names only the request and how to close its sheet.
  *
  * Each call to this hook owns one lock. Submits made through the function it
  * returns run one at a time; a second tap while one is in flight is ignored.
@@ -56,6 +56,11 @@ export function useSheetSubmit({
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       },
       refresh,
+      onRefreshFailed: () =>
+        Alert.alert(
+          "Saved",
+          "Your change was saved, but the latest details could not be loaded. Pull down to refresh."
+        ),
       setSubmitting,
       showError: (message) => Alert.alert("Error", message),
     });

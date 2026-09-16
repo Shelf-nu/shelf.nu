@@ -54,6 +54,13 @@ export type SheetSubmit<
    */
   refresh?: () => Promise<void>;
   /**
+   * Tells the user the change was saved but the record could not be reloaded,
+   * so the screen may still show the values from before the save. Called only
+   * when `refresh` throws. It must not read as a failure: the change went
+   * through, and several of these requests are not safe to send twice.
+   */
+  onRefreshFailed?: () => void;
+  /**
    * Mirrors the in-flight state into the UI, which the sheet reads as
    * `isSubmitting`. True for the whole submit, refetch included.
    */
@@ -70,14 +77,16 @@ export type SheetSubmit<
  *
  * @param submit - The request and the callbacks around it; see
  *   {@link SheetSubmit}.
- * @returns True when the server accepted the change. False when it refused,
- *   the request failed, or another submit still held the lock.
+ * @returns True when the server accepted the change, even if the reload after
+ *   it failed. False when the server refused, the request failed, or another
+ *   submit still held the lock.
  */
 export async function submitFromSheet<TResponse extends SheetSubmitResponse>({
   lock,
   request,
   onAccepted,
   refresh,
+  onRefreshFailed,
   setSubmitting,
   showError,
 }: SheetSubmit<TResponse>): Promise<boolean> {
@@ -92,7 +101,15 @@ export async function submitFromSheet<TResponse extends SheetSubmitResponse>({
       return false;
     }
     onAccepted(outcome.response);
-    await refresh?.();
+    if (refresh) {
+      try {
+        await refresh();
+      } catch {
+        // The change is saved. Reporting the failed reload as a failed save
+        // would invite a retry that sends the change a second time.
+        onRefreshFailed?.();
+      }
+    }
     return true;
   } finally {
     // Released on every path. A lock left held would strand the user in a

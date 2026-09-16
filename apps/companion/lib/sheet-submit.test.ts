@@ -25,15 +25,12 @@ import {
  * A submit whose callbacks log, in order, what the screen would do.
  *
  * @param server.respond - How the server answers; defaults to accepting.
- * @param server.refresh - How the refetch behaves; defaults to succeeding.
  * @returns The submit, and the log its callbacks write to.
  */
 function loggedSubmit({
   respond = async () => ({ error: null }),
-  refresh = async () => {},
 }: {
   respond?: SheetSubmit["request"];
-  refresh?: SheetSubmit["refresh"];
 } = {}) {
   const log: string[] = [];
   const submit: SheetSubmit = {
@@ -45,7 +42,6 @@ function loggedSubmit({
     onAccepted: () => log.push("close sheet"),
     refresh: async () => {
       log.push("refresh");
-      await refresh();
     },
     setSubmitting: (submitting) =>
       log.push(submitting ? "submitting" : "settled"),
@@ -127,18 +123,32 @@ test("ignores a second submit while the first is still in flight", async () => {
   assert.equal(requests(), 2);
 });
 
-test("releases the lock even when the refetch throws", async () => {
-  // Without the release, the sheet's controls would stay disabled with no way
-  // to close it.
-  const { submit, log } = loggedSubmit({
+test("still reports a save the server accepted when the reload after it throws", async () => {
+  // The change went through, so it must not come back as a failure: several
+  // of these requests are not safe to send twice. The lock must still be
+  // released, or the next sheet's controls would stay disabled.
+  const log: string[] = [];
+  const submit: SheetSubmit = {
+    lock: { current: false },
+    request: async () => ({ error: null }),
+    onAccepted: () => log.push("close sheet"),
     refresh: async () => {
       throw new Error("offline");
     },
-  });
+    onRefreshFailed: () => log.push("saved, reload failed"),
+    setSubmitting: (submitting) =>
+      log.push(submitting ? "submitting" : "settled"),
+    showError: (message) => log.push(`alert: ${message}`),
+  };
 
-  await assert.rejects(submitFromSheet(submit), /offline/);
+  assert.equal(await submitFromSheet(submit), true);
+  assert.deepEqual(log, [
+    "submitting",
+    "close sheet",
+    "saved, reload failed",
+    "settled",
+  ]);
   assert.equal(submit.lock.current, false);
-  assert.equal(log.at(-1), "settled");
 });
 
 test("hands the accepted response to the caller for its own success message", async () => {
