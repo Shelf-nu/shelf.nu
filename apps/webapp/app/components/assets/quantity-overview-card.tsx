@@ -114,8 +114,9 @@ export interface QuantityOverviewCardProps {
    */
   overCommitment?: {
     shortBy: number;
-    asks: number;
-    booking: { id: string; name: string } | null;
+    peak: number;
+    held: number;
+    booking: { id: string; name: string; units: number } | null;
   } | null;
   /**
    * Count of distinct upcoming bookings contributing to `reservedQuantity`.
@@ -330,17 +331,31 @@ export function QuantityOverviewCard({
       {overCommitment ? (
         <div className="border-b border-gray-100 px-4 py-3">
           <p className="text-[14px] text-gray-600">
+            At the busiest point ahead, bookings need{" "}
             <span className="font-medium text-gray-900">
-              {overCommitment.booking
-                ? overCommitment.booking.name
-                : "A booking"}
-            </span>{" "}
-            asks for {formatWithUnit(overCommitment.asks, unit)} and you own{" "}
-            {formatWithUnit(qty, unit)} &mdash; promised{" "}
+              {formatWithUnit(overCommitment.peak, unit)}
+            </span>
+            {overCommitment.held > 0
+              ? ` on top of ${formatWithUnit(
+                  overCommitment.held,
+                  unit
+                )} in custody or kits,`
+              : ""}{" "}
+            and you own {formatWithUnit(qty, unit)} &mdash; promised{" "}
             <span className="font-medium text-gray-900">
               {formatWithUnit(overCommitment.shortBy, unit)}
             </span>{" "}
             more than you have.
+            {overCommitment.booking ? (
+              <>
+                {" "}
+                The biggest,{" "}
+                <span className="font-medium text-gray-900">
+                  {overCommitment.booking.name}
+                </span>
+                , asks for {formatWithUnit(overCommitment.booking.units, unit)}.
+              </>
+            ) : null}
           </p>
           {overCommitment.booking ? (
             <Link

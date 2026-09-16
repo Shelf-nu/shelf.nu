@@ -296,25 +296,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Nothing further is derived from it here.
 
     /**
-     * Is this pool promised beyond its size, and by which booking?
+     * Is this pool promised beyond its size at any point ahead, and which
+     * booking is the biggest part of it?
      *
      * `asset.bookingAssets` cannot answer it: `getAssetOverviewFields` filters
-     * that relation to ONGOING/OVERDUE, so no upcoming booking is ever in it —
-     * and a block below replaces the array with `[null]` anyway. So the single
-     * biggest upcoming booking is fetched directly here.
+     * that relation to ONGOING/OVERDUE, so no upcoming booking is ever in it.
+     * The peak comes from the same primitive the booking engine consults,
+     * windowed from now onwards so it is the future peak, not a sum.
      *
-     * ONE grouped row, never a list: an asset can carry hundreds of future
-     * bookings and this page must not pay for all of them to name one. The
-     * ARITHMETIC still goes through the shared `resolveOverCommitment`, so this
-     * page and the assets index can never quote different shortfalls.
+     * The culprit is ONE grouped row, never a list: an asset can carry
+     * hundreds of future bookings and this page must not pay for all of them
+     * to name one. Standalone slices only — a kit's slices are its `inKits`
+     * units, and the primitive excludes them for the same reason.
      */
+    const availabilityAhead = isQuantityTracked(asset)
+      ? await getAssetAvailability({
+          assetId: asset.id,
+          organizationId,
+          window: { from: new Date(), to: AVAILABILITY_HORIZON },
+        })
+      : null;
+
     const topReservedBooking = isQuantityTracked(asset)
       ? (
           await db.bookingAsset.groupBy({
             by: ["bookingId"],
             where: {
               assetId: asset.id,
-              booking: { status: BookingStatus.RESERVED },
+              assetKitId: null,
+              booking: {
+                status: BookingStatus.RESERVED,
+                to: { gt: new Date() },
+              },
             },
             _sum: { quantity: true },
             orderBy: { _sum: { quantity: "desc" } },
@@ -332,24 +345,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         )?.name ?? null
       : null;
 
-    const overCommitment = resolveOverCommitment({
-      total: asset.quantity ?? null,
-      inCustody: quantityData?.inCustody ?? 0,
-      inKits: quantityData?.inKits ?? 0,
-      checkedOut: quantityData?.checkedOut ?? 0,
-      bookingSlices: topReservedBooking
-        ? [
-            {
-              quantity: topReservedBooking._sum.quantity ?? 0,
-              booking: {
+    const overCommitment = availabilityAhead
+      ? resolveOverCommitment({
+          total: availabilityAhead.total,
+          inCustody: availabilityAhead.inCustody,
+          inKits: availabilityAhead.inKits,
+          peakBooked: availabilityAhead.reserved,
+          topBooking: topReservedBooking
+            ? {
                 id: topReservedBooking.bookingId,
                 name: topReservedBookingName ?? "Untitled booking",
-                status: BookingStatus.RESERVED,
-              },
-            },
-          ]
-        : [],
-    });
+                units: topReservedBooking._sum.quantity ?? 0,
+              }
+            : null,
+        })
+      : null;
 
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
@@ -479,6 +489,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+/**
+ * "From now on" for the over-commitment peak. A window end the booking
+ * engine's filter can hold: Prisma refuses to serialise the package's
+ * `FAR_FUTURE_SENTINEL` (the JS max date) as a DateTime argument.
+ */
+const AVAILABILITY_HORIZON = new Date("9999-12-31T00:00:00.000Z");
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },

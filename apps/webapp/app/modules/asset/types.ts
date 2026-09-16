@@ -229,19 +229,36 @@ export type AdvancedIndexAsset = Pick<
   available: number | null;
   /** Units committed to RESERVED bookings. `null` for INDIVIDUAL assets. */
   reserved: number | null;
-  /** Units held by custodians. Feeds the badge; `null` for INDIVIDUAL assets. */
-  inCustody: number | null;
-  /** Units earmarked to kits. `null` for INDIVIDUAL assets. */
-  inKits: number | null;
-  /** Units out on ONGOING/OVERDUE bookings. `null` for INDIVIDUAL assets. */
-  checkedOut: number | null;
   /**
-   * The largest SINGLE upcoming booking's claim — not the sum of all of them.
-   * This is the figure the `Short` verdict is computed from, so it is also the
-   * figure the badge's tooltip must quote; showing `reserved` there could
-   * contradict the badge whenever an asset has several future bookings.
+   * Units held by custodians DIRECTLY. Kit-inherited custody is not here: those
+   * units live in `inKits`, and counting them twice is the double-deduction
+   * `getAssetAvailability` guards against. This is the arithmetic figure.
    */
-  largestUpcomingBooking: number | null;
+  inCustody: number | null;
+  /**
+   * Every custody unit, kit-inherited included. For the status badge's LABEL
+   * only — a member of a kit in custody is still "In custody" to a reader —
+   * never for arithmetic.
+   */
+  inCustodyAll: number | null;
+  /** Units earmarked to kits, whatever the kit is doing. */
+  inKits: number | null;
+  /**
+   * Standalone units that have actually LEFT on ONGOING/OVERDUE bookings
+   * (dispatched minus ledgered returns). The arithmetic figure behind `Free now`.
+   */
+  checkedOut: number | null;
+  /** Every unit out, kit-driven included. Badge label only. */
+  checkedOutAll: number | null;
+  /** Units promised to RESERVED bookings including kit slices. Badge label only. */
+  reservedAll: number | null;
+  /**
+   * The most units owed to bookings at any single instant from now on, over
+   * standalone slices — `peakConcurrent` in SQL. This is the figure the `Short`
+   * verdict is computed from, so it is also the figure the badge's tooltip
+   * must quote.
+   */
+  peakBooked: number | null;
   /**
    * Start of the SOONEST upcoming (RESERVED) booking, or null when there is
    * none. A single scalar on purpose: an asset may carry hundreds of future
@@ -257,6 +274,8 @@ export type AdvancedIndexAsset = Pick<
    */
   topBookingId: string | null;
   topBookingName: string | null;
+  /** Units that booking asks for, so the hover can say so beside its name. */
+  topBookingUnits: number | null;
   /**
    * Derived pool verdict powering the `Stock status` column. Computed in SQL as
    * the twin of `classifyStockStatus` (`@shelf/quantity-control`), which stays

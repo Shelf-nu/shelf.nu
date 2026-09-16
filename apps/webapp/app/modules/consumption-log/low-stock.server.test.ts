@@ -69,10 +69,21 @@ vitest.mock("~/database/db.server", () => ({
     custody: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
     },
+    assetKit: {
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+    },
     organization: {
       findUnique: vitest.fn().mockResolvedValue({ name: "Acme" }),
     },
   },
+}));
+
+const checkedOutBreakdownMock = vitest
+  .fn()
+  .mockResolvedValue({ total: 0, standalone: 0 });
+vitest.mock("~/modules/booking/checked-out.server", () => ({
+  computeCheckedOutBreakdownForAsset: (...args: unknown[]) =>
+    checkedOutBreakdownMock(...args),
 }));
 
 import { checkAndNotifyLowStock } from "./low-stock.server";
@@ -86,6 +97,7 @@ const assetUpdateMock = db.asset.update as ReturnType<typeof vitest.fn>;
 const custodyAggregateMock = db.custody.aggregate as ReturnType<
   typeof vitest.fn
 >;
+const kitAggregateMock = db.assetKit.aggregate as ReturnType<typeof vitest.fn>;
 
 /**
  * A quantity-tracked asset row as `db.asset.findFirst` returns it inside the
@@ -111,6 +123,8 @@ beforeEach(() => {
   // defaults so tests only override what they exercise.
   assetUpdateMock.mockResolvedValue({});
   custodyAggregateMock.mockResolvedValue({ _sum: { quantity: 0 } });
+  kitAggregateMock.mockResolvedValue({ _sum: { quantity: 0 } });
+  checkedOutBreakdownMock.mockResolvedValue({ total: 0, standalone: 0 });
   getAdminsMock.mockResolvedValue([
     { id: "owner-1", email: "owner@acme.test", firstName: "O", lastName: "W" },
   ]);
@@ -533,5 +547,43 @@ describe("checkAndNotifyLowStock — never rejects", () => {
     });
 
     expect(sendEmailMock).toHaveBeenCalled();
+  });
+});
+
+describe("checkAndNotifyLowStock — the same figure as the Stock status column", () => {
+  it("subtracts kit units and standalone checked-out units, not just custody", async () => {
+    // 10 owned, floor 5. Custody alone (0) says Enough; the column subtracts
+    // 3 in kits and 3 out on a booking and says Running low at 4. The alert
+    // must agree with the column, or a row can be flagged and never emailed.
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 10, minQuantity: 5 }));
+    kitAggregateMock.mockResolvedValue({ _sum: { quantity: 3 } });
+    checkedOutBreakdownMock.mockResolvedValue({ total: 5, standalone: 3 });
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    expect(lowStockAlertHtmlMock).toHaveBeenCalledWith(
+      expect.objectContaining({ available: 4 })
+    );
+  });
+
+  it("reads direct custody only, leaving kit-inherited custody to the kit figure", async () => {
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 10, minQuantity: 5 }));
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(custodyAggregateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ kitCustodyId: null }),
+      })
+    );
   });
 });
