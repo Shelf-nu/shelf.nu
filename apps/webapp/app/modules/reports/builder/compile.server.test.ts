@@ -119,7 +119,8 @@ describe("compileBuilderQueries", () => {
       measure: "assetCount",
     });
 
-    expect(grouped).toContain(`v.value->>'raw'`);
+    expect(grouped).toContain(`cf.value->>'raw'`);
+    expect(grouped).toContain(`LEFT JOIN "AssetCustomFieldValue" cf`);
     expect(grouped).not.toContain("cf-perkins");
     expect(values).toContain("cf-perkins");
   });

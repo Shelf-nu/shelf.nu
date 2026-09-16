@@ -143,7 +143,8 @@ function groupSql(
   dataset: BuilderDataset,
   groupBy: BuilderGroupBy,
   customFieldId: string | null,
-  timeZone: string
+  timeZone: string,
+  organizationId: string
 ): GroupSql {
   switch (groupBy) {
     case "none":
@@ -172,7 +173,10 @@ function groupSql(
       };
     case "location":
       return {
-        join: Prisma.sql`LEFT JOIN "AssetLocation" al ON al."assetId" = a.id`,
+        // The workspace predicate lets the planner read the placements through
+        // the organization index instead of scanning the whole table.
+        join: Prisma.sql`LEFT JOIN "AssetLocation" al
+          ON al."assetId" = a.id AND al."organizationId" = ${organizationId}`,
         key: Prisma.sql`al."locationId"`,
         // Units placed at that location; an unplaced asset keeps its stock.
         units: Prisma.sql`COALESCE(al.quantity, COALESCE(a.quantity, 1))`,
@@ -186,13 +190,13 @@ function groupSql(
       };
     case "customField":
       return {
-        join: Prisma.sql`LEFT JOIN LATERAL (
-          SELECT v.value->>'raw' AS raw
-          FROM "AssetCustomFieldValue" v
-          WHERE v."assetId" = a.id AND v."customFieldId" = ${customFieldId}
-          LIMIT 1
-        ) cf ON TRUE`,
-        key: Prisma.sql`NULLIF(TRIM(cf.raw), '')`,
+        // A plain join, not a per-asset lateral lookup: the planner hashes the
+        // field's values once (one index read on `customFieldId`) instead of
+        // probing the value table once per asset, which costs seconds on a
+        // cold cache for a few thousand assets.
+        join: Prisma.sql`LEFT JOIN "AssetCustomFieldValue" cf
+          ON cf."assetId" = a.id AND cf."customFieldId" = ${customFieldId}`,
+        key: Prisma.sql`NULLIF(TRIM(cf.value->>'raw'), '')`,
         units: STOCK_UNITS,
       };
     case "custodian":
@@ -319,7 +323,8 @@ export function compileBuilderQueries(args: {
     spec.dataset,
     spec.groupBy,
     spec.customFieldId,
-    timeZone
+    timeZone,
+    organizationId
   );
   const ctes = Prisma.sql`WITH ${filteredAssetsCte(
     organizationId,
@@ -543,6 +548,11 @@ export async function runBuilderReport(
 
     const groupCount = Number(totalsRow.groupCount ?? 0);
     const top = rows[0];
+    // A custom-field grouping is named after the field ("Condition groups").
+    const groupLabel =
+      spec.groupBy === "customField" && args.customField
+        ? args.customField.name
+        : GROUP_BY_LABELS[spec.groupBy];
     const kpis: ReportKpi[] = [
       {
         id: `total_${spec.measure}`,
@@ -559,7 +569,7 @@ export async function runBuilderReport(
       },
       {
         id: "groups",
-        label: `${GROUP_BY_LABELS[spec.groupBy]} groups`,
+        label: `${groupLabel} groups`,
         value: groupCount.toLocaleString("en-US"),
         rawValue: groupCount,
         format: "number",
