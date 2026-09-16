@@ -2295,15 +2295,14 @@ export async function reserveBooking({
        * reservations draw from. Every standalone INDIVIDUAL row on the draft
        * is checked here, in the transaction that flips the status, so a draft
        * assembled before those reservations existed cannot commit past them.
-       * Kit-driven rows are reserved as one unit on the kit axis and
-       * quantity-tracked rows are judged by the guard above.
+       * Kit-driven rows count too: the pool a reservation draws on loses the
+       * unit either way, and a member reaches the draft through a kit without
+       * ever passing the add-time guards. Quantity-tracked rows are judged by
+       * the guard above.
        */
       await assertModelUnitsNotReservedElsewhere({
         assets: bookingFound.bookingAssets
-          .filter(
-            (ba) =>
-              ba.assetKitId == null && ba.asset.type === AssetType.INDIVIDUAL
-          )
+          .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
           .map((ba) => ba.asset),
         bookingId: id,
         bookingStatus: bookingFound.status,
@@ -11163,16 +11162,14 @@ export async function extendBooking({
       /**
        * The days being added may overlap model reservations that other
        * bookings hold, which the clash check above cannot see: a
-       * `BookingModelRequest` names no asset. The booking's standalone
-       * INDIVIDUAL units are measured again against the pool for the new
-       * dates. Kit-driven rows are reserved on the kit axis.
+       * `BookingModelRequest` names no asset. Every INDIVIDUAL unit the
+       * booking holds by name is measured again against the pool for the new
+       * dates, kit-driven rows included — the extension takes the unit off
+       * that pool for the added days however it got onto the booking.
        */
       await assertModelUnitsNotReservedElsewhere({
         assets: booking.bookingAssets
-          .filter(
-            (ba) =>
-              ba.assetKitId == null && ba.asset.type === AssetType.INDIVIDUAL
-          )
+          .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
           .map((ba) => ba.asset),
         bookingId: booking.id,
         bookingStatus: booking.status,

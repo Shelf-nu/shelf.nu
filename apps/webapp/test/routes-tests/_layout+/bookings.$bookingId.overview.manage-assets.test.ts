@@ -69,6 +69,13 @@ vi.mock("~/modules/booking-model-request/service.server", () => ({
   // this primitive. Its pool math has its own unit test; here the tests
   // control its answer per model and assert which rows the loader flags.
   getAssetModelAvailability: vi.fn(),
+  // why: the loader only measures models another booking is owed units of.
+  // Which models those are is this primitive's own unit test; here the tests
+  // control the answer and assert what the loader does and does not read.
+  findModelsReservedByOtherBookings: vi.fn(),
+  // why: what the booking already holds comes from the same primitive the
+  // write guard uses, so the badge and the refusal cannot disagree.
+  readOwnNamedUnits: vi.fn(),
 }));
 
 vi.mock("~/modules/user/service.server", () => ({
@@ -1405,13 +1412,30 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     });
   }
 
-  /** The standalone units of `model1` the booking already holds. */
-  function heldUnits(count: number) {
-    vi.mocked(db.bookingAsset.findMany).mockResolvedValue(
-      Array.from({ length: count }, () => ({
-        asset: { assetModelId: "model1" },
-      })) as any
+  /** The units of `model1` the booking already holds by name. */
+  function heldUnits(count: number, inCustody = 0) {
+    vi.mocked(modelRequestService.readOwnNamedUnits).mockResolvedValue(
+      count === 0
+        ? new Map()
+        : new Map([
+            [
+              "model1",
+              {
+                unitIds: new Set(
+                  Array.from({ length: count }, (_, i) => `held-${i}`)
+                ),
+                inCustody,
+              },
+            ],
+          ])
     );
+  }
+
+  /** Which models another booking is still owed unnamed units of. */
+  function reservedElsewhere(modelIds: string[]) {
+    vi.mocked(
+      modelRequestService.findModelsReservedByOtherBookings
+    ).mockResolvedValue(new Set(modelIds));
   }
 
   /** The flag per row id in the returned payload. */
@@ -1464,6 +1488,7 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     });
     poolAvailability(0);
     heldUnits(0);
+    reservedElsewhere(["model1"]);
   });
 
   it("flags every unit of a model whose free pool is exhausted, reading each model once", async () => {
@@ -1570,6 +1595,62 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     expect(
       modelRequestService.getAssetModelAvailability
     ).not.toHaveBeenCalled();
-    expect(db.bookingAsset.findMany).not.toHaveBeenCalled();
+    expect(modelRequestService.readOwnNamedUnits).not.toHaveBeenCalled();
+  });
+
+  it("reads no pool at all when no other booking has reserved the model", async () => {
+    // The shape of every picker load in a workspace that does not reserve by
+    // model: one lookup, then nothing. Naming a unit cannot over-commit a
+    // model nobody is owed units of, so there is nothing to measure.
+    reservedElsewhere([]);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+    expect(
+      modelRequestService.getAssetModelAvailability
+    ).not.toHaveBeenCalled();
+    expect(modelRequestService.readOwnNamedUnits).not.toHaveBeenCalled();
+  });
+
+  it("asks about the models on the page, over the booking's own window", async () => {
+    await flagsByAssetId();
+
+    expect(
+      modelRequestService.findModelsReservedByOtherBookings
+    ).toHaveBeenCalledWith({
+      assetModelIds: ["model1"],
+      excludeBookingId: "booking123",
+      organizationId: "org123",
+      from,
+      to,
+    });
+  });
+
+  it("ships the headroom a contested model still has", async () => {
+    poolAvailability(2);
+    heldUnits(1);
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // Two free units, one of them already claimed by a unit on the booking.
+    expect(result.modelHeadroom).toEqual({ model1: 1 });
+  });
+
+  it("does not count a held unit a custodian has against the headroom", async () => {
+    poolAvailability(2);
+    heldUnits(1, 1);
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // The pool already deducted that unit; charging it again would understate
+    // what the booking may still take.
+    expect(result.modelHeadroom).toEqual({ model1: 2 });
   });
 });

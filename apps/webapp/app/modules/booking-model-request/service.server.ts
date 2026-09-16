@@ -54,6 +54,28 @@ const ACTIVE_BOOKING_STATUSES = [
   BookingStatus.OVERDUE,
 ] as const;
 
+/**
+ * The `Booking` predicate for "overlaps this window".
+ *
+ * An absent end means a draft with no dates: nothing can overlap it, so the
+ * predicate is empty and every active booking counts — the conservative
+ * reading, and the one the DRAFT to RESERVED transition re-measures once real
+ * dates exist. Shared so the pool read and the reservation lookup that gates
+ * it always ask about the same span.
+ */
+function bookingWindowOverlap(
+  from?: Date | null,
+  to?: Date | null
+): Prisma.BookingWhereInput {
+  if (!from || !to) return {};
+  return {
+    OR: [
+      { from: { lte: to }, to: { gte: from } },
+      { from: { gte: from }, to: { lte: to } },
+    ],
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /*                          getAssetModelAvailability                         */
 /* -------------------------------------------------------------------------- */
@@ -202,15 +224,7 @@ export async function getAssetModelAvailability({
   const client = dbClient ?? db;
 
   try {
-    const dateOverlap =
-      from && to
-        ? {
-            OR: [
-              { from: { lte: to }, to: { gte: from } },
-              { from: { gte: from }, to: { lte: to } },
-            ],
-          }
-        : {};
+    const dateOverlap = bookingWindowOverlap(from, to);
 
     const [total, custodyAgg, bookingAssetAgg, modelRequestAgg] =
       await Promise.all([
@@ -330,12 +344,20 @@ export type ModelReservationGuardClient = RawQueryClient &
         }>
       >;
     };
-    bookingAsset: AssetModelAvailabilityClient["bookingAsset"] & {
+    asset: AssetModelAvailabilityClient["asset"] & {
       findMany: (args: {
-        where: Prisma.BookingAssetWhereInput;
-        select: { assetId: true; asset: { select: { assetModelId: true } } };
+        where: Prisma.AssetWhereInput;
+        select: {
+          id: true;
+          assetModelId: true;
+          custody: { select: { id: true }; take: 1 };
+        };
       }) => Promise<
-        Array<{ assetId: string; asset: { assetModelId: string | null } }>
+        Array<{
+          id: string;
+          assetModelId: string | null;
+          custody: Array<{ id: string }>;
+        }>
       >;
     };
     assetModel: {
@@ -399,11 +421,150 @@ function groupAssetIdsByModel(
   return byModel;
 }
 
+/** Units of one model a booking holds by name, and how many are in custody. */
+type OwnNamedUnits = {
+  /** Distinct asset ids, standalone and kit-driven alike. */
+  unitIds: Set<string>;
+  /** How many of those units a custodian is holding. */
+  inCustody: number;
+};
+
+/**
+ * The units of these models a booking holds by name, with the subset a
+ * custodian holds.
+ *
+ * Both halves feed a pool comparison, and each answers a question the sums in
+ * {@link getAssetModelAvailability} cannot:
+ *
+ * - **Kit-driven rows count.** A kit member is a physical unit off the loose
+ *   pool, and the pool read already counts it that way for every OTHER booking
+ *   (`reservedConcrete` does not filter `assetKitId`). Leaving it out of the
+ *   booking's own footprint is the asymmetry that lets a booking hold a unit
+ *   through a kit and still name another. `unitIds` is a set, so an asset
+ *   carrying both a standalone and a kit row counts once.
+ * - **Custody is already deducted.** `available` subtracts every unit of the
+ *   model a custodian holds. Charging such a unit again as a named one refuses
+ *   a booking that took nothing a foreign reservation could have drawn on.
+ *
+ * @param args.assetModelIds - Models to report on; others are ignored
+ * @returns One entry per model that has at least one held unit
+ */
+export async function readOwnNamedUnits({
+  bookingId,
+  assetModelIds,
+  organizationId,
+  tx,
+}: {
+  bookingId: string;
+  assetModelIds: string[];
+  organizationId: string;
+  tx: Pick<ModelReservationGuardClient, "asset">;
+}): Promise<Map<string, OwnNamedUnits>> {
+  const rows = await tx.asset.findMany({
+    where: {
+      organizationId,
+      assetModelId: { in: assetModelIds },
+      type: AssetType.INDIVIDUAL,
+      bookingAssets: { some: { bookingId } },
+    },
+    select: {
+      id: true,
+      assetModelId: true,
+      // Existence only — the count of rows is irrelevant, a unit is either in
+      // someone's hands or it is not.
+      custody: { select: { id: true }, take: 1 },
+    },
+  });
+
+  const byModel = new Map<string, OwnNamedUnits>();
+  for (const row of rows) {
+    if (!row.assetModelId) continue;
+    const entry = byModel.get(row.assetModelId) ?? {
+      unitIds: new Set<string>(),
+      inCustody: 0,
+    };
+    if (!entry.unitIds.has(row.id)) {
+      entry.unitIds.add(row.id);
+      if (row.custody.length > 0) entry.inCustody += 1;
+    }
+    byModel.set(row.assetModelId, entry);
+  }
+  return byModel;
+}
+
+/**
+ * Models in `assetModelIds` that another booking still owes unnamed units of,
+ * over the same window {@link getAssetModelAvailability} measures.
+ *
+ * This is the only thing the by-name guard protects. A model nobody has
+ * reserved cannot be over-committed by naming its units: named units and the
+ * units other bookings hold by name are disjoint sets, because the per-asset
+ * conflict rule already forbids one unit on two overlapping bookings. So a
+ * model that fails this test needs no lock, no pool read and no decision — and
+ * skipping it is what keeps a picker page of N models from costing 4N queries.
+ *
+ * @param args.excludeBookingId - The booking being written; its own request is
+ *   a promise to itself, not competition
+ * @returns The subset of `assetModelIds` with outstanding foreign units
+ */
+export async function findModelsReservedByOtherBookings({
+  assetModelIds,
+  excludeBookingId,
+  organizationId,
+  from,
+  to,
+  db: dbClient,
+}: {
+  assetModelIds: string[];
+  excludeBookingId: string;
+  organizationId: string;
+  from?: Date | null;
+  to?: Date | null;
+  db?: Pick<ModelReservationGuardClient, "bookingModelRequest">;
+}): Promise<Set<string>> {
+  if (assetModelIds.length === 0) return new Set();
+
+  const client = dbClient ?? db;
+  const rows = await client.bookingModelRequest.findMany({
+    where: {
+      assetModelId: { in: assetModelIds },
+      bookingId: { not: excludeBookingId },
+      fulfilledAt: null,
+      booking: {
+        organizationId,
+        status: { in: [...ACTIVE_BOOKING_STATUSES] },
+        ...bookingWindowOverlap(from, to),
+      },
+    },
+    select: { assetModelId: true, quantity: true, fulfilledQuantity: true },
+  });
+
+  const outstandingByModel = new Map<string, number>();
+  for (const row of rows) {
+    outstandingByModel.set(
+      row.assetModelId,
+      (outstandingByModel.get(row.assetModelId) ?? 0) +
+        (row.quantity - row.fulfilledQuantity)
+    );
+  }
+  return new Set(
+    [...outstandingByModel.entries()]
+      .filter(([, outstanding]) => outstanding > 0)
+      .map(([assetModelId]) => assetModelId)
+  );
+}
+
 /** What a booking would take from one model's pool once a write lands. */
 type ModelClaim = {
   assetModelId: string;
   /** Units of the model the booking holds by name after the write. */
   named: number;
+  /**
+   * The same units minus the ones a custodian holds — what the booking
+   * actually takes from the pool a foreign reservation draws on. This is the
+   * number the pool is compared against; `named` only states the claim.
+   */
+  namedNotInCustody: number;
   /** Units of the booking's own request still unassigned after the write. */
   stillToAssign: number;
 };
@@ -421,12 +582,20 @@ type ModelClaim = {
  * the same per-model lock.
  *
  * The pool is measured excluding `bookingId`, so what is compared against it is
- * the booking's whole footprint on the model once the write lands: the
- * standalone units it will hold by name (its existing ones plus `assets`, each
- * asset counted once) and the units of its own outstanding request that stay
- * unassigned. A new unit fulfils that request before it claims anything (see
- * {@link fulfilModelRequestsForAssets}), so run this before fulfilment, while
- * the request is still outstanding.
+ * the booking's whole footprint on the model once the write lands: the units it
+ * will hold by name (its existing ones plus `assets`, each asset counted once,
+ * kit-driven rows included) and the units of its own outstanding request that
+ * stay unassigned. A new unit fulfils that request before it claims anything
+ * (see {@link fulfilModelRequestsForAssets}), so run this before fulfilment,
+ * while the request is still outstanding.
+ *
+ * Two things are deliberately NOT charged to the booking. Units a custodian
+ * holds are already deducted from the pool, so naming one takes nothing a
+ * reservation could have drawn on. And a model no other booking is owed units
+ * of is skipped entirely — nothing can be over-committed there, because one
+ * unit cannot sit on two overlapping bookings. That skip is what keeps the
+ * cost at one query for the overwhelming majority of writes, and it is taken
+ * under the model locks so a reservation cannot appear after it.
  *
  * A DRAFT holds nothing on the pool yet, so its whole footprint must fit. An
  * active booking's footprint is already on the pool; only a write that adds
@@ -477,33 +646,21 @@ export async function assertModelUnitsNotReservedElsewhere({
     );
   }
 
-  // Standalone units of these models the booking already holds. They are not
-  // in `availability` (it excludes this booking), so they count on the
-  // booking's side.
-  const heldAssetIdsByModel = groupAssetIdsByModel(
-    (
-      await tx.bookingAsset.findMany({
-        where: {
-          bookingId,
-          assetKitId: null,
-          asset: {
-            organizationId,
-            assetModelId: { in: candidateModelIds },
-            type: AssetType.INDIVIDUAL,
-          },
-        },
-        select: { assetId: true, asset: { select: { assetModelId: true } } },
-      })
-    ).map((row) => ({
-      assetId: row.assetId,
-      assetModelId: row.asset.assetModelId,
-    }))
-  );
+  // Units of these models the booking already holds by name. They are not in
+  // `availability` (it excludes this booking), so they count on the booking's
+  // side.
+  const heldByModel = await readOwnNamedUnits({
+    bookingId,
+    assetModelIds: candidateModelIds,
+    organizationId,
+    tx,
+  });
 
   const isDraft = bookingStatus === BookingStatus.DRAFT;
   const claims: ModelClaim[] = [];
   for (const [assetModelId, newAssetIds] of newAssetIdsByModel) {
-    const heldAssetIds = heldAssetIdsByModel.get(assetModelId) ?? new Set();
+    const held = heldByModel.get(assetModelId);
+    const heldAssetIds = held?.unitIds ?? new Set<string>();
     const addedUnits = [...newAssetIds].filter(
       (assetId) => !heldAssetIds.has(assetId)
     ).length;
@@ -512,9 +669,17 @@ export async function assertModelUnitsNotReservedElsewhere({
     // claim: the units it names were promised to it already. A window change
     // is measured in full, whatever it adds.
     if (!isDraft && !windowChanged && addedUnits <= remaining) continue;
+    const named = new Set([...newAssetIds, ...heldAssetIds]);
     claims.push({
       assetModelId,
-      named: new Set([...newAssetIds, ...heldAssetIds]).size,
+      named: named.size,
+      // `available` has already deducted every unit of this model a custodian
+      // holds. A named unit among them takes nothing a foreign reservation
+      // could have drawn on, so charging it again would refuse the booking for
+      // a unit that was never in the promisable pool. Only units this booking
+      // holds can be discounted — a unit it is merely adding is not yet known
+      // to be one of them.
+      namedNotInCustody: named.size - (held?.inCustody ?? 0),
       stillToAssign: Math.max(0, remaining - addedUnits),
     });
   }
@@ -528,10 +693,30 @@ export async function assertModelUnitsNotReservedElsewhere({
     await lockAssetModelForReservation(tx, claim.assetModelId, organizationId);
   }
 
+  /**
+   * Only a model another booking still owes unnamed units of can be
+   * over-committed by naming units, so only those are worth measuring. Read
+   * through `tx` and AFTER the locks: a competing `upsertBookingModelRequest`
+   * is serialised behind them, so a reservation cannot slip in between this
+   * answer and the write it gates.
+   */
+  const contestedModelIds = await findModelsReservedByOtherBookings({
+    assetModelIds: claims.map((claim) => claim.assetModelId),
+    excludeBookingId: bookingId,
+    organizationId,
+    from,
+    to,
+    db: tx,
+  });
+  const contestedClaims = claims.filter((claim) =>
+    contestedModelIds.has(claim.assetModelId)
+  );
+  if (contestedClaims.length === 0) return;
+
   const shortfalls: Array<
     ModelClaim & Omit<AssetModelAvailability, "total" | "reserved">
   > = [];
-  for (const claim of claims) {
+  for (const claim of contestedClaims) {
     const availability = await getAssetModelAvailability({
       assetModelId: claim.assetModelId,
       organizationId,
@@ -540,7 +725,10 @@ export async function assertModelUnitsNotReservedElsewhere({
       to,
       db: tx,
     });
-    if (claim.named + claim.stillToAssign > availability.available) {
+    if (
+      claim.namedNotInCustody + claim.stillToAssign >
+      availability.available
+    ) {
       shortfalls.push({
         ...claim,
         inCustody: availability.inCustody,
@@ -579,15 +767,25 @@ export async function assertModelUnitsNotReservedElsewhere({
     ].filter((part): part is string => part !== null);
     const deductions =
       otherDeductions.length > 0
-        ? ` ${otherDeductions.join(" and ")} also count against the pool.`
+        ? ` ${otherDeductions.join(" and ")} also ${
+            otherDeductions.length === 1 ? "counts" : "count"
+          } against the pool.`
         : "";
+    // A model is only measured once another booking is owed units of it, so
+    // the reservation is always the leading reason. Stated conditionally all
+    // the same: a sentence that can read "0 units are reserved" tells the
+    // operator the refusal is a bug even when it is not.
+    const reservation =
+      s.reservedViaRequest > 0
+        ? `but ${units(s.reservedViaRequest)} ${
+            s.reservedViaRequest === 1 ? "is" : "are"
+          } reserved by model on other bookings for these dates and only ${
+            s.available
+          } more can be booked`
+        : `but only ${s.available} more can be booked for these dates`;
     return `"${nameById.get(s.assetModelId) ?? s.assetModelId}": ${units(
       s.named
-    )} requested by name${ownRequest}, but ${units(s.reservedViaRequest)} ${
-      s.reservedViaRequest === 1 ? "is" : "are"
-    } reserved by model on other bookings for these dates and only ${
-      s.available
-    } more can be booked.${deductions}`;
+    )} requested by name${ownRequest}, ${reservation}.${deductions}`;
   });
 
   throw new ShelfError({
@@ -1001,18 +1199,51 @@ export async function upsertBookingModelRequest({
         db: tx,
       });
 
-      // We only need fresh pool availability for the NEW outstanding
-      // units this upsert will claim. Fulfilled units are already
-      // reflected as concrete `BookingAsset` rows (not double-counted
-      // against our own request since `availability` excludes this
-      // booking), so the delta against the pool is `newOutstanding`.
+      /**
+       * What this booking would take from the pool once the upsert lands.
+       *
+       * `availability` excludes this booking, so BOTH halves of its footprint
+       * belong on this side of the comparison:
+       *
+       * - the units it already holds by name. Without them a booking holding
+       *   two of three units could still reserve three more by model — the
+       *   same over-commit this module's by-name guard refuses in the other
+       *   direction, and the two have to agree or a pair of writes that each
+       *   pass can still break the pool.
+       * - the units of this request that stay unassigned. Already-fulfilled
+       *   units are named units, so `newOutstanding` nets them out rather than
+       *   counting them twice.
+       *
+       * Units a custodian holds are discounted exactly as the by-name guard
+       * discounts them: the pool never offered them.
+       */
+      const heldByModel = await readOwnNamedUnits({
+        bookingId,
+        assetModelIds: [assetModelId],
+        organizationId,
+        tx,
+      });
+      const held = heldByModel.get(assetModelId);
+      const namedNotInCustody =
+        (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
       const newOutstanding = quantity - existingFulfilled;
-      if (newOutstanding > availability.available) {
+
+      if (namedNotInCustody + newOutstanding > availability.available) {
+        const headroom = Math.max(
+          0,
+          availability.available - namedNotInCustody + existingFulfilled
+        );
+        const heldNote =
+          namedNotInCustody > 0
+            ? ` This booking already holds ${namedNotInCustody} ${
+                namedNotInCustody === 1 ? "unit" : "units"
+              } of it by name.`
+            : "";
         throw new ShelfError({
           cause: null,
           label,
           status: 400,
-          message: `Cannot reserve ${quantity} × ${assetModel.name}. Only ${availability.available} more available in this window.`,
+          message: `Cannot reserve ${quantity} × ${assetModel.name}. Only ${headroom} can be reserved in this window.${heldNote}`,
           shouldBeCaptured: false,
         });
       }

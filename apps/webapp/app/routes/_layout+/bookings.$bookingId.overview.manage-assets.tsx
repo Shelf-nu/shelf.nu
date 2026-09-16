@@ -53,6 +53,7 @@ import { ConsumptionTypeBadge } from "~/components/assets/consumption-type-badge
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import { ManageModelRequests } from "~/components/booking/manage-model-requests";
+import { assetIdsBlockedByModelHeadroom } from "~/components/booking/model-headroom";
 import { StatusFilter } from "~/components/booking/status-filter";
 import styles from "~/components/booking/styles.css?url";
 import { Form } from "~/components/custom-form";
@@ -96,8 +97,10 @@ import {
   updateBookingAssets,
 } from "~/modules/booking/service.server";
 import {
+  findModelsReservedByOtherBookings,
   getAssetModelAvailability,
   getBookingModelTabData,
+  readOwnNamedUnits,
 } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -389,52 +392,73 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         )
       ),
     ];
+    /**
+     * How many more units of a model this booking may still take by name.
+     * Only models another booking is owed unnamed units of appear here — no
+     * other model can be over-committed by naming units, so the page says
+     * nothing about them and reads nothing for them.
+     */
+    const modelHeadroom: Record<string, number> = {};
     const exhaustedModelIds = new Set<string>();
     if (booking.from && booking.to && candidateModelIds.length > 0) {
-      const [availabilities, heldRows] = await Promise.all([
-        Promise.all(
-          candidateModelIds.map((assetModelId) =>
-            getAssetModelAvailability({
-              assetModelId,
-              organizationId,
-              bookingId: id,
-              from: booking.from,
-              to: booking.to,
-            })
-          )
-        ),
-        // Standalone units of these models already on the booking. They are
-        // not in `availability` (it excludes this booking), so they count on
-        // the booking's side.
-        db.bookingAsset.findMany({
-          where: {
-            bookingId: id,
-            assetKitId: null,
-            asset: {
-              organizationId,
-              assetModelId: { in: candidateModelIds },
-              type: AssetType.INDIVIDUAL,
-            },
-          },
-          select: { asset: { select: { assetModelId: true } } },
-        }),
-      ]);
-      const heldByModel = new Map<string, number>();
-      for (const row of heldRows) {
-        const assetModelId = row.asset.assetModelId;
-        if (!assetModelId) continue;
-        heldByModel.set(assetModelId, (heldByModel.get(assetModelId) ?? 0) + 1);
-      }
-      candidateModelIds.forEach((assetModelId, index) => {
-        const held = heldByModel.get(assetModelId) ?? 0;
-        const remaining = remainingByModel.get(assetModelId) ?? 0;
-        // One more named unit, plus whatever the booking's own request still
-        // needs once that unit has fulfilled one of its units.
-        const footprint = held + 1 + Math.max(0, remaining - 1);
-        if (footprint > availabilities[index].available) {
-          exhaustedModelIds.add(assetModelId);
-        }
+      // One read that usually ends the work: a workspace that never reserves
+      // by model gets an empty set here and no per-model reads at all, which
+      // is what keeps a page of N models off N availability lookups.
+      const contestedModelIds = await findModelsReservedByOtherBookings({
+        assetModelIds: candidateModelIds,
+        excludeBookingId: id,
+        organizationId,
+        from: booking.from,
+        to: booking.to,
       });
+      const contested = candidateModelIds.filter((assetModelId) =>
+        contestedModelIds.has(assetModelId)
+      );
+
+      if (contested.length > 0) {
+        const [availabilities, heldByModel] = await Promise.all([
+          Promise.all(
+            contested.map((assetModelId) =>
+              getAssetModelAvailability({
+                assetModelId,
+                organizationId,
+                bookingId: id,
+                from: booking.from,
+                to: booking.to,
+              })
+            )
+          ),
+          // Units of these models already on the booking, which `availability`
+          // excludes and which therefore count on the booking's side. Same
+          // primitive the write guard uses, so the badge and the refusal can
+          // never disagree about what the booking holds.
+          readOwnNamedUnits({
+            bookingId: id,
+            assetModelIds: contested,
+            organizationId,
+            tx: db,
+          }),
+        ]);
+
+        contested.forEach((assetModelId, index) => {
+          const held = heldByModel.get(assetModelId);
+          // Units a custodian holds were never in the pool, so naming one
+          // takes nothing from it — the write guard discounts them the same
+          // way.
+          const base = (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
+          const remaining = remainingByModel.get(assetModelId) ?? 0;
+          const { available } = availabilities[index];
+          // Up to `remaining`, each unit named fulfils one unit of the
+          // booking's own reservation, so the footprint does not move: either
+          // the whole reservation fits beside what the booking holds, or
+          // nothing more can be named at all.
+          modelHeadroom[assetModelId] =
+            base + remaining > available ? 0 : available - base;
+          if (modelHeadroom[assetModelId] === 0) {
+            exhaustedModelIds.add(assetModelId);
+          }
+        });
+      }
     }
 
     /**
@@ -572,6 +596,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       locations,
       totalLocations,
       bookingKitIds,
+      modelHeadroom,
       ...modelTabData,
     });
   } catch (cause) {
@@ -1209,6 +1234,7 @@ export default function AddAssetsToNewBooking() {
     showModelsTab,
     assetModels,
     modelRequests,
+    modelHeadroom,
   } = useLoaderData<typeof loader>();
 
   /**
@@ -1380,8 +1406,24 @@ export default function AddAssetsToNewBooking() {
    * them and adjust the quantity picker. An INDIVIDUAL unit whose model is
    * fully reserved by other bookings for this window is disabled like an
    * unbookable one: the write path refuses it.
+   *
+   * A model with room for some but not all of its units is capped as the
+   * selection grows. The server measures the whole batch, so without this the
+   * rows all look selectable and Confirm returns a 400 naming a limit the
+   * page never showed. Rows already on the booking do not consume headroom —
+   * the server counts them on the booking's side, not as an addition.
    */
   useEffect(() => {
+    const blockedByHeadroom = assetIdsBlockedByModelHeadroom({
+      // `items` is the typed loader payload; a selected row is `ListItemData`,
+      // whose index signature types every field access as `any`, so the model
+      // is resolved from the page rows rather than from the selection.
+      rows: items,
+      selectedAssetIds: new Set(selectedBulkItems.map((asset) => asset.id)),
+      alreadyOnBookingIds: new Set(bookingAssets.map((asset) => asset.id)),
+      modelHeadroom,
+    });
+
     const _disabledBulkItems = items.reduce<ListItemData[]>((acc, asset) => {
       /** Qty-tracked assets can always be selected to adjust quantity */
       if (isQuantityTracked(asset)) return acc;
@@ -1389,7 +1431,8 @@ export default function AddAssetsToNewBooking() {
       if (
         !asset.availableToBook ||
         asset.assetKits.length > 0 ||
-        asset.modelReservedElsewhere
+        asset.modelReservedElsewhere ||
+        blockedByHeadroom.has(asset.id)
       ) {
         acc.push(asset);
       }
@@ -1398,7 +1441,13 @@ export default function AddAssetsToNewBooking() {
     }, []);
 
     setDisabledBulkItems(_disabledBulkItems);
-  }, [items, setDisabledBulkItems]);
+  }, [
+    items,
+    setDisabledBulkItems,
+    selectedBulkItems,
+    modelHeadroom,
+    bookingAssets,
+  ]);
 
   /**
    * Total quantity reserved via model-level requests — shown as a count

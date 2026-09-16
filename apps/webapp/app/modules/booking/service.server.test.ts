@@ -8478,7 +8478,8 @@ describe("extendBooking", () => {
           quantity: 1,
           id: "ba-t140",
         },
-        // Reserved on the kit axis: not a claim on the model's loose pool.
+        // On the booking through a kit. The extension takes this unit off the
+        // model's pool for the added days just as the standalone one does.
         {
           asset: {
             id: "asset-2",
@@ -8511,15 +8512,18 @@ describe("extendBooking", () => {
       role: OrganizationRoles.ADMIN,
     });
 
-    // Only the standalone unit is handed over, under the new end date, with
-    // the whole footprint re-measured.
+    // Every INDIVIDUAL unit the booking holds is handed over, under the new
+    // end date, with the whole footprint re-measured.
     expect(assertModelUnitsNotReservedElsewhere).toHaveBeenCalledWith(
       expect.objectContaining({
         bookingId: "booking-1",
         bookingStatus: BookingStatus.ONGOING,
         windowChanged: true,
         to: newEndDate,
-        assets: [expect.objectContaining({ id: "asset-1" })],
+        assets: [
+          expect.objectContaining({ id: "asset-1" }),
+          expect.objectContaining({ id: "asset-2" }),
+        ],
       })
     );
   });
@@ -15695,12 +15699,15 @@ describe("model reservation guard — write paths", () => {
       db.bookingAsset.findFirst.mockResolvedValue(null);
     });
 
-    it("re-validates every standalone INDIVIDUAL row on the draft in the reserve transaction", async () => {
+    it("re-validates every INDIVIDUAL row on the draft in the reserve transaction", async () => {
       expect.assertions(3);
 
       await reserveBooking(reserveParams);
 
-      expect(handedAssetIds()).toEqual(["asset-ind"]);
+      // The kit-driven unit counts too: it is off the model's pool for these
+      // dates however it reached the draft, and it never passed an add-time
+      // guard on the way in.
+      expect(handedAssetIds()).toEqual(["asset-ind", "asset-kit"]);
       expect(guard).toHaveBeenCalledWith(
         expect.objectContaining({
           bookingId: "booking-1",
