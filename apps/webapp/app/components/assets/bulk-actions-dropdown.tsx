@@ -15,6 +15,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
 import BulkAddToAuditDialog from "./bulk-add-to-audit-dialog";
 import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
 import BulkAssetModelRemoveDialog from "./bulk-asset-model-remove-dialog";
@@ -23,13 +24,16 @@ import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkAssignTagsDialog from "./bulk-assign-tags-dialog";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
+import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import BulkMarkAvailabilityDialog from "./bulk-mark-availability-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
 import BulkRemoveFromKits from "./bulk-remove-from-kits";
 import BulkRemoveTagsDialog from "./bulk-remove-tags-dialog";
+import BulkSetReorderPointDialog from "./bulk-set-reorder-point-dialog";
 import BulkStartAuditDialog from "./bulk-start-audit-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
+import Icon from "../icons/icon";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
 import {
@@ -40,9 +44,6 @@ import {
 } from "../shared/dropdown";
 import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
-import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
-import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
-import Icon from "../icons/icon";
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -158,6 +159,7 @@ function ConditionalDropdown() {
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
         <BulkCategoryUpdateDialog />
+        <BulkSetReorderPointDialog />
         <BulkAssetModelUpdateDialog />
         <BulkAssetModelRemoveDialog />
         <BulkDeleteDialog />
@@ -365,6 +367,18 @@ function ConditionalDropdown() {
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="category"
+                  onClick={closeMenu}
+                  disabled={isLoading}
+                />
+              </DropdownMenuItem>
+              {/* Sits beside category rather than at the bottom of the menu:
+                  the reorder point is the input Stock status depends on, and
+                  10 of 12 quantity assets in a real workspace have none. This
+                  is the only bulk way to fix that. */}
+              <DropdownMenuItem className="py-1 lg:p-0">
+                <BulkUpdateDialogTrigger
+                  type="reorder-point"
+                  label="Set reorder point"
                   onClick={closeMenu}
                   disabled={isLoading}
                 />

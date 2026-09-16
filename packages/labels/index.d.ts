@@ -18,6 +18,18 @@ export declare const ASSET_QTY_STATUS_LABELS: {
   readonly PARTIALLY_RESERVED: "Partially reserved";
 };
 
+/**
+ * Labels for the quantity FIGURES on a pool. `FREE_NOW` is the physical count
+ * and is rendered on four surfaces (assets index, asset page, reports PDF,
+ * mobile asset screen) — keep them reading from here so they cannot drift.
+ */
+export declare const ASSET_QUANTITY_FIGURE_LABELS: {
+  readonly TOTAL: string;
+  readonly FREE_NOW: string;
+  readonly IN_CUSTODY: string;
+  readonly RESERVED: string;
+};
+
 export declare const ASSET_BOOKING_PSEUDO_STATUS_LABELS: {
   readonly ALREADY_CHECKED_IN: "Already checked in";
   readonly PARTIALLY_CHECKED_IN: "Partially checked in";
@@ -199,3 +211,10 @@ export declare const AUDIT_STATUS_TONES: Readonly<
 export declare const AUDIT_ASSET_STATUS_TONES: Readonly<
   Record<AuditAssetStatusKey, StatusTone>
 >;
+
+export declare const STOCK_STATUS_LABELS: {
+  readonly SHORT: "Short";
+  readonly NONE_FREE: "None free";
+  readonly LOW: "Running low";
+  readonly ENOUGH: "Enough";
+};

@@ -216,10 +216,29 @@ async function runLowStockCheck({
   assetId,
   userId,
   organizationId,
+  silent = false,
 }: {
   assetId: string;
   userId?: string | null;
   organizationId: string;
+  /**
+   * Run the state transitions WITHOUT sending anything — no email, no in-app
+   * toast. The `lowStockNotifiedAt` marker is still stamped or cleared exactly
+   * as it would be, so a later genuine crossing and the "back in stock"
+   * recovery notice both still work.
+   *
+   * Exists for BULK callers. This notifier emails the owner AND every admin,
+   * and a bulk threshold change can put hundreds of assets into the low band in
+   * one click — that is hundreds of notifier runs, each mailing several people,
+   * for a change the user just made deliberately and can already see as amber
+   * badges on the screen in front of them. Alerting is for stock moving while
+   * nobody is watching, not for the operation the user just performed.
+   *
+   * Do NOT reach for this to quieten a noisy single-asset path; the debounce
+   * marker already handles repeat firing. Defaults to `false` so every existing
+   * call site behaves exactly as before.
+   */
+  silent?: boolean;
 }): Promise<void> {
   const asset = await db.asset.findFirst({
     // org-scoped: scope the low-stock lookup to the caller's org
@@ -284,8 +303,8 @@ async function runLowStockCheck({
   if (isLow && asset.lowStockNotifiedAt == null) {
     /* ----------------------- Enter low: fire alert ----------------------- */
 
-    /** In-app notification for the acting user (skipped when none). */
-    if (userId) {
+    /** In-app notification for the acting user (skipped when none, or silent). */
+    if (userId && !silent) {
       notifyInAppBestEffort({
         title: "Low stock alert",
         message: `${asset.title} has ${available} ${unitLabel} available (threshold: ${asset.minQuantity})`,
@@ -294,20 +313,26 @@ async function runLowStockCheck({
       });
     }
 
-    await sendLowStockEmails({
-      variant: "alert",
-      organizationId,
-      assetId,
-      assetTitle: asset.title,
-      available,
-      minQuantity: asset.minQuantity,
-      unitOfMeasure: unitLabel,
-    });
+    if (!silent) {
+      await sendLowStockEmails({
+        variant: "alert",
+        organizationId,
+        assetId,
+        assetTitle: asset.title,
+        available,
+        minQuantity: asset.minQuantity,
+        unitOfMeasure: unitLabel,
+      });
+    }
 
     /**
      * Stamp the debounce marker AFTER sending so a further decrement while the
-     * asset stays low won't re-alert. Best-effort (see file header): a failed
-     * stamp just means the next decrement re-fires — never a rollback.
+     * asset stays low won't re-alert. Stamped even in silent mode: the marker
+     * records "this low-stock episode is accounted for", which is exactly true
+     * when the user set the threshold themselves — and leaving it null would
+     * make the very next stock movement fire the alert we just suppressed.
+     * Best-effort (see file header): a failed stamp just means the next
+     * decrement re-fires — never a rollback.
      */
     try {
       await db.asset.update({
@@ -356,7 +381,7 @@ async function runLowStockCheck({
     }
 
     /** In-app notification for the acting user (skipped when none). */
-    if (userId) {
+    if (userId && !silent) {
       notifyInAppBestEffort({
         title: "Back in stock",
         message: `${asset.title} is back above its threshold: ${available} ${unitLabel} available (threshold: ${asset.minQuantity})`,
@@ -365,15 +390,17 @@ async function runLowStockCheck({
       });
     }
 
-    await sendLowStockEmails({
-      variant: "recovered",
-      organizationId,
-      assetId,
-      assetTitle: asset.title,
-      available,
-      minQuantity: asset.minQuantity,
-      unitOfMeasure: unitLabel,
-    });
+    if (!silent) {
+      await sendLowStockEmails({
+        variant: "recovered",
+        organizationId,
+        assetId,
+        assetTitle: asset.title,
+        available,
+        minQuantity: asset.minQuantity,
+        unitOfMeasure: unitLabel,
+      });
+    }
   }
   /* else: no transition — already-notified-and-still-low, or fine-and-was-fine. */
 }

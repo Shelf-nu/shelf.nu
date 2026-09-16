@@ -5,6 +5,7 @@ import {
   CustomFieldType,
   OrganizationRoles,
 } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -57,6 +58,7 @@ import {
   MOVE_UNITS_INTENT_FIELD,
   type MoveAxis,
 } from "~/modules/asset/move-units.types";
+import { resolveOverCommitment } from "~/modules/asset/over-commitment";
 import {
   buildQuantityData,
   type QuantityData,
@@ -292,6 +294,63 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // filters to ONGOING/OVERDUE and excludes bookings this asset has been
     // partially checked in from, so the first row is the one the page shows.
     // Nothing further is derived from it here.
+
+    /**
+     * Is this pool promised beyond its size, and by which booking?
+     *
+     * `asset.bookingAssets` cannot answer it: `getAssetOverviewFields` filters
+     * that relation to ONGOING/OVERDUE, so no upcoming booking is ever in it —
+     * and a block below replaces the array with `[null]` anyway. So the single
+     * biggest upcoming booking is fetched directly here.
+     *
+     * ONE grouped row, never a list: an asset can carry hundreds of future
+     * bookings and this page must not pay for all of them to name one. The
+     * ARITHMETIC still goes through the shared `resolveOverCommitment`, so this
+     * page and the assets index can never quote different shortfalls.
+     */
+    const topReservedBooking = isQuantityTracked(asset)
+      ? (
+          await db.bookingAsset.groupBy({
+            by: ["bookingId"],
+            where: {
+              assetId: asset.id,
+              booking: { status: BookingStatus.RESERVED },
+            },
+            _sum: { quantity: true },
+            orderBy: { _sum: { quantity: "desc" } },
+            take: 1,
+          })
+        )[0] ?? null
+      : null;
+
+    const topReservedBookingName = topReservedBooking
+      ? (
+          await db.booking.findFirst({
+            where: { id: topReservedBooking.bookingId, organizationId },
+            select: { name: true },
+          })
+        )?.name ?? null
+      : null;
+
+    const overCommitment = resolveOverCommitment({
+      total: asset.quantity ?? null,
+      inCustody: quantityData?.inCustody ?? 0,
+      inKits: quantityData?.inKits ?? 0,
+      checkedOut: quantityData?.checkedOut ?? 0,
+      bookingSlices: topReservedBooking
+        ? [
+            {
+              quantity: topReservedBooking._sum.quantity ?? 0,
+              booking: {
+                id: topReservedBooking.bookingId,
+                name: topReservedBookingName ?? "Untitled booking",
+                status: BookingStatus.RESERVED,
+              },
+            },
+          ]
+        : [],
+    });
+
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
       ? asset.customFields.filter(
@@ -404,6 +463,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       qrObj,
       reminders,
       quantityData,
+      overCommitment,
       teamMembers,
       totalTeamMembers,
       categories,
@@ -766,6 +826,7 @@ export default function AssetOverview() {
     currentOrganization,
     userId,
     quantityData,
+    overCommitment,
     allCustomFieldDefs,
     moveDestinations,
     unplacedQuantity,
@@ -1782,6 +1843,7 @@ export default function AssetOverview() {
               inLocationsQuantity={quantityData?.inLocations}
               inLocationsManualQuantity={quantityData?.inLocationsManual}
               reservedQuantity={quantityData?.reserved}
+              overCommitment={overCommitment}
               reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}

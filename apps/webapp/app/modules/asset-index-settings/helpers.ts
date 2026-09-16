@@ -1,4 +1,5 @@
 import { CustomFieldType } from "@prisma/client";
+import { ASSET_QUANTITY_FIGURE_LABELS } from "@shelf/labels";
 import { z } from "zod";
 
 export type Column = {
@@ -102,6 +103,13 @@ export const fixedFields = [
   "type",
   "upcomingBookings",
   "assetModel",
+  // Quantity-pool columns. All three are derived per row rather than stored:
+  // `available` and `reserved` are aggregates, `stockStatus` is the verdict
+  // from `classifyStockStatus` (@shelf/quantity-control). They render empty for
+  // INDIVIDUAL assets, exactly as `quantity` already does.
+  "available",
+  "reserved",
+  "stockStatus",
 ] as const;
 
 // Define barcode field names
@@ -161,35 +169,62 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   barcode_DataMatrix: "DataMatrix",
   barcode_ExternalQR: "External QR",
   barcode_EAN13: "EAN-13",
-  quantity: "Quantity",
+  // Renamed from "Quantity": with `available` beside it, the bare word was read
+  // as "how many can I use" by three separate customers. Same field, clearer name.
+  quantity: "Total quantity",
   minQuantity: "Min quantity",
+  // "Free now", not "Available". Three things in this product were called
+  // "Available" at once: this column, the `AssetStatus` badge, and the
+  // `Available to book` column beside it. Worse, this one is the only one that
+  // is time-bound — it means "free on the shelf TODAY", while the neighbouring
+  // `Reserved` and `Stock status` describe a FUTURE booking window. Printing a
+  // now-figure and a later-figure side by side under interchangeable names
+  // produced rows that read as self-contradicting: 10 free, 12 reserved, Short.
+  // The word "now" is what makes the contrast legible. The column KEY stays
+  // `available`, so saved filters, URLs and stored column configs are unaffected.
+  available: ASSET_QUANTITY_FIGURE_LABELS.FREE_NOW,
+  reserved: "Reserved",
+  stockStatus: "Stock status",
   type: "Tracking method",
   upcomingBookings: "Upcoming Bookings",
   assetModel: "Asset model",
 };
 
 export const defaultFields: Column[] = [
+  // ORDER IS THE FEATURE. The pool columns sit immediately after `status`:
+  // shipped at the end of the list they landed past every custom field,
+  // ~3000px off the right edge, and a column you have to hunt for is the
+  // problem this set exists to solve.
+  //
+  // `quantity` (labelled "Total quantity") is visible and sits directly after
+  // `available`, because a free count with no denominator is not an answer:
+  // "4 pcs" is a crisis at 4-of-5 and a non-event at 4-of-400. The customer
+  // who started this asked to see available "also", meaning ALONGSIDE the
+  // total — shipping one and hiding the other answers half the question.
   { name: "id", visible: false, position: 0 },
   { name: "sequentialId", visible: true, position: 1 },
   { name: "qrId", visible: true, position: 2 },
   { name: "status", visible: true, position: 3 },
-  { name: "description", visible: true, position: 4 },
-  { name: "valuation", visible: true, position: 5 },
-  { name: "availableToBook", visible: true, position: 6 },
-  { name: "createdAt", visible: true, position: 7 },
-  { name: "updatedAt", visible: true, position: 8 },
-  { name: "category", visible: true, position: 9 },
-  { name: "tags", visible: true, position: 10 },
-  { name: "location", visible: true, position: 11 },
-  { name: "kit", visible: true, position: 12 },
-  { name: "custody", visible: true, position: 13 },
-  { name: "upcomingReminder", visible: true, position: 14 },
-  { name: "actions", visible: true, position: 15 },
-  { name: "upcomingBookings", visible: true, position: 16 },
-  { name: "quantity", visible: false, position: 17 },
-  { name: "type", visible: false, position: 18 },
-  { name: "assetModel", visible: false, position: 19 },
-  { name: "minQuantity", visible: false, position: 20 },
+  { name: "available", visible: true, position: 4 },
+  { name: "quantity", visible: true, position: 5 },
+  { name: "reserved", visible: true, position: 6 },
+  { name: "stockStatus", visible: true, position: 7 },
+  { name: "description", visible: true, position: 8 },
+  { name: "valuation", visible: true, position: 9 },
+  { name: "availableToBook", visible: true, position: 10 },
+  { name: "createdAt", visible: true, position: 11 },
+  { name: "updatedAt", visible: true, position: 12 },
+  { name: "category", visible: true, position: 13 },
+  { name: "tags", visible: true, position: 14 },
+  { name: "location", visible: true, position: 15 },
+  { name: "kit", visible: true, position: 16 },
+  { name: "custody", visible: true, position: 17 },
+  { name: "upcomingReminder", visible: true, position: 18 },
+  { name: "actions", visible: true, position: 19 },
+  { name: "upcomingBookings", visible: true, position: 20 },
+  { name: "type", visible: false, position: 21 },
+  { name: "assetModel", visible: false, position: 22 },
+  { name: "minQuantity", visible: false, position: 23 },
 ];
 
 // Generate barcode columns when barcodes are enabled
