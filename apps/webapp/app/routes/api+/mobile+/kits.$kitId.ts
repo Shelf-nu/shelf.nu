@@ -22,6 +22,7 @@ import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibili
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
+  BARCODE_CODES_ORDER_BY,
   QR_CODES_ORDER_BY,
   resolveDisplayCode,
   serializeDisplayCode,
@@ -95,7 +96,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // than the Shelf QR. Kits carry no `sequentialId` or per-kit override,
         // so a SAM_ID preference falls back to the QR — the resolver reports
         // that as `isFallback`.
-        barcodes: { select: { id: true, type: true, value: true } },
+        barcodes: {
+          orderBy: BARCODE_CODES_ORDER_BY,
+          select: { id: true, type: true, value: true },
+        },
         organization: {
           select: {
             currency: true,

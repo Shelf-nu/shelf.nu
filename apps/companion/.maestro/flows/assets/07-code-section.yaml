@@ -1,0 +1,40 @@
+# Assets — the code card on asset detail
+#
+# The workspace chooses which code it labels assets with, and the server
+# resolves it. This covers the two things unit tests cannot: that the card
+# renders at all on a device, and that switching codes swaps what is drawn.
+#
+# Fixture: SHELF_TEST_BARCODE_ASSET_ID must be an asset that carries BOTH a
+# Shelf QR and at least one alternative barcode — with only one code there is
+# no selector to tap, and the flow has nothing to exercise.
+#
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_BARCODE_ASSET_ID
+appId: com.shelf.companion.carlos
+name: "Assets - Code Section"
+tags:
+  - assets
+
+---
+- runFlow: ../../shared/login.yaml
+
+# tapOn rather than assertVisible: after runFlow the iOS a11y tree is stale and
+# only tapOn's retry forces it to refresh (LESSONS.md #1).
+- tapOn:
+    text: "Quick Actions"
+
+- openLink: "shelf://assets/${SHELF_TEST_BARCODE_ASSET_ID}"
+
+# Heading is neutral whenever the entity carries more than one code, because
+# the reader can switch and a heading naming one type would contradict them.
+- extendedWaitUntil:
+    visible: "CODES"
+    timeout: 15000
+
+- takeScreenshot: assets-code-section-default
+
+# The Shelf QR is always offered, whatever the workspace prefers — this is the
+# regression the card exists for: a Code 128 workspace used to see only the QR,
+# and the QR must not disappear now that it no longer leads.
+- assertVisible: "Shelf QR Code"
+- tapOn: "Shelf QR Code"
+- takeScreenshot: assets-code-section-qr

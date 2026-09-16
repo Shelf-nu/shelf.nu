@@ -632,6 +632,37 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
     });
   });
 
+  it("honours a barcode preference a deployment entitles but the column denies", async () => {
+    // why: `canUseBarcodes` is the EFFECTIVE entitlement — a self-hosted
+    // deployment has no billing to gate on and holds every add-on, so the raw
+    // `barcodesEnabled` column reads false there while the workspace may still
+    // have set a barcode preference. Reading the column instead of the helper
+    // would push every self-hosted workspace back to the QR, and nothing else
+    // here would notice.
+    canUseBarcodesMock.mockReturnValue(true);
+    assetFindUniqueMock.mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: false,
+        barcodes: [{ id: "bc-1", type: "Code128", value: "CODE-000128" }],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(canUseBarcodesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ barcodesEnabled: false })
+    );
+    expect(asset.displayCode).toMatchObject({
+      value: "CODE-000128",
+      type: "Code128",
+      isFallback: false,
+    });
+    expect(asset.barcodes).toEqual([
+      { id: "bc-1", type: "Code128", value: "CODE-000128" },
+    ]);
+  });
+
   it("ships the asset's barcodes so the screen can offer a code switcher", async () => {
     assetFindUniqueMock.mockResolvedValue(
       buildAssetWithCodes({

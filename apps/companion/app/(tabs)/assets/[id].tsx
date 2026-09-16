@@ -816,7 +816,10 @@ export default function AssetDetailScreen() {
             {asset.sequentialId &&
             asset.displayCode?.value !== asset.sequentialId ? (
               <InfoRow
-                icon="pricetags-outline"
+                // `keypad-outline`: this row exists because the scanner's
+                // manual entry takes a SAM ID, and a pricetag would read as a
+                // second Category row.
+                icon="keypad-outline"
                 label="SAM ID"
                 value={asset.sequentialId}
               />

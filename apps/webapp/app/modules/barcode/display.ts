@@ -48,6 +48,19 @@ export const QR_CODES_ORDER_BY: Prisma.QrOrderByWithRelationInput[] = [
 ];
 
 /**
+ * Order for reading an entity's `barcodes` relation whenever the result is
+ * offered as a list the reader can choose from.
+ *
+ * Nothing about a barcode row implies an order, so without one the codes come
+ * back in whatever order the database happens to return — which can differ
+ * between two reads of the same entity, moving the chips under a reader's
+ * thumb. Oldest first, with `id` settling ties, so the list an entity presents
+ * is the same every time.
+ */
+export const BARCODE_CODES_ORDER_BY: Prisma.BarcodeOrderByWithRelationInput[] =
+  [{ createdAt: "asc" }, { id: "asc" }];
+
+/**
  * Prisma `select` fragment for the asset fields a list-view loader must
  * include to call `resolveDisplayCode`. Designed to be spread into a
  * larger select clause:

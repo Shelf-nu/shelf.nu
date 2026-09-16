@@ -427,6 +427,34 @@ describe("GET /api/mobile/kits/:kitId — display code", () => {
     expect(kit.displayCode).toMatchObject({ type: "QR_ID", isFallback: true });
   });
 
+  it("honours a barcode preference a deployment entitles but the column denies", async () => {
+    // why: `canUseBarcodes` is the EFFECTIVE entitlement — a self-hosted
+    // deployment holds every add-on while the raw `barcodesEnabled` column
+    // reads false. Reading the column instead would push every self-hosted
+    // workspace back to the QR. Mirrors the asset detail route's test.
+    canUseBarcodesMock.mockReturnValue(true);
+
+    const kit = await loadKit(
+      buildKitWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: false,
+        barcodes: [{ id: "bc-k1", type: "Code128", value: "KIT-000042" }],
+      })
+    );
+
+    expect(canUseBarcodesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ barcodesEnabled: false })
+    );
+    expect(kit.displayCode).toMatchObject({
+      value: "KIT-000042",
+      type: "Code128",
+      isFallback: false,
+    });
+    expect(kit.barcodes).toEqual([
+      { id: "bc-k1", type: "Code128", value: "KIT-000042" },
+    ]);
+  });
+
   it("keeps organization narrowed to currency, leaking no workspace settings", async () => {
     canUseBarcodesMock.mockReturnValue(true);
 

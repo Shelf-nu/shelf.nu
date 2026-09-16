@@ -16,6 +16,7 @@ import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import {
+  BARCODE_CODES_ORDER_BY,
   QR_CODES_ORDER_BY,
   resolveDisplayCode,
   serializeDisplayCode,
@@ -161,7 +162,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
               orderBy: QR_CODES_ORDER_BY,
               select: { id: true },
             },
-            barcodes: { select: { id: true, type: true, value: true } },
+            barcodes: {
+              orderBy: BARCODE_CODES_ORDER_BY,
+              select: { id: true, type: true, value: true },
+            },
             // Model cover image; `shapeMobileAssetResponse` resolves the cascade
             // into the flat image fields the companion already reads.
             ...ASSET_MODEL_IMAGE_SELECT,

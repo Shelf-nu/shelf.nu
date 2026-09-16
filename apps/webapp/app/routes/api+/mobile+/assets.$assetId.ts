@@ -20,6 +20,7 @@ import {
   shapeMobileAssetPlacements,
 } from "~/modules/asset/utils";
 import {
+  BARCODE_CODES_ORDER_BY,
   QR_CODES_ORDER_BY,
   resolveDisplayCode,
   serializeDisplayCode,
@@ -167,7 +168,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // below so the detail screen shows the identifier this workspace
         // actually labels its assets with, not always the Shelf QR.
         preferredBarcodeId: true,
-        barcodes: { select: { id: true, type: true, value: true } },
+        barcodes: {
+          orderBy: BARCODE_CODES_ORDER_BY,
+          select: { id: true, type: true, value: true },
+        },
         organization: {
           select: {
             currency: true,
