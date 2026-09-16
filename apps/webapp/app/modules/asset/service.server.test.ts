@@ -731,12 +731,22 @@ describe("refreshExpiredAssetImages", () => {
     }
   });
 
-  it("returns rows index for index with the input, repeated ids included", async () => {
+  it("returns rows index for index with the input, signing a repeated id once", async () => {
     const lapsed = makeAsset({ id: "asset-1" });
     const fresh = makeAsset({
       id: "asset-2",
       mainImageExpiration: new Date(Date.now() + 60_000),
     });
+    // A second signing call would hand out a different URL. A counter rather
+    // than queued once-values, so nothing unused leaks into the next test.
+    let signingCalls = 0;
+    mockCreateSignedUrl.mockImplementation(() =>
+      Promise.resolve(
+        signingCalls++ === 0
+          ? "https://new-signed-url.com"
+          : "https://second-signed-url.com"
+      )
+    );
 
     const result = await refreshExpiredAssetImages([
       lapsed,
@@ -747,7 +757,9 @@ describe("refreshExpiredAssetImages", () => {
     expect(result).toHaveLength(3);
     expect(result[0].mainImage).toBe("https://new-signed-url.com");
     expect(result[1]).toBe(fresh);
+    // The repeated asset was signed once, so both of its rows carry one URL.
     expect(result[2].mainImage).toBe("https://new-signed-url.com");
+    expect(mockCreateSignedUrl).toHaveBeenCalledTimes(1);
   });
 
   it("returns assets unchanged when none are expired", async () => {

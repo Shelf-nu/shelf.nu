@@ -41,9 +41,17 @@ vitest.mock("react-router", async () => {
   };
 });
 
-// why: external auth — we don't want to hit Supabase in tests
+// why: external auth — we don't want to hit Supabase in tests. The pure shape
+// helpers are provided in its place, and the photo re-sign step only shapes,
+// since it has its own tests.
 vitest.mock("~/modules/api/mobile-auth.server", () => {
-  const shapeAsset = (asset: any) => {
+  /** The pivot fields the shaper flattens; every other field passes through. */
+  type ShapeableAsset = Record<string, unknown> & {
+    assetKits: Array<{ kit: { id: string } | null }>;
+    assetLocations: Array<{ location: unknown }>;
+    custody: unknown[];
+  };
+  const shapeAsset = (asset: ShapeableAsset) => {
     const { assetKits, assetLocations, custody, ...rest } = asset;
     const kit = assetKits[0]?.kit ?? null;
     return {
@@ -71,11 +79,9 @@ vitest.mock("~/modules/api/mobile-auth.server", () => {
     // pure shape helpers must be provided too. These mirror the real ones (flatten
     // the quantities pivot shape into the flat shape the companion expects).
     shapeMobileAssetResponse: shapeAsset,
-    // why: the resolver sends a scanned asset through the shared photo re-sign
-    // step before shaping. That step has its own tests, so here it only shapes.
-    resignAndShapeMobileAsset: (asset: any) =>
+    resignAndShapeMobileAsset: (asset: ShapeableAsset) =>
       Promise.resolve(shapeAsset(asset)),
-    shapeMobileKitResponse: (kit: any) => kit ?? null,
+    shapeMobileKitResponse: (kit: unknown) => kit ?? null,
   };
 });
 

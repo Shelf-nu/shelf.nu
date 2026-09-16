@@ -102,6 +102,18 @@ const organizationFindUnique = db.organization.findUnique as unknown as Mock<
   () => Promise<{ barcodesEnabled: boolean } | null>
 >;
 
+/** The QR path's two reads, narrowed the same way: the code row and the membership. */
+const qrRowFindUnique = db.qr.findUnique as unknown as Mock<
+  () => Promise<{
+    id: string;
+    assetId: string | null;
+    kitId: string | null;
+    organizationId: string | null;
+  } | null>
+>;
+const membershipRowFindUnique = db.userOrganization
+  .findUnique as unknown as Mock<() => Promise<{ id: string } | null>>;
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -390,14 +402,13 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
  */
 describe("resolveMobileScannedCode photo re-sign on the QR path", () => {
   it("hands the asset to the shared step with the workspace that owns the code", async () => {
-    // why: casts — narrow selected shapes, not full Prisma rows.
-    qrFindUnique.mockResolvedValue({
+    qrRowFindUnique.mockResolvedValue({
       id: "qr-sibling",
       assetId: "asset-7",
       kitId: null,
       organizationId: "org-sibling",
-    } as any);
-    membershipFindUnique.mockResolvedValue({ id: "membership-2" } as any);
+    });
+    membershipRowFindUnique.mockResolvedValue({ id: "membership-2" });
     assetFindFirst.mockResolvedValue({ id: "asset-7", title: "Asset seven" });
 
     const result = await resolveMobileScannedCode(resolveArgs("qr-sibling"));

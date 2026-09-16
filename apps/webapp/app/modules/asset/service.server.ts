@@ -5647,6 +5647,9 @@ export async function refreshExpiredAssetImages(
   options: AssetImageResignBounds & { organizationId?: string } = {}
 ): Promise<Array<ResignableAssetImageRow & { organizationId?: string }>> {
   const now = new Date();
+  // A repeated id is the same asset: it is signed once, and that result applies
+  // to every row carrying the id.
+  const seenIds = new Set<string>();
   const expiredAssets = assets
     .filter(
       (a) =>
@@ -5654,6 +5657,11 @@ export async function refreshExpiredAssetImages(
         a.mainImageExpiration &&
         new Date(a.mainImageExpiration) < now
     )
+    .filter((a) => {
+      if (seenIds.has(a.id)) return false;
+      seenIds.add(a.id);
+      return true;
+    })
     .slice(0, options.maxRefreshes)
     .flatMap((a) => {
       const ownerOrganizationId = a.organizationId ?? options.organizationId;
