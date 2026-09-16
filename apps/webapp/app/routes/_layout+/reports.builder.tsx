@@ -3,8 +3,9 @@
  *
  * Reads the spec (data set, group by, measure) and the shared report filters
  * from the URL, runs the grouped query, and renders KPIs, chart and table.
- * Everything is URL state, so a built report is a link and the CSV export
- * reads the same query string.
+ * Everything is URL state, so a built report is a link, the CSV export reads
+ * the same query string, and a saved report is that string kept under a name
+ * for the whole workspace (see the action below).
  *
  * Gate: the `reports` permission (Owners and Admins) plus the workspace's
  * Advanced Reports flag. A workspace without the add-on gets the locked card
@@ -15,14 +16,20 @@
  * @see {@link file://./reports.builder.export.$fileName[.csv].tsx}
  */
 
-import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "react-router";
 import { data, useLoaderData, useNavigation } from "react-router";
+import { z } from "zod";
 
 import Header from "~/components/layout/header";
 import { ReportFilterBar, ReportFooter } from "~/components/reports";
 import { AdvancedReportsLocked } from "~/components/reports/builder/advanced-reports-locked";
 import { BuilderBar } from "~/components/reports/builder/builder-bar";
 import { BuilderResults } from "~/components/reports/builder/builder-results";
+import { SavedReportsMenu } from "~/components/reports/builder/saved-reports-menu";
 import { clearReportFilterParams } from "~/components/reports/filters/search-param-utils";
 import { useCsvExport } from "~/components/reports/use-csv-export";
 import { Button } from "~/components/shared/button";
@@ -38,6 +45,17 @@ import {
   resolveReportFilters,
 } from "~/modules/reports/filters.server";
 import {
+  DeleteSavedReportFormSchema,
+  RenameSavedReportFormSchema,
+  SaveReportFormSchema,
+} from "~/modules/reports/saved/schemas";
+import {
+  createSavedReport,
+  deleteSavedReport,
+  listSavedReports,
+  renameSavedReport,
+} from "~/modules/reports/saved/service.server";
+import {
   isTimeframePreset,
   resolveTimeframe,
 } from "~/modules/reports/timeframe";
@@ -45,6 +63,9 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { SUPPORT_EMAIL } from "~/utils/env";
+import { makeShelfError } from "~/utils/error";
+import { error, parseData, payload } from "~/utils/http.server";
+import { validateAdvancedReportsEnabled } from "~/utils/permissions/advanced-reports.validator.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -108,15 +129,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const customFrom = url.searchParams.get("from");
   const customTo = url.searchParams.get("to");
 
-  const [formatPrefs, reportFilters, filterOptions] = await Promise.all([
-    resolveUserFormatPrefsById(userId, getClientHint(request)),
-    resolveReportFilters({
-      organizationId,
-      searchParams: url.searchParams,
-      reportDef: BUILDER_REPORT_DEF,
-    }),
-    loadReportFilterOptions({ organizationId, reportDef: BUILDER_REPORT_DEF }),
-  ]);
+  const [formatPrefs, reportFilters, filterOptions, savedReports] =
+    await Promise.all([
+      resolveUserFormatPrefsById(userId, getClientHint(request)),
+      resolveReportFilters({
+        organizationId,
+        searchParams: url.searchParams,
+        reportDef: BUILDER_REPORT_DEF,
+      }),
+      loadReportFilterOptions({
+        organizationId,
+        reportDef: BUILDER_REPORT_DEF,
+      }),
+      listSavedReports({ organizationId }),
+    ]);
 
   const timeframe = resolveTimeframe(
     timeframePreset,
@@ -161,6 +187,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     computedMs: result.computedMs,
     timeframe,
     currency: currentOrganization.currency,
+    savedReports: savedReports.map(({ id, name, query }) => ({
+      id,
+      name,
+      query,
+    })),
     // Filter bar inputs; the paged pick-lists are spread onto the top level
     // because the shared `DynamicDropdown` reads them from loader data by key.
     ...filterOptions,
@@ -168,6 +199,68 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     filterConfigs: BUILDER_REPORT_DEF.filters,
     activeFilters: reportFilters.active,
   });
+}
+
+const IntentSchema = z.enum(["save-report", "rename-report", "delete-report"]);
+
+/**
+ * Saves, renames or deletes a saved report of the workspace.
+ *
+ * Every intent needs `reports: read` (Owners and Admins) and the workspace's
+ * Advanced Reports flag; saved reports are shared, so no intent checks who
+ * created the entry.
+ *
+ * @returns The affected record, or the failure with its status
+ */
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  try {
+    const formData = await request.formData();
+    const { intent } = parseData(formData, z.object({ intent: IntentSchema }));
+
+    const { organizationId, currentOrganization } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.reports,
+      action: PermissionAction.read,
+    });
+    validateAdvancedReportsEnabled(currentOrganization, { userId, intent });
+
+    switch (intent) {
+      case "save-report": {
+        const { name, query } = parseData(formData, SaveReportFormSchema);
+        const savedReport = await createSavedReport({
+          organizationId,
+          createdById: userId,
+          name,
+          query,
+        });
+        return payload({ savedReport });
+      }
+      case "rename-report": {
+        const { reportId, name } = parseData(
+          formData,
+          RenameSavedReportFormSchema
+        );
+        const savedReport = await renameSavedReport({
+          id: reportId,
+          organizationId,
+          name,
+        });
+        return payload({ savedReport });
+      }
+      case "delete-report": {
+        const { reportId } = parseData(formData, DeleteSavedReportFormSchema);
+        await deleteSavedReport({ id: reportId, organizationId });
+        return payload({ deleted: reportId });
+      }
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return data(error(reason), { status: reason.status });
+  }
 }
 
 /** The builder page: locked card, or bar + filters + results. */
@@ -208,6 +301,7 @@ export default function ReportBuilderPage() {
     computedMs,
     timeframe,
     currency,
+    savedReports,
     filterOptions,
     filterConfigs,
     activeFilters,
@@ -219,6 +313,7 @@ export default function ReportBuilderPage() {
   return (
     <>
       <Header>
+        <SavedReportsMenu savedReports={savedReports} disabled={isLoading} />
         <Button
           type="button"
           variant="secondary"
