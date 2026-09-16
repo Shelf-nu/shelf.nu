@@ -62,14 +62,16 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
   };
 });
 
-// why: booking settings and permission checks feed the action flags, a
-// different contract from the photos under test — stub them to fixed values.
+// why: booking settings feed the check-in and check-out action flags, a
+// different contract from the photos under test, so they stub to fixed values.
 vi.mock("~/modules/booking-settings/service.server", () => ({
   getBookingSettingsForOrganization: vi.fn().mockResolvedValue({
     requireExplicitCheckinForAdmin: false,
     requireExplicitCheckinForSelfService: false,
   }),
 }));
+// why: resolving booking permissions for real needs the permission tables,
+// and the flags they drive are not under test, so every check answers false.
 vi.mock("~/utils/permissions/permission.validator.server", () => ({
   hasPermission: vi.fn().mockResolvedValue(false),
 }));

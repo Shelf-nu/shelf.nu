@@ -1,3 +1,17 @@
+/**
+ * Mobile API route: asset list.
+ *
+ * Serves the companion's Assets tab and its My Custody view: a paginated,
+ * searchable, status-filterable asset list in the flat legacy shape the app
+ * reads. Org-scoped behind the mobile bearer auth, with custody holders
+ * filtered per viewer the same way the asset detail route filters them. Each
+ * asset photo whose signed URL has lapsed is re-signed before the page is
+ * sent, because the companion draws image URLs exactly as it receives them.
+ * See the loader docblock for the request contract.
+ *
+ * @see {@link file://./assets.$assetId.ts} the detail twin of this route
+ * @see {@link file://./../../../modules/api/mobile-asset-images.server.ts}
+ */
 import { AssetStatus, type Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
@@ -232,9 +246,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     );
 
     // Flatten kit/location/custody pivots into the legacy flat shape via the
-    // shared helper, then re-attach `mainImageExpiration` — a list-only extra
-    // the helper's return type doesn't carry but the companion consumes to
-    // drive its lazy refresh-image flow.
+    // shared helper, then re-attach `mainImageExpiration`, which the list
+    // response carries but the helper's return type does not. The URL it
+    // describes has already been re-signed above if it had lapsed.
     //
     // `thumbnailImage` is deliberately NOT stripped and re-attached any more:
     // the helper resolves the model-image cascade, so the raw column would

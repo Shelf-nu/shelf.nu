@@ -1,3 +1,15 @@
+/**
+ * Mobile API route: asset detail.
+ *
+ * Serves the companion's asset screen: status, category, location, custody and
+ * kit memberships, plus the detail-only fields that screen renders. Org-scoped
+ * behind the mobile bearer auth, with custody holders filtered per viewer. A
+ * lapsed asset photo URL is re-signed before the response is shaped, because
+ * the companion draws image URLs exactly as it receives them.
+ *
+ * @see {@link file://./assets.ts} the list twin of this route
+ * @see {@link file://./../../../modules/api/mobile-asset-images.server.ts}
+ */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
@@ -28,9 +40,9 @@ import { getParams } from "~/utils/http.server";
  *
  * Returns full asset details including category, location, custody, and kit.
  *
- * Image URLs are returned as-stored along with `mainImageExpiration`. Mobile
- * clients should call `/api/mobile/asset/refresh-image/:assetId` lazily when
- * they detect a near-expired URL — keeps this loader read-only.
+ * A lapsed asset photo URL is re-signed, and the new URL written back to the
+ * asset, before the response is shaped. `mainImageExpiration` is still sent
+ * alongside it.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {

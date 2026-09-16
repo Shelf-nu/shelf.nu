@@ -1,3 +1,17 @@
+/**
+ * Mobile API route: booking detail.
+ *
+ * Serves the companion's booking screen: the booking, its assets collapsed to
+ * one row per asset with their kit slices, the kits those rows group under,
+ * model reservations, check-in state and the action flags the screen needs.
+ * Org-scoped behind the mobile bearer auth, with drafts private to their
+ * creator and a custody gate on the loaded row. Asset photos and kit images
+ * whose signed URLs have lapsed are re-signed before the response is sent,
+ * because the companion draws image URLs exactly as it receives them.
+ *
+ * @see {@link file://./../../../modules/api/mobile-asset-images.server.ts}
+ * @see {@link file://./../../../modules/kit/service.server.ts} refreshExpiredKitImages
+ */
 import {
   AssetStatus,
   AssetType,
@@ -45,8 +59,8 @@ import { hasPermission } from "~/utils/permissions/permission.validator.server";
  * GET /api/mobile/bookings/:bookingId
  *
  * Returns full booking detail with assets, custodian, and check-in status.
- * A kit image whose signed URL has lapsed is re-signed, and the new URL
- * written back to the kit, before it is sent.
+ * An asset photo or kit image whose signed URL has lapsed is re-signed, and
+ * the new URL written back, before it is sent.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {

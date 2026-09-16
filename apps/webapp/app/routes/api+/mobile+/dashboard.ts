@@ -1,3 +1,14 @@
+/**
+ * Mobile API route: home dashboard.
+ *
+ * Serves the companion's Home screen in one request: KPI counts, assets by
+ * status, the newest assets, upcoming, active and overdue bookings, and active
+ * audits. Org-scoped behind the mobile bearer auth. The newest assets' photos
+ * are re-signed when their signed URLs have lapsed, because the companion draws
+ * image URLs exactly as it receives them.
+ *
+ * @see {@link file://./../../../modules/api/mobile-asset-images.server.ts}
+ */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { refreshExpiredMobileAssetImages } from "~/modules/api/mobile-asset-images.server";
