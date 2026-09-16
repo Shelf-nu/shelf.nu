@@ -1,6 +1,5 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
-import { db } from "~/database/db.server";
 import {
   getMobileUserContext,
   requireMobileAuth,
@@ -9,6 +8,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
+import { createWhileAuditAcceptsComments } from "~/modules/audit/service.server";
 import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -114,26 +114,32 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
     });
 
-    const note = await db.auditNote.create({
-      data: {
-        content,
-        auditSessionId,
-        auditAssetId,
-        userId: user.id,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            displayName: true,
-            email: true,
-            profilePicture: true,
+    // Created only while the audit still accepts comments, checked on the
+    // locked row so a completion cannot slip in between.
+    const note = await createWhileAuditAcceptsComments(
+      { auditSessionId, organizationId },
+      (tx) =>
+        tx.auditNote.create({
+          data: {
+            content,
+            auditSessionId,
+            auditAssetId,
+            userId: user.id,
           },
-        },
-      },
-    });
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                displayName: true,
+                email: true,
+                profilePicture: true,
+              },
+            },
+          },
+        })
+    );
 
     return data({ note });
   } catch (cause) {
