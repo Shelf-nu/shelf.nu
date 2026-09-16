@@ -130,6 +130,7 @@ model User {
   customTierLimit CustomTierLimit?
 
   assetFilterPresets AssetFilterPreset[]
+  savedReports       SavedReport[]
   assetModels        AssetModel[]
   consumptionLogs    ConsumptionLog[]
 
@@ -348,6 +349,26 @@ model AssetFilterPreset {
 
   @@unique([organizationId, ownerId, name], map: "asset_filter_presets_owner_name_unique")
   @@index([organizationId, ownerId], map: "asset_filter_presets_owner_lookup_idx")
+}
+
+/// A report built with the Advanced Reports builder and kept for the whole
+/// workspace. `query` is the builder page's URL query string (data set,
+/// grouping, measure, filters, timeframe); opening the report navigates to
+/// `/reports/builder?<query>`, so the URL grammar validates it on read.
+model SavedReport {
+  id             String   @id @default(cuid())
+  organizationId String
+  createdById    String
+  name           String
+  query          String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name], map: "saved_reports_org_name_unique")
+  @@index([organizationId], map: "saved_reports_org_idx")
 }
 
 model AssetIndexSettings {
@@ -996,6 +1017,7 @@ model Organization {
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
   assetFilterPresets AssetFilterPreset[]
+  savedReports       SavedReport[]
 
   auditSessions      AuditSession[]
   auditImages        AuditImage[]

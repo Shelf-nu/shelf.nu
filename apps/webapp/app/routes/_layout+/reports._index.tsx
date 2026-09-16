@@ -16,12 +16,14 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import Header from "~/components/layout/header";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 
+import { SavedReportCard } from "~/components/reports/builder/saved-report-card";
 import { BUILDER_REPORT_DEF } from "~/modules/reports/builder/spec";
 import {
   REPORTS,
   REPORT_CATEGORIES,
   getReportsByCategory,
 } from "~/modules/reports/registry";
+import { listSavedReports } from "~/modules/reports/saved/service.server";
 import type { ReportDefinition } from "~/modules/reports/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -31,6 +33,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { canUseAdvancedReports } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header?.title || "Reports") },
@@ -40,7 +43,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { currentOrganization } = await requirePermission({
+  const { organizationId, currentOrganization } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.reports,
@@ -48,6 +51,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   });
 
   const reportsByCategory = getReportsByCategory();
+
+  // The builder card and the saved reports appear only for workspaces with
+  // the add-on; the builder page itself explains the add-on to anyone else.
+  const builderEnabled = canUseAdvancedReports(currentOrganization);
+  const savedReports = builderEnabled
+    ? (await listSavedReports({ organizationId })).map(
+        ({ id, name, query, updatedAt, createdBy }) => ({
+          id,
+          name,
+          query,
+          updatedAt,
+          savedBy: resolveUserDisplayName(createdBy),
+        })
+      )
+    : [];
 
   // Standard header object for app Header component
   const header = {
@@ -60,14 +78,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     reports: REPORTS,
     reportsByCategory,
     categories: REPORT_CATEGORIES,
-    // The builder card appears only for workspaces with the add-on; the
-    // page itself still explains the add-on to anyone who lands on it.
-    builderEnabled: canUseAdvancedReports(currentOrganization),
+    builderEnabled,
+    savedReports,
   });
 }
 
 export default function ReportsIndex() {
-  const { reportsByCategory, categories, builderEnabled } =
+  const { reportsByCategory, categories, builderEnabled, savedReports } =
     useLoaderData<typeof loader>();
 
   // Filter to only show categories with reports
@@ -99,6 +116,25 @@ export default function ReportsIndex() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 <ReportCard report={BUILDER_REPORT_DEF} />
+              </div>
+            </section>
+          ) : null}
+
+          {builderEnabled && savedReports.length > 0 ? (
+            <section>
+              <div className="mb-3">
+                <h3 className="text-sm font-medium text-gray-900">
+                  Your reports
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Reports saved in this workspace. Open one to run it with
+                  today&apos;s data.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {savedReports.map((report) => (
+                  <SavedReportCard key={report.id} report={report} />
+                ))}
               </div>
             </section>
           ) : null}
