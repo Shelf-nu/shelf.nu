@@ -1399,6 +1399,8 @@ export default function AddAssetsToNewBooking() {
     seedFormSelection(bookingAssets);
   }
 
+  const modelIdByAssetId = useRef(new Map<string, string>());
+
   /**
    * Set disabled items for assets.
    * QUANTITY_TRACKED assets are never disabled — they support partial
@@ -1414,11 +1416,23 @@ export default function AddAssetsToNewBooking() {
    * the server counts them on the booking's side, not as an addition.
    */
   useEffect(() => {
+    // Which model each asset the picker has shown belongs to, kept across
+    // pages and searches because the selection is: a unit selected under one
+    // search still holds a slot of its model after the search is cleared.
+    // Built from `items`, the typed loader payload — a selected row is
+    // `ListItemData`, whose index signature types every field access as
+    // `any`, so reading the model off the selection would go unchecked.
+    // Entries are a plain id-to-model fact, so they never need clearing;
+    // stale ones are inert because only selected ids are ever counted.
+    for (const item of items) {
+      if (item.assetModelId) {
+        modelIdByAssetId.current.set(item.id, item.assetModelId);
+      }
+    }
+
     const blockedByHeadroom = assetIdsBlockedByModelHeadroom({
-      // `items` is the typed loader payload; a selected row is `ListItemData`,
-      // whose index signature types every field access as `any`, so the model
-      // is resolved from the page rows rather than from the selection.
       rows: items,
+      modelIdByAssetId: modelIdByAssetId.current,
       selectedAssetIds: new Set(selectedBulkItems.map((asset) => asset.id)),
       alreadyOnBookingIds: new Set(bookingAssets.map((asset) => asset.id)),
       modelHeadroom,

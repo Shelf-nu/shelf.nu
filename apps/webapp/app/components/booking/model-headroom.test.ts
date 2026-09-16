@@ -12,15 +12,18 @@ import { describe, expect, it } from "vitest";
 
 import { assetIdsBlockedByModelHeadroom } from "./model-headroom";
 
-const rows = [
-  { id: "a1", assetModelId: "m1" },
-  { id: "a2", assetModelId: "m1" },
-  { id: "a3", assetModelId: "m1" },
-  { id: "b1", assetModelId: "m2" },
-  { id: "loose", assetModelId: null },
-];
+/** Every asset the picker has rendered so far, across pages and searches. */
+const MODEL_BY_ASSET_ID = new Map([
+  ["a1", "m1"],
+  ["a2", "m1"],
+  ["a3", "m1"],
+  ["b1", "m2"],
+]);
+
+const allRows = ["a1", "a2", "a3", "b1", "loose"].map((id) => ({ id }));
 
 function blocked({
+  rows = allRows,
   selected = [] as string[],
   onBooking = [] as string[],
   headroom = {} as Record<string, number>,
@@ -28,6 +31,7 @@ function blocked({
   return [
     ...assetIdsBlockedByModelHeadroom({
       rows,
+      modelIdByAssetId: MODEL_BY_ASSET_ID,
       selectedAssetIds: new Set(selected),
       alreadyOnBookingIds: new Set(onBooking),
       modelHeadroom: headroom,
@@ -84,5 +88,35 @@ describe("assetIdsBlockedByModelHeadroom", () => {
 
   it("blocks the whole model when it has no room at all", () => {
     expect(blocked({ headroom: { m1: 0 } })).toEqual(["a1", "a2", "a3"]);
+  });
+
+  it("counts a unit selected on a page that is no longer on screen", () => {
+    // Selection survives paging and searching, so a unit of this model can be
+    // holding one of its slots from a page the picker is not showing. Judging
+    // only the visible rows would re-enable a model the user already filled.
+    expect(
+      blocked({
+        rows: [{ id: "a2" }, { id: "a3" }],
+        selected: ["a1"],
+        headroom: { m1: 1 },
+      })
+    ).toEqual(["a2", "a3"]);
+  });
+
+  it("ignores an off-screen selection the booking already holds", () => {
+    expect(
+      blocked({
+        rows: [{ id: "a2" }, { id: "a3" }],
+        selected: ["a1"],
+        onBooking: ["a1"],
+        headroom: { m1: 1 },
+      })
+    ).toEqual([]);
+  });
+
+  it("ignores a selected id it has never seen a model for", () => {
+    // A row the picker has not rendered cannot be selected — select-all is
+    // disabled on this list — so an unresolvable id is not a unit to count.
+    expect(blocked({ selected: ["ghost"], headroom: { m1: 1 } })).toEqual([]);
   });
 });
