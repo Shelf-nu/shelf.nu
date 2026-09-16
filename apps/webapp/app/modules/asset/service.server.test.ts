@@ -737,8 +737,9 @@ describe("refreshExpiredAssetImages", () => {
       id: "asset-2",
       mainImageExpiration: new Date(Date.now() + 60_000),
     });
-    // A second signing call would hand out a different URL. A counter rather
-    // than queued once-values, so nothing unused leaks into the next test.
+    // why: a second signing call hands out a different URL, so signing the
+    // repeated id twice would show in the result. A counter rather than queued
+    // once-values keeps unused values from leaking into the next test.
     let signingCalls = 0;
     mockCreateSignedUrl.mockImplementation(() =>
       Promise.resolve(
