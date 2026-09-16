@@ -423,14 +423,18 @@ export function AdvancedIndexColumn({
                     inCustody: item.inCustody ?? 0,
                     inKits: item.inKits ?? 0,
                     checkedOut: item.checkedOut ?? 0,
-                    largestUpcomingBooking: item.largestUpcomingBooking ?? 0,
+                    peakBooked: item.peakBooked ?? 0,
                     minQuantity: item.minQuantity,
                     unitOfMeasure: item.unitOfMeasure,
-                    // Named culprit for a SHORT row, so the hover can link to
-                    // the booking instead of leaving the reader to find it.
+                    // The biggest booking in the peak, so a SHORT hover can
+                    // link somewhere instead of leaving the reader to search.
                     topBooking:
                       item.topBookingId && item.topBookingName
-                        ? { id: item.topBookingId, name: item.topBookingName }
+                        ? {
+                            id: item.topBookingId,
+                            name: item.topBookingName,
+                            units: item.topBookingUnits ?? 0,
+                          }
                         : null,
                     assetId: item.id,
                   }
@@ -495,10 +499,9 @@ function ReservedCell({ item }: { item: AdvancedIndexAsset }) {
     reserved: item.reserved,
     quantity: isQuantityTracked(item) ? item.quantity ?? null : null,
     stockStatus: item.stockStatus ?? null,
-    largestUpcomingBooking: item.largestUpcomingBooking ?? 0,
+    peakBooked: item.peakBooked ?? 0,
     inCustody: item.inCustody ?? 0,
     inKits: item.inKits ?? 0,
-    checkedOut: item.checkedOut ?? 0,
     unitOfMeasure: item.unitOfMeasure,
   });
 
@@ -580,12 +583,21 @@ function StatusColumn({
     if (!asset || !isQuantityTracked(asset) || asset.available == null) {
       return null;
     }
+    /**
+     * The `_all` figures on purpose. The badge picks a WORD, and for a member
+     * of a kit that is in custody or out on a booking the right word is still
+     * "In custody" / "Checked out" — those units left with the kit. The
+     * arithmetic figures (`inCustody`, `checkedOut`) exclude kit-driven units
+     * so `Free now` counts them once; using them here would label such a row
+     * "Available" beside a `Free now` of 0. This mirrors what the asset page
+     * feeds `getQuantityData`, which reads every custody and booking row.
+     */
     return {
       total: asset.quantity ?? 0,
-      inCustody: asset.inCustody ?? 0,
+      inCustody: asset.inCustodyAll ?? asset.inCustody ?? 0,
       inKits: asset.inKits ?? 0,
-      reserved: asset.reserved ?? 0,
-      checkedOut: asset.checkedOut ?? 0,
+      reserved: asset.reservedAll ?? asset.reserved ?? 0,
+      checkedOut: asset.checkedOutAll ?? asset.checkedOut ?? 0,
       /**
        * **Not the `Free now` figure.** `available` feeds only the label choice
        * in `getQuantityBadgeLabelAndColor` ("Reserved" vs "Partially
@@ -601,9 +613,9 @@ function StatusColumn({
        */
       available:
         (asset.quantity ?? 0) -
-        (asset.inCustody ?? 0) -
-        (asset.reserved ?? 0) -
-        (asset.checkedOut ?? 0),
+        (asset.inCustodyAll ?? asset.inCustody ?? 0) -
+        (asset.reservedAll ?? asset.reserved ?? 0) -
+        (asset.checkedOutAll ?? asset.checkedOut ?? 0),
       /**
        * The DISPLAY figure, and the server's own, so the tooltip footer, the
        * `Free now` column and the `Stock status` pill are three renderings of

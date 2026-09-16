@@ -48,6 +48,7 @@ import {
   lowStockRecoveredText,
 } from "~/emails/low-stock-recovered";
 import { sendEmail } from "~/emails/mail.server";
+import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-out.server";
 import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
@@ -286,12 +287,33 @@ async function runLowStockCheck({
     return;
   }
 
-  /** Compute available = total - inCustody */
-  const custodySum = await db.custody.aggregate({
-    where: { assetId },
-    _sum: { quantity: true },
-  });
-  const available = (asset.quantity ?? 0) - (custodySum._sum.quantity ?? 0);
+  /**
+   * Free now, measured the way `getAssetAvailability` measures it: direct
+   * custody only (a kit's inherited custody rows sit inside the kit figure),
+   * units earmarked to kits, and standalone units that have actually left on
+   * a booking. The `Stock status` column and the "Low stock only" filter read
+   * the same three terms, so this alert fires exactly when they show
+   * Running low — never for a row they call Enough, and never silent on a row
+   * they flag.
+   */
+  const [custodySum, kitSum, checkedOut] = await Promise.all([
+    db.custody.aggregate({
+      where: { assetId, kitCustodyId: null },
+      _sum: { quantity: true },
+    }),
+    db.assetKit.aggregate({
+      where: { assetId, organizationId },
+      _sum: { quantity: true },
+    }),
+    computeCheckedOutBreakdownForAsset(db, assetId, organizationId),
+  ]);
+  const available = Math.max(
+    0,
+    (asset.quantity ?? 0) -
+      (custodySum._sum.quantity ?? 0) -
+      (kitSum._sum.quantity ?? 0) -
+      checkedOut.standalone
+  );
 
   /**
    * PRESERVED predicate: low iff available is at or below the threshold.

@@ -10,6 +10,7 @@ import {
   generateCustomFieldSelect,
   generateWhereClause,
   parseSortingOptions,
+  POOL_AGGREGATE_JOIN,
 } from "./query.server";
 
 // why: mocking location descendants to avoid database queries during tests
@@ -1344,6 +1345,7 @@ describe("generateWhereClause - lowStockOnly", () => {
     const sql = getSqlString(
       generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
     );
+    expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
     expect(sql).toContain(`a."minQuantity" IS NOT NULL`);
     // Compares AVAILABLE against the threshold, via the shared pool expression.
     expect(sql).toContain(`pool.in_custody`);
@@ -1362,6 +1364,57 @@ describe("generateWhereClause - lowStockOnly", () => {
       generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
     );
     expect(sql).not.toContain(`a."quantity" <= a."minQuantity"`);
+  });
+});
+
+describe("POOL_AGGREGATE_JOIN — the SQL twin of getAssetAvailability", () => {
+  const sql = POOL_AGGREGATE_JOIN.strings.join("?");
+
+  it("counts direct custody only, leaving kit-inherited rows to in_kits", () => {
+    // A kit in custody writes Custody rows tagged kitCustodyId for its members;
+    // those units are already in AssetKit.quantity. Summing both painted every
+    // member of a kit in custody as None free.
+    expect(sql).toContain(`cu_q."kitCustodyId" IS NULL`);
+  });
+
+  it("keeps kit-driven booking slices out of every booking figure", () => {
+    // A booked kit writes BookingAsset rows tagged assetKitId for its members.
+    // Reserved, checked-out, the peak and the top booking all read standalone
+    // slices only; a member of a reserved kit read Short before this.
+    expect(sql).toContain(`(ba."assetKitId" IS NULL) AS standalone`);
+    expect(sql).toContain(
+      `FROM slices WHERE standalone AND status = 'RESERVED'), 0) AS reserved,`
+    );
+    expect(sql).toMatch(
+      /FROM slices WHERE standalone AND ahead AND remaining > 0/
+    );
+  });
+
+  it("measures checked-out units as dispatched, not booked", () => {
+    expect(sql).toContain(`"checkedOutQuantity" > 0`);
+    expect(sql).toContain(
+      `WHEN a.status = 'CHECKED_OUT' AND status IN ('ONGOING', 'OVERDUE') THEN quantity`
+    );
+  });
+
+  it("nets the ledger against what a booking still owes", () => {
+    expect(sql).toContain(
+      `cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')`
+    );
+    expect(sql).toContain(`GREATEST(quantity - logged, 0) AS remaining`);
+  });
+
+  it("sweeps bookings as intervals for the peak, releases before claims at a tie", () => {
+    // peakConcurrent in SQL: +qty at start, -qty at end, running sum ordered by
+    // (t, delta) so a booking ending exactly when another starts never overlaps.
+    expect(sql).toContain(
+      `SUM(delta) OVER (ORDER BY t, delta ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`
+    );
+    expect(sql).toContain(`GREATEST(COALESCE(from_at, now()), now()) AS t`);
+    expect(sql).toContain(
+      `CASE WHEN bk.status = 'OVERDUE' THEN 'infinity'::timestamptz ELSE bk."to" END AS end_at`
+    );
+    expect(sql).not.toContain("largest_booking");
   });
 });
 

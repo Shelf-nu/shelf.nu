@@ -90,7 +90,7 @@ export function generateWhereClause(
     // dropped the most urgent rows from a toggle whose own label reads "at or
     // below reorder threshold". Zero is at or below any threshold, and the
     // alert emails about it, so the toggle must find it.
-    whereClause = Prisma.sql`${whereClause} AND a."minQuantity" IS NOT NULL AND ${POOL_AVAILABLE_EXPR} <= a."minQuantity"`;
+    whereClause = Prisma.sql`${whereClause} AND a."type" = 'QUANTITY_TRACKED' AND a."minQuantity" IS NOT NULL AND ${POOL_AVAILABLE_EXPR} <= a."minQuantity"`;
   }
 
   // Add asset IDs filter if provided
@@ -2244,12 +2244,16 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       -- the WHERE clause and ORDER BY can reference the SAME values by alias —
       -- a filter cannot silently disagree with the column it filters.
       pool.in_kits AS "assetInKits",
-      pool.largest_booking AS "assetLargestUpcomingBooking",
+      pool.peak_booked AS "assetPeakBooked",
       pool.next_reserved_from AS "assetNextReservedFrom",
       pool.top_booking_id AS "assetTopBookingId",
       pool.top_booking_name AS "assetTopBookingName",
+      pool.top_booking_units AS "assetTopBookingUnits",
       pool.checked_out AS "assetCheckedOut",
+      pool.checked_out_all AS "assetCheckedOutAll",
       pool.in_custody AS "assetInCustodyUnits",
+      pool.in_custody_all AS "assetInCustodyAll",
+      pool.reserved_all AS "assetReservedAll",
       -- Derived here, not in the outer projection, so there is exactly ONE
       -- definition of each and the filter/sort reference the same expressions.
       ${POOL_AVAILABLE_EXPR} AS "assetAvailable",
@@ -2387,7 +2391,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
 /**
  * Quantity-pool aggregates for one asset, as a LATERAL join aliased `pool`.
  *
- * Everything the `Available` / `Reserved` / `Stock status` columns need, and
+ * Everything the `Free now` / `Reserved` / `Stock status` columns need, and
  * everything filtering and sorting on them needs, computed once per asset.
  *
  * A LATERAL rather than inline scalar subqueries in the SELECT list, because a
@@ -2399,11 +2403,71 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
  * kits and on many bookings) — the same hazard the custody_agg LATERAL exists
  * for.
  *
+ * The figures are the SQL twin of `getAssetAvailabilityBatch`
+ * (`modules/asset/availability.server.ts`), the primitive the booking engine
+ * consults. Three of its rules are load-bearing and easy to lose:
+ *
+ * - **Units inside a kit are counted once, as `in_kits`.** A kit in custody
+ *   writes `Custody` rows tagged `kitCustodyId` for its members, and a booked
+ *   kit writes `BookingAsset` rows tagged `assetKitId`. Both describe units
+ *   `in_kits` already holds, so custody counts `kitCustodyId IS NULL` rows only
+ *   and every booking figure counts `assetKitId IS NULL` slices only. The
+ *   `_all` variants exist for the status badge's LABEL ("In custody" is still
+ *   the right word for a member of a kit in custody); they never feed
+ *   arithmetic.
+ * - **What a booking still owes is booked minus ledgered.** `ConsumptionLog`
+ *   rows in the reservation-reducing categories record units that came back or
+ *   were consumed against a booking; `remaining` subtracts them per slice.
+ *   What has actually LEFT is `checkedOutQuantity` minus the same ledger, with
+ *   the legacy all-at-once rule (asset status CHECKED_OUT, no counter) taken
+ *   from `computeCheckedOutBreakdown`.
+ * - **Bookings are intervals, and `peak_booked` is their peak.** The sweep is
+ *   `peakConcurrent` in SQL: +remaining at each booking's start, −remaining at
+ *   its end, running sum ordered by time with releases before claims at a tie,
+ *   maximum taken. Only the future matters, so starts are clamped to `now()`,
+ *   bookings already over are dropped, and an OVERDUE booking never ends.
+ *   `SHORT` compares custody + kits + this peak against the pool, so it fires
+ *   exactly when the booking engine would refuse one more reservation.
+ *
  * All values are 0 for INDIVIDUAL assets, whose `quantity` is NULL; the
  * renderers gate on `type` anyway.
  */
 export const POOL_AGGREGATE_JOIN = Prisma.sql`
   LEFT JOIN LATERAL (
+    WITH active AS (
+      SELECT
+        ba."bookingId",
+        bk.name,
+        bk.status,
+        bk."from" AS from_at,
+        CASE WHEN bk.status = 'OVERDUE' THEN 'infinity'::timestamptz ELSE bk."to" END AS end_at,
+        (ba."assetKitId" IS NULL) AS standalone,
+        ba.quantity,
+        ba."checkedOutQuantity",
+        COALESCE((
+          SELECT SUM(cl.quantity)
+          FROM public."ConsumptionLog" cl
+          WHERE cl."bookingId" = ba."bookingId"
+            AND cl."assetId" = a.id
+            AND cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')
+        ), 0)::int AS logged
+      FROM public."BookingAsset" ba
+      JOIN public."Booking" bk ON bk.id = ba."bookingId"
+      WHERE ba."assetId" = a.id
+        AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
+    ),
+    slices AS (
+      SELECT
+        active.*,
+        GREATEST(quantity - logged, 0) AS remaining,
+        CASE
+          WHEN "checkedOutQuantity" > 0 THEN LEAST(quantity, GREATEST("checkedOutQuantity" - logged, 0))
+          WHEN a.status = 'CHECKED_OUT' AND status IN ('ONGOING', 'OVERDUE') THEN quantity
+          ELSE 0
+        END AS out_now,
+        COALESCE(end_at, 'infinity'::timestamptz) > now() AS ahead
+      FROM active
+    )
     SELECT
       COALESCE((
         SELECT SUM(ak_q.quantity)::int
@@ -2413,60 +2477,42 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
       COALESCE((
         SELECT SUM(cu_q.quantity)::int
         FROM public."Custody" cu_q
-        WHERE cu_q."assetId" = a.id
+        WHERE cu_q."assetId" = a.id AND cu_q."kitCustodyId" IS NULL
       ), 0) AS in_custody,
-      -- Reserved and checked-out share one scan of the booking pivot.
       COALESCE((
-        SELECT SUM(CASE WHEN bk_p.status = 'RESERVED' THEN ba_p.quantity END)::int
-        FROM public."BookingAsset" ba_p
-        JOIN public."Booking" bk_p ON ba_p."bookingId" = bk_p.id
-        WHERE ba_p."assetId" = a.id
-          AND bk_p.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
-      ), 0) AS reserved,
+        SELECT SUM(cu_a.quantity)::int
+        FROM public."Custody" cu_a
+        WHERE cu_a."assetId" = a.id
+      ), 0) AS in_custody_all,
+      COALESCE((SELECT SUM(remaining)::int FROM slices WHERE standalone AND status = 'RESERVED'), 0) AS reserved,
+      COALESCE((SELECT SUM(remaining)::int FROM slices WHERE status = 'RESERVED'), 0) AS reserved_all,
+      COALESCE((SELECT SUM(out_now)::int FROM slices WHERE standalone AND status IN ('ONGOING', 'OVERDUE')), 0) AS checked_out,
+      COALESCE((SELECT SUM(out_now)::int FROM slices WHERE status IN ('ONGOING', 'OVERDUE')), 0) AS checked_out_all,
       COALESCE((
-        SELECT SUM(CASE WHEN bk_p.status IN ('ONGOING', 'OVERDUE') THEN ba_p.quantity END)::int
-        FROM public."BookingAsset" ba_p
-        JOIN public."Booking" bk_p ON ba_p."bookingId" = bk_p.id
-        WHERE ba_p."assetId" = a.id
-          AND bk_p.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
-      ), 0) AS checked_out,
-      -- The LARGEST single upcoming booking, not the sum, AND which booking it
-      -- is. Summing across bookings that never overlap in time double-counts:
-      -- 8 tripods on Monday plus 8 on Friday from a pool of 10 would report
-      -- over-commitment when peak demand is only 8. A lower bound on peak can
-      -- never false-alarm.
-      --
-      -- The id and name come from the SAME grouped scan that produces the
-      -- figure, so naming the culprit costs nothing extra. Without them a
-      -- SHORT row can say "2 short" and nothing else: the user is told they
-      -- have a problem and given no way to find it, which is the difference
-      -- between a diagnosis and a tool.
-      COALESCE(top_booking.units, 0)::int AS largest_booking,
+        SELECT MAX(running)::int FROM (
+          SELECT SUM(delta) OVER (ORDER BY t, delta ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running
+          FROM (
+            SELECT GREATEST(COALESCE(from_at, now()), now()) AS t, remaining AS delta
+            FROM slices WHERE standalone AND ahead AND remaining > 0
+            UNION ALL
+            SELECT COALESCE(end_at, 'infinity'::timestamptz) AS t, -remaining AS delta
+            FROM slices WHERE standalone AND ahead AND remaining > 0
+          ) ev
+        ) sweep
+      ), 0) AS peak_booked,
       top_booking.id AS top_booking_id,
       top_booking.name AS top_booking_name,
-      -- The START of the soonest upcoming booking. ONE scalar, not a list: an
-      -- asset can carry hundreds of future bookings and the index must not pay
-      -- per-booking payload for a hover card. This is the fact that reconciles
-      -- "12 reserved" with "10 free right now" — the units have not left the
-      -- shelf yet, and this says when they will.
+      COALESCE(top_booking.units, 0) AS top_booking_units,
       (
-        SELECT MIN(bk_f.from)
-        FROM public."BookingAsset" ba_f
-        JOIN public."Booking" bk_f ON ba_f."bookingId" = bk_f.id
-        WHERE ba_f."assetId" = a.id AND bk_f.status = 'RESERVED'
+        SELECT MIN(from_at) FROM slices
+        WHERE standalone AND ahead AND status = 'RESERVED' AND remaining > 0
       ) AS next_reserved_from
-    -- A one-row anchor so the nested LATERAL below can be joined. The body was
-    -- previously a FROM-less SELECT of scalar subqueries.
     FROM (SELECT 1) AS anchor
     LEFT JOIN LATERAL (
-      SELECT bk_t.id, bk_t.name, SUM(ba_t.quantity)::int AS units
-      FROM public."BookingAsset" ba_t
-      JOIN public."Booking" bk_t ON ba_t."bookingId" = bk_t.id
-      WHERE ba_t."assetId" = a.id AND bk_t.status = 'RESERVED'
-      GROUP BY bk_t.id, bk_t.name
-      -- Tie-break on the booking id so the same booking is named
-      -- on every render rather than flapping between equals.
-      ORDER BY SUM(ba_t.quantity) DESC, bk_t.id
+      SELECT "bookingId" AS id, name, remaining AS units
+      FROM slices
+      WHERE standalone AND ahead AND status = 'RESERVED' AND remaining > 0
+      ORDER BY remaining DESC, "bookingId"
       LIMIT 1
     ) AS top_booking ON TRUE
   ) pool ON TRUE`;
@@ -2490,7 +2536,7 @@ const POOL_AVAILABLE_EXPR = Prisma.raw(
  */
 const POOL_STOCK_STATUS_EXPR = Prisma.raw(`CASE
     WHEN a.type <> 'QUANTITY_TRACKED' THEN NULL
-    WHEN (pool.in_custody + pool.in_kits + pool.checked_out + pool.largest_booking)
+    WHEN (pool.in_custody + pool.in_kits + pool.peak_booked)
          > COALESCE(a.quantity, 0) THEN 'SHORT'
     WHEN GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0) <= 0
          THEN 'NONE_FREE'
@@ -2501,9 +2547,14 @@ const POOL_STOCK_STATUS_EXPR = Prisma.raw(`CASE
     ELSE 'ENOUGH'
   END`);
 
-/** Units reserved, capped at the pool size (1 for an individually-tracked asset). */
+/**
+ * Units promised to upcoming bookings. A pool counts standalone slices only
+ * (kit slices are its `in_kits` units); an individually-tracked asset has no
+ * kit arithmetic to protect, so it counts every upcoming booking that claims
+ * it, which for a pool of one is simply how many bookings there are.
+ */
 const POOL_RESERVED_EXPR = Prisma.raw(
-  `CASE WHEN a.type = 'INDIVIDUAL' THEN LEAST(pool.reserved, 1) ELSE pool.reserved END`
+  `CASE WHEN a.type = 'INDIVIDUAL' THEN pool.reserved_all ELSE pool.reserved END`
 );
 
 export const assetQueryJoins = Prisma.sql`
@@ -2709,12 +2760,16 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
           'reserved', aq."assetReservedDisplay",
           'stockStatus', aq."assetStockStatus",
           'inCustody', aq."assetInCustodyUnits",
+          'inCustodyAll', aq."assetInCustodyAll",
           'inKits', aq."assetInKits",
           'checkedOut', aq."assetCheckedOut",
-          'largestUpcomingBooking', aq."assetLargestUpcomingBooking",
+          'checkedOutAll', aq."assetCheckedOutAll",
+          'reservedAll', aq."assetReservedAll",
+          'peakBooked', aq."assetPeakBooked",
           'nextReservedFrom', aq."assetNextReservedFrom",
           'topBookingId', aq."assetTopBookingId",
           'topBookingName', aq."assetTopBookingName",
+          'topBookingUnits', aq."assetTopBookingUnits",
           'consumptionType', aq."assetConsumptionType",
           'availableToBook', aq."assetAvailableToBook",
           'kitId', aq."assetKitId",
@@ -3190,7 +3245,7 @@ export function buildAdvancedAssetsQuery({
         })}
         ${assetQueryJoins}
         WHERE a.id = saq."assetId"
-        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."displayName", bu."profilePicture", btm.id, btm.name, am.id, am.name, pool.in_kits, pool.in_custody, pool.reserved, pool.checked_out, pool.largest_booking, pool.next_reserved_from, pool.top_booking_id, pool.top_booking_name
+        GROUP BY a.id, k.id, k.name, k.status, c.id, c.name, c.color, l.id, l."parentId", l.name, custody_agg.custody, kits_agg.kits, locations_agg.locations, b.id, bu.id, bu."firstName", bu."lastName", bu."displayName", bu."profilePicture", btm.id, btm.name, am.id, am.name, pool.in_kits, pool.in_custody, pool.in_custody_all, pool.reserved, pool.reserved_all, pool.checked_out, pool.checked_out_all, pool.peak_booked, pool.next_reserved_from, pool.top_booking_id, pool.top_booking_name, pool.top_booking_units
       ) aq ON TRUE;
     `;
 }

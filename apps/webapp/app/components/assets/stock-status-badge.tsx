@@ -71,28 +71,30 @@ export type StockStatusBreakdown = {
   total: number;
   /** Free to hand over now: total minus custody, kits and checked-out. */
   available: number;
-  /** Units held by custodians. */
+  /** Units held in direct custody (kit-inherited custody sits inside `inKits`). */
   inCustody: number;
-  /** Units earmarked to kits. */
+  /** Units earmarked to kits, whatever the kit is doing. */
   inKits: number;
-  /** Units out on ONGOING/OVERDUE bookings. */
+  /** Standalone units that have actually left on ONGOING/OVERDUE bookings. */
   checkedOut: number;
   /**
-   * The LARGEST single upcoming booking, which is what the `SHORT` verdict is
-   * computed from — not the sum of every upcoming booking.
+   * The most units owed to bookings at any single instant from now on — the
+   * booking engine's peak-concurrency sweep, and what the `SHORT` verdict is
+   * computed from. Not the sum of every upcoming booking, and not the largest
+   * one either.
    */
-  largestUpcomingBooking: number;
+  peakBooked: number;
   /** The reorder point, or `null` when nobody set one. */
   minQuantity: number | null;
   /** Free-text unit label ("pcs", "boxes"), when the asset has one. */
   unitOfMeasure?: string | null;
   /**
-   * The upcoming booking claiming the most units — the one the `SHORT` verdict
-   * is computed from. Present so the hover can NAME it and link to it: telling
-   * someone they are two short without saying which booking is the shortfall
-   * is a diagnosis, not a tool.
+   * The upcoming booking claiming the most units — the biggest part of the
+   * peak. Present so the hover can NAME it and link to it: telling someone
+   * they are two short without saying where to look is a diagnosis, not a
+   * tool.
    */
-  topBooking?: { id: string; name: string } | null;
+  topBooking?: { id: string; name: string; units: number } | null;
   /**
    * This asset's id, so the no-reorder-point hover can link to the form that
    * sets one. Without it that hover says "set a reorder point" and offers no
@@ -176,12 +178,13 @@ function DetailRow({
  * 2. **No claims at all ⇒ no box.** With every claim row dropped the box
  *    degenerated to `Total 200 = Available 200` — the same number twice, with an
  *    `=` implying arithmetic happened. The reason line above already says it.
- * 3. **The upcoming-booking figure gets its own line BELOW the result**, never a
- *    `−` row inside the subtraction. Those units are still on the shelf, so
- *    `Available` deliberately does not subtract them (see the `Available` column
- *    help). But it IS the number a `SHORT` verdict is computed from, so leaving
- *    it out made the box contradict its own headline: "12 units claimed, but you
- *    only own 10" over a box reading `Total 10 = Available 10`.
+ * 3. **The booking peak gets its own line BELOW the result**, never a `−` row
+ *    inside the subtraction. Units promised to a booking that has not started
+ *    are still on the shelf, so `Free now` deliberately does not subtract them
+ *    (see the column help). But the peak IS the number a `SHORT` verdict is
+ *    computed from, so leaving it out made the box contradict its own
+ *    headline: "12 units needed, but you only own 10" over a box reading
+ *    `Total 10 = Free now 10`.
  *
  * @param props.status - The verdict being explained.
  * @param props.breakdown - This row's figures.
@@ -205,7 +208,7 @@ function StockStatusDetail({
     inCustody,
     inKits,
     checkedOut,
-    largestUpcomingBooking,
+    peakBooked,
     minQuantity,
     unitOfMeasure,
     topBooking,
@@ -224,20 +227,17 @@ function StockStatusDetail({
 
   /**
    * The one-line reason, quoting the comparison the verdict actually made.
-   * `SHORT` quotes the largest single booking rather than the reserved total,
-   * because that is the figure `classifyStockStatus` used — so it is read back
-   * through the same helper rather than re-added by hand here.
+   * `SHORT` quotes custody + kits + the booking PEAK rather than the reserved
+   * total, because that is the figure `classifyStockStatus` used — so it is
+   * read back through the same helper rather than re-added by hand here.
    */
   const reason =
     status === "SHORT"
       ? `${withUnit(
-          committedUnits({
-            inCustody,
-            inKits,
-            checkedOut,
-            largestUpcomingBooking,
-          })
-        )} claimed, but you only own ${withUnit(total)}`
+          committedUnits({ inCustody, inKits, peakBooked })
+        )} needed at the busiest point ahead, but you only own ${withUnit(
+          total
+        )}`
       : status === "NONE_FREE"
       ? `Nothing free to hand over, out of ${withUnit(total)} owned`
       : status === "LOW"
@@ -289,15 +289,26 @@ function StockStatusDetail({
         </div>
       ) : null}
 
-      {largestUpcomingBooking > 0 ? (
+      {peakBooked > 0 ? (
         <p className="text-xs text-gray-500">
-          {/* Named when we know it. "Biggest upcoming booking" is accurate and
-              useless — the reader still has to go and find which one. */}
+          {/* The peak is what the verdict judged; the biggest booking is named
+              when we know it, because "a booking" leaves the reader hunting. */}
+          Bookings need up to{" "}
           <span className="font-medium text-gray-700">
-            {topBooking ? topBooking.name : "Biggest upcoming booking"}
+            {withUnit(peakBooked)}
           </span>{" "}
-          asks for {withUnit(largestUpcomingBooking)}. Those units are still on
-          the shelf, so they are not taken off Free now.
+          at once
+          {topBooking ? (
+            <>
+              ; the biggest,{" "}
+              <span className="font-medium text-gray-700">
+                {topBooking.name}
+              </span>
+              , asks for {withUnit(topBooking.units)}
+            </>
+          ) : null}
+          . Units that have not left yet are still on the shelf, so they are not
+          taken off Free now.
         </p>
       ) : null}
 

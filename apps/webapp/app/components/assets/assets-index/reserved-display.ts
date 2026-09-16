@@ -14,10 +14,12 @@
  * row — precisely on the busiest workspaces, where a false alarm is most
  * expensive and hardest to dismiss.
  *
- * Over-commitment is a PER-BOOKING fact, which is why `classifyStockStatus`
- * takes `largestUpcomingBooking` (the largest single booking) rather than the
- * sum. So this defers to the verdict rather than recomputing anything: the
- * cell and the `Stock status` pill then cannot disagree, by construction.
+ * Over-commitment is a fact about a MOMENT, not a total: the most units owed
+ * to bookings at any single instant ahead (`peakBooked`, the booking engine's
+ * own peak-concurrency sweep) against what the pool holds once custody and
+ * kits are taken out. That is what `classifyStockStatus` judges, so this cell
+ * defers to the verdict rather than recomputing anything: the cell and the
+ * `Stock status` pill then cannot disagree, by construction.
  *
  * @see {@link file://../../../../../packages/quantity-control/src/stock-status.ts}
  * @see {@link file://./advanced-asset-columns.tsx} - the cell that renders this.
@@ -33,11 +35,11 @@ export type ReservedDisplayInput = {
   quantity: number | null;
   /** The verdict from the shared classifier. Null for INDIVIDUAL assets. */
   stockStatus: StockStatus | null;
-  /** The LARGEST single upcoming booking — what the verdict was computed from. */
-  largestUpcomingBooking: number;
+  /** The most units owed to bookings at one instant ahead — what the verdict was computed from. */
+  peakBooked: number;
+  /** Units held in direct custody (kit-inherited custody sits inside `inKits`). */
   inCustody: number;
   inKits: number;
-  checkedOut: number;
   /** Free-text unit label, when the asset has one. */
   unitOfMeasure?: string | null;
 };
@@ -65,10 +67,9 @@ export function resolveReservedDisplay(
     reserved,
     quantity,
     stockStatus,
-    largestUpcomingBooking,
+    peakBooked,
     inCustody,
     inKits,
-    checkedOut,
     unitOfMeasure,
   } = input;
 
@@ -80,36 +81,31 @@ export function resolveReservedDisplay(
   const unit = isPool && unitOfMeasure ? ` ${unitOfMeasure}` : "";
   const owned = quantity ?? 0;
 
-  const shortfall =
-    committedUnits({
-      inCustody,
-      inKits,
-      checkedOut,
-      largestUpcomingBooking,
-    }) - owned;
+  const shortfall = committedUnits({ inCustody, inKits, peakBooked }) - owned;
 
   /**
-   * `largestUpcomingBooking > 0` keeps the flag off a row whose shortfall comes
-   * entirely from custody or kits. The verdict would still be SHORT there, and
+   * `peakBooked > 0` keeps the flag off a row whose shortfall comes entirely
+   * from custody or kits. The verdict would still be SHORT there, and
    * correctly so — but the reserved column is not the culprit and should not
    * claim to be.
    */
   const isOversold =
-    isPool &&
-    stockStatus === "SHORT" &&
-    largestUpcomingBooking > 0 &&
-    shortfall > 0;
+    isPool && stockStatus === "SHORT" && peakBooked > 0 && shortfall > 0;
 
   if (!isOversold) {
     return { text: `${reserved}${unit}`, isOversold: false, title: null };
   }
 
+  /** The other claims, named only when they exist, so the sentence adds up. */
+  const held = [
+    inCustody > 0 ? `${inCustody} in custody` : null,
+    inKits > 0 ? `${inKits} in kits` : null,
+  ].filter((part): part is string => part != null);
+  const heldClause = held.length > 0 ? ` plus ${held.join(" and ")}` : "";
+
   return {
     text: `${reserved}${unit} · ${shortfall} short`,
     isOversold: true,
-    // The colour means nothing to a screen reader, and "2 short" alone does not
-    // say short of what — so name the comparison the verdict actually made, and
-    // keep the sum in view so the two numbers cannot be confused for each other.
-    title: `Biggest upcoming booking asks for ${largestUpcomingBooking}, and you own ${owned} — short by ${shortfall}. ${reserved} promised across all upcoming bookings.`,
+    title: `At the busiest point ahead, bookings need ${peakBooked}${unit} at once${heldClause}, against ${owned}${unit} owned — short by ${shortfall}. ${reserved} promised across all upcoming bookings.`,
   };
 }

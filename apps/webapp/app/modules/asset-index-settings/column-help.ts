@@ -71,20 +71,23 @@ export const COLUMN_HELP: Partial<Record<ColumnLabelKey, ColumnHelp>> = {
       { op: "−", label: "Checked out" },
       { op: "=", label: "Free now", isResult: true },
     ],
-    note: "Units promised to a future booking are still on the shelf, so they are NOT subtracted here \u2014 that is why a row can read 10 free now and still be Short. See Reserved.",
+    note: "Units promised to a future booking are still on the shelf, so they are NOT subtracted here \u2014 that is why a row can read 10 free now and still be Short. Units inside a kit count under In kits, even while the kit is in custody or out on a booking.",
     blankWhen: "Tracked individually — the Status column answers this instead.",
   },
 
   reserved: {
     summary: "Units promised to bookings that have not started yet.",
-    note: "For a quantity pool this counts across every upcoming booking, so it can be higher than you need on any one day. An individually-tracked asset reads 1 whenever a booking claims it — see Upcoming Bookings for how many.",
+    note: "For a quantity pool this counts across every upcoming booking, so it can be higher than you need on any one day. An individually-tracked asset shows how many upcoming bookings claim it.",
     blankWhen: "Never — this column applies to every asset.",
   },
 
   stockStatus: {
     summary: "Whether this pool needs attention right now.",
     legend: [
-      { status: "SHORT", text: "More units claimed than you own" },
+      {
+        status: "SHORT",
+        text: "At some point ahead, custody, kits and overlapping bookings need more than you own",
+      },
       { status: "NONE_FREE", text: "Nothing available to hand over" },
       { status: "LOW", text: "At or below your reorder point" },
       { status: "ENOUGH", text: "Above your reorder point" },

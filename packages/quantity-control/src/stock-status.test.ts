@@ -8,9 +8,11 @@
  * 2026-08-17 — those are the regressions that matter, because they are the ones
  * a human already looked at and disagreed with.
  *
+ * `peakBooked` is an INPUT here: the sweep that produces it is tested with
+ * `peakConcurrent` in availability.test.ts, and the SQL twin in the webapp.
+ *
  * @see ./stock-status.ts
  */
-
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -28,10 +30,9 @@ function pool(over: Partial<StockStatusInputs> = {}): StockStatusInputs {
   return {
     total: 10,
     available: 10,
-    largestUpcomingBooking: 0,
+    peakBooked: 0,
     inCustody: 0,
     inKits: 0,
-    checkedOut: 0,
     minQuantity: null,
     ...over,
   };
@@ -40,8 +41,6 @@ function pool(over: Partial<StockStatusInputs> = {}): StockStatusInputs {
 /* ------------------------------ real rows -------------------------------- */
 
 test("Valve Head - 48k System: 4 available against a floor of 5 is LOW", () => {
-  // why: the live row that started this work. It renders a green "Available"
-  // badge in the index today while sitting under its own reorder point.
   assert.equal(
     classifyStockStatus(pool({ total: 4, available: 4, minQuantity: 5 })),
     "LOW"
@@ -49,8 +48,6 @@ test("Valve Head - 48k System: 4 available against a floor of 5 is LOW", () => {
 });
 
 test("48k Grain Softener tank: 14 available of 15, one in custody, floor 5 is ENOUGH", () => {
-  // why: the row a customer read as "15" in the list and "14" on the asset
-  // page. Custody must not drag a healthy pool into a warning.
   assert.equal(
     classifyStockStatus(
       pool({ total: 15, available: 14, inCustody: 1, minQuantity: 5 })
@@ -61,11 +58,9 @@ test("48k Grain Softener tank: 14 available of 15, one in custody, floor 5 is EN
 
 /* ------------------------------- precedence ------------------------------ */
 
-test("SHORT wins over NONE_FREE when commitments exceed the pool", () => {
-  // 6 owned, 8 promised: available is also 0, but "you promised more than you
-  // own" is the actionable half.
+test("SHORT wins over NONE_FREE when the booking peak exceeds the pool", () => {
   const s = classifyStockStatus(
-    pool({ total: 6, available: 0, largestUpcomingBooking: 8 })
+    pool({ total: 6, available: 0, peakBooked: 8 })
   );
   assert.equal(s, "SHORT");
 });
@@ -73,32 +68,24 @@ test("SHORT wins over NONE_FREE when commitments exceed the pool", () => {
 test("SHORT fires with no threshold set — it is an integrity problem, not a level", () => {
   assert.equal(
     classifyStockStatus(
-      pool({ total: 5, available: 5, checkedOut: 6, minQuantity: null })
+      pool({ total: 5, available: 5, peakBooked: 6, minQuantity: null })
     ),
     "SHORT"
   );
 });
 
-test("SHORT counts every kind of claim, not just reservations", () => {
+test("SHORT counts custody and kits alongside the booking peak", () => {
   assert.equal(
     classifyStockStatus(
-      pool({
-        total: 10,
-        available: 0,
-        inCustody: 4,
-        inKits: 3,
-        checkedOut: 2,
-        largestUpcomingBooking: 2,
-      })
+      pool({ total: 10, available: 1, inCustody: 4, inKits: 3, peakBooked: 4 })
     ),
     "SHORT"
   );
 });
 
 test("commitments equal to the total are NOT short", () => {
-  // Boundary: fully allocated is at capacity, not over it.
   assert.equal(
-    classifyStockStatus(pool({ total: 10, available: 0, checkedOut: 10 })),
+    classifyStockStatus(pool({ total: 10, available: 0, peakBooked: 10 })),
     "NONE_FREE"
   );
 });
@@ -106,7 +93,7 @@ test("commitments equal to the total are NOT short", () => {
 test("NONE_FREE wins over LOW when nothing is free", () => {
   assert.equal(
     classifyStockStatus(
-      pool({ total: 10, available: 0, checkedOut: 10, minQuantity: 3 })
+      pool({ total: 10, available: 0, peakBooked: 10, minQuantity: 3 })
     ),
     "NONE_FREE"
   );
@@ -136,7 +123,6 @@ test("one unit above the floor is ENOUGH", () => {
 });
 
 test("a floor of 0 is valid and does not make a stocked pool low", () => {
-  // Mirrors isLowStock: only null disables the threshold.
   assert.equal(
     classifyStockStatus(pool({ available: 4, minQuantity: 0 })),
     "ENOUGH"
@@ -144,8 +130,6 @@ test("a floor of 0 is valid and does not make a stocked pool low", () => {
 });
 
 test("no floor set is NO_THRESHOLD, never ENOUGH", () => {
-  // why: this is the majority state in real workspaces. Reporting "fine" here
-  // would be a confident claim about a line nobody drew.
   assert.equal(
     classifyStockStatus(pool({ available: 10, minQuantity: null })),
     "NO_THRESHOLD"
@@ -159,10 +143,9 @@ test("no floor set is NO_THRESHOLD, never ENOUGH", () => {
 });
 
 test("no floor still yields NONE_FREE when the pool is empty", () => {
-  // Absence of a threshold must not suppress a fact we can state without one.
   assert.equal(
     classifyStockStatus(
-      pool({ total: 4, available: 0, checkedOut: 4, minQuantity: null })
+      pool({ total: 4, available: 0, peakBooked: 4, minQuantity: null })
     ),
     "NONE_FREE"
   );
@@ -170,16 +153,8 @@ test("no floor still yields NONE_FREE when the pool is empty", () => {
 
 /* ------------------------------ committedUnits ---------------------------- */
 
-test("committedUnits sums every claim on the pool", () => {
-  assert.equal(
-    committedUnits({
-      largestUpcomingBooking: 1,
-      inCustody: 2,
-      inKits: 3,
-      checkedOut: 4,
-    }),
-    10
-  );
+test("committedUnits is custody plus kits plus the booking peak", () => {
+  assert.equal(committedUnits({ peakBooked: 1, inCustody: 2, inKits: 3 }), 6);
 });
 
 /* -------------------------------- severity ------------------------------- */
@@ -191,8 +166,6 @@ test("severity ranks worst first and covers every status exactly once", () => {
 });
 
 test("severity puts NO_THRESHOLD last, below ENOUGH", () => {
-  // why: absence of an opinion is not a healthy reading, and a stock account
-  // sorting worst-first should not see its unconfigured rows above its fine ones.
   assert.ok(STOCK_STATUS_SEVERITY.NO_THRESHOLD > STOCK_STATUS_SEVERITY.ENOUGH);
   assert.ok(STOCK_STATUS_SEVERITY.SHORT < STOCK_STATUS_SEVERITY.NONE_FREE);
   assert.ok(STOCK_STATUS_SEVERITY.NONE_FREE < STOCK_STATUS_SEVERITY.LOW);
@@ -209,33 +182,35 @@ test("only SHORT, NONE_FREE and LOW are actionable", () => {
 });
 
 test("NO_THRESHOLD is not actionable", () => {
-  // why: for an equipment rental workspace this is the correct and permanent
-  // state. Treating it as a problem would nag that whole cohort forever.
   assert.equal(isActionableStockStatus("NO_THRESHOLD"), false);
 });
 
-/* --------------------- the non-overlap false alarm --------------------- */
+/* ----------------------- the time-frame false alarms ---------------------- */
 
-test("two non-overlapping bookings do not make a returnable pool SHORT", () => {
-  // why: this is the regression the input rename exists for. Eight tripods on
-  // Monday and eight on Friday, from a pool of ten, SUM to sixteen — the naive
-  // figure would report SHORT even though peak demand is only eight. Passing
-  // the largest single booking instead can never raise that false alarm.
+test("a pool that is out today and booked again after it returns is not SHORT", () => {
+  // 8 of 10 out this week (available 2), 5 reserved next month. The two
+  // bookings never overlap, so the peak is 8, not 13: the booking engine
+  // accepts the second booking, and so must this verdict.
   assert.equal(
-    classifyStockStatus(
-      pool({ total: 10, available: 10, largestUpcomingBooking: 8 })
-    ),
+    classifyStockStatus(pool({ total: 10, available: 2, peakBooked: 8 })),
     "NO_THRESHOLD"
   );
 });
 
-test("one booking asking for more than the pool is still SHORT", () => {
-  // why: the conservative stand-in must keep catching the case that matters —
-  // otherwise it trades a false alarm for a missed one.
+test("two overlapping bookings that only exceed the pool together are SHORT", () => {
+  // Two bookings of 6 on the same dates peak at 12 from a pool of 10. The
+  // largest-booking reading (6) would have said nothing was wrong.
   assert.equal(
-    classifyStockStatus(
-      pool({ total: 10, available: 10, largestUpcomingBooking: 12 })
-    ),
+    classifyStockStatus(pool({ total: 10, available: 10, peakBooked: 12 })),
     "SHORT"
+  );
+});
+
+test("a kit's units count once, under inKits, never again as custody or bookings", () => {
+  // 10 units in a kit, the kit reserved for 10: the caller passes inKits 10
+  // and peakBooked 0 (kit slices are excluded from the sweep). Not short.
+  assert.equal(
+    classifyStockStatus(pool({ total: 29, available: 19, inKits: 10 })),
+    "NO_THRESHOLD"
   );
 });
