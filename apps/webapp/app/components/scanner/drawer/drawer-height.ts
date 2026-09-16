@@ -32,6 +32,10 @@ export const SCANNER_VIEWFINDER_GAP = 400;
 /**
  * Floor for the resolved height: enough for the drag handle and one line of
  * title, so the drawer is always recognisable and re-openable.
+ *
+ * It yields to a viewport shorter than itself. Holding the floor there would
+ * push the drawer past the top of the screen and strand the handle — the one
+ * outcome the floor exists to prevent.
  */
 export const MIN_DRAWER_HEIGHT = 148;
 
@@ -88,7 +92,8 @@ export function resolveDrawerHeight({
     return natural;
   }
 
-  const ceiling = Math.max(viewportHeight - DRAWER_TOP_GAP, MIN_DRAWER_HEIGHT);
+  const floor = Math.min(MIN_DRAWER_HEIGHT, viewportHeight);
+  const ceiling = Math.max(viewportHeight - DRAWER_TOP_GAP, floor);
 
-  return Math.min(Math.max(natural, MIN_DRAWER_HEIGHT), ceiling);
+  return Math.min(Math.max(natural, floor), ceiling);
 }

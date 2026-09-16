@@ -185,6 +185,23 @@ describe("FulfilReservationsDrawer layout", () => {
     expect(getScrollingList().contains(checkoutButton)).toBe(false);
   });
 
+  it("lets the header yield height so the pinned action cannot be pushed off", () => {
+    // Handle, title bar and footer are shrink-0 and the body has a zero basis,
+    // so a drawer clamped below its chrome height has to take the deficit out
+    // of the header. Anywhere else and the check-out button renders past the
+    // bottom of a `fixed` box, unreachable and unscrollable — the very failure
+    // this drawer was changed to fix. happy-dom does no layout, so this pins
+    // the shrink/scroll contract that produces the behaviour.
+    renderDrawer(40);
+
+    const headerWrapper = getModelsToggle().closest(".overflow-y-auto");
+
+    expect(headerWrapper).not.toBeNull();
+    expect(headerWrapper?.className).toContain("shrink");
+    expect(headerWrapper?.className).not.toContain("shrink-0");
+    expect(headerWrapper?.className).toContain("min-h-0");
+  });
+
   it("gives the per-model progress list its own scroll", async () => {
     // Without this the header grows without limit — 40 models render taller
     // than the viewport, and the drawer takes the whole screen with it.

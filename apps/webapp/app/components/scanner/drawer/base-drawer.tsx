@@ -199,9 +199,19 @@ export default function BaseDrawer({
               />
             </m.div>
 
-            {/* Extra Header Content - Always visible */}
-            <div className="shrink-0" ref={headerContentRef}>
-              {headerContent}
+            {/* Extra Header Content - Always visible.
+
+                The header is the one piece of chrome that yields. Handle,
+                title bar and footer are `shrink-0` and the body has a zero
+                basis, so when the clamped height cannot hold everything the
+                deficit has to land somewhere — and anywhere else means the
+                pinned action renders past the bottom of a `fixed` box, with
+                no scroll path to it. The outer wrapper absorbs the deficit
+                and scrolls; the inner div keeps its natural height so the
+                measurement below still reports what the drawer WANTS, which
+                is what the clamp is deciding against. */}
+            <div className="min-h-0 shrink overflow-y-auto">
+              <div ref={headerContentRef}>{headerContent}</div>
             </div>
 
             {/* Base Header */}

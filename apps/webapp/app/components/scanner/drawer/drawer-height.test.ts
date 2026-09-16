@@ -120,6 +120,21 @@ describe("resolveDrawerHeight", () => {
     });
   });
 
+  it("yields the floor to a viewport smaller than the floor itself", () => {
+    // The floor exists so a drawer is always tall enough to grab and reopen.
+    // On a viewport shorter than the floor, honouring it would push the drawer
+    // — and the drag handle that is its first child — off the top of the
+    // screen, which is the one thing the floor cannot be allowed to cause.
+    const height = resolveDrawerHeight({
+      ...baseArgs,
+      viewportHeight: 120,
+      chromeHeight: 400,
+    });
+
+    expect(height).toBe(120);
+    expect(height).toBeLessThanOrEqual(120);
+  });
+
   it("skips the clamp before the viewport has been measured", () => {
     // `useViewportHeight` starts at 0 until the browser reports a real height.
     // Clamping against 0 would collapse the drawer to nothing on first paint.
