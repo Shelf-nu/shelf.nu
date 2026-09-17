@@ -236,11 +236,16 @@ export const buildCsvBackupDataFromAssets = ({
         return toExport.push(quoteCsvCell(""));
       }
 
-      /** Relations travel as JSON rather than as an id.
+      /** Relations listed here travel as JSON rather than as an id, so a
+       * restore can resolve — or create — them by name; an id would only mean
+       * anything in the workspace the backup came from.
        *
-       * `category`, `location` and `assetModel` each emit an object carrying
-       * the name, so a restore can resolve — or create — them by name. An id
-       * would only mean anything in the workspace the backup came from. */
+       * The list is not the same as the relations the query loads. `location`
+       * is a leftover: placements arrive as `assetLocations`, which is not
+       * listed, so it falls to the default branch and stringifies to
+       * `[object Object]` — locations do not survive a backup round trip. Any
+       * relation added to the query needs a case here and a matching one in
+       * `extractCSVDataFromBackupImport`, or its column is silently junk. */
       switch (key) {
         case "location":
         case "category":
