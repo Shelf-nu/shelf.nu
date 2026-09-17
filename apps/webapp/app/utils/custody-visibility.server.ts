@@ -20,7 +20,14 @@
  * item is held at all.
  *
  * @see {@link file://./permissions/custody-and-bookings-permissions.validator.client.ts} — `userCanViewSpecificCustody`, the client-side mirror.
+ * @see {@link file://../modules/asset/advanced-index/hydrate-heavy.server.ts} — the
+ *   advanced index's custody/bookings batches, which apply {@link viewerMaySeeCustodian}
+ *   and {@link REDACTED_CUSTODIAN} to their own row shapes via {@link redactBookingsForViewer}.
  */
+import type {
+  BookingLite,
+  ViewerScope,
+} from "~/modules/asset/advanced-index/types";
 
 /** The identity fields a list include selects for a custodian. */
 type CustodianIdentity = {
@@ -86,21 +93,45 @@ type BookingCustodianCarrier = {
  *
  * Every identifying field is emptied rather than removed, so the shape stays
  * stable for consumers and `TeamMemberBadge` still receives a truthy custodian
- * to render its "private" chip from.
+ * to render its "private" chip from. Exported so every redaction in this file,
+ * and the advanced-index heavy hydration batches ({@link redactBookingsForViewer}
+ * and the custody batch), blank a custodian to the exact same values.
  */
-const REDACTED_CUSTODIAN = {
+export const REDACTED_CUSTODIAN = {
   userId: null,
   name: "",
   user: null,
 } as const;
 
 /**
+ * Whether `userId` may see a given custodian's identity: they hold it
+ * themselves. A custodian with no linked `User` (an NRM) can never match, so
+ * it is always redacted for a restricted viewer.
+ *
+ * Callers first check the workspace's `canSeeAllCustody` override — this
+ * function only decides the per-entry "is this the viewer's own" exception,
+ * it does not know about that override itself.
+ *
+ * @param custodian - The custodian identity to test, or absent when the row
+ *   (or slice) has none.
+ * @param userId - The viewer.
+ */
+export function viewerMaySeeCustodian(
+  custodian: CustodianIdentity,
+  userId: string
+): boolean {
+  return (
+    !!userId &&
+    !!custodian &&
+    (custodian.userId === userId || custodian.user?.id === userId)
+  );
+}
+
+/**
  * Removes custodian identities the viewer is not allowed to see.
  *
  * Mirrors `userCanViewSpecificCustody`: a viewer always sees custody they hold
  * themselves, and sees everyone else's only when the workspace override is on.
- * An NRM custodian has no user to compare against, so it can never match the
- * viewer and is always redacted for a restricted role.
  *
  * @param rows - List rows straight from Prisma.
  * @param args.canSeeAllCustody - Resolved by `resolveCanSeeAllCustody`.
@@ -121,9 +152,7 @@ export function redactCustodianForViewer<T extends RowWithCustody>(
    * "private" on an item they are holding.
    */
   const maySee = (custodian: CustodianIdentity) =>
-    !!userId &&
-    !!custodian &&
-    (custodian.userId === userId || custodian.user?.id === userId);
+    viewerMaySeeCustodian(custodian, userId);
 
   /** Empties one custody record's custodian, or returns it untouched. */
   const redactEntry = (entry: CustodyEntry) =>
@@ -241,5 +270,68 @@ export function redactCustodianForViewer<T extends RowWithCustody>(
     }
 
     return { ...withBookings, custody: redactEntry(row.custody) } as T;
+  });
+}
+
+/**
+ * Removes booking-custodian identities the viewer is not allowed to see from
+ * a page of upcoming-bookings entries.
+ *
+ * Applies the same rule as {@link redactCustodianForViewer} — a restricted
+ * viewer sees only the bookings they themselves are the custodian of — to the
+ * advanced index's flat, per-`BookingAsset`-slice `BookingLite` shape. That
+ * shape has no `bookingAssets`/`assetKits` nesting to walk, so this is a
+ * dedicated entry-level pass rather than a call into
+ * `redactCustodianForViewer`, but it reuses the same {@link viewerMaySeeCustodian}
+ * rule and {@link REDACTED_CUSTODIAN} values so the two redactions can never
+ * drift apart. `creator` names who made the booking, not who holds the asset,
+ * so it is never redacted. `tags` are workspace metadata, not custody, and are
+ * also left untouched.
+ *
+ * `custodianUser` is nulled outright when redacted (there is no wrapper object
+ * to blank a field on); `custodianTeamMember` is kept as an object (its
+ * presence signals "a private custodian exists" to the cell) but every
+ * identifying field — `name`, `user`, AND the opaque `id` — is cleared, on the
+ * same principle as `redactBookingAsset` above: an id still correlates the row
+ * to one holder, so it is identity too. `id` becomes `""` (the field is a
+ * non-nullable `string`, so the object stays shape-valid).
+ *
+ * @param bookings - One entry per `BookingAsset` slice, as produced by
+ *   `fetchBookingsBatch`.
+ * @param scope - The viewer being hydrated for.
+ * @returns A new array; entries the viewer may already see are returned
+ *   as-is, matching `redactCustodianForViewer`'s contract.
+ */
+export function redactBookingsForViewer(
+  bookings: BookingLite[],
+  { canSeeAllCustody, userId }: ViewerScope
+): BookingLite[] {
+  if (canSeeAllCustody) {
+    return bookings;
+  }
+
+  return bookings.map((booking) => {
+    const isViewersBooking =
+      booking.custodianUser?.id === userId ||
+      viewerMaySeeCustodian(booking.custodianTeamMember, userId);
+
+    if (isViewersBooking) {
+      return booking;
+    }
+
+    return {
+      ...booking,
+      custodianTeamMember: booking.custodianTeamMember
+        ? {
+            ...booking.custodianTeamMember,
+            id: "",
+            name: REDACTED_CUSTODIAN.name,
+            user: REDACTED_CUSTODIAN.user,
+          }
+        : booking.custodianTeamMember,
+      custodianUser: booking.custodianUser
+        ? REDACTED_CUSTODIAN.user
+        : booking.custodianUser,
+    };
   });
 }
