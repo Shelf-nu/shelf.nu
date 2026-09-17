@@ -5,11 +5,12 @@
  * to. This module turns those two into the rows the screen renders — one
  * header per kit followed by its members when expanded — and answers the
  * questions that grouping raises: what the kit's badge says, which members a
- * header may select, how a selection reads on the action button, and whether a
- * removal may name the kit instead of its assets.
+ * header may select, how a selection reads on the action button and in the
+ * check-out and check-in alerts, and whether a removal may name the kit
+ * instead of its assets.
  *
  * Everything here is pure and free of React Native so the rules can be tested
- * under Node. The screen owns the pixels; this owns the decisions.
+ * under Node. The screens own the pixels; this owns the decisions.
  *
  * `describeBookingRows` is a MIRROR of the webapp helper of the same name and
  * is never a source of truth; its own JSDoc carries the provenance and the
@@ -18,7 +19,9 @@
  * asset rather than per row — but each must reach the same outcome as the web
  * surface its `@see` names.
  *
- * @see ../app/(tabs)/bookings/[id].tsx — the only consumer
+ * @see ../app/(tabs)/bookings/[id].tsx — the booking detail list
+ * @see ../app/(tabs)/scanner.tsx — counts a scanned check-out or check-in batch
+ *   with the same rules, through `countBookingBatch`
  * @see ../../../apps/webapp/app/modules/booking/shape-booking-assets.ts — the
  *   web grouping this mirrors
  */
@@ -380,11 +383,14 @@ export type SelectionCounts = { kitCount: number; assetCount: number };
  * Counts a selection the way the list offers it: a kit is one thing, and every
  * other pick is an asset.
  *
- * `kitCount` is the kit headers that read "all" — every member the mode can act
- * on is picked. `assetCount` is every selected id those kits do not account
- * for. A member is only ever picked through its header, so these are normally
- * the standalone rows; an id outside every wholly picked kit still counts, so
- * the label covers everything the submit will send.
+ * `kitCount` is the kits picked whole: at least one member is picked, and no
+ * member the mode can act on is left out — what a header reading "all" shows.
+ * A picked member counts toward its kit whatever its status now says, so the
+ * count of a batch holds while a screen marks that batch as moved.
+ * `assetCount` is every selected id those kits do not account for. A member is
+ * only ever picked through its header, so these are normally the standalone
+ * rows; an id outside every wholly picked kit still counts, so the label covers
+ * everything the submit will send.
  *
  * @param args.rows - the rendered rows; a kit header carries every member
  *   whether or not the kit is open
@@ -409,13 +415,15 @@ export function countSelection({
 
   for (const row of rows) {
     if (row.type !== "kit") continue;
-    const state = resolveKitSelectionState({
-      members: row.members,
-      selectMode,
-      selectedAssetIds,
-      checkedInAssetIds,
-    });
-    if (state !== "all") continue;
+    const somePicked = row.members.some((member) =>
+      selectedAssetIds.has(member.id)
+    );
+    const noneLeftOut = row.members.every(
+      (member) =>
+        selectedAssetIds.has(member.id) ||
+        !isBookingAssetSelectable(member, selectMode, checkedInAssetIds)
+    );
+    if (!somePicked || !noneLeftOut) continue;
     kitCount += 1;
     for (const member of row.members) coveredByKit.add(member.id);
   }
@@ -426,6 +434,41 @@ export function countSelection({
   }
 
   return { kitCount, assetCount };
+}
+
+/**
+ * Counts a flat batch of asset ids against a booking's own assets, by the same
+ * rules as `countSelection`: a kit is one thing once no member of it the mode
+ * can act on is left out of the batch.
+ *
+ * For a caller that holds ids rather than rendered rows. The scanner adds a
+ * scanned kit as its member assets, so this is what lets its batch read the
+ * way the booking screen reads the same kit.
+ *
+ * @param args.assets - the booking's assets, which carry the kit groupings
+ * @param args.assetIds - the asset ids in the batch
+ * @param args.selectMode - "checkout" or "checkin"
+ * @param args.checkedInAssetIds - assets already checked back in
+ * @returns the counts `describeBatch` and the alert helpers below it name
+ */
+export function countBookingBatch({
+  assets,
+  assetIds,
+  selectMode,
+  checkedInAssetIds,
+}: {
+  assets: BookingAsset[];
+  assetIds: readonly string[];
+  selectMode: BookingSelectMode;
+  checkedInAssetIds: readonly string[];
+}): SelectionCounts {
+  return countSelection({
+    // Collapsed or open makes no difference: a kit row carries every member.
+    rows: buildBookingRows({ assets, expandedKitIds: new Set() }),
+    selectedAssetIds: new Set(assetIds),
+    selectMode,
+    checkedInAssetIds,
+  });
 }
 
 /**
@@ -548,21 +591,18 @@ function describeKitsThenAssets(
 }
 
 /**
- * Names what a removal will take, leading with the kits because a kit is the
- * larger thing leaving the booking. Reads inside a sentence, so it is lower
- * case.
+ * Names a batch inside a sentence, leading with the kits because a kit is the
+ * larger thing: what a removal takes off the booking, or what a check-out or
+ * check-in moves. Reads mid-sentence, so it is lower case.
  *
- * @param args.assetCount - assets removed by id
- * @param args.kitCount - kits removed as a whole
- * @returns e.g. `"1 kit and 2 assets"`, `"3 assets"`
+ * @param args.kitCount - kits taken as a whole
+ * @param args.assetCount - every asset outside those kits
+ * @returns e.g. `"1 kit and 2 assets"`, `"3 assets"`, `"2 kits"`
  */
-export function describeRemoval({
-  assetCount,
+export function describeBatch({
   kitCount,
-}: {
-  assetCount: number;
-  kitCount: number;
-}): string {
+  assetCount,
+}: SelectionCounts): string {
   return describeKitsThenAssets(
     { kitCount, assetCount },
     {
@@ -597,4 +637,86 @@ export function describeSelection({
       joiner: " & ",
     }
   );
+}
+
+/** Which way a booking batch moves: out, or back in. */
+type BookingBatchDirection = "checkout" | "checkin";
+
+/**
+ * The question asked before a check-out or check-in batch is sent.
+ *
+ * It names the batch in the words of the action button that opened it, a
+ * wholly picked kit being one thing. Count the batch from the selection before
+ * the submit: the request carries member asset ids, so nothing the server
+ * sends back can tell a kit from the assets in it.
+ *
+ * @param args.direction - which way the batch moves
+ * @param args.counts - the batch, from `countSelection` or `countBookingBatch`
+ * @param args.bookingName - names the booking, for a screen that does not
+ *   show it; a blank name is left out
+ * @returns e.g. `"Check out 1 kit and 1 asset?"`,
+ *   `"Check in 3 assets for "Film shoot"?"`
+ */
+export function describeBatchConfirm({
+  direction,
+  counts,
+  bookingName,
+}: {
+  direction: BookingBatchDirection;
+  counts: SelectionCounts;
+  bookingName?: string | null;
+}): string {
+  const verb = direction === "checkout" ? "Check out" : "Check in";
+  const forBooking = bookingName?.trim() ? ` for "${bookingName}"` : "";
+  return `${verb} ${describeBatch(counts)}${forBooking}?`;
+}
+
+/**
+ * What the success alert says once the server accepts a check-out or check-in
+ * batch.
+ *
+ * A batch that leaves nothing to move speaks for the whole booking. Any other
+ * batch names what it moved, in the words its confirm used, and says where the
+ * rest of the booking stands without a number: the server counts what remains
+ * in assets, one per kit member, which would contradict a batch counted in
+ * kits.
+ *
+ * `isComplete` is the server's answer to "is anything left?". Without one the
+ * message names the batch alone rather than guess.
+ *
+ * @param args.direction - which way the batch moved
+ * @param args.counts - the batch, counted before the submit
+ * @param args.isComplete - true when nothing is left to move, per the server
+ * @param args.bookingName - the booking's name, for the completed forms
+ * @returns e.g. `"1 kit and 1 asset checked out. The rest is still reserved."`
+ */
+export function describeBatchResult({
+  direction,
+  counts,
+  isComplete,
+  bookingName,
+}: {
+  direction: BookingBatchDirection;
+  counts: SelectionCounts;
+  isComplete: boolean | undefined;
+  bookingName?: string | null;
+}): string {
+  const quotedName = bookingName?.trim() ? `"${bookingName}"` : null;
+  if (isComplete) {
+    return direction === "checkout"
+      ? `All assets are now checked out for ${quotedName ?? "this booking"}.`
+      : `All assets checked in. ${
+          quotedName ?? "The booking"
+        } is now complete.`;
+  }
+
+  const batch = describeBatch(counts);
+  const moved = direction === "checkout" ? "checked out" : "checked in";
+  if (isComplete === undefined) return `${batch} ${moved}.`;
+
+  const rest =
+    direction === "checkout"
+      ? "The rest is still reserved."
+      : "The rest is still checked out.";
+  return `${batch} ${moved}. ${rest}`;
 }

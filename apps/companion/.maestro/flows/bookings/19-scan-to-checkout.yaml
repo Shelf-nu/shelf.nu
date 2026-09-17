@@ -10,8 +10,9 @@ tags:
 # Progressive check-out driven by the scanner: the twin of "Scan to Check In".
 # Takes a reserved booking's assets out one scan at a time, asserting that a
 # scanned kit contributes its members, an off-booking asset is refused, a
-# re-scanned kit reports it is already covered, and the counts shown come from
-# the server rather than from the scan list.
+# re-scanned kit reports it is already covered, and the success message names
+# the batch as the drawer does while leaving what remains uncounted: whether
+# anything is left is the server's answer.
 #
 # Also covers the ONGOING entry rule: once the first batch flips the booking to
 # ONGOING, "Check Out All Assets" disappears while both progressive check-out
@@ -162,7 +163,7 @@ tags:
 - takeScreenshot: checkout-error-already-covered
 - tapOn: ".*Tap to dismiss.*"
 
-# ── Submit the first batch: the server's own numbers come back ──
+# ── Submit the first batch: the batch is named, the rest is not counted ──
 - tapOn:
     id: "batch-drawer-submit"
 - extendedWaitUntil:
@@ -173,7 +174,8 @@ tags:
 - extendedWaitUntil:
     visible: ".*Checked Out.*"
     timeout: 30000
-- assertVisible: ".*2 checked out, 1 remaining.*"
+# The members are standalone rows on this booking, so they count as assets.
+- assertVisible: ".*2 assets checked out. The rest is still reserved.*"
 - takeScreenshot: checkout-alert-checked-out
 - tapOn: "OK"
 
@@ -229,7 +231,7 @@ tags:
 - extendedWaitUntil:
     visible: ".*Checked Out.*"
     timeout: 30000
-- assertVisible: ".*1 checked out, 0 remaining.*"
+- assertVisible: ".*All assets are now checked out for.*"
 - takeScreenshot: checkout-alert-complete
 - tapOn: "OK"
 

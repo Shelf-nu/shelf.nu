@@ -89,8 +89,11 @@ appId: com.shelf.companion.carlos
     id: "dev-scan-input"
 - inputText: ${SHELF_TEST_KIT_QR_ID}
 - pressKey: Enter
+# The drawer counts a kit as one thing once every member it can check in is in
+# the list, which holds when the member is on the booking through its kit; a
+# member held as a standalone row counts as an asset.
 - extendedWaitUntil:
-    visible: "2 assets to check in"
+    visible: "(1 kit and 1 asset|2 assets) to check in"
     timeout: 15000
 - tapOn:
     text: ".*amera paused.*"
