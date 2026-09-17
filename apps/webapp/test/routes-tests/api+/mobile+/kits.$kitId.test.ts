@@ -223,6 +223,44 @@ describe("GET /api/mobile/kits/:kitId", () => {
     // NOT 10 × 100 (workspace stock) + 20 × 1 = 1020.
     expect(body.kit.totalValue).toBe(70);
   });
+
+  it("does not send the image expiry that steers the member photo re-sign", async () => {
+    // The loader selects `mainImageExpiration` only to decide whether a
+    // member's signed photo URL has lapsed. A member row must keep the shape
+    // the companion already reads, so the field never reaches the payload.
+    const member = {
+      quantity: 1,
+      asset: {
+        id: "asset-photo",
+        title: "Camera",
+        status: "AVAILABLE",
+        valuation: null,
+        quantity: null,
+        unitOfMeasure: null,
+        type: "INDIVIDUAL",
+        mainImage: null,
+        thumbnailImage: null,
+        mainImageExpiration: null,
+        category: null,
+        assetLocations: [],
+      },
+    };
+    findFirstMock.mockResolvedValueOnce(buildKitFixture([member]) as never);
+
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request(
+          `http://localhost:3000/api/mobile/kits/kit-1?orgId=${FAKE_ORG_ID}`
+        ),
+        params: { kitId: "kit-1" },
+      })
+    );
+    assertIsDataWithResponseInit(response);
+    const body = response.data as { kit: { assets: Array<{ id: string }> } };
+
+    expect(body.kit.assets).toHaveLength(1);
+    expect(body.kit.assets[0]).not.toHaveProperty("mainImageExpiration");
+  });
 });
 
 describe("GET /api/mobile/kits/:kitId — kit image", () => {

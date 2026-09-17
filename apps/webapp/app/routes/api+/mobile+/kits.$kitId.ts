@@ -22,6 +22,10 @@ import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibili
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
   BARCODE_CODES_ORDER_BY,
   QR_CODES_ORDER_BY,
   resolveDisplayCode,
@@ -155,6 +159,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 type: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Lets the re-sign below tell a lapsed photo URL.
+                mainImageExpiration: true,
                 // Model cover image; collapsed into the flat image fields by
                 // `serializeAssetImage` below, so a member asset inheriting
                 // its model's photo is not blank on the kit detail screen.
@@ -183,11 +189,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    // A kit's `image` is a signed storage URL that stops working once
-    // `imageExpiration` passes, and the app has no way to renew it. Re-sign a
-    // lapsed one so the kit screen never receives a dead link. `organizationId`
-    // only scopes that write-back, so it is dropped before the response.
-    const [refreshedKit] = await refreshExpiredKitImages([storedKit]);
+    // Re-sign the kit image and the member photos together; neither needs the
+    // other. `organizationId` only scopes the kit write-back, so it is dropped
+    // before the response. The member result lines up with `assetKits`.
+    const [[refreshedKit], refreshedMembers] = await Promise.all([
+      refreshExpiredKitImages([storedKit]),
+      refreshExpiredAssetImages(
+        storedKit.assetKits.map((ak) => ak.asset),
+        { organizationId, ...ASSET_IMAGE_RESIGN_LIMITS }
+      ),
+    ]);
     const { organizationId: _organizationId, ...kit } = refreshedKit;
 
     // Flatten the AssetKit pivot into the asset list the companion expects.
@@ -213,8 +224,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       },
       entityKind: "kit",
     });
-    const assets = assetKits.map((ak) => {
-      const { assetLocations, ...rest } = ak.asset;
+    const assets = assetKits.map((ak, index) => {
+      // `mainImageExpiration` only steers the re-sign above.
+      const {
+        assetLocations,
+        mainImageExpiration: _mainImageExpiration,
+        ...rest
+      } = refreshedMembers[index];
       return {
         // Resolves the model-image cascade and drops the nested `assetModel`,
         // so the companion keeps one source of truth for the image.
