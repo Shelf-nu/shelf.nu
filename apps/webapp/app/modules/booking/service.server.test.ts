@@ -1547,6 +1547,15 @@ describe("partialCheckinBooking", () => {
     it("does not count an item that never went out as remaining", async () => {
       expect.assertions(2);
 
+      // why: no earlier trip for asset-1 here — only the check-in this test
+      // records. The session-based count would then name BOTH asset-1 and
+      // asset-3 as remaining (neither appears in a check-in session), so the
+      // count below tells the two rules apart. With the earlier session, that
+      // rule drops asset-1 and counts asset-3 instead, and lands on the same 1.
+      (
+        db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation(() => Promise.resolve([...recordedCheckins]));
+
       // why: asset-3 was added to the booking after it went out and has never
       // been checked out, so it has no marker and nothing to check in.
       const withNeverOut = {
