@@ -1,3 +1,15 @@
+/**
+ * Unit test for `computeBookingSliceUnitCounts`, the per-slice checked-out and
+ * dispositioned unit counts for quantity-tracked assets booked across several
+ * `BookingAsset` slices. The web booking overview shows and sorts its rows by
+ * these counts, and the mobile booking detail orders its assets by them.
+ *
+ * Pins that an entry naming a slice lands on that slice, that an untagged
+ * entry spreads across the slices' capacity (standalone first, shared across
+ * the return categories), and that only the assets passed in receive counts.
+ *
+ * @see {@link file://./booking-slice-unit-counts.server.ts} module under test
+ */
 import { describe, expect, it } from "vitest";
 import { computeBookingSliceUnitCounts } from "./booking-slice-unit-counts.server";
 
