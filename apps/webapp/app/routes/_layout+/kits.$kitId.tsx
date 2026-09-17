@@ -689,6 +689,7 @@ export default function KitDetails() {
                 custodianUserId: getCustodyCardHolderUserId({
                   custody: kit.custody ? [kit.custody] : null,
                   booking: currentBooking,
+                  viewerUserId: userId,
                 }),
                 organization: currentOrganization,
                 currentUserId: userId,

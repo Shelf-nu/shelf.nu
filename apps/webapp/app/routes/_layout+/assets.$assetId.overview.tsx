@@ -1764,6 +1764,7 @@ export default function AssetOverview() {
                 custodianUserId: getCustodyCardHolderUserId({
                   custody: asset?.custody,
                   booking,
+                  viewerUserId: userId,
                 }),
                 organization: currentOrganization,
                 currentUserId: userId,

@@ -50,6 +50,46 @@ describe("getCustodyCardHolderUserId", () => {
     ).toBe("user-member");
   });
 
+  describe("when the booking's two links name different users", () => {
+    // A booking records its holder on a user link and a team-member link. The
+    // server-side redaction and the mobile check accept either one, so the card
+    // must too — or it hides a holder the server has already sent.
+    const booking = {
+      custodianUser: { id: "user-direct-link" },
+      custodianTeamMember: { userId: "user-member-link" },
+    };
+
+    it("recognises the viewer behind the team-member link", () => {
+      expect(
+        getCustodyCardHolderUserId({
+          custody: [],
+          booking,
+          viewerUserId: "user-member-link",
+        })
+      ).toBe("user-member-link");
+    });
+
+    it("recognises the viewer behind the user link", () => {
+      expect(
+        getCustodyCardHolderUserId({
+          custody: [],
+          booking,
+          viewerUserId: "user-direct-link",
+        })
+      ).toBe("user-direct-link");
+    });
+
+    it("names the team-member link for anyone else, as the card names the holder", () => {
+      expect(
+        getCustodyCardHolderUserId({
+          custody: [],
+          booking,
+          viewerUserId: "user-someone-else",
+        })
+      ).toBe("user-member-link");
+    });
+  });
+
   it("returns undefined for a holder without an account", () => {
     expect(
       getCustodyCardHolderUserId({
