@@ -152,17 +152,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                           name: true,
                           from: true,
                           status: true,
-                          custodianTeamMember: true,
+                          // Only what the custody card and the redaction read:
+                          // the names shown, and the ids that recognise a
+                          // booking the viewer holds.
+                          custodianTeamMember: {
+                            select: { name: true, userId: true },
+                          },
                           custodianUser: {
                             select: {
-                              // Recognises a booking the viewer holds, so the
-                              // custody card shows it to them.
                               id: true,
                               firstName: true,
                               lastName: true,
                               displayName: true,
                               profilePicture: true,
-                              email: true,
                             },
                           },
                         },
@@ -220,9 +222,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       roles: userOrganizations.find((o) => o.organization.id === organizationId)
         ?.roles,
     });
+    // `GET_KIT_STATIC_INCLUDES` selects `custody.custodian.user` down to
+    // `email`, and this route is gated on `kit: read` — held by BASE and
+    // SELF_SERVICE. A kit has ONE custody row, so the helper's object branch
+    // applies here (assets carry an array). The current booking is derived
+    // from the REDACTED kit: it is returned beside the kit, so reading the raw
+    // one would ship the holders the redaction just emptied.
+    const [redactedKit] = redactCustodianForViewer([kit], {
+      canSeeAllCustody,
+      userId,
+    });
     const currentBooking = getKitCurrentBooking({
-      id: kit.id,
-      assetKits: kit.assetKits,
+      id: redactedKit.id,
+      assetKits: redactedKit.assetKits,
     });
 
     const header: HeaderData = {
@@ -235,11 +247,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return payload({
-      // `GET_KIT_STATIC_INCLUDES` selects `custody.custodian.user` down to
-      // `email`, and this route is gated on `kit: read` — held by BASE and
-      // SELF_SERVICE. A kit has ONE custody row, so the helper's object branch
-      // applies here (assets carry an array).
-      kit: redactCustodianForViewer([kit], { canSeeAllCustody, userId })[0],
+      kit: redactedKit,
       currentBooking,
       header,
       modelName,
