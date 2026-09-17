@@ -1,3 +1,16 @@
+/**
+ * Mobile API route: booking detail.
+ *
+ * Serves the companion's booking screen: the booking, its assets collapsed to
+ * one row per asset with their kit slices, the kits those rows group under,
+ * model reservations, check-in state and the action flags the screen needs.
+ * Org-scoped behind the mobile bearer auth, with drafts private to their
+ * creator and a custody gate on the loaded row. Lapsed asset photo and kit image
+ * URLs are re-signed before the response is sent.
+ *
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ * @see {@link file://./../../../modules/kit/service.server.ts} refreshExpiredKitImages
+ */
 import {
   AssetStatus,
   AssetType,
@@ -16,6 +29,10 @@ import {
 import { ASSET_LOCATIONS_INCLUDE } from "~/modules/asset/fields";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import { computeDispatchedUnitsByAsset } from "~/modules/booking/checkout-attribution";
 import { isBookingArchivable } from "~/modules/booking/helpers";
@@ -27,9 +44,11 @@ import {
   getPartiallyCheckedInAssetIds,
 } from "~/modules/booking/service.server";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -42,8 +61,8 @@ import { hasPermission } from "~/utils/permissions/permission.validator.server";
  * GET /api/mobile/bookings/:bookingId
  *
  * Returns full booking detail with assets, custodian, and check-in status.
- * A kit image whose signed URL has lapsed is re-signed, and the new URL
- * written back to the kit, before it is sent.
+ * An asset photo or kit image whose signed URL has lapsed is re-signed, and
+ * the new URL written back, before it is sent.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -162,6 +181,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 consumptionType: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Lets the re-sign below tell a lapsed photo URL.
+                mainImageExpiration: true,
                 // Model cover image; collapsed into the flat image fields by
                 // `serializeAssetImage` below, so an asset inheriting its
                 // model's photo is not blank on the companion booking screen.
@@ -297,10 +318,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
     }
 
-    const assets = Array.from(byAssetId.values()).map((row) => {
+    const collapsedRows = Array.from(byAssetId.values());
+    // The result lines up with `collapsedRows`, one entry per asset.
+    const refreshedAssets = await refreshExpiredAssetImages(
+      collapsedRows.map((row) => row.first.asset),
+      { organizationId, ...ASSET_IMAGE_RESIGN_LIMITS }
+    );
+
+    const assets = collapsedRows.map((row, index) => {
       // `assetLocations` is taken out here so the pivot never reaches the
       // payload; it is sent only as the flat `location` below.
-      const { assetKits, assetLocations, ...rest } = row.first.asset;
+      // `mainImageExpiration` only steers the re-sign above.
+      const {
+        assetKits,
+        assetLocations,
+        mainImageExpiration: _mainImageExpiration,
+        ...rest
+      } = refreshedAssets[index];
       // why: no `sourceKitId` fallback for detached kit residue here. This
       // response collapses per asset rather than grouping by kit, and the
       // unanimous rule below deliberately reports `null` rather than guessing
@@ -378,13 +412,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // checked out. The shared checkout service hard-blocks the RESERVED →
     // ONGOING transition until every `BookingModelRequest` is assigned to
     // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // `fulfilledAt: null` row remains). Fold that into the state flag so the app
-    // never offers a "Check Out" the server would reject — the app instead
-    // guides the operator to assign the reserved units first (see the
-    // booking-detail "Assign to check out" CTA).
-    const hasOutstandingModelRequests = booking.modelRequests.some(
-      (mr) => mr.fulfilledAt === null
-    );
+    // request is outstanding). Read through the same predicate the service
+    // uses, and fold it into the state flag so the app never offers a "Check
+    // Out" the server would reject — the app instead guides the operator to
+    // assign the reserved units first (see the booking-detail "Assign to
+    // check out" CTA).
+    const hasOutstandingModelRequests =
+      getOutstandingModelRequests(booking.modelRequests).length > 0;
 
     const canCheckoutByState =
       booking.status === "RESERVED" &&
@@ -407,10 +441,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
       hasCheckinable;
 
-    // Quick "check in all" is disallowed when the workspace requires EXPLICIT
-    // (scan/select) check-in for the caller's role — mirror the web policy
-    // (the `checkIn` case of the booking overview action) so the app never
-    // offers an action the web / workspace settings forbid.
+    // Quick "check in all" and "check out all" are disallowed when the
+    // workspace requires EXPLICIT (scan/select) check-in or check-out for the
+    // caller's role. Mirrors the web booking action's `checkIn`, `checkOut` and
+    // `checkOutRemaining` guards, so the app never offers an action the web /
+    // workspace settings forbid.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const canQuickCheckin = !(
@@ -419,6 +454,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (effectiveRole === OrganizationRoles.SELF_SERVICE &&
         bookingSettings.requireExplicitCheckinForSelfService)
     );
+    const canQuickCheckout = !isExplicitCheckoutRequired({
+      role: effectiveRole,
+      bookingSettings,
+    });
 
     // Per-booking lifecycle-action availability, mirroring the web
     // ActionsDropdown gating (actions-dropdown.tsx) so the app surfaces exactly
@@ -742,6 +781,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckout,
       canCheckin,
       canQuickCheckin,
+      canQuickCheckout,
       bookingActions,
     });
   } catch (cause) {

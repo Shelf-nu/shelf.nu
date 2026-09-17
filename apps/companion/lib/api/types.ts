@@ -131,6 +131,14 @@ export type AssetListItem = {
    * servers.
    */
   sequentialId?: string | null;
+  /**
+   * The identifier this workspace labels its assets with, resolved by the
+   * server. Rows show this so an operator can match a printed label by eye;
+   * see `AssetDetail["displayCode"]` for the full contract.
+   *
+   * Absent on older servers, where the row falls back to the SAM ID.
+   */
+  displayCode?: ResolvedDisplayCode | null;
   status: string;
   mainImage: string | null;
   thumbnailImage: string | null;
@@ -203,6 +211,47 @@ export type AssetQuantityBreakdown = {
   custodyAvailable?: number;
 };
 
+/**
+ * The barcode symbologies Shelf can store on an asset. Mirrors the server's
+ * `BarcodeType` enum; `ExternalQR` is a 2D code and renders as a QR, the rest
+ * are linear barcodes.
+ */
+export type BarcodeSymbology =
+  | "Code128"
+  | "Code39"
+  | "DataMatrix"
+  | "ExternalQR"
+  | "EAN13";
+
+/**
+ * What a resolved display code turned out to be. Adds the two non-barcode
+ * identifiers a workspace can prefer to {@link BarcodeSymbology}.
+ */
+export type CodeDisplayType = "QR_ID" | "SAM_ID" | BarcodeSymbology;
+
+/**
+ * A display code as the server resolved it. See `AssetDetail["displayCode"]`
+ * for the contract; kits carry the same shape.
+ */
+export type ResolvedDisplayCode = {
+  value: string;
+  /**
+   * Human label for the type of the code that is SHOWN, e.g. "Code 128". On a
+   * fallback this names the Shelf QR shown in the preference's place, never
+   * the preference itself — `fallbackNote` is what names that.
+   */
+  label: string;
+  type: CodeDisplayType;
+  isFallback: boolean;
+  /**
+   * One sentence explaining a fallback, worded by the server so it matches the
+   * web app ("Your workspace prefers Code 128 but this item has no Code 128.").
+   * `null` unless `isFallback`. Absent on older servers, which the app treats
+   * as "no note" rather than guessing at the words.
+   */
+  fallbackNote?: string | null;
+};
+
 export type AssetDetail = {
   id: string;
   title: string;
@@ -266,6 +315,27 @@ export type AssetDetail = {
   kit: { id: string; name: string; status: string } | null;
   tags: { id: string; name: string }[];
   qrCodes: { id: string }[];
+  /**
+   * The identifier this workspace labels its assets with, already resolved by
+   * the server: a per-asset override first, then the workspace's code
+   * preference, then the Shelf QR. The app must not re-derive this — it never
+   * receives the workspace preference, and resolving server-side is what lets
+   * an installed build follow a preference change with no app release.
+   *
+   * `isFallback` marks a preference that could not be honoured (the workspace
+   * prints Code 128, this asset has none), and `fallbackNote` says so in
+   * words, so the screen can explain itself rather than quietly showing a
+   * different code.
+   *
+   * Absent on older servers — treat a missing value as "show the QR".
+   */
+  displayCode?: ResolvedDisplayCode | null;
+  /**
+   * Every alternative code on the asset, for the code switcher. Empty for a
+   * workspace without the alternative-barcodes add-on — the server withholds
+   * the rows rather than relying on the client to hide them.
+   */
+  barcodes?: { id: string; type: BarcodeSymbology; value: string }[];
   organization: { currency: string };
   notes: AssetNote[];
   customFields: {
@@ -496,6 +566,16 @@ export type KitDetail = {
   category: { id: string; name: string; color: string } | null;
   location: { id: string; name: string } | null;
   qrCodes: { id: string }[];
+  /**
+   * The identifier this workspace labels its kits with, resolved server-side.
+   * Kits carry no SAM ID and no per-kit override, so a workspace preferring
+   * SAM IDs resolves to the Shelf QR with `isFallback` set.
+   *
+   * Absent on older servers — treat a missing value as "show the QR".
+   */
+  displayCode?: ResolvedDisplayCode | null;
+  /** The kit's alternative codes. Empty without the add-on. */
+  barcodes?: { id: string; type: BarcodeSymbology; value: string }[];
   organization: { currency: string };
   /** Sum of the contained assets' valuation (computed server-side). */
   totalValue: number;
@@ -883,6 +963,13 @@ export type BookingDetailResponse = {
    */
   canQuickCheckin: boolean;
   /**
+   * False when the workspace requires explicit (scan/select) check-out for the
+   * caller's role. The app then hides the one-tap "Check Out All Assets", which
+   * the server refuses for that role; selecting or scanning assets stays.
+   * Absent on an older server, which never refuses it: read absence as `true`.
+   */
+  canQuickCheckout?: boolean;
+  /**
    * Per-booking lifecycle-action availability, computed server-side mirroring
    * the web ActionsDropdown gating (role + status + permission). The detail
    * screen shows only the enabled actions; the server endpoints enforce the
@@ -903,6 +990,16 @@ export type BookingActionResponse = {
     name: string;
     status: BookingStatus;
   };
+};
+
+/**
+ * Response of the fulfil-and-check-out endpoint. `remainingCount` is how many
+ * booked assets are still to check out: above 0 when the workspace requires
+ * explicit check-out and only the scanned units went out. Absent on an older
+ * server, which always checks out the whole booking.
+ */
+export type FulfilAndCheckoutResponse = BookingActionResponse & {
+  remainingCount?: number;
 };
 
 export type PartialCheckinResponse = {

@@ -2096,7 +2096,9 @@ describe("getKitCurrentBooking", () => {
   it("resolves a slice whose membership row is gone, via sourceKitId", () => {
     const result = getKitCurrentBooking({
       id: "kit-1",
-      assetKits: [membership("ak-1", [{ assetKitId: null, sourceKitId: "kit-1" }])],
+      assetKits: [
+        membership("ak-1", [{ assetKitId: null, sourceKitId: "kit-1" }]),
+      ],
     });
 
     expect(result).toEqual(ongoing);
@@ -2118,7 +2120,9 @@ describe("getKitCurrentBooking", () => {
     // Free-pool units leave the kit's own slice untouched.
     const result = getKitCurrentBooking({
       id: "kit-1",
-      assetKits: [membership("ak-1", [{ assetKitId: null, sourceKitId: null }])],
+      assetKits: [
+        membership("ak-1", [{ assetKitId: null, sourceKitId: null }]),
+      ],
     });
 
     expect(result).toBeUndefined();

@@ -28,6 +28,10 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import {
+  AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
+  auditAcceptsComments,
+} from "~/modules/audit/comment-policy";
+import {
   createAuditAssetImagesAddedNote,
   createAuditImageEvidenceNote,
 } from "~/modules/audit/helpers.server";
@@ -37,6 +41,9 @@ import {
 } from "~/modules/audit/image.service.server";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
+  assertAuditAcceptsComments,
+  assertAuditAcceptsCommentsOnLockedRow,
+  createWhileAuditAcceptsComments,
   requireAuditAssignee,
   requireAuditAssigneeForBaseSelfService,
 } from "~/modules/audit/service.server";
@@ -97,6 +104,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         auditSession: {
           select: {
+            status: true,
             assignments: {
               select: { userId: true },
             },
@@ -276,26 +284,32 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
 
-      const note = await db.auditNote.create({
-        data: {
-          content,
-          auditSessionId: auditId,
-          auditAssetId: auditAssetId,
-          userId,
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              displayName: true,
-              email: true,
-              profilePicture: true,
+      // Created only while the audit still accepts comments, checked on the
+      // locked row so a completion cannot slip in between.
+      const note = await createWhileAuditAcceptsComments(
+        { auditSessionId: auditId, organizationId },
+        (tx) =>
+          tx.auditNote.create({
+            data: {
+              content,
+              auditSessionId: auditId,
+              auditAssetId: auditAssetId,
+              userId,
             },
-          },
-        },
-      });
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  displayName: true,
+                  email: true,
+                  profilePicture: true,
+                },
+              },
+            },
+          })
+      );
 
       return payload({ note });
     }
@@ -370,6 +384,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     if (intent === "upload-image" || intent === "upload-images") {
+      // Evidence reaches the feed as a note, so a finished audit refuses the
+      // whole upload. Checked before the files are stored — the note write
+      // below re-checks on the locked row, and refusing only there would leave
+      // the uploaded images behind.
+      const auditForUpload = await db.auditSession.findFirst({
+        where: { id: auditId, organizationId },
+        select: { status: true },
+      });
+
+      if (auditForUpload) {
+        assertAuditAcceptsComments(auditForUpload.status, {
+          auditSessionId: auditId,
+          organizationId,
+        });
+      }
+
       // Get optional note content
       const noteContent = formData.get("content") as string | null;
 
@@ -419,6 +449,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       // Create a note in a transaction to track the image uploads.
       await db.$transaction(async (tx) => {
+        await assertAuditAcceptsCommentsOnLockedRow(tx, {
+          auditSessionId: auditId,
+          organizationId,
+        });
+
         const imageIds = uploadedImages.map((img) => img.id);
 
         if (intent === "upload-image") {
@@ -786,6 +821,7 @@ export default function AuditAssetDetails() {
     images,
     auditAsset,
   } = useLoaderData<typeof loader>();
+  const acceptsComments = auditAcceptsComments(auditAsset.auditSession.status);
   const actionData = useActionData<typeof action>();
 
   const imageUploadFetcher = useFetcher<typeof action>();
@@ -998,24 +1034,37 @@ export default function AuditAssetDetails() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Add note form */}
+      {/* Add note form — only while the audit is still open */}
       <div className="shrink-0 border-b border-gray-200 px-6 py-4">
-        <Form method="post" ref={noteFormRef}>
-          <input type="hidden" name="intent" value="create-note" />
-          <div className="space-y-2">
-            <textarea
-              name="content"
-              placeholder="Add a note..."
-              rows={3}
-              className="w-full resize-none rounded-md border border-gray-300 p-2 text-sm focus:border-gray-500 focus:outline-none"
-            />
-            <div className="flex justify-end">
-              <Button type="submit" size="sm" disabled={disabled}>
-                {disabled ? "Adding Note..." : "Add Note"}
-              </Button>
+        {acceptsComments ? (
+          <Form method="post" ref={noteFormRef}>
+            <input type="hidden" name="intent" value="create-note" />
+            <div className="space-y-2">
+              <textarea
+                name="content"
+                placeholder="Add a note..."
+                rows={3}
+                className="w-full resize-none rounded-md border border-gray-300 p-2 text-sm focus:border-gray-500 focus:outline-none"
+              />
+              <div className="flex justify-end">
+                <Button type="submit" size="sm" disabled={disabled}>
+                  {disabled ? "Adding Note..." : "Add Note"}
+                </Button>
+              </div>
             </div>
-          </div>
-        </Form>
+          </Form>
+        ) : (
+          <p className="text-sm text-gray-500">
+            {AUDIT_CLOSED_TO_COMMENTS_MESSAGE}
+          </p>
+        )}
+        {/* A page opened while the audit was still running can submit after it
+            closed, so the server's refusal is rendered here rather than lost. */}
+        {actionData && "error" in actionData && actionData.error ? (
+          <p className="mt-2 text-sm text-error-500" role="alert">
+            {actionData.error.message}
+          </p>
+        ) : null}
       </div>
 
       {/* Notes section - scrollable, takes remaining space */}

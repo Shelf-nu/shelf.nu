@@ -7,11 +7,21 @@ import type {
   Organization,
 } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
+  AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
+  auditAcceptsComments,
+} from "~/modules/audit/comment-policy";
 import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
@@ -76,6 +86,108 @@ function assertAuditNotArchived(
       status: 400,
     });
   }
+}
+
+/**
+ * Refuses a new comment on a finished audit.
+ *
+ * @param status - The audit's current status
+ * @param details - Identifies the audit in the error's additional data
+ * @throws {ShelfError} 400 when the audit is completed, cancelled or archived
+ */
+export function assertAuditAcceptsComments(
+  status: AuditStatus,
+  details: { auditSessionId: string; organizationId: string }
+) {
+  if (!auditAcceptsComments(status)) {
+    throw new ShelfError({
+      cause: null,
+      message: AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
+      additionalData: { ...details, status },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * Runs a comment write while the audit is held open for it.
+ *
+ * Checking the status and then inserting leaves a gap: a complete or cancel can
+ * commit in between, and the comment lands on a finished audit. Locking the
+ * audit row first closes it in both orders. If the transition commits first, the
+ * lock waits for it and then reads the finished status, so the comment is
+ * refused. If the comment takes the lock first, the transition's own guarded
+ * write waits, and the comment becomes part of the audit before it closes.
+ *
+ * A comment write takes no audit-asset row locks, so locking the session first
+ * here cannot invert the order the scan path uses.
+ *
+ * @param auditSessionId - The audit the comment belongs to
+ * @param organizationId - Its organization
+ * @param write - Creates the comment, through the transaction it is handed
+ * @returns Whatever `write` returns
+ * @throws {ShelfError} 404 when the audit is not in the organization; 400 when
+ *   it no longer accepts comments
+ */
+export async function createWhileAuditAcceptsComments<T>(
+  {
+    auditSessionId,
+    organizationId,
+  }: { auditSessionId: string; organizationId: string },
+  write: (tx: Omit<ExtendedPrismaClient, ITXClientDenyList>) => Promise<T>
+): Promise<T> {
+  return db.$transaction(async (tx) => {
+    await assertAuditAcceptsCommentsOnLockedRow(tx, {
+      auditSessionId,
+      organizationId,
+    });
+
+    return write(tx);
+  });
+}
+
+/**
+ * Takes the audit row and refuses unless it still accepts comments.
+ *
+ * For a caller that already has a transaction of its own; everything else goes
+ * through {@link createWhileAuditAcceptsComments}.
+ *
+ * @param tx - The caller's transaction, which must hold the lock until it ends
+ * @param auditSessionId - The audit the comment belongs to
+ * @param organizationId - Its organization
+ * @throws {ShelfError} 404 when the audit is not in the organization; 400 when
+ *   it no longer accepts comments
+ */
+export async function assertAuditAcceptsCommentsOnLockedRow(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    auditSessionId,
+    organizationId,
+  }: { auditSessionId: string; organizationId: string }
+): Promise<void> {
+  const [session] = await tx.$queryRaw<{ status: AuditStatus }[]>`
+    SELECT status FROM "AuditSession"
+    WHERE id = ${auditSessionId} AND "organizationId" = ${organizationId}
+    FOR UPDATE
+  `;
+
+  if (!session) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { auditSessionId, organizationId },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  assertAuditAcceptsComments(session.status, {
+    auditSessionId,
+    organizationId,
+  });
 }
 
 export const AUDIT_LIST_INCLUDE = {
@@ -613,11 +725,19 @@ export async function getAuditSessionDetails({
   organizationId,
   userOrganizations,
   request,
+  refreshExpectedAssetImages,
 }: {
   id: AuditSession["id"];
   organizationId: string;
   userOrganizations?: Pick<UserOrganization, "organizationId">[];
   request?: Request;
+  /**
+   * Re-sign lapsed photo URLs on the expected assets. Pass `true` only from a
+   * caller that renders `expectedAssets`; a caller that reads `session` alone
+   * passes `false` and makes no storage calls. Required so every caller states
+   * which one it is.
+   */
+  refreshExpectedAssetImages: boolean;
 }): Promise<GetAuditSessionResult> {
   try {
     const otherOrganizationIds = userOrganizations?.map(
@@ -666,6 +786,8 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Lets the re-sign below tell a lapsed photo URL.
+                mainImageExpiration: true,
                 // Model cover image for assets with no image of their own
                 ...ASSET_MODEL_IMAGE_SELECT,
                 // Asset-code resolution: surface code data so the audit
@@ -764,9 +886,24 @@ export async function getAuditSessionDetails({
       });
     }
 
-    const expectedAssets: AuditExpectedAsset[] = session.assets
-      .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
-      .map((auditAsset) => {
+    const expectedAuditAssets = session.assets.flatMap((auditAsset) =>
+      auditAsset.expected && auditAsset.asset
+        ? [{ auditAsset, asset: auditAsset.asset }]
+        : []
+    );
+    const expectedAssetRows = expectedAuditAssets.map(({ asset }) => asset);
+    // Only expected rows are rendered, so only they are re-signed. The owning
+    // workspace scopes the write-back, since a sibling-workspace session also
+    // resolves here. The result lines up with `expectedAuditAssets`.
+    const refreshedExpectedAssets = refreshExpectedAssetImages
+      ? await refreshExpiredAssetImages(expectedAssetRows, {
+          organizationId: session.organizationId,
+          ...ASSET_IMAGE_RESIGN_LIMITS,
+        })
+      : expectedAssetRows;
+
+    const expectedAssets: AuditExpectedAsset[] = expectedAuditAssets.map(
+      ({ auditAsset }, index) => {
         // why: prefer the User's display fields when the custodian is a
         // real user; fall back to the TeamMember's name for non-user
         // "external" custodians (contractors etc.). Routes through the
@@ -793,10 +930,11 @@ export async function getAuditSessionDetails({
          * Placeholder stays `null` so the existing client-side "no image"
          * branches keep working — same contract as `serializeAssetImage`.
          */
+        const asset = refreshedExpectedAssets[index];
         const image = resolveAssetImage({
-          mainImage: auditAsset.asset?.mainImage ?? null,
-          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
-          assetModel: auditAsset.asset?.assetModel ?? null,
+          mainImage: asset.mainImage,
+          thumbnailImage: asset.thumbnailImage,
+          assetModel: asset.assetModel,
         });
         const hasImage = image.source !== "placeholder";
 
@@ -814,7 +952,8 @@ export async function getAuditSessionDetails({
           categoryName: auditAsset.asset?.category?.name ?? null,
           custodianName,
         };
-      });
+      }
+    );
 
     return {
       session,
@@ -1828,9 +1967,10 @@ export async function removeAuditScan(
         ]);
 
       await Promise.all([
-        tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven to belong to organizationId by the findFirst above (404 otherwise); update() requires a unique where
-          where: { id: auditSessionId },
+        updateAuditSessionWhileInStatus(tx, {
+          auditSessionId,
+          organizationId,
+          allowedStatuses: [AuditStatus.PENDING, AuditStatus.ACTIVE],
           data: { foundAssetCount, missingAssetCount, unexpectedAssetCount },
         }),
         createAssetScanRemovedNote({
@@ -2058,6 +2198,64 @@ export async function getAuditScans({
 }
 
 /**
+ * Writes to an audit session only while it is still in one of `allowedStatuses`.
+ *
+ * A status read earlier in the same transaction does not hold: under READ
+ * COMMITTED a concurrent complete, cancel or archive can commit between that
+ * read and this write. With the status in the write's own predicate, Postgres
+ * re-checks it against the committed row, so a transition that already landed
+ * matches nothing. That is refused here, and because it throws, the caller's
+ * transaction rolls back everything it did before the write — asset rows,
+ * notes and events included.
+ *
+ * Kept as the last session write rather than a lock taken up front: the scan
+ * path locks audit-asset rows before the session row, and locking the session
+ * first here would take the two in the opposite order.
+ *
+ * @param tx - The caller's transaction
+ * @param auditSessionId - The audit being written
+ * @param organizationId - Its organization
+ * @param allowedStatuses - The statuses in which this write is still valid
+ * @param data - The session fields to write
+ * @throws {ShelfError} 409 when the audit has moved out of `allowedStatuses`
+ */
+async function updateAuditSessionWhileInStatus(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    auditSessionId,
+    organizationId,
+    allowedStatuses,
+    data,
+  }: {
+    auditSessionId: string;
+    organizationId: string;
+    allowedStatuses: AuditStatus[];
+    data: Prisma.AuditSessionUpdateManyMutationInput;
+  }
+): Promise<void> {
+  const result = await tx.auditSession.updateMany({
+    where: {
+      id: auditSessionId,
+      organizationId,
+      status: { in: allowedStatuses },
+    },
+    data,
+  });
+
+  if (result.count !== 1) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "This audit changed while your change was being saved. Please refresh and try again.",
+      additionalData: { auditSessionId, organizationId, allowedStatuses },
+      label,
+      status: 409,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Completes an audit session by finalizing all asset statuses.
  * Expected assets that were not scanned are marked as MISSING.
  * Updates the session status to COMPLETED and sets completedAt timestamp.
@@ -2157,10 +2355,12 @@ export async function completeAuditSession({
           }),
         ]);
 
-      // Update session to completed
-      await tx.auditSession.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: sessionId proven to belong to organizationId by the findUnique guard at the top of this tx (throws 404 otherwise); update() requires a unique-only where so organizationId cannot be added here.
-        where: { id: sessionId },
+      // Update session to completed — only if it is still open, so a cancel or
+      // archive that landed since the check above is not overwritten.
+      await updateAuditSessionWhileInStatus(tx, {
+        auditSessionId: sessionId,
+        organizationId,
+        allowedStatuses: [AuditStatus.PENDING, AuditStatus.ACTIVE],
         data: {
           status: AuditStatus.COMPLETED,
           completedAt: new Date(),
@@ -2987,10 +3187,11 @@ export async function addAssetsToAudit({
           })),
         });
 
-        // Update audit session counts
-        await tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
-          where: { id: auditId },
+        // Update audit session counts — only while it is still pending.
+        await updateAuditSessionWhileInStatus(tx, {
+          auditSessionId: auditId,
+          organizationId,
+          allowedStatuses: [AuditStatus.PENDING],
           data: {
             expectedAssetCount: { increment: newAssetIds.length },
             missingAssetCount: { increment: newAssetIds.length },
@@ -3148,18 +3349,19 @@ export async function removeAssetFromAudit({
         });
       }
 
-      // Update audit session counts
-      // If it was an expected asset, decrement expectedAssetCount
-      if (auditAsset.expected) {
-        await tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { decrement: 1 },
-            missingAssetCount: { decrement: 1 },
-          },
-        });
-      }
+      // Update audit session counts, which move only for an expected asset.
+      // Written unconditionally — a zero delta for an unexpected one — so the
+      // removal is refused whenever the audit is no longer pending.
+      const expectedDelta = auditAsset.expected ? 1 : 0;
+      await updateAuditSessionWhileInStatus(tx, {
+        auditSessionId: auditId,
+        organizationId,
+        allowedStatuses: [AuditStatus.PENDING],
+        data: {
+          expectedAssetCount: { decrement: expectedDelta },
+          missingAssetCount: { decrement: expectedDelta },
+        },
+      });
 
       // Create activity note
       await createAssetRemovedFromAuditNote({
@@ -3291,17 +3493,18 @@ export async function removeAssetsFromAudit({
         });
       }
 
-      // Update audit session counts
-      if (expectedCount > 0) {
-        await tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { decrement: expectedCount },
-            missingAssetCount: { decrement: expectedCount },
-          },
-        });
-      }
+      // Update audit session counts. Written unconditionally — a zero delta
+      // when only unexpected assets were removed — so the removal is refused
+      // whenever the audit is no longer pending.
+      await updateAuditSessionWhileInStatus(tx, {
+        auditSessionId: auditId,
+        organizationId,
+        allowedStatuses: [AuditStatus.PENDING],
+        data: {
+          expectedAssetCount: { decrement: expectedCount },
+          missingAssetCount: { decrement: expectedCount },
+        },
+      });
 
       // Create activity note
       await createAssetsRemovedFromAuditNote({
