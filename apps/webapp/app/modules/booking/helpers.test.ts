@@ -8,6 +8,7 @@ import {
   filterBookingAssets,
   groupAndSortAssetsByKit,
   hasAssetBookingConflicts,
+  hasKitBookingConflicts,
   isAssetCheckoutEligible,
   isBookingArchivable,
   shouldPromptEarlyCheckout,
@@ -640,6 +641,99 @@ describe("hasAssetBookingConflicts", () => {
       );
       expect(hasAssetBookingConflicts(asset, CURRENT)).toBe(false);
     });
+  });
+});
+
+describe("hasKitBookingConflicts", () => {
+  const CURRENT = "booking-current";
+  const OUT = new Date("2026-09-10T09:00:00Z");
+  const IN = new Date("2026-09-11T09:00:00Z");
+
+  /** One kit-driven slice of the kit, on the given booking. */
+  const slice = (
+    booking: { id: string; status: string },
+    checkedOutAt: Date | null = null,
+    checkedInAt: Date | null = null
+  ) => ({ booking, checkedOutAt, checkedInAt });
+
+  it("treats a kit on an overlapping RESERVED booking as a conflict", () => {
+    expect(
+      hasKitBookingConflicts(
+        [slice({ id: "other", status: BookingStatus.RESERVED })],
+        CURRENT
+      )
+    ).toBe(true);
+  });
+
+  it("treats a kit still out on an overlapping ONGOING or OVERDUE booking as a conflict", () => {
+    for (const status of [BookingStatus.ONGOING, BookingStatus.OVERDUE]) {
+      expect(
+        hasKitBookingConflicts([slice({ id: "other", status }, OUT)], CURRENT)
+      ).toBe(true);
+    }
+  });
+
+  it("ignores an ONGOING booking whose slices of the kit have all come back", () => {
+    expect(
+      hasKitBookingConflicts(
+        [slice({ id: "other", status: BookingStatus.ONGOING }, OUT, IN)],
+        CURRENT
+      )
+    ).toBe(false);
+  });
+
+  it("ignores an ONGOING booking that holds the kit but never took it out", () => {
+    // A kit added after the booking departed has not left the shelf.
+    expect(
+      hasKitBookingConflicts(
+        [slice({ id: "other", status: BookingStatus.ONGOING })],
+        CURRENT
+      )
+    ).toBe(false);
+  });
+
+  it("still conflicts while any one slice of the kit is out", () => {
+    // A kit of two quantity-tracked members, one returned and one not.
+    const other = { id: "other", status: BookingStatus.ONGOING };
+    expect(
+      hasKitBookingConflicts(
+        [slice(other, OUT, IN), slice(other, OUT)],
+        CURRENT
+      )
+    ).toBe(true);
+  });
+
+  it("never conflicts on the current booking's own slices", () => {
+    expect(
+      hasKitBookingConflicts(
+        [slice({ id: CURRENT, status: BookingStatus.ONGOING }, OUT)],
+        CURRENT
+      )
+    ).toBe(false);
+  });
+
+  it("does not treat a DRAFT booking as holding the kit", () => {
+    expect(
+      hasKitBookingConflicts(
+        [slice({ id: "other", status: BookingStatus.DRAFT })],
+        CURRENT
+      )
+    ).toBe(false);
+  });
+
+  it("lets an in-flight booking outrank a reservation when reserved conflicts are ignored", () => {
+    const reserved = slice({ id: "other", status: BookingStatus.RESERVED });
+    const stillOut = slice({ id: "live", status: BookingStatus.OVERDUE }, OUT);
+    expect(
+      hasKitBookingConflicts([reserved], CURRENT, {
+        ignoreReservedConflicts: true,
+      })
+    ).toBe(false);
+    expect(
+      hasKitBookingConflicts([reserved, stillOut], CURRENT, {
+        ignoreReservedConflicts: true,
+      })
+    ).toBe(true);
   });
 });
 

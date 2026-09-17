@@ -15,7 +15,14 @@ import {
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
+import {
+  BARCODE_CODES_ORDER_BY,
+  QR_CODES_ORDER_BY,
+  resolveDisplayCode,
+  serializeDisplayCode,
+} from "~/modules/barcode/display";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 /**
  * GET /api/mobile/assets?orgId=xxx&search=xxx&page=1&perPage=20&myCustody=true&status=IN_CUSTODY
@@ -146,6 +153,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
             // to show WHICH SAM ID matched. Without it the user gets hits
             // identified by title only and has to open each one to find out.
             sequentialId: true,
+            // Code-resolution inputs — resolved into `displayCode` below so a
+            // workspace that labels its assets with Code 128 can match a
+            // physical label against this list.
+            preferredBarcodeId: true,
+            qrCodes: {
+              take: 1,
+              orderBy: QR_CODES_ORDER_BY,
+              select: { id: true },
+            },
+            barcodes: {
+              orderBy: BARCODE_CODES_ORDER_BY,
+              select: { id: true, type: true, value: true },
+            },
             // Model cover image; `shapeMobileAssetResponse` resolves the cascade
             // into the flat image fields the companion already reads.
             ...ASSET_MODEL_IMAGE_SELECT,
@@ -231,9 +251,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // `thumbnailImage` is deliberately NOT stripped and re-attached any more:
     // the helper resolves the model-image cascade, so the raw column would
     // overwrite an inherited thumbnail with null.
+    // One workspace read for the whole page — the preference is per-workspace,
+    // so resolving it per row would fetch the same answer `perPage` times.
+    const organization = await db.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { qrIdDisplayPreference: true, barcodesEnabled: true },
+    });
+    // Effective entitlement, not the raw column — see `assets.$assetId.ts`.
+    const barcodesAllowed = canUseBarcodes(organization);
+
     const shapedAssets = assets.map((asset) => {
-      const { mainImageExpiration, ...assetForHelper } = asset;
+      const {
+        mainImageExpiration,
+        qrCodes,
+        barcodes,
+        preferredBarcodeId,
+        ...assetForHelper
+      } = asset;
       const shaped = shapeMobileAssetResponse(assetForHelper);
+
+      // Which identifier to show for this row. Same resolver and precedence as
+      // every web asset row and the mobile detail screen.
+      const resolvedCode = resolveDisplayCode({
+        entity: {
+          sequentialId: asset.sequentialId,
+          preferredBarcodeId,
+          qrCodes,
+          barcodes,
+        },
+        organization: {
+          qrIdDisplayPreference: organization.qrIdDisplayPreference,
+          barcodesEnabled: barcodesAllowed,
+        },
+        entityKind: "asset",
+      });
 
       /**
        * Same custody gate the mobile asset DETAIL route applies
@@ -274,6 +325,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           shaped.imageSource,
           mainImageExpiration
         ),
+        // The label the operator reads off the physical tag, in the same
+        // shape the detail endpoints send.
+        displayCode: serializeDisplayCode(resolvedCode),
       };
     });
 

@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import {
-  useWindowDimensions,
   View,
   Text,
   TextInput,
@@ -13,6 +12,7 @@ import {
   Platform,
   Alert,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
@@ -46,7 +46,11 @@ import {
   type BatchScanAction,
   type BlockerGroup,
 } from "@/lib/batch-blockers";
-import { markBookingDirty } from "@/lib/booking-refresh";
+import { markBookingDirty, markBookingsListDirty } from "@/lib/booking-refresh";
+import {
+  checkoutBlocker,
+  eligibleKitMembers,
+} from "@/lib/booking-scan-eligibility";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
@@ -184,7 +188,10 @@ function ScannerContent() {
   const { bookingId, bookingName, bookingAction } = useLocalSearchParams<{
     bookingId?: string;
     bookingName?: string;
-    /** "checkin" (default) or "add" — which booking flow the scanner serves. */
+    /**
+     * Which booking flow the scanner serves: "checkin" (default), "add",
+     * "fulfil" or "checkout".
+     */
     bookingAction?: string;
   }>();
   const isFocused = useIsFocused();
@@ -220,6 +227,12 @@ function ScannerContent() {
   // all the add-mode scan capture / blockers / list rendering apply to both.
   const isBookingAddMode =
     isBookingMode && (bookingAction === "add" || bookingAction === "fulfil");
+  // Progressive check-out flow: the twin of check-in. Assets already on the
+  // booking are scanned one at a time to take them out, batched into the same
+  // list, and submitted to the partial-checkout endpoint. Available on
+  // RESERVED, ONGOING and OVERDUE bookings, so an operator can keep taking the
+  // rest after a first batch has flipped the booking to ONGOING.
+  const isBookingCheckoutMode = isBookingMode && bookingAction === "checkout";
 
   // Filter scanner actions based on the user's role in the current org
   const availableActions = useMemo(
@@ -309,30 +322,7 @@ function ScannerContent() {
     if (!anyDrawerVisible) setDrawerHeight(0);
   }, [anyDrawerVisible]);
 
-  /**
-   * Where the floating manual-entry control sits, or `null` when it cannot be
-   * placed without overlapping something.
-   *
-   * It is anchored inside the bottom strip, which is roughly half the space
-   * left over after the 240px frame. Lifting it by the full drawer height
-   * clears the drawer but can push it up INTO the frame and over the
-   * instruction text — the drawer grows to 280px (400px with blockers), so on
-   * a short viewport no offset clears both. In that case we render nothing
-   * rather than recreate the overlap this fix exists to remove: the camera and
-   * the drawer's own actions still work, and clearing an item restores the gap.
-   */
-  const { height: windowHeight } = useWindowDimensions();
-  const manualEntryBottom = useMemo(() => {
-    const DEFAULT_BOTTOM = 90;
-    const CONTROL_HEIGHT = 48;
-    if (drawerHeight <= DEFAULT_BOTTOM) return DEFAULT_BOTTOM;
-
-    // Space between the frame's bottom edge and the screen bottom.
-    const stripHeight = (windowHeight - FRAME_SIZE) / 2;
-    const desired = drawerHeight + spacing.md;
-    const maxBottom = stripHeight - CONTROL_HEIGHT - spacing.md;
-    return desired > maxBottom ? null : desired;
-  }, [drawerHeight, windowHeight]);
+  const insets = useSafeAreaInsets();
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -415,6 +405,22 @@ function ScannerContent() {
   // Dev-mode scan injection (stripped from production builds)
   const [devScanInput, setDevScanInput] = useState("");
   const [devScanVisible, setDevScanVisible] = useState(false);
+
+  /**
+   * Absolute position of the manual-entry control.
+   *
+   * The open text field always lives in the top strip, just under the status
+   * bar: the keyboard rises from the bottom and would cover a field anchored
+   * there, and the top strip is free above the header and pills. The closed
+   * pill sits low in the bottom strip while nothing else is there, and moves
+   * to the top strip as soon as a drawer opens: the drawer shares the bottom
+   * strip with the hint text and the camera controls, and no offset keeps the
+   * pill clear of all three on a short screen.
+   */
+  const manualEntryPlacement =
+    devScanVisible || drawerHeight > 0
+      ? { top: insets.top + spacing.md }
+      : { bottom: MANUAL_ENTRY_BOTTOM };
 
   // Cooldown (shared hook)
   const {
@@ -1019,6 +1025,56 @@ function ScannerContent() {
               return;
             }
 
+            // BOOKING CHECK-OUT: a kit contributes the members of it that are
+            // on this booking and still takeable; the kit itself is never a
+            // list row (web parity).
+            if (isBookingCheckoutMode) {
+              const { eligible, reason } = eligibleKitMembers(
+                { id: kit.id, name: kit.name, assets: kit.assets },
+                bookingCtx,
+                new Set(bookingCheckinItems.map((item) => item.targetId))
+              );
+
+              if (reason) {
+                flashFrame("error");
+                Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Warning
+                );
+                setScanResult({ type: "error", ...reason });
+                finalizeScan();
+                return;
+              }
+
+              const kitMemberItems: ScannedItem[] = eligible.map((a) => ({
+                type: "asset",
+                qrId: `${codeId}:${a.id}`,
+                targetId: a.id,
+                title: a.title,
+                status: a.status,
+                mainImage: a.mainImage,
+                category: a.category?.name ?? null,
+                kitId: a.kitId,
+              }));
+
+              setBookingCheckinItems((prev) => [...kitMemberItems, ...prev]);
+              flashFrame("success");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Success
+              );
+              playScanSound();
+              setScanResult({
+                type: "success",
+                title: kit.name,
+                message: `Added ${eligible.length} kit asset${
+                  eligible.length === 1 ? "" : "s"
+                } (${bookingCheckinItems.length + eligible.length} items)`,
+              });
+
+              setTimeout(() => setScanResult(null), 1200);
+              finalizeScan();
+              return;
+            }
+
             const members = bookingCtx.bookedAssets.filter(
               (a) => a.kitId === kit!.id
             );
@@ -1378,6 +1434,8 @@ function ScannerContent() {
               title: "Already Scanned",
               message: isBookingAddMode
                 ? "This asset is already in your list."
+                : isBookingCheckoutMode
+                ? "This asset is already in your check-out list."
                 : "This asset is already in your check-in list.",
             });
             finalizeScan();
@@ -1433,6 +1491,49 @@ function ScannerContent() {
               title: "Booking Still Loading",
               message: "One moment — scan again.",
             });
+            finalizeScan();
+            return;
+          }
+
+          // CHECK-OUT mode has its own gates: the booking's own row carries
+          // the quantity counts a scanned QR does not, so eligibility is
+          // decided there rather than on the asset's global status alone.
+          if (isBookingCheckoutMode) {
+            const blocker = checkoutBlocker(asset, bookingCtx);
+            if (blocker) {
+              flashFrame("error");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({ type: "error", ...blocker });
+              finalizeScan();
+              return;
+            }
+
+            const row = bookingCtx.bookedAssets.find((a) => a.id === asset.id);
+            // Submitting a bare id takes every remaining unit, so name the
+            // count that implies.
+            const unitSuffix =
+              row?.type === "QUANTITY_TRACKED" &&
+              typeof row.remainingToCheckOut === "number"
+                ? ` — all ${row.remainingToCheckOut} ${
+                    row.unitOfMeasure ?? "units"
+                  }`
+                : "";
+
+            setBookingCheckinItems((prev) => [newItem, ...prev]);
+            flashFrame("success");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            setScanResult({
+              type: "success",
+              title: asset.title,
+              message: `Added to check-out (${
+                bookingCheckinItems.length + 1
+              } items)${unitSuffix}`,
+            });
+
+            setTimeout(() => setScanResult(null), 1200);
             finalizeScan();
             return;
           }
@@ -1925,12 +2026,11 @@ function ScannerContent() {
   };
 
   /**
-   * Submit the fulfil-and-check-out list: the scanned assets are matched
-   * against the booking's outstanding model reservations (materialising them)
-   * AND the booking is checked out (RESERVED -> ONGOING) in one atomic call.
-   * Mirrors the web `fulfil-and-checkout` scanner. The server rejects the
-   * submit if any reservation is still unassigned, so the operator gets a clear
-   * "still N to assign" error rather than a silent partial checkout.
+   * Submit the fulfil-and-check-out list. The server assigns the scanned units
+   * to the booking's outstanding model reservations and checks out either the
+   * whole booking or, under the workspace's explicit check-out requirement,
+   * only the scanned units. Mirrors the web `fulfil-and-checkout` scanner. The
+   * server refuses the check-out while any reservation is still unassigned.
    */
   const handleBookingFulfil = async () => {
     if (
@@ -2003,13 +2103,14 @@ function ScannerContent() {
     const kitIds = bookingCheckinItems
       .filter((i) => i.type === "kit")
       .map((i) => i.targetId);
-    const count = bookingCheckinItems.length;
+    // Units are asset rows only: a kit row is not a unit the server assigns.
+    const count = assetIds.length;
 
     Alert.alert(
       "Assign & check out",
-      `Assign ${count} scanned unit${count === 1 ? "" : "s"} and check out "${
-        bookingName || "this booking"
-      }"?`,
+      `Assign and check out the ${count} scanned unit${
+        count === 1 ? "" : "s"
+      } on "${bookingName || "this booking"}"?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -2026,7 +2127,7 @@ function ScannerContent() {
               }
             })();
 
-            const { error } = await api.fulfilAndCheckoutBooking(
+            const { data, error } = await api.fulfilAndCheckoutBooking(
               currentOrg.id,
               bookingId,
               assetIds,
@@ -2036,34 +2137,47 @@ function ScannerContent() {
             setIsBookingSubmitting(false);
 
             if (error) {
+              // A refusal after the assignment step leaves the scanned units
+              // on the booking. Re-reading the booking lets the add blockers
+              // flag them as already in this booking.
+              fetchBookingCtx();
               Alert.alert("Couldn't check out", error);
               return;
             }
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
-            Alert.alert(
-              "Checked out",
-              `Assigned ${count} unit${
-                count === 1 ? "" : "s"
-              } and checked out "${bookingName || "the booking"}".`,
-              [
-                {
-                  text: "OK",
-                  onPress: () => {
-                    setBookingCheckinItems([]);
-                    lastScanRef.current = "";
-                    markBookingDirty(bookingId);
-                    InteractionManager.runAfterInteractions(() => {
-                      pushIntoTab(
-                        "/(tabs)/bookings",
-                        `/(tabs)/bookings/${bookingId}`
-                      );
-                    });
-                  },
+            // Under the explicit check-out requirement only the scanned units
+            // go out, and the server says how many booked assets remain.
+            const remaining = data?.remainingCount ?? 0;
+            const message =
+              remaining > 0
+                ? `Assigned ${count} unit${
+                    count === 1 ? "" : "s"
+                  } and checked ${
+                    count === 1 ? "it" : "them"
+                  } out. ${remaining} more asset${
+                    remaining === 1 ? " is" : "s are"
+                  } still to check out.`
+                : `Assigned ${count} unit${
+                    count === 1 ? "" : "s"
+                  } and checked out "${bookingName || "the booking"}".`;
+            Alert.alert("Checked out", message, [
+              {
+                text: "OK",
+                onPress: () => {
+                  setBookingCheckinItems([]);
+                  lastScanRef.current = "";
+                  markBookingDirty(bookingId);
+                  InteractionManager.runAfterInteractions(() => {
+                    pushIntoTab(
+                      "/(tabs)/bookings",
+                      `/(tabs)/bookings/${bookingId}`
+                    );
+                  });
                 },
-              ]
-            );
+              },
+            ]);
           },
         },
       ]
@@ -2206,6 +2320,112 @@ function ScannerContent() {
     );
   };
 
+  const handleBookingCheckout = () => {
+    if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
+
+    const count = bookingCheckinItems.length;
+    Alert.alert(
+      "Check Out Assets",
+      `Check out ${count} ${count === 1 ? "asset" : "assets"} for "${
+        bookingName || "this booking"
+      }"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Check Out",
+          onPress: async () => {
+            setIsBookingSubmitting(true);
+            const assetIds = bookingCheckinItems.map((i) => i.targetId);
+            const timeZone = (() => {
+              try {
+                return (
+                  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+                );
+              } catch {
+                return "UTC";
+              }
+            })();
+
+            // No per-asset quantities: a bare id checks out every remaining
+            // unit of a quantity-tracked asset, which is the default the
+            // scanner offers. Picking a smaller count is the booking screen's
+            // "Select to Check Out" flow.
+            const { data: result, error } = await api.partialCheckoutBooking(
+              currentOrg.id,
+              bookingId,
+              assetIds,
+              timeZone
+            );
+            setIsBookingSubmitting(false);
+
+            if (error) {
+              Alert.alert("Error", error);
+              return;
+            }
+
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            // Keep the scan-time gates honest for follow-up scans: the assets
+            // just submitted are now out, but the fetched context predates the
+            // submit.
+            const submittedIds = new Set(assetIds);
+            setBookingCtx((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    bookedAssets: prev.bookedAssets.map((a) =>
+                      submittedIds.has(a.id)
+                        ? {
+                            ...a,
+                            status: "CHECKED_OUT",
+                            ...(a.type === "QUANTITY_TRACKED"
+                              ? { remainingToCheckOut: 0 }
+                              : {}),
+                          }
+                        : a
+                    ),
+                  }
+                : prev
+            );
+            // The server drops ids it already counts as out, so its numbers
+            // can be lower than the submitted list — report those, not ours.
+            Alert.alert(
+              "Checked Out",
+              `${result?.checkedOutCount ?? count} checked out, ${
+                result?.remainingCount ?? "some"
+              } remaining.`,
+              [
+                {
+                  text: "OK",
+                  onPress: () => {
+                    setBookingCheckinItems([]);
+                    lastScanRef.current = "";
+                    markBookingDirty(bookingId);
+                    // The first batch flips RESERVED → ONGOING, so the list's
+                    // own freshness gate has to be bypassed too.
+                    markBookingsListDirty();
+                    if (result?.remainingCount === 0) {
+                      // Nothing left to scan. Anchored navigation — router.back()
+                      // from a tab screen falls through history and can land on
+                      // Home. Deferred past the alert dismissal (same render-loop
+                      // wedge as the add path — see handleBookingAdd).
+                      InteractionManager.runAfterInteractions(() => {
+                        pushIntoTab(
+                          "/(tabs)/bookings",
+                          `/(tabs)/bookings/${bookingId}`
+                        );
+                      });
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
+
   // ── Permission states ───────────────────────────────
 
   if (!permission) {
@@ -2312,30 +2532,51 @@ function ScannerContent() {
         </TouchableOpacity>
       )}
 
-      {/* Overlay with cutout */}
-      <View style={styles.overlay}>
+      {/* Overlay with cutout.
+          `box-none` on the overlay and its strips: only real controls inside
+          them are touch targets, so a tap on an empty area falls through to
+          the paused layer beneath, which is what "tap anywhere to resume"
+          relies on. */}
+      <View style={styles.overlay} pointerEvents="box-none">
         {/* Top - Action picker or Booking header */}
-        <View style={styles.overlaySection}>
+        <View style={styles.overlaySection} pointerEvents="box-none">
           {isBookingMode ? (
-            <View style={styles.actionPickerContainer}>
-              <View style={styles.bookingModeHeader}>
+            <View style={styles.actionPickerContainer} pointerEvents="box-none">
+              <View style={styles.bookingModeHeader} pointerEvents="box-none">
                 <TouchableOpacity
-                  onPress={() => router.back()}
+                  // Anchored navigation, like the submit handlers: the scanner
+                  // is a tab screen, so router.back() unwinds the tab's own
+                  // history and lands on the start page rather than on the
+                  // booking the operator came from.
+                  onPress={() =>
+                    bookingId
+                      ? pushIntoTab(
+                          "/(tabs)/bookings",
+                          `/(tabs)/bookings/${bookingId}`
+                        )
+                      : router.back()
+                  }
                   accessibilityLabel="Go back"
                   accessibilityRole="button"
                 >
                   <Ionicons name="arrow-back" size={22} color="#fff" />
                 </TouchableOpacity>
-                <View style={styles.bookingModeInfo}>
+                {/* Labels only: touches pass through to the paused layer. */}
+                <View style={styles.bookingModeInfo} pointerEvents="none">
                   <Text style={styles.bookingModeLabel}>
                     {isBookingFulfilMode
                       ? "Fulfil & Check Out"
                       : isBookingAddMode
                       ? "Add to Booking"
+                      : isBookingCheckoutMode
+                      ? "Booking Check-Out"
                       : "Booking Check-In"}
                   </Text>
                   <Text style={styles.bookingModeName} numberOfLines={1}>
-                    {bookingName || "Scan assets to check in"}
+                    {bookingName ||
+                      (isBookingCheckoutMode
+                        ? "Scan assets to check out"
+                        : "Scan assets to check in")}
                   </Text>
                   {isBookingFulfilMode &&
                     bookingCtx &&
@@ -2355,7 +2596,7 @@ function ScannerContent() {
               </View>
             </View>
           ) : (
-            <View style={styles.actionPickerContainer}>
+            <View style={styles.actionPickerContainer} pointerEvents="box-none">
               <ActionPills
                 actions={availableActions}
                 currentAction={action}
@@ -2369,8 +2610,13 @@ function ScannerContent() {
           )}
         </View>
 
-        {/* Middle row -- swipe gesture target */}
-        <View style={styles.middleRow} {...panResponder.panHandlers}>
+        {/* Middle row -- swipe gesture target. Switched off while paused so
+            the tap lands on the paused layer instead of the swipe surface. */}
+        <View
+          style={styles.middleRow}
+          pointerEvents={isPaused ? "none" : "auto"}
+          {...panResponder.panHandlers}
+        >
           <View style={styles.overlaySection} />
           <ScanFrame
             scanLineAnim={scanLineAnim}
@@ -2398,13 +2644,17 @@ function ScannerContent() {
            * it never needed the overlay to make room in the first place.
            */
           style={[styles.overlaySection, styles.bottomSection]}
+          pointerEvents="box-none"
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
-            <ModeDots actions={availableActions} currentAction={action} />
+            <View pointerEvents="none">
+              <ModeDots actions={availableActions} currentAction={action} />
+            </View>
           )}
 
-          {/* Status / instruction text -- animated for swipe transitions */}
+          {/* Status / instruction text -- animated for swipe transitions.
+              Only the result card takes touches; plain text lets them pass. */}
           <Animated.View
             style={[
               styles.instructionContainer,
@@ -2413,6 +2663,7 @@ function ScannerContent() {
                 opacity: swipeOpacity,
               },
             ]}
+            pointerEvents={scanResult ? "auto" : "none"}
           >
             {isProcessing && !scanResult ? (
               <View style={styles.statusRow}>
@@ -2428,6 +2679,8 @@ function ScannerContent() {
                     ? "Scan the reserved units to assign"
                     : isBookingAddMode
                     ? "Scan assets or kits to add"
+                    : isBookingCheckoutMode
+                    ? "Scan assets to check out"
                     : "Scan assets to check in"
                   : instructionMap[action]}
               </Text>
@@ -2435,7 +2688,7 @@ function ScannerContent() {
           </Animated.View>
 
           {/* Camera controls -- positioned in the thumb-friendly bottom zone */}
-          <View style={styles.controlButtons}>
+          <View style={styles.controlButtons} pointerEvents="box-none">
             {/* Pause/Resume toggle */}
             <TouchableOpacity
               style={[
@@ -2485,14 +2738,13 @@ function ScannerContent() {
             control's origin so the existing e2e flows stay stable. */}
         {/* Hidden while a result card is shown — the card's actions must never
             be occluded (the unclaimed card is tall enough to reach this pill). */}
-        {manualEntryBottom !== null && !scanResult && (
+        {!scanResult && (
           <View
-            style={[
-              styles.devScanContainer,
-              // Clamped so the lift never pushes the control into the scan
-              // frame; see `manualEntryBottom`.
-              { bottom: manualEntryBottom },
-            ]}
+            style={[styles.devScanContainer, manualEntryPlacement]}
+            // Full-width host: only the pill or the field inside it takes
+            // touches, so a tap beside them reaches the paused layer.
+            pointerEvents="box-none"
+            testID="manual-entry-container"
           >
             {devScanVisible ? (
               <View style={styles.devScanRow}>
@@ -2501,6 +2753,9 @@ function ScannerContent() {
                   style={styles.devScanInput}
                   value={devScanInput}
                   onChangeText={setDevScanInput}
+                  // Opens the keyboard as soon as the field appears, so one tap
+                  // on "Enter code" is enough to start typing.
+                  autoFocus
                   placeholder="Enter QR, barcode, or SAM ID"
                   placeholderTextColor="rgba(255,255,255,0.4)"
                   autoCapitalize="none"
@@ -2599,6 +2854,10 @@ function ScannerContent() {
                   ? `${bookingCheckinItems.length} unit${
                       bookingCheckinItems.length > 1 ? "s" : ""
                     } scanned`
+                  : isBookingCheckoutMode
+                  ? `${bookingCheckinItems.length} asset${
+                      bookingCheckinItems.length > 1 ? "s" : ""
+                    } to check out`
                   : `${bookingCheckinItems.length} asset${
                       bookingCheckinItems.length > 1 ? "s" : ""
                     } to check in`
@@ -2623,6 +2882,10 @@ function ScannerContent() {
                       } more to assign`
                   : isBookingAddMode
                   ? "Add to Booking"
+                  : isBookingCheckoutMode
+                  ? `Check Out ${bookingCheckinItems.length} ${
+                      bookingCheckinItems.length === 1 ? "Asset" : "Assets"
+                    }`
                   : `Check In ${bookingCheckinItems.length} ${
                       bookingCheckinItems.length === 1 ? "Asset" : "Assets"
                     }`
@@ -2632,6 +2895,8 @@ function ScannerContent() {
                   ? "log-out-outline"
                   : isBookingAddMode
                   ? "add-circle-outline"
+                  : isBookingCheckoutMode
+                  ? "log-out-outline"
                   : "log-in-outline"
               }
               isSubmitting={isBookingSubmitting}
@@ -2642,6 +2907,8 @@ function ScannerContent() {
                   ? handleBookingFulfil
                   : isBookingAddMode
                   ? handleBookingAdd
+                  : isBookingCheckoutMode
+                  ? handleBookingCheckout
                   : handleBookingCheckin
               }
               showStatus={isBookingAddMode}
@@ -2707,6 +2974,8 @@ export default function ScannerScreen() {
 // ── Styles ────────────────────────────────────────────────
 
 const FRAME_SIZE = 240;
+/** Distance of the closed "Enter code" pill from the bottom edge when no drawer is open. */
+const MANUAL_ENTRY_BOTTOM = 90;
 
 const useStyles = createStyles((colors) => ({
   container: {
@@ -2766,6 +3035,9 @@ const useStyles = createStyles((colors) => ({
     // why: no zIndex — the action pills / batch drawer (later siblings) must
     // win hit-testing, otherwise this full-screen touchable swallows the
     // first tap aimed at them while paused. It still covers the camera area.
+    // The overlay strips above it are `box-none` (and the swipe row `none`
+    // while paused), so a tap on anything that is not a control reaches this
+    // layer and resumes the camera.
   },
   pausedTitle: {
     color: "#fff",
@@ -2870,7 +3142,6 @@ const useStyles = createStyles((colors) => ({
   // ── Dev Scan Injection (DEV only) ───────────────
   devScanContainer: {
     position: "absolute" as const,
-    bottom: 90,
     left: spacing.md,
     right: spacing.md,
     zIndex: 999,

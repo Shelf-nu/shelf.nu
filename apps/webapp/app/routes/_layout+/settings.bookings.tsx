@@ -15,6 +15,10 @@ import {
   ExplicitCheckinSettings,
   ExplicitCheckinSettingsSchema,
 } from "~/components/booking/explicit-checkin-settings";
+import {
+  ExplicitCheckoutSettings,
+  ExplicitCheckoutSettingsSchema,
+} from "~/components/booking/explicit-checkout-settings";
 import { NotificationSettings } from "~/components/booking/notification-settings";
 import {
   ProgressiveCheckinSettings,
@@ -148,6 +152,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         "updateAutoArchiveExpiredToggle",
         "updateAutoArchiveDays",
         "updateExplicitCheckin",
+        "updateExplicitCheckout",
         "updateCountKitsAsSingleUnit",
         "updateNotifyBookingCreator",
         "updateNotifyAdminsOnNewBooking",
@@ -521,6 +526,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
               "Only the workspace owner can change explicit check-in settings",
             status: 403,
             label: "Booking Settings",
+            shouldBeCaptured: false,
           });
         }
 
@@ -544,6 +550,47 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "Settings updated",
           message: "Explicit check-in settings have been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return data(payload({ success: true }), { status: 200 });
+      }
+
+      case "updateExplicitCheckout": {
+        // Only workspace owners can change explicit check-out settings
+        if (role !== OrganizationRoles.OWNER) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not allowed",
+            message:
+              "Only the workspace owner can change explicit check-out settings",
+            status: 403,
+            label: "Booking Settings",
+            shouldBeCaptured: false,
+          });
+        }
+
+        const {
+          requireExplicitCheckoutForAdmin,
+          requireExplicitCheckoutForSelfService,
+        } = parseData(formData, ExplicitCheckoutSettingsSchema, {
+          additionalData: {
+            intent,
+            organizationId,
+            formData: Object.fromEntries(formData),
+          },
+        });
+
+        await updateBookingSettings({
+          organizationId,
+          requireExplicitCheckoutForAdmin,
+          requireExplicitCheckoutForSelfService,
+        });
+
+        sendNotification({
+          title: "Settings updated",
+          message: "Explicit check-out settings have been updated successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -614,6 +661,21 @@ export default function GeneralPage() {
             bookingSettings.requireExplicitCheckinForAdmin,
           requireExplicitCheckinForSelfService:
             bookingSettings.requireExplicitCheckinForSelfService,
+        }}
+      />
+
+      {/* Explicit check-out settings form */}
+      <ExplicitCheckoutSettings
+        header={{
+          title: "Explicit check-out requirement",
+          subHeading:
+            "Control whether specific roles must use the scanner-based or selection-based explicit check-out flow instead of the one-click check-out. Only workspace owners can change this setting.",
+        }}
+        defaultValues={{
+          requireExplicitCheckoutForAdmin:
+            bookingSettings.requireExplicitCheckoutForAdmin,
+          requireExplicitCheckoutForSelfService:
+            bookingSettings.requireExplicitCheckoutForSelfService,
         }}
       />
 
