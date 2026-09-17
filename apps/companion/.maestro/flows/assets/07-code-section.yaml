@@ -1,12 +1,22 @@
 # Assets — the code card on asset detail
 #
 # The workspace chooses which code it labels assets with, and the server
-# resolves it. This covers the two things unit tests cannot: that the card
-# renders at all on a device, and that switching codes swaps what is drawn.
+# resolves it. This covers what unit tests cannot: that the card renders on a
+# device, that the Shelf QR is always offered whatever the workspace prefers,
+# and that selecting it actually redraws the card as a QR.
 #
-# Fixture: SHELF_TEST_BARCODE_ASSET_ID must be an asset that carries BOTH a
-# Shelf QR and at least one alternative barcode — with only one code there is
-# no selector to tap, and the flow has nothing to exercise.
+# Fixture: SHELF_TEST_BARCODE_ASSET_ID must be an asset that
+#   1. carries BOTH a Shelf QR and at least one alternative barcode — with one
+#      code there is no selector to tap, and
+#   2. has its preferred-code override pointing at that barcode (set from the
+#      web asset edit form).
+#
+# The override is what makes this flow independent of the workspace setting:
+# `resolveDisplayCode` honours a per-asset override ahead of
+# `qrIdDisplayPreference`, so the card is guaranteed to open on the barcode and
+# the tap below is guaranteed to be a real transition. Without it the card
+# opens on the QR under a QR_ID workspace — and under SAM_ID, whose resolved
+# value matches no entry in the selector — and the tap changes nothing.
 #
 # Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_BARCODE_ASSET_ID
 appId: com.shelf.companion.carlos
@@ -32,9 +42,24 @@ tags:
 
 - takeScreenshot: assets-code-section-default
 
-# The Shelf QR is always offered, whatever the workspace prefers — this is the
-# regression the card exists for: a Code 128 workspace used to see only the QR,
-# and the QR must not disappear now that it no longer leads.
-- assertVisible: "Shelf QR Code"
-- tapOn: "Shelf QR Code"
+# Matched on the chip's own accessibility label, which is "Show <label>" — a
+# Pressable carrying accessibilityLabel exposes only that string to Maestro,
+# and a matcher must match the whole of it (LESSONS.md #4-#6).
+#
+# The Shelf QR is always offered, whatever the workspace prefers: that is the
+# regression this card exists for, since a Code 128 workspace used to see only
+# the QR and must not now lose it to the code that replaced it.
+- assertVisible: "Show Shelf QR Code"
+
+# The card is on the barcode until the tap — see the fixture contract above.
+# Asserting the absence first is what makes the assertion after the tap proof
+# of a transition rather than of a state that already held.
+- assertNotVisible: "Shelf QR code for .*"
+- tapOn: "Show Shelf QR Code"
+
+# The QR plate's own label. Distinct from the chip ("QR code", not "QR Code")
+# and from the barcode plate ("<symbology> barcode for <value>"), so nothing
+# else on the card can satisfy it — including the placeholder the card falls
+# back to when the QR library is unavailable, which carries no label at all.
+- assertVisible: "Shelf QR code for .*"
 - takeScreenshot: assets-code-section-qr
