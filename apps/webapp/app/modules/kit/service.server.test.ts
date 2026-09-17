@@ -1910,13 +1910,14 @@ describe("updateKitsWithBookingCustodians", () => {
       })
     );
     // The first slice per kit names the holder, so the newest departure must
-    // come first — the same booking the kit detail page names. Postgres puts
-    // NULLs first on a descending sort, so a slice that never left is pushed
-    // explicitly to the end.
+    // come first, with ties broken on the booking id — the same order the kit
+    // detail page ranks by. Postgres puts NULLs first on a descending sort, so
+    // a slice that never left is pushed explicitly to the end.
     expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         orderBy: [
           { checkedOutAt: { sort: "desc", nulls: "last" } },
+          { bookingId: "asc" },
           { id: "asc" },
         ],
       })
@@ -2238,6 +2239,40 @@ describe("getKitCurrentBooking", () => {
       });
 
       expect(result?.id).toBe("booking-newer");
+    });
+
+    it.each([
+      ["lower id first", ["ak-1", "ak-2"]],
+      ["higher id first", ["ak-2", "ak-1"]],
+    ])("breaks a tie in departure on the booking id (%s)", (_order, ids) => {
+      // Adding a member to a kit that is out stamps the new slices on every
+      // holding booking with one timestamp, so equal departures are routine.
+      const sameMoment = new Date("2026-09-05T09:00:00Z");
+      const byId = {
+        "ak-1": membership("ak-1", [
+          {
+            assetKitId: "ak-1",
+            sourceKitId: "kit-1",
+            checkedOutAt: sameMoment,
+            booking: { ...ongoing, id: "booking-a" },
+          },
+        ]),
+        "ak-2": membership("ak-2", [
+          {
+            assetKitId: "ak-2",
+            sourceKitId: "kit-1",
+            checkedOutAt: sameMoment,
+            booking: { ...ongoing, id: "booking-b" },
+          },
+        ]),
+      } as const;
+
+      const result = getKitCurrentBooking({
+        id: "kit-1",
+        assetKits: ids.map((id) => byId[id as keyof typeof byId]),
+      });
+
+      expect(result?.id).toBe("booking-a");
     });
 
     it("ranks a slice that never left below one that did", () => {

@@ -2686,10 +2686,16 @@ async function getBookingCustodiansHoldingKits(
     },
     // Several live bookings can list one kit at once, and the first slice per
     // kit names the custodian. Newest departure first makes that the booking
-    // the kit most recently left on — the one `getKitCurrentBooking` names on
-    // the kit page. Postgres sorts NULLs first on a descending sort, so a slice
-    // that never left is pushed to the end; `id` keeps ties stable.
-    orderBy: [{ checkedOutAt: { sort: "desc", nulls: "last" } }, { id: "asc" }],
+    // the kit most recently left on, with ties broken on the booking id — the
+    // same order `getKitCurrentBooking` ranks by, so the index and the kit page
+    // name the same booking. Postgres sorts NULLs first on a descending sort,
+    // so a slice that never left is pushed to the end. The slice `id` only
+    // fixes row order within one booking, whose custodian is the same.
+    orderBy: [
+      { checkedOutAt: { sort: "desc", nulls: "last" } },
+      { bookingId: "asc" },
+      { id: "asc" },
+    ],
     select: {
       assetKitId: true,
       sourceKitId: true,
@@ -2924,7 +2930,10 @@ export function getKitCurrentBooking(kit: {
       if (bOut === null) return -1;
       return bOut - aOut;
     }
-    return a.booking.id.localeCompare(b.booking.id);
+    // Plain code-unit order, as the database sorts these ids, never the
+    // runtime locale's.
+    if (a.booking.id === b.booking.id) return 0;
+    return a.booking.id < b.booking.id ? -1 : 1;
   });
 
   return newest?.booking;
