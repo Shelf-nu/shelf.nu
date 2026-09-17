@@ -503,7 +503,6 @@ export function compareCoreField(
       );
 
       const currentStr = currentTags.join(", ");
-      const csvStr = csvTags.join(", ");
 
       // Case-insensitive set comparison
       const currentSet = new Set(currentTags.map((t) => t.toLowerCase()));
@@ -516,7 +515,10 @@ export function compareCoreField(
         return {
           field: displayName,
           currentValue: currentStr || "(none)",
-          newValue: csvStr,
+          // The cell verbatim, never the decoded list re-joined: `newValue` is
+          // what the apply flow decodes to resolve and connect the tags, and a
+          // plain join would hand it `Berlin, DE, small` to read as three.
+          newValue: csvValue,
         };
       }
       return null;
