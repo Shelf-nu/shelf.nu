@@ -163,7 +163,17 @@ export type AdvancedAssetBooking = Pick<
   from: string;
   to: string;
   tags: Array<Pick<Tag, "id" | "name" | "color">>;
-  custodianTeamMember?: Pick<TeamMember, "id" | "name">;
+  /** The team member's linked user account, when it has one — mirrors the
+   * mega-query's `bookingsSelect` (`query.server.ts`), which always nests
+   * `user` under `custodianTeamMember` rather than stopping at the team
+   * member's own name/id. Never carries `email`: this surface shows a
+   * custodian as a name and picture only, and the query never selects it. */
+  custodianTeamMember?: Pick<TeamMember, "id" | "name"> & {
+    user: Pick<
+      User,
+      "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
+    > | null;
+  };
   custodianUser?: Pick<
     User,
     "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
