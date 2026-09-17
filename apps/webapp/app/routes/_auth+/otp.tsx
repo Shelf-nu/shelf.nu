@@ -96,8 +96,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         // What the signup link asked for, carried by cookie. A new account
         // records it on its signup event; the cookie then travels on for
-        // onboarding to store and act on, and `redirectTo` decides the
-        // landing page below.
+        // onboarding to store and act on.
         const signupIntent = await readSignupIntent(request);
 
         if (!userExists) {
@@ -136,8 +135,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           request,
         });
 
-        // A user who still has to onboard is sent there first by the app
-        // layout, so the link's `redirectTo` only applies once they are through.
+        // The link's `redirectTo` takes effect only for an account that has
+        // already onboarded. The app layout sends every other account, which
+        // includes every brand-new one, to onboarding first; onboarding picks
+        // the landing page itself and does not read `redirectTo`.
         return redirect(safeRedirect(signupIntent?.redirectTo, "/assets"), {
           headers: [
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),

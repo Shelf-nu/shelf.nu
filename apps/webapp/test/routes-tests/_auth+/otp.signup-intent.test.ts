@@ -1,8 +1,10 @@
 // @vitest-environment node
 
 /**
- * Code confirmation: where the signup link's `redirectTo` is applied and the
- * rest of the intent is handed on to onboarding.
+ * Code confirmation: a new account records the signup link's intent on its
+ * signup event, and the cookie is handed on to onboarding. `redirectTo` only
+ * decides where an existing account lands; the app layout sends an account
+ * that has not onboarded, which includes every new one, to onboarding first.
  *
  * @see {@link file://./../../../app/routes/_auth+/otp.tsx}
  * @see {@link file://./../../../app/modules/signup-intent/cookie.server.ts}
@@ -139,12 +141,15 @@ describe("otp action — confirming the code", () => {
     );
   });
 
-  it("applies the link's in-app redirectTo", async () => {
+  it("sends an existing account to the link's in-app redirectTo", async () => {
+    vi.mocked(findUserByEmail).mockResolvedValue({ id: USER_ID } as never);
+
     const response = (await action(
       confirmArgs(await intentCookie({ redirectTo: "/qr/abc?x=1" }))
     )) as Response;
 
     expect(response.headers.get("Location")).toBe("/qr/abc?x=1");
+    expect(createUser).not.toHaveBeenCalled();
   });
 
   it("never follows a redirectTo off our origin", async () => {

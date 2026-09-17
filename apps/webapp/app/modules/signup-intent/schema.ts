@@ -162,7 +162,8 @@ export function hasTeamPlanIntent(
  * onboarding to the plan page (`/select-plan?plan=team&trial=true`).
  *
  * Only `plan` and `trial` travel: the campaign values were stored during
- * onboarding and `redirectTo` was applied when the account was created.
+ * onboarding, and `redirectTo` belongs to the code confirmation, which
+ * honours it only for an account that has already onboarded.
  *
  * @param intent - An intent with a plan
  * @returns A query string without the leading `?`
