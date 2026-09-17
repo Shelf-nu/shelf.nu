@@ -33,11 +33,13 @@ export function extractCSVDataFromContentImport(
   csvHeaders: string[]
 ) {
   /**
-   * The first row of the CSV contains the keys for the data
-   * We need to trim the keys to remove any whitespace and special characters and Non-printable characters as it already causes issues with in the past
-   * Non-printable character: The non-printable character you encountered at the beginning of the title property key ('\ufeff') is known as the Unicode BOM (Byte Order Mark).
+   * The first row carries the keys. Trimming them strips surrounding
+   * whitespace, which includes a leading Unicode BOM (`\ufeff`) on a file
+   * saved as UTF-8 with signature \u2014 a mark that would otherwise stay glued to
+   * the first header and stop it matching by name. Other non-printable
+   * characters inside a key survive, and make the header unrecognized.
    */
-  const headers = data[0].map((key) => key.trim()); // Trim the keys
+  const headers = data[0].map((key) => key.trim());
   const values = data.slice(1) as string[][];
 
   const csvData = values.map((entry) => {

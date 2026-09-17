@@ -29,8 +29,8 @@ describe("encodeCsvListCell", () => {
     expect(encodeCsvListCell(['He said "hi"'])).toBe('"He said ""hi"""');
   });
 
-  it("quotes an item whose edge whitespace must survive", () => {
-    expect(encodeCsvListCell([" padded "])).toBe('" padded "');
+  it("does not quote for edge whitespace, which the reader trims away", () => {
+    expect(encodeCsvListCell([" padded "])).toBe(" padded ");
   });
 });
 
@@ -55,17 +55,17 @@ describe("decodeCsvListCell", () => {
     ]);
   });
 
-  it("keeps a quoted item's edge whitespace", () => {
-    expect(decodeCsvListCell('" padded ",plain')).toEqual([
-      " padded ",
-      "plain",
-    ]);
+  it("trims a quoted item's edge whitespace too", () => {
+    // Every consumer stores trimmed names, so an item never carries edge
+    // whitespace into the database; a reader that kept it would look the name
+    // up under a key nothing was stored under.
+    expect(decodeCsvListCell('" padded ",plain')).toEqual(["padded", "plain"]);
   });
 
   it("reads a value that itself starts with a quote, written as a quoted item", () => {
-    // Both halves of a deliberate trade-off, pinned so neither is "fixed"
-    // back: a leading quote opens a quoted item, so a value starting with one
-    // must be escaped, and a cell that was not escaped reads one char shorter.
+    // Both halves of the leading-quote rule. A quoted item is the only way to
+    // express a value that starts with a quote, so a bare `"ABCD"` is the
+    // quoting, not the value.
     expect(decodeCsvListCell('"""ABCD"""')).toEqual(['"ABCD"']);
     expect(decodeCsvListCell('"ABCD"')).toEqual(["ABCD"]);
   });
@@ -85,7 +85,6 @@ describe("round trip", () => {
     [["Berlin, DE", "Munich", "Wien"]],
     [['He said "hi"', "plain"]],
     [["https://maps.example.com?loc=40.7,-74.0"]],
-    [[" padded "]],
   ])("survives %j", (values) => {
     expect(decodeCsvListCell(encodeCsvListCell(values))).toEqual(values);
   });

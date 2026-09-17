@@ -13,20 +13,21 @@
  * carrying a comma, a quote or edge whitespace is wrapped in double quotes,
  * and its own quotes are doubled.
  *
- * Plain lists are untouched by both halves, so a hand-written `a,b,c` keeps
- * meaning three items and a file written before quoting existed still imports
- * the same way.
+ * A list with nothing to escape is left exactly as written, so `a,b,c` means
+ * three items whether a person typed it or the exporter produced it.
  *
- * The one shape that is NOT free: a leading `"` opens a quoted item, so a value
- * that itself starts with a quote has to be written as a quoted item with its
- * quotes doubled — `"""ABCD"""` as cell content, which is what the exporter
- * emits. A cell carrying a bare `"ABCD"` is therefore read as `ABCD`. The two
- * readings are genuinely ambiguous — `encodeCsvListCell([' padded '])` produces
- * the same bytes a cell holding the literal `" padded "` would — so no rule can
- * serve both, and this list format resolves it in favour of quoting. Values
- * beginning with a quote are legal in Code128, DataMatrix and ExternalQR, so a
- * cell written before this format existed can read one character shorter; the
- * comma case it replaces used to fail the import outright.
+ * Items come back trimmed, quoted or not: every consumer stores trimmed names,
+ * so edge whitespace has nowhere to go and keeping it only produces lookups
+ * that match nothing.
+ *
+ * A leading `"` always opens a quoted item. That makes quoting the only way to
+ * express a value that itself begins with a quote — `"""ABCD"""` as cell
+ * content, which is what the exporter emits — and it makes a bare `"ABCD"` read
+ * as `ABCD`, the quotes taken as syntax. Values beginning with a quote are
+ * legal in Code128, DataMatrix and ExternalQR, so that reading is a real
+ * choice, not an oversight: one cell shape has to win, and an unescaped
+ * `"ABCD"` is far more likely to be a quoted `ABCD` than a value whose first
+ * character is a quote.
  *
  * @see {@link file://./csv.server.ts} — writes the backup export
  * @see {@link file://./import-ready-export.server.ts} — writes the import-ready export
@@ -50,7 +51,7 @@ export function quoteCsvCell(value: string): string {
 }
 
 /** An item needs quoting when a bare split would not give it back unchanged. */
-const NEEDS_QUOTING = /[",]|^\s|\s$/;
+const NEEDS_QUOTING = /[",]/;
 
 /**
  * Packs several values into one CSV cell.
@@ -70,25 +71,24 @@ export function encodeCsvListCell(values: string[]): string {
 /**
  * Reads a multi-value cell back into its items.
  *
- * Unquoted items are trimmed, so ` a , b ` yields `["a", "b"]`; a quoted item
- * is returned verbatim, which is the only way to express an item with leading
- * or trailing spaces. Empty items are dropped.
+ * Every item comes back trimmed, quoted or not, so ` a , b ` and `" a "` yield
+ * `a` and `b`. That is a contract callers rely on: tag names are stored
+ * trimmed, so a name resolved under an untrimmed key matches nothing and the
+ * write that follows sees an empty list. Empty items are dropped.
  *
  * @param cell - The cell content, after the CSV parser has unquoted the cell.
- * @returns The items it holds.
+ * @returns The items it holds, each trimmed.
  */
 export function decodeCsvListCell(cell: string): string[] {
   const items: string[] = [];
 
   let current = "";
   let inQuotes = false;
-  let quoted = false;
 
   const pushCurrent = () => {
-    const item = quoted ? current : current.trim();
+    const item = current.trim();
     if (item) items.push(item);
     current = "";
-    quoted = false;
   };
 
   for (let index = 0; index < cell.length; index++) {
@@ -111,7 +111,6 @@ export function decodeCsvListCell(cell: string): string[] {
     // anywhere else it is part of the value, as it is in CSV itself.
     if (char === '"' && current.trim() === "") {
       inQuotes = true;
-      quoted = true;
       current = "";
       continue;
     }
