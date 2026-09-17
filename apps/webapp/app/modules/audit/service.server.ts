@@ -15,6 +15,10 @@ import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
   AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
   auditAcceptsComments,
 } from "~/modules/audit/comment-policy";
@@ -721,11 +725,19 @@ export async function getAuditSessionDetails({
   organizationId,
   userOrganizations,
   request,
+  refreshExpectedAssetImages,
 }: {
   id: AuditSession["id"];
   organizationId: string;
   userOrganizations?: Pick<UserOrganization, "organizationId">[];
   request?: Request;
+  /**
+   * Re-sign lapsed photo URLs on the expected assets. Pass `true` only from a
+   * caller that renders `expectedAssets`; a caller that reads `session` alone
+   * passes `false` and makes no storage calls. Required so every caller states
+   * which one it is.
+   */
+  refreshExpectedAssetImages: boolean;
 }): Promise<GetAuditSessionResult> {
   try {
     const otherOrganizationIds = userOrganizations?.map(
@@ -774,6 +786,8 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Lets the re-sign below tell a lapsed photo URL.
+                mainImageExpiration: true,
                 // Model cover image for assets with no image of their own
                 ...ASSET_MODEL_IMAGE_SELECT,
                 // Asset-code resolution: surface code data so the audit
@@ -872,9 +886,24 @@ export async function getAuditSessionDetails({
       });
     }
 
-    const expectedAssets: AuditExpectedAsset[] = session.assets
-      .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
-      .map((auditAsset) => {
+    const expectedAuditAssets = session.assets.flatMap((auditAsset) =>
+      auditAsset.expected && auditAsset.asset
+        ? [{ auditAsset, asset: auditAsset.asset }]
+        : []
+    );
+    const expectedAssetRows = expectedAuditAssets.map(({ asset }) => asset);
+    // Only expected rows are rendered, so only they are re-signed. The owning
+    // workspace scopes the write-back, since a sibling-workspace session also
+    // resolves here. The result lines up with `expectedAuditAssets`.
+    const refreshedExpectedAssets = refreshExpectedAssetImages
+      ? await refreshExpiredAssetImages(expectedAssetRows, {
+          organizationId: session.organizationId,
+          ...ASSET_IMAGE_RESIGN_LIMITS,
+        })
+      : expectedAssetRows;
+
+    const expectedAssets: AuditExpectedAsset[] = expectedAuditAssets.map(
+      ({ auditAsset }, index) => {
         // why: prefer the User's display fields when the custodian is a
         // real user; fall back to the TeamMember's name for non-user
         // "external" custodians (contractors etc.). Routes through the
@@ -901,10 +930,11 @@ export async function getAuditSessionDetails({
          * Placeholder stays `null` so the existing client-side "no image"
          * branches keep working — same contract as `serializeAssetImage`.
          */
+        const asset = refreshedExpectedAssets[index];
         const image = resolveAssetImage({
-          mainImage: auditAsset.asset?.mainImage ?? null,
-          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
-          assetModel: auditAsset.asset?.assetModel ?? null,
+          mainImage: asset.mainImage,
+          thumbnailImage: asset.thumbnailImage,
+          assetModel: asset.assetModel,
         });
         const hasImage = image.source !== "placeholder";
 
@@ -922,7 +952,8 @@ export async function getAuditSessionDetails({
           categoryName: auditAsset.asset?.category?.name ?? null,
           custodianName,
         };
-      });
+      }
+    );
 
     return {
       session,

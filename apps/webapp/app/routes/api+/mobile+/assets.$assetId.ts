@@ -1,3 +1,14 @@
+/**
+ * Mobile API route: asset detail.
+ *
+ * Serves the companion's asset screen: status, category, location, custody and
+ * kit memberships, plus the detail-only fields that screen renders. Org-scoped
+ * behind the mobile bearer auth, with custody holders filtered per viewer. A
+ * lapsed asset photo URL is re-signed before the response is shaped.
+ *
+ * @see {@link file://./assets.ts} the list twin of this route
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
@@ -15,6 +26,10 @@ import {
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import {
   isQuantityTracked,
   shapeMobileAssetPlacements,
@@ -34,9 +49,9 @@ import { canUseBarcodes } from "~/utils/subscription.server";
  *
  * Returns full asset details including category, location, custody, and kit.
  *
- * Image URLs are returned as-stored along with `mainImageExpiration`. Mobile
- * clients should call `/api/mobile/asset/refresh-image/:assetId` lazily when
- * they detect a near-expired URL — keeps this loader read-only.
+ * A lapsed asset photo URL is re-signed, and the new URL written back to the
+ * asset, before the response is shaped. `mainImageExpiration` is still sent
+ * alongside it.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -53,7 +68,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       organizationId
     );
 
-    const asset = await db.asset.findUnique({
+    const storedAsset = await db.asset.findUnique({
       where: {
         // why: inline-scope to org so cross-org probes 404 — matches the
         // pattern used by every other mobile route.
@@ -213,9 +228,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       },
     });
 
-    if (!asset) {
+    if (!storedAsset) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
+
+    const [asset] = await refreshExpiredAssetImages([storedAsset], {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
 
     // Flatten kit / location / custody via the shared mobile shaper so the
     // legacy companion contract (`asset.kit`, `asset.kitId`, `asset.location`,

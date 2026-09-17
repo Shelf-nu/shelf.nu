@@ -1,3 +1,16 @@
+/**
+ * Mobile API route: asset list.
+ *
+ * Serves the companion's Assets tab and its My Custody view: a paginated,
+ * searchable, status-filterable asset list in the flat legacy shape the app
+ * reads. Org-scoped behind the mobile bearer auth, with custody holders
+ * filtered per viewer the same way the asset detail route filters them. Lapsed
+ * asset photo URLs are re-signed before the page is sent. See the loader
+ * docblock for the request contract.
+ *
+ * @see {@link file://./assets.$assetId.ts} the detail twin of this route
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ */
 import { AssetStatus, type Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
@@ -15,6 +28,10 @@ import {
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import {
   BARCODE_CODES_ORDER_BY,
   QR_CODES_ORDER_BY,
@@ -38,12 +55,9 @@ import { canUseBarcodes } from "~/utils/subscription.server";
  * web indexes use, in a single query.
  *
  * Image URLs are returned with the model-image cascade already resolved
- * (`shapeMobileAssetResponse`), not re-signed. `mainImageExpiration` is only
- * sent when the asset's OWN signed URL won the cascade — model cover images
- * are public and never expire. Mobile clients should call
- * `/api/mobile/asset/refresh-image/:assetId` lazily when they detect an
- * expired URL — keeps this loader read-only and avoids fanning out N writes
- * per paginated read.
+ * (`shapeMobileAssetResponse`), after lapsed ones are re-signed.
+ * `mainImageExpiration` is only sent when the asset's OWN signed URL won the
+ * cascade — model cover images are public and never expire.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -238,19 +252,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // Single query: the UNION already searches all 10 sources in one shot,
     // so there is no narrow/fallback two-query dance to run any more.
-    const [assets, totalCount] = await fetchPage({
+    const [storedAssets, totalCount] = await fetchPage({
       ...baseWhere,
       ...searchWhere,
     });
 
-    // Flatten kit/location/custody pivots into the legacy flat shape via the
-    // shared helper, then re-attach `mainImageExpiration` — a list-only extra
-    // the helper's return type doesn't carry but the companion consumes to
-    // drive its lazy refresh-image flow.
-    //
-    // `thumbnailImage` is deliberately NOT stripped and re-attached any more:
-    // the helper resolves the model-image cascade, so the raw column would
-    // overwrite an inherited thumbnail with null.
+    const assets = await refreshExpiredAssetImages(storedAssets, {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
+
     // One workspace read for the whole page — the preference is per-workspace,
     // so resolving it per row would fetch the same answer `perPage` times.
     const organization = await db.organization.findUniqueOrThrow({
@@ -260,6 +271,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Effective entitlement, not the raw column — see `assets.$assetId.ts`.
     const barcodesAllowed = canUseBarcodes(organization);
 
+    // Flatten kit/location/custody pivots into the legacy flat shape via the
+    // shared helper, then re-attach `mainImageExpiration`, which the list
+    // response carries but the helper's return type does not. The URL it
+    // describes has already been re-signed above if it had lapsed.
+    //
+    // `thumbnailImage` is deliberately NOT stripped and re-attached any more:
+    // the helper resolves the model-image cascade, so the raw column would
+    // overwrite an inherited thumbnail with null.
     const shapedAssets = assets.map((asset) => {
       const {
         mainImageExpiration,
