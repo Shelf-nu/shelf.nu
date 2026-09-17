@@ -21,6 +21,16 @@ import {
 import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibility.server";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
+  BARCODE_CODES_ORDER_BY,
+  QR_CODES_ORDER_BY,
+  resolveDisplayCode,
+  serializeDisplayCode,
+} from "~/modules/barcode/display";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -28,6 +38,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 /**
  * GET /api/mobile/kits/:kitId?orgId=xxx
@@ -81,8 +92,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         updatedAt: true,
         category: { select: { id: true, name: true, color: true } },
         location: { select: { id: true, name: true } },
-        qrCodes: { select: { id: true } },
-        organization: { select: { currency: true } },
+        // Ordered so the resolver below and the app, which both read the
+        // first entry, settle on the same code on every load.
+        qrCodes: { orderBy: QR_CODES_ORDER_BY, select: { id: true } },
+        // The kit's alternative codes, resolved into `displayCode` below so a
+        // workspace that labels its kits with Code 128 sees Code 128 rather
+        // than the Shelf QR. Kits carry no `sequentialId` or per-kit override,
+        // so a SAM_ID preference falls back to the QR — the resolver reports
+        // that as `isFallback`.
+        barcodes: {
+          orderBy: BARCODE_CODES_ORDER_BY,
+          select: { id: true, type: true, value: true },
+        },
+        organization: {
+          select: {
+            currency: true,
+            // Destructured out below; `kit.organization` keeps its
+            // `{ currency }` shape.
+            qrIdDisplayPreference: true,
+            barcodesEnabled: true,
+          },
+        },
         custody: {
           select: {
             createdAt: true,
@@ -129,6 +159,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 type: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Lets the re-sign below tell a lapsed photo URL.
+                mainImageExpiration: true,
                 // Model cover image; collapsed into the flat image fields by
                 // `serializeAssetImage` below, so a member asset inheriting
                 // its model's photo is not blank on the kit detail screen.
@@ -157,20 +189,48 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    // A kit's `image` is a signed storage URL that stops working once
-    // `imageExpiration` passes, and the app has no way to renew it. Re-sign a
-    // lapsed one so the kit screen never receives a dead link. `organizationId`
-    // only scopes that write-back, so it is dropped before the response.
-    const [refreshedKit] = await refreshExpiredKitImages([storedKit]);
+    // Re-sign the kit image and the member photos together; neither needs the
+    // other. `organizationId` only scopes the kit write-back, so it is dropped
+    // before the response. The member result lines up with `assetKits`.
+    const [[refreshedKit], refreshedMembers] = await Promise.all([
+      refreshExpiredKitImages([storedKit]),
+      refreshExpiredAssetImages(
+        storedKit.assetKits.map((ak) => ak.asset),
+        { organizationId, ...ASSET_IMAGE_RESIGN_LIMITS }
+      ),
+    ]);
     const { organizationId: _organizationId, ...kit } = refreshedKit;
 
     // Flatten the AssetKit pivot into the asset list the companion expects.
     // Also flatten the `assetLocations[0]` pivot back into the singular
     // `location` field the companion's kit screen still reads (preserves
     // the existing mobile JSON contract).
-    const { assetKits, ...kitData } = kit;
-    const assets = assetKits.map((ak) => {
-      const { assetLocations, ...rest } = ak.asset;
+    const {
+      assetKits,
+      organization: kitOrganization,
+      barcodes: kitBarcodes,
+      ...kitData
+    } = kit;
+
+    // Same resolver, precedence and add-on gate as the asset detail endpoint —
+    // see that route for why the EFFECTIVE entitlement is passed rather than
+    // the raw column.
+    const barcodesAllowed = canUseBarcodes(kitOrganization);
+    const resolvedCode = resolveDisplayCode({
+      entity: { qrCodes: kit.qrCodes, barcodes: kitBarcodes },
+      organization: {
+        qrIdDisplayPreference: kitOrganization.qrIdDisplayPreference,
+        barcodesEnabled: barcodesAllowed,
+      },
+      entityKind: "kit",
+    });
+    const assets = assetKits.map((ak, index) => {
+      // `mainImageExpiration` only steers the re-sign above.
+      const {
+        assetLocations,
+        mainImageExpiration: _mainImageExpiration,
+        ...rest
+      } = refreshedMembers[index];
       return {
         // Resolves the model-image cascade and drops the nested `assetModel`,
         // so the companion keeps one source of truth for the image.
@@ -208,7 +268,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         : null;
 
     return data({
-      kit: { ...kitData, custody: visibleCustody, assets, totalValue },
+      kit: {
+        ...kitData,
+        custody: visibleCustody,
+        assets,
+        totalValue,
+        organization: { currency: kitOrganization.currency },
+        // The identifier to SHOW for this kit, already resolved — see the
+        // asset detail endpoint for the full contract.
+        displayCode: serializeDisplayCode(resolvedCode),
+        barcodes: barcodesAllowed ? kitBarcodes : [],
+      },
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

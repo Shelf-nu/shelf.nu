@@ -1,3 +1,14 @@
+/**
+ * Mobile API route: asset detail.
+ *
+ * Serves the companion's asset screen: status, category, location, custody and
+ * kit memberships, plus the detail-only fields that screen renders. Org-scoped
+ * behind the mobile bearer auth, with custody holders filtered per viewer. A
+ * lapsed asset photo URL is re-signed before the response is shaped.
+ *
+ * @see {@link file://./assets.ts} the list twin of this route
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
@@ -16,20 +27,31 @@ import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
   isQuantityTracked,
   shapeMobileAssetPlacements,
 } from "~/modules/asset/utils";
+import {
+  BARCODE_CODES_ORDER_BY,
+  QR_CODES_ORDER_BY,
+  resolveDisplayCode,
+  serializeDisplayCode,
+} from "~/modules/barcode/display";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 /**
  * GET /api/mobile/assets/:assetId
  *
  * Returns full asset details including category, location, custody, and kit.
  *
- * Image URLs are returned as-stored along with `mainImageExpiration`. Mobile
- * clients should call `/api/mobile/asset/refresh-image/:assetId` lazily when
- * they detect a near-expired URL — keeps this loader read-only.
+ * A lapsed asset photo URL is re-signed, and the new URL written back to the
+ * asset, before the response is shaped. `mainImageExpiration` is still sent
+ * alongside it.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -46,7 +68,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       organizationId
     );
 
-    const asset = await db.asset.findUnique({
+    const storedAsset = await db.asset.findUnique({
       where: {
         // why: inline-scope to org so cross-org probes 404 — matches the
         // pattern used by every other mobile route.
@@ -153,8 +175,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           },
         },
         tags: { select: { id: true, name: true } },
-        qrCodes: { select: { id: true } },
-        organization: { select: { currency: true } },
+        // Ordered so the resolver below and the app, which both read the
+        // first entry, settle on the same code on every load.
+        qrCodes: { orderBy: QR_CODES_ORDER_BY, select: { id: true } },
+        // The asset's alternative codes, and the per-asset override that can
+        // outrank the workspace preference. Both feed `resolveDisplayCode`
+        // below so the detail screen shows the identifier this workspace
+        // actually labels its assets with, not always the Shelf QR.
+        preferredBarcodeId: true,
+        barcodes: {
+          orderBy: BARCODE_CODES_ORDER_BY,
+          select: { id: true, type: true, value: true },
+        },
+        organization: {
+          select: {
+            currency: true,
+            // Drive the display-code resolution below. Both are destructured
+            // out of the response, so `asset.organization` keeps the
+            // `{ currency }` shape the companion already reads.
+            qrIdDisplayPreference: true,
+            barcodesEnabled: true,
+          },
+        },
         notes: {
           select: {
             id: true,
@@ -186,9 +228,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       },
     });
 
-    if (!asset) {
+    if (!storedAsset) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
+
+    const [asset] = await refreshExpiredAssetImages([storedAsset], {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
 
     // Flatten kit / location / custody via the shared mobile shaper so the
     // legacy companion contract (`asset.kit`, `asset.kitId`, `asset.location`,
@@ -298,8 +345,39 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       assetModel: detailAssetModel,
       custody: detailCustody,
       category: detailCategory,
+      // Held back so the response can carry the RESOLVED code instead of the
+      // raw inputs: `organization` is reshaped to `{ currency }`, `barcodes`
+      // is add-on gated, and the override id is server-side only.
+      organization: detailOrganization,
+      barcodes: detailBarcodes,
+      preferredBarcodeId: _preferredBarcodeId,
       ...assetData
     } = asset;
+
+    // Which identifier this workspace labels its assets with. Same resolver
+    // and precedence the web asset rows use — a per-asset override first, then
+    // the workspace's `qrIdDisplayPreference`, then the Shelf QR — so a
+    // workspace that prints Code 128 labels sees Code 128 here rather than a
+    // QR it never uses.
+    //
+    // The entitlement passed in is the EFFECTIVE one from `canUseBarcodes`,
+    // not the raw column: a self-hosted deployment has no billing to gate on
+    // and holds every add-on, and would otherwise be pushed back to QR despite
+    // having set a barcode preference. Every mobile route gates this way.
+    const barcodesAllowed = canUseBarcodes(detailOrganization);
+    const resolvedCode = resolveDisplayCode({
+      entity: {
+        sequentialId: asset.sequentialId,
+        preferredBarcodeId: asset.preferredBarcodeId,
+        qrCodes: asset.qrCodes,
+        barcodes: detailBarcodes,
+      },
+      organization: {
+        qrIdDisplayPreference: detailOrganization.qrIdDisplayPreference,
+        barcodesEnabled: barcodesAllowed,
+      },
+      entityKind: "asset",
+    });
 
     // The model's name only. The detail screen renders it as read-only text —
     // unlike web, mobile has no asset-model screen to link to — so shipping an
@@ -388,6 +466,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // assets and for QUANTITY_TRACKED assets with no custody/booking
         // activity (see getQuantityData's null contract).
         quantityBreakdown,
+        // Reshaped from the widened select above so the companion keeps
+        // reading `asset.organization.currency` and nothing else.
+        organization: { currency: detailOrganization.currency },
+        // The identifier to SHOW for this asset, already resolved. Shipping
+        // the decision rather than its inputs is what lets an installed build
+        // inherit a workspace's preference with no app release — the same
+        // reason the image cascade is resolved server-side.
+        //
+        // `label` names the code that is shown ("Code 128"), never the
+        // preference, and `type` lets the client pick a renderer. On a
+        // preference that could not be honoured (workspace wants Code 128, this
+        // asset has none) `isFallback` is set and `fallbackNote` says why, so
+        // the screen can explain itself instead of silently showing something
+        // else. Null only when the asset has no resolvable code at all.
+        displayCode: serializeDisplayCode(resolvedCode),
+        // Every alternative code on the asset, so the detail screen can offer
+        // the same code switcher the web preview does. Add-on gated: a
+        // workspace without alternative barcodes must not receive barcode
+        // rows, matching every other mobile barcode surface.
+        barcodes: barcodesAllowed ? detailBarcodes : [],
       },
     });
   } catch (cause) {
