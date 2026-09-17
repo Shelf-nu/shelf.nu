@@ -185,6 +185,15 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
 };
 
 /**
+ * One row of the backup export: an asset's own columns plus the relations the
+ * dump carries (`category`, `tags`, `notes`, `customFields`, …). The builder
+ * walks a row by key, so it is typed by what it reads — arbitrary entries —
+ * rather than by Prisma's `Asset`, which describes only the columns and would
+ * make every relation-bearing row a cast.
+ */
+export type BackupExportRow = Record<string, unknown>;
+
+/**
  * Builds the rows of the workspace backup export — a full-fidelity dump whose
  * one job is to re-import through `extractCSVDataFromBackupImport`.
  *
@@ -194,7 +203,7 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
  * quotes, semicolons and commas, and an unquoted cell carrying one shifts the
  * columns after it — silently, since the importer reads by position.
  *
- * @param args.assets - The assets to dump.
+ * @param args.assets - The rows to dump, as {@link BackupExportRow}.
  * @param args.keysToSkip - Columns to leave out (foreign keys that only
  *   resolve in the source workspace).
  * @returns Rows of already-quoted cells, ready to join with a delimiter.
@@ -203,7 +212,7 @@ export const buildCsvBackupDataFromAssets = ({
   assets,
   keysToSkip,
 }: {
-  assets: Asset[];
+  assets: BackupExportRow[];
   keysToSkip: string[];
 }) => {
   if (!assets.length) return [] as unknown as CSVData;
@@ -227,12 +236,11 @@ export const buildCsvBackupDataFromAssets = ({
         return toExport.push(quoteCsvCell(""));
       }
 
-      /** Special handling for category and location.
+      /** Relations travel as JSON rather than as an id.
        *
-       * Phase A5: `assetModel` is included here — backup-export emits it
-       * as a JSON `{ name }` object so the backup-import path can resolve
-       * (or create) the model by name on restore (symmetric with the
-       * `category` / `location` handling above). */
+       * `category`, `location` and `assetModel` each emit an object carrying
+       * the name, so a restore can resolve — or create — them by name. An id
+       * would only mean anything in the workspace the backup came from. */
       switch (key) {
         case "location":
         case "category":
@@ -280,10 +288,9 @@ const keysToSkip = [
   "customFieldId",
   "mainImage",
   "mainImageExpiration",
-  // Phase A5: backup-export now emits the resolved `assetModel` object
-  // (`{ name }`) so cross-org restore can find / create the model by
-  // name. The opaque FK column would only resolve in the source org and
-  // can be safely dropped from the backup.
+  // The backup carries the resolved `assetModel` object instead, so a restore
+  // can find or create the model by name. This FK resolves only in the
+  // workspace the backup came from.
   "assetModelId",
 ];
 

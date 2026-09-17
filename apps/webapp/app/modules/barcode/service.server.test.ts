@@ -1368,6 +1368,8 @@ describe("parseBarcodesFromImportData", () => {
 
   it("should keep a quoted barcode value that contains a comma as one barcode", async () => {
     expect.assertions(2);
+    // why: the uniqueness lookup is a DB round trip; an empty result means no
+    // value in this cell is already linked, so the parse is what gets asserted.
     //@ts-expect-error missing vitest type
     db.barcode.findMany.mockResolvedValue([]);
 

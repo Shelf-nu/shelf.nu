@@ -285,7 +285,7 @@ describe("buildCsvBackupDataFromAssets", () => {
     ];
 
     const result = buildCsvBackupDataFromAssets({
-      assets: assets as any,
+      assets,
       keysToSkip: ["skipMe"],
     });
 
@@ -314,7 +314,7 @@ describe("buildCsvBackupDataFromAssets", () => {
     ];
 
     expect(
-      buildCsvBackupDataFromAssets({ assets: assets as any, keysToSkip: [] })
+      buildCsvBackupDataFromAssets({ assets, keysToSkip: [] })
     ).toEqual([
       ['"asset-1"', '"MacBook Pro; 16-inch"', '"He said ""hello"" to me"'],
     ]);
@@ -326,7 +326,7 @@ describe("backup export -> backup import round trip", () => {
   // whole restore path rather than the writer's own idea of its output.
   const roundTrip = async (asset: Record<string, unknown>) => {
     const rows = buildCsvBackupDataFromAssets({
-      assets: [asset] as any,
+      assets: [asset],
       keysToSkip: [],
     });
     const headers = Object.keys(asset).map((h) => `"${h}"`);

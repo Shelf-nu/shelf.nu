@@ -17,6 +17,17 @@
  * meaning three items and a file written before quoting existed still imports
  * the same way.
  *
+ * The one shape that is NOT free: a leading `"` opens a quoted item, so a value
+ * that itself starts with a quote has to be written as a quoted item with its
+ * quotes doubled — `"""ABCD"""` as cell content, which is what the exporter
+ * emits. A cell carrying a bare `"ABCD"` is therefore read as `ABCD`. The two
+ * readings are genuinely ambiguous — `encodeCsvListCell([' padded '])` produces
+ * the same bytes a cell holding the literal `" padded "` would — so no rule can
+ * serve both, and this list format resolves it in favour of quoting. Values
+ * beginning with a quote are legal in Code128, DataMatrix and ExternalQR, so a
+ * cell written before this format existed can read one character shorter; the
+ * comma case it replaces used to fail the import outright.
+ *
  * @see {@link file://./csv.server.ts} — writes the backup export
  * @see {@link file://./import-ready-export.server.ts} — writes the import-ready export
  * @see {@link file://./import.server.ts} — reads the `tags` cell

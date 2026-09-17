@@ -1,3 +1,15 @@
+/**
+ * Tests for the CSV cell helpers (`~/utils/csv-cells`).
+ *
+ * The contract under test: a multi-value cell (`tags`, `barcode_<Type>`) is a
+ * comma-separated list whose items follow CSV's own quoting rules, so an item
+ * may itself contain a comma, a quote or edge whitespace and still survive a
+ * round trip. A plain `a,b,c` must keep meaning three items, and a leading
+ * quote must be read as opening a quoted item — see the module JSDoc for why
+ * that last one cannot also preserve a literal leading quote.
+ *
+ * @see {@link file://./csv-cells.ts}
+ */
 import { describe, expect, it } from "vitest";
 
 import { decodeCsvListCell, encodeCsvListCell } from "./csv-cells";
@@ -48,6 +60,14 @@ describe("decodeCsvListCell", () => {
       " padded ",
       "plain",
     ]);
+  });
+
+  it("reads a value that itself starts with a quote, written as a quoted item", () => {
+    // Both halves of a deliberate trade-off, pinned so neither is "fixed"
+    // back: a leading quote opens a quoted item, so a value starting with one
+    // must be escaped, and a cell that was not escaped reads one char shorter.
+    expect(decodeCsvListCell('"""ABCD"""')).toEqual(['"ABCD"']);
+    expect(decodeCsvListCell('"ABCD"')).toEqual(["ABCD"]);
   });
 
   it("treats a quote inside an unquoted item as a literal", () => {

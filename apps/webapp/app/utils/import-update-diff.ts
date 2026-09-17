@@ -8,6 +8,7 @@
  * @see {@link file://./import-update.server.ts} Orchestration (server)
  */
 import type { CustomField } from "@prisma/client";
+import { decodeCsvListCell } from "~/utils/csv-cells";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import { isLikeShelfError, type ShelfError } from "~/utils/error";
 import type {
@@ -497,11 +498,9 @@ export function compareCoreField(
       const currentTags = asset.tags
         .map((t) => t.name)
         .sort((a, b) => a.localeCompare(b));
-      const csvTags = csvValue
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b));
+      const csvTags = decodeCsvListCell(csvValue).sort((a, b) =>
+        a.localeCompare(b)
+      );
 
       const currentStr = currentTags.join(", ");
       const csvStr = csvTags.join(", ");

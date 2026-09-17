@@ -430,6 +430,21 @@ describe("compareCoreField", () => {
       const result = compareCoreField("tags", "NewTag", asset, "Tags");
       expect(result?.currentValue).toBe("(none)");
     });
+
+    it("reads a quoted tag name carrying a comma as one tag", () => {
+      // The import-ready export is this importer's input and quotes a tag name
+      // containing the separator, so a bare split would report a spurious
+      // change here and write the wrong tags on apply.
+      const asset = makeAsset({
+        tags: [
+          { id: "t1", name: "Berlin, DE" },
+          { id: "t2", name: "small" },
+        ],
+      });
+      expect(
+        compareCoreField("tags", '"Berlin, DE",small', asset, "Tags")
+      ).toBeNull();
+    });
   });
 
   describe("valuation", () => {
