@@ -24,6 +24,7 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { CURRENT_BOOKING_SLICE_FILTER } from "~/modules/asset/fields";
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
@@ -42,15 +43,14 @@ import {
   serializeDisplayCode,
 } from "~/modules/barcode/display";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
-import { canSeeBooking } from "~/utils/booking-authorization.server";
+import {
+  canSeeBooking,
+  canSeeBookingCustodian,
+  resolveBookingCustodianName,
+} from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
-import {
-  resolveTeamMemberName,
-  resolveUserDisplayName,
-  type UserNameFields,
-} from "~/utils/user";
 
 /**
  * GET /api/mobile/assets/:assetId
@@ -184,19 +184,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             kit: { select: { id: true, name: true, status: true } },
           },
         },
-        // The active booking the asset is out on. Same filter as the web
-        // asset overview (`getAssetOverviewFields`): ONGOING or OVERDUE, and
-        // not partially checked in for this asset. Read only to build
+        // The booking slice the asset is out on, read with the web asset
+        // overview's filter so both name the same booking. Read only to build
         // `activeBooking` below; the rows themselves never reach the client.
         bookingAssets: {
-          where: {
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-              NOT: {
-                partialCheckins: { some: { assetIds: { has: assetId } } },
-              },
-            },
-          },
+          ...CURRENT_BOOKING_SLICE_FILTER,
           select: {
             booking: {
               select: {
@@ -458,44 +450,52 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Custody held through a booking, for an asset checked out on one. A
     // booking checkout writes no Custody row, so this is the only way the
-    // detail screen can say who has the asset. It follows the web asset
-    // overview's CustodyCard on every point:
+    // detail screen can say who has the asset. It matches the web asset
+    // overview's CustodyCard:
     // - the asset must be CHECKED_OUT. Assets added to an ONGOING booking stay
     //   AVAILABLE until they are checked out, and the web shows no card then;
-    // - the `bookingAssets` select above decides which booking, and the first
-    //   row wins, as it does on the web;
+    // - the `bookingAssets` select above keeps only the slice that is out, and
+    //   the first row is the booking, as on the web;
     // - INDIVIDUAL assets only. A quantity-tracked asset's custody is its
     //   quantity breakdown;
-    // - only viewers who may see all custody. The web's "is it yours" check
-    //   reads the custody row's user, which a booking checkout does not write,
-    //   so a booking's own custodian without that permission sees no card.
+    // - only viewers who may see who holds it: everyone's custody, or a
+    //   booking they hold themselves, through either custody link.
     const checkedOutOn =
-      !isQuantityTracked(asset) &&
-      asset.status === AssetStatus.CHECKED_OUT &&
-      canSeeAllCustody
+      !isQuantityTracked(asset) && asset.status === AssetStatus.CHECKED_OUT
         ? asset.bookingAssets[0]?.booking ?? null
         : null;
 
-    const activeBooking = checkedOutOn
-      ? {
-          id: checkedOutOn.id,
-          name: checkedOutOn.name,
-          from: checkedOutOn.from,
-          custodianName: resolveBookingHolderName(checkedOutOn),
-          // Seeing custody and seeing bookings are separate workspace
-          // overrides, so a viewer shown this booking may still be refused by
-          // the booking screen. This is that screen's own gate, answered here
-          // so the app only offers a tap that will open.
-          canOpen: canSeeBooking({
-            canSeeAllBookings,
-            booking: {
-              custodianUserId: checkedOutOn.custodianUser?.id ?? null,
-              custodianTeamMember: checkedOutOn.custodianTeamMember,
-            },
-            userId: user.id,
-          }),
-        }
-      : null;
+    const activeBooking =
+      checkedOutOn &&
+      canSeeBookingCustodian({
+        canSeeAllCustody,
+        booking: checkedOutOn,
+        userId: user.id,
+      })
+        ? {
+            id: checkedOutOn.id,
+            name: checkedOutOn.name,
+            from: checkedOutOn.from,
+            // The resolver every mobile booking surface names a holder with.
+            custodianName: resolveBookingCustodianName({
+              canSeeAllCustody,
+              booking: checkedOutOn,
+              userId: user.id,
+            }),
+            // Seeing custody and seeing bookings are separate workspace
+            // overrides, so a viewer shown this booking may still be refused by
+            // the booking screen. This is that screen's own gate, answered here
+            // so the app only offers a tap that will open.
+            canOpen: canSeeBooking({
+              canSeeAllBookings,
+              booking: {
+                custodianUserId: checkedOutOn.custodianUser?.id ?? null,
+                custodianTeamMember: checkedOutOn.custodianTeamMember,
+              },
+              userId: user.id,
+            }),
+          }
+        : null;
 
     return data({
       asset: {
@@ -578,29 +578,4 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       { status: reason.status }
     );
   }
-}
-
-/**
- * The name of whoever holds a booking, resolved the way the web asset
- * overview's `CustodyCard` resolves it: the custodian user's display name when
- * the booking has a user custodian, otherwise the custodian team member's
- * name.
- *
- * @param booking - The booking's two custody links
- * @returns The name, or `null` when the booking has no custodian or the
- *   custodian's name is empty
- */
-function resolveBookingHolderName(booking: {
-  custodianUser: UserNameFields | null;
-  custodianTeamMember: { name: string } | null;
-}): string | null {
-  if (booking.custodianUser) {
-    return resolveUserDisplayName(booking.custodianUser) || null;
-  }
-  if (booking.custodianTeamMember) {
-    return (
-      resolveTeamMemberName({ name: booking.custodianTeamMember.name }) || null
-    );
-  }
-  return null;
 }

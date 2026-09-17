@@ -32,6 +32,7 @@ import {
   validateBarcodeValue,
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
+import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import {
   deleteKit,
   deleteKitImage,
@@ -154,6 +155,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                           custodianTeamMember: true,
                           custodianUser: {
                             select: {
+                              // Recognises a booking the viewer holds, so the
+                              // custody card shows it to them.
+                              id: true,
                               firstName: true,
                               lastName: true,
                               displayName: true,
@@ -672,7 +676,12 @@ export default function KitDetails() {
               booking={currentBooking || undefined}
               hasPermission={userCanViewSpecificCustody({
                 roles,
-                custodianUserId: kit?.custody?.custodian?.user?.id,
+                // The holder the card shows, so a viewer always sees custody
+                // that is their own — including a booking they hold.
+                custodianUserId: getCustodyCardHolderUserId({
+                  custody: kit.custody ? [kit.custody] : null,
+                  booking: currentBooking,
+                }),
                 organization: currentOrganization,
                 currentUserId: userId,
               })}

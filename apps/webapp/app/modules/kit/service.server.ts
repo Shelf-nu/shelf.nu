@@ -2849,7 +2849,7 @@ type CurrentBookingType = {
   name: string;
   custodianUser: Pick<
     User,
-    "firstName" | "lastName" | "displayName" | "profilePicture" | "email"
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture" | "email"
   > | null;
   custodianTeamMember: TeamMember | null;
   status: BookingStatus;

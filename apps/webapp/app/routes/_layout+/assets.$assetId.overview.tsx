@@ -79,7 +79,7 @@ import {
   isQuantityTracked,
 } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
-import { getPrimaryCustody } from "~/modules/custody/utils";
+import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
@@ -176,7 +176,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
-      include: getAssetOverviewFields(id, canUseBarcodes),
+      include: getAssetOverviewFields(canUseBarcodes),
     });
 
     /**
@@ -288,10 +288,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
-    // `bookingAssets` is already the asset's current booking: the query
-    // filters to ONGOING/OVERDUE and excludes bookings this asset has been
-    // partially checked in from, so the first row is the one the page shows.
-    // Nothing further is derived from it here.
+    // `bookingAssets` is already the asset's current booking: the query keeps
+    // only the slice that is out (`CURRENT_BOOKING_SLICE_FILTER`), so the first
+    // row is the one the page shows. Nothing further is derived from it here.
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
       ? asset.customFields.filter(
@@ -1760,8 +1759,12 @@ export default function AssetOverview() {
               custody={asset?.custody || null}
               hasPermission={userCanViewSpecificCustody({
                 roles,
-                custodianUserId: getPrimaryCustody(asset?.custody)?.custodian
-                  ?.user?.id,
+                // The holder the card shows, so a viewer always sees custody
+                // that is their own — including a booking they hold.
+                custodianUserId: getCustodyCardHolderUserId({
+                  custody: asset?.custody,
+                  booking,
+                }),
                 organization: currentOrganization,
                 currentUserId: userId,
               })}

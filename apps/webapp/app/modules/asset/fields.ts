@@ -70,10 +70,40 @@ export const KITS_INCLUDE_FIELDS = {
   },
 } satisfies Prisma.KitInclude;
 
-export const getAssetOverviewFields = (
-  assetId: string,
-  canUseBarcodes: boolean = false
-) => {
+/**
+ * Narrows an asset's `bookingAssets` to the booking the asset is out on now.
+ *
+ * The slice markers are the record of that: the slice left (`checkedOutAt`)
+ * and nothing has brought it back (`checkedInAt`). Booking status alone does
+ * not answer it — an asset out on an overdue booking can also be booked onto a
+ * later booking that has since started, and both are ONGOING or OVERDUE — and
+ * check-in sessions record scan batches, not what is out.
+ *
+ * Readers take the first row. Newest departure first keeps that row the live
+ * one should a second slice ever still read as out.
+ *
+ * Shared by the web asset overview and the mobile asset endpoint, so the two
+ * name the same booking for the same asset.
+ *
+ * @see {@link file://./../../../../../.claude/rules/booking-checkout-is-recorded-per-slice.md}
+ */
+export const CURRENT_BOOKING_SLICE_FILTER = {
+  where: {
+    checkedOutAt: { not: null },
+    checkedInAt: null,
+    booking: { status: { in: ["ONGOING", "OVERDUE"] } },
+  },
+  orderBy: { checkedOutAt: "desc" },
+} satisfies Pick<Prisma.Asset$bookingAssetsArgs, "where" | "orderBy">;
+
+/**
+ * The relations the web asset overview loads.
+ *
+ * @param canUseBarcodes - Whether the workspace has the barcodes add-on: the
+ *   full barcode rows when it does, only their count when it does not
+ * @returns The `include` for the overview's asset query
+ */
+export const getAssetOverviewFields = (canUseBarcodes: boolean = false) => {
   const baseFields = {
     category: true,
     qrCodes: true,
@@ -157,28 +187,16 @@ export const getAssetOverviewFields = (
       },
     },
     bookingAssets: {
-      where: {
-        booking: {
-          status: { in: ["ONGOING", "OVERDUE"] },
-          // Exclude bookings where this asset has been partially checked in
-          NOT: {
-            partialCheckins: {
-              some: {
-                assetIds: { has: assetId },
-              },
-            },
-          },
-        },
-      },
+      ...CURRENT_BOOKING_SLICE_FILTER,
       include: {
         booking: {
           select: {
             id: true,
             name: true,
             from: true,
-            // Narrowed from `true` on both — that shipped the whole
-            // TeamMember row and the ENTIRE User row (email, Stripe
-            // `customerId`, billing flags). `userId` stays for the redaction.
+            // Only what the custody card reads, plus the ids the redaction
+            // and the card's "is it yours" check need. The whole TeamMember and
+            // User rows carry email, Stripe `customerId` and billing flags.
             custodianTeamMember: {
               select: { id: true, name: true, userId: true },
             },

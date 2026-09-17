@@ -11,8 +11,8 @@
  *   behaves the same way: `QuantityCustodyList` filters and counts its rows,
  *   and the asset overview hides `CustodyCard` through its `hasPermission`.
  * - Custody through a booking. `activeBooking` names the booking an INDIVIDUAL
- *   asset is checked out on, picked and gated the way the web asset overview
- *   picks the booking its `CustodyCard` shows.
+ *   asset is checked out on, picked with the web asset overview's filter and
+ *   shown to viewers who may see all custody or who hold that booking.
  * - The projection. Rows destructured off the query result stay off the wire.
  *
  * The visibility helpers from `mobile-custody-visibility.server`, the booking
@@ -22,6 +22,7 @@
  * @see {@link file://../../../app/routes/api+/mobile+/assets.$assetId.ts}
  */
 import type { Mock } from "vitest";
+import { CURRENT_BOOKING_SLICE_FILTER } from "~/modules/asset/fields";
 import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import { loader } from "~/routes/api+/mobile+/assets.$assetId";
 import { createLoaderArgs } from "@mocks/remix";
@@ -558,10 +559,16 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
 });
 
 /**
- * `activeBooking` follows the web asset overview's `CustodyCard` for custody
- * held through a booking: the same gate (the asset is CHECKED_OUT), the same
- * booking (the `bookingAssets` filter, first row), the same visibility (the
- * viewer may see all custody), and INDIVIDUAL assets only.
+ * `activeBooking` shows custody held through a booking:
+ *
+ * - which booking: the slice the asset is out on, read with the same filter as
+ *   the web asset overview (`CURRENT_BOOKING_SLICE_FILTER`);
+ * - when: the asset is CHECKED_OUT, and it is INDIVIDUAL;
+ * - to whom: a viewer who may see all custody, or who holds the booking
+ *   (`canSeeBookingCustodian`, as on every mobile booking surface);
+ * - named how: `resolveBookingCustodianName`, the one resolver the mobile
+ *   bookings list, calendar and dashboard share, so no two screens name the
+ *   same holder differently.
  */
 describe("GET /api/mobile/assets/:assetId — custody through a booking", () => {
   beforeEach(() => {
@@ -581,6 +588,41 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     assetFindUniqueMock.mockResolvedValue(buildCheckedOutAsset());
   });
+
+  /**
+   * A booking held by the caller (`user-1`), through each of the two custody
+   * links a booking can carry. A booking assigned by picking a team member has
+   * no user link, even once that member has an account.
+   */
+  const CALLERS_OWN_BOOKING = [
+    [
+      "user link",
+      {
+        custodianTeamMember: {
+          id: "tm-me",
+          name: "Test User",
+          userId: null,
+        },
+        custodianUser: {
+          id: "user-1",
+          firstName: "Test",
+          lastName: "User",
+          displayName: null,
+        },
+      },
+    ],
+    [
+      "team-member link",
+      {
+        custodianTeamMember: {
+          id: "tm-me",
+          name: "Test User",
+          userId: "user-1",
+        },
+        custodianUser: null,
+      },
+    ],
+  ] satisfies [string, BookingCustodianOverrides][];
 
   /** Runs the loader for `asset-1` and returns the parsed body. */
   async function loadDetail() {
@@ -617,12 +659,37 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
       id: "booking-1",
       name: "Field shoot",
       from: "2026-03-02T09:30:00.000Z",
-      // The user's display name: the web card resolves the user link first
-      custodianName: "Caz",
+      // The team-member link, as the mobile bookings list names the same
+      // booking's holder
+      custodianName: "Carol Member",
       canOpen: true,
     });
     // The raw rows only feed the field above
     expect(body.asset).not.toHaveProperty("bookingAssets");
+  });
+
+  it("reads the booking with the web asset overview's filter", async () => {
+    await loadDetail();
+
+    // Both surfaces take the first row, so they name the same booking only
+    // while they narrow and order the relation identically.
+    expect(db.asset.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          bookingAssets: expect.objectContaining(CURRENT_BOOKING_SLICE_FILTER),
+        }),
+      })
+    );
+  });
+
+  it("names the user's display name when the booking has no team member", async () => {
+    assetFindUniqueMock.mockResolvedValue(
+      buildCheckedOutAsset({ custodianTeamMember: null })
+    );
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking.custodianName).toBe("Caz");
   });
 
   it("names a team-member custodian that has no user account", async () => {
@@ -653,7 +720,7 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
     expect(body.asset.activeBooking.custodianName).toBeNull();
   });
 
-  it("withholds the booking from a viewer who may not see custody", async () => {
+  it("withholds someone else's booking from a viewer who may not see custody", async () => {
     asSelfServiceViewer({ canSeeAllCustody: false, canSeeAllBookings: false });
 
     const body = await loadDetail();
@@ -665,30 +732,27 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
     expect(serialized).not.toContain("Carol");
   });
 
-  it("withholds it from the booking's own custodian as well, like the web card", async () => {
-    asSelfServiceViewer({ canSeeAllCustody: false, canSeeAllBookings: false });
-    assetFindUniqueMock.mockResolvedValue(
-      buildCheckedOutAsset({
-        custodianTeamMember: {
-          id: "tm-me",
-          name: "Test User",
-          userId: "user-1",
-        },
-        custodianUser: {
-          id: "user-1",
-          firstName: "Test",
-          lastName: "User",
-          displayName: null,
-        },
-      })
-    );
+  it.each(CALLERS_OWN_BOOKING)(
+    "shows a viewer without custody permission the booking they hold through the %s",
+    async (_link, booking) => {
+      asSelfServiceViewer({
+        canSeeAllCustody: false,
+        canSeeAllBookings: false,
+      });
+      assetFindUniqueMock.mockResolvedValue(buildCheckedOutAsset(booking));
 
-    const body = await loadDetail();
+      const body = await loadDetail();
 
-    // The web card's "is it yours" check reads the CUSTODY row's user, and a
-    // booking checkout writes no custody row, so only the permission counts.
-    expect(body.asset.activeBooking).toBeNull();
-  });
+      // Their own name, on their own booking: nothing here is someone else's.
+      expect(body.asset.activeBooking).toEqual({
+        id: "booking-1",
+        name: "Field shoot",
+        from: "2026-03-02T09:30:00.000Z",
+        custodianName: "Test User",
+        canOpen: true,
+      });
+    }
+  );
 
   it("ignores booking rows on a quantity-tracked asset", async () => {
     assetFindUniqueMock.mockResolvedValue({
@@ -738,40 +802,12 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
       id: "booking-1",
       name: "Field shoot",
       from: "2026-03-02T09:30:00.000Z",
-      custodianName: "Caz",
+      custodianName: "Carol Member",
       canOpen: false,
     });
   });
 
-  it.each([
-    [
-      "user link",
-      {
-        custodianTeamMember: {
-          id: "tm-me",
-          name: "Test User",
-          userId: null,
-        },
-        custodianUser: {
-          id: "user-1",
-          firstName: "Test",
-          lastName: "User",
-          displayName: null,
-        },
-      },
-    ],
-    [
-      "team-member link",
-      {
-        custodianTeamMember: {
-          id: "tm-me",
-          name: "Test User",
-          userId: "user-1",
-        },
-        custodianUser: null,
-      },
-    ],
-  ] satisfies [string, BookingCustodianOverrides][])(
+  it.each(CALLERS_OWN_BOOKING)(
     "lets the booking's custodian open it through the %s",
     async (_link, booking) => {
       asSelfServiceViewer({ canSeeAllCustody: true, canSeeAllBookings: false });
