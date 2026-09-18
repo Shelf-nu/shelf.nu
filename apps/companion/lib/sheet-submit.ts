@@ -8,6 +8,11 @@
  * with the sheet still on screen, the sheet shows it in progress, and it closes
  * only once the change is accepted.
  *
+ * The sheet cannot be dismissed while the request runs, so how long it stays
+ * locked is how long the request takes: the API client's timeout bounds it,
+ * and a mutation that is not safe to send twice opts out of the client's
+ * automatic retry (`retry: false`), which also keeps its lock to one attempt.
+ *
  * Pure, and free of React Native, Expo and `@/`-aliased imports, so the
  * `lib/**` node test runner can exercise the whole sequence. The caller
  * supplies the platform pieces: the error alert, closing the sheet, the
@@ -16,6 +21,7 @@
  * @see {@link file://./../hooks/use-sheet-submit.ts} the React binding
  * @see {@link file://./../app/(tabs)/assets/[id].tsx} the asset screen's sheets
  * @see {@link file://./../app/(tabs)/bookings/[id].tsx} the booking check-in and check-out queues
+ * @see {@link file://./../app/(tabs)/bookings/add-assets.tsx} the reserve-model sheet
  */
 
 /** Shown when a request throws instead of resolving with an error. */

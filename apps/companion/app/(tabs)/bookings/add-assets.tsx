@@ -42,6 +42,7 @@ import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import { submitFromSheet } from "@/lib/sheet-submit";
 
 type Mode = "assets" | "kits" | "models";
 
@@ -363,25 +364,36 @@ export default function AddBookingAssetsScreen() {
     return model.available + (existing?.fulfilledQuantity ?? 0);
   };
 
+  /**
+   * Held while a reservation request runs, so a second tap on Reserve cannot
+   * send it twice. A ref rather than state: a state flag cannot block a tap
+   * delivered in the same tick.
+   */
+  const reserveSubmitLock = useRef(false);
+
+  /**
+   * Sends the reservation with the sheet still open; the sheet's confirm IS
+   * the confirmation step. The sheet closes only once the server accepts, so a
+   * refusal — the model's free pool no longer fits the quantity — keeps the
+   * entered number on screen to lower and retry.
+   */
   const handleReserveSubmit = async (quantity: number) => {
     if (!currentOrg || !bookingId || !activeModel) return;
-    const model = activeModel;
-    setActiveModel(null); // the sheet's confirm IS the confirmation step
-    setIsSubmitting(true);
-    const { error: err } = await api.upsertModelRequest(
-      currentOrg.id,
-      bookingId,
-      model.id,
-      quantity
-    );
-    setIsSubmitting(false);
-    if (err) {
-      Alert.alert("Couldn't reserve model", err);
-      return;
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    markBookingDirty(bookingId);
-    reload(); // refresh availability + the reserved amounts
+    const orgId = currentOrg.id;
+    const modelId = activeModel.id;
+    await submitFromSheet({
+      lock: reserveSubmitLock,
+      request: () =>
+        api.upsertModelRequest(orgId, bookingId, modelId, quantity),
+      onAccepted: () => {
+        setActiveModel(null);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        markBookingDirty(bookingId);
+        reload(); // refresh availability + the reserved amounts
+      },
+      setSubmitting: setIsSubmitting,
+      showError: (message) => Alert.alert("Couldn't reserve model", message),
+    });
   };
 
   // Memoized so `renderModel` (which references it) keeps a stable identity
@@ -741,7 +753,8 @@ export default function AddBookingAssetsScreen() {
           activeModel ? modelRequestsById[activeModel.id]?.quantity ?? 1 : 1
         }
         confirmLabel="Reserve"
-        onSubmit={handleReserveSubmit}
+        isSubmitting={isSubmitting}
+        onSubmit={(quantity) => void handleReserveSubmit(quantity)}
         onClose={() => setActiveModel(null)}
       />
 
