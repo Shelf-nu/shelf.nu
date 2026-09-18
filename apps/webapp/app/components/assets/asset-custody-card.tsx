@@ -8,7 +8,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
+import type { UserNameFields } from "~/utils/user";
+import { resolveBookingHolderName, resolveTeamMemberName } from "~/utils/user";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { DateS } from "../shared/date";
@@ -25,9 +26,9 @@ export function CustodyCard({
 }: {
   booking:
     | (Pick<Booking, "id" | "name" | "from"> & {
-        custodianUser: Partial<
-          Pick<User, "firstName" | "lastName" | "profilePicture" | "email">
-        > | null;
+        custodianUser:
+          | (UserNameFields & Partial<Pick<User, "profilePicture" | "email">>)
+          | null;
         // Only `name` is read (see the branch below). Declaring the whole
         // `TeamMember` forced the loader selects to fetch the whole row, which
         // is how the entire record ended up in the payload.
@@ -43,9 +44,9 @@ export function CustodyCard({
           id: string;
           name: string;
           userId?: string | null;
-          user?: Partial<
-            Pick<User, "firstName" | "lastName" | "profilePicture" | "email">
-          > | null;
+          user?:
+            | (UserNameFields & Partial<Pick<User, "profilePicture" | "email">>)
+            | null;
         };
       }[]
     | null;
@@ -61,7 +62,7 @@ export function CustodyCard({
   /** Extract the primary custody record from the array */
   const primaryCustody = getPrimaryCustody(custody);
 
-  /** We return null if user is selfService or if neither custody nor booking exists */
+  /** Nothing to show: the viewer may not see this holder, or there is none */
   if (!hasPermission || (!primaryCustody && !booking)) {
     return <div className="my-3" />;
   }
@@ -114,22 +115,8 @@ export function CustodyCard({
 
   /** If booking is present, we render the card showing custody via booking */
   if (booking) {
-    let teamMemberName = "";
-    if (booking.custodianUser) {
-      teamMemberName = resolveTeamMemberName({
-        name: `${booking.custodianUser?.firstName || ""} ${
-          booking.custodianUser?.lastName || ""
-        }`,
-        user: {
-          firstName: booking.custodianUser?.firstName || "",
-          lastName: booking.custodianUser?.lastName || "",
-        },
-      });
-    } else if (booking.custodianTeamMember) {
-      teamMemberName = resolveTeamMemberName({
-        name: booking.custodianTeamMember.name,
-      });
-    }
+    // Named as every booking surface names its holder, mobile included.
+    const teamMemberName = resolveBookingHolderName(booking) ?? "";
 
     return (
       <Card className={tw("my-3", className)}>

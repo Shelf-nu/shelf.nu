@@ -6,6 +6,7 @@ import {
   clearAuditScanState,
   createDebouncedSaver,
 } from "@/lib/audit-scan-persistence";
+import { auditDeletedAssetLabel } from "@shelf/labels";
 import { announce } from "@/lib/a11y";
 import { reportAuditDurabilityEvent } from "@/lib/sentry";
 
@@ -16,6 +17,21 @@ export type ScannedItem = {
   name: string;
   isExpected: boolean;
   scannedAt: string;
+  /**
+   * The AuditScan row id, set on every scan restored from the server.
+   *
+   * A deleted asset's row REQUIRES it as its list key — `assetId` is empty for
+   * those, so nothing else identifies the row. Absent on scans made live in
+   * this session, which have not reached the server yet, and on servers too
+   * old to send it.
+   */
+  scanId?: string;
+  /**
+   * The scanned asset has since been deleted, so nothing behind this row can
+   * be opened or re-fetched. The name already says so; this is what the list
+   * reads to keep the row from being treated as an ordinary scan.
+   */
+  assetDeleted?: boolean;
   /** The audit-asset record ID, needed for adding notes/photos. Set after server confirms scan. */
   auditAssetId?: string;
   /** Local count of notes added during this session (optimistic). */
@@ -27,6 +43,19 @@ export type ScannedItem = {
    * server. Surfaced in the UI and blocks audit completion until re-synced.
    */
   syncFailed?: boolean;
+  /**
+   * Where the asset is supposed to be. Shown on the scanned row so the tab
+   * carries the same orienting detail the Not-scanned tab already does —
+   * standing in a room, "which shelf" is more useful than re-reading that a
+   * scan was scanned. Null when the asset has no location, or (for an
+   * unexpected asset scanned live) until the server round-trip fills it in.
+   */
+  locationName?: string | null;
+  /**
+   * Thumbnail for the same reason: the Not-scanned tab shows one, so an eye
+   * moving between tabs should not have to switch modes. Null when absent.
+   */
+  thumbnailImage?: string | null;
 };
 
 export type ScanQueueEntry = {
@@ -131,14 +160,31 @@ export function useAuditInit({
       const restoredItems: ScannedItem[] = [];
       for (const scan of data.existingScans) {
         scannedIds.add(scan.assetId);
+        // why: an expected asset already has its full record client-side, so
+        // prefer it for the image; the scan payload only carries a location.
+        const expected = expectedMap.get(scan.assetId);
+        // A scan whose asset was deleted keeps only the title captured at scan
+        // time. Naming it plainly would render it as an ordinary live asset,
+        // which is worse than the blank row it replaced — the auditor would go
+        // looking for something that no longer exists. Older servers omit the
+        // flag, so an empty `assetId` stands in for it.
+        const assetDeleted = scan.assetDeleted || !scan.assetId;
         restoredItems.push({
           assetId: scan.assetId,
-          name: scan.assetTitle,
+          scanId: scan.id,
+          assetDeleted,
+          name: assetDeleted
+            ? auditDeletedAssetLabel(scan.assetTitle)
+            : scan.assetTitle,
           isExpected: scan.isExpected,
           scannedAt: scan.scannedAt,
           auditAssetId: scan.auditAssetId ?? undefined,
           notesCount: scan.auditNotesCount,
           imagesCount: scan.auditImagesCount,
+          locationName:
+            scan.assetLocationName ?? expected?.locationName ?? null,
+          thumbnailImage:
+            expected?.thumbnailImage ?? expected?.mainImage ?? null,
         });
       }
       scannedAssetIdsRef.current = scannedIds;
@@ -236,6 +282,14 @@ export function useAuditInit({
                         "Scanned asset",
                       isExpected: e.isExpected,
                       scannedAt: new Date().toISOString(),
+                      locationName:
+                        expectedAssetMapRef.current.get(e.assetId)
+                          ?.locationName ?? null,
+                      thumbnailImage:
+                        expectedAssetMapRef.current.get(e.assetId)
+                          ?.thumbnailImage ??
+                        expectedAssetMapRef.current.get(e.assetId)?.mainImage ??
+                        null,
                     }));
                   const allRecovered = [...recoveredItems, ...queuedOnlyItems];
 

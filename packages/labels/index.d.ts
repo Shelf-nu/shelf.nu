@@ -24,6 +24,25 @@ export declare const ASSET_BOOKING_PSEUDO_STATUS_LABELS: {
   readonly PARTIALLY_CHECKED_OUT: "Partially checked out";
 };
 
+/**
+ * How a kit's state is named, on the website and on the phone.
+ *
+ * `AVAILABLE`, `IN_CUSTODY` and `CHECKED_OUT` are the persisted `KitStatus`
+ * enum; `PARTIALLY_CHECKED_IN` is derived by a booking for a kit whose every
+ * member it holds has been checked back in while the booking still runs.
+ *
+ * The three enum entries carry the same wording as {@link ASSET_STATUS_LABELS}
+ * without being spread from it — a booking shows a kit and the assets inside it
+ * on one screen, so the strings must agree, while the key set must keep
+ * tracking `KitStatus` alone.
+ */
+export declare const KIT_STATUS_LABELS: {
+  readonly AVAILABLE: "Available";
+  readonly IN_CUSTODY: "In custody";
+  readonly CHECKED_OUT: "Checked out";
+  readonly PARTIALLY_CHECKED_IN: "Already checked in";
+};
+
 export declare const BOOKING_STATUS_LABELS: {
   readonly DRAFT: "Draft";
   readonly RESERVED: "Reserved";
@@ -69,6 +88,29 @@ export declare const AUDIT_ASSET_STATUS_LABELS: {
   readonly MISSING: "Missing";
   readonly UNEXPECTED: "Unexpected";
 };
+
+/**
+ * Wording for an audit scan whose asset no longer exists.
+ *
+ * Deleting an asset leaves the scan row behind with nothing to name it but the
+ * title captured at scan time, so both apps must say it the same way. Prefer
+ * {@link auditDeletedAssetLabel} over indexing this map — only that helper
+ * applies the "keep the snapshotted title" rule.
+ */
+export declare const AUDIT_DELETED_ASSET_LABELS: {
+  readonly UNTITLED: "Deleted asset";
+};
+
+/**
+ * Names a scan whose asset has been deleted, keeping the title it had when it
+ * was scanned and marking it as gone.
+ *
+ * @param title - the snapshotted title, if any
+ * @returns the row's display name
+ */
+export declare function auditDeletedAssetLabel(
+  title: string | null | undefined
+): string;
 
 /** Enum keys of {@link AUDIT_ASSET_STATUS_LABELS} — the Prisma status values. */
 export type AuditAssetStatusKey = keyof typeof AUDIT_ASSET_STATUS_LABELS;

@@ -1,3 +1,16 @@
+/**
+ * Mobile API route: booking detail.
+ *
+ * Serves the companion's booking screen: the booking, its assets collapsed to
+ * one row per asset with their kit slices, the kits those rows group under,
+ * model reservations, check-in state and the action flags the screen needs.
+ * Org-scoped behind the mobile bearer auth, with drafts private to their
+ * creator and a custody gate on the loaded row. Lapsed asset photo and kit image
+ * URLs are re-signed before the response is sent.
+ *
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ * @see {@link file://./../../../modules/kit/service.server.ts} refreshExpiredKitImages
+ */
 import {
   AssetStatus,
   AssetType,
@@ -13,8 +26,16 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { ASSET_LOCATIONS_INCLUDE } from "~/modules/asset/fields";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import { getPrimaryLocation } from "~/modules/asset/utils";
+import { computeDispatchedUnitsByAsset } from "~/modules/booking/checkout-attribution";
+import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
   computeBookingAssetRemaining,
@@ -23,7 +44,11 @@ import {
   getPartiallyCheckedInAssetIds,
 } from "~/modules/booking/service.server";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { refreshExpiredKitImages } from "~/modules/kit/service.server";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -36,6 +61,8 @@ import { hasPermission } from "~/utils/permissions/permission.validator.server";
  * GET /api/mobile/bookings/:bookingId
  *
  * Returns full booking detail with assets, custodian, and check-in status.
+ * An asset photo or kit image whose signed URL has lapsed is re-signed, and
+ * the new URL written back, before it is sent.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -47,13 +74,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // details, assets, tags and action flags via mobile.
     await assertMobileCanUseBookings(organizationId);
 
-    // Self-service / base users may only read their OWN bookings. Scope the
-    // lookup by custodian like the list endpoint (bookings.ts) does, so a
-    // booking they don't own 404s instead of leaking across the workspace.
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    // `canSeeAllBookings` answers who may READ a booking they do not custody:
+    // ADMIN/OWNER always, SELF_SERVICE/BASE only where the workspace override
+    // allows it. `isSelfServiceOrBase` is the narrower, role-only question of
+    // which ACTIONS the caller may take, and must stay role-only: the override
+    // widens reading and never writing.
+    const { canSeeAllBookings, isSelfServiceOrBase, effectiveRole, roles } =
+      await getMobileUserContext(user.id, organizationId);
 
     const { bookingId } = getParams(
       params,
@@ -64,14 +91,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       where: {
         id: bookingId,
         organizationId,
-        ...(isSelfServiceOrBase && { custodianUserId: user.id }),
         /**
          * Draft privacy (web parity). A DRAFT booking is private to its
          * creator — web gates the detail route on the same shared clause, so
          * without it a direct GET here returns a colleague's unfinished draft
-         * even though the list would (now) hide it. The list fix alone is not
-         * enough: booking ids are guessable-adjacent and the detail endpoint
-         * is reachable directly.
+         * even though the list hides it. Hiding drafts from the list is not
+         * enough: booking ids are guessable-adjacent and this endpoint is
+         * reachable directly. The booking override does NOT widen this: an
+         * unfinished draft stays private to its creator either way, exactly as
+         * on web.
+         *
+         * Custody is deliberately NOT a clause here. It is a gate on the
+         * loaded row instead (`canSeeBooking`, just past the 404 below), so
+         * "you may not see this" answers 403 rather than reporting the row as
+         * missing. A custody clause in the `where` would also silently
+         * re-decide visibility before the row is read, where it can no longer
+         * honour the workspace override.
          */
         AND: [bookingDraftVisibilityClause(user.id)],
       },
@@ -92,6 +127,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             lastName: true,
           },
         },
+        // why: `canSeeBooking` reads BOTH custody links, so the scalar is
+        // required even though the relation below covers display. A booking
+        // assigned to a team member with no user attached carries
+        // `custodianUserId = NULL`; matching one link alone refuses the user
+        // the booking belongs to.
+        custodianUserId: true,
         custodianUser: {
           select: {
             id: true,
@@ -105,6 +146,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           select: {
             id: true,
             name: true,
+            userId: true,
           },
         },
         tags: {
@@ -139,6 +181,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 consumptionType: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Lets the re-sign below tell a lapsed photo URL.
+                mainImageExpiration: true,
                 // Model cover image; collapsed into the flat image fields by
                 // `serializeAssetImage` below, so an asset inheriting its
                 // model's photo is not blank on the companion booking screen.
@@ -155,6 +199,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                     kit: { select: { id: true, name: true } },
                   },
                   orderBy: { createdAt: "asc" },
+                },
+                // Where the asset sits, through the `AssetLocation` pivot.
+                // Only the primary placement is sent (see `location` below),
+                // picked by the shared placement order, so an asset placed in
+                // several locations names the same one on every refresh.
+                assetLocations: {
+                  select: { location: { select: { id: true, name: true } } },
+                  orderBy: ASSET_LOCATIONS_INCLUDE.orderBy,
+                  take: 1,
                 },
               },
             },
@@ -191,6 +244,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return data({ error: { message: "Booking not found" } }, { status: 404 });
     }
 
+    /**
+     * The custody gate. Runs on the loaded row so the answer can account for
+     * the workspace override, and refuses with 403 rather than reporting the
+     * booking as missing. Web gates its overview route with this same helper
+     * and this same status, so a booking that opens on one platform opens on
+     * the other.
+     */
+    if (!canSeeBooking({ canSeeAllBookings, booking, userId: user.id })) {
+      return data(
+        { error: { message: "You are not authorized to view this booking" } },
+        { status: 403 }
+      );
+    }
+
     // Get partial check-in data for ONGOING/OVERDUE bookings
     let checkedInAssetIds: string[] = [];
     if (booking.status === "ONGOING" || booking.status === "OVERDUE") {
@@ -203,9 +270,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // = mixed standalone + kit-driven). Mobile clients that don't know
     // about `assetKitId` see the same flat shape they always did.
     //
-    // `slices` additively exposes the per-BookingAsset-row breakdown (Gap 1,
-    // Companion QT display parity) so the app can render standalone vs.
-    // kit-driven booked units separately instead of only the merged total.
+    // `slices` exposes the per-BookingAsset-row breakdown so the app can
+    // render standalone vs. kit-driven booked units separately instead of only
+    // the merged total.
     type SliceRow = {
       bookingAssetId: string;
       quantity: number;
@@ -251,22 +318,37 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
     }
 
-    const assets = Array.from(byAssetId.values()).map((row) => {
-      const { assetKits, ...rest } = row.first.asset;
+    const collapsedRows = Array.from(byAssetId.values());
+    // The result lines up with `collapsedRows`, one entry per asset.
+    const refreshedAssets = await refreshExpiredAssetImages(
+      collapsedRows.map((row) => row.first.asset),
+      { organizationId, ...ASSET_IMAGE_RESIGN_LIMITS }
+    );
+
+    const assets = collapsedRows.map((row, index) => {
+      // `assetLocations` is taken out here so the pivot never reaches the
+      // payload; it is sent only as the flat `location` below.
+      // `mainImageExpiration` only steers the re-sign above.
+      const {
+        assetKits,
+        assetLocations,
+        mainImageExpiration: _mainImageExpiration,
+        ...rest
+      } = refreshedAssets[index];
       // why: no `sourceKitId` fallback for detached kit residue here. This
       // response collapses per asset rather than grouping by kit, and the
       // unanimous rule below deliberately reports `null` rather than guessing
-      // a source. Resolving the snapshot kit would re-introduce exactly the
-      // arbitrary attribution that rule exists to remove.
+      // a source. Resolving the snapshot kit would produce exactly the
+      // arbitrary attribution that rule prevents.
       // Unanimous-kit rule: every collapsed row for this asset points at
       // the same `assetKitId`. Mixed → `null` so clients don't
       // mis-attribute the slice to one of multiple sources.
       const unanimousAssetKitId =
         row.assetKitIds.size === 1 ? Array.from(row.assetKitIds)[0] : null;
-      // Merged kit = the kit of the unanimous membership, else null. This
-      // REPLACES the legacy `assetKits[0].kit` synthesis, which mislabelled
-      // standalone/mixed rows with an arbitrary membership. Safe for old
-      // clients: they already render a null kit (INDIVIDUAL assets have one).
+      // Merged kit = the kit of the unanimous membership, else null. Never an
+      // arbitrary membership such as `assetKits[0]`: a standalone or mixed row
+      // has no single kit to name. Clients already render a null kit, which
+      // every standalone INDIVIDUAL asset has.
       const mergedKit =
         unanimousAssetKitId != null
           ? assetKits.find((ak) => ak.id === unanimousAssetKitId)?.kit ?? null
@@ -275,6 +357,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // Resolves the model-image cascade and drops the nested `assetModel`,
         // so the companion keeps one source of truth for the image.
         ...serializeAssetImage(rest),
+        // The asset's primary location, for the location line web's booking
+        // page shows on every asset row, kit members included. `null` when
+        // the asset is unplaced. Additive: older clients ignore it.
+        location: getPrimaryLocation({ assetLocations }),
         kit: mergedKit,
         kitId: mergedKit?.id ?? null,
         // Per-booking quantity (sum of all slices for this asset in
@@ -288,6 +374,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         slices: row.slices,
       };
     });
+
+    // The kits the app groups those assets under. Only the UNANIMOUS kit ids
+    // qualify: an asset whose slices disagree carries `kitId: null` above and
+    // renders standalone, exactly as web's `shapeBookingAssets` keys on
+    // `asset.kitId`. Empty when the booking holds no kit-driven rows.
+    const bookingKitIds = [
+      ...new Set(
+        assets
+          .map((a) => a.kitId)
+          .filter((kitId): kitId is string => kitId !== null)
+      ),
+    ];
 
     // Per-QUANTITY_TRACKED-asset remaining, computed up-front so the capability
     // flags below can reason about UNITS, not the asset's global status.
@@ -314,24 +412,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // checked out. The shared checkout service hard-blocks the RESERVED →
     // ONGOING transition until every `BookingModelRequest` is assigned to
     // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // `fulfilledAt: null` row remains). Fold that into `canCheckout` so the app
-    // never offers a "Check Out" the server would reject — the app instead
-    // guides the operator to assign the reserved units first (see the
-    // booking-detail "Assign to check out" CTA).
-    const hasOutstandingModelRequests = booking.modelRequests.some(
-      (mr) => mr.fulfilledAt === null
-    );
+    // request is outstanding). Read through the same predicate the service
+    // uses, and fold it into the state flag so the app never offers a "Check
+    // Out" the server would reject — the app instead guides the operator to
+    // assign the reserved units first (see the booking-detail "Assign to
+    // check out" CTA).
+    const hasOutstandingModelRequests =
+      getOutstandingModelRequests(booking.modelRequests).length > 0;
 
-    const canCheckout =
+    const canCheckoutByState =
       booking.status === "RESERVED" &&
       totalAssets > 0 &&
       !hasOutstandingModelRequests;
     // Checkinable while ONGOING/OVERDUE AND something is still to check in.
     // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: booked units not
     // yet reconciled = remainingToCheckIn > 0 (booked − returned/consumed/lost/
-    // damaged) — the SAME "remaining" the web check-in drawer caps at. The old
-    // `checkedOutCount > 0` gate hid check-in on a partially-checked-out QT
-    // booking, whose asset status stays AVAILABLE while units are still booked.
+    // damaged) — the SAME "remaining" the web check-in drawer caps at. Status
+    // cannot answer this for a QT asset: it stays AVAILABLE while some of its
+    // units are still out.
     const hasCheckinable = assets.some((a) => {
       if (a.type === AssetType.QUANTITY_TRACKED) {
         const rem = remainingByAsset.get(a.id);
@@ -339,63 +437,93 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
       return a.status === AssetStatus.CHECKED_OUT;
     });
-    const canCheckin =
+    const canCheckinByState =
       (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
       hasCheckinable;
 
-    // Quick "check in all" is disallowed when the workspace requires EXPLICIT
-    // (scan/select) check-in for the caller's role — mirror the web policy
-    // (overview.tsx:1034-1054) so the app never offers an action the web /
+    // Quick "check in all" and "check out all" are disallowed when the
+    // workspace requires EXPLICIT (scan/select) check-in or check-out for the
+    // caller's role. Mirrors the web booking action's `checkIn`, `checkOut` and
+    // `checkOutRemaining` guards, so the app never offers an action the web /
     // workspace settings forbid.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const canQuickCheckin = !(
-      (role === OrganizationRoles.ADMIN &&
+      (effectiveRole === OrganizationRoles.ADMIN &&
         bookingSettings.requireExplicitCheckinForAdmin) ||
-      (role === OrganizationRoles.SELF_SERVICE &&
+      (effectiveRole === OrganizationRoles.SELF_SERVICE &&
         bookingSettings.requireExplicitCheckinForSelfService)
     );
+    const canQuickCheckout = !isExplicitCheckoutRequired({
+      role: effectiveRole,
+      bookingSettings,
+    });
 
     // Per-booking lifecycle-action availability, mirroring the web
     // ActionsDropdown gating (actions-dropdown.tsx) so the app surfaces exactly
     // the actions this role/status can perform — never an option the web /
-    // role / status forbids. Passing `roles:[role]` keeps `hasPermission` a
-    // pure static-map lookup (no extra query). Server endpoints enforce these
+    // role / status forbids. Passing the membership's `roles` keeps
+    // `hasPermission` a pure static-map lookup (no extra query). Server
+    // endpoints enforce these
     // same gates regardless; this is the UI mirror.
-    const isBaseOrSelfService =
-      role === OrganizationRoles.BASE ||
-      role === OrganizationRoles.SELF_SERVICE;
-    const [canCancelPerm, canArchivePerm, canCreatePerm, canDeletePerm] =
-      await Promise.all([
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.cancel,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.archive,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.create,
-        }),
-        hasPermission({
-          userId: user.id,
-          organizationId,
-          roles: [role],
-          entity: PermissionEntity.booking,
-          action: PermissionAction.delete,
-        }),
-      ]);
+    const [
+      canCancelPerm,
+      canArchivePerm,
+      canCreatePerm,
+      canDeletePerm,
+      canCheckoutPerm,
+      canCheckinPerm,
+    ] = await Promise.all([
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.cancel,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.archive,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.delete,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkout,
+      }),
+      hasPermission({
+        userId: user.id,
+        organizationId,
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkin,
+      }),
+    ]);
+    // State says the booking COULD be checked out or in; the role says whether
+    // this caller may. Both have to hold, or the app draws a button the server
+    // then refuses — the endpoints gate on these same permissions regardless,
+    // so without this the user meets the rule as a 403 instead of an absence.
+    const canCheckout = canCheckoutByState && canCheckoutPerm;
+    const canCheckin = canCheckinByState && canCheckinPerm;
+
     const bookingActions = {
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
       canCancel:
@@ -403,8 +531,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           booking.status === "ONGOING" ||
           booking.status === "OVERDUE") &&
         canCancelPerm,
-      // Archive: COMPLETE only + archive permission.
-      canArchive: booking.status === "COMPLETE" && canArchivePerm,
+      // Archive: shared web-parity rule (COMPLETE, or RESERVED already past
+      // its end date) + archive permission.
+      canArchive:
+        isBookingArchivable({ status: booking.status, to: booking.to }) &&
+        canArchivePerm,
       // Duplicate: any status; gated by create permission (web's duplicate
       // route enforces create — we hide it for those who lack it rather than
       // 403 on tap).
@@ -413,8 +544,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // self-service/base only on DRAFT). Mirrors the web client gate; the
       // server endpoint enforces ownership + the same BASE-only-DRAFT rule.
       canDelete:
-        ((isBaseOrSelfService && booking.status === "DRAFT") ||
-          !isBaseOrSelfService) &&
+        ((isSelfServiceOrBase && booking.status === "DRAFT") ||
+          !isSelfServiceOrBase) &&
         canDeletePerm,
     };
 
@@ -460,26 +591,112 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // web booking overview uses (`calculateBookingLifecycleProgress`), so the
     // mobile bar and the web bar can never disagree. QT rows bucket by their
     // per-asset unit counters; INDIVIDUAL rows by status + `checkedInAssetIds`.
-    // `checkedOutAssetIds` (assets with a PartialBookingCheckout record) drives
-    // the COMPLETE-branch "was it ever out?" test; an empty list means an
-    // all-at-once checkout.
-    const partialCheckoutRows = await db.partialBookingCheckout.findMany({
-      where: { bookingId: booking.id },
-      select: { assetIds: true },
+    // Dispatch truth comes from the slice markers
+    // (`BookingAsset.checkedOutAt`/`checkedInAt`): the Check out button
+    // stamps them but writes NO PartialBookingCheckout rows, so session
+    // records cannot tell a button-checked-out asset from a
+    // never-checked-out one on a booking that also has scan records. The
+    // sessions are still fetched: per-asset dispatched units are judged
+    // slice by slice from stamps + session attribution (an asset can mix a
+    // button-checked-out slice with a progressively-scanned sibling — see
+    // `computeDispatchedUnitsByAsset`).
+    //
+    // The kit lookup rides along here rather than taking a round trip of its
+    // own. It is org-scoped as well as id-scoped: a kit id reaching this query
+    // came from a BookingAsset row, but scoping it keeps the response's kit
+    // payload inside the caller's workspace by construction.
+    const [sliceRows, checkoutSessionRows, storedKitRows] = await Promise.all([
+      db.bookingAsset.findMany({
+        where: { bookingId: booking.id },
+        select: {
+          id: true,
+          assetId: true,
+          quantity: true,
+          assetKitId: true,
+          checkedOutAt: true,
+          checkedInAt: true,
+        },
+      }),
+      db.partialBookingCheckout.findMany({
+        where: { bookingId: booking.id },
+        select: { assetIds: true, quantities: true, bookingAssetIds: true },
+      }),
+      bookingKitIds.length > 0
+        ? db.kit.findMany({
+            where: { id: { in: bookingKitIds }, organizationId },
+            select: {
+              id: true,
+              // Scopes the write-back of a re-signed image below.
+              organizationId: true,
+              name: true,
+              status: true,
+              image: true,
+              imageExpiration: true,
+              category: { select: { id: true, name: true, color: true } },
+              location: { select: { id: true, name: true } },
+              // The kit's FULL membership, which is what tells the app whether
+              // the rows it holds are the whole kit — a removal that names the
+              // kit detaches every member, so it may only offer that when the
+              // booking holds all of them.
+              _count: { select: { assetKits: true } },
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+    // A kit's `image` is a signed storage URL that stops working once
+    // `imageExpiration` passes, and the app has no way to renew it. Re-sign the
+    // lapsed ones so a kit header never receives a dead link. `organizationId`
+    // only scopes that write-back, so it is dropped before the response.
+    const kitRows = (await refreshExpiredKitImages(storedKitRows)).map(
+      ({ organizationId: _organizationId, ...kit }) => kit
+    );
+    const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
+      slices: sliceRows,
+      checkoutSessions: checkoutSessionRows,
     });
+    const sliceMarkersByAssetId = new Map<
+      string,
+      { out: boolean; allStampedIn: boolean }
+    >();
+    for (const s of sliceRows) {
+      const m = sliceMarkersByAssetId.get(s.assetId) ?? {
+        out: false,
+        allStampedIn: true,
+      };
+      if (s.checkedOutAt) {
+        m.out = true;
+        if (!s.checkedInAt) m.allStampedIn = false;
+      }
+      sliceMarkersByAssetId.set(s.assetId, m);
+    }
     const checkedOutAssetIds = [
-      ...new Set(partialCheckoutRows.flatMap((r) => r.assetIds)),
+      ...new Set(sliceRows.filter((s) => s.checkedOutAt).map((s) => s.assetId)),
     ];
+    // With no stamped slice anywhere, pass `undefined` markers (not `false`)
+    // so the calculation's legacy collapse for record-less bookings stays
+    // reachable — `false` means "this row was verifiably never dispatched".
+    const bookingHasSliceMarkers = checkedOutAssetIds.length > 0;
     const lifecycleProgress = calculateBookingLifecycleProgress({
       bookingAssets: assets.map((a) => {
         const isQty = a.type === AssetType.QUANTITY_TRACKED;
         const rem = remainingByAsset.get(a.id);
         const booked = a.quantity ?? 0;
+        const marker = sliceMarkersByAssetId.get(a.id);
         return {
           id: a.id,
           kitId: a.kitId,
           status: a.status,
           assetType: a.type,
+          sliceCheckedOut: bookingHasSliceMarkers
+            ? marker?.out ?? false
+            : undefined,
+          sliceCheckedIn: bookingHasSliceMarkers
+            ? (marker?.out ?? false) && (marker?.allStampedIn ?? false)
+            : undefined,
+          dispatchedQuantity:
+            isQty && bookingHasSliceMarkers
+              ? Math.min(dispatchedUnitsByAsset.get(a.id) ?? 0, booked)
+              : undefined,
           bookedQuantity: isQty ? booked : undefined,
           // checked-out = booked − still-to-check-out; dispositioned =
           // booked − still-to-check-in. Both from the per-asset remaining
@@ -498,12 +715,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * The third rule web's Reserve button disables on, which the companion had
-     * no way to evaluate: whether any asset is already booked for this window.
-     * Unlike "no assets" and "unavailable asset", it cannot be derived from the
-     * rows in this response — it needs the overlapping-booking query — so
-     * without this flag the phone showed an enabled Reserve, the user tapped,
-     * confirmed, and only then got a 400 from `reserveBooking`'s conflict check.
+     * The third rule web's Reserve button disables on: whether any asset is
+     * already booked for this window. Unlike "no assets" and "unavailable
+     * asset", it cannot be derived from the rows in this response — it needs
+     * the overlapping-booking query — so without this flag the app would offer
+     * a Reserve that `reserveBooking`'s conflict check then refuses with a 400.
      *
      * Computed for DRAFT bookings only: Reserve is the sole consumer and it is
      * the only status that renders it, so no other request pays for the query.
@@ -537,6 +753,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodianTeamMember: booking.custodianTeamMember,
         tags: booking.tags,
         assets: assetsForResponse,
+        // The kits those assets group under, in the order the app first meets
+        // them in `assets`, so both sides agree on where a kit's header sits.
+        // `assetCount` is the kit's own membership size, not the number of
+        // members this booking holds — the app counts the latter from `assets`.
+        kits: bookingKitIds
+          .map((kitId) => kitRows.find((kit) => kit.id === kitId))
+          .filter((kit): kit is (typeof kitRows)[number] => kit !== undefined)
+          .map(({ _count, ...kit }) => ({
+            ...kit,
+            assetCount: _count.assetKits,
+          })),
         assetCount: totalAssets,
         checkedOutCount,
         modelRequests,
@@ -546,9 +773,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         hasAlreadyBookedAssets,
       },
       checkedInAssetIds,
+      // Which assets this booking actually sent out, from the slice markers.
+      // `checkedInAssetIds` is filled for ONGOING/OVERDUE only, so on a
+      // finished booking this is the one field that separates a kit that went
+      // out and came back from one that never left.
+      checkedOutAssetIds,
       canCheckout,
       canCheckin,
       canQuickCheckin,
+      canQuickCheckout,
       bookingActions,
     });
   } catch (cause) {

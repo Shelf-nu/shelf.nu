@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
@@ -11,10 +12,12 @@ import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
@@ -98,9 +101,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
    * `booking.modelRequests` (already loaded via `BOOKING_WITH_ASSETS_INCLUDE`)
    * to avoid a new loader field.
    */
-  const outstandingModelRequestCount =
-    loaderBooking.modelRequests?.filter((r) => r.fulfilledAt === null).length ??
-    0;
+  const outstandingModelRequestCount = getOutstandingModelRequests(
+    loaderBooking.modelRequests
+  ).length;
 
   // Progressive checkout is only offered while there are still items that
   // haven't been checked out yet (the Booked bucket). Once everything has been
@@ -164,9 +167,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     isBaseOrSelfService,
     isBase,
     isAdministratorOrOwner,
-    isAdministrator,
-    isOwner,
-    isSelfService,
+    effectiveRole,
   } = useUserRoleHelper();
 
   const zo = useZorm(
@@ -363,7 +364,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               (RESERVED/ONGOING/OVERDUE with still-Booked items) into a single
               dropdown — mirroring the check-in dropdown for a consistent header.
               CheckoutDropdown renders a single button when only one option
-              applies, and nothing when neither does.
+              applies, and only "Scan to check out" when the workspace requires
+              explicit check-out for the viewer's role.
 
               When the booking has outstanding `BookingModelRequest` rows the
               normal RESERVED → ONGOING transition is refused by the server
@@ -438,6 +440,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                       )
                     }
                     checkOutDisabled={checkoutDisabled}
+                    requireExplicitCheckout={isExplicitCheckoutRequired({
+                      role: effectiveRole,
+                      bookingSettings,
+                    })}
                   />
                 );
               })()}
@@ -460,11 +466,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 }}
                 disabled={disabled || isLoadingWorkingHours}
                 requireExplicitCheckin={
-                  !isOwner &&
-                  ((isAdministrator &&
+                  (effectiveRole === OrganizationRoles.ADMIN &&
                     bookingSettings.requireExplicitCheckinForAdmin) ||
-                    (isSelfService &&
-                      bookingSettings.requireExplicitCheckinForSelfService))
+                  (effectiveRole === OrganizationRoles.SELF_SERVICE &&
+                    bookingSettings.requireExplicitCheckinForSelfService)
                 }
               />
             </When>

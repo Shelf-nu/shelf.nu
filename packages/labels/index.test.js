@@ -20,11 +20,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  ASSET_BOOKING_PSEUDO_STATUS_LABELS,
+  ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_TONES,
+  AUDIT_DELETED_ASSET_LABELS,
   AUDIT_STATUS_LABELS,
   AUDIT_STATUS_TONES,
+  KIT_STATUS_LABELS,
   auditAssetStatusLabel,
+  auditDeletedAssetLabel,
   isAuditCompleted,
 } from "./index.js";
 
@@ -59,6 +64,35 @@ test("AUDIT_ASSET_STATUS_LABELS covers the AuditAssetStatus enum", () => {
     "MISSING",
     "UNEXPECTED",
   ]);
+});
+
+test("KIT_STATUS_LABELS covers the KitStatus enum", () => {
+  // enum KitStatus { AVAILABLE, IN_CUSTODY, CHECKED_OUT }
+  // PARTIALLY_CHECKED_IN is not persisted: a booking derives it when every
+  // member it holds has been checked back in.
+  assertSameKeys(KIT_STATUS_LABELS, [
+    "AVAILABLE",
+    "IN_CUSTODY",
+    "CHECKED_OUT",
+    "PARTIALLY_CHECKED_IN",
+  ]);
+});
+
+test("a kit and an asset say the same thing about being back", () => {
+  assert.equal(
+    KIT_STATUS_LABELS.PARTIALLY_CHECKED_IN,
+    ASSET_BOOKING_PSEUDO_STATUS_LABELS.ALREADY_CHECKED_IN
+  );
+});
+
+test("a kit and an asset are named alike", () => {
+  // A booking lists a kit and the assets inside it on one screen, so the three
+  // states both enums share have to read identically. The two maps stay
+  // separate — their key sets follow different database enums — which is why
+  // the agreement is pinned here rather than expressed as a spread.
+  for (const status of ["AVAILABLE", "IN_CUSTODY", "CHECKED_OUT"]) {
+    assert.equal(KIT_STATUS_LABELS[status], ASSET_STATUS_LABELS[status]);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -152,11 +186,37 @@ test("an archived audit that was completed stays completed", () => {
 
 test("the exported maps cannot be mutated by a consumer", () => {
   for (const map of [
+    ASSET_STATUS_LABELS,
+    KIT_STATUS_LABELS,
     AUDIT_STATUS_LABELS,
     AUDIT_ASSET_STATUS_LABELS,
+    AUDIT_DELETED_ASSET_LABELS,
     AUDIT_STATUS_TONES,
     AUDIT_ASSET_STATUS_TONES,
   ]) {
     assert.ok(Object.isFrozen(map));
   }
+});
+
+// ---------------------------------------------------------------------------
+// Deleted-asset wording
+// ---------------------------------------------------------------------------
+
+test("a deleted asset keeps the title it was scanned under", () => {
+  assert.equal(
+    auditDeletedAssetLabel("Arri Fresnel 650"),
+    "Arri Fresnel 650 (deleted)"
+  );
+});
+
+test("a deleted asset with no snapshotted title says only what it is", () => {
+  // A scan recorded before the title was captured by value has nothing left to
+  // qualify, so the row must not read " (deleted)" with an empty name.
+  for (const empty of [null, undefined, "", "   "]) {
+    assert.equal(auditDeletedAssetLabel(empty), "Deleted asset");
+  }
+});
+
+test("surrounding whitespace never reaches the rendered name", () => {
+  assert.equal(auditDeletedAssetLabel("  Tripod  "), "Tripod (deleted)");
 });

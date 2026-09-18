@@ -7,15 +7,26 @@ import type {
   Organization,
 } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
+  AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
+  auditAcceptsComments,
+} from "~/modules/audit/comment-policy";
 import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
 } from "~/modules/note/service.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
 import type { ClientHint } from "~/utils/client-hints";
 import type { RawFormatPrefs } from "~/utils/date-format";
 import type { ErrorLabel } from "~/utils/error";
@@ -27,6 +38,7 @@ import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { removePublicFile } from "~/utils/storage.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
 import type { AuditFilterType } from "./audit-filter-utils";
@@ -47,6 +59,7 @@ import {
   createAssetsAddedToAuditNote,
   createAssetRemovedFromAuditNote,
   createAssetsRemovedFromAuditNote,
+  createAssetScanRemovedNote,
 } from "./helpers.server";
 import type { AuditSchedulerData } from "./types";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
@@ -73,6 +86,108 @@ function assertAuditNotArchived(
       status: 400,
     });
   }
+}
+
+/**
+ * Refuses a new comment on a finished audit.
+ *
+ * @param status - The audit's current status
+ * @param details - Identifies the audit in the error's additional data
+ * @throws {ShelfError} 400 when the audit is completed, cancelled or archived
+ */
+export function assertAuditAcceptsComments(
+  status: AuditStatus,
+  details: { auditSessionId: string; organizationId: string }
+) {
+  if (!auditAcceptsComments(status)) {
+    throw new ShelfError({
+      cause: null,
+      message: AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
+      additionalData: { ...details, status },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * Runs a comment write while the audit is held open for it.
+ *
+ * Checking the status and then inserting leaves a gap: a complete or cancel can
+ * commit in between, and the comment lands on a finished audit. Locking the
+ * audit row first closes it in both orders. If the transition commits first, the
+ * lock waits for it and then reads the finished status, so the comment is
+ * refused. If the comment takes the lock first, the transition's own guarded
+ * write waits, and the comment becomes part of the audit before it closes.
+ *
+ * A comment write takes no audit-asset row locks, so locking the session first
+ * here cannot invert the order the scan path uses.
+ *
+ * @param auditSessionId - The audit the comment belongs to
+ * @param organizationId - Its organization
+ * @param write - Creates the comment, through the transaction it is handed
+ * @returns Whatever `write` returns
+ * @throws {ShelfError} 404 when the audit is not in the organization; 400 when
+ *   it no longer accepts comments
+ */
+export async function createWhileAuditAcceptsComments<T>(
+  {
+    auditSessionId,
+    organizationId,
+  }: { auditSessionId: string; organizationId: string },
+  write: (tx: Omit<ExtendedPrismaClient, ITXClientDenyList>) => Promise<T>
+): Promise<T> {
+  return db.$transaction(async (tx) => {
+    await assertAuditAcceptsCommentsOnLockedRow(tx, {
+      auditSessionId,
+      organizationId,
+    });
+
+    return write(tx);
+  });
+}
+
+/**
+ * Takes the audit row and refuses unless it still accepts comments.
+ *
+ * For a caller that already has a transaction of its own; everything else goes
+ * through {@link createWhileAuditAcceptsComments}.
+ *
+ * @param tx - The caller's transaction, which must hold the lock until it ends
+ * @param auditSessionId - The audit the comment belongs to
+ * @param organizationId - Its organization
+ * @throws {ShelfError} 404 when the audit is not in the organization; 400 when
+ *   it no longer accepts comments
+ */
+export async function assertAuditAcceptsCommentsOnLockedRow(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    auditSessionId,
+    organizationId,
+  }: { auditSessionId: string; organizationId: string }
+): Promise<void> {
+  const [session] = await tx.$queryRaw<{ status: AuditStatus }[]>`
+    SELECT status FROM "AuditSession"
+    WHERE id = ${auditSessionId} AND "organizationId" = ${organizationId}
+    FOR UPDATE
+  `;
+
+  if (!session) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { auditSessionId, organizationId },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  assertAuditAcceptsComments(session.status, {
+    auditSessionId,
+    organizationId,
+  });
 }
 
 export const AUDIT_LIST_INCLUDE = {
@@ -150,19 +265,14 @@ export type CreateAuditSessionResult = {
 export type GetAuditSessionResult = {
   session: AuditSession & {
     assignments: (AuditAssignment & {
-      user: {
+      user: UserNameFields & {
         id: string;
-        firstName: string | null;
-        lastName: string | null;
         email: string;
         profilePicture: string | null;
       };
     })[];
-    createdBy: {
+    createdBy: UserNameFields & {
       id: string;
-      firstName: string | null;
-      lastName: string | null;
-      displayName: string | null;
       email: string;
       profilePicture: string | null;
     };
@@ -214,6 +324,8 @@ export type RecordAuditScanResult = {
  * Used when fetching existing scans to restore audit state.
  */
 export type AuditScanData = {
+  /** AuditScan row id — the identity that survives asset deletion */
+  id: string;
   /** The QR code or barcode that was scanned */
   code: string;
   /** The ID of the asset that was scanned */
@@ -234,6 +346,8 @@ export type AuditScanData = {
   auditImagesCount: number;
   /** Asset location name for display */
   assetLocationName: string | null;
+  /** True when the scanned asset has since been deleted. */
+  assetDeleted: boolean;
 };
 
 export async function createAuditSession(
@@ -611,11 +725,19 @@ export async function getAuditSessionDetails({
   organizationId,
   userOrganizations,
   request,
+  refreshExpectedAssetImages,
 }: {
   id: AuditSession["id"];
   organizationId: string;
   userOrganizations?: Pick<UserOrganization, "organizationId">[];
   request?: Request;
+  /**
+   * Re-sign lapsed photo URLs on the expected assets. Pass `true` only from a
+   * caller that renders `expectedAssets`; a caller that reads `session` alone
+   * passes `false` and makes no storage calls. Required so every caller states
+   * which one it is.
+   */
+  refreshExpectedAssetImages: boolean;
 }): Promise<GetAuditSessionResult> {
   try {
     const otherOrganizationIds = userOrganizations?.map(
@@ -664,6 +786,8 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Lets the re-sign below tell a lapsed photo URL.
+                mainImageExpiration: true,
                 // Model cover image for assets with no image of their own
                 ...ASSET_MODEL_IMAGE_SELECT,
                 // Asset-code resolution: surface code data so the audit
@@ -762,9 +886,24 @@ export async function getAuditSessionDetails({
       });
     }
 
-    const expectedAssets: AuditExpectedAsset[] = session.assets
-      .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
-      .map((auditAsset) => {
+    const expectedAuditAssets = session.assets.flatMap((auditAsset) =>
+      auditAsset.expected && auditAsset.asset
+        ? [{ auditAsset, asset: auditAsset.asset }]
+        : []
+    );
+    const expectedAssetRows = expectedAuditAssets.map(({ asset }) => asset);
+    // Only expected rows are rendered, so only they are re-signed. The owning
+    // workspace scopes the write-back, since a sibling-workspace session also
+    // resolves here. The result lines up with `expectedAuditAssets`.
+    const refreshedExpectedAssets = refreshExpectedAssetImages
+      ? await refreshExpiredAssetImages(expectedAssetRows, {
+          organizationId: session.organizationId,
+          ...ASSET_IMAGE_RESIGN_LIMITS,
+        })
+      : expectedAssetRows;
+
+    const expectedAssets: AuditExpectedAsset[] = expectedAuditAssets.map(
+      ({ auditAsset }, index) => {
         // why: prefer the User's display fields when the custodian is a
         // real user; fall back to the TeamMember's name for non-user
         // "external" custodians (contractors etc.). Routes through the
@@ -791,10 +930,11 @@ export async function getAuditSessionDetails({
          * Placeholder stays `null` so the existing client-side "no image"
          * branches keep working — same contract as `serializeAssetImage`.
          */
+        const asset = refreshedExpectedAssets[index];
         const image = resolveAssetImage({
-          mainImage: auditAsset.asset?.mainImage ?? null,
-          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
-          assetModel: auditAsset.asset?.assetModel ?? null,
+          mainImage: asset.mainImage,
+          thumbnailImage: asset.thumbnailImage,
+          assetModel: asset.assetModel,
         });
         const hasImage = image.source !== "placeholder";
 
@@ -812,7 +952,8 @@ export async function getAuditSessionDetails({
           categoryName: auditAsset.asset?.category?.name ?? null,
           custodianName,
         };
-      });
+      }
+    );
 
     return {
       session,
@@ -1448,6 +1589,13 @@ export async function recordAuditScan(
             assetId,
             scannedById: userId,
             scannedAt: new Date(),
+            // Snapshot what was scanned, so this row still means something
+            // once the asset is gone. `scannedAsset` is the org-verified
+            // fetch above, so this is the title as it stood at scan time.
+            // `wasExpected` is not known yet — it is derived from the audit's
+            // own rows below and written with `auditAssetId` in the same
+            // transaction.
+            assetTitle: scannedAsset.title,
           },
         });
 
@@ -1585,7 +1733,15 @@ export async function recordAuditScan(
         // resolvable now: every branch above either found or created the row.
         await tx.auditScan.update({
           where: { id: scan.id },
-          data: { auditAssetId },
+          data: {
+            auditAssetId,
+            // why: recorded here rather than at create because expectedness is
+            // derived from AuditAsset above, never trusted from the request.
+            // Snapshotting it is what lets a deleted asset's row still say
+            // whether it belonged to the audit, once the cascade has taken the
+            // AuditAsset row that would otherwise answer that.
+            wasExpected: isExpected,
+          },
         });
 
         // Update the audit session counts.
@@ -1672,6 +1828,198 @@ export async function recordAuditScan(
       cause,
       message: "Failed to record audit scan",
       additionalData: { auditSessionId, assetId, userId },
+      label,
+    });
+  }
+}
+
+/** Arguments for {@link removeAuditScan}. */
+export interface RemoveAuditScanInput {
+  auditSessionId: string;
+  assetId: string;
+  userId: string;
+  organizationId: string;
+}
+
+/** Result of {@link removeAuditScan}, with the recalculated aggregate counts. */
+export interface RemoveAuditScanResult {
+  /** False when no scan for this asset existed — nothing changed. */
+  removed: boolean;
+  foundAssetCount: number;
+  missingAssetCount: number;
+  unexpectedAssetCount: number;
+}
+
+/**
+ * Removes a recorded scan from a live audit — the undo for a mis-scan.
+ *
+ * An expected asset's row returns to MISSING with its scan fields cleared; an
+ * unexpected asset's row is deleted outright, since only the scan created it.
+ * Aggregate counts are recomputed from the rows inside the same transaction,
+ * so the session's numbers can never drift from its rows, and a system note
+ * records the removal.
+ *
+ * Only a live audit (PENDING or ACTIVE) accepts removal: a COMPLETED or
+ * CANCELLED audit is a finished record whose numbers have been reported, and a
+ * removal would rewrite them after the fact. Callers own authentication and
+ * assignee gating.
+ *
+ * @param input - the scan to remove, org-proven by the session fetch
+ * @returns whether a scan was removed, plus the recalculated counts
+ * @throws {ShelfError} 404 when the session is not in this organization
+ */
+export async function removeAuditScan(
+  input: RemoveAuditScanInput
+): Promise<RemoveAuditScanResult> {
+  const { auditSessionId, assetId, userId, organizationId } = input;
+
+  try {
+    return await db.$transaction(async (tx) => {
+      // Read the session INSIDE the transaction. Reading it outside left a
+      // window where an audit completed between the status check and the
+      // write, so a removal could rewrite the numbers of an audit that had
+      // already been reported.
+      const session = await tx.auditSession.findFirst({
+        where: { id: auditSessionId, organizationId },
+        select: {
+          status: true,
+          foundAssetCount: true,
+          missingAssetCount: true,
+          unexpectedAssetCount: true,
+        },
+      });
+
+      if (!session) {
+        throw new ShelfError({
+          cause: null,
+          message: "Audit session not found",
+          additionalData: { auditSessionId, organizationId },
+          status: 404,
+          label,
+        });
+      }
+
+      if (session.status !== "PENDING" && session.status !== "ACTIVE") {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "This audit is no longer live, so its scans cannot be changed.",
+          additionalData: { auditSessionId, status: session.status },
+          status: 400,
+          label,
+          shouldBeCaptured: false,
+        });
+      }
+
+      const existingScan = await tx.auditScan.findFirst({
+        where: {
+          auditSessionId,
+          assetId,
+          auditSession: { organizationId },
+        },
+        include: {
+          auditAsset: { select: { id: true, expected: true } },
+        },
+      });
+
+      if (!existingScan) {
+        return {
+          removed: false,
+          foundAssetCount: session.foundAssetCount,
+          missingAssetCount: session.missingAssetCount,
+          unexpectedAssetCount: session.unexpectedAssetCount,
+        };
+      }
+
+      if (existingScan.auditAsset?.expected) {
+        // Expected asset: the row predates the scan, so it stays and returns
+        // to MISSING with its scan facts cleared.
+        await Promise.all([
+          tx.auditAsset.update({
+            where: { id: existingScan.auditAsset.id },
+            data: { status: "MISSING", scannedAt: null, scannedById: null },
+          }),
+          tx.auditScan.delete({ where: { id: existingScan.id } }),
+        ]);
+      } else if (existingScan.auditAsset?.id) {
+        // Unexpected asset: only the scan created the row, so both go.
+        await Promise.all([
+          tx.auditAsset.delete({ where: { id: existingScan.auditAsset.id } }),
+          tx.auditScan.delete({ where: { id: existingScan.id } }),
+        ]);
+      } else {
+        await tx.auditScan.delete({ where: { id: existingScan.id } });
+      }
+
+      // Recompute aggregates from the rows rather than incrementing, so the
+      // session's numbers cannot drift from what its rows actually say.
+      const [foundAssetCount, missingAssetCount, unexpectedAssetCount] =
+        await Promise.all([
+          tx.auditAsset.count({
+            where: { auditSessionId, expected: true, status: "FOUND" },
+          }),
+          tx.auditAsset.count({
+            where: { auditSessionId, expected: true, status: "MISSING" },
+          }),
+          tx.auditAsset.count({
+            where: { auditSessionId, expected: false, status: "UNEXPECTED" },
+          }),
+        ]);
+
+      await Promise.all([
+        updateAuditSessionWhileInStatus(tx, {
+          auditSessionId,
+          organizationId,
+          allowedStatuses: [AuditStatus.PENDING, AuditStatus.ACTIVE],
+          data: { foundAssetCount, missingAssetCount, unexpectedAssetCount },
+        }),
+        createAssetScanRemovedNote({
+          auditSessionId,
+          assetId,
+          organizationId,
+          userId,
+          tx,
+        }),
+        // Activity event — AUDIT_ASSET_SCAN_REMOVED, the counterpart to the
+        // AUDIT_ASSET_SCANNED that `recordAuditScan` emits. Without it the
+        // stream shows scans going in and never coming out, so a report
+        // counting scans on a corrected audit overstates it.
+        //
+        // `auditAssetId` is carried even on the unexpected branch, where the
+        // row has just been deleted: it is a plain scalar with no FK, and
+        // keeping it is what lets a reader pair this event with the
+        // AUDIT_ASSET_SCANNED that created that row.
+        recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "AUDIT_ASSET_SCAN_REMOVED",
+            entityType: "AUDIT",
+            entityId: auditSessionId,
+            auditSessionId,
+            auditAssetId: existingScan.auditAsset?.id,
+            assetId,
+            meta: { isExpected: existingScan.auditAsset?.expected ?? false },
+          },
+          tx
+        ),
+      ]);
+
+      return {
+        removed: true,
+        foundAssetCount,
+        missingAssetCount,
+        unexpectedAssetCount,
+      };
+    });
+  } catch (cause) {
+    // ShelfErrors carry their own status and message; rethrow untouched so a
+    // 400/404 reaches the caller as itself rather than as a generic 500.
+    if (cause instanceof ShelfError) throw cause;
+    throw new ShelfError({
+      cause,
+      message: "Failed to remove the scan",
+      additionalData: { auditSessionId, assetId, organizationId },
       label,
     });
   }
@@ -1800,13 +2148,39 @@ export async function getAuditScans({
         scan.auditAsset ??
         (scan.assetId ? auditAssetsByAssetId.get(scan.assetId) : undefined);
 
+      // The asset is gone precisely when `assetId` is null: `AuditScan.asset`
+      // is SetNull, so deletion is the only thing that empties it.
+      const assetDeleted = scan.assetId === null;
+
+      // The live row wins over the snapshot: a rename must show the CURRENT
+      // name. The snapshot's job is to survive deletion, not to freeze naming.
+      // A row written before the snapshot columns existed has neither and
+      // falls back to "", leaving the client the `code`, which also outlives
+      // the asset.
+      const assetTitle = scan.asset?.title ?? scan.assetTitle ?? "";
+
+      // Expectedness falls back to the snapshot ONLY once the asset is gone.
+      // `AuditScan.auditAsset` is SetNull too, so a missing AuditAsset does not
+      // imply deletion — removing an asset from a pending audit leaves the scan
+      // behind with its asset intact, and that row is genuinely no longer part
+      // of the audit. Keying on deletion keeps the snapshot from resurrecting
+      // it as expected.
+      const isExpected = assetDeleted
+        ? scan.wasExpected ?? false
+        : auditAsset?.expected ?? false;
+
       return {
+        id: scan.id,
         code: scan.code ?? "",
         assetId: scan.assetId ?? "",
         type: "asset" as const,
         scannedAt: scan.scannedAt,
-        isExpected: auditAsset?.expected ?? false,
-        assetTitle: scan.asset?.title ?? "",
+        isExpected,
+        assetTitle,
+        // Distinguishes "the asset is gone" from "this scan predates the
+        // snapshot columns", so the client can say which it is instead of
+        // guessing from an empty title.
+        assetDeleted,
         auditAssetId: auditAsset?.id ?? null,
         auditNotesCount: auditAsset?._count?.notes ?? 0,
         auditImagesCount: auditAsset?._count?.images ?? 0,
@@ -1819,6 +2193,64 @@ export async function getAuditScans({
       message: "Failed to fetch audit scans",
       additionalData: { auditSessionId, organizationId },
       label,
+    });
+  }
+}
+
+/**
+ * Writes to an audit session only while it is still in one of `allowedStatuses`.
+ *
+ * A status read earlier in the same transaction does not hold: under READ
+ * COMMITTED a concurrent complete, cancel or archive can commit between that
+ * read and this write. With the status in the write's own predicate, Postgres
+ * re-checks it against the committed row, so a transition that already landed
+ * matches nothing. That is refused here, and because it throws, the caller's
+ * transaction rolls back everything it did before the write — asset rows,
+ * notes and events included.
+ *
+ * Kept as the last session write rather than a lock taken up front: the scan
+ * path locks audit-asset rows before the session row, and locking the session
+ * first here would take the two in the opposite order.
+ *
+ * @param tx - The caller's transaction
+ * @param auditSessionId - The audit being written
+ * @param organizationId - Its organization
+ * @param allowedStatuses - The statuses in which this write is still valid
+ * @param data - The session fields to write
+ * @throws {ShelfError} 409 when the audit has moved out of `allowedStatuses`
+ */
+async function updateAuditSessionWhileInStatus(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    auditSessionId,
+    organizationId,
+    allowedStatuses,
+    data,
+  }: {
+    auditSessionId: string;
+    organizationId: string;
+    allowedStatuses: AuditStatus[];
+    data: Prisma.AuditSessionUpdateManyMutationInput;
+  }
+): Promise<void> {
+  const result = await tx.auditSession.updateMany({
+    where: {
+      id: auditSessionId,
+      organizationId,
+      status: { in: allowedStatuses },
+    },
+    data,
+  });
+
+  if (result.count !== 1) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "This audit changed while your change was being saved. Please refresh and try again.",
+      additionalData: { auditSessionId, organizationId, allowedStatuses },
+      label,
+      status: 409,
+      shouldBeCaptured: false,
     });
   }
 }
@@ -1923,10 +2355,12 @@ export async function completeAuditSession({
           }),
         ]);
 
-      // Update session to completed
-      await tx.auditSession.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: sessionId proven to belong to organizationId by the findUnique guard at the top of this tx (throws 404 otherwise); update() requires a unique-only where so organizationId cannot be added here.
-        where: { id: sessionId },
+      // Update session to completed — only if it is still open, so a cancel or
+      // archive that landed since the check above is not overwritten.
+      await updateAuditSessionWhileInStatus(tx, {
+        auditSessionId: sessionId,
+        organizationId,
+        allowedStatuses: [AuditStatus.PENDING, AuditStatus.ACTIVE],
         data: {
           status: AuditStatus.COMPLETED,
           completedAt: new Date(),
@@ -2524,9 +2958,8 @@ export async function cancelAuditSession({
     await db.auditNote.create({
       data: {
         content: `${wrapUserLinkForNote({
+          ...(actingUser ?? { displayName: null }),
           id: userId,
-          firstName: actingUser?.firstName,
-          lastName: actingUser?.lastName,
         })} cancelled the audit`,
         type: "UPDATE",
         userId,
@@ -2554,12 +2987,7 @@ export async function cancelAuditSession({
       userId: string;
       // Raw format-preference columns travel on each recipient row so the email
       // helper resolves prefs from the loaded row (no per-recipient DB fetch).
-      user: {
-        email: string;
-        firstName: string | null;
-        lastName: string | null;
-        displayName?: string | null;
-      } & RawFormatPrefs;
+      user: UserNameFields & { email: string } & RawFormatPrefs;
     }> = auditSession.assignments
       .filter(
         (assignment) => assignment.userId !== userId && assignment.user.email
@@ -2759,10 +3187,11 @@ export async function addAssetsToAudit({
           })),
         });
 
-        // Update audit session counts
-        await tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
-          where: { id: auditId },
+        // Update audit session counts — only while it is still pending.
+        await updateAuditSessionWhileInStatus(tx, {
+          auditSessionId: auditId,
+          organizationId,
+          allowedStatuses: [AuditStatus.PENDING],
           data: {
             expectedAssetCount: { increment: newAssetIds.length },
             missingAssetCount: { increment: newAssetIds.length },
@@ -2893,7 +3322,10 @@ export async function removeAssetFromAudit({
         });
       }
 
-      // Delete the audit asset (cascade will delete related scans). Scoped
+      // Delete the audit asset. `AuditScan.auditAsset` is SetNull, so any scan
+      // of this asset SURVIVES with its `auditAssetId` emptied — the row stays
+      // in the audit's scan history while ceasing to be part of the audit.
+      // `getAuditScans` relies on that distinction. Scoped
       // again rather than by id alone: defence in depth, so the write cannot
       // outlive a future refactor of the check above.
       const removed = await tx.auditAsset.deleteMany({
@@ -2917,18 +3349,19 @@ export async function removeAssetFromAudit({
         });
       }
 
-      // Update audit session counts
-      // If it was an expected asset, decrement expectedAssetCount
-      if (auditAsset.expected) {
-        await tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { decrement: 1 },
-            missingAssetCount: { decrement: 1 },
-          },
-        });
-      }
+      // Update audit session counts, which move only for an expected asset.
+      // Written unconditionally — a zero delta for an unexpected one — so the
+      // removal is refused whenever the audit is no longer pending.
+      const expectedDelta = auditAsset.expected ? 1 : 0;
+      await updateAuditSessionWhileInStatus(tx, {
+        auditSessionId: auditId,
+        organizationId,
+        allowedStatuses: [AuditStatus.PENDING],
+        data: {
+          expectedAssetCount: { decrement: expectedDelta },
+          missingAssetCount: { decrement: expectedDelta },
+        },
+      });
 
       // Create activity note
       await createAssetRemovedFromAuditNote({
@@ -3060,17 +3493,18 @@ export async function removeAssetsFromAudit({
         });
       }
 
-      // Update audit session counts
-      if (expectedCount > 0) {
-        await tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { decrement: expectedCount },
-            missingAssetCount: { decrement: expectedCount },
-          },
-        });
-      }
+      // Update audit session counts. Written unconditionally — a zero delta
+      // when only unexpected assets were removed — so the removal is refused
+      // whenever the audit is no longer pending.
+      await updateAuditSessionWhileInStatus(tx, {
+        auditSessionId: auditId,
+        organizationId,
+        allowedStatuses: [AuditStatus.PENDING],
+        data: {
+          expectedAssetCount: { decrement: expectedCount },
+          missingAssetCount: { decrement: expectedCount },
+        },
+      });
 
       // Create activity note
       await createAssetsRemovedFromAuditNote({
@@ -3168,9 +3602,8 @@ export async function archiveAuditSession({
       await tx.auditNote.create({
         data: {
           content: `${wrapUserLinkForNote({
+            ...(user ?? { displayName: null }),
             id: userId,
-            firstName: user?.firstName,
-            lastName: user?.lastName,
           })} archived the audit`,
           type: "UPDATE",
           userId,
@@ -3352,7 +3785,7 @@ export async function bulkArchiveAudits({
     // avoid holding a DB connection while reading unrelated data.
     const user = await db.user.findFirst({
       where: { id: userId },
-      select: { firstName: true, lastName: true },
+      select: { ...USER_NAME_SELECT },
     });
 
     await db.$transaction(async (tx) => {
@@ -3390,9 +3823,8 @@ export async function bulkArchiveAudits({
       await tx.auditNote.createMany({
         data: audits.map((a) => ({
           content: `${wrapUserLinkForNote({
+            ...(user ?? { displayName: null }),
             id: userId,
-            firstName: user?.firstName,
-            lastName: user?.lastName,
           })} archived the audit`,
           type: "UPDATE" as const,
           userId,

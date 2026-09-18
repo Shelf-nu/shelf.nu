@@ -28,6 +28,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 import { organizationRolesMap } from "./settings.team";
 
 export const loader = async ({
@@ -73,10 +74,7 @@ export const loader = async ({
 
     const userContact = await getUserContactById(user.id);
 
-    const userName =
-      (user.firstName ? user.firstName.trim() : "") +
-      " " +
-      (user.lastName ? user.lastName.trim() : "");
+    const userName = resolveUserDisplayName(user);
     const header = {
       title: userName,
     };

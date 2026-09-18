@@ -91,14 +91,54 @@ type EvidenceModalProps = {
   auditSessionId: string;
   /** Callback when evidence is added, to update counts */
   onEvidenceAdded: (assetId: string, type: "note" | "image") => void;
+  /**
+   * Undo this scan. Optional so a caller with no undo to offer can leave it
+   * out; the audit scanner always passes it, and reaching that screen is
+   * itself the live-audit gate — its entry point renders only for a PENDING or
+   * ACTIVE audit. An audit completed while the scanner sits open is caught by
+   * the server, which refuses to change a reported record.
+   *
+   * Return a promise to keep the control busy for the round trip.
+   */
+  onRemoveScan?: (item: ScannedItem) => void | Promise<void>;
+  /**
+   * The evidence this scan actually carries, once the sheet has read it.
+   *
+   * A row's counts come from the scan that created it, so they start at zero —
+   * but evidence belongs to the audit's row for the asset and outlives any one
+   * scan, so an asset scanned again after an undo already has some. This is
+   * what corrects the row.
+   */
+  onEvidenceCounts?: (
+    assetId: string,
+    counts: { notes: number; images: number }
+  ) => void;
 };
 
+/**
+ * The bottom sheet a scanned row opens: the condition notes and photos
+ * recorded against that scan, and the controls to add more.
+ *
+ * It is also where a scan is undone. That sits at the foot of the sheet, past
+ * a divider and only once the scan has reached the server — a scan still in
+ * the retry queue has no server row to remove, and removing it locally would
+ * leave a retry free to record it again.
+ *
+ * Evidence belongs to the audit's row for the asset rather than to any one
+ * scan, so it outlives an undo. The sheet reads the real counts and reports
+ * them back through `onEvidenceCounts`, which is what stops a row scanned
+ * again after an undo from claiming it has none.
+ *
+ * @param props - See {@link EvidenceModalProps}.
+ */
 export function EvidenceModal({
   visible,
   onClose,
   item,
   auditSessionId,
   onEvidenceAdded,
+  onRemoveScan,
+  onEvidenceCounts,
 }: EvidenceModalProps) {
   const { currentOrg } = useOrg();
 
@@ -134,21 +174,41 @@ export function EvidenceModal({
     void (async () => {
       // Narrowed to this asset: the sheet shows one row, and the audit-wide
       // response carries every note and photo in the audit.
-      const { data } = await api.auditEvidence(
+      const { data, error } = await api.auditEvidence(
         auditSessionId,
         currentOrg.id,
         controller.signal,
         auditAssetId
       );
       if (controller.signal.aborted) return;
-      setExisting(
-        data?.byAuditAsset?.[auditAssetId] ?? { notes: [], images: [] }
-      );
+      // A failed read knows nothing. Publishing its empty shape would tell the
+      // list this scan has no evidence and overwrite counts that are right —
+      // opening a row offline would erase them. (An abort returns no error and
+      // is already handled above.)
+      if (error) {
+        setExistingLoading(false);
+        return;
+      }
+      const evidence = data?.byAuditAsset?.[auditAssetId] ?? {
+        notes: [],
+        images: [],
+      };
+      setExisting(evidence);
       setExistingLoading(false);
+      if (item) {
+        onEvidenceCounts?.(item.assetId, {
+          notes: evidence.notes.length,
+          images: evidence.images.length,
+        });
+      }
     })();
     return () => controller.abort();
     // `savedCount` re-runs this after a note or photo is added, so what the
     // sheet shows includes what the person just recorded.
+    // `item` and `onEvidenceCounts` are deliberately absent: the effect keys on
+    // the auditAssetId that identifies the row, and listing either would re-run
+    // the fetch on every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, auditAssetId, currentOrg?.id, auditSessionId, savedCount]);
   const { colors } = useTheme();
   const styles = useStyles();
@@ -156,6 +216,13 @@ export function EvidenceModal({
   const [noteText, setNoteText] = useState("");
   const [isSubmittingNote, setIsSubmittingNote] = useState(false);
   const [isSubmittingImage, setIsSubmittingImage] = useState(false);
+  /**
+   * The undo is a network round trip that leaves this sheet on screen until it
+   * answers, and the caller closes the sheet rather than this component — so
+   * without a busy state the control looks untouched for the whole wait, and a
+   * second tap fires a second removal.
+   */
+  const [isRemoving, setIsRemoving] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [imageMimeType, setImageMimeType] = useState("image/jpeg");
 
@@ -306,6 +373,23 @@ export function EvidenceModal({
     noteText,
     onEvidenceAdded,
   ]);
+
+  /**
+   * Run the undo and hold the control busy until it answers.
+   *
+   * The caller owns what happens next — including closing this sheet — so the
+   * busy state is cleared unconditionally: on the success path the sheet is
+   * already gone, and on every other one the control has to come back.
+   */
+  const handleRemoveScanPress = useCallback(async () => {
+    if (!item || !onRemoveScan) return;
+    setIsRemoving(true);
+    try {
+      await onRemoveScan(item);
+    } finally {
+      setIsRemoving(false);
+    }
+  }, [item, onRemoveScan]);
 
   if (!item) return null;
 
@@ -539,6 +623,72 @@ export function EvidenceModal({
                 </View>
               </>
             )}
+
+            {/* A scan that has not reached the server has nothing to remove:
+                the endpoint would answer removed:false while its entry sits in
+                the retry queue, and a later retry would record the scan the
+                person was just told was gone. */}
+            {onRemoveScan && !isPending ? (
+              <View style={styles.removeScanSection}>
+                <TouchableOpacity
+                  style={[
+                    styles.removeScanButton,
+                    isRemoving && styles.removeScanButtonBusy,
+                  ]}
+                  disabled={isRemoving}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    // The confirm lives here rather than in the caller so the
+                    // sheet can name the asset; the caller owns what happens
+                    // after, including closing this sheet.
+                    Alert.alert(
+                      "Remove this scan?",
+                      `"${
+                        item.name?.trim() || "This asset"
+                      }" goes back to how it was before you scanned it. You can scan it again.`,
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Remove",
+                          style: "destructive",
+                          onPress: () => void handleRemoveScanPress(),
+                        },
+                      ]
+                    );
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: isRemoving,
+                    busy: isRemoving,
+                  }}
+                  accessibilityLabel={`Remove the scan of ${
+                    item.name?.trim() || "this asset"
+                  }`}
+                >
+                  {isRemoving ? (
+                    <ActivityIndicator size="small" color={colors.error} />
+                  ) : (
+                    <Ionicons
+                      name="arrow-undo-outline"
+                      size={18}
+                      color={colors.error}
+                    />
+                  )}
+                  <Text style={styles.removeScanText}>
+                    {isRemoving ? "Removing…" : "Remove scan"}
+                  </Text>
+                </TouchableOpacity>
+                {/* Evidence hangs off the audit's row for the asset, not off
+                    the scan, so it survives the undo and is still there if the
+                    asset is scanned again. Worth saying: without it, undoing a
+                    mis-scan looks like it costs you the photos you took. */}
+                {(item.notesCount ?? 0) > 0 || (item.imagesCount ?? 0) > 0 ? (
+                  <Text style={styles.removeScanHint}>
+                    Your notes and photos stay on the audit.
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
@@ -547,6 +697,39 @@ export function EvidenceModal({
 }
 
 const useStyles = createStyles((colors) => ({
+  // Sits under the evidence controls, past a divider: undoing a scan is the
+  // opposite of the sheet's main job, so it must not read as one of its
+  // primary actions.
+  removeScanSection: {
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: spacing.xs,
+  },
+  removeScanButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+  },
+  // Dimmed rather than hidden while the removal is in flight: the row it acts
+  // on is still on screen, so the control has to stay where the eye left it.
+  removeScanButtonBusy: {
+    opacity: 0.6,
+  },
+  removeScanText: {
+    color: colors.error,
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+  },
+  removeScanHint: {
+    color: colors.mutedLight,
+    fontSize: fontSize.xs,
+    textAlign: "center",
+  },
   existingLoading: { marginBottom: spacing.md },
   existingImages: {
     flexDirection: "row",

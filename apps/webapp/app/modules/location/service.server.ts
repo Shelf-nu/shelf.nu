@@ -1117,9 +1117,8 @@ async function createLocationEditNotes({
     select: { firstName: true, lastName: true, displayName: true },
   });
   const userLink = wrapUserLinkForNote({
+    ...(user ?? { displayName: null }),
     id: userId,
-    firstName: user?.firstName,
-    lastName: user?.lastName,
   });
 
   const content = `${userLink} updated the location:\n\n${changes.join("\n")}`;
@@ -1496,6 +1495,10 @@ export async function getLocationKits(
  * @param params.newLocation - The asset's location after the change
  * @param params.firstName - Acting user's first name (for the note link)
  * @param params.lastName - Acting user's last name (for the note link)
+ * @param params.displayName - Acting user's display name, or `null` when they
+ *   have none. Required, not optional: when set it REPLACES first + last as the
+ *   name the note shows, and an omitted one is indistinguishable at runtime
+ *   from a user who simply has none.
  * @param params.assetId - The asset the note is written against
  * @param params.userId - The acting user's ID
  * @param params.isRemoving - Whether the location is being removed
@@ -1507,6 +1510,7 @@ export async function createLocationChangeNote({
   newLocation,
   firstName,
   lastName,
+  displayName,
   assetId,
   userId,
   isRemoving,
@@ -1519,6 +1523,8 @@ export async function createLocationChangeNote({
   newLocation: Pick<Location, "id" | "name"> | null;
   firstName: string;
   lastName: string;
+  /** The user's display name, or `null`. Replaces first + last when set. */
+  displayName: string | null;
   assetId: Asset["id"];
   userId: User["id"];
   isRemoving: boolean;
@@ -1540,6 +1546,7 @@ export async function createLocationChangeNote({
       userId,
       firstName,
       lastName,
+      displayName,
       isRemoving,
       type,
       unitOfMeasure,
@@ -1705,6 +1712,7 @@ async function createBulkLocationChangeNotes({
           newLocation,
           firstName: user.firstName || "",
           lastName: user.lastName || "",
+          displayName: user.displayName,
           assetId: asset.id,
           userId,
           isRemoving,
@@ -1732,11 +1740,7 @@ async function createBulkLocationChangeNotes({
     // interactive chip; inlining per-asset unit counts here is the same
     // limitation as the assets_list popover. Per-asset counts land on the
     // individual asset notes above.
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
     if (addedAssets.length > 0) {
       // Group added assets by their previous location for "Moved from" context
@@ -2620,11 +2624,7 @@ export async function updateLocationKits({
         }));
 
       if (kitsSummary.length > 0) {
-        const userLink = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
         // Build "Moved from" context for kits coming from other locations
         const actuallyNewKits = kitsToAdd.filter((kit) =>
@@ -2799,11 +2799,7 @@ export async function updateLocationKits({
         }));
 
         if (removedKitsSummary.length > 0) {
-          const userLink = wrapUserLinkForNote({
-            id: userId,
-            firstName: user?.firstName,
-            lastName: user?.lastName,
-          });
+          const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
           await createSystemLocationActivityNote({
             locationId,

@@ -117,22 +117,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       });
 
       const actor = wrapUserLinkForNote(user);
-      const custodianDisplay = wrapCustodianForNote({
-        teamMember: {
-          name: teamMember.name,
-          user: teamMember.user
-            ? {
-                id: teamMember.user.id,
-                firstName: teamMember.user.firstName,
-                lastName: teamMember.user.lastName,
-              }
-            : null,
-        },
-      });
+      const custodianDisplay = wrapCustodianForNote({ teamMember });
 
       const isSelfService = role === OrganizationRoles.SELF_SERVICE;
       const baseLine = isSelfService

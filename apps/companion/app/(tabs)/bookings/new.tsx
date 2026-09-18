@@ -32,9 +32,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from "@react-native-community/datetimepicker";
 import { api, type BookingTag, type TeamMember } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -49,13 +46,17 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { TeamMemberPicker } from "@/components/team-member-picker";
+import { DateTimeField } from "@/components/date-time-field";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 /**
  * The default booking window — 09:00-17:00 as `timeZone` reads it, on `day`
  * when one is given and on tomorrow otherwise.
  *
  * Both are real instants. The day and the hours are resolved in `timeZone`, so
- * the window means the same wall clock regardless of where the device is.
+ * the window means the same wall clock regardless of where the device is. The
+ * start never seeds in the past: it is clamped to ten minutes from now, the
+ * earliest start the server accepts.
  *
  * @param timeZone - the acting user's preference zone
  * @param day - a `YYYY-MM-DD` calendar date, as the calendar lens keys its days
@@ -86,7 +87,22 @@ function defaultBookingWindow(
         { year: onDay[0], month: onDay[1], day: onDay[2], hour, minute: 0 },
         timeZone
       );
-    return { from: at(9), to: at(17) };
+    // A booking can only start in the future, so the seed is clamped to ten
+    // minutes from now — the same earliest-start the server holds submissions
+    // to. Without the clamp, opening the form from today's panel after 09:00
+    // (or from a past day left on the back stack) seeds a start the server
+    // rejects on an untouched form.
+    // Ceil to the next whole minute: flooring the seconds could land up to
+    // 59s inside the ten-minute minimum and fail an untouched form.
+    const earliest = new Date(
+      Math.ceil((Date.now() + 10 * 60 * 1000) / 60_000) * 60_000
+    );
+    const from = at(9) < earliest ? earliest : at(9);
+    // Keep the day's 17:00 end when it still leaves a window; once the clamp
+    // passes it, fall back to the same eight-hour span 09:00–17:00 describes.
+    const to =
+      at(17) > from ? at(17) : new Date(from.getTime() + 8 * 60 * 60 * 1000);
+    return { from, to };
   }
   const now = new Date();
   return {
@@ -96,6 +112,14 @@ function defaultBookingWindow(
 }
 
 export default function CreateBookingScreen() {
+  return (
+    <ErrorBoundary screenName="Create booking">
+      <CreateBookingContent />
+    </ErrorBoundary>
+  );
+}
+
+function CreateBookingContent() {
   const router = useRouter();
   /**
    * The calendar lens opens this screen from a day panel, so the booking
@@ -182,32 +206,24 @@ export default function CreateBookingScreen() {
   }, [navigation, hasUnsavedChanges]);
 
   // ── Date pickers ────────────────────────────────
-  const onFromChange = useCallback(
-    (event: DateTimePickerEvent, selected: Date | undefined) => {
-      if (Platform.OS === "android") setShowFromPicker(false);
-      if (event.type === "dismissed") return;
-      if (selected) {
-        datesTouchedRef.current = true;
-        setFrom(selected);
-        setTo((prev) => keepEndAfterStart(prev, selected, prefs.timeZone));
-        if (Platform.OS === "ios") setShowFromPicker(false);
-      }
+  const closeFromPicker = useCallback(() => setShowFromPicker(false), []);
+  const closeToPicker = useCallback(() => setShowToPicker(false), []);
+
+  const onFromConfirm = useCallback(
+    (selected: Date) => {
+      setShowFromPicker(false);
+      datesTouchedRef.current = true;
+      setFrom(selected);
+      setTo((prev) => keepEndAfterStart(prev, selected, prefs.timeZone));
     },
     [prefs.timeZone]
   );
 
-  const onToChange = useCallback(
-    (event: DateTimePickerEvent, selected: Date | undefined) => {
-      if (Platform.OS === "android") setShowToPicker(false);
-      if (event.type === "dismissed") return;
-      if (selected) {
-        datesTouchedRef.current = true;
-        setTo(selected);
-        if (Platform.OS === "ios") setShowToPicker(false);
-      }
-    },
-    []
-  );
+  const onToConfirm = useCallback((selected: Date) => {
+    setShowToPicker(false);
+    datesTouchedRef.current = true;
+    setTo(selected);
+  }, []);
 
   // The preference zone arrives with the user profile, so on a cold start this
   // screen can mount while `/me` is still in flight — at which point
@@ -405,18 +421,14 @@ export default function CreateBookingScreen() {
             />
           </TouchableOpacity>
           {showFromPicker && (
-            <View
-              style={Platform.OS === "ios" ? styles.dateInlineWrap : undefined}
-            >
-              <DateTimePicker
-                value={from ?? new Date()}
-                mode="datetime"
-                display={Platform.OS === "ios" ? "inline" : "default"}
-                timeZoneName={prefs.timeZone}
-                onChange={onFromChange}
-                accentColor={colors.primary}
-              />
-            </View>
+            <DateTimeField
+              value={from ?? new Date()}
+              timeZoneName={prefs.timeZone}
+              onConfirm={onFromConfirm}
+              onCancel={closeFromPicker}
+              inlineStyle={styles.dateInlineWrap}
+              accentColor={colors.primary}
+            />
           )}
         </View>
 
@@ -447,19 +459,15 @@ export default function CreateBookingScreen() {
             />
           </TouchableOpacity>
           {showToPicker && (
-            <View
-              style={Platform.OS === "ios" ? styles.dateInlineWrap : undefined}
-            >
-              <DateTimePicker
-                value={to ?? from ?? new Date()}
-                mode="datetime"
-                display={Platform.OS === "ios" ? "inline" : "default"}
-                timeZoneName={prefs.timeZone}
-                minimumDate={from ?? undefined}
-                onChange={onToChange}
-                accentColor={colors.primary}
-              />
-            </View>
+            <DateTimeField
+              value={to ?? from ?? new Date()}
+              timeZoneName={prefs.timeZone}
+              minimumDate={from ?? undefined}
+              onConfirm={onToConfirm}
+              onCancel={closeToPicker}
+              inlineStyle={styles.dateInlineWrap}
+              accentColor={colors.primary}
+            />
           )}
         </View>
 

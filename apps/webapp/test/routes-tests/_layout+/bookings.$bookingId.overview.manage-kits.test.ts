@@ -39,7 +39,7 @@ vi.mock("~/modules/booking/service.server", () => ({
   createKitBookingNote: vi.fn(),
   // Loader-only — used by the Models-tab loader tests below.
   getBooking: vi.fn(),
-  getKitIdsByAssets: vi.fn(),
+  getKitIdsByBookingSlices: vi.fn(),
 }));
 
 // Loader-only — `getPaginatedAndFilterableKits` backs the Kits tab list.
@@ -119,6 +119,7 @@ describe("manage-kits route validation", () => {
     id: "user123",
     firstName: "John",
     lastName: "Doe",
+    displayName: null,
     email: "john@example.com",
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -454,6 +455,7 @@ describe("manage-kits route validation", () => {
             id: "user123",
             firstName: "John",
             lastName: "Doe",
+            displayName: null,
             profilePicture: null,
           },
         },
@@ -642,6 +644,7 @@ describe("manage-kits route validation", () => {
             id: "user123",
             firstName: "John",
             lastName: "Doe",
+            displayName: null,
             profilePicture: null,
           },
         },
@@ -920,7 +923,9 @@ describe("manage-kits loader — Models tab payload", () => {
     });
 
     vi.mocked(bookingService.getBooking).mockResolvedValue(mockLoaderBooking);
-    vi.mocked(bookingService.getKitIdsByAssets).mockReturnValue([]);
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
     vi.mocked(kitService.getPaginatedAndFilterableKits).mockResolvedValue(
       mockPaginatedKits as any
     );
@@ -1062,6 +1067,7 @@ describe("manage-kits loader — Models tab payload", () => {
                 email: "colleague@example.com",
                 firstName: "Colleague",
                 lastName: "Name",
+                displayName: null,
               },
             },
           },
@@ -1092,5 +1098,213 @@ describe("manage-kits loader — Models tab payload", () => {
     // tests it for presence (`hasCustody`), so dropping it would change which
     // kits read as available.
     expect(result.items[0].custody).toBeTruthy();
+  });
+
+  describe("overlap predicate for the picker's booking rows", () => {
+    /** One clause of the overlap `OR`, as the loader builds it. */
+    type OverlapClause = {
+      from: { lte?: Date; gte?: Date };
+      to: { lte?: Date; gte?: Date };
+    };
+
+    /** The path from the kit include down to that `OR`. */
+    type IncludeWithOverlap = {
+      assetKits: {
+        select: {
+          asset: {
+            select: {
+              bookingAssets: { where: { booking: { OR: OverlapClause[] } } };
+            };
+          };
+        };
+      };
+    };
+
+    /**
+     * Evaluates the loader's Prisma `OR` against a candidate booking.
+     *
+     * The predicate decides which existing bookings are shown against a kit,
+     * and therefore whether the kit reads as available. Asserting its literal
+     * shape would pass for any pair of endpoints, including a pair no booking
+     * can satisfy — so this interprets the operators instead, and the tests
+     * below state which candidates must match.
+     */
+    function matchesOverlapClause(
+      or: OverlapClause[],
+      candidate: { from: Date; to: Date }
+    ): boolean {
+      const satisfies = (
+        value: Date,
+        bound: { lte?: Date; gte?: Date }
+      ): boolean =>
+        (bound.lte === undefined || value.getTime() <= bound.lte.getTime()) &&
+        (bound.gte === undefined || value.getTime() >= bound.gte.getTime());
+
+      return or.some(
+        (clause) =>
+          satisfies(candidate.from, clause.from) &&
+          satisfies(candidate.to, clause.to)
+      );
+    }
+
+    /** Runs the loader and digs out the `OR` it handed the kit query. */
+    async function readOverlapClause(): Promise<OverlapClause[]> {
+      // why: the loader awaits the Models tab payload before it queries kits;
+      // this is the minimal payload that lets it get there.
+      vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+        showModelsTab: false,
+        assetModels: [],
+        initialAssetModels: [],
+        totalAssetModels: 0,
+        matchedAssetModels: 0,
+        modelRequests: [],
+      });
+
+      await loader(
+        createLoaderArgs({ context: mockContext, params: mockParams })
+      );
+
+      const args = vi.mocked(kitService.getPaginatedAndFilterableKits).mock
+        .calls[0]?.[0];
+      if (!args?.extraInclude) {
+        throw new Error("Expected the loader to query kits with an include");
+      }
+
+      // `extraInclude` is typed as the generic `Prisma.KitInclude`, whose
+      // relations are `boolean | args` unions; this names the one shape the
+      // loader builds.
+      const include = args.extraInclude as unknown as IncludeWithOverlap;
+      return include.assetKits.select.asset.select.bookingAssets.where.booking
+        .OR;
+    }
+
+    // The booking being filled runs Jan 1 → Jan 2 (`mockLoaderBooking`).
+    it.each([
+      {
+        label: "starts before and ends inside",
+        candidate: {
+          from: new Date("2025-12-30"),
+          to: new Date("2026-01-01T12:00:00Z"),
+        },
+      },
+      {
+        label: "starts inside and ends after",
+        candidate: {
+          from: new Date("2026-01-01T12:00:00Z"),
+          to: new Date("2026-01-05"),
+        },
+      },
+      {
+        label: "sits entirely inside",
+        candidate: {
+          from: new Date("2026-01-01T06:00:00Z"),
+          to: new Date("2026-01-01T18:00:00Z"),
+        },
+      },
+      {
+        label: "spans the whole period",
+        candidate: { from: new Date("2025-12-01"), to: new Date("2026-02-01") },
+      },
+    ])("matches a booking that $label", async ({ candidate }) => {
+      expect(matchesOverlapClause(await readOverlapClause(), candidate)).toBe(
+        true
+      );
+    });
+
+    it.each([
+      {
+        label: "ends before this one starts",
+        candidate: { from: new Date("2025-12-01"), to: new Date("2025-12-15") },
+      },
+      {
+        label: "starts after this one ends",
+        candidate: { from: new Date("2026-02-01"), to: new Date("2026-02-15") },
+      },
+    ])("ignores a booking that $label", async ({ candidate }) => {
+      expect(matchesOverlapClause(await readOverlapClause(), candidate)).toBe(
+        false
+      );
+    });
+
+    it("has no clause that only a zero-length booking could satisfy", async () => {
+      // A clause bounding `from` from below and `to` from above by the same
+      // instant is satisfiable only where from === to, which no real booking
+      // is — so it silently contributes nothing to the OR.
+      for (const clause of await readOverlapClause()) {
+        const impossible =
+          clause.from.gte !== undefined &&
+          clause.to.lte !== undefined &&
+          clause.from.gte.getTime() >= clause.to.lte.getTime();
+
+        expect(impossible).toBe(false);
+      }
+    });
+  });
+
+  describe("kit query selects assetKits.id and keeps bookingAssets as an include", () => {
+    /** The path from the kit include down to the `assetKits` relation. */
+    type AssetKitsInclude = {
+      select: {
+        id?: boolean;
+        asset: {
+          select: {
+            bookingAssets: Record<string, unknown>;
+          };
+        };
+      };
+    };
+
+    /** Runs the loader and digs out the kit query's `assetKits` clause. */
+    async function readAssetKitsInclude(): Promise<AssetKitsInclude> {
+      // why: the loader awaits the Models tab payload before it queries kits;
+      // this is the minimal payload that lets it get there.
+      vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+        showModelsTab: false,
+        assetModels: [],
+        initialAssetModels: [],
+        totalAssetModels: 0,
+        matchedAssetModels: 0,
+        modelRequests: [],
+      });
+
+      await loader(
+        createLoaderArgs({ context: mockContext, params: mockParams })
+      );
+
+      const args = vi.mocked(kitService.getPaginatedAndFilterableKits).mock
+        .calls[0]?.[0];
+      if (!args?.extraInclude) {
+        throw new Error("Expected the loader to query kits with an include");
+      }
+
+      // `extraInclude` is typed as the generic `Prisma.KitInclude`, whose
+      // relations are `boolean | args` unions; this names the one shape the
+      // loader builds.
+      const include = args.extraInclude as unknown as {
+        assetKits: AssetKitsInclude;
+      };
+      return include.assetKits;
+    }
+
+    it("selects the membership's own id, not just its asset", async () => {
+      const assetKits = await readAssetKitsInclude();
+
+      // `BookingAsset.assetKitId` points at THIS id, not at `Kit.id` —
+      // without it a kit-driven slice can't be matched back to the
+      // membership that produced it, and `getKitAvailabilityStatus` can't
+      // scope a conflict check to one kit's own slices.
+      expect(assetKits.select.id).toBe(true);
+    });
+
+    it("keeps the nested bookingAssets as an `include`, not narrowed to a `select`", async () => {
+      const assetKits = await readAssetKitsInclude();
+      const bookingAssetsClause = assetKits.select.asset.select.bookingAssets;
+
+      // An `include` carries every BookingAsset scalar (assetKitId,
+      // checkedOutAt, checkedInAt) implicitly; narrowing it to a `select`
+      // would silently drop whichever of those a future edit forgets to list.
+      expect(bookingAssetsClause).toHaveProperty("include");
+      expect(bookingAssetsClause).not.toHaveProperty("select");
+    });
   });
 });

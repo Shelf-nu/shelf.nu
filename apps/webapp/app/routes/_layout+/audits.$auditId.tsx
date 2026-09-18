@@ -269,6 +269,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const { organizationId, userOrganizations } = permissionResult;
 
     const { session } = await getAuditSessionDetails({
+      // Reads `session` only, so no photo is signed here.
+      refreshExpectedAssetImages: false,
       id: auditId,
       organizationId,
       userOrganizations,
@@ -426,11 +428,7 @@ export default function AuditDetailsPage() {
             !isCancelled &&
             !isArchived &&
             canScanAndComplete && (
-              <CompleteAuditDialog
-                disabled={!hasScans}
-                auditName={session.name}
-                stats={stats}
-              />
+              <CompleteAuditDialog auditName={session.name} stats={stats} />
             )}
         </div>
       </Header>

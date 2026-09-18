@@ -3,6 +3,7 @@ import type {
   BookingsResponse,
   BookingDetailResponse,
   BookingActionResponse,
+  FulfilAndCheckoutResponse,
   CheckinDisposition,
   CheckoutDisposition,
   PartialCheckinResponse,
@@ -95,11 +96,13 @@ export const bookingsApi = {
     ),
 
   /**
-   * Fulfil outstanding book-by-model reservations by scanning concrete units,
-   * then check the booking out (RESERVED -> ONGOING) in one atomic step.
+   * Fulfil outstanding book-by-model reservations by scanning concrete units.
+   * The server assigns the scanned units and checks out either the whole
+   * booking or, under the workspace's explicit check-out requirement, only the
+   * scanned units (`remainingCount` says how many booked assets are left).
    * Mirrors the web `fulfil-and-checkout` scanner: each scanned asset is
    * matched against an outstanding `BookingModelRequest` (materialising it);
-   * the server rejects the submit if any reservation is still unassigned.
+   * the server refuses the check-out if any reservation is still unassigned.
    */
   fulfilAndCheckoutBooking: (
     orgId: string,
@@ -108,7 +111,7 @@ export const bookingsApi = {
     kitIds: string[] = [],
     timeZone?: string
   ) =>
-    apiFetch<BookingActionResponse>(
+    apiFetch<FulfilAndCheckoutResponse>(
       `/api/mobile/bookings/fulfil-and-checkout?orgId=${orgId}`,
       {
         method: "POST",
@@ -139,6 +142,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify({ bookingId, assetIds, checkins, timeZone }),
+        // why: non-idempotent — per-unit dispositions carry no request key, so
+        // a timed-out-but-landed request re-sent would return the units twice.
+        retry: false,
       }
     ),
 
@@ -160,6 +166,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify({ bookingId, assetIds, checkouts, timeZone }),
+        // why: non-idempotent — per-unit quantities carry no request key, so a
+        // timed-out-but-landed request re-sent would check the units out twice.
+        retry: false,
       }
     ),
 
@@ -193,18 +202,35 @@ export const bookingsApi = {
       }
     ),
 
-  /** Remove assets and/or kits from a booking (kits expand server-side). */
+  /**
+   * Remove assets and/or kits from a booking (kits expand server-side).
+   *
+   * `standaloneAssetIds` is the subset of `assetIds` the user ticked as rows of
+   * their own. The server scopes those deletes to each asset's kit-less booking
+   * row instead of inferring the intent from kit membership, which cannot see
+   * an asset that holds both a loose row and kit-driven ones. Omitting it
+   * leaves the server on that inference.
+   */
   removeAssets: (
     orgId: string,
     bookingId: string,
     assetIds: string[],
-    kitIds: string[] = []
+    kitIds: string[] = [],
+    standaloneAssetIds?: string[]
   ) =>
     apiFetch<RemoveBookingAssetsResponse>(
       `/api/mobile/bookings/remove-assets?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, kitIds }),
+        // `JSON.stringify` omits an `undefined` value, so a caller with no
+        // way to tell a standalone row from a kit member leaves the key off
+        // and the server infers the intent from kit membership instead.
+        body: JSON.stringify({
+          bookingId,
+          assetIds,
+          kitIds,
+          standaloneAssetIds,
+        }),
       }
     ),
 

@@ -67,9 +67,8 @@ export async function createAssetReminder({
         userId: createdById,
         type: "UPDATE",
         content: `${wrapUserLinkForNote({
+          ...user,
           id: createdById,
-          firstName: user.firstName,
-          lastName: user.lastName,
         })} created a new reminder ${wrapLinkForNote(
           `/assets/${assetId}/reminders?${new URLSearchParams({
             s: assetReminder.name,
@@ -210,7 +209,9 @@ export async function getPaginatedAndFilterableReminders({
       db.assetReminder.count({ where: finalWhere }),
     ]);
 
-    const totalPages = Math.ceil(totalReminders / perPageParam);
+    // Divide by the page size the query used. The raw `per_page` param is 0
+    // whenever the URL carries none.
+    const totalPages = Math.ceil(totalReminders / take);
 
     return {
       reminders,

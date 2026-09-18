@@ -34,6 +34,7 @@ import { recordEvent } from "~/modules/activity-event/service.server";
 // `createConsumptionLog` in the booking suite. See the leaf's header doc.
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import { assertStockNotBelowManualPlacements } from "~/modules/asset/placement-reconcile.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { lockAssetForQuantityUpdate } from "./quantity-lock.server";
@@ -183,8 +184,7 @@ export async function getConsumptionLogs({
         include: {
           performedBy: {
             select: {
-              firstName: true,
-              lastName: true,
+              ...USER_NAME_SELECT,
               profilePicture: true,
             },
           },

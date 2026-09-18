@@ -61,6 +61,7 @@ import {
   createCategoriesIfNotExists,
   getCategory,
 } from "~/modules/category/service.server";
+import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import {
   createCustomFieldsIfNotExists,
@@ -197,12 +198,18 @@ import { createConsumptionLog } from "../consumption-log/service.server";
 import { createKitsIfNotExists } from "../kit/service.server";
 import { createSystemLocationNote } from "../location-note/service.server";
 import {
+  buildAssetModelChangeNote,
+  resolveUserLink,
+} from "../note/helpers.server";
+import {
   createAssetCategoryChangeNote,
+  createAssetModelChangeNote,
   createAssetDescriptionChangeNote,
   createAssetNameChangeNote,
   createAssetQuantityChangeNote,
   createAssetValuationChangeNote,
   createNote,
+  createNotes,
   createTagChangeNoteIfNeeded,
   type TagSummary,
 } from "../note/service.server";
@@ -214,6 +221,8 @@ const ASSET_BEFORE_UPDATE_SELECT = Prisma.validator<Prisma.AssetSelect>()({
   title: true,
   description: true,
   preferredBarcodeId: true,
+  // The model the asset is leaving, so a change note can name both sides.
+  assetModel: { select: { id: true, name: true } },
   category: {
     select: {
       id: true,
@@ -2041,7 +2050,8 @@ export async function updateAsset({
         typeof minQuantity !== "undefined" ||
         typeof consumptionType !== "undefined" ||
         typeof unitOfMeasure !== "undefined" ||
-        typeof preferredBarcodeId !== "undefined"
+        typeof preferredBarcodeId !== "undefined" ||
+        typeof assetModelId !== "undefined"
     );
 
     const assetBeforeUpdate = await fetchAssetBeforeUpdate({
@@ -2117,7 +2127,10 @@ export async function updateAsset({
       // / r3350881506). Runs before the type-check below so a
       // cross-org id is rejected with the "not in your workspace"
       // 404 instead of leaking a "not allowed for qty-tracked" 400.
-      await assertAssetModelBelongsToOrg({ assetModelId, organizationId });
+      await assertAssetModelBelongsToOrg({
+        assetModelId,
+        organizationId,
+      });
 
       // AssetModel is INDIVIDUAL-only (see the matching guard in
       // createAsset). Block the connect for a QUANTITY_TRACKED asset
@@ -2544,6 +2557,10 @@ export async function updateAsset({
           tags: true,
           category: true,
           organization: true,
+          // Carried so the model change note can compare the row before
+          // against the row after. Deriving the "after" from the request
+          // payload instead would read an absent field as a removal.
+          assetModel: { select: { id: true, name: true } },
         },
       });
 
@@ -2624,6 +2641,7 @@ export async function updateAsset({
               tags: true,
               category: true,
               organization: true,
+              assetModel: { select: { id: true, name: true } },
             },
           })
         : updated;
@@ -2772,6 +2790,7 @@ export async function updateAsset({
         newLocation,
         firstName: user.firstName || "",
         lastName: user.lastName || "",
+        displayName: user.displayName,
         assetId: asset.id,
         userId,
         organizationId,
@@ -2802,11 +2821,7 @@ export async function updateAsset({
       });
 
       // Create location activity notes
-      const userLink = wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
+      const userLink = wrapUserLinkForNote({ ...user, id: userId });
       // Single-asset location-timeline note. `wrapAssetWithCountForNote`
       // prefixes the qty-tracked unit count ("50 units of {asset}");
       // INDIVIDUAL renders the bare link, so phrasing is unchanged.
@@ -2878,6 +2893,14 @@ export async function updateAsset({
           userId,
           previousDescription: assetBeforeUpdate.description,
           newDescription: description,
+          loadUserForNotes,
+        }),
+        createAssetModelChangeNote({
+          assetId: asset.id,
+          organizationId,
+          userId,
+          previousModel: assetBeforeUpdate.assetModel,
+          newModel: asset.assetModel,
           loadUserForNotes,
         }),
         createAssetCategoryChangeNote({
@@ -2970,6 +2993,23 @@ export async function updateAsset({
           field: "categoryId",
           fromValue: assetBeforeUpdate.category?.id ?? null,
           toValue: asset.category?.id ?? null,
+        });
+      }
+      if (
+        typeof assetModelId !== "undefined" &&
+        (assetBeforeUpdate.assetModel?.id ?? null) !==
+          (asset.assetModelId ?? null)
+      ) {
+        fieldChangeEvents.push({
+          organizationId,
+          actorUserId: userId,
+          action: "ASSET_MODEL_CHANGED",
+          entityType: "ASSET",
+          entityId: asset.id,
+          assetId: asset.id,
+          field: "assetModelId",
+          fromValue: assetBeforeUpdate.assetModel?.id ?? null,
+          toValue: asset.assetModelId ?? null,
         });
       }
       if (
@@ -3104,6 +3144,7 @@ export async function updateAsset({
               newValue: change.newValue,
               firstName: user?.firstName || "",
               lastName: user?.lastName || "",
+              displayName: user?.displayName,
               assetId: asset.id,
               userId,
               organizationId,
@@ -3665,11 +3706,7 @@ export async function replaceAssetPlacements({
         const fromCount = formatUnitCount(asset, existing.quantity);
         const toCount = formatUnitCount(asset, p.quantity);
         if (!fromCount || !toCount) return [];
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName,
-          lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         const locationLink = wrapLinkForNote(
           `/locations/${locationMeta.id}`,
           locationMeta.name.trim()
@@ -3694,6 +3731,7 @@ export async function replaceAssetPlacements({
             newLocation: location,
             firstName,
             lastName,
+            displayName: user?.displayName ?? null,
             assetId,
             userId,
             isRemoving: false,
@@ -3709,6 +3747,7 @@ export async function replaceAssetPlacements({
             newLocation: null,
             firstName,
             lastName,
+            displayName: user?.displayName ?? null,
             assetId,
             userId,
             isRemoving: true,
@@ -4431,6 +4470,7 @@ export async function createCustomFieldChangeNote({
   newValue,
   firstName,
   lastName,
+  displayName,
   assetId,
   userId,
   organizationId,
@@ -4441,6 +4481,12 @@ export async function createCustomFieldChangeNote({
   newValue?: string | null;
   firstName: string;
   lastName: string;
+  /**
+   * Acting user's `User.displayName`. It wins over first+last in the note's
+   * user link, so a caller holding the full user row must pass it or the note
+   * names the person differently from every other surface.
+   */
+  displayName?: string | null;
   assetId: Asset["id"];
   userId: User["id"];
   organizationId: Organization["id"];
@@ -4454,6 +4500,7 @@ export async function createCustomFieldChangeNote({
       userId,
       firstName,
       lastName,
+      displayName,
       isFirstTimeSet,
     });
 
@@ -4856,6 +4903,7 @@ export async function createAssetsFromContentImport({
           },
           label: "Assets",
           shouldBeCaptured: false,
+          status: 400,
         });
       }
 
@@ -4875,6 +4923,7 @@ export async function createAssetsFromContentImport({
           },
           label: "Assets",
           shouldBeCaptured: false,
+          status: 400,
         });
       }
 
@@ -4896,6 +4945,7 @@ export async function createAssetsFromContentImport({
           },
           label: "Assets",
           shouldBeCaptured: false,
+          status: 400,
         });
       }
 
@@ -5001,6 +5051,7 @@ export async function createAssetsFromContentImport({
           ...(isShelfError && cause.additionalData),
         },
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 
@@ -5519,29 +5570,105 @@ export function isStorageObjectNotFound(error: unknown): boolean {
 }
 
 /**
- * Refreshes expired signed URLs for asset images server-side.
- * Prevents N+1 client-side calls to /api/asset/refresh-main-image.
+ * Bounds for one {@link refreshExpiredAssetImages} call on a read path.
  *
- * Only refreshes existing thumbnail URLs — does not generate missing
- * thumbnails, as that requires downloading + re-uploading images
- * which is too expensive for a batch operation.
+ * Signing runs on the request path, one storage call per image, and
+ * `createSignedUrl` retries with backoff when storage is slow or rate-limited.
+ * A list without pagination (a booking, a kit, an audit) can hold hundreds of
+ * lapsed photos, so an unbounded pass could outlast a client's request timeout.
+ * With these bounds a call re-signs at most `maxRefreshes` rows and starts no
+ * new batch once `timeBudgetMs` has passed, so the worst case is one batch past
+ * the budget. Rows it does not reach keep their stored URL for that response;
+ * the rows it re-signs are written back, so each later load repairs the next
+ * slice.
+ */
+export const ASSET_IMAGE_RESIGN_LIMITS = {
+  maxRefreshes: 100,
+  timeBudgetMs: 2_500,
+} as const;
+
+/** The image columns a row needs for its lapsed photo to be re-signed. */
+type ResignableAssetImageRow = {
+  id: string;
+  mainImage: string | null;
+  mainImageExpiration: Date | null;
+  thumbnailImage?: string | null;
+};
+
+/** Optional bounds for one re-sign pass; see {@link ASSET_IMAGE_RESIGN_LIMITS}. */
+type AssetImageResignBounds = {
+  /** Re-sign at most this many lapsed rows, taken in input order. */
+  maxRefreshes?: number;
+  /** Start no new batch once this many milliseconds have passed. */
+  timeBudgetMs?: number;
+};
+
+/**
+ * Re-signs lapsed asset photo URLs server-side.
+ *
+ * `Asset.mainImage` and `Asset.thumbnailImage` are signed storage URLs that stop
+ * loading once `mainImageExpiration` passes. The web can repair one from the
+ * browser, but the companion app draws the URL it receives and has no repair
+ * flow, so every read path that sends asset photos to it re-signs them here
+ * first. On web lists it also saves N+1 calls to /api/asset/refresh-main-image.
+ *
+ * Only existing thumbnail URLs are re-signed. A missing thumbnail is not
+ * generated, which would mean downloading and re-uploading the image.
+ *
+ * Each re-signed URL is written back to its asset in a deferred `updateMany`,
+ * guarded on the URL that was read. That write also bumps `Asset.updatedAt`, so
+ * opening a large booking, kit or audit refreshes "updated at" on every asset it
+ * re-signs.
+ *
+ * The write-back is scoped to a workspace: a row that carries `organizationId`
+ * uses its own, and rows selected without it take `options.organizationId`,
+ * which the overloads require in that case.
+ *
+ * @param assets - Rows carrying the image columns.
+ * @param options - The owning workspace for rows without one, and the bounds
+ *   from {@link ASSET_IMAGE_RESIGN_LIMITS}. Unbounded when omitted.
+ * @returns The rows in input order, index for index, with re-signed URLs merged
+ *   in. A row that was not re-signed is returned as it came in.
  */
 export async function refreshExpiredAssetImages<
-  T extends {
-    id: string;
-    organizationId: string;
-    mainImage: string | null;
-    mainImageExpiration: Date | null;
-    thumbnailImage?: string | null;
-  },
->(assets: T[]): Promise<T[]> {
+  T extends ResignableAssetImageRow & { organizationId: string },
+>(
+  assets: T[],
+  options?: AssetImageResignBounds & { organizationId?: string }
+): Promise<T[]>;
+export async function refreshExpiredAssetImages<
+  T extends ResignableAssetImageRow,
+>(
+  assets: T[],
+  options: AssetImageResignBounds & { organizationId: string }
+): Promise<T[]>;
+export async function refreshExpiredAssetImages(
+  assets: Array<ResignableAssetImageRow & { organizationId?: string }>,
+  options: AssetImageResignBounds & { organizationId?: string } = {}
+): Promise<Array<ResignableAssetImageRow & { organizationId?: string }>> {
   const now = new Date();
-  const expiredAssets = assets.filter(
-    (a) =>
-      a.mainImage &&
-      a.mainImageExpiration &&
-      new Date(a.mainImageExpiration) < now
-  );
+  // A repeated id is the same asset: it is signed once, and that result applies
+  // to every row carrying the id.
+  const seenIds = new Set<string>();
+  const expiredAssets = assets
+    .filter(
+      (a) =>
+        a.mainImage &&
+        a.mainImageExpiration &&
+        new Date(a.mainImageExpiration) < now
+    )
+    .filter((a) => {
+      if (seenIds.has(a.id)) return false;
+      seenIds.add(a.id);
+      return true;
+    })
+    .slice(0, options.maxRefreshes)
+    .flatMap((a) => {
+      const ownerOrganizationId = a.organizationId ?? options.organizationId;
+      // The overloads guarantee a workspace; a row without one is never signed,
+      // so a write-back can never run unscoped.
+      return ownerOrganizationId ? [{ ...a, ownerOrganizationId }] : [];
+    });
 
   if (expiredAssets.length === 0) return assets;
 
@@ -5577,7 +5704,7 @@ export async function refreshExpiredAssetImages<
       args: {
         where: {
           id: asset.id,
-          organizationId: asset.organizationId,
+          organizationId: asset.ownerOrganizationId,
           mainImage: asset.mainImage,
         },
         data: { mainImageExpiration: backoffExpiration },
@@ -5651,7 +5778,7 @@ export async function refreshExpiredAssetImages<
         args: {
           where: {
             id: asset.id,
-            organizationId: asset.organizationId,
+            organizationId: asset.ownerOrganizationId,
             mainImage: asset.mainImage,
             ...(updateData.thumbnailImage !== undefined
               ? { thumbnailImage: asset.thumbnailImage }
@@ -5713,7 +5840,17 @@ export async function refreshExpiredAssetImages<
     thumbnailImage?: string;
   } | null>[] = [];
 
+  const startedAt = Date.now();
   for (let i = 0; i < expiredAssets.length; i += BATCH_SIZE) {
+    // Start no new batch once the time budget is spent. Rows not reached keep
+    // their stored URL and get no backoff, so the next load picks them up.
+    if (
+      i > 0 &&
+      options.timeBudgetMs !== undefined &&
+      Date.now() - startedAt >= options.timeBudgetMs
+    ) {
+      break;
+    }
     const batch = expiredAssets.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.allSettled(
       batch.map((asset) => refreshAsset(asset))
@@ -6115,6 +6252,7 @@ export async function bulkCheckOutAssets({
           "All selected assets are quantity-tracked. Quantity-tracked assets must be assigned custody individually with a specific quantity.",
         label: "Assets",
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 
@@ -6129,6 +6267,7 @@ export async function bulkCheckOutAssets({
           "There are some unavailable assets. Please make sure you are selecting only available assets.",
         label: "Assets",
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 
@@ -6158,10 +6297,19 @@ export async function bulkCheckOutAssets({
 
       /** Clean up any stale custody records that may exist despite AVAILABLE status.
        * This prevents P2002 unique constraint violations when a previous
-       * release/checkin updated status but failed to delete the custody row. */
+       * release/checkin updated status but failed to delete the custody row.
+       *
+       * `kitCustodyId: null` — only operator-assigned rows are stale here. The
+       * `assetsNotAvailable` pre-check rejects an IN_CUSTODY asset, so a
+       * kit-derived row reaching this point means status and custody have
+       * already drifted apart; deleting it would orphan the KitCustody and
+       * make the drift permanent. Scoping the delete keeps it for the assert
+       * below, which refuses the assignment instead. */
       await tx.custody.deleteMany({
-        where: { assetId: { in: assets.map((a) => a.id) } },
+        where: { assetId: { in: assetIdsToCustody }, kitCustodyId: null },
       });
+
+      await assertNoKitDerivedCustody(tx, assetIdsToCustody, organizationId);
 
       /**
        * Updating status of assets to IN_CUSTODY — BEFORE the custody rows.
@@ -6216,11 +6364,7 @@ export async function bulkCheckOutAssets({
       });
 
       /** Creating notes for the assets */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
 
       const custodianDisplay = custodianTeamMember
         ? wrapCustodianForNote({ teamMember: custodianTeamMember })
@@ -6376,6 +6520,7 @@ export async function bulkCheckInAssets({
           "All selected assets are quantity-tracked. Quantity-tracked assets must have custody released individually.",
         label: "Assets",
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 
@@ -6390,6 +6535,7 @@ export async function bulkCheckInAssets({
           "There are some assets without custody. Please make sure you are selecting assets with custody.",
         label: "Assets",
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 
@@ -6423,12 +6569,24 @@ export async function bulkCheckInAssets({
      * 2. Update status of all assets to AVAILABLE
      */
     await db.$transaction(async (tx) => {
-      /** Deleting custodies over assets */
+      /** Deleting custodies over assets. `kitCustodyId: null` — this release
+       * owns only operator-assigned rows; kit-derived custody is the kit's to
+       * remove, so it is scoped out of the delete and left for the assert
+       * below to reject.
+       * @see {@link assertNoKitDerivedCustody} for what that ordering does and
+       * does not guarantee. */
       await tx.custody.deleteMany({
         where: {
           assetId: { in: assets.map((asset) => asset.id) },
+          kitCustodyId: null,
         },
       });
+
+      await assertNoKitDerivedCustody(
+        tx,
+        assets.map((asset) => asset.id),
+        organizationId
+      );
 
       /**
        * Updating status of assets to AVAILABLE.
@@ -6713,6 +6871,7 @@ export async function bulkUpdateAssetLocation({
               userId,
               firstName: user?.firstName ?? "",
               lastName: user?.lastName ?? "",
+              displayName: user?.displayName,
               isRemoving,
             });
 
@@ -6747,11 +6906,7 @@ export async function bulkUpdateAssetLocation({
     });
 
     // Create location activity notes
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
     // Filter out assets already at the target location
     const actuallyChanged = assets.filter(
       (a) => getPrimaryLocation(a)?.id !== newLocation?.id
@@ -7012,12 +7167,19 @@ export type BulkUpdateAssetModelResult = {
  *   Those are create-time conveniences (see `bulkCreateAssetsFromModel`);
  *   retro-applying them here would silently overwrite curated data on assets
  *   that already exist.
- * - No activity events and no notes are written. `ActivityAction` has no
- *   ASSET_MODEL action and the singular `updateAsset` path writes neither, so
- *   staying silent is what `.claude/rules/bulk-event-parity.md` requires:
- *   bulk must emit exactly what singular emits. Adding the event properly
- *   needs an additive enum migration plus the singular call site plus the
- *   model-delete SetNull cascade, which is its own change.
+ * - One `ASSET_MODEL_CHANGED` event and one note per asset that actually
+ *   changed, matching what the singular `updateAsset` path emits, as
+ *   `.claude/rules/bulk-event-parity.md` requires. Both are written inside the
+ *   transaction that makes the change: a note written after the commit can
+ *   fail while the change is already durable, and the retry finds the asset on
+ *   the target model and skips it, so that note could never be recreated. The
+ *   notes are grouped by the model being left, since that is the only part of
+ *   the sentence that varies, which keeps a large batch to a handful of
+ *   statements.
+ * - The rows are re-read inside the transaction and the events, notes and
+ *   returned counts all come from that read, not from the read taken before
+ *   it opened. Eligibility is re-checked there too, so an asset converted to
+ *   quantity-tracked in between is not linked past the guard meant to stop it.
  *
  * @param params.assetIds - Selected asset ids, possibly `[ALL_SELECTED_KEY]`
  * @param params.assetModelId - Target model, or `null`/`""` to remove the link
@@ -7093,7 +7255,14 @@ export async function bulkUpdateAssetModel({
      */
     const assetsBeforeUpdate = await db.asset.findMany({
       where: { id: { in: resolvedIds }, organizationId },
-      select: { id: true, type: true, assetModelId: true },
+      select: {
+        id: true,
+        type: true,
+        assetModelId: true,
+        // The note names the model an asset is leaving, not just the one it
+        // joins, so a reader can see what the change actually replaced.
+        assetModel: { select: { id: true, name: true } },
+      },
     });
 
     const individuals = assetsBeforeUpdate.filter(
@@ -7130,18 +7299,137 @@ export async function bulkUpdateAssetModel({
      * Surfaced in the toast because it is the only signal that the previous
      * model's book-by-model availability pool just shrank.
      */
-    const moved = newAssetModelId
+    let moved = newAssetModelId
       ? assetsThatChange.filter((asset) => asset.assetModelId !== null).length
       : 0;
 
+    /**
+     * Reported to the user, so it counts the rows the transaction actually
+     * wrote rather than the rows this request first read.
+     */
+    let updated = assetsThatChange.length;
+
     if (assetsThatChange.length > 0) {
-      await db.asset.updateMany({
-        where: {
-          id: { in: assetsThatChange.map((asset) => asset.id) },
-          organizationId,
+      // Resolved once, outside the transaction: it can hit the user table, and
+      // every note in this batch is written by the same person.
+      const loadUserForNotes = createLoadUserForNotes(userId);
+      const userLink = await resolveUserLink({ userId, loadUserForNotes });
+      const newModel = newAssetModelId
+        ? // Keyed on the id, never the name: a model saved with a
+          // whitespace-only name trims to "", and branching on that would
+          // report a real link as a removal.
+          { id: newAssetModelId, name: modelName ?? "" }
+        : null;
+
+      // Defense-in-depth: the write, its events and its notes all run in here,
+      // over a selection `resolveAssetIdsForBulkOperation` does not cap, so a
+      // large one can exhaust Prisma's 5s default and abort with P2028 —
+      // costing the user the model change itself, not just its history. Bump
+      // the ceiling to 15s, matching `bulkAssignAssetTags` and
+      // `bulkDeleteAssets`.
+      await db.$transaction(
+        async (tx) => {
+          /**
+           * Re-read under the transaction. The rows above were read before it
+           * opened, so a concurrent change would be overwritten here while the
+           * event and note still named the model this request happened to see.
+           * The trail has to describe the write that actually happened.
+           */
+          const current = await tx.asset.findMany({
+            where: {
+              id: { in: assetsThatChange.map((asset) => asset.id) },
+              organizationId,
+            },
+            select: {
+              id: true,
+              type: true,
+              assetModelId: true,
+              assetModel: { select: { id: true, name: true } },
+            },
+          });
+          // Eligibility is re-checked too, not just the current model: an asset
+          // converted to quantity-tracked since the read above must not be
+          // linked, and the check that rejected it ran on the stale row.
+          const changing = current.filter(
+            (asset) =>
+              asset.type !== AssetType.QUANTITY_TRACKED &&
+              asset.assetModelId !== newAssetModelId
+          );
+          updated = changing.length;
+          moved = newAssetModelId
+            ? changing.filter((asset) => asset.assetModelId !== null).length
+            : 0;
+          if (changing.length === 0) {
+            return;
+          }
+
+          await tx.asset.updateMany({
+            where: {
+              id: { in: changing.map((asset) => asset.id) },
+              organizationId,
+            },
+            data: { assetModelId: newAssetModelId },
+          });
+
+          // One event per asset that actually changed. A bulk model change has to
+          // leave the same trail its singular counterpart does, or the activity
+          // log reports a different history depending on which button was pressed.
+          await recordEvents(
+            changing.map((asset) => ({
+              organizationId,
+              actorUserId: userId,
+              action: "ASSET_MODEL_CHANGED" as const,
+              entityType: "ASSET" as const,
+              entityId: asset.id,
+              assetId: asset.id,
+              field: "assetModelId",
+              fromValue: asset.assetModelId ?? null,
+              toValue: newAssetModelId,
+            })),
+            tx
+          );
+
+          /**
+           * Notes commit with the write. A note written afterwards can fail once
+           * the model change is already durable, and the retry is a no-op because
+           * the asset now points at the target — so the note could never be
+           * recreated.
+           *
+           * Grouped by the model being left, because that is the only part of the
+           * sentence that varies: each group is one `createMany`, so a large
+           * batch costs a handful of statements rather than one per asset.
+           */
+          const byPreviousModel = new Map<string, typeof changing>();
+          for (const asset of changing) {
+            const key = asset.assetModel?.id ?? "";
+            const group = byPreviousModel.get(key);
+            if (group) {
+              group.push(asset);
+            } else {
+              byPreviousModel.set(key, [asset]);
+            }
+          }
+          for (const group of byPreviousModel.values()) {
+            const content = buildAssetModelChangeNote({
+              userLink,
+              previous: group[0].assetModel,
+              next: newModel,
+            });
+            if (!content) continue;
+            await createNotes(
+              {
+                content,
+                type: "UPDATE",
+                userId,
+                assetIds: group.map((asset) => asset.id),
+                organizationId,
+              },
+              tx
+            );
+          }
         },
-        data: { assetModelId: newAssetModelId },
-      });
+        { timeout: 15000 }
+      );
     }
 
     return {
@@ -7153,7 +7441,7 @@ export async function bulkUpdateAssetModel({
        * organization, when "matched no assets" is the truth.
        */
       resolved: assetsBeforeUpdate.length,
-      updated: assetsThatChange.length,
+      updated,
       moved,
       /**
        * Only meaningful when linking. On the unlink path a quantity-tracked
@@ -7567,9 +7855,8 @@ export async function relinkAssetQrCode({
         organizationId,
         type: "UPDATE",
         content: `${wrapUserLinkForNote({
+          ...user,
           id: userId,
-          firstName: user.firstName,
-          lastName: user.lastName,
         })} changed QR code ${
           oldQrCode ? `from **${oldQrCode.id}**` : ""
         } to **${qrId}**.`,
@@ -8986,6 +9273,7 @@ export async function moveAssetLocationUnits(
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.location.findFirst({
@@ -9001,6 +9289,7 @@ export async function moveAssetLocationUnits(
     if (user && fromLocation && toLocation) {
       const firstName = user.firstName ?? "";
       const lastName = user.lastName ?? "";
+      const displayName = user.displayName;
 
       // Asset-side bidirectional note. The helper recognises the
       // "current + new both set" shape and emits the "moved …" phrasing.
@@ -9009,6 +9298,7 @@ export async function moveAssetLocationUnits(
         newLocation: toLocation,
         firstName,
         lastName,
+        displayName,
         assetId,
         userId,
         isRemoving: false,
@@ -9022,6 +9312,7 @@ export async function moveAssetLocationUnits(
       // the single-location update path at ~line 2596.
       const userLink = wrapUserLinkForNote({
         id: userId,
+        displayName,
         firstName,
         lastName,
       });
@@ -9279,6 +9570,7 @@ export async function placeUnplacedUnits(
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       }),
       db.location.findFirst({
@@ -9290,12 +9582,14 @@ export async function placeUnplacedUnits(
     if (user && toLocation) {
       const firstName = user.firstName ?? "";
       const lastName = user.lastName ?? "";
+      const displayName = user.displayName;
 
       await createLocationChangeNote({
         currentLocation: null,
         newLocation: toLocation,
         firstName,
         lastName,
+        displayName,
         assetId,
         userId,
         isRemoving: false,
@@ -9307,6 +9601,7 @@ export async function placeUnplacedUnits(
 
       const userLink = wrapUserLinkForNote({
         id: userId,
+        displayName,
         firstName,
         lastName,
       });

@@ -51,7 +51,9 @@ describe("bulkDeleteNRMs", () => {
     });
 
     const { where } = dbMocks.findMany.mock.calls[0][0];
-    expect(where.OR).toHaveLength(3);
+    // The NRM's own name plus the three name columns on a linked user
+    // (first, last, display) — see `getNrmIndexWhere`.
+    expect(where.OR).toHaveLength(4);
     expect(where.deletedAt).toBeNull();
   });
 
@@ -66,9 +68,11 @@ describe("bulkDeleteNRMs", () => {
   });
 
   it("soft-deletes only the rows the scoped query returned", async () => {
+    // why: two unencumbered members are the fixture that lets the write run,
+    // so the ids it is issued with are observable.
     dbMocks.findMany.mockResolvedValue([
-      { id: "a", _count: { custodies: 0 } },
-      { id: "b", _count: { custodies: 0 } },
+      { id: "a", _count: { custodies: 0, kitCustodies: 0 } },
+      { id: "b", _count: { custodies: 0, kitCustodies: 0 } },
     ]);
 
     await bulkDeleteNRMs({ nrmIds: [ALL_SELECTED_KEY], organizationId: ORG });
@@ -82,7 +86,11 @@ describe("bulkDeleteNRMs", () => {
   });
 
   it("re-asserts the NRM scope and custody guard in the write predicate", async () => {
-    dbMocks.findMany.mockResolvedValue([{ id: "a", _count: { custodies: 0 } }]);
+    // why: an unencumbered member, so nothing short-circuits before the write
+    // whose predicate this asserts on.
+    dbMocks.findMany.mockResolvedValue([
+      { id: "a", _count: { custodies: 0, kitCustodies: 0 } },
+    ]);
 
     await bulkDeleteNRMs({ nrmIds: [ALL_SELECTED_KEY], organizationId: ORG });
 
@@ -94,11 +102,46 @@ describe("bulkDeleteNRMs", () => {
       ...NRM_BASE_SCOPE,
       id: { in: ["a"] },
       custodies: { none: {} },
+      kitCustodies: { none: {} },
     });
   });
 
+  it("refuses the batch for a kit-only custodian", async () => {
+    // Assigning a kit always writes `KitCustody`; the inherited per-asset
+    // rows only appear when the kit has assets. An empty kit's custodian
+    // therefore holds nothing an asset-only count would see.
+    // why: kit custody with no asset custody is exactly the member an
+    // asset-only count reports as free.
+    dbMocks.findMany.mockResolvedValue([
+      { id: "a", _count: { custodies: 0, kitCustodies: 1 } },
+    ]);
+
+    await expect(
+      bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG })
+    ).rejects.toThrow(/custody/i);
+    expect(dbMocks.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("treats a custody refusal as a client error, not a server fault", async () => {
+    // why: one encumbered member is all it takes to refuse the batch, and this
+    // asserts how that refusal is reported rather than that it happens.
+    dbMocks.findMany.mockResolvedValue([
+      { id: "a", _count: { custodies: 1, kitCustodies: 0 } },
+    ]);
+
+    // Without a status the wrapper inherits 500 and Sentry captures it, over a
+    // user being told to check in their assets first.
+    await expect(
+      bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG })
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+  });
+
   it("still refuses the batch when a selected member holds custody", async () => {
-    dbMocks.findMany.mockResolvedValue([{ id: "a", _count: { custodies: 2 } }]);
+    // why: an encumbered member is the whole precondition of the rule under
+    // test; the count is stubbed rather than seeded.
+    dbMocks.findMany.mockResolvedValue([
+      { id: "a", _count: { custodies: 2, kitCustodies: 0 } },
+    ]);
 
     await expect(
       bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG })

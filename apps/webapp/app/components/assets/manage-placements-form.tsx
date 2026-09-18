@@ -28,6 +28,7 @@ import { useMemo, useState } from "react";
 import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 
 type LocationOption = {
   id: string;
@@ -317,6 +318,7 @@ export function ManagePlacementsForm({
               <div className="flex shrink-0 items-center gap-1">
                 <input
                   type="number"
+                  {...numberInputWheelGuard}
                   min={1}
                   max={totalPool}
                   value={row.quantity}

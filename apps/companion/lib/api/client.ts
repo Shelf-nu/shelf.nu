@@ -1,21 +1,28 @@
-import { supabase } from "../supabase";
+import {
+  getActiveServer,
+  getServerVersion,
+  subscribeToServerChange,
+} from "../server/active-server";
+import { getSupabase, getSupabaseClientUrl } from "../supabase";
+import { isSessionServerMismatched } from "../server/contract";
+import { reportServerMismatch } from "../sentry";
 
 /**
- * Base URL for the Shelf webapp API.
- * In development, this is your local dev server.
- * In production, this is the deployed webapp URL.
+ * Base URL of the Shelf server the app is currently connected to.
  *
- * why the __DEV__ split in the fallback: EXPO_PUBLIC_* vars are inlined at
- * bundle time, so an OTA update published without the production env scope
- * would bake the fallback into every install. With a bare localhost fallback
- * that mistake breaks every API call in the field; falling back to the
- * production URL instead makes the worst case "points at prod", which is
- * what release builds want anyway.
+ * Must stay a function, never an exported constant: the app switches servers at
+ * runtime, and a captured `const` would keep pointing at whichever server was
+ * active at import time. Neither typecheck nor the unit tests can see that
+ * mistake — only running the app against a second server would.
+ *
+ * The Shelf Cloud default, including the `__DEV__` fallback split, lives on
+ * `CLOUD_SERVER` in `lib/server/active-server.ts`.
+ *
+ * @returns The active server's origin, without a trailing slash.
  */
-export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ||
-  (__DEV__ ? "http://localhost:3000" : "https://app.shelf.nu");
-if (__DEV__) console.log("[API] Base URL:", API_BASE_URL);
+export function getApiBaseUrl(): string {
+  return getActiveServer().baseUrl;
+}
 
 /**
  * Global auth error listener.
@@ -46,21 +53,105 @@ const SESSION_CACHE_TTL_MS = 30_000; // 30 seconds
 let cachedAccessToken: string | null = null;
 let cachedAt = 0;
 
-// Invalidate cache when auth state changes (login, logout, token refresh)
-supabase.auth.onAuthStateChange(() => {
+/** Unsubscribe handle for the current client's auth listener. */
+let authSubscription: { unsubscribe: () => void } | null = null;
+
+/** Clears the in-memory access-token cache. */
+function resetAccessTokenCache(): void {
   cachedAccessToken = null;
   cachedAt = 0;
+}
+
+/**
+ * Subscribes the token cache to the CURRENT Supabase client's auth events
+ * (login, logout, token refresh).
+ *
+ * Re-called after every server switch: otherwise the cache keeps listening to
+ * the discarded client, silently stops invalidating, and hands the previous
+ * server's access token to the new one.
+ */
+function attachAuthListener(): void {
+  authSubscription?.unsubscribe();
+  const {
+    data: { subscription },
+  } = getSupabase().auth.onAuthStateChange(() => {
+    resetAccessTokenCache();
+  });
+  authSubscription = subscription;
+}
+
+attachAuthListener();
+
+// why: this module owns the token cache and the auth subscription, so it — not
+// active-server.ts — rearms them after a switch. Wiring it as a subscription
+// keeps the dependency one-way (api → server); importing these functions INTO
+// active-server.ts would create a require cycle, which Metro resolves to
+// `undefined` at module-eval time and surfaces far from the cause.
+subscribeToServerChange(() => {
+  resetAccessTokenCache();
+  attachAuthListener();
 });
 
-/** Returns a valid access token, using cache when possible. */
+/**
+ * Refuses the request when the live Supabase client belongs to a different
+ * project than the active server.
+ *
+ * `apiFetch` / `apiUpload` are the single chokepoint every authenticated
+ * request passes through, which makes this the one place the core invariant of
+ * multi-server support can actually be enforced: the token we are about to send
+ * was minted by the server we are about to send it to.
+ *
+ * Defence in depth: it should never fire, because `setActiveServer` signs out
+ * and rebuilds before notifying anyone and sessions are namespaced per Supabase
+ * project. Keep it anyway — the invariant is otherwise only believed, not
+ * checked, and failing closed turns a silent cross-server credential leak into
+ * a clean re-auth.
+ *
+ * @returns An error result when the request must not proceed, otherwise null.
+ */
+function guardSessionServerMatch(): { data: null; error: string } | null {
+  const active = getActiveServer();
+  if (!isSessionServerMismatched(getSupabaseClientUrl(), active.supabaseUrl)) {
+    return null;
+  }
+
+  // Loud on purpose: this is a bug, not a user condition, and it is invisible
+  // from the outside — the user would just see an unexplained sign-out.
+  reportServerMismatch(getSupabaseClientUrl(), active.supabaseUrl);
+  resetAccessTokenCache();
+  notifyAuthError();
+  return {
+    data: null,
+    error: "Session expired. Please sign in again.",
+  };
+}
+
+/**
+ * Returns a valid access token for the ACTIVE server, using cache when
+ * possible.
+ *
+ * Reading a session is slow — `getSession()` reassembles several chunked
+ * SecureStore entries — and a server switch can complete in that window. The
+ * token then belongs to the server that was active when it was requested, so
+ * it is discarded rather than returned, and above all is NOT written to the
+ * cache: `setActiveServer` clears the cache as it switches, and writing here
+ * afterwards would resurrect the previous server's token for the whole TTL.
+ *
+ * @returns The token, or `null` when there is no session or the active server
+ *   changed while it was being read.
+ */
 export async function getAccessToken(): Promise<string | null> {
   const now = Date.now();
   if (cachedAccessToken && now - cachedAt < SESSION_CACHE_TTL_MS) {
     return cachedAccessToken;
   }
+  const versionAtStart = getServerVersion();
   const {
     data: { session },
-  } = await supabase.auth.getSession();
+  } = await getSupabase().auth.getSession();
+
+  if (getServerVersion() !== versionAtStart) return null;
+
   if (session?.access_token) {
     cachedAccessToken = session.access_token;
     cachedAt = now;
@@ -69,6 +160,44 @@ export async function getAccessToken(): Promise<string | null> {
   cachedAccessToken = null;
   cachedAt = 0;
   return null;
+}
+
+/**
+ * Resolves the base URL and token for one authenticated request, proving both
+ * belong to the same server.
+ *
+ * `guardSessionServerMatch` is synchronous and cannot cover the `await` that
+ * follows it, and it could not detect a completed switch anyway:
+ * `setActiveServer` moves the active record and rebuilds the Supabase client
+ * together, so afterwards the guard compares the new server against itself and
+ * passes. Capturing the server up front and re-checking the version after the
+ * await is what actually closes the window — and returning the CAPTURED base
+ * URL keeps the token and the destination from ever disagreeing, which reading
+ * live state at send time cannot guarantee.
+ *
+ * @returns The URL prefix and token to use, or the error result to return.
+ */
+async function resolveRequestTarget(): Promise<
+  | { ok: true; baseUrl: string; accessToken: string }
+  | { ok: false; result: { data: null; error: string } }
+> {
+  const mismatch = guardSessionServerMatch();
+  if (mismatch) return { ok: false, result: mismatch };
+
+  const server = getActiveServer();
+  const versionAtStart = getServerVersion();
+
+  const accessToken = await getAccessToken();
+
+  if (!accessToken || getServerVersion() !== versionAtStart) {
+    notifyAuthError();
+    return {
+      ok: false,
+      result: { data: null, error: "Session expired. Please sign in again." },
+    };
+  }
+
+  return { ok: true, baseUrl: server.baseUrl, accessToken };
 }
 
 /**
@@ -146,14 +275,11 @@ export async function apiFetch<T>(
   let timedOut = false;
 
   try {
-    const accessToken = await getAccessToken();
+    const target = await resolveRequestTarget();
+    if (!target.ok) return target.result;
+    const { accessToken } = target;
 
-    if (!accessToken) {
-      notifyAuthError();
-      return { data: null, error: "Session expired. Please sign in again." };
-    }
-
-    const url = `${API_BASE_URL}${path}`;
+    const url = `${target.baseUrl}${path}`;
     if (__DEV__)
       console.log(
         "[API] Fetching:",
@@ -277,14 +403,11 @@ export async function apiUpload<T>(
   formData: FormData
 ): Promise<{ data: T | null; error: string | null }> {
   try {
-    const accessToken = await getAccessToken();
+    const target = await resolveRequestTarget();
+    if (!target.ok) return target.result;
+    const { accessToken } = target;
 
-    if (!accessToken) {
-      notifyAuthError();
-      return { data: null, error: "Session expired. Please sign in again." };
-    }
-
-    const url = `${API_BASE_URL}${path}`;
+    const url = `${target.baseUrl}${path}`;
     if (__DEV__) console.log("[API] Uploading to:", url);
 
     // Abort controller for timeout (longer than regular fetch for uploads)
