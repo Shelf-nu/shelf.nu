@@ -1,6 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
+import { caseInsensitiveEmailFilter } from "~/modules/invite/helpers";
 import { createInvite } from "~/modules/invite/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -55,7 +56,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const existingInvites = await db.invite.findMany({
       where: {
         status: "PENDING",
-        inviteeEmail: email,
+        inviteeEmail: caseInsensitiveEmailFilter(email),
         organizationId,
       },
     });

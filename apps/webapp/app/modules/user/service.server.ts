@@ -54,6 +54,10 @@ import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
+import {
+  caseInsensitiveEmailFilter,
+  normalizeInviteEmail,
+} from "../invite/helpers";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { USER_CONTACT_SELECT } from "../user-contact/constants";
 import {
@@ -285,10 +289,19 @@ export async function createUserOrAttachOrg({
     formatPrefs?: DetectedFormatPrefs;
   }) {
   try {
-    const shelfUser = await db.user.findFirst({
-      where: { email },
+    /**
+     * `User.email` can contain capitals, so the existing account is matched
+     * without regard to letter case. When rows differ only by case, the
+     * lowercase row wins, because that is the form sign-in uses.
+     */
+    const matchingUsers = await db.user.findMany({
+      where: { email: caseInsensitiveEmailFilter(email) },
       select: USER_WITH_SSO_DETAILS_SELECT,
     });
+    const shelfUser =
+      matchingUsers.find(
+        (user) => user.email === normalizeInviteEmail(email)
+      ) ?? matchingUsers[0];
 
     // If no Prisma User exists, create one.
     // First try creating a fresh auth account. If that fails (email already

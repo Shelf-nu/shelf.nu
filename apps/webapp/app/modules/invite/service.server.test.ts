@@ -1,20 +1,32 @@
 /**
- * Invite Service — role validation at acceptance
+ * Invite Service tests
  *
- * Creation-time guards cannot protect an invite that already exists. A row
- * written before those guards landed still carries its stored roles, and
- * `updateInviteStatus` hands them to `createUserOrAttachOrg` verbatim, which
- * writes them into `UserOrganization.roles`. This pins that an invite granting
- * a non-invitable role is refused at acceptance instead.
+ * - Role validation at acceptance: creation-time guards cannot protect an
+ *   invite that already exists, so an invite granting a non-invitable role is
+ *   refused when it is accepted.
+ * - SCIM-managed domains refuse invites.
+ * - Email letter case: invitee emails are stored lowercased, and every match
+ *   against a stored email (invites, users, the signed-in user) ignores case,
+ *   because stored rows can still hold capitals.
  *
  * @see {@link file://./service.server.ts}
+ * @see {@link file://./helpers.ts}
  * @see {@link file://./roles.ts}
  */
 
+import type { Invite } from "@prisma/client";
 import { InviteStatuses, OrganizationRoles } from "@prisma/client";
+import type { AppLoadContext } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createInvite, updateInviteStatus } from "./service.server";
+import { caseInsensitiveEmailFilter, normalizeInviteEmail } from "./helpers";
+import {
+  bulkInviteUsers,
+  checkUserAndInviteMatch,
+  createInvite,
+  updateInviteStatus,
+} from "./service.server";
+import { createTeamMember } from "../team-member/service.server";
 import { createUserOrAttachOrg } from "../user/service.server";
 
 // @vitest-environment node
@@ -22,13 +34,22 @@ import { createUserOrAttachOrg } from "../user/service.server";
 const dbMock = vi.hoisted(() => ({
   invite: {
     findFirst: vi.fn(),
+    findMany: vi.fn(),
+    create: vi.fn(),
+    createManyAndReturn: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
   },
-  teamMember: { update: vi.fn() },
+  user: { findFirst: vi.fn(), findMany: vi.fn() },
+  teamMember: {
+    update: vi.fn(),
+    findMany: vi.fn(),
+    createManyAndReturn: vi.fn(),
+  },
+  $transaction: vi.fn(),
 }));
 
-// why: isolating the acceptance branch from the database
+// why: isolating the invite logic from the database
 vi.mock("~/database/db.server", () => ({ db: dbMock }));
 
 // why: acceptance creates the user and the org association — the write this
@@ -37,8 +58,19 @@ vi.mock("../user/service.server", () => ({
   createUserOrAttachOrg: vi.fn(),
 }));
 
-// why: acceptance sends a welcome email
+// why: creating a team member is a database write; the tests assert whether
+// it happens, not how
+vi.mock("../team-member/service.server", () => ({
+  createTeamMember: vi.fn(),
+}));
+
+// why: invites and acceptance send emails
 vi.mock("~/emails/mail.server", () => ({ sendEmail: vi.fn() }));
+
+// why: rendering the HTML email is unrelated to who the invite is for
+vi.mock("~/emails/invite-template", () => ({
+  invitationTemplateString: vi.fn().mockResolvedValue("<html></html>"),
+}));
 
 const ssoMock = vi.hoisted(() => ({
   checkDomainSSOStatus: vi.fn(),
@@ -50,10 +82,13 @@ const ssoMock = vi.hoisted(() => ({
 vi.mock("~/utils/sso.server", () => ssoMock);
 
 /** Builds a PENDING invite row as `db.invite.findFirst` would return it */
-function pendingInvite(roles: OrganizationRoles[]) {
+function pendingInvite(
+  roles: OrganizationRoles[],
+  inviteeEmail = "invitee@example.com"
+) {
   return {
     id: "invite-1",
-    inviteeEmail: "invitee@example.com",
+    inviteeEmail,
     organizationId: "org-1",
     roles,
     status: InviteStatuses.PENDING,
@@ -121,6 +156,264 @@ describe("updateInviteStatus — stored role validation", () => {
     expect(createUserOrAttachOrg).toHaveBeenCalledWith(
       expect.objectContaining({ roles: [OrganizationRoles.ADMIN] })
     );
+  });
+
+  it("accepts an invite stored with capitals for the lowercase account", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(
+      pendingInvite([OrganizationRoles.BASE], "First.Last@School.org")
+    );
+
+    await updateInviteStatus({
+      id: "invite-1",
+      status: InviteStatuses.ACCEPTED,
+      password: "hunter2hunter2",
+    });
+
+    expect(createUserOrAttachOrg).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "first.last@school.org" })
+    );
+    // Other pending invites for the same person close, whatever their case
+    expect(dbMock.invite.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          inviteeEmail: { in: ["first.last@school.org"], mode: "insensitive" },
+        }),
+      })
+    );
+  });
+});
+
+describe("invite email helpers", () => {
+  it("trims and lowercases an invitee email", () => {
+    expect(normalizeInviteEmail("  First.Last@School.ORG ")).toBe(
+      "first.last@school.org"
+    );
+  });
+
+  it("matches with `in`, which Prisma compiles to an exact LOWER() comparison", () => {
+    // `equals` + insensitive compiles to an unescaped ILIKE, where `_` in an
+    // address would match any character.
+    expect(caseInsensitiveEmailFilter(["First_Last@School.org"])).toEqual({
+      in: ["first_last@school.org"],
+      mode: "insensitive",
+    });
+    expect(caseInsensitiveEmailFilter("A@B.org")).toEqual({
+      in: ["a@b.org"],
+      mode: "insensitive",
+    });
+  });
+});
+
+describe(checkUserAndInviteMatch.name, () => {
+  const context = {
+    getSession: () => ({ userId: "user-1" }),
+  } as unknown as AppLoadContext;
+  const invite = { inviteeEmail: "First.Last@School.org" } as Invite;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("lets the invited person in when only the letter case differs", async () => {
+    dbMock.user.findFirst.mockResolvedValue({ email: "first.last@school.org" });
+
+    await expect(
+      checkUserAndInviteMatch({ context, invite })
+    ).resolves.toBeUndefined();
+  });
+
+  it("still refuses a different signed-in person", async () => {
+    dbMock.user.findFirst.mockResolvedValue({
+      email: "someone.else@school.org",
+    });
+
+    await expect(
+      checkUserAndInviteMatch({ context, invite })
+    ).rejects.toMatchObject({ title: "Wrong user" });
+  });
+
+  it("refuses when the signed-in user cannot be found", async () => {
+    dbMock.user.findFirst.mockResolvedValue(null);
+
+    await expect(
+      checkUserAndInviteMatch({ context, invite })
+    ).rejects.toMatchObject({ title: "Wrong user" });
+  });
+});
+
+describe("createInvite — earlier invites of the same person", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssoMock.checkDomainSSOStatus.mockResolvedValue({
+      isConfiguredForSSO: false,
+      linkedOrganizations: [],
+    });
+    dbMock.user.findFirst.mockResolvedValue(null);
+    vi.mocked(createTeamMember).mockResolvedValue({
+      id: "tm-new",
+    } as Awaited<ReturnType<typeof createTeamMember>>);
+    dbMock.invite.create.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: "invite-new",
+        inviteeEmail: data.inviteeEmail,
+        organization: { name: "Workspace", customEmailFooter: null },
+        inviter: { firstName: "Owner", lastName: "Person", displayName: null },
+      })
+    );
+  });
+
+  it("reuses the team member of an earlier invite stored with capitals", async () => {
+    dbMock.invite.findFirst.mockResolvedValue({ teamMemberId: "tm-earlier" });
+
+    await createInvite({
+      organizationId: "org-1",
+      inviteeEmail: "first.last@school.org",
+      inviterId: "user-1",
+      roles: [OrganizationRoles.BASE],
+      teamMemberName: "first.last",
+      userId: "user-1",
+    });
+
+    expect(dbMock.invite.findFirst).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        inviteeEmail: { in: ["first.last@school.org"], mode: "insensitive" },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(createTeamMember).not.toHaveBeenCalled();
+    expect(dbMock.invite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inviteeTeamMember: { connect: { id: "tm-earlier" } },
+        }),
+      })
+    );
+  });
+
+  it("stores the email lowercased", async () => {
+    dbMock.invite.findFirst.mockResolvedValue(null);
+
+    await createInvite({
+      organizationId: "org-1",
+      inviteeEmail: " First.Last@School.org ",
+      inviterId: "user-1",
+      roles: [OrganizationRoles.BASE],
+      teamMemberName: "First.Last",
+      userId: "user-1",
+    });
+
+    expect(createTeamMember).toHaveBeenCalledTimes(1);
+    expect(dbMock.invite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inviteeEmail: "first.last@school.org",
+        }),
+      })
+    );
+  });
+});
+
+describe("bulkInviteUsers — email case", () => {
+  type BulkUsers = Parameters<typeof bulkInviteUsers>[0]["users"];
+
+  /** Builds CSV rows the way the import route hands them over */
+  const rows = (...emails: string[]) =>
+    emails.map((email) => ({ email, role: "BASE" })) as BulkUsers;
+
+  /** The rows the bulk insert wrote, as `{ inviteeEmail, teamMemberId }` */
+  const createdInvites = () =>
+    (dbMock.invite.createManyAndReturn.mock.calls[0]?.[0]?.data ?? []).map(
+      (invite: { inviteeEmail: string; teamMemberId: string }) => ({
+        inviteeEmail: invite.inviteeEmail,
+        teamMemberId: invite.teamMemberId,
+      })
+    );
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssoMock.checkDomainSSOStatus.mockResolvedValue({
+      isConfiguredForSSO: false,
+      linkedOrganizations: [],
+    });
+    dbMock.teamMember.findMany.mockResolvedValue([]);
+    dbMock.user.findMany.mockResolvedValue([]);
+    dbMock.invite.findMany.mockResolvedValue([]);
+    dbMock.$transaction.mockImplementation((callback) => callback(dbMock));
+    dbMock.teamMember.createManyAndReturn.mockImplementation(({ data }) =>
+      Promise.resolve(
+        data.map((member: { name: string }, index: number) => ({
+          id: `tm-${index}`,
+          name: member.name,
+        }))
+      )
+    );
+    // No invites returned means no emails are scheduled after the test ends.
+    dbMock.invite.createManyAndReturn.mockResolvedValue([]);
+  });
+
+  it("makes one invite for an address listed twice with different capitals", async () => {
+    await bulkInviteUsers({
+      users: rows("First.Last@School.org", "first.last@school.org"),
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(createdInvites()).toEqual([
+      { inviteeEmail: "first.last@school.org", teamMemberId: "tm-0" },
+    ]);
+    // The team member keeps the address as typed; it seeds the first name.
+    expect(dbMock.teamMember.createManyAndReturn).toHaveBeenCalledWith({
+      data: [{ name: "First.Last", organizationId: "org-1" }],
+    });
+  });
+
+  it("skips a row for a member whose stored email has other capitals", async () => {
+    dbMock.user.findMany.mockResolvedValue([{ email: "Member@School.org" }]);
+
+    const result = await bulkInviteUsers({
+      users: rows("member@school.org", "New.Person@School.org"),
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(dbMock.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          email: {
+            in: ["member@school.org", "new.person@school.org"],
+            mode: "insensitive",
+          },
+        }),
+      })
+    );
+    expect(result.skippedUsers.map((user) => user.email)).toEqual([
+      "member@school.org",
+    ]);
+    expect(createdInvites()).toEqual([
+      { inviteeEmail: "new.person@school.org", teamMemberId: "tm-0" },
+    ]);
+  });
+
+  it("still invites a new person when another has two pending invites", async () => {
+    // One person, two pending rows that differ only by case
+    dbMock.invite.findMany.mockResolvedValue([
+      { inviteeEmail: "Pending@School.org" },
+      { inviteeEmail: "pending@school.org" },
+    ]);
+
+    const result = await bulkInviteUsers({
+      users: rows("pending@school.org", "new.person@school.org"),
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result.skippedUsers.map((user) => user.email)).toEqual([
+      "pending@school.org",
+    ]);
+    expect(createdInvites()).toEqual([
+      { inviteeEmail: "new.person@school.org", teamMemberId: "tm-0" },
+    ]);
   });
 });
 

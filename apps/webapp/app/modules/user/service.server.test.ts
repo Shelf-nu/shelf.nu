@@ -38,6 +38,7 @@ vitest.mock("~/database/db.server", () => ({
     user: {
       create: vitest.fn().mockResolvedValue({}),
       findFirst: vitest.fn().mockResolvedValue(null),
+      findMany: vitest.fn().mockResolvedValue([]),
       findUnique: vitest.fn().mockResolvedValue(null),
     },
     organization: {
@@ -324,7 +325,7 @@ describe(createUserOrAttachOrg.name, () => {
     vitest.clearAllMocks();
     // Default: no existing Prisma user, no existing auth user
     // @ts-expect-error missing vitest type
-    db.user.findFirst.mockResolvedValue(null);
+    db.user.findMany.mockResolvedValue([]);
     // @ts-expect-error missing vitest type
     db.$queryRaw.mockResolvedValue([]);
     // @ts-expect-error missing vitest type
@@ -434,7 +435,7 @@ describe(createUserOrAttachOrg.name, () => {
     };
 
     // @ts-expect-error missing vitest type
-    db.user.findFirst.mockResolvedValueOnce(existingUser);
+    db.user.findMany.mockResolvedValueOnce([existingUser]);
 
     const result = await createUserOrAttachOrg({
       email: USER_EMAIL,
@@ -448,6 +449,91 @@ describe(createUserOrAttachOrg.name, () => {
     expect(result.id).toBe(USER_ID);
     expect(db.userOrganization.upsert).toHaveBeenCalled();
     expect(db.user.create).not.toHaveBeenCalled();
+  });
+
+  /** An address that differs only in letter case is the same person */
+  it("attaches the existing account when the email differs only in letter case", async () => {
+    const authAdminRequests: string[] = [];
+    server.events.on("request:start", ({ request }) => {
+      if (
+        new URL(request.url).pathname.startsWith(SUPABASE_AUTH_ADMIN_USER_API)
+      )
+        authAdminRequests.push(request.method);
+    });
+
+    // @ts-expect-error missing vitest type
+    db.user.findMany.mockResolvedValueOnce([
+      {
+        id: USER_ID,
+        email: USER_EMAIL,
+        firstName: "Existing",
+        lastName: "User",
+        sso: false,
+        userOrganizations: [],
+      },
+    ]);
+
+    const result = await createUserOrAttachOrg({
+      email: "Hello@Supabase.com",
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.BASE],
+      password: USER_PASSWORD,
+      firstName: "Existing",
+      createdWithInvite: true,
+    });
+
+    expect(db.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: { in: [USER_EMAIL], mode: "insensitive" } },
+      })
+    );
+    expect(result.id).toBe(USER_ID);
+    expect(db.userOrganization.upsert).toHaveBeenCalled();
+    // Attaching an existing account needs no auth admin call and no new row.
+    expect(authAdminRequests).toEqual([]);
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+    expect(db.user.create).not.toHaveBeenCalled();
+  });
+
+  /** Rows that differ only by case: the lowercase one is the account in use */
+  it("prefers the lowercase row when several rows match the email", async () => {
+    // @ts-expect-error missing vitest type
+    db.user.findMany.mockResolvedValueOnce([
+      {
+        id: "stale-mixed-case-row",
+        email: "Hello@Supabase.com",
+        sso: false,
+        userOrganizations: [],
+      },
+      {
+        id: USER_ID,
+        email: USER_EMAIL,
+        sso: false,
+        userOrganizations: [],
+      },
+    ]);
+
+    const result = await createUserOrAttachOrg({
+      email: USER_EMAIL,
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.BASE],
+      password: USER_PASSWORD,
+      firstName: "Existing",
+      createdWithInvite: true,
+    });
+
+    expect(result.id).toBe(USER_ID);
+    expect(db.user.create).not.toHaveBeenCalled();
+    expect(db.userOrganization.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId_organizationId: {
+            userId: USER_ID,
+            organizationId: ORGANIZATION_ID,
+          },
+        },
+      })
+    );
   });
 });
 

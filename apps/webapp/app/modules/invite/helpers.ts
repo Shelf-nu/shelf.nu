@@ -1,6 +1,45 @@
+import type { Prisma } from "@prisma/client";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { InviteWithInviterAndOrg } from "./types";
+
+/**
+ * Normalises an invitee email to the form in which invites are stored and
+ * compared: trimmed and lowercased.
+ *
+ * Sign-in lowercases the address, so an invite that keeps the capitals of a
+ * CSV row never equals the invitee's account email. Every path that creates
+ * an invite, or looks one up by an email from outside, calls this first.
+ *
+ * @param email - The address as typed or imported
+ * @returns The trimmed, lowercased address
+ */
+export function normalizeInviteEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/**
+ * Prisma filter for an email column that matches the given addresses without
+ * regard to letter case.
+ *
+ * Stored `Invite.inviteeEmail` and `User.email` values can contain capitals,
+ * so an exact match misses the same person. The filter uses `in`, not
+ * `equals`: with `mode: "insensitive"`, Prisma compiles `equals` to an
+ * unescaped `ILIKE`, where `_` and `%` in an address are wildcards that match
+ * other addresses. `in` compiles to `LOWER(column) IN (LOWER(value), ...)`,
+ * which is an exact comparison.
+ *
+ * @param emails - One address or a list; each is normalised first
+ * @returns A string filter for `inviteeEmail` or `email`
+ */
+export function caseInsensitiveEmailFilter(emails: string | string[]) {
+  const list = Array.isArray(emails) ? emails : [emails];
+
+  return {
+    in: list.map(normalizeInviteEmail),
+    mode: "insensitive" as const,
+  } satisfies Prisma.StringFilter;
+}
 
 export function generateRandomCode(length: number): string {
   const characters =

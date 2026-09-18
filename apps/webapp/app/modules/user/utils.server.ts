@@ -24,7 +24,11 @@ import {
   revokeAccessToOrganization,
   transferEntitiesToNewOwner,
 } from "./service.server";
-import { revokeAccessEmailText, roleChangeEmailText } from "../invite/helpers";
+import {
+  caseInsensitiveEmailFilter,
+  revokeAccessEmailText,
+  roleChangeEmailText,
+} from "../invite/helpers";
 import { isInvitableRole } from "../invite/roles";
 import { createInvite } from "../invite/service.server";
 
@@ -198,7 +202,7 @@ export async function resolveUserAction(
       await db.invite
         .updateMany({
           where: {
-            inviteeEmail,
+            inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
             organizationId,
             status: InviteStatuses.PENDING,
           },
@@ -275,7 +279,7 @@ export async function resolveUserAction(
         db.invite
           .updateMany({
             where: {
-              inviteeEmail,
+              inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
               organizationId,
             },
             data: {
