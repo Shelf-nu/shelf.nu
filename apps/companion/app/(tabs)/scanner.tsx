@@ -27,6 +27,7 @@ import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
 import type {
   BookingAsset,
+  BookingDetailResponse,
   QrResolveFailureReason,
   ScannedKit,
 } from "@/lib/api/types";
@@ -54,8 +55,10 @@ import {
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
 import {
   canFulfilCheckOut,
+  describeFulfilCheckout,
   hasAssetsLeftToCheckOut,
   matchScansToReservations,
+  toOutstandingReservations,
   unassignedCheckoutConfirm,
   type OutstandingReservation,
 } from "@/lib/booking-reservation-checkout";
@@ -315,29 +318,42 @@ function ScannerContent() {
   // cross-booking stale response can't land here because the whole component
   // remounts on a booking change (see the keyed default export), so this
   // closure and its state setter belong to a single booking's mount.
-  const fetchBookingCtx = useCallback(() => {
-    if (!isBookingMode || !bookingId || !currentOrg) return;
-    const originOrgId = currentOrg.id;
-    api.booking(bookingId, currentOrg.id).then(({ data }) => {
-      // A failed fetch leaves the previous context in place, so an answer that
-      // outlived its workspace must not be the one that replaces it.
-      if (!data || activeOrgIdRef.current !== originOrgId) return;
+  /**
+   * Store a booking payload as this screen's scan-time context.
+   *
+   * Shared by the mount fetch and by the read the fulfil submit makes, so one
+   * response both answers that submit and refreshes what is on screen.
+   *
+   * @param data A booking detail response for the booking this screen is on.
+   * @param originOrgId The workspace the request was made for: a response that
+   *   outlived its workspace must not replace the current context.
+   */
+  const applyBookingCtx = useCallback(
+    (data: BookingDetailResponse, originOrgId: string) => {
+      if (activeOrgIdRef.current !== originOrgId) return;
       setBookingCtx({
         bookedAssetIds: new Set(data.booking.assets.map((a) => a.id)),
         bookingStatus: data.booking.status,
         bookedAssets: data.booking.assets,
         checkedInAssetIds: new Set(data.checkedInAssetIds),
-        outstandingModelRequests: (data.booking.modelRequests ?? [])
-          .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
-          .map((r) => ({
-            assetModelId: r.assetModelId,
-            assetModelName: r.assetModelName,
-            outstandingQuantity: r.outstandingQuantity,
-          })),
+        outstandingModelRequests: toOutstandingReservations(
+          data.booking.modelRequests
+        ),
         requireExplicitCheckout: !canOfferQuickCheckout(data),
       });
+    },
+    []
+  );
+
+  const fetchBookingCtx = useCallback(() => {
+    if (!isBookingMode || !bookingId || !currentOrg) return;
+    const originOrgId = currentOrg.id;
+    api.booking(bookingId, currentOrg.id).then(({ data }) => {
+      // A failed fetch leaves the previous context in place.
+      if (!data) return;
+      applyBookingCtx(data, originOrgId);
     });
-  }, [isBookingMode, bookingId, currentOrg]);
+  }, [isBookingMode, bookingId, currentOrg, applyBookingCtx]);
 
   useEffect(() => {
     fetchBookingCtx();
@@ -1998,11 +2014,16 @@ function ScannerContent() {
    * @param assetIds Scanned assets: units that assign a reservation, plus extras
    *   that join the booking and go out alongside them.
    * @param kitIds Scanned kits.
+   * @param assigned How many of `assetIds` assign a reserved unit, measured
+   *   against the reservations as they stood when the operator confirmed. The
+   *   rest are extras, and the report names the two separately.
    */
-  const submitBookingFulfil = async (assetIds: string[], kitIds: string[]) => {
+  const submitBookingFulfil = async (
+    assetIds: string[],
+    kitIds: string[],
+    assigned: number
+  ) => {
     if (!bookingId || !currentOrg) return;
-    // Units are asset rows only: a kit row is not a unit the server assigns.
-    const count = assetIds.length;
 
     setIsBookingSubmitting(true);
     const timeZone = (() => {
@@ -2034,18 +2055,14 @@ function ScannerContent() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     playScanSound();
     // Under the explicit check-out requirement only the scanned units go out,
-    // and the server says how many booked assets remain.
-    const remaining = data?.remainingCount ?? 0;
-    const message =
-      remaining > 0
-        ? `Assigned ${count} unit${count === 1 ? "" : "s"} and checked ${
-            count === 1 ? "it" : "them"
-          } out. ${remaining} more asset${
-            remaining === 1 ? " is" : "s are"
-          } still to check out.`
-        : `Assigned ${count} unit${count === 1 ? "" : "s"} and checked out "${
-            bookingName || "the booking"
-          }".`;
+    // and the server says how many booked assets remain. Asset rows only: a
+    // kit row is not a unit the server assigns.
+    const message = describeFulfilCheckout({
+      assigned,
+      extras: Math.max(0, assetIds.length - assigned),
+      remaining: data?.remainingCount ?? 0,
+      bookingName: bookingName || "",
+    });
     Alert.alert("Checked out", message, [
       {
         text: "OK",
@@ -2113,40 +2130,33 @@ function ScannerContent() {
 
     /**
      * `fulfilMatch` reads the booking context captured when this screen opened,
-     * and someone may have assigned or shrunk a reservation since. So a short
-     * match is re-run against a fresh read before the confirm names what stays
-     * unassigned. A failed read falls back to the snapshot.
+     * and reservations can be added, raised or assigned by someone else while
+     * this operator scans. So the match is re-run against a read taken now: it
+     * decides which units the confirm names as staying unassigned, and how many
+     * of the scans the report counts as assigned. A failed read falls back to
+     * the snapshot, and the response also refreshes what is on screen.
      */
-    let unassigned = fulfilMatch.unassigned;
-    if (!fulfilMatch.isComplete) {
-      setIsBookingSubmitting(true);
-      const { data: fresh } = await api.booking(bookingId, currentOrg.id);
-      setIsBookingSubmitting(false);
+    setIsBookingSubmitting(true);
+    const { data: fresh } = await api.booking(bookingId, currentOrg.id);
+    setIsBookingSubmitting(false);
 
-      if (fresh) {
-        const freshOutstanding = (fresh.booking.modelRequests ?? [])
-          .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
-          .map((r) => ({
-            assetModelId: r.assetModelId,
-            assetModelName: r.assetModelName,
-            outstandingQuantity: r.outstandingQuantity,
-          }));
-        unassigned = matchScansToReservations(
-          bookingCheckinItems,
-          freshOutstanding
-        ).unassigned;
-      }
-      // Refresh the on-screen counter so it reflects the booking as it is now.
-      fetchBookingCtx();
+    let match = fulfilMatch;
+    if (fresh) {
+      match = matchScansToReservations(
+        bookingCheckinItems,
+        toOutstandingReservations(fresh.booking.modelRequests)
+      );
+      applyBookingCtx(fresh, currentOrg.id);
     }
 
-    const unassignedConfirm = unassignedCheckoutConfirm(unassigned);
+    const unassignedConfirm = unassignedCheckoutConfirm(match.unassigned);
     if (unassignedConfirm) {
       Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
         { text: "Cancel", style: "cancel" },
         {
           text: unassignedConfirm.confirmLabel,
-          onPress: () => void submitBookingFulfil(assetIds, kitIds),
+          onPress: () =>
+            void submitBookingFulfil(assetIds, kitIds, match.matched),
         },
       ]);
       return;
@@ -2161,7 +2171,8 @@ function ScannerContent() {
         { text: "Cancel", style: "cancel" },
         {
           text: "Check out",
-          onPress: () => void submitBookingFulfil(assetIds, kitIds),
+          onPress: () =>
+            void submitBookingFulfil(assetIds, kitIds, match.matched),
         },
       ]
     );

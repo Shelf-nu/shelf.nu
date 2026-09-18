@@ -248,3 +248,87 @@ export function unassignedCheckoutConfirm(
     confirmLabel: "Check out anyway",
   };
 }
+
+/** A booking's model reservation, as the booking endpoint sends it. */
+export type BookingModelRequestRow = {
+  assetModelId: string;
+  assetModelName: string;
+  /** Units of this model with no concrete asset behind them yet. */
+  outstandingQuantity: number;
+  /** Set once every unit has been assigned. */
+  fulfilledAt: string | null;
+};
+
+/**
+ * The reservations a scan can still assign a unit of, from a booking payload.
+ *
+ * Both halves are required: `fulfilledAt` is the completion stamp, and
+ * `outstandingQuantity` is the work left. A row satisfying one but not the
+ * other has nothing to assign and would render "0 × Model".
+ *
+ * @param rows The booking's reservations; absent on an older server.
+ * @returns One entry per reservation with units left, in the order given.
+ */
+export function toOutstandingReservations(
+  rows: readonly BookingModelRequestRow[] | undefined | null
+): OutstandingReservation[] {
+  return (rows ?? [])
+    .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
+    .map((r) => ({
+      assetModelId: r.assetModelId,
+      assetModelName: r.assetModelName,
+      outstandingQuantity: r.outstandingQuantity,
+    }));
+}
+
+/** What a fulfil-and-check-out sent out, as the operator is told it. */
+export type FulfilOutcome = {
+  /** Scanned units that assigned a reserved unit. */
+  assigned: number;
+  /** Scanned assets that assigned nothing and joined the booking as extras. */
+  extras: number;
+  /** Booked assets the server reports as still to check out. */
+  remaining: number;
+  /** The booking's name, quoted when the whole booking went out. */
+  bookingName: string;
+};
+
+/**
+ * Report a finished check-out, naming assigned units and extras separately.
+ *
+ * The submit carries both — units that answer a reservation and scans that
+ * merely join the booking — and the scanner's own button names the two halves,
+ * so one combined total would contradict it and hide that a unit was never
+ * reserved.
+ *
+ * @param outcome See {@link FulfilOutcome}.
+ * @returns The message to show.
+ */
+export function describeFulfilCheckout({
+  assigned,
+  extras,
+  remaining,
+  bookingName,
+}: FulfilOutcome): string {
+  const units = function plural(n: number, noun: string) {
+    return `${n} ${noun}${n === 1 ? "" : "s"}`;
+  };
+  const parts: string[] = [];
+  if (assigned > 0) parts.push(`Assigned ${units(assigned, "unit")}`);
+  if (extras > 0) {
+    parts.push(
+      assigned > 0
+        ? `added ${units(extras, "extra")}`
+        : `Added ${units(extras, "extra")}`
+    );
+  }
+  const lead = parts.join(", ");
+
+  if (remaining > 0) {
+    const pronoun = assigned + extras === 1 ? "it" : "them";
+    return `${lead} and checked ${pronoun} out. ${remaining} more asset${
+      remaining === 1 ? " is" : "s are"
+    } still to check out.`;
+  }
+  return `${lead} and checked out "${bookingName || "the booking"}".`;
+}

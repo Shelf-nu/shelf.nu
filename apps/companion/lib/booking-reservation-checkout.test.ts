@@ -16,9 +16,11 @@ import { test } from "node:test";
 
 import {
   canFulfilCheckOut,
+  describeFulfilCheckout,
   formatUnassignedReservations,
   hasAssetsLeftToCheckOut,
   matchScansToReservations,
+  toOutstandingReservations,
   unassignedCheckoutConfirm,
   type OutstandingReservation,
   type ReservationScan,
@@ -249,5 +251,119 @@ test("asks nothing when no reserved unit stays unassigned", () => {
       { assetModelName: "HP", outstandingQuantity: 0 },
     ]),
     null
+  );
+});
+
+// ── Outstanding reservations from a booking payload ─────
+
+test("keeps only reservations with units left to assign", () => {
+  assert.deepEqual(
+    toOutstandingReservations([
+      {
+        assetModelId: "m-dell",
+        assetModelName: "Dell Latitude",
+        outstandingQuantity: 2,
+        fulfilledAt: null,
+      },
+      {
+        assetModelId: "m-done",
+        assetModelName: "Fulfilled",
+        outstandingQuantity: 0,
+        fulfilledAt: null,
+      },
+      {
+        assetModelId: "m-stamped",
+        assetModelName: "Stamped",
+        outstandingQuantity: 1,
+        fulfilledAt: "2026-09-18T00:00:00.000Z",
+      },
+    ]),
+    [
+      {
+        assetModelId: "m-dell",
+        assetModelName: "Dell Latitude",
+        outstandingQuantity: 2,
+      },
+    ]
+  );
+});
+
+test("reads a booking that reserves no models as nothing outstanding", () => {
+  assert.deepEqual(toOutstandingReservations(undefined), []);
+});
+
+// ── What the check-out actually sent out ────────────────
+
+test("names assigned units and extras separately", () => {
+  // The submit carries both: units that answer a reservation, and scans that
+  // just join the booking. One total would hide which is which.
+  assert.equal(
+    describeFulfilCheckout({
+      assigned: 1,
+      extras: 1,
+      remaining: 0,
+      bookingName: "Load-in",
+    }),
+    'Assigned 1 unit, added 1 extra and checked out "Load-in".'
+  );
+});
+
+test("leaves extras out when every scan assigned a unit", () => {
+  assert.equal(
+    describeFulfilCheckout({
+      assigned: 2,
+      extras: 0,
+      remaining: 0,
+      bookingName: "Load-in",
+    }),
+    'Assigned 2 units and checked out "Load-in".'
+  );
+});
+
+test("says only what was added when no scan assigned a unit", () => {
+  assert.equal(
+    describeFulfilCheckout({
+      assigned: 0,
+      extras: 3,
+      remaining: 0,
+      bookingName: "Load-in",
+    }),
+    'Added 3 extras and checked out "Load-in".'
+  );
+});
+
+test("reports what is still to check out when the booking stays open", () => {
+  assert.equal(
+    describeFulfilCheckout({
+      assigned: 1,
+      extras: 0,
+      remaining: 2,
+      bookingName: "Load-in",
+    }),
+    "Assigned 1 unit and checked it out. 2 more assets are still to check out."
+  );
+});
+
+test("agrees in number for a single remaining asset", () => {
+  assert.equal(
+    describeFulfilCheckout({
+      assigned: 2,
+      extras: 0,
+      remaining: 1,
+      bookingName: "Load-in",
+    }),
+    "Assigned 2 units and checked them out. 1 more asset is still to check out."
+  );
+});
+
+test("falls back when the booking has no name to quote", () => {
+  assert.equal(
+    describeFulfilCheckout({
+      assigned: 1,
+      extras: 0,
+      remaining: 0,
+      bookingName: "",
+    }),
+    'Assigned 1 unit and checked out "the booking".'
   );
 });

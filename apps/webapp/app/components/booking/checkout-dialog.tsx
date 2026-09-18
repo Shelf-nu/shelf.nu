@@ -75,6 +75,12 @@ type CheckoutDialogProps = {
   unassignedUnits?: UnassignedModelUnits[];
 };
 
+/**
+ * Stable empty list for the default below: a fresh `[]` per render would be a
+ * new prop value every time for a caller that passes nothing.
+ */
+const NO_UNASSIGNED_UNITS: UnassignedModelUnits[] = [];
+
 export default function CheckoutDialog({
   disabled,
   booking,
@@ -86,7 +92,7 @@ export default function CheckoutDialog({
   variant = "default",
   suppressEarlyCheckoutPrompt = false,
   fullWidth = false,
-  unassignedUnits = [],
+  unassignedUnits = NO_UNASSIGNED_UNITS,
 }: CheckoutDialogProps) {
   const isEarlyCheckout =
     !suppressEarlyCheckoutPrompt && isBookingEarlyCheckout(booking.from);
