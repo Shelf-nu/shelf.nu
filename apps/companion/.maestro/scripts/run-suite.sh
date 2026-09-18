@@ -83,12 +83,19 @@ echo ""
 
 platform_ensure_device
 
+FLOWS_ROOT=$(platform_prepare_flows "$MAESTRO_DIR")
+trap 'platform_cleanup_flows "$FLOWS_ROOT" "$MAESTRO_DIR"' EXIT
+SUITE_DIR="$FLOWS_ROOT/flows/$SUITE_NAME"
+
 # Create results dir
 mkdir -p "$RESULTS_DIR"
 
 # Toggle dark mode for dark-mode suite
 if [ "$SUITE_NAME" = "dark-mode" ]; then
-  platform_set_appearance dark
+  if ! platform_set_appearance dark; then
+    echo -e "${RED}✗ dark-mode: device is not in dark mode, suite not run${NC}"
+    exit 1
+  fi
   echo -e "${YELLOW}  Set device to dark mode${NC}"
 fi
 
@@ -115,7 +122,7 @@ done
 
 # Reset dark mode
 if [ "$SUITE_NAME" = "dark-mode" ]; then
-  platform_set_appearance light
+  platform_set_appearance light || echo -e "${YELLOW}⚠ Device left in dark mode${NC}"
 fi
 
 TOTAL=$((PASS_COUNT + FAIL_COUNT))

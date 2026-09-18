@@ -277,7 +277,8 @@ the native modules under them are not: date pickers, action sheets, permission
 dialogs and the camera all take different props and fail differently on Android.
 A green iOS run tells you nothing about any of them — 1.4.0 shipped an
 Android-only crash in the booking date picker for exactly this reason.
-Override the device with `IOS_SIMULATOR` or `ANDROID_AVD`.
+Pick the device with `IOS_SIMULATOR` (name or UDID) or `ANDROID_AVD`; the
+Android runs drive `com.shelf.companion`, overridable with `ANDROID_APP_ID`.
 
 **Typical workflow:**
 

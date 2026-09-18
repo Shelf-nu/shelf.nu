@@ -85,6 +85,9 @@ echo -e "${GREEN}✓ $(platform_label) ready${NC}"
 
 platform_reset_credentials "$(maestro_app_id "$MAESTRO_DIR")"
 
+FLOWS_ROOT=$(platform_prepare_flows "$MAESTRO_DIR")
+trap 'platform_cleanup_flows "$FLOWS_ROOT" "$MAESTRO_DIR"' EXIT
+
 # ─── Create results directory ───────────────────────────────────────
 mkdir -p "$RESULTS_DIR"
 echo -e "${GREEN}✓ Results dir: $RESULTS_DIR${NC}"
@@ -106,7 +109,7 @@ SUITE_RESULTS=()
 
 # ─── Run each suite ────────────────────────────────────────────────
 for suite in "${SUITES[@]}"; do
-  SUITE_DIR="$MAESTRO_DIR/flows/$suite"
+  SUITE_DIR="$FLOWS_ROOT/flows/$suite"
   if [ ! -d "$SUITE_DIR" ]; then
     echo -e "${YELLOW}⊘ Skipping: $suite (directory not found)${NC}"
     SKIP_COUNT=$((SKIP_COUNT + 1))
@@ -143,16 +146,27 @@ done
 
 # ─── Dark mode suite (optional) ────────────────────────────────────
 if [ "${SKIP_DARK:-}" != "1" ]; then
-  DARK_DIR="$MAESTRO_DIR/flows/dark-mode"
+  DARK_DIR="$FLOWS_ROOT/flows/dark-mode"
   if [ -d "$DARK_DIR" ]; then
     echo -e "${CYAN}${BOLD}━━━ Running: dark-mode ━━━${NC}"
 
-    # Set simulator to dark mode
-    platform_set_appearance dark
     SUITE_PASS=0
     SUITE_FAIL=0
 
-    for flow in "$DARK_DIR"/*.yaml; do
+    # A dark-mode pass only means something if the device is in dark mode, so
+    # a failed switch fails the suite instead of running it.
+    if ! platform_set_appearance dark; then
+      echo -e "${RED}  ✗ Device is not in dark mode, suite not run${NC}"
+      TOTAL_COUNT=$((TOTAL_COUNT + 1))
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      SUITE_FAIL=1
+      FAILED_TESTS+=("dark-mode/set-appearance")
+      DARK_FLOWS=()
+    else
+      DARK_FLOWS=("$DARK_DIR"/*.yaml)
+    fi
+
+    for flow in ${DARK_FLOWS[@]+"${DARK_FLOWS[@]}"}; do
       [ -f "$flow" ] || continue
       FLOW_NAME=$(basename "$flow" .yaml)
       TOTAL_COUNT=$((TOTAL_COUNT + 1))
@@ -174,8 +188,8 @@ if [ "${SKIP_DARK:-}" != "1" ]; then
 
     SUITE_RESULTS+=("dark-mode: $SUITE_PASS passed, $SUITE_FAIL failed")
 
-    # Reset simulator back to light mode
-    platform_set_appearance light
+    # Reset the device back to light mode
+    platform_set_appearance light || echo -e "${YELLOW}  ⚠ Device left in dark mode${NC}"
     echo ""
   fi
 fi

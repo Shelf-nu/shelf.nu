@@ -60,9 +60,7 @@ tags:
     commands:
       # iOS shows one inline picker; confirming closes it.
       - waitForAnimationToEnd
-      - tapOn:
-          text: "15"
-          optional: true
+      - tapOn: "15"
 
 # The assertion that fails on the crash: the form is still mounted. A blank
 # screen has no "Ends" field, and the ErrorBoundary fallback reads "Error".
@@ -91,9 +89,7 @@ tags:
       platform: iOS
     commands:
       - waitForAnimationToEnd
-      - tapOn:
-          text: "20"
-          optional: true
+      - tapOn: "20"
 
 - extendedWaitUntil:
     visible: ".*Starts.*tap to change.*"
