@@ -241,7 +241,7 @@ describe(checkUserAndInviteMatch.name, () => {
   });
 });
 
-describe("createInvite — earlier invites of the same person", () => {
+describe("createInvite: earlier invites of the same person", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ssoMock.checkDomainSSOStatus.mockResolvedValue({
@@ -314,7 +314,7 @@ describe("createInvite — earlier invites of the same person", () => {
   });
 });
 
-describe("bulkInviteUsers — email case", () => {
+describe("bulkInviteUsers: email case", () => {
   type BulkUsers = Parameters<typeof bulkInviteUsers>[0]["users"];
 
   /** Builds CSV rows the way the import route hands them over */
