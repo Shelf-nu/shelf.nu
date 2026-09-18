@@ -45,9 +45,17 @@ const sheetVariants = cva(
         right:
           "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right ",
       },
+      // `wide` gives a sheet room for a full advanced-index table (the
+      // drill-down sheet); every other sheet keeps the unset default so its
+      // width comes entirely from `side`.
+      size: {
+        default: "",
+        wide: "sm:max-w-[min(1100px,92vw)] w-full",
+      },
     },
     defaultVariants: {
       side: "right",
+      size: "default",
     },
   }
 );
@@ -61,14 +69,21 @@ const SheetContent = forwardRef<
   SheetContentProps & { hideCloseButton?: boolean }
 >(
   (
-    { side = "right", className, children, hideCloseButton = false, ...props },
+    {
+      side = "right",
+      size = "default",
+      className,
+      children,
+      hideCloseButton = false,
+      ...props
+    },
     ref
   ) => (
     <SheetPortal>
       <SheetOverlay />
       <SheetPrimitive.Content
         ref={ref}
-        className={tw(sheetVariants({ side }), className)}
+        className={tw(sheetVariants({ side, size }), className)}
         {...props}
       >
         <When truthy={!hideCloseButton}>
