@@ -3041,6 +3041,92 @@ describe("bulkReleaseKitCustody - emit-before-cascade", () => {
   });
 });
 
+describe("bulkReleaseKitCustody - per-kit custodian in events", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("records each kit's own custodian as targetUserId", async () => {
+    expect.assertions(2);
+
+    const kitsInCustody = [
+      {
+        id: "kit-1",
+        status: KitStatus.IN_CUSTODY,
+        custody: {
+          id: "kc-1",
+          custodian: { id: "tm-1", name: "Alice", user: { id: "user-alice" } },
+        },
+        assets: [
+          {
+            id: "asset-1",
+            status: AssetStatus.IN_CUSTODY,
+            title: "Asset 1",
+            custody: [{ id: "custody-1" }],
+            kit: { id: "kit-1", name: "Kit 1" },
+          },
+        ],
+      },
+      {
+        id: "kit-2",
+        status: KitStatus.IN_CUSTODY,
+        custody: {
+          id: "kc-2",
+          custodian: { id: "tm-2", name: "Bob", user: { id: "user-bob" } },
+        },
+        assets: [
+          {
+            id: "asset-2",
+            status: AssetStatus.IN_CUSTODY,
+            title: "Asset 2",
+            custody: [{ id: "custody-2" }],
+            kit: { id: "kit-2", name: "Kit 2" },
+          },
+        ],
+      },
+    ];
+
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(kitsInCustody);
+    //@ts-expect-error missing vitest type
+    db.kitCustody.findMany.mockResolvedValue([
+      { id: "kc-1", kitId: "kit-1", custodianId: "tm-1" },
+      { id: "kc-2", kitId: "kit-2", custodianId: "tm-2" },
+    ]);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>)
+      // First call: the rows this release actually removed.
+      .mockResolvedValueOnce([
+        { assetId: "asset-1", teamMemberId: "tm-1", kitCustodyId: "kc-1" },
+        { assetId: "asset-2", teamMemberId: "tm-2", kitCustodyId: "kc-2" },
+      ])
+      // Second call: still-custodied check after the cascade (none).
+      .mockResolvedValueOnce([]);
+
+    const { recordEvents } = await import(
+      "~/modules/activity-event/service.server"
+    );
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await bulkReleaseKitCustody({
+      allowedTeamMemberIds: "all" as const,
+      role: "ADMIN" as const,
+      kitIds: ["kit-1", "kit-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    const events = (recordEvents as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0] as Array<{ assetId: string; targetUserId?: string }>;
+    const targetByAsset = new Map(
+      events.map((e) => [e.assetId, e.targetUserId])
+    );
+
+    expect(targetByAsset.get("asset-1")).toBe("user-alice");
+    expect(targetByAsset.get("asset-2")).toBe("user-bob");
+  });
+});
+
 describe("releaseCustody (single kit) - emit-before-cascade", () => {
   beforeEach(() => {
     vitest.clearAllMocks();

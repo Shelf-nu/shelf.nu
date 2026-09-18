@@ -1,5 +1,6 @@
 import {
   AssetStatus,
+  AssetType,
   OrganizationRoles,
   type AssetIndexSettings,
 } from "@prisma/client";
@@ -39,6 +40,7 @@ import {
   bulkCreateAssetsFromModel,
   bulkDeleteAssets,
   bulkUpdateAssetCategory,
+  bulkUpdateAssetLocation,
   bulkUpdateAssetModel,
   buildAssetKitCreateData,
   checkOutQuantity,
@@ -110,6 +112,12 @@ vitest.mock("~/database/db.server", () => ({
     },
     tag: {
       findMany: vitest.fn().mockResolvedValue([]),
+    },
+    // why: the bulk paths write their per-asset system notes inside the same
+    // transaction as the mutation, so the delegate has to exist for the tx
+    // body to run at all.
+    note: {
+      createMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     qr: {
       update: vitest.fn().mockResolvedValue({}),
@@ -5534,5 +5542,76 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     expect(db.custody.deleteMany).toHaveBeenCalledWith({
       where: { assetId: { in: ["asset-1"] }, kitCustodyId: null },
     });
+  });
+});
+
+describe("bulkUpdateAssetLocation — location activity notes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("names only the assets the update actually moved", async () => {
+    // A QUANTITY_TRACKED asset is skipped by this path (placements need a
+    // per-location quantity), so the location's timeline must not claim it
+    // arrived. Asserted through the note, which is the only place a reader
+    // ever sees this list.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-individual",
+        title: "Tripod",
+        type: AssetType.INDIVIDUAL,
+        quantity: null,
+        assetLocations: [
+          {
+            locationId: "loc-old",
+            location: { id: "loc-old", name: "Old Location" },
+          },
+        ],
+        assetKits: [],
+      },
+      {
+        id: "asset-qty",
+        title: "Gaffer tape",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        assetLocations: [
+          {
+            locationId: "loc-old",
+            location: { id: "loc-old", name: "Old Location" },
+          },
+        ],
+        assetKits: [],
+      },
+    ]);
+    (db.location.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "loc-new",
+      name: "New Location",
+      organizationId: "org-1",
+    });
+    (db.$transaction as ReturnType<typeof vitest.fn>).mockImplementation(
+      (callback: (tx: unknown) => unknown) => callback(db)
+    );
+
+    const { createSystemLocationNote } = await import(
+      "~/modules/location-note/service.server"
+    );
+
+    await bulkUpdateAssetLocation({
+      userId: "user-1",
+      assetIds: ["asset-individual", "asset-qty"],
+      organizationId: "org-1",
+      newLocationId: "loc-new",
+      settings: ASSET_INDEX_SETTINGS,
+    });
+
+    const contents = (
+      createSystemLocationNote as ReturnType<typeof vitest.fn>
+    ).mock.calls.map((c) => (c[0] as { content: string }).content);
+
+    expect(contents.length).toBeGreaterThan(0);
+    for (const content of contents) {
+      expect(content).toContain("asset-individual");
+      expect(content).not.toContain("asset-qty");
+    }
   });
 });
