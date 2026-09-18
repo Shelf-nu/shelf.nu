@@ -55,8 +55,10 @@ Accounts signing in with SSO have certain limitations. The following sections ou
 
 ### Enable SSO for your organization [#](#enable-sso-for-your-organization)
 
-- Workspace invites are not restricted to company members belonging to the same identity provider. You can also invite normal users to your workspace
-- SSO users don't get a personal workspace which by default comes with any normal user
+- You can invite people whose email domain is not set up for SSO (for example a contractor's gmail.com address). They join as normal users.
+- You cannot invite people whose email is on your workspace's SSO domain. Their access comes from your identity provider's group mapping, not from invites.
+- People on a different company's SSO domain can only be invited after they have signed in to Shelf with SSO at least once.
+- SSO users cannot see or switch to a personal workspace. When the account is created by the user's first SSO sign-in, Shelf still creates one in the background, but it stays hidden on web and mobile. Accounts provisioned through SCIM don't get one.
 - An SSO user will not be able to update or reset their password since the company administrator manages their access via the identity provider.
 - An SSO user will not be able to buy their own subscription to Shelf.
 - If an SSO user with the following email of huis@zaans.com attempts to sign in with email, they will be refused access to shelf. Once a email is linked to an SSO account, they are not able to create a normal account with the same email
