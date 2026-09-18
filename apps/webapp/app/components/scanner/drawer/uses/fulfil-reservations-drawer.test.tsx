@@ -28,9 +28,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   type ExpectedModelRequest,
+  type FulfilSessionInfo,
   expectedModelRequestsAtom,
   fulfilSessionAtom,
+  scannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 
 import FulfilReservationsDrawer from "./fulfil-reservations-drawer";
 
@@ -81,12 +84,23 @@ vi.mock("~/components/list/list-header", () => ({
 }));
 
 // why: Radix AlertDialog portals don't settle in happy-dom. The check-out
-// dialog's trigger button is what these tests locate; the dialog body is not
+// dialog's trigger button is what these tests locate, and the units it would
+// ask the operator to confirm are exposed on it; the dialog body is not
 // asserted against.
 vi.mock("~/components/booking/checkout-dialog", () => ({
   __esModule: true,
-  default: ({ disabled }: { disabled?: boolean }) => (
-    <button type="submit" disabled={disabled}>
+  default: ({
+    disabled,
+    unassignedUnits,
+  }: {
+    disabled?: boolean;
+    unassignedUnits?: Array<{ name: string; count: number }>;
+  }) => (
+    <button
+      type="submit"
+      disabled={disabled}
+      data-unassigned={JSON.stringify(unassignedUnits ?? [])}
+    >
       Check out
     </button>
   ),
@@ -108,8 +122,36 @@ function makeExpectedModels(n: number): ExpectedModelRequest[] {
   }));
 }
 
-/** Mounts the drawer with a seeded fulfil session for `modelCount` models. */
-function renderDrawer(modelCount: number) {
+/** An item already on the booking, as the loader lists it. */
+const ALREADY_ON_BOOKING: Exclude<
+  FulfilSessionInfo,
+  null
+>["alreadyIncluded"][number] = {
+  id: "asset-tripod",
+  title: "Tripod",
+  mainImage: null,
+  thumbnailImage: null,
+  assetModelId: null,
+  kitId: null,
+  bookedQuantity: 1,
+  type: "INDIVIDUAL",
+};
+
+/**
+ * Mounts the drawer with a seeded fulfil session for `modelCount` models.
+ *
+ * @param options.alreadyIncluded - Items already on the booking.
+ * @param options.checksOutScannedOnly - Whether submit sends out scans only.
+ * @param options.scannedAssets - Resolved scans, keyed by their QR id.
+ */
+function renderDrawer(
+  modelCount: number,
+  options: {
+    alreadyIncluded?: Exclude<FulfilSessionInfo, null>["alreadyIncluded"];
+    checksOutScannedOnly?: boolean;
+    scannedAssets?: Record<string, Partial<AssetFromQr>>;
+  } = {}
+) {
   const store = createStore();
   const expectedModelRequests = makeExpectedModels(modelCount);
 
@@ -117,10 +159,21 @@ function renderDrawer(modelCount: number) {
     bookingId: "booking-1",
     bookingName: "Nishanth",
     bookingFrom: new Date("2099-01-01T10:00:00Z").toISOString(),
+    bookingStatus: "RESERVED",
+    checksOutScannedOnly: options.checksOutScannedOnly ?? false,
     expectedModelRequests,
-    alreadyIncluded: [],
+    alreadyIncluded: options.alreadyIncluded ?? [],
   });
   store.set(expectedModelRequestsAtom, expectedModelRequests);
+  store.set(
+    scannedItemsAtom,
+    Object.fromEntries(
+      Object.entries(options.scannedAssets ?? {}).map(([qrId, asset]) => [
+        qrId,
+        { type: "asset" as const, data: asset as AssetFromQr },
+      ])
+    )
+  );
 
   return render(
     <Provider store={store}>
@@ -260,5 +313,77 @@ describe("FulfilReservationsDrawer layout", () => {
       expect(getModelsToggle()).toHaveTextContent("40 models reserved");
       expect(getModelsToggle()).toHaveTextContent("0 / 160");
     });
+  });
+});
+
+/**
+ * A check-out needs at least one item to go out, and nothing more. Reserved
+ * units still unassigned are confirmed by the operator and stay open on the
+ * booking; they never keep the button disabled.
+ */
+describe("FulfilReservationsDrawer check-out rule", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useRouteLoaderDataMock.mockReturnValue({
+      minimizedSidebar: false,
+    } as never);
+  });
+
+  it("offers check-out while reserved units are unassigned, once an item would go out", () => {
+    // Two models x 4 units, nothing scanned; the booking already holds a
+    // tripod, and the whole booking goes out.
+    renderDrawer(2, { alreadyIncluded: [ALREADY_ON_BOOKING] });
+
+    const checkoutButton = screen.getByRole("button", { name: "Check out" });
+
+    expect(checkoutButton).toBeEnabled();
+    expect(screen.getByText("8 reserved units still unassigned")).toBeTruthy();
+    // The confirmation names every model with units still to assign.
+    expect(JSON.parse(checkoutButton.dataset.unassigned ?? "[]")).toEqual([
+      { name: 'Matthews 24" x 36" Black Flag 0', count: 4 },
+      { name: 'Matthews 24" x 36" Black Flag 1', count: 4 },
+    ]);
+  });
+
+  it("keeps check-out disabled while nothing would go out", () => {
+    renderDrawer(2);
+
+    expect(screen.getByRole("button", { name: "Check out" })).toBeDisabled();
+    expect(
+      screen.getByText("Scan at least one item to check out")
+    ).toBeTruthy();
+  });
+
+  it("requires a scan when only scanned items go out, even with items on the booking", () => {
+    renderDrawer(2, {
+      alreadyIncluded: [ALREADY_ON_BOOKING],
+      checksOutScannedOnly: true,
+    });
+
+    expect(screen.getByRole("button", { name: "Check out" })).toBeDisabled();
+  });
+
+  it("checks out an item already on the booking by scanning it, when only scanned items go out", () => {
+    renderDrawer(2, {
+      alreadyIncluded: [ALREADY_ON_BOOKING],
+      checksOutScannedOnly: true,
+      scannedAssets: {
+        "qr-tripod": {
+          id: "asset-tripod",
+          title: "Tripod",
+          type: "INDIVIDUAL",
+          assetModelId: null,
+          mainImage: null,
+          thumbnailImage: null,
+        },
+      },
+    });
+
+    expect(screen.getByRole("button", { name: "Check out" })).toBeEnabled();
+    expect(screen.getByText("Ready to check out")).toBeTruthy();
+    expect(document.querySelector('input[name="assetIds[0]"]')).toHaveAttribute(
+      "value",
+      "asset-tripod"
+    );
   });
 });

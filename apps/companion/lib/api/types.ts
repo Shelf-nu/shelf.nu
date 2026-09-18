@@ -738,9 +738,9 @@ export type BookingListItem = {
   assetCount: number;
   /**
    * Outstanding book-by-model reservations still to assign (units reserved at
-   * the model level with no concrete asset behind them yet). > 0 means the
-   * booking can't be checked out until matching assets are assigned. Optional
-   * for back-compat with an older server response.
+   * the model level with no concrete asset behind them yet). They don't stop a
+   * check-out; they stay open on the booking until scanned or released.
+   * Optional for back-compat with an older server response.
    */
   outstandingModelCount?: number;
   /**

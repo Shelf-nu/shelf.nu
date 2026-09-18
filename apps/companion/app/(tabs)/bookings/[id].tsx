@@ -54,6 +54,10 @@ import {
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import {
+  hasAssetsLeftToCheckOut,
+  unassignedCheckoutConfirm,
+} from "@/lib/booking-reservation-checkout";
 import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
 import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
 import {
@@ -302,33 +306,47 @@ export default function BookingDetailScreen() {
 
   const handleCheckout = () => {
     if (!booking || !currentOrg) return;
+
+    const submit = async () => {
+      setIsActioning(true);
+      const { error: err } = await api.checkoutBooking(
+        currentOrg.id,
+        booking.id,
+        getTimeZone()
+      );
+      setIsActioning(false);
+      if (err) {
+        Alert.alert("Error", err);
+        return;
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Mutation changed this booking — force the list to refetch.
+      markBookingsListDirty();
+      Alert.alert("Checked Out", `"${booking.name}" is now ongoing.`, [
+        { text: "OK", onPress: () => fetchBooking() },
+      ]);
+    };
+
+    // Reserved units nobody has assigned yet don't stop the check-out; they
+    // stay open on the booking. This confirm stands in for the plain one, so
+    // the operator agrees to both in a single step.
+    const unassignedConfirm = unassignedCheckoutConfirm(
+      booking.modelRequests ?? []
+    );
+    if (unassignedConfirm) {
+      Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
+        { text: "Cancel", style: "cancel" },
+        { text: unassignedConfirm.confirmLabel, onPress: () => void submit() },
+      ]);
+      return;
+    }
+
     Alert.alert(
       "Check Out",
       `Check out "${booking.name}"?\n\nAll ${booking.assetCount} assets will be marked as checked out.`,
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Check Out",
-          onPress: async () => {
-            setIsActioning(true);
-            const { error: err } = await api.checkoutBooking(
-              currentOrg.id,
-              booking.id,
-              getTimeZone()
-            );
-            setIsActioning(false);
-            if (err) {
-              Alert.alert("Error", err);
-              return;
-            }
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            // Mutation changed this booking — force the list to refetch.
-            markBookingsListDirty();
-            Alert.alert("Checked Out", `"${booking.name}" is now ongoing.`, [
-              { text: "OK", onPress: () => fetchBooking() },
-            ]);
-          },
-        },
+        { text: "Check Out", onPress: () => void submit() },
       ]
     );
   };
@@ -502,6 +520,40 @@ export default function BookingDetailScreen() {
     const individualIds = selected
       .filter((a) => a.type !== "QUANTITY_TRACKED")
       .map((a) => a.id);
+    // Walk each QT asset through the quantity picker before submitting.
+    const startQuantityPicker = () =>
+      setCheckoutQueue({
+        queue: qtAssets,
+        index: 0,
+        collected: [],
+        individualIds,
+      });
+
+    // The selection that takes a RESERVED booking out is the one that leaves
+    // its unassigned reservations open, so that is where the operator confirms
+    // it; an ongoing booking already went out with them open. The confirm
+    // stands in for the plain one, then the check-out carries on as usual.
+    const unassignedConfirm =
+      booking.status === "RESERVED"
+        ? unassignedCheckoutConfirm(booking.modelRequests ?? [])
+        : null;
+    if (unassignedConfirm) {
+      Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: unassignedConfirm.confirmLabel,
+          onPress: () => {
+            if (qtAssets.length === 0) {
+              void submitCheckout(individualIds, []);
+            } else {
+              startQuantityPicker();
+            }
+          },
+        },
+      ]);
+      return;
+    }
+
     if (qtAssets.length === 0) {
       // No quantity to pick (INDIVIDUAL-only, or the server didn't send QT
       // metadata) — keep the simple confirm + bare send.
@@ -519,13 +571,7 @@ export default function BookingDetailScreen() {
       );
       return;
     }
-    // Walk each QT asset through the quantity picker before submitting.
-    setCheckoutQueue({
-      queue: qtAssets,
-      index: 0,
-      collected: [],
-      individualIds,
-    });
+    startQuantityPicker();
   };
 
   const handleReserve = () => {
@@ -1260,37 +1306,26 @@ export default function BookingDetailScreen() {
   const outstandingModelRequests = (booking.modelRequests ?? []).filter(
     (mr) => mr.fulfilledAt === null && mr.fulfilledQuantity < mr.quantity
   );
-  // A booking with unfulfilled model reservations can't be checked out at all
-  // (full OR partial): the shared checkout service hard-blocks RESERVED →
-  // ONGOING until every request is assigned to concrete assets. So gate BOTH
-  // checkout paths on this — the app surfaces an "Assign to check out" CTA
-  // instead of a checkout the server would reject. (`canCheckout` from the
-  // loader already accounts for this; `canPartialCheckout` is derived here.)
+  // Unassigned reservations never stop a check-out: a booking goes out as soon
+  // as one item leaves, and the rest stay open on it. They only decide whether
+  // to offer the scan-to-assign CTA below, and a check-out that takes the
+  // booking out of RESERVED confirms them before going ahead.
   const hasOutstandingModelRequests = outstandingModelRequests.length > 0;
 
   // Progressive check-out stays available while the booking is active AND still
   // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
   // RESERVED/ONGOING/OVERDUE, but the loader's `canCheckout` is RESERVED-only (it
-  // gates the full "Check Out All" button), so we derive our own flag for the
-  // partial path — otherwise "Select to Check Out" disappears the moment the
-  // first batch flips the booking to ONGOING.
-  // Each row answers for itself. Booking-wide arithmetic cannot: a pooled
-  // asset's remaining units and its global status are independent, so
-  // subtracting whole returned and checked-out assets from the total both
-  // hides the control while units remain (a partial return cancels the row
-  // against its own count) and shows it when none do (a spent row whose
-  // status is still AVAILABLE). A quantity-tracked row is answered by the
-  // booking-scoped count the server sends for it; every other row by whether
-  // it is still on the booking and not yet out.
-  const hasUnitsLeftToCheckOut = booking.assets.some((a) =>
-    typeof a.remainingToCheckOut === "number"
-      ? a.remainingToCheckOut > 0
-      : a.status !== "CHECKED_OUT" && !checkedInAssetIds.includes(a.id)
+  // gates the full "Check Out All" button), so this flag is derived separately
+  // for the partial path, which must outlive the first batch that flips the
+  // booking to ONGOING. Whether anything is left is answered row by row; see
+  // `hasAssetsLeftToCheckOut`.
+  const hasUnitsLeftToCheckOut = hasAssetsLeftToCheckOut(
+    booking.assets,
+    new Set(checkedInAssetIds)
   );
 
   const canPartialCheckout =
     hasUnitsLeftToCheckOut &&
-    !hasOutstandingModelRequests &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
   /**
@@ -1781,7 +1816,9 @@ export default function BookingDetailScreen() {
             {/* Full check-out is RESERVED-only (web parity); the loader's
                 canCheckout reflects that. It is hidden when the workspace
                 requires explicit check-out for this role, which leaves
-                "Select to Check Out" below as the way to check out. */}
+                "Select to Check Out" below as the way to check out.
+                Unassigned reservations don't hide it: handleCheckout names
+                them and asks before checking out. */}
             {canCheckout && canQuickCheckout && (
               <TouchableOpacity
                 style={styles.actionButton}
@@ -1870,21 +1907,21 @@ export default function BookingDetailScreen() {
             )}
 
             {/* Book-by-model: a RESERVED booking with unfulfilled reservations
-                has no plain checkout button (the server hard-blocks checkout
-                until every reserved unit is assigned to a concrete asset).
-                Route the operator to the fulfil-and-check-out SCANNER
-                (`bookingAction=fulfil`): it shows what's reserved, they scan
-                the physical units, and on submit the reservations are
-                materialised AND the booking is checked out in one atomic call
-                (`fulfilModelRequestsAndCheckout`) — full web parity with the
-                web `fulfil-and-checkout` scanner. Scan-first IS the point of
-                book-by-model: reserve the count now, scan the items when you
-                grab them, no browse picker. (Browse to Add above stays for
-                hand-picking.) Gated `!isRestrictedRole` to match the add/browse
-                affordances above: a restricted custodian can only edit a
-                DRAFT booking, so on a RESERVED booking the assign+checkout flow
-                can't succeed for them — showing the CTA would just lead to a
-                rejected submit. */}
+                offers the fulfil-and-check-out SCANNER
+                (`bookingAction=fulfil`): it shows what's reserved, the
+                operator scans the physical units, and on submit the scanned
+                units are assigned AND the booking is checked out in one call
+                (`fulfilAndCheckOut`) — web parity with the web
+                `fulfil-and-checkout` scanner. The scan need not cover every
+                reserved unit; whatever it leaves unassigned stays open on the
+                booking, and the scanner confirms that before submitting.
+                Scan-first IS the point of book-by-model: reserve the count
+                now, scan the items when you grab them, no browse picker.
+                (Browse to Add above stays for hand-picking.) Gated
+                `!isRestrictedRole` to match the add/browse affordances above:
+                a restricted custodian can only edit a DRAFT booking, so on a
+                RESERVED booking the assign+checkout flow can't succeed for
+                them — showing the CTA would just lead to a rejected submit. */}
             {!isRestrictedRole &&
               booking.status === "RESERVED" &&
               hasOutstandingModelRequests && (
