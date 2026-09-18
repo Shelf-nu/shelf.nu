@@ -164,9 +164,8 @@ vitest.mock("~/database/db.server", () => {
         updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
         deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       },
-      // why: checkoutBooking's defence-in-depth guard reads
-      // `bookingModelRequest` for outstanding model-request rows that would
-      // block checkout. Default to none so the delegate path proceeds.
+      // why: the add-assets and remove-assets flows this suite reaches read
+      // and drain model reservations. Default to none.
       bookingModelRequest: {
         findMany: vitest.fn().mockResolvedValue([]),
         findUnique: vitest.fn().mockResolvedValue(null),

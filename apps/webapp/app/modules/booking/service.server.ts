@@ -88,7 +88,6 @@ import {
   bookingWriteScopeClause,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { canUserRemoveBookingAssets } from "~/utils/bookings";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -2682,9 +2681,10 @@ async function readFullCheckoutDepartures(
  *
  * Runs the write-side of the RESERVED → ONGOING transition under the
  * caller's transaction:
- *   1. Re-reads `BookingModelRequest` rows with `quantity > 0` and throws
- *      a 400 `ShelfError` if any remain (hard block — model requests must
- *      all be fulfilled before checkout).
+ *   1. Refuses when the booking holds no items: a check-out needs at least
+ *      one item to go out. That is the only completeness rule. Model
+ *      reservations that are still unassigned stay open on the ongoing
+ *      booking, to be scanned later or released, and never hold it back.
  *   2. For every QUANTITY_TRACKED booking asset, acquires a row lock and
  *      validates available pool capacity inside the tx — closes the TOCTOU
  *      window against sibling writers (other checkouts, custody
@@ -2695,9 +2695,8 @@ async function readFullCheckoutDepartures(
  *
  * Extracted so `fulfilModelRequestsAndCheckout` can compose
  * `addScannedAssetsToBookingWithinTx` and this body into a single atomic
- * unit — a failure here (availability, outstanding request, etc.) rolls
- * back BookingAsset creation AND the model-request materialisation in one
- * shot.
+ * unit — a failure here (availability, an empty booking, etc.) rolls back
+ * BookingAsset creation AND the model-request materialisation in one shot.
  *
  * @param tx - Prisma transaction client
  * @param args.bookingId - Booking being transitioned
@@ -2707,7 +2706,7 @@ async function readFullCheckoutDepartures(
  * @param args.dataToUpdate - Pre-computed update payload for the booking row (status, optional from/originalFrom)
  * @param args.kitIds - Kits to flip to `CHECKED_OUT`
  * @param args.hasKits - Whether the kit update should fire
- * @throws {ShelfError} 400 when any model request is unfulfilled
+ * @throws {ShelfError} 400 when the booking holds no items to check out
  * @throws {ShelfError} 400 when any QUANTITY_TRACKED asset lacks sufficient pool availability
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2761,96 +2760,19 @@ async function checkoutBookingWritesWithinTx(
   }
 ) {
   /**
-   * Checkout guard for unfulfilled `BookingModelRequest` rows. Model
-   * requests (Book-by-Model) represent units that
-   * were reserved at the model level but haven't been assigned to
-   * a concrete asset yet. If any remain at checkout we refuse the
-   * RESERVED → ONGOING transition and surface the outstanding counts
-   * so the operator can either:
-   *   1. put matching assets on the booking — from "Manage assets", the
-   *      scanner, the asset index, or the mobile API; all of them drain
-   *      the request via {@link fulfilModelRequestsForAssets}, or
-   *   2. edit the requests from manage-assets (allowed while the
-   *      booking is still RESERVED — see the model-request service).
-   * This is a hard block — there is no force-partial escape hatch
-   * because ONGOING implies "assets are physically out", which
-   * unfulfilled requests directly contradict.
-   *
-   * Also enforced independently by `fulfilModelRequestsAndCheckout`
-   * as defence in depth: the drawer disables submit while
-   * `remaining > 0`, but a tampered payload would still hit this
-   * guard inside the shared transaction and roll everything back.
+   * A check-out sends at least one item out. `bookingAssetIds` is read after
+   * any scan in the same transaction has landed, so a reservation-only booking
+   * with nothing assigned is refused here rather than going ongoing empty.
    */
-  /**
-   * ONE definition of "outstanding", shared with every surface that renders it.
-   *
-   * This guard used to filter on `fulfilledAt: null` in SQL while the overview,
-   * drawer, PDF, statistics panel and index pill all used
-   * `getOutstandingModelRequests`, which additionally requires
-   * `fulfilledQuantity < quantity`. Two predicates meant a row could fall in
-   * the gap: fully delivered by unit count but with no completion timestamp, so
-   * invisible everywhere in the UI while still hard-blocking check-out — with
-   * no row on screen to edit and `removeBookingModelRequest` refusing to delete
-   * it. An unrecoverable booking.
-   *
-   * Reading through the same helper closes the class rather than this instance
-   * of it: units delivered is the truth, `fulfilledAt` is a timestamp. Fetching
-   * the booking's requests and filtering in JS keeps the two in lockstep by
-   * construction — Prisma cannot compare two columns in a `where`, so a SQL
-   * predicate here could only ever be an approximation of the helper.
-   *
-   * @see {@link file://./../../utils/booking-model-requests.ts}
-   */
-  // Shape pinned explicitly — `tx` is typed `any` (the extended Prisma client's
-  // tx type is incompatible with `Prisma.TransactionClient`), so without this
-  // the helper's generic widens and `assetModel` is lost.
-  type GuardModelRequest = {
-    quantity: number;
-    fulfilledQuantity: number;
-    fulfilledAt: Date | null;
-    assetModel: { name: string };
-  };
-  const allRequests: GuardModelRequest[] =
-    await tx.bookingModelRequest.findMany({
-      where: { bookingId },
-      include: { assetModel: { select: { name: true } } },
-    });
-  const outstandingRequests =
-    getOutstandingModelRequests<GuardModelRequest>(allRequests);
-
-  if (outstandingRequests.length > 0) {
-    // `tx` is typed `any` so the result shape is lost; annotate the callback.
-    //
-    // Report `req.quantity` (the original reservation intent), NOT
-    // `quantity - fulfilledQuantity`. This throw rolls the whole tx
-    // back — including the in-tx `fulfilledQuantity` increments from
-    // `addScannedAssetsToBookingWithinTx`. So the number the operator
-    // sees post-failure is the pre-tx outstanding count, which equals
-    // `quantity` for rows whose `fulfilledAt` is still null. Showing
-    // `quantity - fulfilledQuantity` here would report a mid-tx view
-    // that doesn't match post-rollback reality.
-    const outstanding: Array<{ assetModelName: string; remaining: number }> =
-      outstandingRequests.map((req) => ({
-        assetModelName: req.assetModel.name,
-        remaining: req.quantity,
-      }));
-
-    const summary = outstanding
-      .map((row) => `${row.remaining} × ${row.assetModelName}`)
-      .join(", ");
-
+  if (bookingAssetIds.length === 0) {
     throw new ShelfError({
       cause: null,
       label,
       status: 400,
       shouldBeCaptured: false,
-      // Names both routes out. It used to say "Scan matching assets", which
-      // was the literal truth — fulfilment only happened on the scan path — and
-      // left a workspace without a working scanner with no way to check the
-      // booking out at all. Adding a matching asset from "Manage assets" now
-      // discharges the reservation too, so the message says so.
-      message: `Cannot check out — ${summary} still unassigned. Add matching assets from "Manage assets", or scan them, to fulfil the reservation.`,
-      additionalData: { outstanding },
+      message:
+        "There's nothing to check out yet. Add or scan at least one item to this booking first.",
+      additionalData: { bookingId },
     });
   }
 
@@ -3547,9 +3469,13 @@ export async function checkoutBooking({
 }
 
 /**
- * Combined service that fulfils outstanding `BookingModelRequest` rows via
- * scanned assets AND transitions the booking from RESERVED to
+ * Combined service that assigns scanned assets to the booking's outstanding
+ * `BookingModelRequest` rows AND transitions the booking from RESERVED to
  * ONGOING/OVERDUE in a single atomic transaction.
+ *
+ * Every item on the booking goes out, scanned or already assigned. Reserved
+ * units that no scan covered stay open on the ongoing booking; the only
+ * refusal for completeness is a booking left with no items at all.
  *
  * Called by `fulfilAndCheckOut` when the explicit check-out requirement does
  * not apply.
@@ -3559,9 +3485,6 @@ export async function checkoutBooking({
  *   - `BookingAsset` row creation for the scanned assets
  *   - Booking `from`/`originalFrom` adjustment for early checkout
  *   - Booking status transition + kit/asset CHECKED_OUT flags
- *   - Outstanding-request guard (defence in depth — the drawer also
- *     blocks submit while any `remaining > 0`, but the server enforces
- *     independently in case the payload is tampered with)
  *   - QUANTITY_TRACKED availability guard (with row locks against
  *     concurrent checkouts)
  *
@@ -3587,7 +3510,7 @@ export async function checkoutBooking({
  * @param args.from - Optional booking.from for conflict detection (mirrors `checkoutBooking`'s pre-tx conflict guard).
  * @param args.to - Optional booking.to for conflict detection.
  * @returns The hydrated booking with reservation-email includes (same shape as `checkoutBooking`).
- * @throws {ShelfError} 400 if any model request remains unfulfilled after scanning (drawer also guards, server enforces).
+ * @throws {ShelfError} 400 if the booking holds no items after the scan.
  * @throws {ShelfError} 400 if any QUANTITY_TRACKED asset lacks pool availability.
  * @throws {ShelfError} If any asset is in custody / conflicted with another booking window.
  */
@@ -3772,10 +3695,10 @@ export async function fulfilModelRequestsAndCheckout({
      *      + create `BookingAsset` rows (shared helper).
      *   2. Re-read bookingAssets inside the tx so the checkout writes
      *      operate on the post-scan snapshot (includes the scanned rows).
-     *   3. Run the checkout writes (outstanding guard, qty availability,
+     *   3. Run the checkout writes (at-least-one-item guard, qty availability,
      *      status flips) via the shared helper.
      *
-     * If any guard throws — unfulfilled requests, insufficient pool,
+     * If any guard throws — no items to check out, insufficient pool,
      * unique constraint on an already-added asset — the whole tx rolls
      * back: the scanned materialisations, the BookingAsset rows, the
      * early-date adjustment, and the status transition are all reverted
@@ -3784,9 +3707,8 @@ export async function fulfilModelRequestsAndCheckout({
     await db.$transaction(
       async (tx) => {
         // Hold the booking and its model requests for the rest of the
-        // transaction, so the outstanding-request guard inside the checkout
-        // writes reads rows a concurrent fulfilment cannot change underneath
-        // it.
+        // transaction, so the assignment below cannot interleave with a
+        // concurrent check-out or reservation edit on the same booking.
         await tx.$queryRaw`SELECT id FROM "Booking" WHERE id = ${bookingId} FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM "BookingModelRequest" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
 
@@ -10168,12 +10090,12 @@ export async function updateBookingAssets({
        *
        * A model reservation is a promise of LOOSE units from the free pool, so
        * it is discharged by a new standalone `BookingAsset` row and by nothing
-       * else. Two things follow, and both were wrong before:
+       * else. Two things follow:
        *
-       *  - The scope must be `assetKitId: null`. Without it, an asset present
-       *    only as a kit slice reads as "already here", so picking it to
+       *  - The scope must be `assetKitId: null`. Otherwise an asset present
+       *    only as a kit slice reads as "already here", and picking it to
        *    discharge a reservation silently does nothing: the booking gains the
-       *    asset a second time and stays hard-blocked on check-out.
+       *    asset a second time while the reservation stays open.
        *  - Only NEW rows may discharge. `addedAssetIds` is "every asset this
        *    call touched", and the manage-assets dialog reposts the whole
        *    selection on every save against an upsert, so keying off it lets a
@@ -10324,9 +10246,7 @@ export async function updateBookingAssets({
          *
          * Naming a concrete unit of model M satisfies a "N units of M, any
          * units" reservation — the promise and the delivery are the same
-         * physical thing. Before this ran here, only the scanner discharged
-         * reservations, so adding the very asset a booking had reserved left
-         * the request outstanding and check-out hard-blocked. See
+         * physical thing, whichever surface added it. See
          * {@link fulfilModelRequestsForAssets} for the full rationale.
          */
         const fulfilledRequestIdByAssetId = await fulfilModelRequestsForAssets({
@@ -12323,16 +12243,9 @@ export async function removeAssets({
        * reservation, including ones that never discharged anything:
        *
        *   Reserve 2 x Dell. Add 3 matching assets: two discharge the
-       *   reservation, the third is an ordinary add. Remove that third one and
-       *   the model-based count re-opened the reservation, hard-blocking
-       *   check-out while both discharging assets were still on the booking.
-       *   The operator's only escape was deleting a reservation that was
-       *   correctly satisfied.
-       *
-       * That was near-unreachable while only the scanner discharged
-       * reservations. Routing every add-assets surface through
-       * `fulfilModelRequestsForAssets` makes it routine, so the column this PR
-       * adds has to be read here, not just written.
+       *   reservation, the third is an ordinary add. Removing that third one
+       *   must leave the reservation fulfilled, because both discharging assets
+       *   are still on the booking. A model-based count would re-open it.
        */
       /**
        * `fulfilledAt` reversals to report, one per request this loop reopens.

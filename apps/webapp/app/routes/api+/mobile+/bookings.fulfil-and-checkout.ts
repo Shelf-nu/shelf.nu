@@ -30,22 +30,20 @@ import {
  * (`_layout+/bookings.$bookingId.overview.fulfil-and-checkout.tsx`).
  *
  * A book-by-model booking reserves N units of an `AssetModel` up front as
- * intent (`BookingModelRequest`), with no concrete assets behind them yet.
- * The server hard-blocks a plain checkout (RESERVED → ONGOING) while any of
- * those requests are unfulfilled, so on mobile the operator scans the actual
- * units they're taking and this endpoint delegates to `fulfilAndCheckOut`,
- * which:
+ * intent (`BookingModelRequest`), with no concrete assets behind them yet. The
+ * operator scans the actual units they're taking and this endpoint delegates
+ * to `fulfilAndCheckOut`, which:
  *   1. matches each scanned asset against the outstanding model requests
  *      (materialising them into real `BookingAsset` rows), and
  *   2. checks the booking out — the whole booking, or, under the
  *      workspace's explicit check-out requirement, only the scanned units.
  *
- * This is the "scan to assign + check out" flow — the whole point of
- * book-by-model — done in a single motion, mirroring web. Off-model scans
- * that don't match a reservation land as direct `BookingAsset`s (same as web);
- * the server rejects the submit if any request is still outstanding afterwards.
- * Under the explicit check-out requirement only the scanned units are checked
- * out; `remainingCount` says how many booked assets are still to check out.
+ * This is the "scan to assign + check out" flow, done in a single motion and
+ * mirroring web. Off-model scans that don't match a reservation land as direct
+ * `BookingAsset`s (same as web). Reserved units no scan covered stay open on
+ * the ongoing booking: a check-out needs at least one item to go out, and under
+ * the explicit check-out requirement that item has to be scanned.
+ * `remainingCount` says how many booked assets are still to check out.
  *
  * Body: {
  *   bookingId: string,
