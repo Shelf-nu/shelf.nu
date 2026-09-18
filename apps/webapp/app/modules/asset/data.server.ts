@@ -510,6 +510,7 @@ async function getAssetModelRollupPage({
   timeZone,
   filters,
   parsedFilters,
+  availableToBookOnly,
   sortBy,
   sortDirection,
 }: {
@@ -518,6 +519,7 @@ async function getAssetModelRollupPage({
   timeZone: string;
   filters: string | undefined;
   parsedFilters: Filter[];
+  availableToBookOnly: boolean;
   sortBy: AssetModelRollupSortKey;
   sortDirection: "asc" | "desc";
 }) {
@@ -526,7 +528,12 @@ async function getAssetModelRollupPage({
     : getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
-  const { perPage } = cookie;
+  // Clamp once, here, and report the clamped value. `per_page` reaches the
+  // cookie straight from the URL with no upper bound, while the rollup caps its
+  // own LIMIT at 100 — so reporting the raw value would advertise a page size
+  // larger than any page can hold and strand every row past the first hundred.
+  // Mirrors `getAdvancedPaginatedAndFilterableAssets`'s `take` / `perPage: take`.
+  const perPage = Math.min(Math.max(cookie.perPage, 1), 100);
 
   const { rows, totalModels, totalGroups, totalRollupAssets } =
     await getAssetModelRollup({
@@ -536,6 +543,7 @@ async function getAssetModelRollupPage({
       timeZone,
       page,
       perPage,
+      availableToBookOnly,
       sortBy,
       sortDirection,
     });
@@ -691,6 +699,10 @@ export async function advancedModeLoader({
           timeZone: prefTimeZone,
           filters,
           parsedFilters,
+          // Same scoping the asset query three lines below applies, so a
+          // restricted role's model counts describe the assets it can actually
+          // see rather than the whole workspace.
+          availableToBookOnly: role === OrganizationRoles.SELF_SERVICE,
           sortBy: modelSortBy,
           sortDirection: modelSortDirection,
         })
@@ -704,7 +716,17 @@ export async function advancedModeLoader({
           canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
           availableToBookOnly: role === OrganizationRoles.SELF_SERVICE,
           preParsedFilters: parsedFilters,
-        }),
+          // Both arms carry the same keys so the caller reads them directly.
+          // Discriminating a union by `in` here degrades to `unknown` at this
+          // file's type complexity, and the failure lands on unrelated
+          // consumers of the loader payload rather than on the narrowing.
+        }).then((result) => ({
+          ...result,
+          modelRows: null,
+          totalModels: 0,
+          totalGroups: 0,
+          totalRollupAssets: 0,
+        })),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({
       organizationId,
@@ -787,13 +809,9 @@ export async function advancedModeLoader({
   const { search, totalAssets, perPage, page, assets, totalPages, cookie } =
     assetsOrRollup;
 
-  /** Present only on the model-view branch; `null` narrows the other one. */
-  const modelRollup: AssetModelRollupRow[] | null =
-    "modelRows" in assetsOrRollup ? assetsOrRollup.modelRows : null;
-  const totalRollupAssets =
-    "totalRollupAssets" in assetsOrRollup
-      ? assetsOrRollup.totalRollupAssets
-      : 0;
+  /** Populated only on the model-view branch; `null` on the asset branch. */
+  const modelRollup: AssetModelRollupRow[] | null = assetsOrRollup.modelRows;
+  const totalRollupAssets = assetsOrRollup.totalRollupAssets;
 
   const currentUserTeamMember = isSelfService
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
@@ -840,13 +858,11 @@ export async function advancedModeLoader({
   /** Paging counts describe whatever the list renders — models here, assets
    * otherwise — so the shared pagination component needs no branch. The model
    * view renders one row per group, which includes the no-model bucket. */
-  const totalGroupsForPayload =
-    "totalGroups" in assetsOrRollup ? assetsOrRollup.totalGroups : 0;
+  const totalGroupsForPayload = assetsOrRollup.totalGroups;
 
   /** The header's "N models" count, which the no-model bucket is excluded from
    * because it is not a model. Deliberately NOT the paging total above. */
-  const totalModelsForPayload =
-    "totalModels" in assetsOrRollup ? assetsOrRollup.totalModels : 0;
+  const totalModelsForPayload = assetsOrRollup.totalModels;
 
   return data(
     payload({

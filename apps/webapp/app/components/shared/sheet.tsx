@@ -64,6 +64,16 @@ interface SheetContentProps
   extends ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
     VariantProps<typeof sheetVariants> {}
 
+/**
+ * The sheet's panel: an overlay plus the content that slides in over it.
+ *
+ * @param side - Edge the panel slides from. Defaults to `right`; `left` and
+ *   `right` are full height, `top` and `bottom` span the width.
+ * @param size - Panel width. `default` takes the width from `side`; `wide`
+ *   widens it enough for a full data table, capped against the viewport.
+ * @param hideCloseButton - Omits the built-in close control, for panels that
+ *   provide their own dismissal.
+ */
 const SheetContent = forwardRef<
   ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps & { hideCloseButton?: boolean }

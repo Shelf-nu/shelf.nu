@@ -181,6 +181,10 @@ export type GetAssetModelRollupArgs = {
    * returns at most 100 rows rather than erroring, so a caller comparing the
    * row count against the requested `perPage` should expect the clamp. */
   perPage: number;
+  /** Restricts the rollup to assets the viewer may reserve. Mirrors the asset
+   * list's own scoping, so a role that sees a narrowed list does not also see
+   * counts computed over the wider set. */
+  availableToBookOnly?: boolean;
   sortBy?: AssetModelRollupSortKey;
   sortDirection?: "asc" | "desc";
 };
@@ -199,6 +203,7 @@ export async function getAssetModelRollup({
   timeZone = "UTC",
   page,
   perPage,
+  availableToBookOnly = false,
   sortBy = "name",
   sortDirection = "asc",
 }: GetAssetModelRollupArgs): Promise<{
@@ -217,7 +222,7 @@ export async function getAssetModelRollup({
     search,
     filters,
     undefined,
-    false,
+    availableToBookOnly,
     timeZone
   );
 

@@ -14,11 +14,12 @@
  *
  * @see {@link file://./../../../routes/api+/asset-models.$assetModelId.assets.ts}
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useLocation } from "react-router";
 import { AssetIndexSettingsProvider } from "~/context/asset-index-settings-context";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import type { AdvancedIndexAsset } from "~/modules/asset/types";
+import { MODEL_VIEW_SCOPED_PARAMS } from "~/modules/asset-model/view-params";
 import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
 import { Button } from "../../shared/button";
@@ -37,11 +38,9 @@ import { Table } from "../../table";
  * `{ error: null }` — it does not nest under a `payload` key — so these
  * fields sit at the top level of `fetcher.data`.
  */
-type SheetResponse = {
-  error: null;
-  assets: AdvancedIndexAsset[];
-  totalAssets: number;
-};
+type SheetResponse =
+  | { error: null; assets: AdvancedIndexAsset[]; totalAssets: number }
+  | { error: { message: string }; assets?: undefined; totalAssets?: undefined };
 
 /**
  * The `N assets` trigger plus the sheet it opens.
@@ -62,6 +61,9 @@ export function AssetModelAssetsSheet({
   const [open, setOpen] = useState(false);
   /** The `modelId:search` the currently-held `fetcher.data` was loaded for. */
   const loadedKeyRef = useRef<string | null>(null);
+  /** Bumped to re-run the load effect after a failure, since neither the model
+   * nor the search string changes on a retry. */
+  const [retryToken, setRetryToken] = useState(0);
   const fetcher = useFetcher<SheetResponse>();
   const location = useLocation();
   const columns = useAssetIndexColumns();
@@ -96,11 +98,37 @@ export function AssetModelAssetsSheet({
     void fetcher.load(
       `/api/asset-models/${assetModelId}/assets?${search.toString()}`
     );
-  }, [open, assetModelId, location.search, fetcher]);
+  }, [open, assetModelId, location.search, fetcher, retryToken]);
 
+  /**
+   * The escape hatch into the flat asset list, carrying the filters that
+   * produced this sheet. Built from the page's own search string for the same
+   * reason the fetch is: a link assembled from scratch lands the user on a
+   * differently-scoped set than the sheet they clicked out of. `view` has to go
+   * or the destination is the rollup again, and `set` rather than `append`
+   * replaces any model filter already in force instead of conflicting with it.
+   */
+  const viewAllHref = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+
+    MODEL_VIEW_SCOPED_PARAMS.forEach((param) => params.delete(param));
+    params.set("assetModel", `is:${assetModelId}`);
+
+    return `/assets?${params.toString()}`;
+  }, [location.search, assetModelId]);
+
+  // A failed load must not read as an empty model. Both render zero rows, and
+  // only the error field tells them apart.
+  const loadError = fetcher.data?.error ?? null;
   const assets = fetcher.data?.assets ?? [];
   const totalAssets = fetcher.data?.totalAssets ?? 0;
   const isLoading = fetcher.state !== "idle";
+
+  /** Clears the cached load key so the effect re-issues the same request. */
+  function retry() {
+    loadedKeyRef.current = null;
+    setRetryToken((token) => token + 1);
+  }
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -124,7 +152,9 @@ export function AssetModelAssetsSheet({
                 so it states when it is showing fewer rows than matched rather
                 than letting the count and the list silently disagree. The
                 footer link is the way to see the rest. */}
-            {totalAssets > assets.length
+            {loadError
+              ? "Couldn't load this model's assets"
+              : totalAssets > assets.length
               ? `Showing first ${assets.length} of ${totalAssets} assets matching your filters`
               : `${matchingAssets} ${
                   matchingAssets === 1 ? "asset" : "assets"
@@ -139,6 +169,13 @@ export function AssetModelAssetsSheet({
           {isLoading ? (
             <div className="flex h-32 items-center justify-center">
               <Spinner />
+            </div>
+          ) : loadError ? (
+            <div className="flex h-32 flex-col items-center justify-center gap-2 px-6 text-center">
+              <p className="text-sm text-gray-600">{loadError.message}</p>
+              <Button type="button" variant="secondary" onClick={retry}>
+                Try again
+              </Button>
             </div>
           ) : (
             <AssetIndexSettingsProvider freezeColumn={false}>
@@ -161,10 +198,7 @@ export function AssetModelAssetsSheet({
         </div>
 
         <div className="border-t pt-3">
-          <Button
-            variant="secondary"
-            to={`/assets?assetModel=is%3A${assetModelId}`}
-          >
+          <Button variant="secondary" to={viewAllHref}>
             View all in list →
           </Button>
         </div>

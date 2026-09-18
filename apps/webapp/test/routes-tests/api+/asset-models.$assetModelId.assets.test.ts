@@ -1,3 +1,19 @@
+/**
+ * Asset Model Assets endpoint — route tests
+ *
+ * Covers the three things this endpoint must get right, none of which are
+ * visible from its happy path: that a model id from another organization is
+ * refused rather than leaked, that the caller's own filters reach the asset
+ * query unchanged (the sheet's contents and the row's count are the same
+ * query), and that a viewer who cannot see all custody never receives a
+ * foreign custodian's identity in the response body.
+ *
+ * Assertions read the returned payload rather than rendered output: the
+ * redaction this endpoint relies on is a server-side control, and a UI that
+ * hides a value it was still sent is exactly the bypass it exists to prevent.
+ *
+ * @see {@link file://./../../../app/routes/api+/asset-models.$assetModelId.assets.ts}
+ */
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { loader } from "~/routes/api+/asset-models.$assetModelId.assets";
 
@@ -24,15 +40,23 @@ vitest.mock("react-router", async () => {
 vitest.mock("~/utils/date-format.server", () => ({
   resolveUserFormatPrefsById: vitest.fn(),
 }));
+// why: the real resolver performs DB reads and session work; these tests
+// assert on what the loader does with a given role, not on how it is derived.
 vitest.mock("~/utils/roles.server", () => ({
   requirePermission: vitest.fn(),
 }));
+// why: settings resolution self-heals the stored column list against a DB.
+// The endpoint only needs a columns array to hand to the filter parser.
 vitest.mock("~/modules/asset-index-settings/service.server", () => ({
   getAssetIndexSettings: vitest.fn(),
 }));
+// why: the advanced asset query is raw SQL against Postgres and is covered by
+// its own tests; here it is the seam whose ARGUMENTS are under assertion.
 vitest.mock("~/modules/asset/service.server", () => ({
   getAdvancedPaginatedAndFilterableAssets: vitest.fn(),
 }));
+// why: isolates the org-scoping lookup so a cross-org model id can be
+// simulated without seeding two organizations.
 vitest.mock("~/database/db.server", () => ({
   db: { assetModel: { findFirst: vitest.fn() } },
 }));
@@ -91,13 +115,22 @@ describe("asset model assets endpoint", () => {
   it("refuses a model from another organization", async () => {
     vitest.mocked(db.assetModel.findFirst).mockResolvedValue(null);
 
-    await expect(
-      loader({
-        context,
-        request: request("https://x.test/api/asset-models/am-1/assets"),
-        params: { assetModelId: "am-1" },
-      } as never)
-    ).rejects.toBeTruthy();
+    // Returned, not thrown: a fetcher consuming this route has no in-tree
+    // error boundary, so throwing would escalate to the app shell instead of
+    // surfacing in the sheet. The refusal must still be a 404 carrying no
+    // detail about the foreign model.
+    const response = await loader({
+      context,
+      request: request("https://x.test/api/asset-models/am-1/assets"),
+      params: { assetModelId: "am-1" },
+    } as never);
+
+    expect((response as unknown as Response).status).toBe(404);
+    const body = await (response as unknown as Response).json();
+    expect(body.error).toBeTruthy();
+    expect(
+      vitest.mocked(getAdvancedPaginatedAndFilterableAssets)
+    ).not.toHaveBeenCalled();
   });
 
   it("appends the model filter to the caller's current filters", async () => {

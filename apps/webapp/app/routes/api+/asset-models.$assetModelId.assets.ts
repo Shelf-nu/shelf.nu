@@ -22,6 +22,7 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { MODEL_VIEW_SCOPED_PARAMS } from "~/modules/asset-model/view-params";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -32,20 +33,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-
-/**
- * Query params that describe the MODEL view's own paging/sorting and mean
- * nothing to an asset list — dropped from the forwarded filter string so a
- * model-rollup page number or model sort key never leaks into the drill-down
- * (a model's assets and the model rollup paginate independently; reusing the
- * rollup's `page` would point the asset list at an unrelated page).
- */
-const VIEW_SCOPED_PARAMS = [
-  "view",
-  "modelSortBy",
-  "modelSortDirection",
-  "page",
-];
 
 /**
  * Serializes filter params back to this app's filter-string convention
@@ -124,7 +111,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const forwarded = new URLSearchParams(
       url.searchParams.get("filters") ?? ""
     );
-    VIEW_SCOPED_PARAMS.forEach((param) => forwarded.delete(param));
+    MODEL_VIEW_SCOPED_PARAMS.forEach((param) => forwarded.delete(param));
     // `is:<id>` is the operator `generateWhereClause`'s assetModel branch
     // expects (see query.server.ts) — anything else silently matches nothing.
     forwarded.set("assetModel", `is:${assetModel.id}`);
@@ -181,6 +168,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, assetModelId });
-    throw data(error(reason), { status: reason.status });
+
+    // Returned, not thrown. A fetcher consuming a resource route outside its
+    // own route tree has no in-tree boundary to catch a thrown response, so it
+    // escalates to the outermost one and takes down the app shell over
+    // something as ordinary as a model deleted a moment ago. Returning puts the
+    // failure in `fetcher.data`, where the sheet renders it. Mirrors
+    // `assets.get-assets-for-bulk-qr-download.ts`.
+    return data(error(reason), { status: reason.status });
   }
 }
