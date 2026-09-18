@@ -31,6 +31,10 @@ import {
 } from "~/modules/booking/booking-slice-unit-counts.server";
 import type { CheckoutSession } from "~/modules/booking/checkout-attribution";
 import type * as BookingServiceServer from "~/modules/booking/service.server";
+import {
+  getDetailedPartialCheckinData,
+  type PartialCheckinDetailsType,
+} from "~/modules/booking/service.server";
 import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
 
 import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
@@ -254,11 +258,13 @@ function websiteOrder({
   slices,
   sessions = [],
   dispositionLogs = [],
+  partialCheckinDetails = {},
 }: {
   status: "RESERVED" | "ONGOING";
   slices: SliceFixture[];
   sessions?: CheckoutSession[];
   dispositionLogs?: BookingDispositionLog[];
+  partialCheckinDetails?: PartialCheckinDetailsType;
 }): string[] {
   const bookingAssetRowsByAsset = new Map<
     string,
@@ -304,7 +310,7 @@ function websiteOrder({
     orderDirection: "desc",
     page: 1,
     perPage: rawAssets.length,
-    partialCheckinDetails: {},
+    partialCheckinDetails,
     bookingStatus: status,
   });
   return items.flatMap((item) => item.assets.map((asset) => asset.id));
@@ -559,6 +565,51 @@ describe("GET /api/mobile/bookings/:bookingId — asset order", () => {
         })
       );
     });
+  });
+
+  it("judges an item by this booking's check-in record, not by its status elsewhere", async () => {
+    // Alpha came back on this booking and has since gone out on another one,
+    // so its own status reads CHECKED_OUT. This booking's check-in record is
+    // what says it is back here: it must not sink with the items still out.
+    const slices = [
+      slice({
+        id: "ba-alpha",
+        assetId: "alpha",
+        title: "Alpha Monitor",
+        status: "CHECKED_OUT",
+      }),
+      slice({ id: "ba-bravo", assetId: "bravo", title: "Bravo Light" }),
+      slice({
+        id: "ba-charlie",
+        assetId: "charlie",
+        title: "Charlie Tripod",
+        status: "CHECKED_OUT",
+      }),
+    ];
+    const partialCheckinDetails: PartialCheckinDetailsType = {
+      alpha: {
+        checkinDate: new Date("2026-09-10T12:00:00.000Z"),
+        checkedInBy: {
+          id: "user-1",
+          firstName: "Test",
+          lastName: "User",
+          displayName: null,
+          profilePicture: null,
+        },
+      },
+    };
+    findFirstMock.mockResolvedValue(bookingRow("ONGOING", slices));
+    vi.mocked(getDetailedPartialCheckinData).mockResolvedValueOnce({
+      checkedInAssetIds: ["alpha"],
+      partialCheckinDetails,
+    } as Awaited<ReturnType<typeof getDetailedPartialCheckinData>>);
+
+    const order = (await getBooking()).assets.map((asset) => asset.id);
+
+    expect(order).toEqual(["alpha", "bravo", "charlie"]);
+    expect(order).toEqual(
+      websiteOrder({ status: "ONGOING", slices, partialCheckinDetails })
+    );
   });
 
   it("keeps a RESERVED booking in one group, ordered like the website", async () => {

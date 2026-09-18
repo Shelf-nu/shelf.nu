@@ -400,28 +400,80 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       });
       qtyBookingAssetRowsByAsset.set(ba.asset.id, rows);
     }
-    // The sessions also feed the lifecycle progress further down.
-    const [checkoutSessionRows, dispositionLogRows] = await Promise.all([
-      db.partialBookingCheckout.findMany({
-        where: { bookingId: booking.id },
-        select: { assetIds: true, quantities: true, bookingAssetIds: true },
-      }),
-      qtyBookingAssetRowsByAsset.size > 0
-        ? db.consumptionLog.findMany({
-            where: {
-              bookingId: booking.id,
-              assetId: { in: [...qtyBookingAssetRowsByAsset.keys()] },
-              category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
-            },
-            select: {
-              assetId: true,
-              bookingAssetId: true,
-              category: true,
-              quantity: true,
-            },
-          })
-        : Promise.resolve([]),
-    ]);
+    // The kits those rows sit under. Only which kits matters for the lookup;
+    // the order the app receives them in follows the sorted assets below.
+    const kitIdsOnBooking = [
+      ...new Set(
+        unorderedAssets
+          .map((a) => a.kitId)
+          .filter((kitId): kitId is string => kitId !== null)
+      ),
+    ];
+
+    // Everything the rest of the handler reads, in one round trip:
+    // - the check-out sessions and disposition logs the asset order counts
+    //   units with (the sessions also feed the lifecycle progress);
+    // - the slice markers (`BookingAsset.checkedOutAt`/`checkedInAt`), the
+    //   dispatch truth for the lifecycle progress: the Check out button stamps
+    //   them but writes NO PartialBookingCheckout rows;
+    // - the booking's kits. The lookup is org-scoped as well as id-scoped: a
+    //   kit id reaching it came from a BookingAsset row, but scoping it keeps
+    //   the response's kit payload inside the caller's workspace by
+    //   construction.
+    const [checkoutSessionRows, dispositionLogRows, sliceRows, storedKitRows] =
+      await Promise.all([
+        db.partialBookingCheckout.findMany({
+          where: { bookingId: booking.id },
+          select: { assetIds: true, quantities: true, bookingAssetIds: true },
+        }),
+        qtyBookingAssetRowsByAsset.size > 0
+          ? db.consumptionLog.findMany({
+              where: {
+                bookingId: booking.id,
+                assetId: { in: [...qtyBookingAssetRowsByAsset.keys()] },
+                category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
+              },
+              select: {
+                assetId: true,
+                bookingAssetId: true,
+                category: true,
+                quantity: true,
+              },
+            })
+          : Promise.resolve([]),
+        db.bookingAsset.findMany({
+          where: { bookingId: booking.id },
+          select: {
+            id: true,
+            assetId: true,
+            quantity: true,
+            assetKitId: true,
+            checkedOutAt: true,
+            checkedInAt: true,
+          },
+        }),
+        kitIdsOnBooking.length > 0
+          ? db.kit.findMany({
+              where: { id: { in: kitIdsOnBooking }, organizationId },
+              select: {
+                id: true,
+                // Scopes the write-back of a re-signed image below.
+                organizationId: true,
+                name: true,
+                status: true,
+                image: true,
+                imageExpiration: true,
+                category: { select: { id: true, name: true, color: true } },
+                location: { select: { id: true, name: true } },
+                // The kit's FULL membership, which is what tells the app
+                // whether the rows it holds are the whole kit — a removal that
+                // names the kit detaches every member, so it may only offer
+                // that when the booking holds all of them.
+                _count: { select: { assetKits: true } },
+              },
+            })
+          : Promise.resolve([]),
+      ]);
     const { checkedOutByBookingAsset, dispositionedByBookingAsset } =
       computeBookingSliceUnitCounts({
         bookingAssetRowsByAsset: qtyBookingAssetRowsByAsset,
@@ -655,59 +707,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         : a;
     });
 
-    // Segmented lifecycle progress (Booked / Partial / Checked out / Returned)
-    // for the booking's progress bar — computed with the SAME shared helper the
-    // web booking overview uses (`calculateBookingLifecycleProgress`), so the
-    // mobile bar and the web bar can never disagree. QT rows bucket by their
-    // per-asset unit counters; INDIVIDUAL rows by status + `checkedInAssetIds`.
-    // Dispatch truth comes from the slice markers
-    // (`BookingAsset.checkedOutAt`/`checkedInAt`): the Check out button
-    // stamps them but writes NO PartialBookingCheckout rows, so session
-    // records cannot tell a button-checked-out asset from a
-    // never-checked-out one on a booking that also has scan records. The
-    // sessions (read above, for the asset order) still count: per-asset
-    // dispatched units are judged slice by slice from stamps + session
-    // attribution (an asset can mix a button-checked-out slice with a
-    // progressively-scanned sibling — see `computeDispatchedUnitsByAsset`).
-    //
-    // The kit lookup rides along here rather than taking a round trip of its
-    // own. It is org-scoped as well as id-scoped: a kit id reaching this query
-    // came from a BookingAsset row, but scoping it keeps the response's kit
-    // payload inside the caller's workspace by construction.
-    const [sliceRows, storedKitRows] = await Promise.all([
-      db.bookingAsset.findMany({
-        where: { bookingId: booking.id },
-        select: {
-          id: true,
-          assetId: true,
-          quantity: true,
-          assetKitId: true,
-          checkedOutAt: true,
-          checkedInAt: true,
-        },
-      }),
-      bookingKitIds.length > 0
-        ? db.kit.findMany({
-            where: { id: { in: bookingKitIds }, organizationId },
-            select: {
-              id: true,
-              // Scopes the write-back of a re-signed image below.
-              organizationId: true,
-              name: true,
-              status: true,
-              image: true,
-              imageExpiration: true,
-              category: { select: { id: true, name: true, color: true } },
-              location: { select: { id: true, name: true } },
-              // The kit's FULL membership, which is what tells the app whether
-              // the rows it holds are the whole kit — a removal that names the
-              // kit detaches every member, so it may only offer that when the
-              // booking holds all of them.
-              _count: { select: { assetKits: true } },
-            },
-          })
-        : Promise.resolve([]),
-    ]);
     // A kit's `image` is a signed storage URL that stops working once
     // `imageExpiration` passes, and the app has no way to renew it. Re-sign the
     // lapsed ones so a kit header never receives a dead link. `organizationId`
@@ -715,6 +714,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const kitRows = (await refreshExpiredKitImages(storedKitRows)).map(
       ({ organizationId: _organizationId, ...kit }) => kit
     );
+
+    // Segmented lifecycle progress (Booked / Partial / Checked out / Returned)
+    // for the booking's progress bar — computed with the SAME shared helper the
+    // web booking overview uses (`calculateBookingLifecycleProgress`), so the
+    // mobile bar and the web bar can never disagree. QT rows bucket by their
+    // per-asset unit counters; INDIVIDUAL rows by status + `checkedInAssetIds`.
+    // Dispatch truth comes from the slice markers read above: session records
+    // cannot tell a button-checked-out asset from a never-checked-out one on a
+    // booking that also has scan records. The sessions still count: per-asset
+    // dispatched units are judged slice by slice from stamps + session
+    // attribution (an asset can mix a button-checked-out slice with a
+    // progressively-scanned sibling — see `computeDispatchedUnitsByAsset`).
     const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
       slices: sliceRows,
       checkoutSessions: checkoutSessionRows,
