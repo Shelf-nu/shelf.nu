@@ -10,10 +10,13 @@ set -euo pipefail
 #   ./run-suite.sh auth           # Run auth suite
 #   ./run-suite.sh dashboard      # Run dashboard suite
 #   ./run-suite.sh dark-mode      # Run dark mode suite
+#   PLATFORM=android ./run-suite.sh bookings
 #############################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAESTRO_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=./platform.sh
+source "$SCRIPT_DIR/platform.sh"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 RESULTS_DIR="$MAESTRO_DIR/results/$TIMESTAMP"
 
@@ -75,16 +78,25 @@ while IFS='=' read -r key value; do
   MAESTRO_ENV_FLAGS+=(-e "$key=$value")
 done < "$ENV_FILE"
 
-echo -e "${CYAN}${BOLD}━━━ Running suite: $SUITE_NAME ━━━${NC}"
+echo -e "${CYAN}${BOLD}━━━ Running suite: $SUITE_NAME on $(platform_label) ━━━${NC}"
 echo ""
+
+platform_ensure_device
+
+FLOWS_ROOT=$(platform_prepare_flows "$MAESTRO_DIR")
+trap 'platform_cleanup_flows "$FLOWS_ROOT" "$MAESTRO_DIR"' EXIT
+SUITE_DIR="$FLOWS_ROOT/flows/$SUITE_NAME"
 
 # Create results dir
 mkdir -p "$RESULTS_DIR"
 
 # Toggle dark mode for dark-mode suite
 if [ "$SUITE_NAME" = "dark-mode" ]; then
-  xcrun simctl ui booted appearance dark 2>/dev/null || true
-  echo -e "${YELLOW}  Set simulator to dark mode${NC}"
+  if ! platform_set_appearance dark; then
+    echo -e "${RED}✗ dark-mode: device is not in dark mode, suite not run${NC}"
+    exit 1
+  fi
+  echo -e "${YELLOW}  Set device to dark mode${NC}"
 fi
 
 PASS_COUNT=0
@@ -98,7 +110,7 @@ for flow in "$SUITE_DIR"/*.yaml; do
   echo -n "  ▸ $FLOW_NAME ... "
 
   FLOW_OUTPUT="$RESULTS_DIR/${SUITE_NAME}_${FLOW_NAME}.log"
-  if maestro test "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
+  if maestro test "${MAESTRO_DEVICE_FLAGS[@]}" "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
     echo -e "${GREEN}PASS${NC}"
     PASS_COUNT=$((PASS_COUNT + 1))
   else
@@ -110,7 +122,7 @@ done
 
 # Reset dark mode
 if [ "$SUITE_NAME" = "dark-mode" ]; then
-  xcrun simctl ui booted appearance light 2>/dev/null || true
+  platform_set_appearance light || echo -e "${YELLOW}⚠ Device left in dark mode${NC}"
 fi
 
 TOTAL=$((PASS_COUNT + FAIL_COUNT))
