@@ -1,3 +1,12 @@
+/**
+ * Invite Helpers
+ *
+ * Pure helpers for invites: email normalisation and matching, invite codes,
+ * plain-text email bodies, and splitting a team member name into first and
+ * last name.
+ *
+ * @see {@link file://./service.server.ts}
+ */
 import type { Prisma } from "@prisma/client";
 import { SERVER_URL, SUPPORT_EMAIL } from "~/utils/env";
 import { resolveUserDisplayName } from "~/utils/user";

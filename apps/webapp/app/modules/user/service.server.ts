@@ -270,6 +270,27 @@ async function createUserOrgAssociation(
   }
 }
 
+/**
+ * Gives an invitee access to an organization when they accept an invite.
+ *
+ * When a user with the email exists (matched without regard to letter case),
+ * the organization is attached to that user with the invite's roles. When no
+ * user exists, a Supabase auth account is created (or an existing auth
+ * account without a user row is confirmed) and a new user is created in the
+ * organization.
+ *
+ * @param args.email - The invitee email, normalised by the caller
+ * @param args.organizationId - The organization the invite is for
+ * @param args.roles - The roles the invite grants
+ * @param args.password - The password for a newly created auth account
+ * @param args.firstName - First name for a newly created user
+ * @param args.lastName - Last name for a newly created user
+ * @param args.createdWithInvite - Marks a newly created user as invited
+ * @param args.formatPrefs - Browser-detected date/time preferences for a new user
+ * @returns The existing or newly created user
+ * @throws {ShelfError} When no auth account can be created or confirmed, or
+ *   when the user or the organization association cannot be written
+ */
 export async function createUserOrAttachOrg({
   email,
   organizationId,
@@ -981,28 +1002,24 @@ export async function createUser(
       cause instanceof PrismaClientKnownRequestError && cause.code === "P2002";
 
     /**
-     * Idempotency on `id` (SHELF-WEBAPP-1EA): a P2002 unique-constraint
-     * violation raised on the primary key means a `User` row already exists for
-     * this Supabase auth id — e.g. a re-signup, or a prior partial signup whose
-     * stored email differs from the OTP email, so the route's email-keyed race
-     * guard missed it. The `user.create` and ALL its side-effects (personal
-     * org, org association, team member, asset index settings) run inside one
-     * `$transaction`, so the P2002 rolled the whole thing back. Return the
-     * pre-existing row (using the exact same select shape the create returns)
-     * instead of failing the signup.
+     * Idempotency on `id`: a P2002 unique-constraint violation on the primary
+     * key means a `User` row already exists for this Supabase auth id, for
+     * example on a re-signup, or when the stored email differs from the
+     * sign-in email so the route's email-keyed guard does not see the row.
+     * The `user.create` and all its side-effects (personal org, org
+     * association, team member, asset index settings) run inside one
+     * `$transaction`, so the violation rolls all of them back. The existing
+     * row is returned, with the same select shape the create returns.
      *
-     * ONE piece of state still needs reconciling: for invite/SSO callers
-     * (`organizationId` present), the rolled-back transaction never created the
-     * requested org association, so a concurrent P2002 race would otherwise
-     * return the existing user un-attached to the org they were invited to. We
-     * re-attach that association idempotently below (only when they aren't
-     * already a member). The personal-org / OTP self-signup case has no
-     * `organizationId`, so there is nothing to reconcile there.
+     * For invite and SSO callers (`organizationId` present), the rolled-back
+     * transaction did not create the requested org association, so it is
+     * restored below. The personal-org / OTP self-signup case has no
+     * `organizationId` and needs nothing else.
      *
-     * We deliberately do NOT re-fire the `signup_completed` analytics event on
-     * this path: no new account was created. If the lookup unexpectedly finds
-     * no row (P2002 on some OTHER unique field, e.g. `email`, with no row for
-     * this `id`), that is a genuine conflict — fall through and throw.
+     * The `signup_completed` analytics event does not fire on this path,
+     * because no account was created. When the lookup finds no row (a P2002 on
+     * another unique field, such as `email`), it is a real conflict and the
+     * error is thrown.
      */
     if (isUniqueViolation) {
       const existingUser = await db.user.findUnique({
@@ -1018,12 +1035,10 @@ export async function createUser(
       });
 
       if (existingUser) {
-        // The rolled-back transaction never created the org association. For
-        // invite/SSO callers (organizationId present), a concurrent P2002 race
-        // would otherwise leave the existing user un-attached to the requested
-        // org. Reconcile idempotently — only attach when not already a member
-        // (the membership check avoids re-pushing roles via the upsert's
-        // `push` update branch). SHELF-WEBAPP-1EA follow-up.
+        // Restore the org association the rolled-back transaction did not
+        // write. Attach only when the user is not a member yet: the upsert's
+        // update branch pushes roles, so running it for a member would add
+        // the roles a second time.
         if (
           organizationId &&
           !existingUser.organizations.some((org) => org.id === organizationId)

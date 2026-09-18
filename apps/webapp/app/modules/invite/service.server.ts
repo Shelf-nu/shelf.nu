@@ -1,3 +1,17 @@
+/**
+ * Invite Service
+ *
+ * Creates workspace invites (single and CSV import), accepts or rejects them,
+ * checks that the signed-in user is the invitee, and lists pending invites
+ * for the team settings page.
+ *
+ * Invitee emails are stored lowercased, and every match against a stored
+ * email ignores letter case, because stored rows can still hold capitals.
+ *
+ * @see {@link file://./helpers.ts}
+ * @see {@link file://./../../routes/_auth+/accept-invite.$inviteId.tsx}
+ * @see {@link file://./../../routes/api+/settings.import-users.ts}
+ */
 import type {
   Invite,
   Organization,
