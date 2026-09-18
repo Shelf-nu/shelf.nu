@@ -240,14 +240,18 @@ export default function ListAssetContent({
    *    or (partially) fulfilled (`contextStatus`, computed above) — at
    *    that point the stock signal has nothing left to warn about for it.
    *
-   * Each row evaluates independently against the SAME per-asset workspace
-   * headroom, so a multi-row asset can have several rows each light up.
+   * Each standalone row evaluates independently against the SAME per-asset
+   * workspace headroom, so a multi-row asset can have several rows each
+   * light up. A kit-driven row (`item.isKitDriven`) gets neither badge: its
+   * units are bounded by the kit's allocation, which that headroom already
+   * excludes.
    */
   const stockBadgeVariant = resolveQtyStockBadgeVariant({
     rowQty: qtyBooked,
     availability,
     contextStatus,
     bookingStatus: booking.status,
+    isKitDriven: Boolean(item.isKitDriven),
   });
 
   // Per-asset partial check-OUT record (if any). Presence of a record drives

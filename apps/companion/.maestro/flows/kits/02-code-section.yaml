@@ -1,0 +1,33 @@
+# Kits — the code card on kit detail
+#
+# The kit screen shares the asset screen's code card. It has no unit test that
+# renders it and was not exercised by hand when the card landed, so this is the
+# only check that the kit half draws.
+#
+# Kits carry no SAM ID, so a workspace preferring SAM IDs resolves to the Shelf
+# QR here and the card says why. This flow asserts only what holds for every
+# preference: the card renders and names a code.
+#
+# Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_KIT_QR_ID
+appId: com.shelf.companion.carlos
+name: "Kits - Code Section"
+tags:
+  - kits
+
+---
+- runFlow: ../../shared/login.yaml
+
+- tapOn:
+    text: "Quick Actions"
+
+# Deep-linking the kit's QR exercises the same resolver a real scan would
+# (LESSONS.md: the simulator has no camera).
+- openLink: "shelf://qr/${SHELF_TEST_KIT_QR_ID}"
+
+# "CODES" when the kit carries a barcode as well, the code's own name when the
+# Shelf QR is all it has.
+- extendedWaitUntil:
+    visible: "CODES|QR CODE"
+    timeout: 15000
+
+- takeScreenshot: kits-code-section

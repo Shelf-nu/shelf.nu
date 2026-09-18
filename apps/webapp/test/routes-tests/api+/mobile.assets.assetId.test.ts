@@ -1,20 +1,29 @@
 /**
- * Test suite for GET /api/mobile/assets/:assetId — custody visibility.
+ * Test suite for GET /api/mobile/assets/:assetId.
  *
- * Pins the server-side custody-visibility parity fix: viewers without
- * custody-view permission (SELF_SERVICE/BASE without the org override) must
- * only receive their OWN `custodyList` entries plus a hidden-holders count
- * (`custodyListOthersCount`), and the legacy single `custody` field is
- * nulled unless the viewer can see all custody or IS the primary custodian —
- * mirroring the web (quantity-custody-list.tsx:121-126 and
- * assets.$assetId.overview.tsx:1826-1836 + asset-custody-card.tsx:63).
+ * Pins what the companion's asset detail screen may be sent:
  *
- * The filtering helpers from `mobile-custody-visibility.server` are NOT
- * mocked, so the real visibility logic is exercised end to end through the
- * loader.
+ * - Custody visibility. Viewers without custody-view permission
+ *   (SELF_SERVICE/BASE without the org override) receive only their OWN
+ *   `custodyList` entries plus a hidden-holders count
+ *   (`custodyListOthersCount`), and the legacy single `custody` field is null
+ *   unless the viewer can see all custody or IS the primary custodian. The web
+ *   behaves the same way: `QuantityCustodyList` filters and counts its rows,
+ *   and the asset overview hides `CustodyCard` through its `hasPermission`.
+ * - Custody through a booking. `activeBooking` names the booking an INDIVIDUAL
+ *   asset is checked out on, picked with the web asset overview's filter and
+ *   shown to viewers who may see all custody or who hold that booking.
+ * - The projection. Rows destructured off the query result stay off the wire.
+ *
+ * The visibility helpers from `mobile-custody-visibility.server`, the booking
+ * read gate and the name resolvers are NOT mocked, so the real logic runs end
+ * to end through the loader.
  *
  * @see {@link file://../../../app/routes/api+/mobile+/assets.$assetId.ts}
  */
+import type { Mock } from "vitest";
+import { CURRENT_BOOKING_SLICE_FILTER } from "~/modules/asset/fields";
+import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import { loader } from "~/routes/api+/mobile+/assets.$assetId";
 import { createLoaderArgs } from "@mocks/remix";
 
@@ -87,6 +96,14 @@ vitest.mock("~/modules/asset/quantity-breakdown.server", () => ({
   }),
 }));
 
+// why: `subscription.server` loads the Stripe client and the billing config at
+// module load. Stubbing the one capability helper also puts the add-on gate
+// under explicit control, so these tests do not depend on the ambient
+// `ENABLE_PREMIUM_FEATURES` value.
+vitest.mock("~/utils/subscription.server", () => ({
+  canUseBarcodes: vitest.fn(() => true),
+}));
+
 // why: we need to control error formatting without running real error logic
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn((cause: any) => ({
@@ -108,6 +125,17 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
+
+/**
+ * Typed handles for the mocks every suite below drives. Auth fixtures are cast
+ * to the helper's own return type, never to `any`, so a fixture that stops
+ * resembling what the helper returns fails the build.
+ */
+const requireMobileAuthMock = vitest.mocked(requireMobileAuth);
+const requireOrganizationAccessMock = vitest.mocked(requireOrganizationAccess);
+const getMobileUserContextMock = vitest.mocked(getMobileUserContext);
+const canUseBarcodesMock = vitest.mocked(canUseBarcodes);
 
 const mockUser = {
   id: "user-1",
@@ -196,11 +224,145 @@ function buildAsset() {
       },
     ],
     assetKits: [],
+    // Active booking rows; none for this asset
+    bookingAssets: [],
     tags: [],
-    qrCodes: [],
-    organization: { currency: "USD" },
+    qrCodes: [{ id: "qr-abc123" }],
+    // Code-resolution inputs. Defaults describe a workspace on the stock
+    // QR_ID preference with no alternative codes; the display-code tests
+    // below override exactly what they are about.
+    preferredBarcodeId: null,
+    barcodes: [],
+    organization: {
+      currency: "USD",
+      qrIdDisplayPreference: "QR_ID",
+      barcodesEnabled: false,
+    },
     notes: [],
     customFields: [],
+  };
+}
+
+/**
+ * The row these suites hand the asset lookup: `buildAsset()`'s shape, with the
+ * fields the fixtures vary widened to what the loader can actually receive.
+ */
+type AssetFixture = Omit<
+  ReturnType<typeof buildAsset>,
+  | "sequentialId"
+  | "assetModel"
+  | "preferredBarcodeId"
+  | "barcodes"
+  | "quantity"
+  | "unitOfMeasure"
+  | "bookingAssets"
+> & {
+  sequentialId: string | null;
+  assetModel: ReturnType<typeof buildAsset>["assetModel"] | null;
+  preferredBarcodeId: string | null;
+  barcodes: { id: string; type: string; value: string }[];
+  quantity: number | null;
+  unitOfMeasure: string | null;
+  bookingAssets: {
+    booking: {
+      id: string;
+      name: string;
+      from: Date;
+    } & Required<BookingCustodianOverrides>;
+  }[];
+};
+
+/**
+ * The asset lookup, narrowed to {@link AssetFixture}.
+ *
+ * The loader reads with `select`, so Prisma hands it the selected shape and
+ * never a whole row — yet the mocked client's signature still asks for one.
+ * Narrowing the handle once, here, means every fixture handed to it is checked
+ * against the shape the loader reads instead of being waved through by a cast.
+ */
+const assetFindUniqueMock = db.asset.findUnique as unknown as Mock<
+  (args: unknown) => Promise<AssetFixture | null>
+>;
+
+/** A `buildAsset()` with the code-resolution fields overridden. */
+function buildAssetWithCodes(overrides: {
+  qrIdDisplayPreference?: string;
+  barcodesEnabled?: boolean;
+  barcodes?: { id: string; type: string; value: string }[];
+  preferredBarcodeId?: string | null;
+  sequentialId?: string | null;
+}) {
+  const asset = buildAsset();
+  return {
+    ...asset,
+    sequentialId:
+      overrides.sequentialId === undefined
+        ? asset.sequentialId
+        : overrides.sequentialId,
+    preferredBarcodeId: overrides.preferredBarcodeId ?? null,
+    barcodes: overrides.barcodes ?? [],
+    organization: {
+      currency: "USD",
+      qrIdDisplayPreference: overrides.qrIdDisplayPreference ?? "QR_ID",
+      barcodesEnabled: overrides.barcodesEnabled ?? false,
+    },
+  };
+}
+
+/** The booking custody links a fixture booking may override. */
+type BookingCustodianOverrides = {
+  custodianTeamMember?: {
+    id: string;
+    name: string;
+    userId: string | null;
+  } | null;
+  custodianUser?: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    displayName: string | null;
+  } | null;
+};
+
+/**
+ * An INDIVIDUAL asset checked out on an ONGOING booking. A booking checkout
+ * writes no Custody row, so `custody` is empty and the holder is known only
+ * through the booking. The default custodian is a registered user whose
+ * display name, team-member name and legal name all differ, so an assertion
+ * can tell which one the response used.
+ *
+ * @param booking - Overrides for the booking's custody links
+ */
+function buildCheckedOutAsset(booking: BookingCustodianOverrides = {}) {
+  return {
+    ...buildAsset(),
+    title: "Camera A",
+    status: "CHECKED_OUT",
+    type: "INDIVIDUAL",
+    quantity: null,
+    unitOfMeasure: null,
+    custody: [],
+    bookingAssets: [
+      {
+        booking: {
+          id: "booking-1",
+          name: "Field shoot",
+          from: new Date("2026-03-02T09:30:00Z"),
+          custodianTeamMember: {
+            id: "tm-carol",
+            name: "Carol Member",
+            userId: "user-7",
+          },
+          custodianUser: {
+            id: "user-7",
+            firstName: "Carol",
+            lastName: "Legal",
+            displayName: "Caz",
+          },
+          ...booking,
+        },
+      },
+    ],
   };
 }
 
@@ -217,30 +379,32 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
 
-    (requireMobileAuth as any).mockResolvedValue({
+    requireMobileAuthMock.mockResolvedValue({
       user: mockUser,
       authUser: { id: "auth-user-1", email: mockUser.email },
-    });
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
 
-    (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    requireOrganizationAccessMock.mockResolvedValue("org-1");
 
-    (getMobileUserContext as any).mockResolvedValue({
+    getMobileUserContextMock.mockResolvedValue({
       role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: true,
-    });
+      canSeeAllBookings: true,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
-    (db.asset.findUnique as any).mockResolvedValue(buildAsset());
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
   });
 
   it("shows a self-service caller only their own custody rows + the hidden count", async () => {
-    (getMobileUserContext as any).mockResolvedValue({
+    getMobileUserContextMock.mockResolvedValue({
       role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: false,
-    });
+      canSeeAllBookings: false,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const result = await loader(
       createLoaderArgs({
@@ -271,16 +435,17 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
   });
 
   it("keeps the legacy custody visible when the restricted caller IS the primary custodian", async () => {
-    (getMobileUserContext as any).mockResolvedValue({
+    getMobileUserContextMock.mockResolvedValue({
       role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: false,
-    });
+      canSeeAllBookings: false,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
     // Reorder so the caller's row is the primary (oldest) one
     const asset = buildAsset();
     asset.custody = [asset.custody[1], asset.custody[0], asset.custody[2]];
-    (db.asset.findUnique as any).mockResolvedValue(asset);
+    assetFindUniqueMock.mockResolvedValue(asset);
 
     const result = await loader(
       createLoaderArgs({
@@ -330,18 +495,19 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
 
-    (requireMobileAuth as any).mockResolvedValue({
+    requireMobileAuthMock.mockResolvedValue({
       user: mockUser,
       authUser: { id: "auth-user-1", email: mockUser.email },
-    });
-    (requireOrganizationAccess as any).mockResolvedValue("org-1");
-    (getMobileUserContext as any).mockResolvedValue({
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
+    requireOrganizationAccessMock.mockResolvedValue("org-1");
+    getMobileUserContextMock.mockResolvedValue({
       role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: true,
-    });
-    (db.asset.findUnique as any).mockResolvedValue(buildAsset());
+      canSeeAllBookings: true,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
   });
 
   it("sends the SAM ID, which the scanner's manual entry accepts", async () => {
@@ -374,7 +540,7 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
   });
 
   it("returns a null model rather than omitting the field when the asset has none", async () => {
-    (db.asset.findUnique as any).mockResolvedValue({
+    assetFindUniqueMock.mockResolvedValue({
       ...buildAsset(),
       assetModel: null,
     });
@@ -389,5 +555,508 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
     const body = await (result as unknown as Response).json();
 
     expect(body.asset.assetModel).toBeNull();
+  });
+});
+
+/**
+ * `activeBooking` shows custody held through a booking:
+ *
+ * - which booking: the slice the asset is out on, read with the same filter as
+ *   the web asset overview (`CURRENT_BOOKING_SLICE_FILTER`);
+ * - when: the asset is CHECKED_OUT, and it is INDIVIDUAL;
+ * - to whom: a viewer who may see all custody, or who holds the booking
+ *   (`canSeeBookingCustodian`, as on every mobile booking surface);
+ * - named how: `resolveBookingCustodianName`, the one resolver the mobile
+ *   bookings list, calendar and dashboard share, so no two screens name the
+ *   same holder differently.
+ */
+describe("GET /api/mobile/assets/:assetId — custody through a booking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+
+    requireMobileAuthMock.mockResolvedValue({
+      user: mockUser,
+      authUser: { id: "auth-user-1", email: mockUser.email },
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
+    requireOrganizationAccessMock.mockResolvedValue("org-1");
+    getMobileUserContextMock.mockResolvedValue({
+      role: "ADMIN",
+      canUseBarcodes: false,
+      canUseAudits: false,
+      canSeeAllCustody: true,
+      canSeeAllBookings: true,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+    assetFindUniqueMock.mockResolvedValue(buildCheckedOutAsset());
+  });
+
+  /**
+   * A booking held by the caller (`user-1`), through each of the two custody
+   * links a booking can carry. A booking assigned by picking a team member has
+   * no user link, even once that member has an account.
+   */
+  const CALLERS_OWN_BOOKING = [
+    [
+      "user link",
+      {
+        custodianTeamMember: {
+          id: "tm-me",
+          name: "Test User",
+          userId: null,
+        },
+        custodianUser: {
+          id: "user-1",
+          firstName: "Test",
+          lastName: "User",
+          displayName: null,
+        },
+      },
+    ],
+    [
+      "team-member link",
+      {
+        custodianTeamMember: {
+          id: "tm-me",
+          name: "Test User",
+          userId: "user-1",
+        },
+        custodianUser: null,
+      },
+    ],
+  ] satisfies [string, BookingCustodianOverrides][];
+
+  /** Runs the loader for `asset-1` and returns the parsed body. */
+  async function loadDetail() {
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    expect((result as unknown as Response).status).toBe(200);
+    return (result as unknown as Response).json();
+  }
+
+  /**
+   * Signs the caller in as a SELF_SERVICE member whose workspace grants the
+   * given overrides.
+   */
+  function asSelfServiceViewer(overrides: {
+    canSeeAllCustody: boolean;
+    canSeeAllBookings: boolean;
+  }) {
+    getMobileUserContextMock.mockResolvedValue({
+      role: "SELF_SERVICE",
+      canUseBarcodes: false,
+      canUseAudits: false,
+      ...overrides,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+  }
+
+  it("names the booking and its holder for a viewer who may see all custody", async () => {
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toEqual({
+      id: "booking-1",
+      name: "Field shoot",
+      from: "2026-03-02T09:30:00.000Z",
+      // The team-member link, as the mobile bookings list names the same
+      // booking's holder
+      custodianName: "Carol Member",
+      canOpen: true,
+    });
+    // The raw rows only feed the field above
+    expect(body.asset).not.toHaveProperty("bookingAssets");
+  });
+
+  it("reads the booking with the web asset overview's filter", async () => {
+    await loadDetail();
+
+    // Both surfaces take the first row, so they name the same booking only
+    // while they narrow and order the relation identically.
+    expect(db.asset.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          bookingAssets: expect.objectContaining(CURRENT_BOOKING_SLICE_FILTER),
+        }),
+      })
+    );
+  });
+
+  it("names the user's display name when the booking has no team member", async () => {
+    assetFindUniqueMock.mockResolvedValue(
+      buildCheckedOutAsset({ custodianTeamMember: null })
+    );
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking.custodianName).toBe("Caz");
+  });
+
+  it("names a team-member custodian that has no user account", async () => {
+    assetFindUniqueMock.mockResolvedValue(
+      buildCheckedOutAsset({
+        custodianUser: null,
+        custodianTeamMember: {
+          id: "tm-dana",
+          name: "Dana Contractor",
+          userId: null,
+        },
+      })
+    );
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking.custodianName).toBe("Dana Contractor");
+  });
+
+  it("sends a null custodian name when the booking has no custodian", async () => {
+    assetFindUniqueMock.mockResolvedValue(
+      buildCheckedOutAsset({ custodianUser: null, custodianTeamMember: null })
+    );
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking.id).toBe("booking-1");
+    expect(body.asset.activeBooking.custodianName).toBeNull();
+  });
+
+  it("withholds someone else's booking from a viewer who may not see custody", async () => {
+    asSelfServiceViewer({ canSeeAllCustody: false, canSeeAllBookings: false });
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toBeNull();
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("Field shoot");
+    expect(serialized).not.toContain("Caz");
+    expect(serialized).not.toContain("Carol");
+  });
+
+  it.each(CALLERS_OWN_BOOKING)(
+    "shows a viewer without custody permission the booking they hold through the %s",
+    async (_link, booking) => {
+      asSelfServiceViewer({
+        canSeeAllCustody: false,
+        canSeeAllBookings: false,
+      });
+      assetFindUniqueMock.mockResolvedValue(buildCheckedOutAsset(booking));
+
+      const body = await loadDetail();
+
+      // Their own name, on their own booking: nothing here is someone else's.
+      expect(body.asset.activeBooking).toEqual({
+        id: "booking-1",
+        name: "Field shoot",
+        from: "2026-03-02T09:30:00.000Z",
+        custodianName: "Test User",
+        canOpen: true,
+      });
+    }
+  );
+
+  it("ignores booking rows on a quantity-tracked asset", async () => {
+    assetFindUniqueMock.mockResolvedValue({
+      ...buildAsset(),
+      status: "CHECKED_OUT",
+      bookingAssets: buildCheckedOutAsset().bookingAssets,
+    });
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toBeNull();
+    // Its custody is the quantity breakdown, which still arrives
+    expect(body.asset.quantityBreakdown).not.toBeNull();
+    expect(body.asset).not.toHaveProperty("bookingAssets");
+  });
+
+  it("sends null, and no raw rows, when the asset is on no active booking", async () => {
+    assetFindUniqueMock.mockResolvedValue({
+      ...buildCheckedOutAsset(),
+      bookingAssets: [],
+    });
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toBeNull();
+    expect(body.asset).not.toHaveProperty("bookingAssets");
+  });
+
+  it("sends null for an asset staged onto an ongoing booking but not checked out", async () => {
+    assetFindUniqueMock.mockResolvedValue({
+      ...buildCheckedOutAsset(),
+      // Assets added to an ONGOING booking stay AVAILABLE until checked out
+      status: "AVAILABLE",
+    });
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toBeNull();
+  });
+
+  it("shows the booking as closed to a viewer who may see custody but not other people's bookings", async () => {
+    asSelfServiceViewer({ canSeeAllCustody: true, canSeeAllBookings: false });
+
+    const body = await loadDetail();
+
+    expect(body.asset.activeBooking).toEqual({
+      id: "booking-1",
+      name: "Field shoot",
+      from: "2026-03-02T09:30:00.000Z",
+      custodianName: "Carol Member",
+      canOpen: false,
+    });
+  });
+
+  it.each(CALLERS_OWN_BOOKING)(
+    "lets the booking's custodian open it through the %s",
+    async (_link, booking) => {
+      asSelfServiceViewer({ canSeeAllCustody: true, canSeeAllBookings: false });
+      assetFindUniqueMock.mockResolvedValue(buildCheckedOutAsset(booking));
+
+      const body = await loadDetail();
+
+      expect(body.asset.activeBooking.canOpen).toBe(true);
+    }
+  );
+});
+
+/**
+ * Which identifier the detail screen is told to show.
+ *
+ * A workspace that labels its assets with Code 128 must see Code 128 here.
+ * The screen cannot work this out for itself — it never receives the
+ * workspace preference — so the endpoint resolves it, exactly as it resolves
+ * the image cascade, and an installed build inherits the answer with no app
+ * release.
+ *
+ * Same precedence as every web asset row: a per-asset override first, then
+ * the workspace preference, then the Shelf QR.
+ *
+ * @see {@link file://../../../app/modules/barcode/display.ts} `resolveDisplayCode`
+ */
+describe("GET /api/mobile/assets/:assetId — display code", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    requireMobileAuthMock.mockResolvedValue({
+      user: mockUser,
+      authUser: { id: "auth-user-1", email: mockUser.email },
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
+    requireOrganizationAccessMock.mockResolvedValue("org-1");
+    getMobileUserContextMock.mockResolvedValue({
+      role: "ADMIN",
+      canUseBarcodes: true,
+      canUseAudits: false,
+      canSeeAllCustody: true,
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+    canUseBarcodesMock.mockReturnValue(true);
+  });
+
+  /** Runs the loader and returns the parsed `asset` payload. */
+  async function loadAsset() {
+    const response = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    const body = await (response as unknown as Response).json();
+    return body.asset;
+  }
+
+  it("sends the workspace's Code 128 value, not the Shelf QR", async () => {
+    // why: this is the reported bug — a workspace that prints Code 128 labels
+    // was shown the native Shelf QR on the asset detail screen.
+    assetFindUniqueMock.mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+        barcodes: [{ id: "bc-1", type: "Code128", value: "CODE-000128" }],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.displayCode).toEqual({
+      value: "CODE-000128",
+      label: "Code 128",
+      type: "Code128",
+      isFallback: false,
+      fallbackNote: null,
+    });
+  });
+
+  it("marks a preference it could not honour instead of silently showing the QR", async () => {
+    // why: workspace wants Code 128 but this asset has none. The value has to
+    // fall back to the QR, and the screen must be able to say so. `label`
+    // names the QR actually shown; only `fallbackNote` names the preference.
+    assetFindUniqueMock.mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+        barcodes: [],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.displayCode).toEqual({
+      value: "qr-abc123",
+      label: "QR Code ID",
+      type: "QR_ID",
+      isFallback: true,
+      fallbackNote:
+        "Your workspace prefers Code 128 but this item has no Code 128.",
+    });
+  });
+
+  it("lets a per-asset override outrank the workspace preference", async () => {
+    assetFindUniqueMock.mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+        preferredBarcodeId: "bc-2",
+        barcodes: [
+          { id: "bc-1", type: "Code128", value: "CODE-000128" },
+          { id: "bc-2", type: "Code39", value: "OVERRIDE-9" },
+        ],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.displayCode).toMatchObject({
+      value: "OVERRIDE-9",
+      label: "Code 39",
+    });
+  });
+
+  it("sends the SAM ID when that is the workspace preference", async () => {
+    assetFindUniqueMock.mockResolvedValue(
+      buildAssetWithCodes({ qrIdDisplayPreference: "SAM_ID" })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.displayCode).toMatchObject({
+      value: "SAM-0017",
+      label: "SAM ID",
+      isFallback: false,
+    });
+  });
+
+  it("sends the QR id on the stock preference", async () => {
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
+
+    const asset = await loadAsset();
+
+    expect(asset.displayCode).toMatchObject({
+      value: "qr-abc123",
+      label: "QR Code ID",
+      isFallback: false,
+    });
+  });
+
+  it("withholds barcode rows and the preference from a workspace without the add-on", async () => {
+    // why: barcode rows are add-on data. Without the add-on the workspace must
+    // neither receive them nor resolve through them, matching every other
+    // mobile barcode surface.
+    canUseBarcodesMock.mockReturnValue(false);
+    assetFindUniqueMock.mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: false,
+        barcodes: [{ id: "bc-1", type: "Code128", value: "CODE-000128" }],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.barcodes).toEqual([]);
+    expect(asset.displayCode).toMatchObject({
+      value: "qr-abc123",
+      type: "QR_ID",
+      isFallback: true,
+    });
+  });
+
+  it("honours a barcode preference a deployment entitles but the column denies", async () => {
+    // why: `canUseBarcodes` is the EFFECTIVE entitlement — a self-hosted
+    // deployment has no billing to gate on and holds every add-on, so the raw
+    // `barcodesEnabled` column reads false there while the workspace may still
+    // have set a barcode preference. Reading the column instead of the helper
+    // would push every self-hosted workspace back to the QR, and nothing else
+    // here would notice.
+    canUseBarcodesMock.mockReturnValue(true);
+    assetFindUniqueMock.mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: false,
+        barcodes: [{ id: "bc-1", type: "Code128", value: "CODE-000128" }],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(canUseBarcodesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ barcodesEnabled: false })
+    );
+    expect(asset.displayCode).toMatchObject({
+      value: "CODE-000128",
+      type: "Code128",
+      isFallback: false,
+    });
+    expect(asset.barcodes).toEqual([
+      { id: "bc-1", type: "Code128", value: "CODE-000128" },
+    ]);
+  });
+
+  it("ships the asset's barcodes so the screen can offer a code switcher", async () => {
+    assetFindUniqueMock.mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+        barcodes: [{ id: "bc-1", type: "Code128", value: "CODE-000128" }],
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.barcodes).toEqual([
+      { id: "bc-1", type: "Code128", value: "CODE-000128" },
+    ]);
+  });
+
+  it("keeps organization narrowed to currency, leaking no workspace settings", async () => {
+    // why: the select was widened to resolve the code. The response must not
+    // start carrying workspace configuration the companion never asked for.
+    assetFindUniqueMock.mockResolvedValue(
+      buildAssetWithCodes({
+        qrIdDisplayPreference: "Code128",
+        barcodesEnabled: true,
+      })
+    );
+
+    const asset = await loadAsset();
+
+    expect(asset.organization).toEqual({ currency: "USD" });
+    expect(asset.preferredBarcodeId).toBeUndefined();
+  });
+
+  it("reads the asset's QR codes in a fixed order, so one code wins on every load", async () => {
+    // why: `Qr.assetId` is not unique, and both the resolver and the app take
+    // the first QR. An unordered read could show a different code on each
+    // load — something a mocked database cannot exhibit, so the query is what
+    // this pins.
+    assetFindUniqueMock.mockResolvedValue(buildAsset());
+
+    await loadAsset();
+
+    expect(db.asset.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          qrCodes: { orderBy: QR_CODES_ORDER_BY, select: { id: true } },
+        }),
+      })
+    );
   });
 });

@@ -4,6 +4,7 @@
  * must never leave "rows or units?" ambiguous.
  */
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { BookingModelReservationsSection } from "./booking-model-reservations-section";
 
@@ -118,5 +119,96 @@ describe("BookingModelReservationsSection", () => {
   it("omits the action cell entirely when the surface supplies none", () => {
     render(<BookingModelReservationsSection modelRequests={[projectors]} />);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  describe("pagination", () => {
+    /** `count` distinct outstanding reservations, one unit each. */
+    const manyModels = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        id: `req-${i}`,
+        assetModelId: `model-${i}`,
+        quantity: 1,
+        fulfilledQuantity: 0,
+        fulfilledAt: null,
+        assetModel: { id: `model-${i}`, name: `Model ${i}` },
+      }));
+
+    it("leaves a short list alone — no pager, every row visible", () => {
+      render(
+        <BookingModelReservationsSection modelRequests={manyModels(10)} />
+      );
+
+      expect(screen.getByText("Model 9")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Go to next page" })
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows one page at a time once the list outgrows the page size", () => {
+      // The reported booking carried 40 models. Rendering all of them pushed
+      // the assets list — and everything below it — off the page.
+      render(
+        <BookingModelReservationsSection modelRequests={manyModels(40)} />
+      );
+
+      expect(screen.getByText("Model 0")).toBeInTheDocument();
+      expect(screen.getByText("Model 9")).toBeInTheDocument();
+      expect(screen.queryByText("Model 10")).not.toBeInTheDocument();
+      expect(screen.getByText("Showing 1-10 of 40 models")).toBeInTheDocument();
+    });
+
+    it("pages forward and back through the full list", async () => {
+      const user = userEvent.setup();
+      render(
+        <BookingModelReservationsSection modelRequests={manyModels(40)} />
+      );
+
+      await user.click(screen.getByRole("button", { name: "Go to next page" }));
+
+      expect(screen.getByText("Model 10")).toBeInTheDocument();
+      expect(screen.queryByText("Model 0")).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Showing 11-20 of 40 models")
+      ).toBeInTheDocument();
+
+      await user.click(
+        screen.getByRole("button", { name: "Go to previous page" })
+      );
+
+      expect(screen.getByText("Model 0")).toBeInTheDocument();
+    });
+
+    it("stops at both ends of the list", async () => {
+      const user = userEvent.setup();
+      render(
+        <BookingModelReservationsSection modelRequests={manyModels(25)} />
+      );
+
+      const next = screen.getByRole("button", { name: "Go to next page" });
+      expect(
+        screen.getByRole("button", { name: "Go to previous page" })
+      ).toBeDisabled();
+
+      await user.click(next);
+      await user.click(next);
+
+      // 25 models over pages of 10 — the last page holds the remaining 5.
+      expect(
+        screen.getByText("Showing 21-25 of 25 models")
+      ).toBeInTheDocument();
+      expect(next).toBeDisabled();
+    });
+
+    it("keeps the header totals describing the WHOLE list, not the page", () => {
+      // The header is the booking's outstanding work. Paging is a view
+      // concern; a total that changed with the page would be unusable.
+      render(
+        <BookingModelReservationsSection modelRequests={manyModels(40)} />
+      );
+
+      expect(
+        screen.getByText("40 of 40 units still to assign, across 40 models")
+      ).toBeInTheDocument();
+    });
   });
 });

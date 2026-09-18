@@ -67,6 +67,7 @@ import {
   calculatePartialCheckinProgress,
   calculateUnitCheckinProgress,
 } from "~/modules/booking/utils.server";
+import { assertQuickCheckoutAllowed } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -676,6 +677,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         bookingAssetId: ba.id,
         bookedQuantity: ba.quantity ?? 1,
         isRemovedFromKit,
+        /**
+         * Live kit-driven slice (`BookingAsset.assetKitId` set): the row's
+         * units come out of the kit's allocation, not the loose pool, so the
+         * workspace-availability badges skip it (`resolveQtyStockBadgeVariant`).
+         * Derived here for the same reason as `isRemovedFromKit`: the cached
+         * row projection does not carry `assetKitId`.
+         */
+        isKitDriven: ba.assetKitId != null,
       };
     });
 
@@ -988,6 +997,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * "pending return" badge (fires on not-yet-started bookings when
      * `bookedQuantity` exceeds `.physicalNow` while still fitting within
      * `.bookable`) on the booking-overview asset row + assets sidebar.
+     * Both figures describe the LOOSE pool: kit allocations are already
+     * subtracted, so kit-driven rows (`isKitDriven`) never compare against
+     * them.
      *
      * Delegates to the shared, windowed QT availability primitive via
      * `buildAvailableUnitsByAsset` — see
@@ -1105,25 +1117,69 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // is physically out. The qty maps populated above
     // (`checkedOutByBookingAsset`, `dispositionedByBookingAsset`) supply
     // those per-row counters via the slice's `bookingAssetId`.
+    //
+    // Dispatch truth for the bar comes from the slice markers
+    // (`BookingAsset.checkedOutAt`/`checkedInAt`): the Check out button
+    // stamps them but writes NO PartialBookingCheckout rows, so the
+    // session-derived `checkedOutAssetIds` (kept for the "Checked out
+    // on/by" columns) cannot tell a button-checked-out row from a
+    // never-checked-out one on a booking that also has scan records — one
+    // scanned asset would flip every other asset's bucket at COMPLETE.
+    const sliceMarkersByBookingAssetId = new Map(
+      booking.bookingAssets.map((ba) => [
+        ba.id,
+        { out: Boolean(ba.checkedOutAt), in: Boolean(ba.checkedInAt) },
+      ])
+    );
+    const sliceCheckedOutAssetIds = [
+      ...new Set(
+        booking.bookingAssets
+          .filter((ba) => ba.checkedOutAt)
+          .map((ba) => ba.assetId)
+      ),
+    ];
+    // With no stamped slice anywhere, pass `undefined` markers (not `false`)
+    // so the calculation's legacy collapse for record-less bookings stays
+    // reachable — `false` means "this row was verifiably never dispatched".
+    const bookingHasSliceMarkers = sliceCheckedOutAssetIds.length > 0;
     const lifecycleProgress = calculateBookingLifecycleProgress({
       bookingAssets: enrichedAssetsForView.map((a) => {
         const isQty = a.type === "QUANTITY_TRACKED";
+        const marker = sliceMarkersByBookingAssetId.get(a.bookingAssetId);
+        const rowCheckedOutUnits = isQty
+          ? checkedOutByBookingAsset.get(a.bookingAssetId) ?? 0
+          : 0;
         return {
           id: a.id,
           kitId: a.kitId,
           status: a.status,
           assetType: a.type,
           bookedQuantity: a.bookedQuantity,
-          checkedOutQuantity: isQty
-            ? checkedOutByBookingAsset.get(a.bookingAssetId) ?? 0
-            : 0,
+          checkedOutQuantity: rowCheckedOutUnits,
           dispositionedQuantity: isQty
             ? dispositionedByBookingAsset.get(a.bookingAssetId) ?? 0
             : 0,
+          sliceCheckedOut: bookingHasSliceMarkers
+            ? marker?.out ?? false
+            : undefined,
+          sliceCheckedIn: bookingHasSliceMarkers
+            ? marker?.in ?? false
+            : undefined,
+          // Rows here are per slice, so the row's dispatched units are exact:
+          // its session-attributed units when any exist, else the whole row
+          // when its slice is stamped.
+          dispatchedQuantity:
+            isQty && bookingHasSliceMarkers
+              ? rowCheckedOutUnits > 0
+                ? Math.min(rowCheckedOutUnits, a.bookedQuantity ?? 0)
+                : marker?.out
+                ? a.bookedQuantity ?? 0
+                : 0
+              : undefined,
         };
       }),
       checkedInAssetIds,
-      checkedOutAssetIds,
+      checkedOutAssetIds: sliceCheckedOutAssetIds,
       bookingStatus: booking.status,
       countKitsAsSingleUnit,
     });
@@ -1147,6 +1203,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         booking,
         modelName,
+        /**
+         * Whether any QUANTITY_TRACKED unit on this booking has been accounted
+         * for — returned, consumed, lost or damaged.
+         *
+         * Quantity-tracked only, because that is the gap it fills: a quantity
+         * slice returned in part keeps `BookingAsset.checkedInAt` NULL, since
+         * that marker means fully reconciled, so the slice markers alone cannot
+         * answer "has anything come back yet". Individual assets have no
+         * disposition logs and are answered by their markers, so a reader must
+         * not treat this as a booking-wide "anything returned" flag.
+         *
+         * The check-in receipt is offered for exactly the partial-quantity
+         * case, and reads this alongside the slice markers.
+         */
+        hasDispositionedUnits: dispositionLogs.length > 0,
         // Shaped view for first paint (same field names the component reads),
         // post-enriched with per-row qty disposition data (Polish-6 multi-row).
         items: enrichedItems,
@@ -1703,6 +1774,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "checkOut": {
+        // The one-click check-out is refused when the workspace requires the
+        // explicit flow (scan or select) for this role.
+        assertQuickCheckoutAllowed({ role, bookingSettings });
+
         const booking = await checkoutBooking({
           id,
           organizationId,
@@ -1742,6 +1817,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // Booked bucket at once. The service resolves the eligible ids
         // server-side (no client-supplied id list) and routes through the
         // progressive partial-checkout path, which writes notes/events.
+        // Being one click, it is refused under the explicit check-out
+        // requirement, the same as "Check out".
+        assertQuickCheckoutAllowed({ role, bookingSettings });
+
         return await checkoutRemainingAssets({
           formData,
           request,
@@ -2022,7 +2101,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "revert-to-draft": {
-        await revertBookingToDraft({ id, organizationId, userId });
+        await revertBookingToDraft({
+          id,
+          organizationId,
+          userId,
+          hints: getClientHint(request),
+        });
 
         sendNotification({
           title: "Booking reverted",

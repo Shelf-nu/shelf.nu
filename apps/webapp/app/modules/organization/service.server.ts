@@ -270,6 +270,7 @@ export async function updateOrganization({
   hasSequentialIdsMigrated,
   qrIdDisplayPreference,
   showShelfBranding,
+  showQrCodesOnPdfs,
   customEmailFooter,
 }: Pick<Organization, "id"> & {
   currency?: Organization["currency"];
@@ -284,6 +285,7 @@ export async function updateOrganization({
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
   showShelfBranding?: Organization["showShelfBranding"];
+  showQrCodesOnPdfs?: Organization["showQrCodesOnPdfs"];
   customEmailFooter?: string | null;
 }) {
   try {
@@ -296,6 +298,9 @@ export async function updateOrganization({
       }),
       ...(typeof showShelfBranding === "boolean" && {
         showShelfBranding,
+      }),
+      ...(typeof showQrCodesOnPdfs === "boolean" && {
+        showQrCodesOnPdfs,
       }),
       ...(customEmailFooter !== undefined && { customEmailFooter }),
       ...(ssoDetails && {
@@ -430,12 +435,44 @@ const ORGANIZATION_SELECT_FIELDS = {
   hasSequentialIdsMigrated: true,
   qrIdDisplayPreference: true,
   showShelfBranding: true,
+  showQrCodesOnPdfs: true,
   customEmailFooter: true,
 };
 
 export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
   select: typeof ORGANIZATION_SELECT_FIELDS;
 }>;
+
+/**
+ * Whether a user signs in through SSO.
+ *
+ * Each membership carries its user's flag, so an already-fetched membership list
+ * answers without another query. A user with no memberships at all has nothing
+ * to read it from, and that is precisely the SSO user who belongs on the
+ * pending-assignment page — so the user row answers instead of defaulting to
+ * "not SSO".
+ *
+ * @param userId - The user in question
+ * @param userOrganizations - Their memberships, as `getUserOrganizations` returns them
+ * @returns `true` when the user is an SSO user
+ */
+export async function isSsoUser({
+  userId,
+  userOrganizations,
+}: {
+  userId: string;
+  userOrganizations: Array<{ user: { sso: boolean } }>;
+}): Promise<boolean> {
+  if (userOrganizations.length > 0) {
+    return userOrganizations[0].user.sso === true;
+  }
+
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { sso: true },
+  });
+  return user?.sso === true;
+}
 
 export async function getUserOrganizations({ userId }: { userId: string }) {
   try {
