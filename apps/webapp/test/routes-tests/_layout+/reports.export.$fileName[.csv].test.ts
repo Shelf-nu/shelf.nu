@@ -65,6 +65,32 @@ vi.mock("~/modules/reports/helpers.server", () => ({
   monthlyBookingTrendsReport: vi.fn(),
 }));
 
+// why: the real resolver verifies filter ids against the database; the
+// loader's contract is only that it hands the resolved filters on. The fake
+// parses the query string with the real pure grammar and echoes the parsed
+// params inside the predicate, so each case can assert what reached the
+// report function.
+vi.mock("~/modules/reports/filters.server", async () => {
+  const { parseReportFilterParams } = await import(
+    "~/modules/reports/filter-params"
+  );
+  return {
+    resolveReportFilters: vi.fn(
+      ({ searchParams }: { searchParams: URLSearchParams }) => {
+        const params = parseReportFilterParams(searchParams);
+        return Promise.resolve({
+          params,
+          assetFilter: { where: { parsed: params }, sql: [], isEmpty: false },
+          bookingStatuses: params.statuses,
+          teamMemberId: params.teamMemberId,
+          assetId: params.assetId,
+          active: [],
+        });
+      }
+    ),
+  };
+});
+
 // why: format prefs are resolved from the database for the acting user
 vi.mock("~/utils/date-format.server", () => ({
   resolveUserFormatPrefsById: vi.fn(() =>
@@ -123,6 +149,15 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         assetCount: 20,
         percentage: 100,
         totalValue: 40000,
+      },
+    ],
+    byAssetModel: [
+      {
+        id: "model-1",
+        groupName: "كاميرا",
+        assetCount: 5,
+        percentage: 25,
+        totalValue: 10000,
       },
     ],
   };
@@ -230,6 +265,16 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       pageSize: 10000,
     });
 
+    /**
+     * Matcher for the predicate the fake resolver builds: it echoes the parsed
+     * params, so asserting on them proves the route forwarded the resolved
+     * filters rather than re-reading the query string itself.
+     */
+    const filterCarrying = (parsed: Record<string, unknown>) =>
+      expect.objectContaining({
+        where: { parsed: expect.objectContaining(parsed) },
+      });
+
     type PassthroughCase = {
       /** `reportId` param, matching a case in the loader's switch. */
       reportId: string;
@@ -255,15 +300,16 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         mock: vi.mocked(custodySnapshotReport),
         expected: {
           teamMemberId: "tm-1",
-          locationId: "loc-1",
+          assetFilter: filterCarrying({ locationIds: ["loc-1"] }),
           currency: "USD",
         },
       },
       {
         reportId: "overdue-items",
-        query: "custodian=cust-1",
+        // Legacy spelling of the custodian filter must still reach the report.
+        query: "custodian=tm-1",
         mock: vi.mocked(overdueItemsReport),
-        expected: { custodianId: "cust-1", currency: "USD" },
+        expected: { custodianTeamMemberId: "tm-1", currency: "USD" },
       },
       {
         reportId: "idle-assets",
@@ -271,16 +317,30 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         mock: vi.mocked(idleAssetsReport),
         expected: {
           idleThresholdDays: 60,
-          categoryId: "cat-1",
-          locationId: "loc-1",
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1"],
+            locationIds: ["loc-1"],
+          }),
           currency: "USD",
         },
       },
       {
         reportId: "top-booked-assets",
-        query: "category=cat-1&location=loc-1",
+        query: "category=cat-1&assetModel=model-1&cf=field-1:yes",
         mock: vi.mocked(topBookedAssetsReport),
-        expected: { categoryId: "cat-1", locationId: "loc-1" },
+        expected: {
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1"],
+            assetModelIds: ["model-1"],
+            customFieldValues: [{ customFieldId: "field-1", value: "yes" }],
+          }),
+        },
+      },
+      {
+        reportId: "monthly-booking-trends",
+        query: "category=cat-1",
+        mock: vi.mocked(monthlyBookingTrendsReport),
+        expected: { assetFilter: filterCarrying({ categoryIds: ["cat-1"] }) },
       },
       {
         reportId: "top-booked-kits",
@@ -293,13 +353,16 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       },
       {
         reportId: "asset-inventory",
+        // Legacy comma-joined spellings must still reach the report.
         query:
           "categories=cat-1,cat-2&locations=loc-1&statuses=AVAILABLE,IN_CUSTODY",
         mock: vi.mocked(assetInventoryReport),
         expected: {
-          categoryIds: ["cat-1", "cat-2"],
-          locationIds: ["loc-1"],
-          statuses: ["AVAILABLE", "IN_CUSTODY"],
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1", "cat-2"],
+            locationIds: ["loc-1"],
+            statuses: ["AVAILABLE", "IN_CUSTODY"],
+          }),
           currency: "USD",
         },
       },
@@ -307,19 +370,31 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         reportId: "asset-utilization",
         query: "category=cat-1&location=loc-1",
         mock: vi.mocked(assetUtilizationReport),
-        expected: { categoryId: "cat-1", locationId: "loc-1" },
+        expected: {
+          assetFilter: filterCarrying({
+            categoryIds: ["cat-1"],
+            locationIds: ["loc-1"],
+          }),
+        },
       },
       {
         reportId: "asset-activity",
         query: "asset=asset-1&category=cat-1",
         mock: vi.mocked(assetActivityReport),
-        expected: { assetId: "asset-1", categoryId: "cat-1" },
+        expected: {
+          assetId: "asset-1",
+          assetFilter: filterCarrying({ categoryIds: ["cat-1"] }),
+        },
       },
       {
         reportId: "distribution",
-        query: "",
+        query: "assetModel=model-1",
         mock: vi.mocked(assetDistributionReport),
-        expected: { organizationId: "org-1", currency: "USD" },
+        expected: {
+          organizationId: "org-1",
+          currency: "USD",
+          assetFilter: filterCarrying({ assetModelIds: ["model-1"] }),
+        },
       },
     ];
 
