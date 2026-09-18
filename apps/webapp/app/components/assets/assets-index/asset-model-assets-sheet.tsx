@@ -14,7 +14,7 @@
  *
  * @see {@link file://./../../../routes/api+/asset-models.$assetModelId.assets.ts}
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFetcher, useLocation } from "react-router";
 import { AssetIndexSettingsProvider } from "~/context/asset-index-settings-context";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
@@ -60,12 +60,25 @@ export function AssetModelAssetsSheet({
   matchingAssets: number;
 }) {
   const [open, setOpen] = useState(false);
+  /** The `modelId:search` the currently-held `fetcher.data` was loaded for. */
+  const loadedKeyRef = useRef<string | null>(null);
   const fetcher = useFetcher<SheetResponse>();
   const location = useLocation();
   const columns = useAssetIndexColumns();
 
   useEffect(() => {
-    if (!open || fetcher.state !== "idle" || fetcher.data) {
+    // Keyed on what was actually fetched, not merely on whether anything was.
+    // `fetcher.data` stays populated for this component's lifetime, and `open`
+    // is local state so toggling it never remounts — so a truthiness check
+    // would leave the sheet showing assets from the filters in force at first
+    // open, disagreeing with the row's count.
+    const loadKey = `${assetModelId}:${location.search}`;
+
+    if (!open || fetcher.state !== "idle") {
+      return;
+    }
+
+    if (fetcher.data && loadedKeyRef.current === loadKey) {
       return;
     }
 
@@ -78,6 +91,8 @@ export function AssetModelAssetsSheet({
     // `void`: the fetcher owns the request lifecycle and surfaces state through
     // `fetcher.state` / `fetcher.data`, so there is no promise for this effect
     // to await or reject on.
+    loadedKeyRef.current = loadKey;
+
     void fetcher.load(
       `/api/asset-models/${assetModelId}/assets?${search.toString()}`
     );

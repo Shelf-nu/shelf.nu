@@ -1,6 +1,7 @@
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
 import type { AssetModelRollupSortKey } from "./rollup.server";
+import type { GetAssetModelRollupArgs } from "./rollup.server";
 import {
   ASSET_MODEL_ROLLUP_SORT_KEYS,
   getAssetModelRollup,
@@ -112,6 +113,61 @@ describe("getAssetModelRollup", () => {
       matchingAssets: 20,
       available: 14,
     });
+  });
+
+  it("joins the custody aggregation when a custody filter is active", async () => {
+    // why: custody predicates test `jsonb_array_length(custody_agg.custody)`,
+    // an alias from a LATERAL join rather than a self-contained subquery — a
+    // missing FROM-clause error rather than a wrong result.
+    await getAssetModelRollup({
+      ...baseArgs,
+      filters: [
+        {
+          name: "custody",
+          type: "enum",
+          operator: "is",
+          value: "in-custody",
+        },
+      ] as unknown as GetAssetModelRollupArgs["filters"],
+    });
+
+    expect(lastQueryText()).toContain("custody_agg");
+  });
+
+  it("omits the custody aggregation when no custody filter is active", async () => {
+    await getAssetModelRollup(baseArgs);
+
+    expect(lastQueryText()).not.toContain("custody_agg");
+  });
+
+  it("counts the no-model bucket as a row for pagination but not as a model", async () => {
+    vitest.mocked(db.$queryRaw).mockResolvedValue([
+      {
+        assetModelId: null,
+        name: null,
+        description: null,
+        image: null,
+        thumbnailImage: null,
+        defaultCategoryId: null,
+        defaultCategoryName: null,
+        defaultCategoryColor: null,
+        matchingAssets: 25,
+        available: 25,
+        checkedOut: 0,
+        inCustody: 0,
+        notBookable: 0,
+        totalValue: 0,
+        totalModels: 20,
+        totalGroups: 21,
+        totalRollupAssets: 145,
+      },
+    ]);
+
+    const result = await getAssetModelRollup(baseArgs);
+
+    // The header's label and the pagination total answer different questions.
+    expect(result.totalModels).toBe(20);
+    expect(result.totalGroups).toBe(21);
   });
 
   it("reports zero totals for an empty result rather than NaN", async () => {

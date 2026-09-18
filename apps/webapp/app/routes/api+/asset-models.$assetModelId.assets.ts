@@ -22,7 +22,9 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
 import {
@@ -134,6 +136,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       role,
     });
 
+    // Built-in date filters truncate to a calendar day in the acting user's
+    // zone, and the filter string carries the date but not the zone it must be
+    // read in. Resolving it the way the index loader does is what keeps this
+    // sheet's contents equal to the count on the row that opened it.
+    const { timeZone } = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
     const { assets, totalAssets, page, perPage, totalPages } =
       await getAdvancedPaginatedAndFilterableAssets({
         request,
@@ -141,6 +152,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         settings,
         filters: stringifyFilters(forwarded),
         canUseBarcodes,
+        timeZone,
         // Matches the index loader (data.server.ts) so a SELF_SERVICE viewer
         // sees the same restricted set here as on the page that opened the
         // sheet — this endpoint is reachable directly, not only through it.

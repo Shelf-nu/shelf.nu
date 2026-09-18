@@ -62,7 +62,7 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
   wrapperClassName?: string;
 }) => {
-  const { items, modelRollup, totalRollupAssets, totalItems, locale } =
+  const { items, modelRollup, totalRollupAssets, totalModels, locale } =
     useLoaderData<AssetIndexLoaderData>();
   // We use the hook because it handles optimistic UI
   const {
@@ -84,10 +84,11 @@ export const AssetsList = ({
   // resourceLabelContent to render AssetCodeBadge next to status + category.
   // resolveDisplayCode short-circuits to QR for non-addon orgs, so always safe.
   const currentOrganization = useCurrentOrganization();
-  // The header count for the model view. `modelRollup` only holds the CURRENT
-  // PAGE's rows — the loader sets `totalItems` to the unpaged model total
-  // for this view, so that (not `modelRollup.length`) is the source of truth.
-  const totalModelsShown = isModelView ? totalItems : 0;
+  // The header's model count. Three candidates, and only one is right:
+  // `modelRollup.length` is this page's rows, `totalItems` is every row the
+  // list renders (bucket included), and `totalModels` is the unpaged count of
+  // real models — which is what "N models" claims to be.
+  const totalModelsShown = isModelView ? totalModels : 0;
   // Stable `id` per row (react-list-item key + click targeting) — the rollup
   // row's natural identifier is `assetModelId`, which is `null` for the
   // synthetic "No model" bucket.

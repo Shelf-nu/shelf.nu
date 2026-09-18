@@ -19,6 +19,11 @@ vitest.mock("react-router", async () => {
 
 // why: the route's job is authorization + filter assembly; the asset query
 // itself is covered by the advanced index's own tests.
+// why: the route resolves the viewer's timezone for date-filter truncation;
+// the real resolver reads the DB.
+vitest.mock("~/utils/date-format.server", () => ({
+  resolveUserFormatPrefsById: vitest.fn(),
+}));
 vitest.mock("~/utils/roles.server", () => ({
   requirePermission: vitest.fn(),
 }));
@@ -35,6 +40,7 @@ vitest.mock("~/database/db.server", () => ({
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { requirePermission } from "~/utils/roles.server";
 
 const context = {
@@ -51,6 +57,10 @@ describe("asset model assets endpoint", () => {
     // `.mock.calls[0]`, which without this returns the FIRST test's call for
     // the whole file rather than the current test's.
     vitest.clearAllMocks();
+
+    vitest.mocked(resolveUserFormatPrefsById).mockResolvedValue({
+      timeZone: "Asia/Tokyo",
+    } as never);
 
     vitest.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
@@ -199,5 +209,19 @@ describe("asset model assets endpoint", () => {
       .calls[0];
     expect(args.filters).not.toContain("view=");
     expect(args.filters).not.toContain("modelSortBy=");
+  });
+
+  it("passes the viewer's timezone so date filters truncate the same day as the row's count", async () => {
+    await loader({
+      context,
+      request: request("https://x.test/api/asset-models/am-1/assets"),
+      params: { assetModelId: "am-1" },
+    } as never);
+
+    const [args] = vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mock
+      .calls[0];
+    // Omitting it falls through to the query helper's UTC default, which
+    // truncates a different calendar day than the model row's count does.
+    expect(args.timeZone).toBe("Asia/Tokyo");
   });
 });

@@ -23,7 +23,7 @@ import { withPrismaRetry } from "@shelf/database";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
-import { generateWhereClause } from "../asset/query.server";
+import { CUSTODY_AGG_JOIN, generateWhereClause } from "../asset/query.server";
 
 /** Sort keys the model view offers. Deliberately separate from the asset
  * index's `sortBy`, whose keys name asset columns a model row does not have. */
@@ -71,8 +71,27 @@ export type AssetModelRollupRow = {
  * Postgres repeats on every row. */
 type AssetModelRollupQueryRow = AssetModelRollupRow & {
   totalModels: number;
+  totalGroups: number;
   totalRollupAssets: number;
 };
+
+/**
+ * The joins a rollup query needs beyond its own three tables.
+ *
+ * Custody WHERE predicates test `jsonb_array_length(custody_agg.custody)`, an
+ * alias that lives in a LATERAL join rather than a self-contained subquery, so
+ * a custody filter without this join is a "missing FROM-clause entry" error
+ * rather than a wrong result. Added only when such a filter is present: the
+ * aggregation runs per asset row and is pure cost when nothing reads it.
+ *
+ * @param filters - Parsed filters for this request.
+ * @returns The join fragment, or `Prisma.empty` when no custody filter applies.
+ */
+function buildRollupFilterJoins(filters: Filter[]): Prisma.Sql {
+  const hasCustodyFilter = filters.some((filter) => filter.name === "custody");
+
+  return hasCustodyFilter ? CUSTODY_AGG_JOIN : Prisma.empty;
+}
 
 /** Sort expression per key. A whitelist, not interpolation — the key comes
  * from a URL param and must never reach `Prisma.raw` unvalidated. */
@@ -87,6 +106,9 @@ const SORT_EXPRESSIONS: Record<AssetModelRollupSortKey, string> = {
  * is being viewed. */
 type AssetModelRollupTotals = {
   totalModels: number;
+  /** Rows the list renders — models plus the no-model bucket when non-empty.
+   * Pagination must cover this, not `totalModels`. */
+  totalGroups: number;
   totalRollupAssets: number;
 };
 
@@ -104,17 +126,28 @@ type AssetModelRollupTotals = {
  *
  * @param whereClause - The same `generateWhereClause` output the primary
  *   query used, so the totals describe the identical filtered set.
+ * @param filterJoins - The same joins the primary query used, so a custody
+ *   filter resolves here too.
  * @returns The filtered set's totals, `0` for each when there are no rows.
  */
 async function getAssetModelRollupTotals(
-  whereClause: Prisma.Sql
+  whereClause: Prisma.Sql,
+  filterJoins: Prisma.Sql
 ): Promise<AssetModelRollupTotals> {
   const query = Prisma.sql`
     SELECT
       COUNT(DISTINCT am.id) FILTER (WHERE am.id IS NOT NULL)::int AS "totalModels",
+      -- Rows the list renders: every model, plus the no-model bucket when it
+      -- has any assets. Separate from 'totalModels' because that one answers
+      -- the header's "N models", which a bucket is not.
+      (
+        COUNT(DISTINCT am.id) FILTER (WHERE am.id IS NOT NULL)
+        + (CASE WHEN COUNT(*) FILTER (WHERE am.id IS NULL) > 0 THEN 1 ELSE 0 END)
+      )::int                                                       AS "totalGroups",
       COUNT(*)::int                                                AS "totalRollupAssets"
     FROM public."Asset" a
     LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id
+    ${filterJoins}
     ${whereClause}
       AND a.type = 'INDIVIDUAL'
   `;
@@ -128,6 +161,7 @@ async function getAssetModelRollupTotals(
 
   return {
     totalModels: totals?.totalModels ?? 0,
+    totalGroups: totals?.totalGroups ?? 0,
     totalRollupAssets: totals?.totalRollupAssets ?? 0,
   };
 }
@@ -170,10 +204,13 @@ export async function getAssetModelRollup({
 }: GetAssetModelRollupArgs): Promise<{
   rows: AssetModelRollupRow[];
   totalModels: number;
+  totalGroups: number;
   totalRollupAssets: number;
 }> {
   const take = Math.min(Math.max(perPage, 1), 100);
   const skip = page > 1 ? (page - 1) * take : 0;
+
+  const filterJoins = buildRollupFilterJoins(filters);
 
   const whereClause = generateWhereClause(
     organizationId,
@@ -225,10 +262,14 @@ export async function getAssetModelRollup({
         -- the UNPAGED totals. The no-model bucket is not a model, so it is
         -- excluded from the model count but not from the asset count.
         COUNT(*) FILTER (WHERE am.id IS NOT NULL) OVER ()::int AS "totalModels",
+        -- Rows the list renders, which pagination must cover: the no-model
+        -- bucket is one of them even though it is not a model.
+        COUNT(*) OVER ()::int                                 AS "totalGroups",
         SUM(COUNT(*)) OVER ()::int                            AS "totalRollupAssets"
       FROM public."Asset" a
       LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id
       LEFT JOIN public."Category" cat ON am."defaultCategoryId" = cat.id
+      ${filterJoins}
       ${whereClause}
         AND a.type = 'INDIVIDUAL'
       -- cat.id joins the grouping because Postgres extends a functional
@@ -254,15 +295,17 @@ export async function getAssetModelRollup({
     // with matches as having none.
     const totals =
       result.length === 0 && skip > 0
-        ? await getAssetModelRollupTotals(whereClause)
+        ? await getAssetModelRollupTotals(whereClause, filterJoins)
         : {
             totalModels: first?.totalModels ?? 0,
+            totalGroups: first?.totalGroups ?? 0,
             totalRollupAssets: first?.totalRollupAssets ?? 0,
           };
 
     return {
       rows: result.map(
-        ({ totalModels: _m, totalRollupAssets: _a, ...row }) => row
+        ({ totalModels: _m, totalGroups: _g, totalRollupAssets: _a, ...row }) =>
+          row
       ),
       ...totals,
     };

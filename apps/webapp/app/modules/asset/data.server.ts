@@ -437,6 +437,7 @@ export async function simpleModeLoader({
        * every call site. */
       modelRollup: null,
       totalRollupAssets: 0,
+      totalModels: 0,
       categories,
       tags,
       search,
@@ -527,16 +528,17 @@ async function getAssetModelRollupPage({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
-  const { rows, totalModels, totalRollupAssets } = await getAssetModelRollup({
-    organizationId,
-    search,
-    filters: parsedFilters,
-    timeZone,
-    page,
-    perPage,
-    sortBy,
-    sortDirection,
-  });
+  const { rows, totalModels, totalGroups, totalRollupAssets } =
+    await getAssetModelRollup({
+      organizationId,
+      search,
+      filters: parsedFilters,
+      timeZone,
+      page,
+      perPage,
+      sortBy,
+      sortDirection,
+    });
 
   return {
     search,
@@ -545,9 +547,14 @@ async function getAssetModelRollupPage({
     cookie,
     assets: [] as never[],
     totalAssets: 0,
-    totalPages: Math.ceil(totalModels / Math.max(perPage, 1)),
+    // Paginate over the rows the list renders, which includes the no-model
+    // bucket. `totalModels` answers the header's "N models" instead, and using
+    // it here strands the bucket on an unreachable page whenever the real
+    // model count is an exact multiple of `perPage`.
+    totalPages: Math.ceil(totalGroups / Math.max(perPage, 1)),
     modelRows: rows,
     totalModels,
+    totalGroups,
     totalRollupAssets,
   };
 }
@@ -831,7 +838,13 @@ export async function advancedModeLoader({
   ];
 
   /** Paging counts describe whatever the list renders — models here, assets
-   * otherwise — so the shared pagination component needs no branch. */
+   * otherwise — so the shared pagination component needs no branch. The model
+   * view renders one row per group, which includes the no-model bucket. */
+  const totalGroupsForPayload =
+    "totalGroups" in assetsOrRollup ? assetsOrRollup.totalGroups : 0;
+
+  /** The header's "N models" count, which the no-model bucket is excluded from
+   * because it is not a model. Deliberately NOT the paging total above. */
   const totalModelsForPayload =
     "totalModels" in assetsOrRollup ? assetsOrRollup.totalModels : 0;
 
@@ -848,7 +861,8 @@ export async function advancedModeLoader({
       }),
       search,
       page,
-      totalItems: isModelView ? totalModelsForPayload : totalAssets,
+      totalItems: isModelView ? totalGroupsForPayload : totalAssets,
+      totalModels: totalModelsForPayload,
       perPage,
       totalPages,
       modelName,
