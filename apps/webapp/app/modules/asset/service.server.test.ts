@@ -5555,6 +5555,9 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
     // per-location quantity), so the location's timeline must not claim it
     // arrived. Asserted through the note, which is the only place a reader
     // ever sees this list.
+    // why: the selection under test — one INDIVIDUAL and one
+    // QUANTITY_TRACKED asset is the only shape that separates "selected" from
+    // "actually moved", which is what the note is asserted on.
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
       {
         id: "asset-individual",
@@ -5583,11 +5586,17 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
         assetKits: [],
       },
     ]);
+    // why: the destination is resolved through an org-scoped lookup before
+    // anything is written, and `assertLocationBelongsToOrg` reads the same
+    // delegate — without a row the call refuses as a cross-org location.
     (db.location.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
       id: "loc-new",
       name: "New Location",
       organizationId: "org-1",
     });
+    // why: the placement writes happen inside the transaction, so its body has
+    // to run against the same mocked delegates for the post-tx note to be
+    // built from a set the transaction really wrote.
     (db.$transaction as ReturnType<typeof vitest.fn>).mockImplementation(
       (callback: (tx: unknown) => unknown) => callback(db)
     );
