@@ -22,7 +22,6 @@ import {
   type AssetCustodyListEntry,
   type Location as LocationType,
   type TeamMember,
-  getApiBaseUrl,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { resolveSelfTeamMember } from "@/lib/self-team-member";
@@ -39,6 +38,8 @@ import {
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import { pushIntoTab } from "@/lib/navigation";
+import { buildBookingCustodyRows } from "@/lib/asset-custody-rows";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
@@ -48,6 +49,7 @@ import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
+import { CodeSection } from "@/components/shared/code-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
 import { InfoRow } from "@/components/shared/info-row";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
@@ -55,19 +57,6 @@ import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
 import { useImageUpload } from "@/hooks/use-image-upload";
 import { useSheetSubmit } from "@/hooks/use-sheet-submit";
-// Lazy-loaded: ~50KB library only needed when viewing QR codes on asset detail
-let QRCode: typeof import("react-native-qrcode-svg").default | null = null;
-try {
-  // why: dynamic require keeps react-native-qrcode-svg out of the initial JS bundle
-  // for screens that don't render QR codes; static import would defeat the optimization
-  QRCode =
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("react-native-qrcode-svg").default ??
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("react-native-qrcode-svg");
-} catch {
-  // Will render graceful fallback instead of QR code
-}
 
 export default function AssetDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -102,7 +91,7 @@ export default function AssetDetailScreen() {
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
   // Render dates in the acting user's format preferences + timezone.
-  const { formatDate } = useDateFormatter();
+  const { formatDate, formatDateTime } = useDateFormatter();
 
   // Asset data
   const {
@@ -449,6 +438,15 @@ export default function AssetDetailScreen() {
     isQtyTracked && asset.custodyList && asset.custodyList.length > 0
       ? asset.custodyList
       : null;
+  // Custody held through a booking. Rendered only when neither custody source
+  // above has a row, the same precedence as the web asset page's card.
+  const bookingCustodyRows = buildBookingCustodyRows(asset.activeBooking, {
+    formatDateTime,
+    // The booking lives in another tab; the helper roots that tab at its list
+    // so "back" has somewhere to go.
+    onOpenBooking: (bookingId) =>
+      pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`),
+  });
   // Cap for the assign-quantity step. Prefer the server's custodyAvailable
   // (web-parity cap that also excludes kit earmarks); fall back for older
   // servers to the broader `available`, then the plain total — the server
@@ -770,7 +768,18 @@ export default function AssetDetailScreen() {
                   value={formatDate(asset.custody.createdAt)}
                 />
               </>
-            ) : null}
+            ) : (
+              bookingCustodyRows.map((row) => (
+                <InfoRow
+                  key={row.key}
+                  icon={row.icon}
+                  label={row.label}
+                  value={row.value}
+                  onPress={row.onPress}
+                  accessibilityLabel={row.accessibilityLabel}
+                />
+              ))
+            )}
             {/* Holders hidden from this caller (privacy filtering) — one calm
                 muted row so partial lists don't read as the full picture. */}
             {custodyOthersCount > 0 && (
@@ -810,16 +819,32 @@ export default function AssetDetailScreen() {
                 value={asset.assetModel.name}
               />
             ) : null}
-            {asset.sequentialId ? (
-              // why: the scanner's manual entry accepts a SAM ID, so the app
-              // has to be able to tell you what an asset's SAM ID is. Web has
-              // always shown it as "Asset ID".
+            {/* The identifier this workspace labels its assets with, resolved
+                server-side. Labelled with the code's own name ("Code 128") so
+                the reader can tell WHICH identifier they are looking at when
+                matching a physical label. */}
+            {asset.displayCode?.value ? (
               <InfoRow
                 // `barcode-outline` rather than `pricetag-outline`: the Category
                 // row above already owns the pricetag, and it also matches the
                 // scanner affordance this row exists for.
                 icon="barcode-outline"
-                label="Asset ID"
+                label={asset.displayCode.label}
+                value={asset.displayCode.value}
+              />
+            ) : null}
+            {/* The SAM ID keeps its own row whenever it is not already the row
+                above: the scanner's manual entry accepts a SAM ID, so the app
+                has to be able to tell you what an asset's SAM ID is whatever
+                the workspace prefers to display. */}
+            {asset.sequentialId &&
+            asset.displayCode?.value !== asset.sequentialId ? (
+              <InfoRow
+                // `keypad-outline`: this row exists because the scanner's
+                // manual entry takes a SAM ID, and a pricetag would read as a
+                // second Category row.
+                icon="keypad-outline"
+                label="SAM ID"
                 value={asset.sequentialId}
               />
             ) : null}
@@ -849,40 +874,15 @@ export default function AssetDetailScreen() {
             </View>
           )}
 
-          {/* ── QR Code ─────────────────────────────────── */}
-          {asset.qrCodes.length > 0 && (
-            <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitle}>QR Code</Text>
-              <View style={styles.qrCard}>
-                {QRCode ? (
-                  <QRCode
-                    value={`${getApiBaseUrl()}/qr/${asset.qrCodes[0].id}`}
-                    size={160}
-                    backgroundColor={colors.white}
-                    color={colors.foreground}
-                  />
-                ) : (
-                  <View
-                    style={{
-                      width: 160,
-                      height: 160,
-                      justifyContent: "center",
-                      alignItems: "center",
-                    }}
-                  >
-                    <Ionicons
-                      name="qr-code-outline"
-                      size={64}
-                      color={colors.muted}
-                    />
-                  </View>
-                )}
-                <Text style={styles.qrIdText} selectable numberOfLines={1}>
-                  {asset.qrCodes[0].id}
-                </Text>
-              </View>
-            </View>
-          )}
+          {/* ── Codes ──────────────────────────────────── */}
+          {/* Leads with the workspace's preferred code and offers the others.
+              The choice is the server's (`displayCode`); this screen never
+              re-derives it, because it does not receive the preference. */}
+          <CodeSection
+            displayCode={asset.displayCode}
+            barcodes={asset.barcodes}
+            qrCodes={asset.qrCodes}
+          />
 
           {/* ── Custom Fields ──────────────────────────── */}
           <CustomFieldsSection
@@ -1374,28 +1374,6 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
   },
   tagText: { fontSize: fontSize.sm, color: colors.gray700 },
-
-  // QR Code
-  qrCard: {
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center",
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.lg,
-    gap: spacing.md,
-    ...shadows.sm,
-  },
-  qrIdText: {
-    fontSize: fontSize.xs,
-    color: colors.mutedLight,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-  },
-  qrExtraText: {
-    fontSize: fontSize.sm,
-    color: colors.muted,
-  },
 
   // Image zoom modal
   zoomOverlay: {

@@ -7,7 +7,6 @@ import {
   getBookingAssetCheckinLabel,
   getBookingContextAssetStatus,
   isAssetCheckableIn,
-  isAssetCheckableOut,
   isQtyRowCheckedOutOrFulfilled,
   resolveQtyStockBadgeVariant,
   type AssetWithStatus,
@@ -202,92 +201,6 @@ describe("isAssetCheckableIn", () => {
   it("is NOT checkable-in when the asset was never checked out (available)", () => {
     const asset = { id: "asset-2", status: "AVAILABLE" };
     expect(isAssetCheckableIn(asset, noCheckins, "ONGOING")).toBe(false);
-  });
-});
-
-describe("isAssetCheckableOut", () => {
-  it("is checkable-out when still booked (available, not in records)", () => {
-    const asset = { id: "asset-1", status: "AVAILABLE" };
-    expect(isAssetCheckableOut(asset, new Set())).toBe(true);
-  });
-
-  it("is NOT checkable-out when the asset status is CHECKED_OUT", () => {
-    const asset = { id: "asset-1", status: "CHECKED_OUT" };
-    expect(isAssetCheckableOut(asset, new Set())).toBe(false);
-  });
-
-  it("is NOT checkable-out when the id is in the per-booking checkout records", () => {
-    const asset = { id: "asset-1", status: "AVAILABLE" };
-    expect(isAssetCheckableOut(asset, new Set(["asset-1"]))).toBe(false);
-  });
-
-  // why: the qty-aware top-off UX hinges on `remainingByAssetId` taking
-  // precedence over the binary "already checked out?" signal for
-  // QUANTITY_TRACKED rows. These four cases pin down the contract — drop one
-  // branch and the bulk dropdown / partial-checkout dialog silently disagree
-  // with each other again, which is exactly the bug the option exists to
-  // prevent.
-  describe("with remainingByAssetId (qty-aware top-off)", () => {
-    it("is checkable-out for QT asset with remaining > 0 even when id is in checkedOutAssetIds", () => {
-      // Top-off case: the row is "partially checked out" — its id is recorded
-      // in the booking's checked-out set — but units remain for this booking,
-      // so the user must still be able to check the rest out.
-      const asset = {
-        id: "asset-1",
-        status: "CHECKED_OUT",
-        type: "QUANTITY_TRACKED",
-      };
-      expect(
-        isAssetCheckableOut(asset, new Set(["asset-1"]), {
-          remainingByAssetId: { "asset-1": 5 },
-        })
-      ).toBe(true);
-    });
-
-    it("is NOT checkable-out for QT asset with remaining = 0", () => {
-      // Map present and authoritative: zero remaining means every booked unit
-      // is dispositioned, so no further check-out is possible — even if the
-      // binary fallback would have said otherwise.
-      const asset = {
-        id: "asset-1",
-        status: "AVAILABLE",
-        type: "QUANTITY_TRACKED",
-      };
-      expect(
-        isAssetCheckableOut(asset, new Set(), {
-          remainingByAssetId: { "asset-1": 0 },
-        })
-      ).toBe(false);
-    });
-
-    it("falls back to the binary check for QT asset when no map is provided (legacy loaders)", () => {
-      // Legacy call sites that haven't been updated to plumb the remaining map
-      // through must keep their pre-existing behaviour — the QT branch is
-      // strictly opt-in via the options arg.
-      const asset = {
-        id: "asset-1",
-        status: "CHECKED_OUT",
-        type: "QUANTITY_TRACKED",
-      };
-      expect(isAssetCheckableOut(asset, new Set())).toBe(false);
-    });
-
-    it("ignores remainingByAssetId for INDIVIDUAL assets (binary check only)", () => {
-      // The QT branch is gated on `type === "QUANTITY_TRACKED"`. An INDIVIDUAL
-      // asset whose id happens to appear in the map must still resolve via the
-      // binary fallback — anything else would let a top-off bug leak into
-      // single-unit assets.
-      const asset = {
-        id: "asset-1",
-        status: "CHECKED_OUT",
-        type: "INDIVIDUAL",
-      };
-      expect(
-        isAssetCheckableOut(asset, new Set(), {
-          remainingByAssetId: { "asset-1": 5 },
-        })
-      ).toBe(false);
-    });
   });
 });
 

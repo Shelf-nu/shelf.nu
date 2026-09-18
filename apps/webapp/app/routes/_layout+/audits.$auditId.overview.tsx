@@ -102,6 +102,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const [{ session }, assetsData, allImages] = await Promise.all([
       getAuditSessionDetails({
+        // Reads `session` only, so no photo is signed here.
+        refreshExpectedAssetImages: false,
         id: auditId,
         organizationId,
         userOrganizations,

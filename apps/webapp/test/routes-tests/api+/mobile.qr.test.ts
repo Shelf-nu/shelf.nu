@@ -41,24 +41,17 @@ vitest.mock("react-router", async () => {
   };
 });
 
-// why: external auth — we don't want to hit Supabase in tests
-vitest.mock("~/modules/api/mobile-auth.server", () => ({
-  requireMobileAuth: vitest.fn(),
-  // why: SAM/sequential resolution (added on main) scopes by the caller's org
-  requireOrganizationAccess: vitest.fn(),
-  MOBILE_ASSET_SELECT: {
-    id: true,
-    title: true,
-    status: true,
-    mainImage: true,
-    category: { select: { name: true } },
-    location: { select: { name: true } },
-  },
-  MOBILE_KIT_SELECT: { id: true, name: true },
-  // why: the whole module is mocked to keep Supabase out of these tests, so the
-  // pure shape helpers must be provided too. These mirror the real ones (flatten
-  // the quantities pivot shape into the flat shape the companion expects).
-  shapeMobileAssetResponse: (asset: any) => {
+// why: external auth — we don't want to hit Supabase in tests. The pure shape
+// helpers are provided in its place, and the photo re-sign step only shapes,
+// since it has its own tests.
+vitest.mock("~/modules/api/mobile-auth.server", () => {
+  /** The pivot fields the shaper flattens; every other field passes through. */
+  type ShapeableAsset = Record<string, unknown> & {
+    assetKits: Array<{ kit: { id: string } | null }>;
+    assetLocations: Array<{ location: unknown }>;
+    custody: unknown[];
+  };
+  const shapeAsset = (asset: ShapeableAsset) => {
     const { assetKits, assetLocations, custody, ...rest } = asset;
     const kit = assetKits[0]?.kit ?? null;
     return {
@@ -68,9 +61,29 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
       location: assetLocations[0]?.location ?? null,
       custody: custody[0] ?? null,
     };
-  },
-  shapeMobileKitResponse: (kit: any) => kit ?? null,
-}));
+  };
+  return {
+    requireMobileAuth: vitest.fn(),
+    // why: SAM/sequential resolution (added on main) scopes by the caller's org
+    requireOrganizationAccess: vitest.fn(),
+    MOBILE_ASSET_SELECT: {
+      id: true,
+      title: true,
+      status: true,
+      mainImage: true,
+      category: { select: { name: true } },
+      location: { select: { name: true } },
+    },
+    MOBILE_KIT_SELECT: { id: true, name: true },
+    // why: the whole module is mocked to keep Supabase out of these tests, so the
+    // pure shape helpers must be provided too. These mirror the real ones (flatten
+    // the quantities pivot shape into the flat shape the companion expects).
+    shapeMobileAssetResponse: shapeAsset,
+    resignAndShapeMobileAsset: (asset: ShapeableAsset) =>
+      Promise.resolve(shapeAsset(asset)),
+    shapeMobileKitResponse: (kit: unknown) => kit ?? null,
+  };
+});
 
 // why: external database — we don't want to hit the real database in tests.
 // asset/kit are read via org-scoped `findFirst` (main moved off `findUnique`).
