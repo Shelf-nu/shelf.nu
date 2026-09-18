@@ -3,6 +3,7 @@
 import type { AssetIndexSettings, Kit } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { data, redirect } from "react-router";
+import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -12,6 +13,7 @@ import {
   getAdvancedFiltersFromRequest,
   getFiltersFromRequest,
   setCookie,
+  updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
 import type { RowWithCustody } from "~/utils/custody-visibility.server";
@@ -43,6 +45,14 @@ import { getAllSelectedValuesFromFilters } from "./utils.server";
 import { MAX_SAVED_FILTER_PRESETS } from "../asset-filter-presets/constants";
 import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
+import type {
+  AssetModelRollupRow,
+  AssetModelRollupSortKey,
+} from "../asset-model/rollup.server";
+import {
+  ASSET_MODEL_ROLLUP_SORT_KEYS,
+  getAssetModelRollup,
+} from "../asset-model/rollup.server";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
@@ -421,6 +431,12 @@ export async function simpleModeLoader({
         assets as unknown as Array<(typeof assets)[number] & RowWithCustody>,
         { canSeeAllCustody, userId }
       ),
+      /* The model view is advanced-only, but both loaders must offer the same
+       * keys: the index components read one union-typed loader payload, and a
+       * key present on only one branch is unreadable without narrowing at
+       * every call site. */
+      modelRollup: null,
+      totalRollupAssets: 0,
       categories,
       tags,
       search,
@@ -479,6 +495,63 @@ export async function simpleModeLoader({
   );
 }
 
+/**
+ * Adapts {@link getAssetModelRollup} to the shape `advancedModeLoader`
+ * destructures from the asset query, so the two branches stay interchangeable.
+ *
+ * `assets` is empty and `totalAssets` is 0 on this branch: the model view has
+ * no asset rows of its own. Paging counts describe MODELS, because models are
+ * what the list renders.
+ */
+async function getAssetModelRollupPage({
+  request,
+  organizationId,
+  timeZone,
+  filters,
+  parsedFilters,
+  sortBy,
+  sortDirection,
+}: {
+  request: Request;
+  organizationId: string;
+  timeZone: string;
+  filters: string | undefined;
+  parsedFilters: Filter[];
+  sortBy: AssetModelRollupSortKey;
+  sortDirection: "asc" | "desc";
+}) {
+  const searchParams = filters
+    ? new URLSearchParams(filters)
+    : getCurrentSearchParams(request);
+  const { page, perPageParam, search } = getParamsValues(searchParams);
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  const { rows, totalModels, totalRollupAssets } = await getAssetModelRollup({
+    organizationId,
+    search,
+    filters: parsedFilters,
+    timeZone,
+    page,
+    perPage,
+    sortBy,
+    sortDirection,
+  });
+
+  return {
+    search,
+    page,
+    perPage,
+    cookie,
+    assets: [] as never[],
+    totalAssets: 0,
+    totalPages: Math.ceil(totalModels / Math.max(perPage, 1)),
+    modelRows: rows,
+    totalModels,
+    totalRollupAssets,
+  };
+}
+
 export async function advancedModeLoader({
   request,
   userId,
@@ -510,6 +583,17 @@ export async function advancedModeLoader({
     "getAll"
   ) as AllowedModelNames[];
   const view = searchParams.get("view") ?? "table";
+
+  /** The model view rolls the SAME filtered asset set up by model, so it
+   * replaces the asset query rather than running alongside it. */
+  const isModelView = view === "models";
+
+  const requestedModelSort = searchParams.get("modelSortBy");
+  const modelSortBy: AssetModelRollupSortKey =
+    ASSET_MODEL_ROLLUP_SORT_KEYS.find((key) => key === requestedModelSort) ??
+    "name";
+  const modelSortDirection =
+    searchParams.get("modelSortDirection") === "desc" ? "desc" : "asc";
 
   const paramsValues = getParamsValues(searchParams);
   const { teamMemberIds } = paramsValues;
@@ -568,7 +652,7 @@ export async function advancedModeLoader({
       totalAssetModels,
     },
     tierLimit,
-    { search, totalAssets, perPage, page, assets, totalPages, cookie },
+    assetsOrRollup,
     customFields,
     teamMembersData,
     kits,
@@ -593,17 +677,27 @@ export async function advancedModeLoader({
       organizationId,
       organizations,
     }),
-    getAdvancedPaginatedAndFilterableAssets({
-      request,
-      organizationId,
-      timeZone: prefTimeZone,
-      filters,
-      settings,
-      getBookings: view === "availability",
-      canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
-      availableToBookOnly: role === OrganizationRoles.SELF_SERVICE,
-      preParsedFilters: parsedFilters,
-    }),
+    isModelView
+      ? getAssetModelRollupPage({
+          request,
+          organizationId,
+          timeZone: prefTimeZone,
+          filters,
+          parsedFilters,
+          sortBy: modelSortBy,
+          sortDirection: modelSortDirection,
+        })
+      : getAdvancedPaginatedAndFilterableAssets({
+          request,
+          organizationId,
+          timeZone: prefTimeZone,
+          filters,
+          settings,
+          getBookings: view === "availability",
+          canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
+          availableToBookOnly: role === OrganizationRoles.SELF_SERVICE,
+          preParsedFilters: parsedFilters,
+        }),
     // We need the custom fields so we can create the options for filtering
     getActiveCustomFields({
       organizationId,
@@ -683,6 +777,17 @@ export async function advancedModeLoader({
     }),
   ]);
 
+  const { search, totalAssets, perPage, page, assets, totalPages, cookie } =
+    assetsOrRollup;
+
+  /** Present only on the model-view branch; `null` narrows the other one. */
+  const modelRollup: AssetModelRollupRow[] | null =
+    "modelRows" in assetsOrRollup ? assetsOrRollup.modelRows : null;
+  const totalRollupAssets =
+    "totalRollupAssets" in assetsOrRollup
+      ? assetsOrRollup.totalRollupAssets
+      : 0;
+
   const currentUserTeamMember = isSelfService
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
@@ -715,16 +820,20 @@ export async function advancedModeLoader({
       : "Your inventory",
   };
 
-  const modelName = {
-    singular: "asset",
-    plural: "assets",
-  };
+  const modelName = isModelView
+    ? { singular: "asset model", plural: "asset models" }
+    : { singular: "asset", plural: "assets" };
 
   const userPrefsCookie = await userPrefs.serialize(cookie);
   const headers = [
     setCookie(userPrefsCookie),
     ...(filtersCookie ? [setCookie(filtersCookie)] : []),
   ];
+
+  /** Paging counts describe whatever the list renders — models here, assets
+   * otherwise — so the shared pagination component needs no branch. */
+  const totalModelsForPayload =
+    "totalModels" in assetsOrRollup ? assetsOrRollup.totalModels : 0;
 
   return data(
     payload({
@@ -739,7 +848,7 @@ export async function advancedModeLoader({
       }),
       search,
       page,
-      totalItems: totalAssets,
+      totalItems: isModelView ? totalModelsForPayload : totalAssets,
       perPage,
       totalPages,
       modelName,
@@ -756,6 +865,10 @@ export async function advancedModeLoader({
       timeZone,
       currentOrganization,
       settings,
+      modelRollup,
+      totalRollupAssets,
+      modelSortBy,
+      modelSortDirection,
 
       customFields,
       ...teamMembersData,
