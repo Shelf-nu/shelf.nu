@@ -20,16 +20,17 @@ import {
 import { Th, Td } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { AssetIndexSettingsProvider } from "~/context/asset-index-settings-context";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
-import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
+import type { AssetModelRollupRow } from "~/modules/asset-model/rollup.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { formatCustodyList } from "~/modules/custody/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
@@ -41,6 +42,7 @@ import BulkActionsDropdown from "../bulk-actions-dropdown";
 import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
 import { AssetIndexPagination } from "./asset-index-pagination";
+import { AssetModelRow } from "./asset-model-row";
 import AssetQuickActions from "./asset-quick-actions";
 import { AssetIndexFilters } from "./filters";
 import { ListItemTagsColumn } from "./list-item-tags-column";
@@ -60,11 +62,15 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
   wrapperClassName?: string;
 }) => {
-  const { items } = useLoaderData<AssetIndexLoaderData>();
+  const { items, modelRollup, totalRollupAssets, totalModels, locale } =
+    useLoaderData<AssetIndexLoaderData>();
   // We use the hook because it handles optimistic UI
-  const { modeIsSimple } = useAssetIndexViewState();
-  const { isAvailabilityView, shouldShowAvailabilityView } =
-    useIsAvailabilityView();
+  const {
+    isAvailabilityView,
+    shouldShowAvailabilityView,
+    isModelView,
+    modeIsSimple,
+  } = useAssetIndexView();
   const columns = useAssetIndexColumns();
   // Memoize so the object reference stays stable across re-renders,
   // allowing React.memo on AdvancedAssetRow to work effectively.
@@ -78,6 +84,28 @@ export const AssetsList = ({
   // resourceLabelContent to render AssetCodeBadge next to status + category.
   // resolveDisplayCode short-circuits to QR for non-addon orgs, so always safe.
   const currentOrganization = useCurrentOrganization();
+  // The header's model count. Three candidates, and only one is right:
+  // `modelRollup.length` is this page's rows, `totalItems` is every row the
+  // list renders (bucket included), and `totalModels` is the unpaged count of
+  // real models — which is what "N models" claims to be.
+  const totalModelsShown = isModelView ? totalModels : 0;
+  // Stable `id` per row (react-list-item key + click targeting) — the rollup
+  // row's natural identifier is `assetModelId`, which is `null` for the
+  // synthetic "No model" bucket.
+  const modelRollupItems = useMemo(
+    () =>
+      (modelRollup ?? []).map((row: AssetModelRollupRow) => ({
+        ...row,
+        id: row.assetModelId ?? "no-model",
+      })),
+    [modelRollup]
+  );
+  // Memoized so `AssetModelRow`'s `memo()` wrapper is not defeated by a new
+  // object identity on every render (see react-render-stability rule).
+  const modelExtraProps = useMemo(
+    () => ({ locale, currency: currentOrganization?.currency }),
+    [locale, currentOrganization?.currency]
+  );
   /** Find the fetcher used for toggling between asset index modes */
   const modeFetcher = fetchers.find(
     (fetcher) => fetcher.key === "asset-index-settings-mode"
@@ -144,7 +172,60 @@ export const AssetsList = ({
           <AssetIndexFilters
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
-          {isAvailabilityView && shouldShowAvailabilityView ? (
+          {isModelView ? (
+            <>
+              <div className="-mb-2 flex items-center gap-1 px-1 text-sm text-gray-500">
+                <span>
+                  {`${totalModelsShown} models · ${totalRollupAssets} ${
+                    totalRollupAssets === 1 ? "asset" : "assets"
+                  } match your filters`}
+                </span>
+                {/* The asset count here is deliberately smaller than the list
+                    view's for the same filters: models are an INDIVIDUAL-only
+                    concept, so quantity-tracked assets are not part of this
+                    rollup. Stated rather than left for the reader to discover
+                    as apparent data loss when switching views. */}
+                <InfoTooltip
+                  iconClassName="size-4"
+                  content={
+                    <>
+                      <h6>Asset models</h6>
+                      <p>
+                        Counts cover the assets matching your current filters.
+                        Asset models apply to individually-tracked assets only,
+                        so quantity-tracked assets are not included here.
+                      </p>
+                    </>
+                  }
+                />
+              </div>
+              {/* Freezing is switched off here: it pins the first header cell
+                  with `sticky left-[48px]` and an opaque background, an offset
+                  anchored to the bulk-select column. Model rows carry neither,
+                  so the pinned header would sit on top of the next column. */}
+              <AssetIndexSettingsProvider freezeColumn={false}>
+                <List
+                  title="Asset models"
+                  ItemComponent={AssetModelRow}
+                  customPagination={<AssetIndexPagination />}
+                  headerChildren={
+                    <>
+                      <Th>Category</Th>
+                      <Th>Assets</Th>
+                      <Th>Availability</Th>
+                      <Th>Total value</Th>
+                    </>
+                  }
+                  items={modelRollupItems}
+                  extraItemComponentProps={modelExtraProps}
+                  customEmptyStateContent={{
+                    title: "No asset models match your filters",
+                    text: "Clear or change your filters to see models here.",
+                  }}
+                />
+              </AssetIndexSettingsProvider>
+            </>
+          ) : isAvailabilityView && shouldShowAvailabilityView ? (
             <>
               <AvailabilityCalendar
                 resources={resources}

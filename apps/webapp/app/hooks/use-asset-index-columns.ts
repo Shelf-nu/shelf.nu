@@ -1,5 +1,6 @@
 import { useFetchers, useLoaderData } from "react-router";
 import { z } from "zod";
+import { useAssetIndexSettingsOverrides } from "~/context/asset-index-settings-context";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 
@@ -44,9 +45,15 @@ const parseColumnsFromFormData = (formData: FormData): Column[] => {
 };
 
 /** Hook that returns the columns in the asset index.
- * Can only be used in asset index page or its child routes
+ * Can only be used in asset index page or its child routes.
+ *
+ * A mounted `AssetIndexSettingsProvider` overriding `columns` wins over the
+ * loader's stored value and the optimistic fetcher update below — this is
+ * how the drill-down sheet can render its own column set without touching
+ * the page's saved settings.
  */
 export function useAssetIndexColumns() {
+  const overrides = useAssetIndexSettingsOverrides();
   const { settings } = useLoaderData<AssetIndexLoaderData>();
 
   /** Get the mode from the settings */
@@ -64,6 +71,12 @@ export function useAssetIndexColumns() {
     optimisticColumns = columnsFetcher?.formData
       ? parseColumnsFromFormData(columnsFetcher.formData)
       : [];
+  }
+
+  // Checked last, after every hook above has run in a stable order: an
+  // early return here would change the hook call order between renders.
+  if (overrides?.columns !== undefined) {
+    return overrides.columns;
   }
 
   return optimisticColumns;

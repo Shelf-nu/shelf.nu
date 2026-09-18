@@ -2612,17 +2612,20 @@ const CHEAP_LOCATION_JOIN = Prisma.sql`
     ) l ON TRUE`;
 
 /**
- * Cheap-phase custody joins: the per-asset custody aggregation (`custody_agg`)
- * plus the active-booking LATERAL (`b`) and its custodian joins (`bu`/`btm`).
- * Injected only when a custody FILTER or a custody SORT is active — the custody
- * WHERE predicates reference `jsonb_array_length(custody_agg.custody)` and the
- * custody sort key references the full CASE (which needs `b`/`bu`/`btm`).
- * Verbatim mirror of the custody joins in {@link assetQueryJoins} — including
- * the `ORDER BY cu."createdAt" ASC, cu.id ASC` inside `jsonb_agg` that makes
- * element 0 (the primary custodian used by the sort key `custody->0->>'name'`)
- * deterministic and consistent with the heavy phase's rendered badge.
+ * The per-asset custody aggregation (`custody_agg`).
+ *
+ * Every custody WHERE predicate in {@link generateWhereClause} tests
+ * `jsonb_array_length(custody_agg.custody)`, so any query that splices in a
+ * custody filter must also carry this join or Postgres raises "missing
+ * FROM-clause entry for table custody_agg". Exported so surfaces that build
+ * their own FROM — the asset-model rollup — share this fragment rather than
+ * keeping a copy that can drift from the predicates it has to satisfy.
+ *
+ * The `ORDER BY cu."createdAt" ASC, cu.id ASC` inside `jsonb_agg` is
+ * load-bearing: it makes element 0 the primary custodian, which the custody
+ * sort key (`custody->0->>'name'`) and the rendered badge both read.
  */
-const CHEAP_CUSTODY_JOINS = Prisma.sql`
+export const CUSTODY_AGG_JOIN = Prisma.sql`
     LEFT JOIN LATERAL (
       SELECT COALESCE(
         jsonb_agg(
@@ -2652,7 +2655,16 @@ const CHEAP_CUSTODY_JOINS = Prisma.sql`
       LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
       LEFT JOIN public."User" u ON tm."userId" = u.id
       WHERE cu."assetId" = a.id
-    ) custody_agg ON TRUE
+    ) custody_agg ON TRUE`;
+
+/**
+ * Cheap-phase custody joins: {@link CUSTODY_AGG_JOIN} plus the active-booking
+ * LATERAL (`b`) and its custodian joins (`bu`/`btm`). Injected only when a
+ * custody FILTER or a custody SORT is active — the filter needs the
+ * aggregation, and the sort key's CASE additionally needs `b`/`bu`/`btm`.
+ */
+const CHEAP_CUSTODY_JOINS = Prisma.sql`
+    ${CUSTODY_AGG_JOIN}
     LEFT JOIN LATERAL (
       SELECT b.*
       FROM public."Booking" b

@@ -19,6 +19,7 @@ import { Switch } from "~/components/forms/switch";
 import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import {
@@ -43,6 +44,7 @@ import type { Filter, FilterFieldType } from "./advanced-filters/schema";
 import { ValueField } from "./advanced-filters/value-field";
 import { useFilterFormValidation } from "./advanced-filters/value.client.validator";
 import { SaveFilterButton } from "./saved-filter-presets";
+import When from "../../when/when";
 
 export interface Sort {
   name: string;
@@ -82,6 +84,7 @@ function AdvancedFilter() {
   // Acting user's resolved pref timezone — seeds new date filters with the
   // user's local "today" rather than the server/UTC day (avoids off-by-one).
   const { timeZone } = useFormatPrefs();
+  const { isModelView } = useAssetIndexView();
   const disabled = useDisabled();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -99,7 +102,11 @@ function AdvancedFilter() {
   // this Filter popover rather than as a separate top-bar button. It's
   // independent of the column-filter apply model (toggles immediately) and
   // counts toward the trigger's active badge so it's visible when collapsed.
-  const lowStockActive = searchParams.get("lowStockOnly") === "true";
+  // A `lowStockOnly` param can still ride in on a bookmarked URL while the
+  // model view is active; treat it as inactive there so the badge, the
+  // empty-state copy and the clear control agree with the hidden toggle.
+  const lowStockActive =
+    !isModelView && searchParams.get("lowStockOnly") === "true";
   const activeFilterCount = initialFilters.length + (lowStockActive ? 1 : 0);
 
   function toggleLowStock() {
@@ -374,25 +381,33 @@ function AdvancedFilter() {
 
             {/* Low-stock quick filter — deliberately small and de-emphasized so
                 it does not compete with the column filters above. Toggles the
-                `lowStockOnly` param immediately (independent of the Apply flow). */}
-            <button
-              type="button"
-              onClick={toggleLowStock}
-              aria-pressed={lowStockActive}
-              className="flex w-full items-center gap-2 border-b px-4 py-2 text-left text-[12px] font-normal text-gray-500 hover:bg-gray-50"
-            >
-              <FakeCheckbox
-                checked={lowStockActive}
-                className={tw(
-                  "size-[14px]",
-                  lowStockActive ? "text-primary" : "text-white"
-                )}
-              />
-              Low stock only
-              <span className="text-gray-500">
-                — at or below reorder threshold
-              </span>
-            </button>
+                `lowStockOnly` param immediately (independent of the Apply flow).
+
+                Hidden in the model view: low stock selects QUANTITY_TRACKED
+                assets at or below their reorder threshold, and asset models are
+                an INDIVIDUAL-only concept, so the two predicates can never both
+                hold. Offering it there is a control that can only ever empty the
+                list. */}
+            <When truthy={!isModelView}>
+              <button
+                type="button"
+                onClick={toggleLowStock}
+                aria-pressed={lowStockActive}
+                className="flex w-full items-center gap-2 border-b px-4 py-2 text-left text-[12px] font-normal text-gray-500 hover:bg-gray-50"
+              >
+                <FakeCheckbox
+                  checked={lowStockActive}
+                  className={tw(
+                    "size-[14px]",
+                    lowStockActive ? "text-primary" : "text-white"
+                  )}
+                />
+                Low stock only
+                <span className="text-gray-500">
+                  — at or below reorder threshold
+                </span>
+              </button>
+            </When>
 
             <div className="flex items-center justify-between px-4 py-3">
               <div>
