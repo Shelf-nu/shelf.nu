@@ -20,6 +20,8 @@
  * a refusal keeps the entered numbers.
  *
  * @see {@link file://../app/(tabs)/assets/[id].tsx} assign/release consumers
+ * @see {@link file://../app/(tabs)/bookings/[id].tsx} the check-out queue consumer
+ * @see {@link file://../app/(tabs)/bookings/add-assets.tsx} the reserve-model consumer
  * @see {@link file://./team-member-picker.tsx} the modal contract this mirrors
  */
 import { useEffect, useRef, useState } from "react";

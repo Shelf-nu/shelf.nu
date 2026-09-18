@@ -6,12 +6,15 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import {
+  describeCheckoutDisabled,
+  makeCheckoutEligibility,
+} from "~/modules/booking/helpers";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithStatus } from "~/utils/booking-assets";
 import {
   flattenSelectedBookingItems,
   isAssetCheckableIn,
-  isAssetCheckableOut,
   isAssetPartiallyCheckedIn,
 } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
@@ -98,8 +101,6 @@ function ConditionalDropdown() {
     assetsList
   ).filter((item) => item.title && !item._count);
 
-  const checkedOutIdsSet = new Set(checkedOutAssetIds);
-
   // How many selected assets each action can act on.
   const checkInEligibleCount = selectedAssets.filter((asset) =>
     isAssetCheckableIn(
@@ -107,14 +108,6 @@ function ConditionalDropdown() {
       partialCheckinDetails,
       booking.status
     )
-  ).length;
-  // QT-aware top-off: pass the per-booking remaining map so QUANTITY_TRACKED
-  // assets stay eligible while units remain, even if some are already out.
-  // Falls back to the binary check for INDIVIDUAL rows / legacy loaders.
-  const checkOutEligibleCount = selectedAssets.filter((asset) =>
-    isAssetCheckableOut(asset as AssetWithStatus, checkedOutIdsSet, {
-      remainingByAssetId: remainingToCheckOutByAsset ?? {},
-    })
   ).length;
 
   // Grey out check-in when nothing in the selection is checked out. Tailor the
@@ -139,16 +132,18 @@ function ConditionalDropdown() {
         }
       : false;
 
-  // Grey out check-out when every selected asset is already checked out.
-  const partialCheckoutDisabled =
-    selectedAssets.length === 0
-      ? { reason: "Select one or more assets to check out." }
-      : checkOutEligibleCount === 0
-      ? {
-          reason:
-            "All selected items are already checked out. Select items that are still booked.",
-        }
-      : false;
+  // Grey out check-out when nothing selected can go out, with a reason true of
+  // the whole selection. Eligibility is the scan drawer's rule — see
+  // `makeCheckoutEligibility` for why the returned set is not optional.
+  const checkoutEligibility = makeCheckoutEligibility({
+    checkedOutAssetIds,
+    partialCheckinDetails,
+    remainingToCheckOutByAsset,
+  });
+  const partialCheckoutDisabled = describeCheckoutDisabled(
+    selectedAssets as AssetWithStatus[],
+    checkoutEligibility
+  );
 
   // Mirror per-row Remove: can't remove items from a finished booking.
   const removeDisabled = canRemove

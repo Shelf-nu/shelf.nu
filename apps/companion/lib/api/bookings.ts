@@ -142,6 +142,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify({ bookingId, assetIds, checkins, timeZone }),
+        // why: non-idempotent — per-unit dispositions carry no request key, so
+        // a timed-out-but-landed request re-sent would return the units twice.
+        retry: false,
       }
     ),
 
@@ -163,6 +166,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify({ bookingId, assetIds, checkouts, timeZone }),
+        // why: non-idempotent — per-unit quantities carry no request key, so a
+        // timed-out-but-landed request re-sent would check the units out twice.
+        retry: false,
       }
     ),
 

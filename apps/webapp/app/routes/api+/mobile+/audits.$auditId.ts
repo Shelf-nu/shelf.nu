@@ -70,7 +70,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Fetch session details and scans in parallel
     const [{ session, expectedAssets }, scans] = await Promise.all([
-      getAuditSessionDetails({ id: auditId, organizationId }),
+      getAuditSessionDetails({
+        id: auditId,
+        organizationId,
+        refreshExpectedAssetImages: true,
+      }),
       getAuditScans({ auditSessionId: auditId, organizationId }),
     ]);
 
