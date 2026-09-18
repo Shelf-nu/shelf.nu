@@ -27,7 +27,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useIsMobile } from "~/hooks/use-mobile";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -390,7 +390,7 @@ SidebarRail.displayName = "SidebarRail";
 
 const SidebarInset = forwardRef<HTMLDivElement, ComponentProps<"main">>(
   ({ className, ...props }, ref) => {
-    const { isAvailabilityView } = useIsAvailabilityView();
+    const { isAvailabilityView } = useAssetIndexView();
     const location = useLocation();
     const isKitIndex = location.pathname.includes("/kits");
     return (

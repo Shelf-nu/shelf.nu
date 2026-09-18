@@ -34,8 +34,8 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
@@ -315,7 +315,7 @@ export default function KitsIndexPage() {
     action: PermissionAction.create,
   });
   const { isAvailabilityView, shouldShowAvailabilityView } =
-    useIsAvailabilityView();
+    useAssetIndexView();
   const { resources, events } = useKitAvailabilityData(items);
 
   const organization = useCurrentOrganization();
