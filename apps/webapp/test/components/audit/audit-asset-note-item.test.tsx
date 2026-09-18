@@ -265,4 +265,34 @@ describe("AuditAssetNoteItem", () => {
       expect(screen.queryByRole("button")).not.toBeInTheDocument();
     });
   });
+
+  describe("audit_images tag stripping", () => {
+    // Regression: a captioned image upload stores its caption plus a trusted
+    // `{% audit_images ... /%}` tag in the same COMMENT note. This panel also
+    // renders every image in its own Images grid, so expanding the tag here
+    // duplicated the photos. The panel must strip the tag before handing
+    // content to MarkdownViewer; other readers (Activity feed, PDF export)
+    // still expand it, since neither has a separate images grid.
+    it("strips the audit_images tag from a captioned note before rendering", () => {
+      const captionedNote: NoteData = {
+        ...mockCommentNote,
+        content:
+          'Dent on the top-left corner\n\n{% audit_images count=2 ids="img-1,img-2" /%}',
+      };
+
+      render(<AuditAssetNoteItem note={captionedNote} />);
+
+      const rendered = screen.getByTestId("markdown-content");
+      expect(rendered).toHaveTextContent("Dent on the top-left corner");
+      expect(rendered.textContent).not.toContain("audit_images");
+    });
+
+    it("leaves a plain note with no images untouched", () => {
+      render(<AuditAssetNoteItem note={mockCommentNote} />);
+
+      expect(screen.getByTestId("markdown-content")).toHaveTextContent(
+        mockCommentNote.content
+      );
+    });
+  });
 });

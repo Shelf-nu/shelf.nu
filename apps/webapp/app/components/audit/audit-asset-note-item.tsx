@@ -5,6 +5,7 @@ import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import type { action } from "~/routes/_layout+/audits.$auditId.scan.$auditAssetId.details";
+import { stripAuditImagesTag } from "~/utils/markdoc-sanitize";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { UserBadge } from "../shared/user-badge";
@@ -147,9 +148,17 @@ export function AuditAssetNoteItem({
         <div className="flex-1">
           <div className="text-sm text-gray-900">
             {/* Author-written condition notes may link out; system-generated
-                audit activity keeps the restrictive default. */}
+                audit activity keeps the restrictive default.
+
+                A captioned image upload stores its caption plus a trusted
+                `{% audit_images %}` tag in the same COMMENT note
+                (buildAuditImagesNoteContent). This panel also renders every
+                AuditImage row in its own Images grid below, so expanding the
+                tag here would show the same photos twice. Strip it — the
+                Activity feed and PDF export still render the tag normally,
+                since neither of those has a separate images grid. */}
             <MarkdownViewer
-              content={note.content}
+              content={stripAuditImagesTag(note.content)}
               disablePortal={true}
               allowExternalLinks={isAuthorWritten}
             />
