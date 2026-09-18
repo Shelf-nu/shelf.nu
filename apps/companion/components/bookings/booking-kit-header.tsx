@@ -82,6 +82,17 @@ function isImageStillSigned(imageExpiration: string | null): boolean {
   return !Number.isNaN(expiresAt) && expiresAt > Date.now();
 }
 
+/**
+ * The header row of one kit on a booking's asset list.
+ *
+ * Outside selection, and for a kit the current mode cannot act on, the row
+ * shows a chevron and a tap opens or closes the kit. For a kit the mode can act
+ * on, the row shows a tick box, a tap picks or drops its members, and a
+ * separate chevron on the right opens or closes the kit.
+ *
+ * @param props - see `BookingKitHeaderProps`
+ * @returns the pressable kit header row
+ */
 export function BookingKitHeader({
   kit,
   name,
