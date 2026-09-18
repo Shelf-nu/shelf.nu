@@ -14,9 +14,12 @@
  * it — including the ones this booking never held.
  *
  * Two presses live on this row and they cannot both be the whole row. Outside
- * selection the row opens and closes; inside it the row picks the members and a
- * separate chevron opens and closes, because the tap that selects is the one an
- * operator is repeating.
+ * selection the row opens and closes. Inside selection, a kit that the current
+ * mode can act on shows a tick box: the row picks the members and a separate
+ * chevron opens and closes, because the tap that selects is the one an
+ * operator is repeating. A kit that the mode cannot act on shows no tick box,
+ * the same as an asset row in that state. It shows the chevron in place of the
+ * tick box, and a tap opens and closes it as outside selection.
  *
  * @see ../../lib/booking-kit-rows.ts — the rules this renders
  * @see ../../../webapp/app/components/booking/kit-row.tsx — the web row
@@ -47,7 +50,11 @@ type BookingKitHeaderProps = {
   /** The status badge to show, or null when there is nothing to say. */
   badge: BookingKitBadge | null;
   expanded: boolean;
-  /** Null outside selection; otherwise how much of the kit is picked. */
+  /**
+   * Null outside selection; otherwise how much of the kit is picked.
+   * "unselectable" draws the row as outside selection: a chevron and no tick
+   * box.
+   */
   selectionState: KitSelectionState | null;
   /** Opens or closes the group. */
   onToggleExpand: () => void;
@@ -88,8 +95,9 @@ export function BookingKitHeader({
   const { colors, statusBadge, bookingStatusBadge } = useTheme();
   const styles = useStyles();
 
-  const isSelecting = selectionState !== null;
-  const isSelectable = isSelecting && selectionState !== "unselectable";
+  // True only while selecting AND the mode can act on a member of this kit.
+  const isSelectable =
+    selectionState !== null && selectionState !== "unselectable";
   const showImage =
     Boolean(kit?.image) && isImageStillSigned(kit?.imageExpiration ?? null);
 
@@ -143,11 +151,11 @@ export function BookingKitHeader({
       // so the press falls back to expanding rather than the row going
       // `disabled`, which would also take the accessibility action below with
       // it (RN treats a disabled touchable as one inactive element).
-      onPress={isSelecting && isSelectable ? onToggleSelection : onToggleExpand}
+      onPress={isSelectable ? onToggleSelection : onToggleExpand}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      // The row is one element to a screen reader, so the chevron rendered
-      // inside it during selection cannot be reached by swiping. This exposes
+      // The row is one element to a screen reader, so the separate chevron
+      // beside a selectable kit cannot be reached by swiping. This exposes
       // the same toggle as a rotor action, which is the only route to it.
       accessibilityActions={[
         { name: "expand", label: expanded ? "Collapse kit" : "Expand kit" },
@@ -156,12 +164,13 @@ export function BookingKitHeader({
         if (event.nativeEvent.actionName === "expand") onToggleExpand();
       }}
     >
-      {isSelecting ? (
+      {/* Only a kit the mode can act on gets a tick box. Every other kit
+          shows the chevron, because a tap on it opens or closes the kit. */}
+      {isSelectable ? (
         <View
           style={[
             styles.checkbox,
             selectionState === "all" && styles.checkboxChecked,
-            !isSelectable && styles.checkboxDisabled,
           ]}
         >
           {selectionState === "all" ? (
@@ -231,7 +240,7 @@ export function BookingKitHeader({
         </View>
       ) : null}
 
-      {isSelecting ? (
+      {isSelectable ? (
         <TouchableOpacity
           onPress={onToggleExpand}
           hitSlop={CONTROL_HIT_SLOP}
@@ -322,8 +331,5 @@ const useStyles = createStyles((colors) => ({
   checkboxChecked: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
-  },
-  checkboxDisabled: {
-    opacity: 0.4,
   },
 }));
