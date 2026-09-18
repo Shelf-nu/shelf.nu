@@ -2684,10 +2684,18 @@ async function getBookingCustodiansHoldingKits(
         { assetKitId: { in: [...kitIdByAssetKitId.keys()] } },
       ],
     },
-    // Several ongoing bookings can hold one kit at once. Ordering fixes which
-    // of them names the custodian, so the cell does not flip between requests
-    // with whatever order Postgres happens to return.
-    orderBy: { id: "asc" },
+    // Several live bookings can list one kit at once, and the first slice per
+    // kit names the custodian. Newest departure first makes that the booking
+    // the kit most recently left on, with ties broken on the booking id — the
+    // same order `getKitCurrentBooking` ranks by, so the index and the kit page
+    // name the same booking. Postgres sorts NULLs first on a descending sort,
+    // so a slice that never left is pushed to the end. The slice `id` only
+    // fixes row order within one booking, whose custodian is the same.
+    orderBy: [
+      { checkedOutAt: { sort: "desc", nulls: "last" } },
+      { bookingId: "asc" },
+      { id: "asc" },
+    ],
     select: {
       assetKitId: true,
       sourceKitId: true,
@@ -2849,9 +2857,9 @@ type CurrentBookingType = {
   name: string;
   custodianUser: Pick<
     User,
-    "firstName" | "lastName" | "displayName" | "profilePicture" | "email"
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
   > | null;
-  custodianTeamMember: TeamMember | null;
+  custodianTeamMember: Pick<TeamMember, "name" | "userId"> | null;
   status: BookingStatus;
   from: Booking["from"];
 };
@@ -2865,6 +2873,13 @@ type CurrentBookingType = {
  * survives a detach. Both are NULL on a standalone free-pool slice.
  *
  * The slice must also still be out — see {@link isSliceStillOut}.
+ *
+ * Several live bookings can list the kit at once (an overdue booking it is
+ * still out on, and a later one that has started), so every qualifying slice is
+ * ranked rather than taking the first one found: the newest departure wins, a
+ * slice that never left ranks below any that did, and the booking id breaks
+ * ties. The slices arrive in no particular order, and the answer must not
+ * depend on it.
  *
  * @param kit - The kit with its membership rows and their assets' active slices
  * @returns The booking holding a slice of this kit that is still out, or
@@ -2897,21 +2912,31 @@ export function getKitCurrentBooking(kit: {
     slice.sourceKitId === kit.id ||
     (slice.assetKitId !== null && ownAssetKitIds.has(slice.assetKitId));
 
-  for (const membership of kit.assetKits) {
-    const holdingSlice = membership.asset.bookingAssets.find(
+  const holdingSlices = kit.assetKits.flatMap((membership) =>
+    membership.asset.bookingAssets.filter(
       (slice) =>
         (slice.booking.status === BookingStatus.ONGOING ||
           slice.booking.status === BookingStatus.OVERDUE) &&
         belongsToKit(slice) &&
         isSliceStillOut(slice)
-    );
+    )
+  );
 
-    if (holdingSlice) {
-      return holdingSlice.booking;
+  const [newest] = holdingSlices.sort((a, b) => {
+    const aOut = a.checkedOutAt?.getTime() ?? null;
+    const bOut = b.checkedOutAt?.getTime() ?? null;
+    if (aOut !== bOut) {
+      if (aOut === null) return 1;
+      if (bOut === null) return -1;
+      return bOut - aOut;
     }
-  }
+    // Plain code-unit order, as the database sorts these ids, never the
+    // runtime locale's.
+    if (a.booking.id === b.booking.id) return 0;
+    return a.booking.id < b.booking.id ? -1 : 1;
+  });
 
-  return undefined;
+  return newest?.booking;
 }
 
 export async function bulkDeleteKits({
