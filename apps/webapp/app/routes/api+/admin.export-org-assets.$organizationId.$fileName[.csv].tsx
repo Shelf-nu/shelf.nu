@@ -1,3 +1,4 @@
+/** Admin CSV export route for an organization's asset backup. */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { csvResponse } from "~/utils/csv-utf8";
@@ -6,6 +7,7 @@ import { makeShelfError } from "~/utils/error";
 import { buildContentDisposition, error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
+/** Exports an organization's asset backup as a CSV download for administrators. */
 export async function loader({ context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;

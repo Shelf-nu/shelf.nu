@@ -1,3 +1,4 @@
+/** CSV export route for selected bookings. */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { csvResponse } from "~/utils/csv-utf8";
@@ -19,6 +20,7 @@ export const ExportBookingsSchema = z.object({
   bookingIds: z.array(z.string()).min(1),
 });
 
+/** Exports the requested bookings as a CSV download. */
 export const loader = async ({
   context,
   request,

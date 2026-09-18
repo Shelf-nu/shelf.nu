@@ -1,3 +1,4 @@
+/** Unit tests for the shared HTTP server utilities. */
 import { z } from "zod";
 import type { FailureReason } from "./error";
 import { ShelfError } from "./error";
@@ -551,6 +552,18 @@ describe(buildContentDisposition.name, () => {
     expect(result).toBe(
       'attachment; filename="assets-import-ready-2026-09-14-123456.csv"; ' +
         "filename*=UTF-8''assets-import-ready-2026-09-14-123456.csv"
+    );
+  });
+
+  it("should sanitize control characters and quotes in an explicit filename", () => {
+    const result = buildContentDisposition(null, {
+      fallback: "asset",
+      filename: 'assets\r\n"quoted".csv',
+    });
+
+    expect(result).toBe(
+      'attachment; filename="assets__-quoted-.csv"; ' +
+        "filename*=UTF-8''assets%0D%0A%22quoted%22.csv"
     );
   });
 

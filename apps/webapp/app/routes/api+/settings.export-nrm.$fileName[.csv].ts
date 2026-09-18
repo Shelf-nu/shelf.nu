@@ -1,3 +1,4 @@
+/** CSV export route for selected non-registered members. */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { NRM_ID_PARAM } from "~/components/nrm/export-nrm-button";
 import { csvResponse } from "~/utils/csv-utf8";
@@ -14,6 +15,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+/** Exports the requested non-registered members as a CSV download. */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 

@@ -1,3 +1,4 @@
+/** Shared HTTP request, response, and header utilities for the web application. */
 import { data, type Params } from "react-router";
 import { parseFormAny } from "react-zorm";
 import type { ZodType } from "zod";

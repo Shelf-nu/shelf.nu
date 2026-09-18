@@ -1,3 +1,4 @@
+/** Contract tests for CSV download route response and header requirements. */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";

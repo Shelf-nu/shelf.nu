@@ -1,3 +1,4 @@
+/** CSV export route for asset lists, backups, and import-ready downloads. */
 import { AssetIndexMode } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -20,6 +21,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanExportAssets } from "~/utils/subscription.server";
 
+/** Exports the requested asset selection as a CSV download. */
 export const loader = async ({
   context,
   request,
