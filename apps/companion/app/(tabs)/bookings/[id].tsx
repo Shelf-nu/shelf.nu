@@ -519,6 +519,18 @@ export default function BookingDetailScreen() {
           counts: batch,
           isComplete: data?.isComplete,
           bookingName,
+          // The server skips an asset another check-out already took; this
+          // lets the message say so rather than claim the whole batch moved.
+          assets:
+            data?.checkedOutCount === undefined
+              ? undefined
+              : {
+                  sent: new Set([
+                    ...assetIds,
+                    ...checkouts.map((c) => c.assetId),
+                  ]).size,
+                  moved: data.checkedOutCount,
+                },
         });
         Alert.alert("Checked Out", msg, [
           {

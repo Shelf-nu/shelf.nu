@@ -684,10 +684,19 @@ export function describeBatchConfirm({
  * `isComplete` is the server's answer to "is anything left?". Without one the
  * message names the batch alone rather than guess.
  *
+ * The server's check-out skips an asset that is already out, so it can move
+ * fewer assets than the batch sent — another check-out took them in the
+ * meantime. When `assets` shows that, the batch as counted did not all move,
+ * so the message names what moved in the server's own units instead. The
+ * server's check-in refuses such an asset rather than skipping it, so only a
+ * check-out caller has a reason to pass `assets`.
+ *
  * @param args.direction - which way the batch moved
  * @param args.counts - the batch, counted before the submit
  * @param args.isComplete - true when nothing is left to move, per the server
  * @param args.bookingName - the booking's name, for the completed forms
+ * @param args.assets - how many distinct assets the request sent, and how many
+ *   the server says it moved
  * @returns e.g. `"1 kit and 1 asset checked out. The rest is still reserved."`
  */
 export function describeBatchResult({
@@ -695,11 +704,13 @@ export function describeBatchResult({
   counts,
   isComplete,
   bookingName,
+  assets,
 }: {
   direction: BookingBatchDirection;
   counts: SelectionCounts;
   isComplete: boolean | undefined;
   bookingName?: string | null;
+  assets?: { sent: number; moved: number };
 }): string {
   const quotedName = bookingName?.trim() ? `"${bookingName}"` : null;
   if (isComplete) {
@@ -710,13 +721,22 @@ export function describeBatchResult({
         } is now complete.`;
   }
 
-  const batch = describeBatch(counts);
   const moved = direction === "checkout" ? "checked out" : "checked in";
-  if (isComplete === undefined) return `${batch} ${moved}.`;
+  const skipped = assets ? assets.sent - assets.moved : 0;
+  const summary =
+    assets && skipped > 0
+      ? `${describeBatch({
+          kitCount: 0,
+          assetCount: assets.moved,
+        })} ${moved}. ${skipped} ${
+          skipped === 1 ? "was" : "were"
+        } already ${moved}.`
+      : `${describeBatch(counts)} ${moved}.`;
+  if (isComplete === undefined) return summary;
 
   const rest =
     direction === "checkout"
       ? "The rest is still reserved."
       : "The rest is still checked out.";
-  return `${batch} ${moved}. ${rest}`;
+  return `${summary} ${rest}`;
 }

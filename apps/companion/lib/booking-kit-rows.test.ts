@@ -1163,3 +1163,56 @@ test("without the server's answer the result names the batch alone", () => {
     "1 kit and 2 assets checked in."
   );
 });
+
+test("names the server's count when it checked out fewer assets than were sent", () => {
+  // The server skips an asset another check-out already took, so the batch as
+  // counted did not all move: the message must not claim it did.
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 1, assetCount: 1 },
+      isComplete: false,
+      bookingName: "Film shoot",
+      assets: { sent: 4, moved: 3 },
+    }),
+    "3 assets checked out. 1 was already checked out. The rest is still reserved."
+  );
+});
+
+test("keeps the batch's words when the server moved every asset it was sent", () => {
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 1, assetCount: 1 },
+      isComplete: false,
+      assets: { sent: 4, moved: 4 },
+    }),
+    "1 kit and 1 asset checked out. The rest is still reserved."
+  );
+});
+
+test("a batch that completes the booking still says so when some were already out", () => {
+  // Nothing is left either way, so the whole-booking message stays true.
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 0, assetCount: 3 },
+      isComplete: true,
+      bookingName: "Film shoot",
+      assets: { sent: 3, moved: 1 },
+    }),
+    'All assets are now checked out for "Film shoot".'
+  );
+});
+
+test("names what moved without the server's answer on whether anything is left", () => {
+  assert.equal(
+    describeBatchResult({
+      direction: "checkout",
+      counts: { kitCount: 0, assetCount: 3 },
+      isComplete: undefined,
+      assets: { sent: 3, moved: 1 },
+    }),
+    "1 asset checked out. 2 were already checked out."
+  );
+});

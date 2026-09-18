@@ -16,6 +16,17 @@
 #   booking through its kit: its BookingAsset row carries the AssetKit id, so
 #   the booking lists the kit and the drawer counts it as one thing.
 #
+#   A booking seeded before kit slices holds the member as a standalone row,
+#   and the drawer then reads "2 assets to check in". Convert that row once,
+#   with the kit's QR id in place of <KIT_QR_ID>:
+#     UPDATE "BookingAsset" ba SET "assetKitId" = ak.id, "sourceKitId" = ak."kitId"
+#     FROM "AssetKit" ak, "Booking" b, "Qr" q
+#     WHERE ba."bookingId" = b.id AND b.name = 'QA Scan Booking'
+#       AND q.id = '<KIT_QR_ID>' AND ak."kitId" = q."kitId"
+#       AND ak."assetId" = ba."assetId" AND ba."assetKitId" IS NULL;
+#   This fixture is shared with flows 02 and 03b and the kit flows through the
+#   same QR env vars, so it is not reseeded by scripts/seed-e2e.sh.
+#
 # Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_ASSET_QR_ID
 #      SHELF_TEST_KIT_QR_ID / SHELF_TEST_OUTSIDER_QR_ID
 appId: com.shelf.companion.carlos

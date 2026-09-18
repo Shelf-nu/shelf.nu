@@ -2422,7 +2422,8 @@ function ScannerContent() {
                 : prev
             );
             // The batch is named as the drawer and its confirm named it; only
-            // the server can say whether anything is left to check out.
+            // the server can say whether anything is left to check out, and
+            // whether it skipped an asset another check-out already took.
             Alert.alert(
               "Checked Out",
               describeBatchResult({
@@ -2430,6 +2431,13 @@ function ScannerContent() {
                 counts: batch,
                 isComplete: result?.isComplete,
                 bookingName,
+                assets:
+                  result?.checkedOutCount === undefined
+                    ? undefined
+                    : {
+                        sent: submittedIds.size,
+                        moved: result.checkedOutCount,
+                      },
               }),
               [
                 {
