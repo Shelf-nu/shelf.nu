@@ -131,7 +131,11 @@ describe("getAssetModelRollup", () => {
       ] as unknown as GetAssetModelRollupArgs["filters"],
     });
 
-    expect(lastQueryText()).toContain("custody_agg");
+    // The alias declaration, not a bare "custody_agg": the custody WHERE
+    // predicate emits `jsonb_array_length(custody_agg.custody)` whether or not
+    // the join was added, so the looser substring passes even when the join is
+    // missing — which is precisely the 500 this test exists to catch.
+    expect(lastQueryText()).toContain(") custody_agg ON TRUE");
   });
 
   it("omits the custody aggregation when no custody filter is active", async () => {
