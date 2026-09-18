@@ -14,12 +14,15 @@
  * it — including the ones this booking never held.
  *
  * Two presses live on this row and they cannot both be the whole row. Outside
- * selection the row opens and closes. Inside selection, a kit that the current
- * mode can act on shows a tick box: the row picks the members and a separate
- * chevron opens and closes, because the tap that selects is the one an
- * operator is repeating. A kit that the mode cannot act on shows no tick box,
- * the same as an asset row in that state. It shows the chevron in place of the
- * tick box, and a tap opens and closes it as outside selection.
+ * selection the chevron is on the left and the row opens and closes. Inside
+ * selection every kit row has the same slots in the same order, so the
+ * pictures, names, badges and chevrons line up down the list: a 22 x 22 slot on
+ * the left, the picture, the name and count, the badge, and a chevron on the
+ * right that opens and closes. A kit that the current mode can act on has a
+ * tick box in the left slot, and the row picks the members, because the tap
+ * that selects is the one an operator is repeating. A kit that the mode cannot
+ * act on has an empty left slot, the same as an asset row in that state has no
+ * tick box, and a tap on the row opens and closes it.
  *
  * @see ../../lib/booking-kit-rows.ts — the rules this renders
  * @see ../../../webapp/app/components/booking/kit-row.tsx — the web row
@@ -52,8 +55,7 @@ type BookingKitHeaderProps = {
   expanded: boolean;
   /**
    * Null outside selection; otherwise how much of the kit is picked.
-   * "unselectable" draws the row as outside selection: a chevron and no tick
-   * box.
+   * "unselectable" leaves the left slot empty: no tick box.
    */
   selectionState: KitSelectionState | null;
   /** Opens or closes the group. */
@@ -85,10 +87,12 @@ function isImageStillSigned(imageExpiration: string | null): boolean {
 /**
  * The header row of one kit on a booking's asset list.
  *
- * Outside selection, and for a kit the current mode cannot act on, the row
- * shows a chevron and a tap opens or closes the kit. For a kit the mode can act
- * on, the row shows a tick box, a tap picks or drops its members, and a
- * separate chevron on the right opens or closes the kit.
+ * Outside selection the row shows a chevron on the left and a tap opens or
+ * closes the kit. Inside selection the row shows a 22 x 22 slot on the left and
+ * a chevron on the right that opens or closes the kit. For a kit the current
+ * mode can act on, the slot holds a tick box and a tap on the row picks or
+ * drops its members. For a kit the mode cannot act on, the slot is empty and a
+ * tap on the row opens or closes the kit.
  *
  * @param props - see `BookingKitHeaderProps`
  * @returns the pressable kit header row
@@ -106,9 +110,9 @@ export function BookingKitHeader({
   const { colors, statusBadge, bookingStatusBadge } = useTheme();
   const styles = useStyles();
 
+  const isSelecting = selectionState !== null;
   // True only while selecting AND the mode can act on a member of this kit.
-  const isSelectable =
-    selectionState !== null && selectionState !== "unselectable";
+  const isSelectable = isSelecting && selectionState !== "unselectable";
   const showImage =
     Boolean(kit?.image) && isImageStillSigned(kit?.imageExpiration ?? null);
 
@@ -165,9 +169,9 @@ export function BookingKitHeader({
       onPress={isSelectable ? onToggleSelection : onToggleExpand}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      // The row is one element to a screen reader, so the separate chevron
-      // beside a selectable kit cannot be reached by swiping. This exposes
-      // the same toggle as a rotor action, which is the only route to it.
+      // The row is one element to a screen reader, so the chevron on the right
+      // during selection cannot be reached by swiping. This exposes the same
+      // toggle as a rotor action, which is the only route to it.
       accessibilityActions={[
         { name: "expand", label: expanded ? "Collapse kit" : "Expand kit" },
       ]}
@@ -175,9 +179,15 @@ export function BookingKitHeader({
         if (event.nativeEvent.actionName === "expand") onToggleExpand();
       }}
     >
-      {/* Only a kit the mode can act on gets a tick box. Every other kit
-          shows the chevron, because a tap on it opens or closes the kit. */}
-      {isSelectable ? (
+      {/* During selection the left slot is always 22 x 22, so every kit row
+          lines up. Only a kit the mode can act on gets a tick box in it. */}
+      {!isSelecting ? (
+        <Ionicons
+          name={expanded ? "chevron-down" : "chevron-forward"}
+          size={18}
+          color={colors.muted}
+        />
+      ) : isSelectable ? (
         <View
           style={[
             styles.checkbox,
@@ -195,11 +205,7 @@ export function BookingKitHeader({
           ) : null}
         </View>
       ) : (
-        <Ionicons
-          name={expanded ? "chevron-down" : "chevron-forward"}
-          size={18}
-          color={colors.muted}
-        />
+        <View style={styles.checkboxSlot} />
       )}
 
       {showImage ? (
@@ -251,7 +257,7 @@ export function BookingKitHeader({
         </View>
       ) : null}
 
-      {isSelectable ? (
+      {isSelecting ? (
         <TouchableOpacity
           onPress={onToggleExpand}
           hitSlop={CONTROL_HIT_SLOP}
@@ -342,5 +348,11 @@ const useStyles = createStyles((colors) => ({
   checkboxChecked: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
+  },
+  // Holds the tick box's place on a kit the mode cannot act on. The size must
+  // match `checkbox`, or the rows stop lining up.
+  checkboxSlot: {
+    width: 22,
+    height: 22,
   },
 }));
