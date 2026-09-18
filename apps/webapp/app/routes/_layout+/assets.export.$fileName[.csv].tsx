@@ -20,7 +20,11 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanExportAssets } from "~/utils/subscription.server";
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -95,7 +99,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       headers: {
         "content-disposition": buildContentDisposition(null, {
           fallback: "assets",
-          suffix: "-export",
+          filename: params.fileName ? `${params.fileName}.csv` : undefined,
         }),
       },
     });

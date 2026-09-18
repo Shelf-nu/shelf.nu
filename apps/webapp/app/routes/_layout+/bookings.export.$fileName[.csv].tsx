@@ -19,7 +19,11 @@ export const ExportBookingsSchema = z.object({
   bookingIds: z.array(z.string()).min(1),
 });
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -58,7 +62,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       headers: {
         "content-disposition": buildContentDisposition(null, {
           fallback: "bookings",
-          suffix: "-export",
+          filename: params.fileName ? `${params.fileName}.csv` : undefined,
         }),
       },
     });

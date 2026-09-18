@@ -14,7 +14,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
@@ -48,7 +48,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       headers: {
         "content-disposition": buildContentDisposition(null, {
           fallback: "nrm",
-          suffix: "-export",
+          filename: params.fileName ? `${params.fileName}.csv` : undefined,
         }),
       },
     });

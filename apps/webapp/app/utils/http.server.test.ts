@@ -542,6 +542,18 @@ describe(buildContentDisposition.name, () => {
     expect(result).toContain('filename="My Asset-2024-06-15T1230.csv"');
   });
 
+  it("should preserve a finished filename without adding a timestamp or suffix", () => {
+    const result = buildContentDisposition(null, {
+      fallback: "asset",
+      filename: "assets-import-ready-2026-09-14-123456.csv",
+    });
+
+    expect(result).toBe(
+      'attachment; filename="assets-import-ready-2026-09-14-123456.csv"; ' +
+        "filename*=UTF-8''assets-import-ready-2026-09-14-123456.csv"
+    );
+  });
+
   it("should produce a header that does not throw when used in a Response", () => {
     const header = buildContentDisposition("ทดสอบ", {
       fallback: "booking",

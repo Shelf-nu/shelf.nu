@@ -79,4 +79,13 @@ describe("csv download encoding contract", () => {
       `${file} should not hand-roll a text/csv Response — csvResponse sets the content type`
     ).not.toMatch(/["']text\/csv["']/);
   });
+
+  it.each(GUARDED_FILES)("%s sets a Content-Disposition header", (file) => {
+    const src = readFileSync(path.join(ROUTES_DIR, file), "utf8");
+
+    expect(
+      src,
+      `${file} should set Content-Disposition so direct downloads have a filename`
+    ).toMatch(/["']content-disposition["']\s*:/i);
+  });
 });

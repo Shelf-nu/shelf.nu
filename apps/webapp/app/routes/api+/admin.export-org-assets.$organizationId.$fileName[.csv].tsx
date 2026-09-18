@@ -9,9 +9,9 @@ import { requireAdmin } from "~/utils/roles.server";
 export async function loader({ context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const { organizationId } = getParams(
+  const { organizationId, fileName } = getParams(
     params,
-    z.object({ organizationId: z.string() }),
+    z.object({ organizationId: z.string(), fileName: z.string() }),
     {
       additionalData: { userId },
     }
@@ -27,7 +27,7 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
       headers: {
         "content-disposition": buildContentDisposition(null, {
           fallback: "assets",
-          suffix: "-org-export",
+          filename: `${fileName}.csv`,
         }),
       },
     });

@@ -381,12 +381,15 @@ export type DataOrErrorResponse<T extends ResponsePayload = ResponsePayload> =
  */
 export function buildContentDisposition(
   name: string | null | undefined,
-  opts: { fallback: string; suffix?: string }
+  opts: { fallback: string; suffix?: string; filename?: string }
 ): string {
-  const { fallback, suffix = "" } = opts;
+  const { fallback, suffix = "", filename } = opts;
   const source = name && name.trim().length > 0 ? name : fallback;
   const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  const fullName = `${source}${suffix}-${timestamp}.csv`;
+  const fullName =
+    filename && filename.trim().length > 0
+      ? filename
+      : `${source}${suffix}-${timestamp}.csv`;
 
   // ASCII-safe version: strip non-ASCII, replace unsafe chars
   const asciiName =
