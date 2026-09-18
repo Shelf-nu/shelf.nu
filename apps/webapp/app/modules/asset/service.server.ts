@@ -1048,8 +1048,12 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     );
 
   try {
-    const skip = page > 1 ? (page - 1) * perPage : 0;
+    // `take` first, and `skip` from it: a stale cookie can carry a page size
+    // above the cap, and an OFFSET stepped by the raw value walks past the
+    // result set while LIMIT only ever returns `take` rows — the UI then
+    // advertises pages that come back empty.
     const take = Math.min(Math.max(perPage, 1), 100);
+    const skip = page > 1 ? (page - 1) * take : 0;
     const parsedFilters =
       preParsedFilters ??
       (await parseFiltersWithHierarchy(

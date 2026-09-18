@@ -536,6 +536,10 @@ async function getAssetModelRollupPage({
   // larger than any page can hold and strand every row past the first hundred.
   // Mirrors `getAdvancedPaginatedAndFilterableAssets`'s `take` / `perPage: take`.
   const perPage = Math.min(Math.max(cookie.perPage, 1), 100);
+  // Written back, not just used locally: this same object is serialized into
+  // the user's cookie by the loader, so leaving the raw value on it would
+  // persist a page size no page can hold into the next request.
+  cookie.perPage = perPage;
 
   const { rows, totalModels, totalGroups, totalRollupAssets } =
     await getAssetModelRollup({
