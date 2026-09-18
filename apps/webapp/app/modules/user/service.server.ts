@@ -1,3 +1,14 @@
+/**
+ * User Service
+ *
+ * Server-side user lifecycle: creating users (email, SSO, invite acceptance),
+ * attaching them to organizations, reading and updating profiles, and
+ * removing or soft-deleting accounts.
+ *
+ * @see {@link file://./fields.ts}
+ * @see {@link file://./utils.server.ts}
+ * @see {@link file://./../invite/service.server.ts}
+ */
 import type {
   Organization,
   TierId,
