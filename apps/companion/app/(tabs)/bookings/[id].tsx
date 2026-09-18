@@ -61,14 +61,17 @@ import {
   bookingRowKey,
   buildBookingRows,
   countSelection,
+  describeBatch,
+  describeBatchConfirm,
+  describeBatchResult,
   describeBookingRows,
-  describeRemoval,
   describeSelection,
   isBookingAssetSelectable,
   resolveBookingKitBadge,
   resolveKitSelectionState,
   splitRemovalSelection,
   type BookingRow,
+  type SelectionCounts,
 } from "@/lib/booking-kit-rows";
 import { filterBookingAssets } from "@/lib/booking-search";
 
@@ -218,11 +221,14 @@ export default function BookingDetailScreen() {
   // Sequential quantity picker for checking out QUANTITY_TRACKED assets: the
   // user selects the rows, then we walk each QT asset asking "how many units?"
   // (defaulting to all remaining), collect the dispositions, then submit.
+  // `batch` is the selection counted when the walk starts, for the success
+  // message the submit ends in.
   const [checkoutQueue, setCheckoutQueue] = useState<{
     queue: BookingAsset[];
     index: number;
     collected: CheckoutDisposition[];
     individualIds: string[];
+    batch: SelectionCounts;
   } | null>(null);
 
   // Sequential disposition picker for checking IN quantity-tracked assets:
@@ -232,6 +238,7 @@ export default function BookingDetailScreen() {
     index: number;
     collected: CheckinDisposition[];
     individualIds: string[];
+    batch: SelectionCounts;
   } | null>(null);
 
   const lastFetchedAt = useRef(0);
@@ -383,12 +390,15 @@ export default function BookingDetailScreen() {
   };
 
   // Send the check-in. `assetIds` = INDIVIDUAL rows (a bare QT id would default
-  // to all-remaining server-side); `checkins` = per-QT-asset dispositions.
-  // `closeSheet` runs only once the server accepts, so a refused check-in keeps
-  // the disposition sheet open with every collected disposition intact.
+  // to all-remaining server-side); `checkins` = per-QT-asset dispositions;
+  // `batch` = the selection as the confirm and the button counted it, which the
+  // success message names. `closeSheet` runs only once the server accepts, so a
+  // refused check-in keeps the disposition sheet open with every collected
+  // disposition intact.
   const submitCheckin = async (
     assetIds: string[],
     checkins: CheckinDisposition[],
+    batch: SelectionCounts,
     closeSheet?: () => void
   ) => {
     if (!booking || !currentOrg) return;
@@ -410,11 +420,12 @@ export default function BookingDetailScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         // Mutation changed this booking — force the list to refetch.
         markBookingsListDirty();
-        const msg = data?.isComplete
-          ? `All assets checked in. "${bookingName}" is now complete.`
-          : `${data?.checkedInCount ?? "Some"} checked in, ${
-              data?.remainingCount ?? "some"
-            } remaining.`;
+        const msg = describeBatchResult({
+          direction: "checkin",
+          counts: batch,
+          isComplete: data?.isComplete,
+          bookingName,
+        });
         Alert.alert("Checked In", msg, [
           {
             text: "OK",
@@ -443,18 +454,20 @@ export default function BookingDetailScreen() {
     const individualIds = selected
       .filter((a) => a.type !== "QUANTITY_TRACKED")
       .map((a) => a.id);
+    // Counted now, from the selection: the request carries member asset ids,
+    // so the server's reply cannot tell a picked kit from its assets.
+    const batch = selectionCounts;
     if (qtAssets.length === 0) {
       // No disposition to collect (INDIVIDUAL-only, or the server didn't send
       // QT metadata) — keep the simple confirm + bare send.
-      const count = selectedAssetIds.size;
       Alert.alert(
         "Check In Selected",
-        `Check in ${count} selected ${count === 1 ? "asset" : "assets"}?`,
+        describeBatchConfirm({ direction: "checkin", counts: batch }),
         [
           { text: "Cancel", style: "cancel" },
           {
             text: "Check In",
-            onPress: () => void submitCheckin(individualIds, []),
+            onPress: () => void submitCheckin(individualIds, [], batch),
           },
         ]
       );
@@ -466,16 +479,20 @@ export default function BookingDetailScreen() {
       index: 0,
       collected: [],
       individualIds,
+      batch,
     });
   };
 
   // Send the check-out. `assetIds` = INDIVIDUAL rows (implicit 1 unit);
-  // `checkouts` = per-QT-asset quantities the picker collected. `closeSheet`
-  // runs only once the server accepts, so a refused check-out keeps the
-  // quantity sheet open with every collected quantity intact.
+  // `checkouts` = per-QT-asset quantities the picker collected; `batch` = the
+  // selection as the confirm and the button counted it, which the success
+  // message names. `closeSheet` runs only once the server accepts, so a refused
+  // check-out keeps the quantity sheet open with every collected quantity
+  // intact.
   const submitCheckout = async (
     assetIds: string[],
     checkouts: CheckoutDisposition[],
+    batch: SelectionCounts,
     closeSheet?: () => void
   ) => {
     if (!booking || !currentOrg) return;
@@ -497,11 +514,24 @@ export default function BookingDetailScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         // Mutation changed this booking — force the list to refetch.
         markBookingsListDirty();
-        const msg = data?.isComplete
-          ? `All assets are now checked out for "${bookingName}".`
-          : `${data?.checkedOutCount ?? "Some"} checked out, ${
-              data?.remainingCount ?? "some"
-            } still reserved.`;
+        const msg = describeBatchResult({
+          direction: "checkout",
+          counts: batch,
+          isComplete: data?.isComplete,
+          bookingName,
+          // The server skips an asset another check-out already took; this
+          // lets the message say so rather than claim the whole batch moved.
+          assets:
+            data?.checkedOutCount === undefined
+              ? undefined
+              : {
+                  sent: new Set([
+                    ...assetIds,
+                    ...checkouts.map((c) => c.assetId),
+                  ]).size,
+                  moved: data.checkedOutCount,
+                },
+        });
         Alert.alert("Checked Out", msg, [
           {
             text: "OK",
@@ -528,18 +558,20 @@ export default function BookingDetailScreen() {
     const individualIds = selected
       .filter((a) => a.type !== "QUANTITY_TRACKED")
       .map((a) => a.id);
+    // Counted now, from the selection: the request carries member asset ids,
+    // so the server's reply cannot tell a picked kit from its assets.
+    const batch = selectionCounts;
     if (qtAssets.length === 0) {
       // No quantity to pick (INDIVIDUAL-only, or the server didn't send QT
       // metadata) — keep the simple confirm + bare send.
-      const count = selectedAssetIds.size;
       Alert.alert(
         "Check Out Selected",
-        `Check out ${count} selected ${count === 1 ? "asset" : "assets"}?`,
+        describeBatchConfirm({ direction: "checkout", counts: batch }),
         [
           { text: "Cancel", style: "cancel" },
           {
             text: "Check Out",
-            onPress: () => void submitCheckout(individualIds, []),
+            onPress: () => void submitCheckout(individualIds, [], batch),
           },
         ]
       );
@@ -551,6 +583,7 @@ export default function BookingDetailScreen() {
       index: 0,
       collected: [],
       individualIds,
+      batch,
     });
   };
 
@@ -599,7 +632,7 @@ export default function BookingDetailScreen() {
     });
     Alert.alert(
       "Remove Selected",
-      `Remove ${describeRemoval({
+      `Remove ${describeBatch({
         assetCount: assetIds.length,
         kitCount: kitIds.length,
       })} from "${booking.name}"?`,
@@ -2285,8 +2318,11 @@ export default function BookingDetailScreen() {
               // The last asset submits with the sheet still open. The queue
               // clears only once the server accepts, so a refusal keeps every
               // collected quantity for a retry.
-              void submitCheckout(checkoutQueue.individualIds, collected, () =>
-                setCheckoutQueue(null)
+              void submitCheckout(
+                checkoutQueue.individualIds,
+                collected,
+                checkoutQueue.batch,
+                () => setCheckoutQueue(null)
               );
             }
           }}
@@ -2338,8 +2374,11 @@ export default function BookingDetailScreen() {
               // The last asset submits with the sheet still open. The queue
               // clears only once the server accepts, so a refusal keeps every
               // collected disposition for a retry.
-              void submitCheckin(checkinQueue.individualIds, collected, () =>
-                setCheckinQueue(null)
+              void submitCheckin(
+                checkinQueue.individualIds,
+                collected,
+                checkinQueue.batch,
+                () => setCheckinQueue(null)
               );
             }
           }}
