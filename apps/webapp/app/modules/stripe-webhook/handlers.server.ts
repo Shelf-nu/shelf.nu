@@ -40,6 +40,109 @@ import {
 const OK = () => new Response(null, { status: 200 });
 
 /**
+ * Applies a tier subscription's lifecycle event to the add-ons bundled on it.
+ *
+ * A Team trial or checkout can carry the Audits and Barcodes add-ons as extra
+ * line items on the tier subscription (`createTeamTrialSubscription`,
+ * `createStripeCheckoutSession`). Workspace creation links that subscription
+ * to the new organization through `metadata.organizationId` and switches the
+ * add-ons on; from then on they live and die with the tier subscription, so
+ * its pauses, cancellations and status changes have to reach the same
+ * organization flags the standalone add-on handlers maintain.
+ *
+ * Only add-ons present on this subscription are touched. A workspace can also
+ * hold a standalone add-on subscription, and that one is governed by its own
+ * webhook events.
+ *
+ * @param args.eventType - The Stripe event type being handled
+ * @param args.subscription - The tier subscription from the event
+ * @param args.hasAuditAddon - Whether the subscription carries an Audits item
+ * @param args.hasBarcodeAddon - Whether the subscription carries a Barcodes item
+ */
+async function syncBundledAddons({
+  eventType,
+  subscription,
+  hasAuditAddon,
+  hasBarcodeAddon,
+}: {
+  eventType: string;
+  subscription: Stripe.Subscription;
+  hasAuditAddon: boolean;
+  hasBarcodeAddon: boolean;
+}) {
+  const organizationId = subscription.metadata?.organizationId;
+  if (!organizationId) return;
+
+  if (hasAuditAddon) {
+    await handleAuditAddonWebhook({ eventType, subscription, organizationId });
+  }
+  if (hasBarcodeAddon) {
+    await handleBarcodeAddonWebhook({
+      eventType,
+      subscription,
+      organizationId,
+    });
+  }
+}
+
+/**
+ * Switches off the add-ons an update removed from a tier subscription.
+ *
+ * Stripe lists the pre-update line items in `previous_attributes.items`. An
+ * add-on item that was there and is gone now has been dropped from the
+ * subscription, which for the workspace is the same as cancelling it.
+ *
+ * @param args.event - The `customer.subscription.updated` event
+ * @param args.subscription - The subscription as it is after the update
+ */
+async function disableAddonsRemovedFromSubscription({
+  event,
+  subscription,
+}: {
+  event: Stripe.Event;
+  subscription: Stripe.Subscription;
+}) {
+  const organizationId = subscription.metadata?.organizationId;
+  if (!organizationId) return;
+
+  const previousItems = (
+    event.data.previous_attributes as
+      | { items?: { data?: Stripe.SubscriptionItem[] } }
+      | undefined
+  )?.items?.data;
+  if (!previousItems?.length) return;
+
+  const productIdOf = (item: Stripe.SubscriptionItem) =>
+    typeof item.price?.product === "string"
+      ? item.price.product
+      : item.price?.product?.id;
+  const currentProductIds = new Set(subscription.items.data.map(productIdOf));
+
+  const removed: { auditsEnabled?: false; barcodesEnabled?: false } = {};
+  for (const item of previousItems) {
+    const productId = productIdOf(item);
+    if (!productId || currentProductIds.has(productId)) continue;
+
+    // Same metadata reading as `getDataFromStripeEvent`: an archived add-on
+    // product is still an add-on for the purpose of taking it away.
+    const product = await stripe.products.retrieve(productId);
+    if (product.metadata?.product_type !== "addon") continue;
+    if (product.metadata.addon_type === "audits") removed.auditsEnabled = false;
+    if (product.metadata.addon_type === "barcodes") {
+      removed.barcodesEnabled = false;
+    }
+  }
+
+  if (Object.keys(removed).length === 0) return;
+
+  await db.organization.update({
+    where: { id: organizationId },
+    data: removed,
+    select: { id: true },
+  });
+}
+
+/**
  * Builds the `upgrade_completed` PostHog properties from a Stripe subscription.
  * Normalises the recurring price to a monthly figure (`mrr`) so monthly,
  * yearly, weekly and daily plans are comparable; `mrr` is `null` when the plan
@@ -292,8 +395,15 @@ export async function handleSubscriptionPaused(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { subscription, customerId, tierId, productType, product } =
-    await getDataFromStripeEvent(event);
+  const {
+    subscription,
+    customerId,
+    tierId,
+    productType,
+    product,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  } = await getDataFromStripeEvent(event);
 
   if (
     isAddonSubscription({
@@ -320,6 +430,13 @@ export async function handleSubscriptionPaused(
     }
     return OK();
   }
+
+  await syncBundledAddons({
+    eventType: event.type,
+    subscription,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  });
 
   const pausedSubscriptionIsHigherOrEqualTier = isHigherOrEqualTier(
     tierId as TierId,
@@ -361,8 +478,15 @@ export async function handleSubscriptionUpdated(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { subscription, customerId, tierId, productType, product } =
-    await getDataFromStripeEvent(event);
+  const {
+    subscription,
+    customerId,
+    tierId,
+    productType,
+    product,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  } = await getDataFromStripeEvent(event);
 
   if (
     isAddonSubscription({
@@ -389,6 +513,14 @@ export async function handleSubscriptionUpdated(
     }
     return OK();
   }
+
+  await syncBundledAddons({
+    eventType: event.type,
+    subscription,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  });
+  await disableAddonsRemovedFromSubscription({ event, subscription });
 
   const newSubscriptionIsHigherTier = isHigherTier(
     tierId as TierId,
@@ -452,8 +584,15 @@ export async function handleSubscriptionDeleted(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { subscription, customerId, tierId, productType, product } =
-    await getDataFromStripeEvent(event);
+  const {
+    subscription,
+    customerId,
+    tierId,
+    productType,
+    product,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  } = await getDataFromStripeEvent(event);
 
   if (isAddonSubscription({ tierId, productType, event })) {
     const organizationId = subscription?.metadata?.organizationId;
@@ -482,6 +621,17 @@ export async function handleSubscriptionDeleted(
       });
     }
     return OK();
+  }
+
+  // A transfer cancels the old subscription only after its replacement exists
+  // with the same items and metadata, so the add-ons stay with the workspace.
+  if (!subscription?.metadata?.transferred_to_subscription) {
+    await syncBundledAddons({
+      eventType: event.type,
+      subscription,
+      hasAuditAddon,
+      hasBarcodeAddon,
+    });
   }
 
   const deletedSubscriptionIsHigherOrEqualTier = isHigherOrEqualTier(
