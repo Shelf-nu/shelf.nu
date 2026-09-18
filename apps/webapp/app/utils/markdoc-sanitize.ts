@@ -56,3 +56,27 @@ export function stripMarkdocDelimiters(raw: string | null | undefined): string {
 
   return sanitized.trim();
 }
+
+/** Matches a whole trusted `{% audit_images ... /%}` tag, attributes and all. */
+const AUDIT_IMAGES_TAG = /{%\s*audit_images[^%]*%}/g;
+
+/**
+ * Removes the trusted `{% audit_images ... /%}` tag that
+ * `buildAuditImagesNoteContent` (`~/modules/audit/note-content.server`)
+ * appends to a captioned image-evidence note, leaving the user-authored
+ * caption text untouched.
+ *
+ * Display-only: the tag itself is safe to render (it is appended server-side,
+ * never user-controlled — see that module's threat model) and other readers
+ * of note content, e.g. the Activity feed and the PDF export, still expand it
+ * normally. This helper exists solely for the audit-asset details panel
+ * (`AuditAssetNoteItem`), which renders the note body *and* a separate Images
+ * grid backed by the same `AuditImage` rows — expanding the tag there
+ * duplicated every captioned upload's photos.
+ *
+ * @param raw - Note content that may contain a trailing `audit_images` tag
+ * @returns The content with any `audit_images` tag removed and trimmed
+ */
+export function stripAuditImagesTag(raw: string | null | undefined): string {
+  return (raw ?? "").replace(AUDIT_IMAGES_TAG, "").trim();
+}

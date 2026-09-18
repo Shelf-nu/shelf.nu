@@ -1,6 +1,9 @@
 import Markdoc from "@markdoc/markdoc";
 import { describe, it, expect } from "vitest";
-import { stripMarkdocDelimiters } from "./markdoc-sanitize";
+import {
+  stripAuditImagesTag,
+  stripMarkdocDelimiters,
+} from "./markdoc-sanitize";
 
 /** Tag nodes Markdoc finds in a string — the thing an injection must not produce. */
 const tagsIn = (content: string) =>
@@ -62,5 +65,30 @@ describe("stripMarkdocDelimiters", () => {
 
     expect(tagsIn(payload)).toHaveLength(1); // sanity: the raw payload IS a tag
     expect(tagsIn(stripMarkdocDelimiters(payload))).toHaveLength(0);
+  });
+});
+
+describe("stripAuditImagesTag", () => {
+  it("removes a trailing audit_images tag, keeping the caption", () => {
+    expect(
+      stripAuditImagesTag(
+        'Dent on the top-left corner\n\n{% audit_images count=2 ids="img-1,img-2" /%}'
+      )
+    ).toBe("Dent on the top-left corner");
+  });
+
+  it("leaves plain note content untouched", () => {
+    expect(stripAuditImagesTag("Looks fine")).toBe("Looks fine");
+  });
+
+  it("treats nullish input as empty rather than throwing", () => {
+    expect(stripAuditImagesTag(null)).toBe("");
+    expect(stripAuditImagesTag(undefined)).toBe("");
+  });
+
+  it("yields an empty string for an uncaptioned image note", () => {
+    expect(stripAuditImagesTag('{% audit_images count=1 ids="img-1" /%}')).toBe(
+      ""
+    );
   });
 });
