@@ -17,6 +17,10 @@ import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
+import {
+  readSignupIntent,
+  signupIntentHeaders,
+} from "~/modules/signup-intent/cookie.server";
 import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -90,6 +94,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const authSession = await verifyOtpAndSignin(email, otp);
         const userExists = Boolean(await findUserByEmail(email));
 
+        // What the signup link asked for, carried by cookie. A new account
+        // records it on its signup event; the cookie then travels on for
+        // onboarding to store and act on.
+        const signupIntent = await readSignupIntent(request);
+
         if (!userExists) {
           try {
             const username = await generateUniqueUsername(authSession.email);
@@ -104,6 +113,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
               ...authSession,
               username,
               formatPrefs,
+              signupIntent,
             });
           } catch (createError) {
             // Handle race condition: if a concurrent request already
@@ -125,9 +135,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
           request,
         });
 
-        return redirect(safeRedirect("/assets"), {
+        // The link's `redirectTo` takes effect only for an account that has
+        // already onboarded. The app layout sends every other account, which
+        // includes every brand-new one, to onboarding first; onboarding picks
+        // the landing page itself and does not read `redirectTo`.
+        return redirect(safeRedirect(signupIntent?.redirectTo, "/assets"), {
           headers: [
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+            ...(await signupIntentHeaders(signupIntent)),
           ],
         });
       }

@@ -3,7 +3,13 @@ import type {
   ActionFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { redirect, data, useActionData, useNavigation } from "react-router";
+import {
+  redirect,
+  data,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -17,6 +23,14 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
+import {
+  refreshSignupIntentHeaders,
+  signupIntentHeaders,
+} from "~/modules/signup-intent/cookie.server";
+import {
+  parseSignupIntentFromSearchParams,
+  signupIntentNotice,
+} from "~/modules/signup-intent/schema";
 import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -31,13 +45,14 @@ import {
   payload,
   error,
   getActionMethod,
+  getCurrentSearchParams,
   parseData,
 } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
 import { validateNonSSOSignup } from "~/utils/sso.server";
 import { passwordSchema } from "~/utils/zod";
 
-export function loader({ context }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const title = "Create an account";
   const subHeading = "Start your journey with Shelf";
   const { disableSignup } = config;
@@ -58,7 +73,17 @@ export function loader({ context }: LoaderFunctionArgs) {
       return redirect("/assets");
     }
 
-    return data(payload({ title, subHeading }));
+    // What the signup link asked for (`?plan=team&trial=true&utm_*=…`). From
+    // here on it travels in a signed cookie, so both signup paths and the
+    // email-code confirmation carry it to onboarding. The page itself only
+    // uses it for the confirmation line under the heading.
+    const signupIntent = parseSignupIntentFromSearchParams(
+      getCurrentSearchParams(request)
+    );
+
+    return data(payload({ title, subHeading, signupIntent }), {
+      headers: await signupIntentHeaders(signupIntent),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });
@@ -120,7 +145,12 @@ export async function action({ request }: ActionFunctionArgs) {
         await signUpWithEmailPass(email, password);
 
         return redirect(
-          `/otp?email=${encodeURIComponent(email)}&mode=confirm_signup`
+          `/otp?email=${encodeURIComponent(email)}&mode=confirm_signup`,
+          {
+            // Re-issue the signup link's intent so its window restarts here
+            // rather than at the first page view.
+            headers: await refreshSignupIntentHeaders(request),
+          }
         );
       }
     }
@@ -141,6 +171,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function Join() {
+  const { signupIntent } = useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", JoinFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
@@ -151,9 +182,22 @@ export default function Join() {
   /** Focus the email field on mount (intentional first-field focus on auth pages). */
   const emailInputRef = useAutoFocus<HTMLInputElement>();
 
+  const intentNotice = signupIntentNotice({
+    intent: signupIntent,
+    freeTrialDays: config.freeTrialDays,
+  });
+
   return (
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full max-w-md">
+        {intentNotice ? (
+          <p
+            className="mb-6 text-center text-sm text-gray-600"
+            data-test-id="signup-intent-notice"
+          >
+            {intentNotice}
+          </p>
+        ) : null}
         <Form ref={zo.ref} method="post" className="space-y-6" replace>
           <div>
             <Input
