@@ -181,8 +181,13 @@ export type AssetModelAvailability = {
  * `FOR UPDATE` on the model row first makes the second caller wait for the
  * first to commit and re-read the pool it actually left behind.
  *
- * The model row is the right grain: contention is exactly "requests for this
- * model", and every writer of a `BookingModelRequest` passes through here.
+ * The model row is the right grain for POOL contention: what competes is
+ * "requests for this model", across bookings. It is not a lock on any one
+ * reservation, and most writers of a `BookingModelRequest` row never take it
+ * — `materializeModelRequestForAsset` does not, and
+ * `assertModelUnitsNotReservedElsewhere` skips it for a write that fits
+ * inside the booking's own remaining units. A caller that needs one
+ * reservation held still needs {@link lockModelRequestRow}.
  *
  * Scoped by `organizationId` as well as `id`, so a caller supplying another
  * workspace's model id takes no lock at all rather than contending on a row
@@ -211,6 +216,53 @@ async function lockAssetModelForReservation(
       shouldBeCaptured: false,
     });
   }
+}
+
+/**
+ * Serializes every writer of one booking's reservation of one model.
+ *
+ * `quantity` and `fulfilledQuantity` are moved by different callers: an
+ * operator sets the first, assignment increments the second
+ * ({@link materializeModelRequestForAsset}), and cancellation removes the row
+ * on the condition that the second is zero. Each of those decisions is taken
+ * in application code against a row the transaction has read, so without a
+ * lock on that row the decision rests on a snapshot another transaction is
+ * free to invalidate before the write lands — leaving `fulfilledQuantity`
+ * above `quantity`, or deleting a reservation whose units have just arrived
+ * and stripping their provenance through the FK's `ON DELETE SET NULL`.
+ *
+ * The pool lock cannot stand in for this.
+ * {@link assertModelUnitsNotReservedElsewhere} skips it entirely for a write
+ * that fits inside the booking's own remaining units — which is exactly the
+ * assignment that competes here.
+ *
+ * Locks nothing when the reservation does not exist yet: there is no row to
+ * lock, and two concurrent creates serialize on the unique constraint
+ * instead, which the upsert's `wasCreated` discriminator already expects.
+ *
+ * Needs no `organizationId` of its own: both callers prove the booking
+ * belongs to the caller's workspace before reaching this.
+ *
+ * Callers that take both locks take {@link lockAssetModelForReservation}
+ * FIRST, matching the order assignment takes them in, so the two paths cannot
+ * deadlock.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param bookingId - The booking whose reservation is being written
+ * @param assetModelId - The reserved model
+ */
+async function lockModelRequestRow(
+  tx: RawQueryClient,
+  bookingId: string,
+  assetModelId: string
+): Promise<void> {
+  // Column names are literal — `BookingModelRequest` declares no `@map`.
+  // @see {@link file://./../../../../../.claude/rules/raw-sql-respects-prisma-map.md}
+  await tx.$queryRaw`
+    SELECT "id" FROM "BookingModelRequest"
+    WHERE "bookingId" = ${bookingId} AND "assetModelId" = ${assetModelId}
+    FOR UPDATE
+  `;
 }
 
 /**
@@ -1158,10 +1210,18 @@ export async function upsertBookingModelRequest({
         });
       }
 
-      // Peek at the existing row first — we need its `fulfilledQuantity`
-      // both for the "can't shrink below already-fulfilled" guard and
-      // for the availability delta calculation ("only claim the still-
-      // outstanding share against the pool").
+      // Both locks before the read, because every decision below is made in
+      // application code against the row this read returns: the floor, whether
+      // this write is a reduction, and the completion stamp. Taken without the
+      // row lock that is a pre-write snapshot, and an assignment committing
+      // between the read and the upsert lands `fulfilledQuantity` above
+      // `quantity` — an invariant nothing in the database enforces.
+      //
+      // Pool first, then the row: assignment takes them in that order, and
+      // the reverse is a deadlock rather than a wrong answer.
+      await lockAssetModelForReservation(tx, assetModelId, organizationId);
+      await lockModelRequestRow(tx, bookingId, assetModelId);
+
       const existing = await tx.bookingModelRequest.findUnique({
         where: {
           bookingId_assetModelId: { bookingId, assetModelId },
@@ -1189,13 +1249,6 @@ export async function upsertBookingModelRequest({
         });
       }
 
-      // Claim the pool before measuring it. Both statements have to be in
-      // this transaction: the lock serializes competing reservations, and
-      // `db: tx` is what makes the counts observe it. Taken on every path,
-      // including the reduction below, so a reduction and a competing
-      // increase still commit in a defined order.
-      await lockAssetModelForReservation(tx, assetModelId, organizationId);
-
       /**
        * A reduction takes nothing from the pool, so nothing about the pool can
        * refuse it — and measuring anyway would, in the one case that matters
@@ -1203,6 +1256,11 @@ export async function upsertBookingModelRequest({
        * asset retired or moved into custody mid-booking) fails the comparison
        * below at EVERY quantity, which would leave the operator unable to give
        * back the units they are trying to give back.
+       *
+       * Sound only because `previousQuantity` is read under the row lock
+       * above. Off an unlocked read it is a guess, and a concurrent write can
+       * make a genuine INCREASE look like a reduction — which would skip the
+       * pool measurement on the one path that actually needs it.
        */
       const isReduction =
         previousQuantity != null && quantity <= previousQuantity;
@@ -1493,6 +1551,12 @@ export async function removeBookingModelRequest({
         });
       }
 
+      // The "nothing assigned yet" guard below is evaluated in application
+      // code, so it is only as good as the read behind it. Locked, an
+      // assignment either commits first and this read refuses the
+      // cancellation, or waits and then finds no row to claim.
+      await lockModelRequestRow(tx, bookingId, assetModelId);
+
       const existing = await tx.bookingModelRequest.findUnique({
         where: { bookingId_assetModelId: { bookingId, assetModelId } },
         include: { assetModel: { select: { name: true } } },
@@ -1526,9 +1590,24 @@ export async function removeBookingModelRequest({
         });
       }
 
-      await tx.bookingModelRequest.delete({
-        where: { bookingId_assetModelId: { bookingId, assetModelId } },
+      // `fulfilledQuantity: 0` restates the guard above as part of the write.
+      // The row lock already makes the guard sound, so this can only ever
+      // match — which is the point: the invariant travels with the statement
+      // rather than depending on a lock a later edit might move or drop.
+      const { count } = await tx.bookingModelRequest.deleteMany({
+        where: { bookingId, assetModelId, fulfilledQuantity: 0 },
       });
+
+      if (count === 0) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          status: 400,
+          message:
+            "Units were assigned to this reservation while it was being cancelled. Reload the booking and reduce the quantity instead.",
+          shouldBeCaptured: false,
+        });
+      }
 
       // In the same tx as the delete — a rolled-back cancellation must not
       // leave an event claiming the reservation was cancelled.

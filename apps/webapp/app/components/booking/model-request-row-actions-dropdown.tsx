@@ -55,6 +55,7 @@ import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu"
 import { useDisabled } from "~/hooks/use-disabled";
 import {
   canAssignModelUnits,
+  canCancelModelReservation,
   canEditModelReservations,
 } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
@@ -147,10 +148,7 @@ const ConditionalActionsDropdown = ({
   // purely to pre-gate the UI so disabled items don't clutter the menu.
   const canScanToAssign = canManage && canAssignModelUnits(bookingStatus);
   const canAdjust = canManage && canEditModelReservations(bookingStatus);
-  // Deleting the row while units hang off it would cut them loose from the
-  // record of how they got onto the booking. Reducing the quantity is the
-  // route out in that case, which "Adjust quantity" offers directly.
-  const canRemove = canAdjust && request.fulfilledQuantity === 0;
+  const canRemove = canAdjust && canCancelModelReservation(request);
 
   const scanUrl = `/bookings/${bookingId}/overview/scan-assets`;
 

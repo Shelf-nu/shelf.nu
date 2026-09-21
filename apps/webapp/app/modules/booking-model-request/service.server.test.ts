@@ -95,6 +95,9 @@ vitest.mock("~/database/db.server", () => ({
       }),
       findUnique: vitest.fn().mockResolvedValue(null),
       delete: vitest.fn().mockResolvedValue({}),
+      // why: cancellation deletes through `deleteMany` so the
+      // "nothing assigned" guard rides in the statement's own WHERE clause.
+      deleteMany: vitest.fn().mockResolvedValue({ count: 1 }),
       update: vitest.fn().mockResolvedValue({}),
     },
     bookingNote: {
@@ -165,8 +168,18 @@ function installClaimSimulator() {
       // consume a row meant for the claim, so the stub routes on the statement
       // it was handed: the lock is the one naming "AssetModel", and it expects
       // a row back (an empty result means "not in this workspace").
-      if (Array.isArray(strings) && strings.join("").includes('"AssetModel"')) {
+      const sql = Array.isArray(strings) ? strings.join("") : "";
+      if (sql.includes('"AssetModel"')) {
         return [{ id: MODEL_ID }];
+      }
+      // why: the reservation-row lock is a third raw statement reaching this
+      // stub. It must report whether the row exists and change nothing —
+      // falling through to the claim branch below would silently increment
+      // `fulfilledQuantity` on every upsert the suite runs.
+      if (sql.includes("FOR UPDATE") && sql.includes('"BookingModelRequest"')) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const locked = await (db.bookingModelRequest.findUnique as any)();
+        return locked ? [{ id: locked.id ?? "req-1" }] : [];
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const row = await (db.bookingModelRequest.findUnique as any)();
@@ -185,6 +198,30 @@ function installClaimSimulator() {
         },
       ];
     }
+  );
+}
+
+/**
+ * Raw statements issued this test, in call order, with the SQL flattened so a
+ * test can name the table it is asserting about rather than an index. Several
+ * raw statements reach the same mock, and indexing into `calls` couples every
+ * assertion to how many locks the code happens to take.
+ */
+function rawStatements() {
+  const mock = (db.$queryRaw as ReturnType<typeof vitest.fn>).mock;
+  return mock.calls.map((call, index) => ({
+    sql: (call[0] as TemplateStringsArray).join("?"),
+    values: call.slice(1),
+    order: mock.invocationCallOrder[index],
+  }));
+}
+
+/** The single statement locking `table`, or undefined when none was issued. */
+function lockOn(table: string) {
+  return rawStatements().find(
+    (statement) =>
+      statement.sql.includes(`"${table}"`) &&
+      statement.sql.includes("FOR UPDATE")
   );
 }
 
@@ -536,6 +573,83 @@ describe("upsertBookingModelRequest", () => {
 
     expect(lockOrder).toBeDefined();
     expect(lockOrder).toBeLessThan(readOrder);
+  });
+
+  it("locks this booking's reservation row before it reads it", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(10);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      quantity: 10,
+      fulfilledQuantity: 8,
+      fulfilledAt: null,
+    });
+
+    await upsertBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 9,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    // Everything this function decides — the floor, whether the write is a
+    // reduction, the completion stamp — comes off that read. Taken without
+    // the row lock it is a pre-write snapshot, and a scan committing between
+    // the read and the write lands `fulfilledQuantity` above `quantity`.
+    // The pool lock cannot stand in: a scan that fits inside the
+    // reservation's own remaining count never takes one (see the early
+    // `continue` in `assertModelUnitsNotReservedElsewhere`).
+    const rowLock = lockOn("BookingModelRequest");
+    const readOrder = (
+      db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+    ).mock.invocationCallOrder[0];
+
+    expect(rowLock).toBeDefined();
+    expect(rowLock!.order).toBeLessThan(readOrder);
+  });
+
+  it("takes the pool lock before the reservation row lock", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(10);
+
+    await upsertBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    // Assignment takes these two in this order (pool locks first in
+    // `assertModelUnitsNotReservedElsewhere`, then the row via its claim
+    // UPDATE). Taking them the other way round here is a lock-order
+    // inversion, which is a deadlock rather than a wrong answer.
+    expect(lockOn("AssetModel")!.order).toBeLessThan(
+      lockOn("BookingModelRequest")!.order
+    );
+  });
+
+  it("scopes the reservation row lock to this booking and model", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(10);
+
+    await upsertBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    expect(lockOn("BookingModelRequest")!.values).toEqual([
+      BOOKING_ID,
+      MODEL_ID,
+    ]);
   });
 
   it("scopes the lock to the caller's workspace", async () => {
@@ -1230,6 +1344,11 @@ describe("removeBookingModelRequest", () => {
     db.bookingModelRequest.findUnique.mockResolvedValue(null);
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue(null);
+    // why: `mockResolvedValue` replaces the implementation for good, and
+    // `clearAllMocks` only wipes call history — so the one test that stages a
+    // zero-row delete would answer every test after it. Re-default here.
+    // @ts-expect-error mocked
+    db.bookingModelRequest.deleteMany.mockResolvedValue({ count: 1 });
   });
 
   it("deletes the row on a DRAFT booking", async () => {
@@ -1255,14 +1374,83 @@ describe("removeBookingModelRequest", () => {
       userId: USER_ID,
     });
 
-    expect(db.bookingModelRequest.delete).toHaveBeenCalledWith({
+    expect(db.bookingModelRequest.deleteMany).toHaveBeenCalledWith({
       where: {
-        bookingId_assetModelId: {
-          bookingId: BOOKING_ID,
-          assetModelId: MODEL_ID,
-        },
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        fulfilledQuantity: 0,
       },
     });
+  });
+
+  it("locks the reservation row before the assigned-units guard", async () => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.booking.findUnique.mockResolvedValue({
+      id: BOOKING_ID,
+      status: BookingStatus.ONGOING,
+    });
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      fulfilledQuantity: 0,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    await removeBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    // The "nothing assigned yet" guard lives in application code, so it is
+    // only as good as the read behind it. Unlocked, a scan can fill the
+    // reservation between the guard and the delete, and the FK's ON DELETE
+    // SET NULL then strips that asset's `bookingModelRequestId` — the exact
+    // provenance this guard exists to keep.
+    const rowLock = lockOn("BookingModelRequest");
+    const readOrder = (
+      db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+    ).mock.invocationCallOrder[0];
+
+    expect(rowLock).toBeDefined();
+    expect(rowLock!.order).toBeLessThan(readOrder);
+  });
+
+  it("refuses the cancellation when the delete matches nothing", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.booking.findUnique.mockResolvedValue({
+      id: BOOKING_ID,
+      status: BookingStatus.ONGOING,
+    });
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      fulfilledQuantity: 0,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+    // The guard passed, and the write still matched nothing — the only way
+    // that happens is a unit arriving in between. Refuse rather than report
+    // a cancellation that did not occur.
+    // @ts-expect-error mocked
+    db.bookingModelRequest.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      removeBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      })
+    ).rejects.toThrow(ShelfError);
   });
 
   it("is idempotent when no request exists", async () => {
@@ -1282,7 +1470,7 @@ describe("removeBookingModelRequest", () => {
       userId: USER_ID,
     });
 
-    expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
+    expect(db.bookingModelRequest.deleteMany).not.toHaveBeenCalled();
   });
 
   it("cancels a reservation nothing was assigned to on an ONGOING booking", async () => {
@@ -1309,7 +1497,7 @@ describe("removeBookingModelRequest", () => {
       userId: USER_ID,
     });
 
-    expect(db.bookingModelRequest.delete).toHaveBeenCalled();
+    expect(db.bookingModelRequest.deleteMany).toHaveBeenCalled();
   });
 
   it("refuses to cancel a reservation that already has units assigned", async () => {
@@ -1339,7 +1527,7 @@ describe("removeBookingModelRequest", () => {
         userId: USER_ID,
       })
     ).rejects.toThrow(ShelfError);
-    expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
+    expect(db.bookingModelRequest.deleteMany).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1362,7 +1550,7 @@ describe("removeBookingModelRequest", () => {
         userId: USER_ID,
       })
     ).rejects.toThrow(ShelfError);
-    expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
+    expect(db.bookingModelRequest.deleteMany).not.toHaveBeenCalled();
   });
 
   describe("activity events", () => {
@@ -1587,7 +1775,7 @@ describe("materializeModelRequestForAsset", () => {
     ).join("?");
     expect(sql).toContain('"fulfilledQuantity" < "quantity"');
     // Row is NEVER deleted under the audit-trail schema.
-    expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
+    expect(db.bookingModelRequest.deleteMany).not.toHaveBeenCalled();
   });
 
   it("stamps fulfilledAt when the last unit is assigned (never deletes)", async () => {
@@ -1679,7 +1867,7 @@ describe("materializeModelRequestForAsset", () => {
 
     expect(result).toEqual({ matched: false });
     expect(db.bookingModelRequest.update).not.toHaveBeenCalled();
-    expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
+    expect(db.bookingModelRequest.deleteMany).not.toHaveBeenCalled();
   });
 
   describe("activity events", () => {

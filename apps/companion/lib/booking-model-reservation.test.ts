@@ -13,7 +13,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { modelReservationBounds } from "./booking-model-reservation";
+import {
+  canCancelModelReservation,
+  modelReservationBounds,
+} from "./booking-model-reservation";
 
 test("an untouched reservation may use the whole free pool", () => {
   assert.deepEqual(modelReservationBounds({ available: 4 }), {
@@ -52,4 +55,15 @@ test("a pool reported as negative counts as empty", () => {
     modelReservationBounds({ available: -2, fulfilledQuantity: 1 }),
     { min: 1, max: 1 }
   );
+});
+
+test("a reservation nothing has been assigned to can be cancelled", () => {
+  assert.equal(canCancelModelReservation(0), true);
+  assert.equal(canCancelModelReservation(), true);
+});
+
+test("one assigned unit takes cancellation off the table", () => {
+  // The server refuses it, so a trash control here would always fail —
+  // reducing to the assigned count is what releases the rest.
+  assert.equal(canCancelModelReservation(1), false);
 });

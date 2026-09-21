@@ -34,6 +34,7 @@ import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.model-requests";
 import { BADGE_COLORS } from "~/utils/badge-colors";
+import { canCancelModelReservation } from "~/utils/booking-model-requests";
 import { getValidationErrors } from "~/utils/http";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
@@ -458,24 +459,28 @@ function ExistingRequestRow({
             </Button>
           </updateFetcher.Form>
 
-          <removeFetcher.Form
-            method="DELETE"
-            action={`/api/bookings/${bookingId}/model-requests`}
-          >
-            <input
-              type="hidden"
-              name="assetModelId"
-              value={request.assetModelId}
-            />
-            <Button
-              type="submit"
-              variant="secondary"
-              disabled={disabled}
-              aria-label={`Remove reservation for ${request.assetModelName}`}
+          {/* The quantity input beside this one, floored at the assigned
+              count, is the route that works once units are on the booking. */}
+          {canCancelModelReservation(request) ? (
+            <removeFetcher.Form
+              method="DELETE"
+              action={`/api/bookings/${bookingId}/model-requests`}
             >
-              {isRemoving ? "Removing..." : "Remove"}
-            </Button>
-          </removeFetcher.Form>
+              <input
+                type="hidden"
+                name="assetModelId"
+                value={request.assetModelId}
+              />
+              <Button
+                type="submit"
+                variant="secondary"
+                disabled={disabled}
+                aria-label={`Remove reservation for ${request.assetModelName}`}
+              >
+                {isRemoving ? "Removing..." : "Remove"}
+              </Button>
+            </removeFetcher.Form>
+          ) : null}
         </div>
       </div>
 

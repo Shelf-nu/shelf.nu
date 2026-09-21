@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canAssignModelUnits,
+  canCancelModelReservation,
   canEditModelReservations,
   countReservedModelUnits,
   countUnassignedModelUnits,
@@ -162,6 +163,23 @@ describe("canAssignModelUnits", () => {
     // Fail closed: a status added later shouldn't silently start advertising
     // work on a booking whose lifecycle nobody has reviewed here.
     expect(canAssignModelUnits("SOME_FUTURE_STATUS")).toBe(false);
+  });
+});
+
+describe("canCancelModelReservation", () => {
+  it("allows cancelling a reservation nothing has been assigned to", () => {
+    expect(canCancelModelReservation({ fulfilledQuantity: 0 })).toBe(true);
+  });
+
+  it("refuses once a single unit is on the booking", () => {
+    // Deleting the row would strip that asset's provenance via the FK's
+    // ON DELETE SET NULL, so the server refuses. Reducing the quantity to the
+    // assigned count is the route that releases the rest.
+    expect(canCancelModelReservation({ fulfilledQuantity: 1 })).toBe(false);
+  });
+
+  it("refuses a fully assigned reservation", () => {
+    expect(canCancelModelReservation({ fulfilledQuantity: 5 })).toBe(false);
   });
 });
 

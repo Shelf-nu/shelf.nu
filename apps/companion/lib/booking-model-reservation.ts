@@ -64,3 +64,23 @@ export function modelReservationBounds({
     min: Math.max(1, assigned),
   };
 }
+
+/**
+ * Whether a reservation can be cancelled outright, rather than reduced.
+ *
+ * Only while nothing has been assigned to it. Once a unit is on the booking
+ * the reservation row is the record of how it got there, and the server
+ * refuses to delete it — so a trash control offered here would always fail.
+ * Reducing the quantity to the assigned count is the route that works, and it
+ * releases everything still unassigned.
+ *
+ * MIRROR of `canCancelModelReservation` in
+ * `apps/webapp/app/utils/booking-model-requests.ts`. Cosmetic only; the server
+ * enforces it either way.
+ *
+ * @param fulfilledQuantity - Units of this reservation already assigned.
+ * @returns `true` when cancelling is still possible.
+ */
+export function canCancelModelReservation(fulfilledQuantity = 0): boolean {
+  return fulfilledQuantity === 0;
+}

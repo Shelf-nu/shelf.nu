@@ -76,6 +76,30 @@ export function canEditModelReservations(status: string): boolean {
 }
 
 /**
+ * Whether a reservation can be cancelled outright, rather than reduced.
+ *
+ * Only while nothing has been assigned to it. Once a unit is on the booking
+ * the row is the record of how it got there, and deleting it strips that
+ * asset's `bookingModelRequestId` through the FK's `ON DELETE SET NULL`. The
+ * server refuses such a cancellation, so a surface that offers the control
+ * anyway is handing the operator a button that always fails — the route that
+ * works is reducing the quantity to the assigned count, which releases
+ * everything still unassigned.
+ *
+ * Every surface showing a cancel control asks here. The rule was previously
+ * spelled out inline on one surface and missing on two others, which is the
+ * drift this exists to stop.
+ *
+ * @param request - The reservation, or its assigned-unit count.
+ * @returns `true` when cancelling is still possible.
+ */
+export function canCancelModelReservation(request: {
+  fulfilledQuantity: number;
+}): boolean {
+  return request.fulfilledQuantity === 0;
+}
+
+/**
  * Minimal `BookingModelRequest` shape these helpers need.
  *
  * Declared structurally (rather than importing the Prisma type) so callers

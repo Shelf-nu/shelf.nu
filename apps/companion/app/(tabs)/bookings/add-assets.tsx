@@ -42,7 +42,10 @@ import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
-import { modelReservationBounds } from "@/lib/booking-model-reservation";
+import {
+  canCancelModelReservation,
+  modelReservationBounds,
+} from "@/lib/booking-model-reservation";
 import { submitFromSheet } from "@/lib/sheet-submit";
 
 type Mode = "assets" | "kits" | "models";
@@ -532,7 +535,11 @@ export default function AddBookingAssetsScreen() {
     ({ item }: { item: AvailableModel }) => {
       const existing = modelRequestsById[item.id];
       const reserved = existing?.quantity ?? 0;
-      const max = item.available + (existing?.fulfilledQuantity ?? 0);
+      const assigned = existing?.fulfilledQuantity ?? 0;
+      const { max } = modelReservationBounds({
+        available: item.available,
+        fulfilledQuantity: assigned,
+      });
       // Nothing free to reserve AND nothing already reserved → can't act.
       const canReserve = max >= 1;
       return (
@@ -547,9 +554,12 @@ export default function AddBookingAssetsScreen() {
             <Text style={styles.modelMeta}>
               {item.available} of {item.total} available
               {reserved > 0 ? ` · ${reserved} reserved here` : ""}
+              {assigned > 0 ? ` · ${assigned} assigned` : ""}
             </Text>
           </View>
-          {reserved > 0 && (
+          {/* Edit, floored at the assigned count, is the route that works
+              once units are on the booking. */}
+          {reserved > 0 && canCancelModelReservation(assigned) && (
             <TouchableOpacity
               style={styles.modelRemoveButton}
               onPress={() => handleRemoveModel(item)}
