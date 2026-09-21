@@ -15,3 +15,7 @@ Wondering what is up for grabs? Check out those issues: https://github.com/Shelf
 8. Request a review from someone in the shelf team
 
 If you get stuck on any of these steps, open an issue or join us in our [Discord](https://discord.gg/8he9W7aTJu) for some extra help.
+
+## Contributions to the companion app
+
+The companion mobile app in `apps/companion/` is not under AGPL-3.0. It has its [own license](./apps/companion/LICENSE), which does not allow distribution. For that reason we can accept a pull request that changes files in `apps/companion/` only under a separate written agreement with Shelf Asset Management, Inc. Please open an issue before you start work there.
