@@ -388,8 +388,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     // `error()` also sends the refusal to this user as an error notification.
-    // That toast is how a refused check-out (e.g. a reservation still
-    // unassigned) reaches the operator in the drawer.
+    // That toast is how a refused check-out reaches the operator in the drawer.
     const reason = makeShelfError(cause, { userId, bookingId });
     return data(error(reason), { status: reason.status });
   }

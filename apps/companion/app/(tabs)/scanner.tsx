@@ -2440,7 +2440,7 @@ function ScannerContent() {
     );
   };
 
-  const handleBookingCheckout = () => {
+  const handleBookingCheckout = async () => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
 
     // Counted now, from the list: the request carries member asset ids, so the
@@ -2450,10 +2450,22 @@ function ScannerContent() {
     // The batch that takes a RESERVED booking out is the one that leaves its
     // unassigned reservations open, so that is where the operator confirms
     // it. Later batches find the booking already out with them open.
-    const unassignedConfirm =
-      bookingCtx?.bookingStatus === "RESERVED"
-        ? unassignedCheckoutConfirm(bookingCtx.outstandingModelRequests)
-        : null;
+    //
+    // Named from a read taken now: the context was captured when this screen
+    // opened, and a scanning session runs for minutes. The response also
+    // refreshes the scan-time gates, the way the fulfil submit does.
+    let unassignedConfirm = null;
+    if (bookingCtx?.bookingStatus === "RESERVED") {
+      setIsBookingSubmitting(true);
+      const { data: fresh } = await api.booking(bookingId, currentOrg.id);
+      setIsBookingSubmitting(false);
+      if (fresh) applyBookingCtx(fresh, currentOrg.id);
+      unassignedConfirm = unassignedCheckoutConfirm(
+        fresh
+          ? toOutstandingReservations(fresh.booking.modelRequests)
+          : bookingCtx.outstandingModelRequests
+      );
+    }
     if (unassignedConfirm) {
       Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
         { text: "Cancel", style: "cancel" },
@@ -2954,7 +2966,7 @@ function ScannerContent() {
                   : isBookingAddMode
                   ? handleBookingAdd
                   : isBookingCheckoutMode
-                  ? handleBookingCheckout
+                  ? () => void handleBookingCheckout()
                   : handleBookingCheckin
               }
               showStatus={isBookingAddMode}

@@ -277,6 +277,24 @@ export default function BookingDetailScreen() {
     lastFetchedAt.current = Date.now();
   }, [id, currentOrg]);
 
+  /**
+   * The booking's model reservations as they stand right now, for a
+   * confirmation that is about to name them.
+   *
+   * Deliberately does NOT apply the response to the screen. `fetchBooking`
+   * clears the selection, and the selection is what a "Select to Check Out"
+   * confirm is built from — refreshing there would wipe what the operator is
+   * checking out. A failed read answers `null` and the caller falls back to
+   * what the screen already holds.
+   *
+   * @returns The reservations, or `null` when the read failed.
+   */
+  const readModelRequestsNow = useCallback(async () => {
+    if (!id || !currentOrg) return null;
+    const { data } = await api.booking(id, currentOrg.id);
+    return data?.booking.modelRequests ?? null;
+  }, [id, currentOrg]);
+
   // Stale-while-revalidate: refetch on focus if data is > 60s old — UNLESS
   // a flow that mutated this booking (e.g. scan-to-add) marked it dirty,
   // which must bypass the freshness gate.
@@ -319,7 +337,7 @@ export default function BookingDetailScreen() {
     }
   };
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (!booking || !currentOrg) return;
 
     const submit = async () => {
@@ -345,8 +363,15 @@ export default function BookingDetailScreen() {
     // Reserved units nobody has assigned yet don't stop the check-out; they
     // stay open on the booking. This confirm stands in for the plain one, so
     // the operator agrees to both in a single step.
+    //
+    // Named from a read taken now: the screen's copy can be up to a minute old
+    // (see the focus effect), and a reservation someone else added in that
+    // window would otherwise go unmentioned.
+    setIsActioning(true);
+    const freshRequests = await readModelRequestsNow();
+    setIsActioning(false);
     const unassignedConfirm = unassignedCheckoutConfirm(
-      booking.modelRequests ?? []
+      freshRequests ?? booking.modelRequests ?? []
     );
     if (unassignedConfirm) {
       Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
@@ -566,7 +591,7 @@ export default function BookingDetailScreen() {
     });
   };
 
-  const handlePartialCheckout = () => {
+  const handlePartialCheckout = async () => {
     if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
     const selected = booking.assets.filter((a) => selectedAssetIds.has(a.id));
     // QT assets need an explicit quantity; INDIVIDUAL rows are implicit 1 unit.
@@ -594,10 +619,18 @@ export default function BookingDetailScreen() {
     // its unassigned reservations open, so that is where the operator confirms
     // it; an ongoing booking already went out with them open. The confirm
     // stands in for the plain one, then the check-out carries on as usual.
-    const unassignedConfirm =
-      booking.status === "RESERVED"
-        ? unassignedCheckoutConfirm(booking.modelRequests ?? [])
-        : null;
+    // Named from a read taken now, for the same reason as the full check-out
+    // above. Only a RESERVED booking asks: an ongoing one already went out with
+    // its reservations open.
+    let unassignedConfirm = null;
+    if (booking.status === "RESERVED") {
+      setIsActioning(true);
+      const freshRequests = await readModelRequestsNow();
+      setIsActioning(false);
+      unassignedConfirm = unassignedCheckoutConfirm(
+        freshRequests ?? booking.modelRequests ?? []
+      );
+    }
     if (unassignedConfirm) {
       Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
         { text: "Cancel", style: "cancel" },
@@ -1882,7 +1915,7 @@ export default function BookingDetailScreen() {
             {canCheckout && canQuickCheckout && (
               <TouchableOpacity
                 style={styles.actionButton}
-                onPress={handleCheckout}
+                onPress={() => void handleCheckout()}
                 accessibilityLabel="Check out all assets in this booking"
                 accessibilityRole="button"
               >
@@ -2244,7 +2277,7 @@ export default function BookingDetailScreen() {
             style={styles.floatingButton}
             onPress={
               selectMode === "checkout"
-                ? handlePartialCheckout
+                ? () => void handlePartialCheckout()
                 : selectMode === "remove"
                 ? handleRemoveAssets
                 : handlePartialCheckin
