@@ -4,6 +4,7 @@ import {
   countReservedModelUnits,
   countUnassignedModelUnits,
   getOutstandingModelRequests,
+  summarizeUnassignedUnits,
 } from "./booking-model-requests";
 
 /**
@@ -160,5 +161,55 @@ describe("canAssignModelUnits", () => {
     // Fail closed: a status added later shouldn't silently start advertising
     // work on a booking whose lifecycle nobody has reviewed here.
     expect(canAssignModelUnits("SOME_FUTURE_STATUS")).toBe(false);
+  });
+});
+
+describe("summarizeUnassignedUnits", () => {
+  it("names a single model with its unit count", () => {
+    expect(
+      summarizeUnassignedUnits([{ name: "Dell Latitude", count: 2 }])
+    ).toBe("2 × Dell Latitude");
+  });
+
+  it("joins the last two models with 'and'", () => {
+    expect(
+      summarizeUnassignedUnits([
+        { name: "Dell Latitude", count: 2 },
+        { name: "HP LaserJet", count: 1 },
+        { name: "Pelican case", count: 3 },
+      ])
+    ).toBe("2 × Dell Latitude, 1 × HP LaserJet and 3 × Pelican case");
+  });
+
+  it("names a long list up to the limit and counts the rest", () => {
+    // A confirmation that lists forty models is one nobody reads.
+    const units = Array.from({ length: 8 }, (_, i) => ({
+      name: `Model ${i + 1}`,
+      count: 1,
+    }));
+
+    expect(summarizeUnassignedUnits(units, 3)).toBe(
+      "1 × Model 1, 1 × Model 2, 1 × Model 3 and 5 more models"
+    );
+  });
+
+  it("says 'model' when exactly one is left over the limit", () => {
+    const units = Array.from({ length: 4 }, (_, i) => ({
+      name: `Model ${i + 1}`,
+      count: 1,
+    }));
+
+    expect(summarizeUnassignedUnits(units, 3)).toBe(
+      "1 × Model 1, 1 × Model 2, 1 × Model 3 and 1 more model"
+    );
+  });
+
+  it("leaves out models with nothing unassigned", () => {
+    expect(
+      summarizeUnassignedUnits([
+        { name: "Dell Latitude", count: 0 },
+        { name: "HP LaserJet", count: 1 },
+      ])
+    ).toBe("1 × HP LaserJet");
   });
 });
