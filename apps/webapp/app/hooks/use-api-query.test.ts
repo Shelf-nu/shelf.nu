@@ -64,7 +64,10 @@ describe("useApiQuery", () => {
     );
 
     expect(result.current.isLoading).toBe(true);
-    expect(mockFetch).toHaveBeenCalledWith("/api/test");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/test",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
 
     await waitForAsyncUpdate(() => {
       expect(result.current.isLoading).toBe(false);
@@ -93,7 +96,10 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/assets?page=1&limit=10");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/assets?page=1&limit=10",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
   });
 
@@ -191,14 +197,20 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test1");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test1",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     // Change the API endpoint
     rerender({ api: "/api/test2" });
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test2");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test2",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -229,14 +241,20 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test?page=1");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test?page=1",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     // Change search params
     rerender({ searchParams: searchParams2 });
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test?page=2");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test?page=2",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -266,7 +284,10 @@ describe("useApiQuery", () => {
     rerender({ enabled: true });
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/test");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/test",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -286,7 +307,10 @@ describe("useApiQuery", () => {
     );
 
     await waitForAsyncUpdate(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/health");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/health",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
   });
 
@@ -436,5 +460,88 @@ describe("useApiQuery", () => {
     expect(mockFetch).not.toHaveBeenCalled();
     expect(onSuccessMock).not.toHaveBeenCalled();
     expect(onErrorMock).not.toHaveBeenCalled();
+  });
+  it("ignores a superseded response when the url changes mid-flight", async () => {
+    // why: hand-built deferreds are the only way to hold one response open
+    // while a second starts — the whole bug is about which one lands last.
+    let resolveFirst: (value: unknown) => void = () => {};
+    const firstResponse = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+
+    mockFetch.mockImplementation((url: string) =>
+      url.includes("page=1")
+        ? firstResponse
+        : Promise.resolve({ json: () => Promise.resolve({ page: 2 }) })
+    );
+
+    const { result, rerender } = renderHook(
+      ({ page }: { page: number }) =>
+        useApiQuery<{ page: number }>({
+          api: "/api/test",
+          searchParams: new URLSearchParams({ page: String(page) }),
+        }),
+      { initialProps: { page: 1 } }
+    );
+
+    // Page 2 is requested and answered while page 1 is still open.
+    rerender({ page: 2 });
+    await waitForAsyncUpdate(() => {
+      expect(result.current.data).toEqual({ page: 2 });
+    });
+
+    // Page 1 answers late. It must not replace what the current url returned.
+    resolveFirst({ json: () => Promise.resolve({ page: 1 }) });
+    await waitForAsyncUpdate(() => {
+      expect(result.current.data).toEqual({ page: 2 });
+    });
+    expect(result.current.data).toEqual({ page: 2 });
+  });
+
+  it("still resolves when the caller passes a new callback every render", async () => {
+    // why: every real call site passes an inline arrow, so the callbacks
+    // change identity on each render. Cancelling on dependency change must not
+    // treat that as a superseded request, or the query aborts itself forever
+    // and the data never arrives.
+    mockFetch.mockResolvedValue({
+      json: () => Promise.resolve({ ok: true }),
+    });
+
+    const { result } = renderHook(() =>
+      useApiQuery<{ ok: boolean }>({
+        api: "/api/test",
+        onSuccess: () => {},
+        onError: () => {},
+      })
+    );
+
+    await waitForAsyncUpdate(() => {
+      expect(result.current.data).toEqual({ ok: true });
+    });
+    expect(result.current.isLoading).toBe(false);
+  });
+  it("stops loading when the query is disabled mid-flight", async () => {
+    // why: a never-resolving fetch is what "still in flight" means here; the
+    // dialogs that use this hook disable it the moment they close, which
+    // happens while a request is open.
+    mockFetch.mockImplementation(() => new Promise(() => {}));
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useApiQuery({ api: "/api/test", enabled }),
+      { initialProps: { enabled: true } }
+    );
+
+    await waitForAsyncUpdate(() => {
+      expect(result.current.isLoading).toBe(true);
+    });
+
+    rerender({ enabled: false });
+
+    // Cancelling must not leave the caller showing a spinner for a request
+    // that will never answer.
+    await waitForAsyncUpdate(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
   });
 });
