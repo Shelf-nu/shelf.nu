@@ -52,22 +52,30 @@ import {
   type CheckinDispositionValue,
 } from "@/components/checkin-disposition-sheet";
 import { announce } from "@/lib/a11y";
+import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import {
+  hasAssetsLeftToCheckOut,
+  unassignedCheckoutConfirm,
+} from "@/lib/booking-reservation-checkout";
 import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
 import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
 import {
   bookingRowKey,
   buildBookingRows,
   countSelection,
+  describeBatch,
+  describeBatchConfirm,
+  describeBatchResult,
   describeBookingRows,
-  describeRemoval,
   describeSelection,
   isBookingAssetSelectable,
   resolveBookingKitBadge,
   resolveKitSelectionState,
   splitRemovalSelection,
   type BookingRow,
+  type SelectionCounts,
 } from "@/lib/booking-kit-rows";
 import { filterBookingAssets } from "@/lib/booking-search";
 
@@ -217,11 +225,14 @@ export default function BookingDetailScreen() {
   // Sequential quantity picker for checking out QUANTITY_TRACKED assets: the
   // user selects the rows, then we walk each QT asset asking "how many units?"
   // (defaulting to all remaining), collect the dispositions, then submit.
+  // `batch` is the selection counted when the walk starts, for the success
+  // message the submit ends in.
   const [checkoutQueue, setCheckoutQueue] = useState<{
     queue: BookingAsset[];
     index: number;
     collected: CheckoutDisposition[];
     individualIds: string[];
+    batch: SelectionCounts;
   } | null>(null);
 
   // Sequential disposition picker for checking IN quantity-tracked assets:
@@ -231,9 +242,17 @@ export default function BookingDetailScreen() {
     index: number;
     collected: CheckinDisposition[];
     individualIds: string[];
+    batch: SelectionCounts;
   } | null>(null);
 
   const lastFetchedAt = useRef(0);
+
+  /**
+   * Held while a check-in or check-out request runs, so a second tap cannot
+   * send it twice. A ref rather than state: a state flag cannot block a tap
+   * delivered in the same tick.
+   */
+  const bookingSubmitLock = useRef(false);
 
   const fetchBooking = useCallback(async () => {
     if (!id || !currentOrg) return;
@@ -256,6 +275,24 @@ export default function BookingDetailScreen() {
     // Clear stale selections — checked-in assets are no longer selectable
     setSelectedAssetIds(new Set());
     lastFetchedAt.current = Date.now();
+  }, [id, currentOrg]);
+
+  /**
+   * The booking's model reservations as they stand right now, for a
+   * confirmation that is about to name them.
+   *
+   * Deliberately does NOT apply the response to the screen. `fetchBooking`
+   * clears the selection, and the selection is what a "Select to Check Out"
+   * confirm is built from — refreshing there would wipe what the operator is
+   * checking out. A failed read answers `null` and the caller falls back to
+   * what the screen already holds.
+   *
+   * @returns The reservations, or `null` when the read failed.
+   */
+  const readModelRequestsNow = useCallback(async () => {
+    if (!id || !currentOrg) return null;
+    const { data } = await api.booking(id, currentOrg.id);
+    return data?.booking.modelRequests ?? null;
   }, [id, currentOrg]);
 
   // Stale-while-revalidate: refetch on focus if data is > 60s old — UNLESS
@@ -300,35 +337,56 @@ export default function BookingDetailScreen() {
     }
   };
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (!booking || !currentOrg) return;
+
+    const submit = async () => {
+      setIsActioning(true);
+      const { error: err } = await api.checkoutBooking(
+        currentOrg.id,
+        booking.id,
+        getTimeZone()
+      );
+      setIsActioning(false);
+      if (err) {
+        Alert.alert("Error", err);
+        return;
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Mutation changed this booking — force the list to refetch.
+      markBookingsListDirty();
+      Alert.alert("Checked Out", `"${booking.name}" is now ongoing.`, [
+        { text: "OK", onPress: () => fetchBooking() },
+      ]);
+    };
+
+    // Reserved units nobody has assigned yet don't stop the check-out; they
+    // stay open on the booking. This confirm stands in for the plain one, so
+    // the operator agrees to both in a single step.
+    //
+    // Named from a read taken now: the screen's copy can be up to a minute old
+    // (see the focus effect), and a reservation someone else added in that
+    // window would otherwise go unmentioned.
+    setIsActioning(true);
+    const freshRequests = await readModelRequestsNow();
+    setIsActioning(false);
+    const unassignedConfirm = unassignedCheckoutConfirm(
+      freshRequests ?? booking.modelRequests ?? []
+    );
+    if (unassignedConfirm) {
+      Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
+        { text: "Cancel", style: "cancel" },
+        { text: unassignedConfirm.confirmLabel, onPress: () => void submit() },
+      ]);
+      return;
+    }
+
     Alert.alert(
       "Check Out",
       `Check out "${booking.name}"?\n\nAll ${booking.assetCount} assets will be marked as checked out.`,
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Check Out",
-          onPress: async () => {
-            setIsActioning(true);
-            const { error: err } = await api.checkoutBooking(
-              currentOrg.id,
-              booking.id,
-              getTimeZone()
-            );
-            setIsActioning(false);
-            if (err) {
-              Alert.alert("Error", err);
-              return;
-            }
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            // Mutation changed this booking — force the list to refetch.
-            markBookingsListDirty();
-            Alert.alert("Checked Out", `"${booking.name}" is now ongoing.`, [
-              { text: "OK", onPress: () => fetchBooking() },
-            ]);
-          },
-        },
+        { text: "Check Out", onPress: () => void submit() },
       ]
     );
   };
@@ -375,43 +433,56 @@ export default function BookingDetailScreen() {
   };
 
   // Send the check-in. `assetIds` = INDIVIDUAL rows (a bare QT id would default
-  // to all-remaining server-side); `checkins` = per-QT-asset dispositions.
+  // to all-remaining server-side); `checkins` = per-QT-asset dispositions;
+  // `batch` = the selection as the confirm and the button counted it, which the
+  // success message names. `closeSheet` runs only once the server accepts, so a
+  // refused check-in keeps the disposition sheet open with every collected
+  // disposition intact.
   const submitCheckin = async (
     assetIds: string[],
-    checkins: CheckinDisposition[]
+    checkins: CheckinDisposition[],
+    batch: SelectionCounts,
+    closeSheet?: () => void
   ) => {
     if (!booking || !currentOrg) return;
-    setIsActioning(true);
-    const { data, error: err } = await api.partialCheckinBooking(
-      currentOrg.id,
-      booking.id,
-      assetIds,
-      getTimeZone(),
-      checkins.length > 0 ? checkins : undefined
-    );
-    setIsActioning(false);
-    if (err) {
-      Alert.alert("Error", err);
-      return;
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // Mutation changed this booking — force the list to refetch.
-    markBookingsListDirty();
-    const msg = data?.isComplete
-      ? `All assets checked in. "${booking.name}" is now complete.`
-      : `${data?.checkedInCount ?? "Some"} checked in, ${
-          data?.remainingCount ?? "some"
-        } remaining.`;
-    Alert.alert("Checked In", msg, [
-      {
-        text: "OK",
-        onPress: () => {
-          setSelectedAssetIds(new Set());
-          setSelectMode(null);
-          fetchBooking();
-        },
+    const orgId = currentOrg.id;
+    const bookingId = booking.id;
+    const bookingName = booking.name;
+    await submitFromSheet({
+      lock: bookingSubmitLock,
+      request: () =>
+        api.partialCheckinBooking(
+          orgId,
+          bookingId,
+          assetIds,
+          getTimeZone(),
+          checkins.length > 0 ? checkins : undefined
+        ),
+      onAccepted: ({ data }) => {
+        closeSheet?.();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Mutation changed this booking — force the list to refetch.
+        markBookingsListDirty();
+        const msg = describeBatchResult({
+          direction: "checkin",
+          counts: batch,
+          isComplete: data?.isComplete,
+          bookingName,
+        });
+        Alert.alert("Checked In", msg, [
+          {
+            text: "OK",
+            onPress: () => {
+              setSelectedAssetIds(new Set());
+              setSelectMode(null);
+              fetchBooking();
+            },
+          },
+        ]);
       },
-    ]);
+      setSubmitting: setIsActioning,
+      showError: (message) => Alert.alert("Error", message),
+    });
   };
 
   const handlePartialCheckin = () => {
@@ -426,18 +497,20 @@ export default function BookingDetailScreen() {
     const individualIds = selected
       .filter((a) => a.type !== "QUANTITY_TRACKED")
       .map((a) => a.id);
+    // Counted now, from the selection: the request carries member asset ids,
+    // so the server's reply cannot tell a picked kit from its assets.
+    const batch = selectionCounts;
     if (qtAssets.length === 0) {
       // No disposition to collect (INDIVIDUAL-only, or the server didn't send
       // QT metadata) — keep the simple confirm + bare send.
-      const count = selectedAssetIds.size;
       Alert.alert(
         "Check In Selected",
-        `Check in ${count} selected ${count === 1 ? "asset" : "assets"}?`,
+        describeBatchConfirm({ direction: "checkin", counts: batch }),
         [
           { text: "Cancel", style: "cancel" },
           {
             text: "Check In",
-            onPress: () => void submitCheckin(individualIds, []),
+            onPress: () => void submitCheckin(individualIds, [], batch),
           },
         ]
       );
@@ -449,50 +522,76 @@ export default function BookingDetailScreen() {
       index: 0,
       collected: [],
       individualIds,
+      batch,
     });
   };
 
   // Send the check-out. `assetIds` = INDIVIDUAL rows (implicit 1 unit);
-  // `checkouts` = per-QT-asset quantities the picker collected.
+  // `checkouts` = per-QT-asset quantities the picker collected; `batch` = the
+  // selection as the confirm and the button counted it, which the success
+  // message names. `closeSheet` runs only once the server accepts, so a refused
+  // check-out keeps the quantity sheet open with every collected quantity
+  // intact.
   const submitCheckout = async (
     assetIds: string[],
-    checkouts: CheckoutDisposition[]
+    checkouts: CheckoutDisposition[],
+    batch: SelectionCounts,
+    closeSheet?: () => void
   ) => {
     if (!booking || !currentOrg) return;
-    setIsActioning(true);
-    const { data, error: err } = await api.partialCheckoutBooking(
-      currentOrg.id,
-      booking.id,
-      assetIds,
-      getTimeZone(),
-      checkouts.length > 0 ? checkouts : undefined
-    );
-    setIsActioning(false);
-    if (err) {
-      Alert.alert("Error", err);
-      return;
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // Mutation changed this booking — force the list to refetch.
-    markBookingsListDirty();
-    const msg = data?.isComplete
-      ? `All assets are now checked out for "${booking.name}".`
-      : `${data?.checkedOutCount ?? "Some"} checked out, ${
-          data?.remainingCount ?? "some"
-        } still reserved.`;
-    Alert.alert("Checked Out", msg, [
-      {
-        text: "OK",
-        onPress: () => {
-          setSelectedAssetIds(new Set());
-          setSelectMode(null);
-          fetchBooking();
-        },
+    const orgId = currentOrg.id;
+    const bookingId = booking.id;
+    const bookingName = booking.name;
+    await submitFromSheet({
+      lock: bookingSubmitLock,
+      request: () =>
+        api.partialCheckoutBooking(
+          orgId,
+          bookingId,
+          assetIds,
+          getTimeZone(),
+          checkouts.length > 0 ? checkouts : undefined
+        ),
+      onAccepted: ({ data }) => {
+        closeSheet?.();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Mutation changed this booking — force the list to refetch.
+        markBookingsListDirty();
+        const msg = describeBatchResult({
+          direction: "checkout",
+          counts: batch,
+          isComplete: data?.isComplete,
+          bookingName,
+          // The server skips an asset another check-out already took; this
+          // lets the message say so rather than claim the whole batch moved.
+          assets:
+            data?.checkedOutCount === undefined
+              ? undefined
+              : {
+                  sent: new Set([
+                    ...assetIds,
+                    ...checkouts.map((c) => c.assetId),
+                  ]).size,
+                  moved: data.checkedOutCount,
+                },
+        });
+        Alert.alert("Checked Out", msg, [
+          {
+            text: "OK",
+            onPress: () => {
+              setSelectedAssetIds(new Set());
+              setSelectMode(null);
+              fetchBooking();
+            },
+          },
+        ]);
       },
-    ]);
+      setSubmitting: setIsActioning,
+      showError: (message) => Alert.alert("Error", message),
+    });
   };
 
-  const handlePartialCheckout = () => {
+  const handlePartialCheckout = async () => {
     if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
     const selected = booking.assets.filter((a) => selectedAssetIds.has(a.id));
     // QT assets need an explicit quantity; INDIVIDUAL rows are implicit 1 unit.
@@ -502,30 +601,70 @@ export default function BookingDetailScreen() {
     const individualIds = selected
       .filter((a) => a.type !== "QUANTITY_TRACKED")
       .map((a) => a.id);
+    // Counted now, from the selection: the request carries member asset ids,
+    // so the server's reply cannot tell a picked kit from its assets.
+    const batch = selectionCounts;
+
+    // Walk each QT asset through the quantity picker before submitting.
+    const startQuantityPicker = () =>
+      setCheckoutQueue({
+        queue: qtAssets,
+        index: 0,
+        collected: [],
+        individualIds,
+        batch,
+      });
+
+    // The selection that takes a RESERVED booking out is the one that leaves
+    // its unassigned reservations open, so that is where the operator confirms
+    // it; an ongoing booking already went out with them open. The confirm
+    // stands in for the plain one, then the check-out carries on as usual.
+    // Named from a read taken now, for the same reason as the full check-out
+    // above. Only a RESERVED booking asks: an ongoing one already went out with
+    // its reservations open.
+    let unassignedConfirm = null;
+    if (booking.status === "RESERVED") {
+      setIsActioning(true);
+      const freshRequests = await readModelRequestsNow();
+      setIsActioning(false);
+      unassignedConfirm = unassignedCheckoutConfirm(
+        freshRequests ?? booking.modelRequests ?? []
+      );
+    }
+    if (unassignedConfirm) {
+      Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: unassignedConfirm.confirmLabel,
+          onPress: () => {
+            if (qtAssets.length === 0) {
+              void submitCheckout(individualIds, [], batch);
+            } else {
+              startQuantityPicker();
+            }
+          },
+        },
+      ]);
+      return;
+    }
+
     if (qtAssets.length === 0) {
       // No quantity to pick (INDIVIDUAL-only, or the server didn't send QT
       // metadata) — keep the simple confirm + bare send.
-      const count = selectedAssetIds.size;
       Alert.alert(
         "Check Out Selected",
-        `Check out ${count} selected ${count === 1 ? "asset" : "assets"}?`,
+        describeBatchConfirm({ direction: "checkout", counts: batch }),
         [
           { text: "Cancel", style: "cancel" },
           {
             text: "Check Out",
-            onPress: () => void submitCheckout(individualIds, []),
+            onPress: () => void submitCheckout(individualIds, [], batch),
           },
         ]
       );
       return;
     }
-    // Walk each QT asset through the quantity picker before submitting.
-    setCheckoutQueue({
-      queue: qtAssets,
-      index: 0,
-      collected: [],
-      individualIds,
-    });
+    startQuantityPicker();
   };
 
   const handleReserve = () => {
@@ -573,7 +712,7 @@ export default function BookingDetailScreen() {
     });
     Alert.alert(
       "Remove Selected",
-      `Remove ${describeRemoval({
+      `Remove ${describeBatch({
         assetCount: assetIds.length,
         kitCount: kitIds.length,
       })} from "${booking.name}"?`,
@@ -1260,37 +1399,26 @@ export default function BookingDetailScreen() {
   const outstandingModelRequests = (booking.modelRequests ?? []).filter(
     (mr) => mr.fulfilledAt === null && mr.fulfilledQuantity < mr.quantity
   );
-  // A booking with unfulfilled model reservations can't be checked out at all
-  // (full OR partial): the shared checkout service hard-blocks RESERVED →
-  // ONGOING until every request is assigned to concrete assets. So gate BOTH
-  // checkout paths on this — the app surfaces an "Assign to check out" CTA
-  // instead of a checkout the server would reject. (`canCheckout` from the
-  // loader already accounts for this; `canPartialCheckout` is derived here.)
+  // Unassigned reservations never stop a check-out: a booking goes out as soon
+  // as one item leaves, and the rest stay open on it. They only decide whether
+  // to offer the scan-to-assign CTA below, and a check-out that takes the
+  // booking out of RESERVED confirms them before going ahead.
   const hasOutstandingModelRequests = outstandingModelRequests.length > 0;
 
   // Progressive check-out stays available while the booking is active AND still
   // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
   // RESERVED/ONGOING/OVERDUE, but the loader's `canCheckout` is RESERVED-only (it
-  // gates the full "Check Out All" button), so we derive our own flag for the
-  // partial path — otherwise "Select to Check Out" disappears the moment the
-  // first batch flips the booking to ONGOING.
-  // Each row answers for itself. Booking-wide arithmetic cannot: a pooled
-  // asset's remaining units and its global status are independent, so
-  // subtracting whole returned and checked-out assets from the total both
-  // hides the control while units remain (a partial return cancels the row
-  // against its own count) and shows it when none do (a spent row whose
-  // status is still AVAILABLE). A quantity-tracked row is answered by the
-  // booking-scoped count the server sends for it; every other row by whether
-  // it is still on the booking and not yet out.
-  const hasUnitsLeftToCheckOut = booking.assets.some((a) =>
-    typeof a.remainingToCheckOut === "number"
-      ? a.remainingToCheckOut > 0
-      : a.status !== "CHECKED_OUT" && !checkedInAssetIds.includes(a.id)
+  // gates the full "Check Out All" button), so this flag is derived separately
+  // for the partial path, which must outlive the first batch that flips the
+  // booking to ONGOING. Whether anything is left is answered row by row; see
+  // `hasAssetsLeftToCheckOut`.
+  const hasUnitsLeftToCheckOut = hasAssetsLeftToCheckOut(
+    booking.assets,
+    new Set(checkedInAssetIds)
   );
 
   const canPartialCheckout =
     hasUnitsLeftToCheckOut &&
-    !hasOutstandingModelRequests &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
   /**
@@ -1781,11 +1909,13 @@ export default function BookingDetailScreen() {
             {/* Full check-out is RESERVED-only (web parity); the loader's
                 canCheckout reflects that. It is hidden when the workspace
                 requires explicit check-out for this role, which leaves
-                "Select to Check Out" below as the way to check out. */}
+                "Select to Check Out" below as the way to check out.
+                Unassigned reservations don't hide it: handleCheckout names
+                them and asks before checking out. */}
             {canCheckout && canQuickCheckout && (
               <TouchableOpacity
                 style={styles.actionButton}
-                onPress={handleCheckout}
+                onPress={() => void handleCheckout()}
                 accessibilityLabel="Check out all assets in this booking"
                 accessibilityRole="button"
               >
@@ -1870,21 +2000,21 @@ export default function BookingDetailScreen() {
             )}
 
             {/* Book-by-model: a RESERVED booking with unfulfilled reservations
-                has no plain checkout button (the server hard-blocks checkout
-                until every reserved unit is assigned to a concrete asset).
-                Route the operator to the fulfil-and-check-out SCANNER
-                (`bookingAction=fulfil`): it shows what's reserved, they scan
-                the physical units, and on submit the reservations are
-                materialised AND the booking is checked out in one atomic call
-                (`fulfilModelRequestsAndCheckout`) — full web parity with the
-                web `fulfil-and-checkout` scanner. Scan-first IS the point of
-                book-by-model: reserve the count now, scan the items when you
-                grab them, no browse picker. (Browse to Add above stays for
-                hand-picking.) Gated `!isRestrictedRole` to match the add/browse
-                affordances above: a restricted custodian can only edit a
-                DRAFT booking, so on a RESERVED booking the assign+checkout flow
-                can't succeed for them — showing the CTA would just lead to a
-                rejected submit. */}
+                offers the fulfil-and-check-out SCANNER
+                (`bookingAction=fulfil`): it shows what's reserved, the
+                operator scans the physical units, and on submit the scanned
+                units are assigned AND the booking is checked out in one call
+                (`fulfilAndCheckOut`) — web parity with the web
+                `fulfil-and-checkout` scanner. The scan need not cover every
+                reserved unit; whatever it leaves unassigned stays open on the
+                booking, and the scanner confirms that before submitting.
+                Scan-first IS the point of book-by-model: reserve the count
+                now, scan the items when you grab them, no browse picker.
+                (Browse to Add above stays for hand-picking.) Gated
+                `!isRestrictedRole` to match the add/browse affordances above:
+                a restricted custodian can only edit a DRAFT booking, so on a
+                RESERVED booking the assign+checkout flow can't succeed for
+                them — showing the CTA would just lead to a rejected submit. */}
             {!isRestrictedRole &&
               booking.status === "RESERVED" &&
               hasOutstandingModelRequests && (
@@ -2147,7 +2277,7 @@ export default function BookingDetailScreen() {
             style={styles.floatingButton}
             onPress={
               selectMode === "checkout"
-                ? handlePartialCheckout
+                ? () => void handlePartialCheckout()
                 : selectMode === "remove"
                 ? handleRemoveAssets
                 : handlePartialCheckin
@@ -2242,6 +2372,7 @@ export default function BookingDetailScreen() {
               ? "Next"
               : "Check out"
           }
+          isSubmitting={isActioning}
           onSubmit={(quantity) => {
             const cur = checkoutQueue.queue[checkoutQueue.index];
             const collected = [
@@ -2255,9 +2386,15 @@ export default function BookingDetailScreen() {
                 collected,
               });
             } else {
-              const { individualIds } = checkoutQueue;
-              setCheckoutQueue(null);
-              void submitCheckout(individualIds, collected);
+              // The last asset submits with the sheet still open. The queue
+              // clears only once the server accepts, so a refusal keeps every
+              // collected quantity for a retry.
+              void submitCheckout(
+                checkoutQueue.individualIds,
+                collected,
+                checkoutQueue.batch,
+                () => setCheckoutQueue(null)
+              );
             }
           }}
           onClose={() => setCheckoutQueue(null)}
@@ -2285,6 +2422,7 @@ export default function BookingDetailScreen() {
           }
           unitOfMeasure={checkinQueue.queue[checkinQueue.index].unitOfMeasure}
           isLast={checkinQueue.index + 1 >= checkinQueue.queue.length}
+          isSubmitting={isActioning}
           onSubmit={(value: CheckinDispositionValue) => {
             const cur = checkinQueue.queue[checkinQueue.index];
             const collected = [
@@ -2304,9 +2442,15 @@ export default function BookingDetailScreen() {
                 collected,
               });
             } else {
-              const { individualIds } = checkinQueue;
-              setCheckinQueue(null);
-              void submitCheckin(individualIds, collected);
+              // The last asset submits with the sheet still open. The queue
+              // clears only once the server accepts, so a refusal keeps every
+              // collected disposition for a retry.
+              void submitCheckin(
+                checkinQueue.individualIds,
+                collected,
+                checkinQueue.batch,
+                () => setCheckinQueue(null)
+              );
             }
           }}
           onClose={() => setCheckinQueue(null)}

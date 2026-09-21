@@ -29,7 +29,7 @@
  * @see {@link file://./../../atoms/qr-scanner.ts} — fulfil atoms.
  */
 
-import { OrganizationRoles } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -115,6 +115,8 @@ export const fulfilAndCheckoutSchema = z.object({
  *   already-included concrete assets.
  * - Rejects if the user can't manage the booking (mirrors
  *   scan-assets).
+ * - Tells the drawer whether submit sends out only the scanned items, so
+ *   its "something to check out" rule matches the action's.
  * - Short-circuits to `/bookings/:id` when there are zero outstanding
  *   model requests — the regular checkout flow is correct in that
  *   case and the fulfil scanner would be a confusing detour.
@@ -246,6 +248,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       type: ba.asset.type as "INDIVIDUAL" | "QUANTITY_TRACKED",
     }));
 
+    /**
+     * Whether submit sends out only the scanned items, decided the same way
+     * `fulfilAndCheckOut` decides it: under the explicit check-out requirement,
+     * or once the booking is no longer RESERVED.
+     */
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const checksOutScannedOnly =
+      isExplicitCheckoutRequired({ role, bookingSettings }) ||
+      booking.status !== BookingStatus.RESERVED;
+
     const title = `Fulfil reservations & check out | ${booking.name}`;
     const header: HeaderData = {
       title,
@@ -257,6 +270,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking,
       expectedModelRequests,
       alreadyIncluded,
+      checksOutScannedOnly,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -374,8 +388,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     // `error()` also sends the refusal to this user as an error notification.
-    // That toast is how a refused check-out (e.g. a reservation still
-    // unassigned) reaches the operator in the drawer.
+    // That toast is how a refused check-out reaches the operator in the drawer.
     const reason = makeShelfError(cause, { userId, bookingId });
     return data(error(reason), { status: reason.status });
   }
@@ -414,8 +427,12 @@ export default function FulfilAndCheckoutForBooking() {
   // drawer also reads `useLoaderData` directly for its own
   // rendering — that's fine; `useLoaderData` dedupes via the router
   // context.
-  const { booking, expectedModelRequests, alreadyIncluded } =
-    useLoaderData<typeof loader>();
+  const {
+    booking,
+    expectedModelRequests,
+    alreadyIncluded,
+    checksOutScannedOnly,
+  } = useLoaderData<typeof loader>();
 
   useBookingFulfilSessionInitialization({
     session: {
@@ -428,6 +445,8 @@ export default function FulfilAndCheckoutForBooking() {
       bookingFrom: booking.from
         ? new Date(booking.from).toISOString()
         : new Date().toISOString(),
+      bookingStatus: booking.status,
+      checksOutScannedOnly,
       expectedModelRequests,
       alreadyIncluded,
     },

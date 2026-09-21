@@ -101,8 +101,12 @@ export const bookingsApi = {
    * booking or, under the workspace's explicit check-out requirement, only the
    * scanned units (`remainingCount` says how many booked assets are left).
    * Mirrors the web `fulfil-and-checkout` scanner: each scanned asset is
-   * matched against an outstanding `BookingModelRequest` (materialising it);
-   * the server refuses the check-out if any reservation is still unassigned.
+   * matched against an outstanding `BookingModelRequest` (materialising it).
+   *
+   * Reserved units the scan does not cover stay open on the booking. The
+   * server refuses only a check-out that sends nothing out: without the
+   * explicit requirement it needs a scanned unit or an asset already on the
+   * booking, and under it a scanned unit.
    */
   fulfilAndCheckoutBooking: (
     orgId: string,
@@ -142,6 +146,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify({ bookingId, assetIds, checkins, timeZone }),
+        // why: non-idempotent — per-unit dispositions carry no request key, so
+        // a timed-out-but-landed request re-sent would return the units twice.
+        retry: false,
       }
     ),
 
@@ -163,6 +170,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify({ bookingId, assetIds, checkouts, timeZone }),
+        // why: non-idempotent — per-unit quantities carry no request key, so a
+        // timed-out-but-landed request re-sent would check the units out twice.
+        retry: false,
       }
     ),
 

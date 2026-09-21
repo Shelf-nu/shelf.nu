@@ -17,6 +17,12 @@
  * without touching placements — so when the sheet OPENS over-placed the
  * message explains that, and Save stays disabled until the numbers fit.
  *
+ * Save does not close the sheet. The caller sends the request with the sheet
+ * still open and passes `isSubmitting` while it runs; the rows lock, Save shows
+ * a spinner, and the sheet cannot be dismissed until the request settles. It
+ * closes only once the server accepts the set, so a refused save keeps every
+ * edit on screen to fix or retry.
+ *
  * Follows the house selection-flow contract (AdjustQuantitySheet /
  * QuantityInputSheet): `<Modal animationType="slide"
  * presentationStyle="pageSheet">` + SafeAreaView + header-with-close.
@@ -37,6 +43,7 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -71,12 +78,20 @@ type Props = {
    */
   initialPlacements: AssetPlacement[];
   /**
+   * True while the save request runs. Locks the rows, shows a spinner on
+   * Save, and blocks dismissal until the request settles.
+   */
+  isSubmitting?: boolean;
+  /**
    * Called with the full desired manual set on Save. An empty array
-   * unplaces the asset. The caller closes the sheet and performs the
-   * request.
+   * unplaces the asset. The caller performs the request with the sheet still
+   * open and closes it only once the server accepts the set.
    */
   onSave: (placements: { locationId: string; quantity: number }[]) => void;
-  /** Called when the user dismisses the sheet without saving. */
+  /**
+   * Called when the user dismisses the sheet without saving. Never called
+   * while `isSubmitting`.
+   */
   onClose: () => void;
 };
 
@@ -170,6 +185,7 @@ export function ManagePlacementsSheet({
   totalQuantity,
   unitOfMeasure,
   initialPlacements,
+  isSubmitting = false,
   onSave,
   onClose,
 }: Props) {
@@ -285,11 +301,23 @@ export function ManagePlacementsSheet({
     });
   };
 
+  const canSave = clientError == null && !isSubmitting;
+
   const save = () => {
-    if (clientError) return;
+    if (!canSave) return;
     onSave(
       rows.map((r) => ({ locationId: r.locationId, quantity: r.quantity }))
     );
+  };
+
+  /**
+   * Every dismissal path goes through here. A save in flight decides whether
+   * the sheet closes, and a refusal must find the rows still on screen, so
+   * dismissal waits for it to settle.
+   */
+  const requestClose = () => {
+    if (isSubmitting) return;
+    onClose();
   };
 
   return (
@@ -297,17 +325,19 @@ export function ManagePlacementsSheet({
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      onRequestClose={requestClose}
     >
       <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Manage Placements</Text>
           <TouchableOpacity
-            onPress={onClose}
-            style={styles.closeButton}
+            onPress={requestClose}
+            disabled={isSubmitting}
+            style={[styles.closeButton, isSubmitting && styles.dismissDisabled]}
             accessibilityLabel="Close manage placements"
             accessibilityRole="button"
+            accessibilityState={{ disabled: isSubmitting }}
           >
             <Ionicons name="close" size={24} color={colors.foreground} />
           </TouchableOpacity>
@@ -333,6 +363,7 @@ export function ManagePlacementsSheet({
               row={row}
               totalQuantity={totalQuantity}
               unitLabel={unitLabel}
+              disabled={isSubmitting}
               onStep={stepRow}
               onSetQuantity={setRowQuantity}
               onRemove={removeRow}
@@ -348,13 +379,16 @@ export function ManagePlacementsSheet({
 
           {/* Add location */}
           <TouchableOpacity
-            style={[styles.addButton, !canAddRow && styles.addButtonDisabled]}
+            style={[
+              styles.addButton,
+              (!canAddRow || isSubmitting) && styles.addButtonDisabled,
+            ]}
             onPress={() => setShowLocationPicker(true)}
-            disabled={!canAddRow}
+            disabled={!canAddRow || isSubmitting}
             activeOpacity={0.7}
             accessibilityLabel="Add location"
             accessibilityRole="button"
-            accessibilityState={{ disabled: !canAddRow }}
+            accessibilityState={{ disabled: !canAddRow || isSubmitting }}
           >
             <Ionicons name="add" size={18} color={colors.foreground} />
             <Text style={styles.addButtonText}>
@@ -389,32 +423,43 @@ export function ManagePlacementsSheet({
 
           {/* Save */}
           <TouchableOpacity
-            style={[
-              styles.confirmPrimary,
-              clientError != null && styles.confirmDisabled,
-            ]}
+            style={[styles.confirmPrimary, !canSave && styles.confirmDisabled]}
             onPress={save}
-            disabled={clientError != null}
+            disabled={!canSave}
             activeOpacity={0.7}
             accessibilityLabel="Save placements"
             accessibilityRole="button"
-            accessibilityState={{ disabled: clientError != null }}
+            accessibilityState={{ disabled: !canSave, busy: isSubmitting }}
           >
-            <Ionicons
-              name="checkmark"
-              size={20}
-              color={colors.primaryForeground}
-            />
-            <Text style={styles.confirmText}>Save placements</Text>
+            {isSubmitting ? (
+              <ActivityIndicator
+                size="small"
+                color={colors.primaryForeground}
+              />
+            ) : (
+              <>
+                <Ionicons
+                  name="checkmark"
+                  size={20}
+                  color={colors.primaryForeground}
+                />
+                <Text style={styles.confirmText}>Save placements</Text>
+              </>
+            )}
           </TouchableOpacity>
 
           {/* Cancel */}
           <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={onClose}
+            style={[
+              styles.cancelButton,
+              isSubmitting && styles.dismissDisabled,
+            ]}
+            onPress={requestClose}
+            disabled={isSubmitting}
             activeOpacity={0.7}
             accessibilityLabel="Cancel manage placements"
             accessibilityRole="button"
+            accessibilityState={{ disabled: isSubmitting }}
           >
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
@@ -543,6 +588,8 @@ function PlacementMeter({
  * @param props.row - The row being edited.
  * @param props.totalQuantity - The asset's pool; the per-row upper bound.
  * @param props.unitLabel - Unit suffix shown after the stepper.
+ * @param props.disabled - Locks every control while a save is in flight, so
+ *   an edit made after Save cannot be dropped when the sheet closes.
  * @param props.onStep - Steps this row's quantity by a delta.
  * @param props.onSetQuantity - Sets this row's quantity outright.
  * @param props.onRemove - Drops this row from the set.
@@ -552,6 +599,7 @@ function PlacementRow({
   row,
   totalQuantity,
   unitLabel,
+  disabled,
   onStep,
   onSetQuantity,
   onRemove,
@@ -559,12 +607,16 @@ function PlacementRow({
   row: EditableRow;
   totalQuantity: number;
   unitLabel: string;
+  disabled: boolean;
   onStep: (row: EditableRow, delta: number) => void;
   onSetQuantity: (rowId: string, quantity: number) => void;
   onRemove: (rowId: string) => void;
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
+
+  const canDecrease = !disabled && row.quantity > 1;
+  const canIncrease = !disabled && row.quantity < totalQuantity;
 
   return (
     <View style={styles.row}>
@@ -579,9 +631,11 @@ function PlacementRow({
         </Text>
         <TouchableOpacity
           onPress={() => onRemove(row.rowId)}
-          style={styles.removeButton}
+          disabled={disabled}
+          style={[styles.removeButton, disabled && styles.stepButtonDisabled]}
           accessibilityLabel={`Remove ${row.locationName}`}
           accessibilityRole="button"
+          accessibilityState={{ disabled }}
         >
           <Ionicons
             name="trash-outline"
@@ -592,16 +646,13 @@ function PlacementRow({
       </View>
       <View style={styles.quantityRow}>
         <TouchableOpacity
-          style={[
-            styles.stepButton,
-            row.quantity <= 1 && styles.stepButtonDisabled,
-          ]}
+          style={[styles.stepButton, !canDecrease && styles.stepButtonDisabled]}
           onPress={() => onStep(row, -1)}
-          disabled={row.quantity <= 1}
+          disabled={!canDecrease}
           activeOpacity={0.7}
           accessibilityLabel={`Decrease ${row.locationName} quantity`}
           accessibilityRole="button"
-          accessibilityState={{ disabled: row.quantity <= 1 }}
+          accessibilityState={{ disabled: !canDecrease }}
         >
           <Ionicons name="remove" size={20} color={colors.foreground} />
         </TouchableOpacity>
@@ -629,21 +680,19 @@ function PlacementRow({
           // common case, so typing a new number must not concatenate onto
           // the default (full-pool) seed.
           selectTextOnFocus
+          editable={!disabled}
           keyboardType="number-pad"
           returnKeyType="done"
           accessibilityLabel={`Quantity at ${row.locationName}`}
         />
         <TouchableOpacity
-          style={[
-            styles.stepButton,
-            row.quantity >= totalQuantity && styles.stepButtonDisabled,
-          ]}
+          style={[styles.stepButton, !canIncrease && styles.stepButtonDisabled]}
           onPress={() => onStep(row, 1)}
-          disabled={row.quantity >= totalQuantity}
+          disabled={!canIncrease}
           activeOpacity={0.7}
           accessibilityLabel={`Increase ${row.locationName} quantity`}
           accessibilityRole="button"
-          accessibilityState={{ disabled: row.quantity >= totalQuantity }}
+          accessibilityState={{ disabled: !canIncrease }}
         >
           <Ionicons name="add" size={20} color={colors.foreground} />
         </TouchableOpacity>
@@ -674,6 +723,9 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   closeButton: {
     padding: spacing.xs,
+  },
+  dismissDisabled: {
+    opacity: 0.5,
   },
   scroll: {
     flex: 1,
