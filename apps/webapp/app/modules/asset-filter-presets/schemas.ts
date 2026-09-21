@@ -28,3 +28,14 @@ export const DeletePresetFormSchema = z.object({
   intent: z.literal("delete-preset"),
   presetId: z.string().min(1, "Preset ID is required"),
 });
+
+/**
+ * Schema for publishing a preset to the workspace, or taking it back.
+ * Used by server (parseData) validation.
+ */
+export const SharePresetFormSchema = z.object({
+  intent: z.literal("share-preset"),
+  presetId: z.string().min(1, "Preset ID is required"),
+  /** Checkbox-style string from the form: "true" shares, anything else unshares. */
+  shared: z.string().transform((value) => value === "true"),
+});

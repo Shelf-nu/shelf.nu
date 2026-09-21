@@ -5,6 +5,7 @@ import {
   useMemo,
   type ChangeEvent,
   type KeyboardEvent,
+  type ReactElement,
 } from "react";
 import {
   Popover,
@@ -23,6 +24,7 @@ import {
 import { Button } from "~/components/shared/button";
 import { cleanParamsForCookie, useSearchParams } from "~/hooks/search-params";
 import { useFilterPreview } from "~/hooks/use-filter-preview";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { MAX_SAVED_FILTER_PRESETS } from "~/modules/asset-filter-presets/constants";
 import type {
   CreatePresetFormSchema,
@@ -32,6 +34,11 @@ import type { Column } from "~/modules/asset-index-settings/helpers";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { CreatePresetDialog } from "./saved-filter-presets/create-preset-dialog";
 import {
   PresetListItem,
@@ -45,12 +52,7 @@ export { SaveFilterButton } from "./saved-filter-presets/save-filter-button";
 type LoaderData = AssetIndexLoaderData;
 
 /** Response structure from the server when saving/renaming/deleting presets. */
-type SavedPresetResponse = {
-  id: string;
-  name: string;
-  query: string;
-  starred: boolean;
-};
+type SavedPresetResponse = NormalizedPreset;
 
 /** Action response data from preset mutation operations. */
 type PresetActionData = DataOrErrorResponse<{
@@ -84,6 +86,13 @@ function mapToNormalizedPresets(value: unknown): NormalizedPreset[] {
         const query = typeof record.query === "string" ? record.query : null;
         const starred =
           typeof record.starred === "boolean" ? record.starred : false;
+        const shared =
+          typeof record.shared === "boolean" ? record.shared : false;
+        // A row is the viewer's own only when the server says so. Assuming
+        // ownership would offer a star and a rename the server then refuses.
+        const isOwn = record.isOwn === true;
+        const sharedByName =
+          typeof record.sharedByName === "string" ? record.sharedByName : null;
 
         // Reject presets missing any required field
         if (!id || !name || !query) {
@@ -95,6 +104,9 @@ function mapToNormalizedPresets(value: unknown): NormalizedPreset[] {
           name,
           query,
           starred,
+          shared,
+          isOwn,
+          sharedByName,
         } satisfies NormalizedPreset;
       })
       // Filter out null entries from validation failures
@@ -184,6 +196,79 @@ function presetsUIReducer(
 }
 
 /**
+ * One titled block of the saved-filters list.
+ *
+ * Module scope, not an inline closure: the list re-renders on every keystroke
+ * in the search box, and a fresh component identity would unmount and remount
+ * every row under it.
+ *
+ * @param title - Section heading, or null to render the rows without one
+ * @param presets - The rows of this section, already filtered by the search
+ * @param startIndex - Index of this section's first row within the flat
+ *   keyboard-navigation list, so arrow keys and the rendered DOM ids agree
+ */
+function PresetGroup({
+  title,
+  presets,
+  startIndex,
+  activePresetId,
+  applyingPresetId,
+  selectedIndex,
+  canManageSharing,
+  columns,
+  formatPreview,
+  onApply,
+  onRename,
+}: {
+  title: string | null;
+  presets: NormalizedPreset[];
+  startIndex: number;
+  activePresetId: string | undefined;
+  applyingPresetId: string | null;
+  selectedIndex: number;
+  canManageSharing: boolean;
+  columns: Column[];
+  formatPreview: (query: string, columns: Column[]) => ReactElement;
+  onApply: (preset: NormalizedPreset) => void;
+  onRename: (preset: NormalizedPreset) => void;
+}) {
+  if (presets.length === 0) {
+    return null;
+  }
+
+  return (
+    <div>
+      {title ? (
+        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          {title}
+        </div>
+      ) : null}
+      <div className="space-y-1">
+        {presets.map((preset, index) => {
+          const globalIndex = startIndex + index;
+
+          return (
+            <PresetListItem
+              key={preset.id}
+              id={`preset-option-${globalIndex}`}
+              preset={preset}
+              isActive={activePresetId === preset.id}
+              isApplying={applyingPresetId === preset.id}
+              isSelected={selectedIndex === globalIndex}
+              canManageSharing={canManageSharing}
+              columns={columns}
+              formatPreview={formatPreview}
+              onApply={onApply}
+              onRename={onRename}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Manages saved filter presets for the asset index (advanced mode only).
  *
  * Provides UI controls for:
@@ -204,6 +289,17 @@ export function SavedFilterPresetsControls() {
   } = loaderData;
 
   const { formatPreview } = useFilterPreview();
+
+  /**
+   * Who may publish a view to the workspace — and retire or delete one the
+   * workspace already has. Cosmetic: the route proves the same permission.
+   */
+  const { roles } = useUserRoleHelper();
+  const canManageSharing = userHasPermission({
+    roles,
+    entity: PermissionEntity.assetIndexSettings,
+    action: PermissionAction.update,
+  });
 
   const [searchParams, setSearchParams] = useSearchParams();
   const queryString = cleanParamsForCookie(searchParams).toString();
@@ -310,11 +406,22 @@ export function SavedFilterPresetsControls() {
       });
   }, [basePresets, fetchers, deletingPresetIds]);
 
-  // Separate starred and regular presets
-  const starredPresets = presets.filter((p) => p.starred);
-  const regularPresets = presets.filter((p) => !p.starred);
+  // Three groups, in render order: the views the workspace shared with you,
+  // your starred shortcuts, then the rest of yours. A preset you own and
+  // shared stays in your own groups — one row, with its star and its controls.
+  const sharedPresets = presets.filter((p) => !p.isOwn);
+  const starredPresets = presets.filter((p) => p.isOwn && p.starred);
+  const regularPresets = presets.filter((p) => p.isOwn && !p.starred);
 
   // Filter presets based on search query
+  const filteredSharedPresets = useMemo(
+    () =>
+      sharedPresets.filter((preset) =>
+        preset.name.toLowerCase().includes(searchQuery.toLowerCase())
+      ),
+    [sharedPresets, searchQuery]
+  );
+
   const filteredStarredPresets = useMemo(
     () =>
       starredPresets.filter((preset) =>
@@ -331,10 +438,15 @@ export function SavedFilterPresetsControls() {
     [regularPresets, searchQuery]
   );
 
-  // All filtered presets for keyboard navigation
+  // All filtered presets for keyboard navigation, in the order they render —
+  // the arrow keys index into this, so it must match the sections below.
   const allFilteredPresets = useMemo(
-    () => [...filteredStarredPresets, ...filteredRegularPresets],
-    [filteredStarredPresets, filteredRegularPresets]
+    () => [
+      ...filteredSharedPresets,
+      ...filteredStarredPresets,
+      ...filteredRegularPresets,
+    ],
+    [filteredSharedPresets, filteredStarredPresets, filteredRegularPresets]
   );
 
   // Determine which preset is currently active (matches current URL query)
@@ -469,6 +581,27 @@ export function SavedFilterPresetsControls() {
     }
     dispatchUI({ type: "setApplyingPresetId", id: preset.id });
   };
+
+  const handleOpenRenameDialog = (preset: NormalizedPreset) => {
+    dispatchUI({ type: "openRenameDialog", preset });
+  };
+
+  /** How many of the viewer's own presets the search left on screen. */
+  const ownPresetsShown =
+    filteredStarredPresets.length + filteredRegularPresets.length;
+
+  /** Everything the three sections of the list render identically. */
+  const groupProps = {
+    activePresetId: activePreset?.id,
+    applyingPresetId,
+    selectedIndex,
+    canManageSharing,
+    columns: settings.columns as Column[],
+    formatPreview,
+    onApply: handleApplyPreset,
+    onRename: handleOpenRenameDialog,
+  };
+
   return (
     <div className="flex items-center gap-2">
       {/* Saved presets dropdown */}
@@ -547,35 +680,27 @@ export function SavedFilterPresetsControls() {
                   </div>
                 ) : (
                   <div className="max-h-[400px] space-y-3 overflow-y-auto p-3">
-                    {/* Starred section */}
-                    {filteredStarredPresets.length > 0 && (
-                      <div>
-                        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                          Starred
-                        </div>
-                        <div className="space-y-1">
-                          {filteredStarredPresets.map((preset, index) => (
-                            <PresetListItem
-                              key={`starred-${preset.id}`}
-                              id={`preset-option-${index}`}
-                              preset={preset}
-                              isActive={activePreset?.id === preset.id}
-                              isApplying={applyingPresetId === preset.id}
-                              isSelected={selectedIndex === index}
-                              columns={settings.columns as Column[]}
-                              formatPreview={formatPreview}
-                              onApply={handleApplyPreset}
-                              onRename={(preset) =>
-                                dispatchUI({
-                                  type: "openRenameDialog",
-                                  preset,
-                                })
-                              }
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    {/* Shared with the workspace by someone else. Read-only:
+                        apply it, and nothing more, unless you may manage the
+                        workspace's shared views. */}
+                    <PresetGroup
+                      title="Shared"
+                      presets={filteredSharedPresets}
+                      startIndex={0}
+                      {...groupProps}
+                    />
+
+                    {filteredSharedPresets.length > 0 &&
+                      ownPresetsShown > 0 && (
+                        <div className="border-t border-gray-200" />
+                      )}
+
+                    <PresetGroup
+                      title="Starred"
+                      presets={filteredStarredPresets}
+                      startIndex={filteredSharedPresets.length}
+                      {...groupProps}
+                    />
 
                     {/* Divider between sections */}
                     {filteredStarredPresets.length > 0 &&
@@ -583,41 +708,22 @@ export function SavedFilterPresetsControls() {
                         <div className="border-t border-gray-200" />
                       )}
 
-                    {/* Regular presets section */}
-                    {filteredRegularPresets.length > 0 && (
-                      <div>
-                        {filteredStarredPresets.length > 0 && (
-                          <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                            All presets
-                          </div>
-                        )}
-                        <div className="space-y-1">
-                          {filteredRegularPresets.map((preset, index) => {
-                            const globalIndex =
-                              filteredStarredPresets.length + index;
-                            return (
-                              <PresetListItem
-                                key={`regular-${preset.id}`}
-                                id={`preset-option-${globalIndex}`}
-                                preset={preset}
-                                isActive={activePreset?.id === preset.id}
-                                isApplying={applyingPresetId === preset.id}
-                                isSelected={selectedIndex === globalIndex}
-                                columns={settings.columns as Column[]}
-                                formatPreview={formatPreview}
-                                onApply={handleApplyPreset}
-                                onRename={(preset) =>
-                                  dispatchUI({
-                                    type: "openRenameDialog",
-                                    preset,
-                                  })
-                                }
-                              />
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
+                    {/* Your remaining presets. They only need a heading once
+                        another section sits above them. */}
+                    <PresetGroup
+                      title={
+                        filteredSharedPresets.length > 0 ||
+                        filteredStarredPresets.length > 0
+                          ? "All presets"
+                          : null
+                      }
+                      presets={filteredRegularPresets}
+                      startIndex={
+                        filteredSharedPresets.length +
+                        filteredStarredPresets.length
+                      }
+                      {...groupProps}
+                    />
                   </div>
                 )}
               </>

@@ -26,13 +26,15 @@ import {
   CreatePresetFormSchema,
   RenamePresetFormSchema,
   DeletePresetFormSchema,
+  SharePresetFormSchema,
 } from "~/modules/asset-filter-presets/schemas";
 import {
   createPreset,
   deletePreset,
   togglePresetStar,
-  listPresetsForUser,
+  listPresetsWithShared,
   renamePreset,
+  setPresetShared,
 } from "~/modules/asset-filter-presets/service.server";
 import {
   changeMode,
@@ -53,6 +55,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export type AssetIndexLoaderData = typeof loader;
@@ -173,6 +176,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       "rename-preset",
       "delete-preset",
       "toggle-star-preset",
+      "share-preset",
     ]);
 
     const { intent } = parseData(formData, z.object({ intent: IntentSchema }));
@@ -186,14 +190,47 @@ export async function action({ context, request }: ActionFunctionArgs) {
       "rename-preset": PermissionAction.read,
       "delete-preset": PermissionAction.read,
       "toggle-star-preset": PermissionAction.read,
+      // Publishing a view to the workspace is an index-settings change, not an
+      // asset read — it is what separates who may share from who may save.
+      "share-preset": PermissionAction.update,
+    };
+
+    const intent2EntityMap: Record<
+      z.infer<typeof IntentSchema>,
+      PermissionEntity
+    > = {
+      "bulk-delete": PermissionEntity.asset,
+      "create-preset": PermissionEntity.asset,
+      "rename-preset": PermissionEntity.asset,
+      "delete-preset": PermissionEntity.asset,
+      "toggle-star-preset": PermissionEntity.asset,
+      "share-preset": PermissionEntity.assetIndexSettings,
     };
 
     const { organizationId, canUseBarcodes, role } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
+      entity: intent2EntityMap[intent],
       action: intent2ActionMap[intent],
     });
+
+    /**
+     * Whether the caller may manage the workspace's shared views — the same
+     * permission that gates sharing. It lets them delete a preset someone else
+     * shared, so an abandoned view can be retired; it never reaches another
+     * person's private preset.
+     */
+    const canManageSharedPresets = await hasPermission({
+      organizationId,
+      userId,
+      roles: role ? [role] : [],
+      entity: PermissionEntity.assetIndexSettings,
+      action: PermissionAction.update,
+    });
+
+    /** The saved-filters list every preset intent echoes back to the client. */
+    const listSavedFilterPresets = () =>
+      listPresetsWithShared({ organizationId, ownerId: userId });
 
     // Fetch asset index settings to determine mode
     const settings = await getAssetIndexSettings({
@@ -249,12 +286,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           query,
         });
 
-        const savedFilterPresets = await listPresetsForUser({
-          organizationId,
-          ownerId: userId,
-        });
-
-        return payload({ savedFilterPresets });
+        return payload({ savedFilterPresets: await listSavedFilterPresets() });
       }
 
       case "rename-preset": {
@@ -267,12 +299,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           name,
         });
 
-        const savedFilterPresets = await listPresetsForUser({
-          organizationId,
-          ownerId: userId,
-        });
-
-        return payload({ savedFilterPresets });
+        return payload({ savedFilterPresets: await listSavedFilterPresets() });
       }
 
       case "delete-preset": {
@@ -282,14 +309,32 @@ export async function action({ context, request }: ActionFunctionArgs) {
           id: presetId,
           organizationId,
           ownerId: userId,
+          canManageSharedPresets,
         });
 
-        const savedFilterPresets = await listPresetsForUser({
+        return payload({ savedFilterPresets: await listSavedFilterPresets() });
+      }
+
+      case "share-preset": {
+        const { presetId, shared } = parseData(formData, SharePresetFormSchema);
+
+        await setPresetShared({
+          id: presetId,
           organizationId,
           ownerId: userId,
+          shared,
         });
 
-        return payload({ savedFilterPresets });
+        sendNotification({
+          title: shared ? "Filter shared" : "Filter unshared",
+          message: shared
+            ? "Everyone in this workspace can now use this saved filter."
+            : "This saved filter is private again.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ savedFilterPresets: await listSavedFilterPresets() });
       }
 
       case "toggle-star-preset": {
@@ -308,12 +353,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           ownerId: userId,
         });
 
-        const savedFilterPresets = await listPresetsForUser({
-          organizationId,
-          ownerId: userId,
-        });
-
-        return payload({ savedFilterPresets });
+        return payload({ savedFilterPresets: await listSavedFilterPresets() });
       }
 
       default: {

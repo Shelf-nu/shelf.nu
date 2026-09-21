@@ -345,6 +345,10 @@ model AssetFilterPreset {
   name           String
   query          String
   starred        Boolean  @default(false)
+  /// Visible to every member of the workspace, not just the owner. Only a user
+  /// holding assetIndexSettings:update may set it, and only on a preset they
+  /// own. A shared preset stays owned: star and rename remain the owner's.
+  shared         Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -353,6 +357,9 @@ model AssetFilterPreset {
 
   @@unique([organizationId, ownerId, name], map: "asset_filter_presets_owner_name_unique")
   @@index([organizationId, ownerId], map: "asset_filter_presets_owner_lookup_idx")
+  // Backs the workspace-wide half of the asset index lookup, which reads every
+  // shared preset in the organization regardless of owner.
+  @@index([organizationId, shared], map: "asset_filter_presets_shared_lookup_idx")
 }
 
 model AssetIndexSettings {

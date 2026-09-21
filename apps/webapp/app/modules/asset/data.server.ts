@@ -42,7 +42,10 @@ import {
 } from "./service.server";
 import { getAllSelectedValuesFromFilters } from "./utils.server";
 import { MAX_SAVED_FILTER_PRESETS } from "../asset-filter-presets/constants";
-import { listPresetsForUser } from "../asset-filter-presets/service.server";
+import {
+  listPresetsForUser,
+  listPresetsWithShared,
+} from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
 import { getActiveCustomFields } from "../custom-field/service.server";
 import type { OrganizationFromUser } from "../organization/service.server";
@@ -670,8 +673,10 @@ export async function advancedModeLoader({
       },
     }),
     getTeamMembersForNotify({ organizationId }),
-    // Saved filter presets — only depends on organizationId + userId
-    listPresetsForUser({
+    // Saved filter presets — own presets plus the workspace's shared ones.
+    // Only this mode renders the saved-filters control, so only this mode
+    // carries other people's presets in its payload.
+    listPresetsWithShared({
       organizationId,
       ownerId: userId,
     }),

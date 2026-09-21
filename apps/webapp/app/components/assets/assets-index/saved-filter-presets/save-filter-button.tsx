@@ -82,9 +82,12 @@ export function SaveFilterButton({
     setPresetName(e.target.value);
   };
 
-  // Disable if at limit or if no filters are applied
+  // Disable if at limit or if no filters are applied.
+  // The cap counts the user's OWN presets: the list also carries the views
+  // other people shared with the workspace, which cost this user no quota.
   const hasFilters = queryString.length > 0;
-  const atLimit = loaderPresets.length >= savedFilterPresetLimit;
+  const ownPresetCount = loaderPresets.filter((preset) => preset.isOwn).length;
+  const atLimit = ownPresetCount >= savedFilterPresetLimit;
   const isDisabled = atLimit || !hasFilters || hasUnappliedFilters;
 
   const title = atLimit
