@@ -1,3 +1,15 @@
+/**
+ * Tests for {@link useApiQuery} (`~/hooks/use-api-query`).
+ *
+ * Beyond the request/loading/error surface, two properties here are the whole
+ * reason the hook exists rather than a bare `fetch` in an effect, and each has
+ * a case that fails without it: only the current request's answer is applied,
+ * and the newest callback the caller rendered is the one invoked — including
+ * when the caller rebuilds that callback on every render, which every real
+ * call site does.
+ *
+ * @see {@link file://./use-api-query.ts}
+ */
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import useApiQuery from "./use-api-query";
@@ -462,8 +474,9 @@ describe("useApiQuery", () => {
     expect(onErrorMock).not.toHaveBeenCalled();
   });
   it("ignores a superseded response when the url changes mid-flight", async () => {
-    // why: hand-built deferreds are the only way to hold one response open
-    // while a second starts — the whole bug is about which one lands last.
+    // why: the case turns on completion ORDER, so one response has to be held
+    // open while a second answers. Only a hand-built deferred lets the test
+    // decide when the first one settles.
     let resolveFirst: (value: unknown) => void = () => {};
     const firstResponse = new Promise((resolve) => {
       resolveFirst = resolve;
@@ -490,11 +503,18 @@ describe("useApiQuery", () => {
       expect(result.current.data).toEqual({ page: 2 });
     });
 
-    // Page 1 answers late. It must not replace what the current url returned.
-    resolveFirst({ json: () => Promise.resolve({ page: 1 }) });
-    await waitForAsyncUpdate(() => {
-      expect(result.current.data).toEqual({ page: 2 });
+    // Page 1 answers late. Settling the fetch is not enough to exercise the
+    // guard: `response.json()` and the handler after it run in later
+    // microtasks, and asserting before those have run would pass on page 2's
+    // data without the stale path ever being reached. Drain the chain inside
+    // `act` so any state update it attempts is flushed and attributed here.
+    await act(async () => {
+      resolveFirst({ json: () => Promise.resolve({ page: 1 }) });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
     });
+
     expect(result.current.data).toEqual({ page: 2 });
   });
 

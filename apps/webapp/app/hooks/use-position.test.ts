@@ -17,12 +17,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const submit = vi.fn();
 const searchParamsValue = { current: new URLSearchParams() };
 
-// why: the hook reads the scanId from the URL and posts through a router
-// fetcher; both are router-owned, and the assertion is about what gets posted.
+// why: the hook posts through a router fetcher and reads the qrId from the
+// route; both are router-owned, and the assertion is about what gets posted.
 vi.mock("react-router", () => ({
   useFetcher: () => ({ submit }),
   useParams: () => ({ qrId: "qr-1" }),
 }));
+// why: the scanId comes from the URL, and moving between scans IS the scenario
+// under test — this is how a case switches scans without a router.
 vi.mock("~/hooks/search-params", () => ({
   useSearchParams: () => [searchParamsValue.current],
 }));

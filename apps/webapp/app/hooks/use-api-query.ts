@@ -1,9 +1,37 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+/**
+ * Client-side reads of Shelf's own `api+` routes.
+ *
+ * One hook for the shape that recurs across the app: fetch a JSON endpoint when
+ * some condition holds, expose loading/error/data, and refetch on demand. It is
+ * a read path only — mutations go through a router fetcher, which brings
+ * revalidation with it.
+ *
+ * Two properties callers depend on and should not be traded away:
+ *
+ * - **The current request wins.** Changing the url (or refetching) cancels what
+ *   is in flight, so a slower earlier answer can never overwrite a newer one.
+ * - **The newest callback is called.** `onSuccess`/`onError` are read from refs
+ *   rather than being keyed on, because callers pass inline closures.
+ *
+ * The declared `TData` is an unchecked cast of `response.json()` — see
+ * `.claude/rules/api-payload-contracts-need-a-test-on-both-sides.md` before
+ * trusting it.
+ *
+ * @see {@link file://./use-api-query.test.ts}
+ */
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 /**
- * A simple hook which calls any of our API
+ * `useLayoutEffect` on the client, `useEffect` on the server.
  *
+ * The callback refs below must be current before any promise continuation can
+ * read them, which rules out a passive effect; but layout effects do not run
+ * during SSR and React warns when a server-rendered component asks for one, and
+ * this hook renders on the server across every route that uses it.
  */
+const useIsomorphicLayoutEffect =
+  typeof document !== "undefined" ? useLayoutEffect : useEffect;
+
 type UseApiQueryParams<TData> = {
   /** Any API endpoint */
   api: string;
@@ -21,6 +49,19 @@ type UseApiQueryParams<TData> = {
   onError?: (error: string) => void;
 };
 
+/**
+ * Reads a Shelf API endpoint and tracks the request's state.
+ *
+ * @param args.api - The endpoint path, e.g. `/api/assets`.
+ * @param args.searchParams - Appended to the path; may be rebuilt each render.
+ * @param args.enabled - Nothing is requested until this is true. A query that
+ *   turns disabled mid-request cancels it and reports itself as not loading.
+ * @param args.onSuccess - Called with the parsed payload of the request that
+ *   was still current when it answered.
+ * @param args.onError - Called with a message when the request fails. A
+ *   cancelled request is not a failure and calls neither callback.
+ * @returns `{ isLoading, error, data, refetch }`.
+ */
 export default function useApiQuery<TData>({
   api,
   searchParams,
@@ -47,10 +88,14 @@ export default function useApiQuery<TData>({
    * `setIsLoading` triggers and never resolve. Reading them from a ref keeps
    * the query keyed on what actually identifies it (url, enabled, refetch)
    * while still calling the newest callback the caller rendered.
+   *
+   * The refs are filled in a layout effect, not a passive one: a response that
+   * lands between a commit and the next passive flush would otherwise be
+   * handed the callback from the render before it.
    */
   const onSuccessRef = useRef(onSuccess);
   const onErrorRef = useRef(onError);
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     onSuccessRef.current = onSuccess;
     onErrorRef.current = onError;
   });
