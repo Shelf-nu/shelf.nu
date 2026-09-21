@@ -9,7 +9,9 @@
  *
  * @see {@link file://./use-position.ts}
  */
+import { createElement, type ReactNode } from "react";
 import { renderHook, waitFor } from "@testing-library/react";
+import { Provider, createStore } from "jotai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const submit = vi.fn();
@@ -33,11 +35,23 @@ const coordsFor = (latitude: number, longitude: number) =>
 
 describe("usePosition", () => {
   let getCurrentPosition: ReturnType<typeof vi.fn>;
+  let wrapper: ({ children }: { children: ReactNode }) => ReactNode;
 
   beforeEach(() => {
     submit.mockClear();
+    // why: the browser's geolocation API cannot answer in a test environment,
+    // and each case needs a different answer from it — a fix, or silence.
     getCurrentPosition = vi.fn();
     vi.stubGlobal("navigator", { geolocation: { getCurrentPosition } });
+
+    // One store per test, shared by every render within it. `positionAtom`
+    // otherwise lives in Jotai's module-wide default store, which would carry
+    // one test's fix into the next: the assertion that a scan posted something
+    // could then pass off a value this test never recorded. Sharing it WITHIN
+    // a test is deliberate — that is how the layout and its child route see
+    // one scan's fix, and it is the mechanism under test.
+    const store = createStore();
+    wrapper = ({ children }) => createElement(Provider, { store }, children);
   });
 
   afterEach(() => {
@@ -50,7 +64,7 @@ describe("usePosition", () => {
       onSuccess({ coords: coordsFor(1, 2) } as GeolocationPosition)
     );
 
-    renderHook(() => usePosition());
+    renderHook(() => usePosition(), { wrapper });
 
     await waitFor(() =>
       expect(submit).toHaveBeenCalledWith(
@@ -66,7 +80,7 @@ describe("usePosition", () => {
     getCurrentPosition.mockImplementation((onSuccess: PositionCallback) =>
       onSuccess({ coords: coordsFor(1, 2) } as GeolocationPosition)
     );
-    const first = renderHook(() => usePosition());
+    const first = renderHook(() => usePosition(), { wrapper });
     await waitFor(() => expect(submit).toHaveBeenCalled());
     first.unmount();
 
@@ -77,7 +91,7 @@ describe("usePosition", () => {
     searchParamsValue.current = new URLSearchParams({ scanId: "scan-2" });
     getCurrentPosition.mockImplementation(() => undefined);
 
-    renderHook(() => usePosition());
+    renderHook(() => usePosition(), { wrapper });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
 
