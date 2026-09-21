@@ -2,8 +2,9 @@
 set -euo pipefail
 
 #############################################################################
-# Book-by-model E2E fixture seeder
+# E2E fixture seeder
 #
+# `up` / `down` — book-by-model fulfil fixture.
 # Creates (or tears down) a reproducible RESERVED booking that reserves 2
 # units of a dedicated AssetModel, with two concrete units whose QR ids are
 # known — the exact state the fulfil-and-check-out flow needs. Writes the
@@ -15,9 +16,18 @@ set -euo pipefail
 # whatever model the picker surfaces), so fulfil coverage needs a fixture.
 # Before this, the state was hand-seeded with ad-hoc psql every run.
 #
+# `scan-checkout-up` / `scan-checkout-down` — scan-to-check-out fixture for
+# flows/bookings/19-*: a RESERVED booking holding a two-asset kit's members and
+# one more asset as standalone rows, plus an asset the booking does not hold.
+# Fixed ids and QR codes, so the QR ids the flow scans never change. Writes
+# them to `.maestro/env/e2e-scan-checkout.env`. Re-running `scan-checkout-up`
+# resets every fixture asset to AVAILABLE, which a previous run leaves out.
+#
 # Usage:
-#   ./seed-e2e.sh up      # create fixtures, write env/e2e.env
-#   ./seed-e2e.sh down     # remove fixtures
+#   ./seed-e2e.sh up                  # fulfil fixture, write env/e2e.env
+#   ./seed-e2e.sh down                # remove it
+#   ./seed-e2e.sh scan-checkout-up    # flow 19 fixture, write env/e2e-scan-checkout.env
+#   ./seed-e2e.sh scan-checkout-down  # remove it
 #
 # Targets the workspace named "$WORKSPACE" (default "GRANULAR WORKSPACE").
 # Reads the DB connection from the monorepo-root .env (DIRECT_URL), or from
@@ -33,6 +43,21 @@ WORKSPACE="${WORKSPACE:-GRANULAR WORKSPACE}"
 # Stable ids so `down` is idempotent and re-running `up` is a no-op-then-create.
 MODEL_ID="e2e_fulfil_model"
 BOOKING_NAME="E2E Fulfil Booking"
+
+# Scan-to-check-out fixture. Every id is cuid-shaped (a leading "c"): the
+# partial-checkout endpoint validates assetIds with zod `.cuid()` and refuses any
+# other shape before the booking is touched.
+SCAN_ENV_OUT="$MAESTRO_DIR/env/e2e-scan-checkout.env"
+SCAN_BOOKING_ID="ce2escanchkbooking0001"
+SCAN_BOOKING_NAME="E2E Scan Checkout Booking"
+SCAN_KIT_ID="ce2escanchkkit00000001"
+SCAN_ALPHA="ce2escanchkalpha000001"   # kit member
+SCAN_BRAVO="ce2escanchkbravo000001"   # kit member
+SCAN_CHARLIE="ce2escanchkcharlie0001" # on the booking, scanned on its own
+SCAN_DELTA="ce2escanchkdelta000001"   # never added to the booking
+SCAN_KIT_QR="e2eskchkqr01"
+SCAN_CHARLIE_QR="e2eskchkqra3"
+SCAN_DELTA_QR="e2eskchkqra4"
 
 DB="${DATABASE_URL:-}"
 if [ -z "$DB" ]; then
@@ -134,8 +159,72 @@ SQL
     rm -f "$ENV_OUT"
     echo "✓ Removed book-by-model fulfil fixture from '${WORKSPACE}'."
     ;;
+  scan-checkout-up)
+    OWNER_ID=$(psql_q -c "select \"userId\" from \"UserOrganization\" where \"organizationId\"='${ORG_ID}' and 'OWNER'=any(roles) limit 1;")
+    OWNER_TM=$(psql_q -c "select id from \"TeamMember\" where \"userId\"='${OWNER_ID}' and \"organizationId\"='${ORG_ID}' and \"deletedAt\" is null limit 1;")
+    # Deleting and recreating resets the assets to AVAILABLE and drops the
+    # previous run's check-out sessions and slices: every child row of the
+    # booking, the assets and the kit cascades.
+    psql "$DB" -v ON_ERROR_STOP=1 >/dev/null <<SQL
+BEGIN;
+DELETE FROM "Booking" WHERE id='${SCAN_BOOKING_ID}';
+DELETE FROM "Qr" WHERE id IN ('${SCAN_KIT_QR}','${SCAN_CHARLIE_QR}','${SCAN_DELTA_QR}');
+DELETE FROM "Kit" WHERE id='${SCAN_KIT_ID}';
+DELETE FROM "Asset" WHERE id IN ('${SCAN_ALPHA}','${SCAN_BRAVO}','${SCAN_CHARLIE}','${SCAN_DELTA}');
+
+INSERT INTO "Asset" (id,title,"organizationId","userId","updatedAt") VALUES
+  ('${SCAN_ALPHA}','E2E Checkout Alpha','${ORG_ID}','${OWNER_ID}',NOW()),
+  ('${SCAN_BRAVO}','E2E Checkout Bravo','${ORG_ID}','${OWNER_ID}',NOW()),
+  ('${SCAN_CHARLIE}','E2E Checkout Charlie','${ORG_ID}','${OWNER_ID}',NOW()),
+  ('${SCAN_DELTA}','E2E Checkout Delta','${ORG_ID}','${OWNER_ID}',NOW());
+INSERT INTO "Kit" (id,name,"organizationId","createdById","updatedAt")
+VALUES ('${SCAN_KIT_ID}','E2E Scan Checkout Kit','${ORG_ID}','${OWNER_ID}',NOW());
+INSERT INTO "AssetKit" (id,"assetId","kitId","organizationId","updatedAt") VALUES
+  ('${SCAN_KIT_ID}_alpha','${SCAN_ALPHA}','${SCAN_KIT_ID}','${ORG_ID}',NOW()),
+  ('${SCAN_KIT_ID}_bravo','${SCAN_BRAVO}','${SCAN_KIT_ID}','${ORG_ID}',NOW());
+INSERT INTO "Qr" (id,"kitId","assetId","organizationId","userId","updatedAt") VALUES
+  ('${SCAN_KIT_QR}','${SCAN_KIT_ID}',NULL,'${ORG_ID}','${OWNER_ID}',NOW()),
+  ('${SCAN_CHARLIE_QR}',NULL,'${SCAN_CHARLIE}','${ORG_ID}','${OWNER_ID}',NOW()),
+  ('${SCAN_DELTA_QR}',NULL,'${SCAN_DELTA}','${ORG_ID}','${OWNER_ID}',NOW());
+
+-- Started an hour ago, so checking out prompts no early check-out.
+INSERT INTO "Booking" (id,name,status,"organizationId","creatorId","custodianUserId",
+                       "custodianTeamMemberId","from","to","updatedAt")
+VALUES ('${SCAN_BOOKING_ID}','${SCAN_BOOKING_NAME}','RESERVED','${ORG_ID}','${OWNER_ID}',
+        '${OWNER_ID}',NULLIF('${OWNER_TM}',''),NOW()-interval '1 hour',NOW()+interval '1 day',NOW());
+-- The kit's members as STANDALONE rows (assetKitId NULL): the shape the
+-- phone's scan-to-add path produces, which the flow depends on.
+INSERT INTO "BookingAsset" (id,"bookingId","assetId") VALUES
+  ('${SCAN_BOOKING_ID}_alpha','${SCAN_BOOKING_ID}','${SCAN_ALPHA}'),
+  ('${SCAN_BOOKING_ID}_bravo','${SCAN_BOOKING_ID}','${SCAN_BRAVO}'),
+  ('${SCAN_BOOKING_ID}_charlie','${SCAN_BOOKING_ID}','${SCAN_CHARLIE}');
+COMMIT;
+SQL
+
+    mkdir -p "$MAESTRO_DIR/env"
+    cat > "$SCAN_ENV_OUT" <<ENV
+# Generated by seed-e2e.sh scan-checkout-up. Do not edit by hand.
+SHELF_TEST_CHECKOUT_KIT_QR_ID=${SCAN_KIT_QR}
+SHELF_TEST_CHECKOUT_ASSET_QR_ID=${SCAN_CHARLIE_QR}
+SHELF_TEST_OFF_BOOKING_QR_ID=${SCAN_DELTA_QR}
+ENV
+    echo "✓ Seeded '${SCAN_BOOKING_NAME}' (RESERVED; kit members + 1 asset, standalone) in '${WORKSPACE}'."
+    echo "  wrote $SCAN_ENV_OUT"
+    ;;
+  scan-checkout-down)
+    psql "$DB" -v ON_ERROR_STOP=1 >/dev/null <<SQL
+BEGIN;
+DELETE FROM "Booking" WHERE id='${SCAN_BOOKING_ID}';
+DELETE FROM "Qr" WHERE id IN ('${SCAN_KIT_QR}','${SCAN_CHARLIE_QR}','${SCAN_DELTA_QR}');
+DELETE FROM "Kit" WHERE id='${SCAN_KIT_ID}';
+DELETE FROM "Asset" WHERE id IN ('${SCAN_ALPHA}','${SCAN_BRAVO}','${SCAN_CHARLIE}','${SCAN_DELTA}');
+COMMIT;
+SQL
+    rm -f "$SCAN_ENV_OUT"
+    echo "✓ Removed the scan-to-check-out fixture from '${WORKSPACE}'."
+    ;;
   *)
-    echo "Usage: $0 up|down" >&2
+    echo "Usage: $0 up|down|scan-checkout-up|scan-checkout-down" >&2
     exit 1
     ;;
 esac

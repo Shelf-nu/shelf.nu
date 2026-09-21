@@ -11,8 +11,10 @@
  * regardless of how it got there: "Manage assets", the web scanner, the asset
  * index, or the mobile API. Every one of those routes through
  * {@link fulfilModelRequestsForAssets}. That helper's JSDoc explains why this
- * is deliberately surface-independent — it used to be scanner-only, and the
- * asymmetry hard-blocked check-out.
+ * is deliberately surface-independent.
+ *
+ * Unassigned units never hold a check-out back: a booking goes ongoing once at
+ * least one item leaves, and whatever is still unassigned stays open on it.
  *
  * ## Availability formula
  *
@@ -1581,9 +1583,9 @@ type MaterializeArgs = {
    * Actor for the activity note. Optional because not every add-assets path
    * threads one through (`api/assets.add-to-booking` writes its own
    * user-attributed note instead, so passing a user here would duplicate it).
-   * Fulfilment itself must not depend on attribution — a reservation that
-   * silently survived because the caller had no `userId` would hard-block
-   * check-out. Without an actor the note is written in the system voice.
+   * Fulfilment itself must not depend on attribution — a reservation must not
+   * stay open just because the caller had no `userId`. Without an actor the
+   * note is written in the system voice.
    */
   userId?: string;
   /**
@@ -1679,11 +1681,10 @@ export async function materializeModelRequestForAsset({
      *
      *   T1 reads 0, T2 reads 0. Both compute `justCompleted = (1 === 2)` =
      *   false. Both increment. The row lands on `2/2` with `fulfilledAt` still
-     *   NULL — invisible to `getOutstandingModelRequests` (`2 < 2` is false),
-     *   still hard-blocking check-out (the guard matched `fulfilledAt: null`
-     *   alone), and un-removable (`removeBookingModelRequest` refuses while
-     *   `fulfilledQuantity > 0`). No visible row to fix. The old absolute write
-     *   at least produced a visible, recoverable under-count.
+     *   NULL — invisible to `getOutstandingModelRequests` (`2 < 2` is false)
+     *   yet never stamped complete, and un-removable
+     *   (`removeBookingModelRequest` refuses while `fulfilledQuantity > 0`).
+     *   No visible row to fix.
      *
      * The stale capacity check had the mirror problem: on a 1-unit request two
      * concurrent fulfilments both read 0, both passed, both incremented, and
@@ -1856,16 +1857,8 @@ export async function materializeModelRequestForAsset({
  * units". Naming a concrete unit of M and putting it on the booking ANSWERS
  * that — the promise and the delivery describe the same physical thing. If the
  * reservation survives, the booking demands N unnamed units PLUS the named one,
- * which is not what the operator asked for, and because unfulfilled requests
- * are a hard block on check-out, the booking then cannot leave at all.
- *
- * Until this helper existed, {@link materializeModelRequestForAsset} had
- * exactly one production caller: the scan path. Adding the very same asset
- * through "Manage assets" (`updateBookingAssets`) left the reservation
- * untouched — verified against a live database, not inferred: identical asset,
- * identical reservation, scanner ⇒ `1/1 fulfilled, checkout allowed`, picker ⇒
- * `0/1 fulfilled, checkout HARD BLOCKED`. The operator's only escape was to
- * delete the reservation they had correctly made.
+ * which is not what the operator asked for: the booking shows units still to
+ * pull that are already on it, and holds pool availability it doesn't need.
  *
  * Routing every add-assets path through here makes fulfilment a property of an
  * asset landing on the booking, not of the device it was added with. Web

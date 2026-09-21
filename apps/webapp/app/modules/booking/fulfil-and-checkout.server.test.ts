@@ -19,9 +19,10 @@ import { fulfilAndCheckOut } from "./fulfil-and-checkout.server";
 
 // @vitest-environment node
 
-// why: the orchestrator reads the booking's status, the scanned assets already
-// on the booking, and its model requests; the database is the boundary, and
-// each case sets the rows it needs.
+// why: the orchestrator reads the booking's status and the scanned assets
+// already on the booking; the database is the boundary, and each case sets the
+// rows it needs. `bookingModelRequest` is mocked so a case can stage open
+// reservations and prove the orchestrator never consults them.
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
@@ -57,21 +58,13 @@ beforeEach(() => {
 });
 
 /**
- * Sets the reads of a RESERVED booking whose reservations are all assigned
- * after the scan, and a progressive check-out that leaves two assets booked.
+ * Sets the reads of a RESERVED booking and a progressive check-out that leaves
+ * two assets booked.
  */
 function primeRulePath() {
   vi.mocked(db.booking.findFirst).mockResolvedValue({
     status: BookingStatus.RESERVED,
   } as never);
-  vi.mocked(db.bookingModelRequest.findMany).mockResolvedValue([
-    {
-      quantity: 1,
-      fulfilledQuantity: 1,
-      fulfilledAt: new Date(),
-      assetModel: { name: "Dell" },
-    },
-  ] as never);
   vi.mocked(partialCheckoutBooking).mockResolvedValue({
     booking: {
       id: "booking-1",
@@ -86,6 +79,9 @@ function primeRulePath() {
 
 describe("fulfilAndCheckOut", () => {
   it("runs the full fulfil-and-check-out when the rule does not apply", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+    } as never);
     vi.mocked(fulfilModelRequestsAndCheckout).mockResolvedValue({
       id: "booking-1",
       name: "Load-in",
@@ -108,6 +104,22 @@ describe("fulfilAndCheckOut", () => {
       },
       remainingAssetCount: 0,
     });
+  });
+
+  it("checks out only the scanned units on a booking that is already out, even without the rule", async () => {
+    // A booking some of whose items already left: sending the whole booking
+    // out again would re-stamp every item. Only what was scanned goes.
+    primeRulePath();
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      status: BookingStatus.ONGOING,
+    } as never);
+
+    await fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: false });
+
+    expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
+    );
   });
 
   it("assigns the scanned units, then checks out only those, under the rule", async () => {
@@ -170,10 +182,10 @@ describe("fulfilAndCheckOut", () => {
     expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
   });
 
-  it("does not check out while a reservation is still unassigned after the scan", async () => {
-    vi.mocked(db.booking.findFirst).mockResolvedValue({
-      status: BookingStatus.RESERVED,
-    } as never);
+  it("checks out the scanned units while a reservation is still unassigned", async () => {
+    primeRulePath();
+    // why: the booking reserved 2 Dells and only 1 was scanned. The second
+    // unit stays open on the booking instead of holding the check-out back.
     vi.mocked(db.bookingModelRequest.findMany).mockResolvedValue([
       {
         quantity: 2,
@@ -183,14 +195,37 @@ describe("fulfilAndCheckOut", () => {
       },
     ] as never);
 
-    const refused = fulfilAndCheckOut({
+    const result = await fulfilAndCheckOut({
       ...baseArgs,
       requireExplicitCheckout: true,
     });
 
-    await expect(refused).rejects.toMatchObject({ status: 400 });
-    await expect(refused).rejects.toThrow(/1 × Dell still unassigned/);
-    expect(addScannedAssetsToBooking).toHaveBeenCalledTimes(1);
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+    // Reservations are not a check-out input at all: nothing reads them.
+    expect(db.bookingModelRequest.findMany).not.toHaveBeenCalled();
+    expect(result.booking.status).toBe(BookingStatus.ONGOING);
+  });
+
+  it("refuses when nothing was scanned, before reading or assigning anything", async () => {
+    primeRulePath();
+
+    const refused = fulfilAndCheckOut({
+      ...baseArgs,
+      assetIds: [],
+      requireExplicitCheckout: true,
+    });
+
+    await expect(refused).rejects.toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
+    });
+    await expect(refused).rejects.toThrow(
+      "Scan at least one item to check out."
+    );
+    expect(db.booking.findFirst).not.toHaveBeenCalled();
+    expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
     expect(partialCheckoutBooking).not.toHaveBeenCalled();
   });
 
@@ -284,11 +319,6 @@ describe("fulfilAndCheckOut", () => {
           assetId: { in: ["dell-1"] },
           assetKitId: null,
         },
-      })
-    );
-    expect(db.bookingModelRequest.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { bookingId: "booking-1", booking: { organizationId: "org-1" } },
       })
     );
   });

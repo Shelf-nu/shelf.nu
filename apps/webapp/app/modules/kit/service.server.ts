@@ -3468,8 +3468,10 @@ export async function bulkReleaseKitCustody({
 
     /**
      * Nothing matched — a refused custodian filter, or a selection that no
-     * longer exists. Reading `kits[0]` below would throw a 500 and hand the
-     * caller a binary oracle for "does this custodian hold any kit".
+     * longer exists. Both refuse with the same generic 400: a release that
+     * quietly succeeded on zero kits, or that failed differently depending on
+     * why the match was empty, would hand the caller a binary oracle for
+     * "does this custodian hold any kit".
      */
     if (kits.length === 0) {
       throw new ShelfError({
@@ -3482,7 +3484,15 @@ export async function bulkReleaseKitCustody({
       });
     }
 
-    const custodian = kits[0].custody?.custodian;
+    /**
+     * Custodian per kit, not per call: a bulk selection may span kits held by
+     * different people, and both the audit events and the asset notes below
+     * name the custodian whose custody actually ended. One custodian taken
+     * from the selection would be right only when the selection is uniform.
+     */
+    const custodianByKitId = new Map(
+      kits.map((kit) => [kit.id, kit.custody?.custodian])
+    );
 
     /** Kits will be released only if all the selected kits are IN_CUSTODY */
     const allKitsInCustody = kits.every((kit) => kit.status === "IN_CUSTODY");
@@ -3547,6 +3557,9 @@ export async function bulkReleaseKitCustody({
         await recordEvents(
           releasedCustodyRows.map((row) => {
             const asset = assetById.get(row.assetId);
+            const kitId = row.kitCustodyId
+              ? kitIdByKitCustodyId.get(row.kitCustodyId)
+              : undefined;
             return {
               organizationId,
               actorUserId: userId,
@@ -3554,11 +3567,11 @@ export async function bulkReleaseKitCustody({
               entityType: "ASSET" as const,
               entityId: row.assetId,
               assetId: row.assetId,
-              kitId: row.kitCustodyId
-                ? kitIdByKitCustodyId.get(row.kitCustodyId)
-                : undefined,
+              kitId,
               teamMemberId: row.teamMemberId,
-              targetUserId: custodian?.user?.id ?? undefined,
+              targetUserId: kitId
+                ? custodianByKitId.get(kitId)?.user?.id ?? undefined
+                : undefined,
               meta: {
                 viaKit: true,
                 ...(asset ? assetQtyMeta(asset, row.quantity) : {}),
@@ -3611,14 +3624,19 @@ export async function bulkReleaseKitCustody({
 
       /** Creating notes for all the assets */
       const actor = wrapUserLinkForNote({ ...user, id: userId });
-      const custodianDisplay = custodian
-        ? wrapCustodianForNote({ teamMember: custodian })
-        : "**Unknown Custodian**";
       await tx.note.createMany({
         data: allAssetsOfAllKits.map((asset) => {
           const kitLink = asset.kit
             ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
             : "**Unknown Kit**";
+          // The custodian of the kit this asset came through — the note says
+          // whose custody ended, and a bulk selection may span several.
+          const custodian = asset.kit
+            ? custodianByKitId.get(asset.kit.id)
+            : undefined;
+          const custodianDisplay = custodian
+            ? wrapCustodianForNote({ teamMember: custodian })
+            : "**Unknown Custodian**";
           // qty-tracked assets name the units released ("custody of 50
           // units"); INDIVIDUAL phrasing is unchanged.
           const count = formatUnitCount(

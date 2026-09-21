@@ -89,7 +89,7 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
       id: "booking-1",
       name: "Shoot",
       description: null,
-      status: "DRAFT", // DRAFT → skips getPartiallyCheckedInAssetIds
+      status: "DRAFT", // DRAFT → skips getDetailedPartialCheckinData
       from: null,
       to: null,
       createdAt: new Date("2026-01-01T00:00:00.000Z"),
@@ -166,7 +166,7 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
     expect(body.booking.outstandingModelUnitCount).toBe(2);
   });
 
-  it("reads outstanding requests through the shared predicate for the check-out state", async () => {
+  it("offers check-out while reserved units are still unassigned", async () => {
     // why: `canCheckout` is state AND permission; grant the permission so the
     // assertion is about the model-request state alone.
     vi.mocked(hasPermission).mockResolvedValue(true);
@@ -204,10 +204,10 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
         {
           id: "mr-1",
           assetModelId: "model-a",
-          // Every unit assigned but no stamp: nothing is left to fulfil, so
-          // the request must not hold the check-out back.
+          // Nothing assigned yet. The booking still holds an item, and one
+          // item going out is all a check-out needs.
           quantity: 2,
-          fulfilledQuantity: 2,
+          fulfilledQuantity: 0,
           fulfilledAt: null,
           assetModel: { id: "model-a", name: "Dell XPS" },
         },

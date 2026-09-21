@@ -150,3 +150,40 @@ export function countReservedModelUnits(
     0
   );
 }
+
+/** Reserved units of one model that no asset has been assigned to yet. */
+export type UnassignedModelUnits = {
+  /** The asset model's name. */
+  name: string;
+  /** Units of this model still unassigned. */
+  count: number;
+};
+
+/**
+ * Names the reserved units still unassigned, in one line an operator can read
+ * before confirming a check-out: "2 × Dell Latitude, 1 × HP LaserJet and
+ * 3 × Pelican case".
+ *
+ * A booking can reserve dozens of models, so the line names at most `limit` of
+ * them and counts the rest ("… and 5 more models"). Models with nothing
+ * unassigned are left out.
+ *
+ * @param units - Unassigned units per model, in display order.
+ * @param limit - Most models to name before counting the rest.
+ * @returns The summary, or an empty string when nothing is unassigned.
+ */
+export function summarizeUnassignedUnits(
+  units: UnassignedModelUnits[],
+  limit = 5
+): string {
+  const open = units.filter((unit) => unit.count > 0);
+  const named = open
+    .slice(0, limit)
+    .map((unit) => `${unit.count} × ${unit.name}`);
+  const rest = open.length - named.length;
+  const parts =
+    rest > 0 ? [...named, `${rest} more model${rest === 1 ? "" : "s"}`] : named;
+
+  if (parts.length <= 1) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
