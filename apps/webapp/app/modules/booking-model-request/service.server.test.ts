@@ -579,6 +579,9 @@ describe("upsertBookingModelRequest", () => {
     expect.assertions(2);
     // @ts-expect-error mocked
     db.asset.count.mockResolvedValue(10);
+    // The scenario, not incidental data: ten units promised and eight
+    // already on the booking is the state a concurrent scan can move under
+    // the reader's feet, so it is what makes the ordering below matter.
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue({
       id: "req-1",
@@ -1385,6 +1388,9 @@ describe("removeBookingModelRequest", () => {
 
   it("locks the reservation row before the assigned-units guard", async () => {
     expect.assertions(2);
+    // An ONGOING booking with a reservation nothing has been assigned to:
+    // the one state where cancelling is still allowed, and so the only one
+    // in which the guard's read can be raced by an arriving unit.
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue({
       id: BOOKING_ID,
