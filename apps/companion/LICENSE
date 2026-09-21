@@ -4,8 +4,9 @@ Copyright (c) 2026-present Shelf Asset Management, Inc. <https://www.shelf.nu>
 All content that resides under the "apps/companion/" directory of this
 repository (the "software") is licensed by Shelf Asset Management, Inc. (the
 "licensor") under the PolyForm Internal Use License 1.0.0. The full text of
-that license follows. This content is not licensed under the "AGPLv3" license
-that applies to other parts of this repository.
+that license follows. Starting with the version of this repository that first
+includes this file, this content is offered only under that license, and not
+under the "AGPLv3" license that applies to other parts of this repository.
 
 All third party components incorporated into the software are licensed under
 the original license provided by the owner of the applicable component.
