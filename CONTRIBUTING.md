@@ -18,4 +18,7 @@ If you get stuck on any of these steps, open an issue or join us in our [Discord
 
 ## Contributions to the companion app
 
-The companion mobile app in `apps/companion/` is not under AGPL-3.0. It has its [own license](./apps/companion/LICENSE), which does not allow distribution. For that reason we can accept a pull request that changes files in `apps/companion/` only under a separate written agreement with Shelf Asset Management, Inc. Please open an issue before you start work there.
+The companion mobile app in `apps/companion/` is not under AGPL-3.0. It has its [own license](./apps/companion/LICENSE), which does not allow distribution.
+
+- **Forking is fine.** You can fork this repository on GitHub to contribute to the rest of Shelf, even though the fork contains `apps/companion/`. GitHub's [Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#5-license-grant-to-other-users) let every user fork a public repository, which means a copy within GitHub. The companion license applies to anything else you do with that folder.
+- **Changes to `apps/companion/` need an agreement first.** We can accept a pull request that changes files in that folder only under a separate written agreement with Shelf Asset Management, Inc. Please open an issue before you start work there.
