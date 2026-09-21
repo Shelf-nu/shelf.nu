@@ -297,20 +297,40 @@ function ExistingRequestRow({
   }, [request.quantity]);
 
   /**
-   * Client schema for the inline update — same shape as the server
-   * schema, with a superRefine that enforces "can't exceed the cap
-   * this booking is allowed to climb to". We fall back to the bare
-   * server schema when loader-side availability is missing (model
-   * fetched via typeahead beyond the seed list) and let the server
-   * be the authority.
+   * Units already matched to a concrete asset. The reservation can never go
+   * below this: those assets are on the booking, and a smaller reservation
+   * would promise fewer units than the booking is already holding.
+   */
+  const floor = request.fulfilledQuantity;
+
+  /**
+   * Client schema for the inline update — same shape as the server schema,
+   * with a superRefine for the two bounds the server enforces: the floor of
+   * already-assigned units, and the cap this booking is allowed to climb to.
+   *
+   * The cap needs loader-side availability, which is missing for a model
+   * fetched via typeahead beyond the seed list; the floor comes off the row
+   * itself and is always known, so it is checked either way.
    */
   const clientSchema = useMemo(() => {
+    const withFloor = UpsertModelRequestSchema.superRefine((data, ctx) => {
+      if (floor > 0 && data.quantity < floor) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["quantity"],
+          message: `${floor} ${
+            floor === 1 ? "unit is" : "units are"
+          } already assigned — ${floor} is the lowest this can go.`,
+        });
+      }
+    });
+
     if (capacityForThisBooking == null || model == null) {
-      return UpsertModelRequestSchema;
+      return withFloor;
     }
     const max = capacityForThisBooking;
     const total = model.total;
-    return UpsertModelRequestSchema.superRefine((data, ctx) => {
+    return withFloor.superRefine((data, ctx) => {
       if (data.quantity > max) {
         ctx.addIssue({
           code: "custom",
@@ -319,7 +339,7 @@ function ExistingRequestRow({
         });
       }
     });
-  }, [capacityForThisBooking, model]);
+  }, [capacityForThisBooking, model, floor]);
 
   const zo = useZorm(`EditModelRequest-${request.assetModelId}`, clientSchema);
 
@@ -372,6 +392,7 @@ function ExistingRequestRow({
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
             <span>
               {request.quantity} reserved
+              {floor > 0 ? ` · ${floor} assigned` : null}
               {model ? ` · ${model.total} total in workspace` : null}
             </span>
             {hasShortfall ? (
@@ -412,7 +433,7 @@ function ExistingRequestRow({
               type="number"
               {...numberInputWheelGuard}
               name={zo.fields.quantity()}
-              min={1}
+              min={Math.max(1, floor)}
               step={1}
               value={quantityInput}
               onChange={(e) => setQuantityInput(e.target.value)}

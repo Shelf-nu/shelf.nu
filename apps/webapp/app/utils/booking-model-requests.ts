@@ -51,6 +51,31 @@ export function canAssignModelUnits(status: string): boolean {
 }
 
 /**
+ * Whether the reserved quantity itself can still be changed on this booking.
+ *
+ * The same live-booking window as {@link canAssignModelUnits}, and that is the
+ * point: a reservation an operator can still fulfil is one they must also be
+ * able to correct. A booking that is already out is exactly when they find out
+ * a unit is damaged, lost, or was never collected — and until the reservation
+ * is reduced it keeps holding those units against every other booking whose
+ * window overlaps.
+ *
+ * Status is the only thing this answers. Two further limits live on the server
+ * and apply at every status: the quantity can never drop below the units
+ * already assigned, and a reservation with assigned units is reduced rather
+ * than cancelled (deleting it would orphan the assets it explains).
+ *
+ * The two predicates must move together — see
+ * `upsertBookingModelRequest` / `removeBookingModelRequest`, which enforce it.
+ *
+ * @param status - The booking's status.
+ * @returns `true` when the reservation can still be adjusted or cancelled.
+ */
+export function canEditModelReservations(status: string): boolean {
+  return canAssignModelUnits(status);
+}
+
+/**
  * Minimal `BookingModelRequest` shape these helpers need.
  *
  * Declared structurally (rather than importing the Prisma type) so callers

@@ -630,13 +630,175 @@ describe("upsertBookingModelRequest", () => {
     expect(db.bookingModelRequest.upsert).not.toHaveBeenCalled();
   });
 
-  it("rejects edits on ONGOING bookings", async () => {
+  it("releases units that never turned up, on an ONGOING booking", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.booking.findUnique.mockResolvedValue({
+      id: BOOKING_ID,
+      name: "Test",
+      status: BookingStatus.ONGOING,
+      from,
+      to,
+    });
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(10);
+    // Ten promised, eight collected and taken out — the other two are still
+    // on the shelf and the booking is never getting them.
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      quantity: 10,
+      fulfilledQuantity: 8,
+      fulfilledAt: null,
+    });
+    // @ts-expect-error mocked
+    db.asset.findMany.mockResolvedValue(
+      Array.from({ length: 8 }, (_, index) => ({
+        id: `asset-out-${index}`,
+        assetModelId: MODEL_ID,
+        custody: [],
+      }))
+    );
+
+    await upsertBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 8,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    expect(db.bookingModelRequest.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ quantity: 8 }),
+      })
+    );
+  });
+
+  it("adjusts the reservation on an OVERDUE booking", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.booking.findUnique.mockResolvedValue({
+      id: BOOKING_ID,
+      name: "Test",
+      status: BookingStatus.OVERDUE,
+      from,
+      to,
+    });
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(10);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      quantity: 5,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+    });
+
+    await upsertBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 2,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    expect(db.bookingModelRequest.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ quantity: 2 }),
+      })
+    );
+  });
+
+  it("lets a reservation come down even when the pool no longer covers it", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.booking.findUnique.mockResolvedValue({
+      id: BOOKING_ID,
+      name: "Test",
+      status: BookingStatus.ONGOING,
+      from,
+      to,
+    });
+    // The workspace now owns fewer units of this model than the booking is
+    // holding — assets were retired, or moved into custody, after it went out.
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(2);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      quantity: 10,
+      fulfilledQuantity: 8,
+      fulfilledAt: null,
+    });
+    // @ts-expect-error mocked
+    db.asset.findMany.mockResolvedValue(
+      Array.from({ length: 8 }, (_, index) => ({
+        id: `asset-out-${index}`,
+        assetModelId: MODEL_ID,
+        custody: [],
+      }))
+    );
+
+    // Measuring the pool would refuse this at every quantity, stranding the
+    // two unassigned units on the booking for good. Giving units back can
+    // never need headroom.
+    await upsertBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 8,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    expect(db.bookingModelRequest.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ quantity: 8 }),
+      })
+    );
+  });
+
+  it("refuses to drop a live booking's reservation below the units already assigned", async () => {
     expect.assertions(2);
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue({
       id: BOOKING_ID,
       name: "Test",
       status: BookingStatus.ONGOING,
+      from,
+      to,
+    });
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(10);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      quantity: 10,
+      fulfilledQuantity: 8,
+      fulfilledAt: null,
+    });
+
+    // Eight units are on the booking. Reserving five would claim fewer units
+    // than the booking is already holding.
+    await expect(
+      upsertBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 5,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      })
+    ).rejects.toThrow(ShelfError);
+    expect(db.bookingModelRequest.upsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    BookingStatus.COMPLETE,
+    BookingStatus.CANCELLED,
+    BookingStatus.ARCHIVED,
+  ])("rejects edits once the booking is %s", async (status) => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.booking.findUnique.mockResolvedValue({
+      id: BOOKING_ID,
+      name: "Test",
+      status,
       from,
       to,
     });
@@ -911,6 +1073,60 @@ describe("upsertBookingModelRequest", () => {
       expect(typeof changes[1].toValue).toBe("string");
     });
 
+    it("records the release and closes the request out on a live booking", async () => {
+      expect.assertions(3);
+      // @ts-expect-error mocked
+      db.booking.findUnique.mockResolvedValue({
+        id: BOOKING_ID,
+        name: "Test",
+        status: BookingStatus.ONGOING,
+        from,
+        to,
+      });
+      // @ts-expect-error mocked
+      db.asset.count.mockResolvedValue(10);
+      // @ts-expect-error mocked
+      db.bookingModelRequest.findUnique.mockResolvedValue({
+        quantity: 10,
+        fulfilledQuantity: 8,
+        fulfilledAt: null,
+      });
+      // @ts-expect-error mocked
+      db.bookingModelRequest.upsert.mockResolvedValueOnce({
+        id: "req-1",
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 8,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-02T00:00:00Z"),
+      });
+
+      await upsertBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 8,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      });
+
+      const changes = eventsOfAction("BOOKING_MODEL_REQUEST_CHANGED");
+      expect(changes.map((event) => event.field)).toEqual([
+        "quantity",
+        "fulfilledAt",
+      ]);
+      expect(changes[0]).toEqual(
+        expect.objectContaining({ fromValue: 10, toValue: 8 })
+      );
+      // The activity feed has to state what the booking no longer owes, or
+      // the two released units just vanish from its history.
+      const content = (
+        createSystemBookingNote as unknown as {
+          mock: { calls: Array<[{ content: string }]> };
+        }
+      ).mock.calls[0][0].content;
+      expect(content).toContain("from **10** to **8**");
+    });
+
     it("records no event when the reservation is rejected", async () => {
       expect.assertions(2);
       // @ts-expect-error mocked
@@ -1069,12 +1285,73 @@ describe("removeBookingModelRequest", () => {
     expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
   });
 
-  it("rejects cancellation on ONGOING bookings", async () => {
+  it("cancels a reservation nothing was assigned to on an ONGOING booking", async () => {
+    expect.assertions(1);
+    // @ts-expect-error mocked
+    db.booking.findUnique.mockResolvedValue({
+      id: BOOKING_ID,
+      status: BookingStatus.ONGOING,
+    });
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      fulfilledQuantity: 0,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    await removeBookingModelRequest({
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+    });
+
+    expect(db.bookingModelRequest.delete).toHaveBeenCalled();
+  });
+
+  it("refuses to cancel a reservation that already has units assigned", async () => {
     expect.assertions(2);
     // @ts-expect-error mocked
     db.booking.findUnique.mockResolvedValue({
       id: BOOKING_ID,
       status: BookingStatus.ONGOING,
+    });
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 3,
+      fulfilledQuantity: 2,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    // Deleting the row would orphan the two concrete assets it explains.
+    // Reducing the quantity to 2 is the way to close it out.
+    await expect(
+      removeBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      })
+    ).rejects.toThrow(ShelfError);
+    expect(db.bookingModelRequest.delete).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    BookingStatus.COMPLETE,
+    BookingStatus.CANCELLED,
+    BookingStatus.ARCHIVED,
+  ])("rejects cancellation once the booking is %s", async (status) => {
+    expect.assertions(2);
+    // @ts-expect-error mocked
+    db.booking.findUnique.mockResolvedValue({
+      id: BOOKING_ID,
+      status,
     });
 
     await expect(

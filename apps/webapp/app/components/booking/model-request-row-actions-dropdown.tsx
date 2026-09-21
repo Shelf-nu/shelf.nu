@@ -8,28 +8,37 @@
  * **byte-identical** to {@link AssetRowActionsDropdown} so model-request
  * rows and asset rows feel like siblings in the list.
  *
- * Menu items:
- *   - **Select assets to assign** — opens "Manage assets". Ticking a matching
- *     asset there discharges the reservation, because fulfilment is a property
- *     of an asset landing on the booking rather than of the scanner (see
+ * Menu items, all of them gated on the booking still being live
+ * (`canAssignModelUnits` / `canEditModelReservations` — the same statuses):
+ *   - **Assign from list** — opens "Manage assets". Ticking a matching asset
+ *     there discharges the reservation, because fulfilment is a property of an
+ *     asset landing on the booking rather than of the scanner (see
  *     `fulfilModelRequestsForAssets`). Listed first: it is the only route that
  *     works without a camera or a scannable label.
  *   - **Scan to assign** — links to the generic scan-assets drawer. Same
  *     server path, same result, faster when you are holding the thing.
  *
- * Both are rendered only when the booking is in a manage-eligible state.
- *   - **Remove reservation** — posts `DELETE` to the model-requests API
- *     via a fetcher. Only shown on DRAFT/RESERVED bookings with no
- *     materialised units (server-side guard in
- *     `removeBookingModelRequest` refuses otherwise; we just pre-gate
- *     the UI).
+ * Every label is short enough to sit on one line in the menu’s width. A
+ * wrapping item grows its own row and the menu stops reading as a list of
+ * equals — so reach for a shorter verb before a wider popover.
+ *   - **Adjust quantity** — opens {@link AdjustModelReservationDialog}. The
+ *     way a booking gives units back: reducing the reservation releases the
+ *     unassigned remainder to every other booking competing for that window.
+ *   - **Remove** — posts `DELETE` to the model-requests API via a fetcher.
+ *     Only when nothing has been assigned yet; once units are on the booking
+ *     the reservation is reduced instead, so those rows keep the record of how
+ *     they got there.
+ *
+ * The server-side guards in `booking-model-request/service.server` are what
+ * actually enforce all of this; the gating here only keeps the menu from
+ * offering something that would come back as an error.
  *
  * @see {@link file://./asset-row-actions-dropdown.tsx} — pattern mirrored
+ * @see {@link file://./adjust-model-reservation-dialog.tsx}
  * @see {@link file://../../modules/booking-model-request/service.server.ts}
- *   — `removeBookingModelRequest` status + fulfilled-quantity guards
  */
 
-import { forwardRef } from "react";
+import { forwardRef, useState } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import type { BookingStatus } from "@prisma/client";
 import {
@@ -44,7 +53,12 @@ import { TrashIcon, VerticalDotsIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useDisabled } from "~/hooks/use-disabled";
+import {
+  canAssignModelUnits,
+  canEditModelReservations,
+} from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
+import { AdjustModelReservationDialog } from "./adjust-model-reservation-dialog";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -72,7 +86,7 @@ interface Props {
    *  actionable items and the whole popover is skipped. */
   canManage: boolean;
   /**
-   * Destination for "Select assets to assign" — the booking-window-filtered
+   * Destination for "Assign from list" — the booking-window-filtered
    * `manage-assets` URL built by the parent. Required rather than defaulted:
    * an unfiltered picker lists assets that cannot legally be added, and a
    * silent fallback is exactly how the two entry points drifted apart.
@@ -122,6 +136,7 @@ const ConditionalActionsDropdown = ({
     open,
     setOpen,
   } = useControlledDropdownMenu({ skipDefault: true });
+  const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false);
 
   function handleMenuClose() {
     setOpen(false);
@@ -130,12 +145,12 @@ const ConditionalActionsDropdown = ({
   // Menu-item gating. Server-side guards (`upsertBookingModelRequest`,
   // `removeBookingModelRequest`) enforce the same constraints; this is
   // purely to pre-gate the UI so disabled items don't clutter the menu.
-  const canScanToAssign =
-    canManage && bookingStatus !== "COMPLETE" && bookingStatus !== "ARCHIVED";
-  const canRemove =
-    canManage &&
-    (bookingStatus === "DRAFT" || bookingStatus === "RESERVED") &&
-    request.fulfilledQuantity === 0;
+  const canScanToAssign = canManage && canAssignModelUnits(bookingStatus);
+  const canAdjust = canManage && canEditModelReservations(bookingStatus);
+  // Deleting the row while units hang off it would cut them loose from the
+  // record of how they got onto the booking. Reducing the quantity is the
+  // route out in that case, which "Adjust quantity" offers directly.
+  const canRemove = canAdjust && request.fulfilledQuantity === 0;
 
   const scanUrl = `/bookings/${bookingId}/overview/scan-assets`;
 
@@ -185,7 +200,7 @@ const ConditionalActionsDropdown = ({
                       width="full"
                       onClick={handleMenuClose}
                     >
-                      Select assets to assign
+                      Assign from list
                     </Button>
                   </div>
 
@@ -202,6 +217,24 @@ const ConditionalActionsDropdown = ({
                     </Button>
                   </div>
                 </>
+              ) : null}
+
+              {canAdjust ? (
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    type="button"
+                    variant="link"
+                    icon="adjust-quantity"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    onClick={() => {
+                      setIsAdjustDialogOpen(true);
+                      handleMenuClose();
+                    }}
+                  >
+                    Adjust quantity
+                  </Button>
+                </div>
               ) : null}
 
               {canRemove ? (
@@ -241,6 +274,20 @@ const ConditionalActionsDropdown = ({
           </PopoverContent>
         </PopoverPortal>
       </Popover>
+
+      {/* Outside the Popover: the menu closes as the dialog opens, and a
+          dialog nested in the popover tree would unmount with it. */}
+      {canAdjust ? (
+        <AdjustModelReservationDialog
+          bookingId={bookingId}
+          assetModelId={request.assetModelId}
+          modelName={request.assetModel.name}
+          quantity={request.quantity}
+          fulfilledQuantity={request.fulfilledQuantity}
+          open={isAdjustDialogOpen}
+          onOpenChange={setIsAdjustDialogOpen}
+        />
+      ) : null}
     </>
   );
 };
