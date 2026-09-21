@@ -2,18 +2,27 @@
  * Fulfil-and-check-out
  *
  * The entry point the web fulfil scanner and the mobile fulfil endpoint call.
- * It chooses the flow by the workspace's explicit check-out requirement:
+ * It chooses the flow by the booking's status and the workspace's explicit
+ * check-out requirement:
  *
- * - Not required: {@link fulfilModelRequestsAndCheckout} assigns the scanned
- *   units to the booking's model reservations and checks the whole booking out
- *   in one transaction.
- * - Required: only what the operator scanned leaves. The units are assigned
- *   with {@link addScannedAssetsToBooking}, the scan-to-add path, which
- *   discharges matching reservations. Then only the scanned ids are checked
- *   out with {@link partialCheckoutBooking}. The booking's other assets stay
- *   booked for a later scan or select. Kits are refused on this path.
+ * - A RESERVED booking, requirement off: {@link fulfilModelRequestsAndCheckout}
+ *   assigns the scanned units to the booking's model reservations and checks
+ *   the whole booking out in one transaction.
+ * - Otherwise only what the operator scanned leaves: under the requirement,
+ *   and on a booking whose items have already started leaving, where sending
+ *   the whole booking out again would re-stamp items that are out or back. The
+ *   units are assigned with {@link addScannedAssetsToBooking}, the scan-to-add
+ *   path, which discharges matching reservations. Then only the scanned ids are
+ *   checked out with {@link partialCheckoutBooking}. The booking's other assets
+ *   stay booked for a later scan or select. Kits are refused on this path.
  *
- * The required flow runs two transactions. If the check-out step fails, the
+ * Either way a check-out needs at least one item to go out, and nothing more:
+ * reserved units no scan covered stay open on the ongoing booking, to be
+ * scanned later or released. On the scanned-only path that item has to be a
+ * scanned one; the requirement exists so a person handles every item that
+ * leaves.
+ *
+ * The scanned-only flow runs two transactions. If the check-out step fails, the
  * units stay assigned but not out, the state Manage assets leaves, and the
  * operator finishes with "Scan to check out" or submits the same scan again:
  * units already on the booking are not assigned twice.
@@ -28,7 +37,6 @@ import {
   fulfilModelRequestsAndCheckout,
   partialCheckoutBooking,
 } from "~/modules/booking/service.server";
-import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking";
@@ -61,58 +69,48 @@ export type FulfilAndCheckOutResult = {
 };
 
 /**
- * Shape of a `BookingModelRequest` row this module reads to decide whether a
- * check-out can proceed. Pinned explicitly (rather than left to inference) so
- * `assetModel` survives into {@link getOutstandingModelRequests}'s generic
- * even if the extended Prisma client's inferred payload type ever widens —
- * mirrors `checkoutBookingWritesWithinTx`'s `GuardModelRequest`.
- */
-type GuardModelRequest = {
-  quantity: number;
-  fulfilledQuantity: number;
-  fulfilledAt: Date | null;
-  assetModel: { name: string };
-};
-
-/**
- * Assigns the scanned units to the booking's model reservations and checks out
- * either the whole booking or, under the explicit check-out requirement, only
- * the scanned units.
+ * Assigns the scanned units to the booking's model reservations and checks
+ * them out: the whole booking when it is RESERVED and the explicit check-out
+ * requirement is off, only the scanned units otherwise.
  *
  * @param args - The scan, the booking, the caller, and whether the rule applies
  * @returns The booking's id, name and status, and how many assets remain
- * @throws {ShelfError} 404 when the booking is not in the workspace; 400 when a
- *   kit is scanned under the requirement, the booking cannot be checked out,
- *   or a reservation is still unassigned after the scan
+ * @throws {ShelfError} 404 when the booking is not in the workspace; 400 when
+ *   nothing would go out, a kit is scanned on the scanned-only path, or the
+ *   booking cannot be checked out in its current status
  */
 export async function fulfilAndCheckOut({
   requireExplicitCheckout,
   ...args
 }: FulfilAndCheckOutArgs): Promise<FulfilAndCheckOutResult> {
+  // Under the requirement the flow is known up front, so the scan is judged
+  // before anything is read. Without it the booking's status decides.
+  let status: BookingStatus | undefined;
   if (!requireExplicitCheckout) {
-    const booking = await fulfilModelRequestsAndCheckout(args);
-    return {
-      booking: { id: booking.id, name: booking.name, status: booking.status },
-      remainingAssetCount: 0,
-    };
+    status = await readBookingStatus(args);
+    if (status === BookingStatus.RESERVED) {
+      const booking = await fulfilModelRequestsAndCheckout(args);
+      return {
+        booking: { id: booking.id, name: booking.name, status: booking.status },
+        remainingAssetCount: 0,
+      };
+    }
   }
 
-  const { bookingId, organizationId, userId, assetIds, kitIds = [] } = args;
+  return checkOutScannedUnits(args, status);
+}
 
-  // This path checks out scanned asset ids only, so a scanned kit would be
-  // counted but stay booked. Refused before anything is read or assigned;
-  // "Scan to check out" expands a kit into its members.
-  if (kitIds.length > 0) {
-    throw new ShelfError({
-      cause: null,
-      status: 400,
-      label,
-      message:
-        "Kits can't be checked out from the reservation scanner. Use Scan to check out for kits.",
-      shouldBeCaptured: false,
-    });
-  }
-
+/**
+ * Reads the booking's status, scoped to the caller's workspace.
+ *
+ * @param args - The booking id and the caller's workspace
+ * @returns The booking's status
+ * @throws {ShelfError} 404 when the booking is not in the workspace
+ */
+async function readBookingStatus({
+  bookingId,
+  organizationId,
+}: Pick<FulfilAndCheckOutArgs, "bookingId" | "organizationId">) {
   const booking = await db.booking.findFirst({
     where: { id: bookingId, organizationId },
     select: { status: true },
@@ -126,9 +124,55 @@ export async function fulfilAndCheckOut({
       shouldBeCaptured: false,
     });
   }
+  return booking.status;
+}
+
+/**
+ * Assigns the scanned units, then checks out only those.
+ *
+ * @param args - The scan, the booking and the caller
+ * @param knownStatus - The booking's status, when the caller already read it
+ * @returns The booking's id, name and status, and how many assets remain
+ * @throws {ShelfError} 404 when the booking is not in the workspace; 400 when
+ *   nothing was scanned, a kit was scanned, or the booking cannot be checked
+ *   out in its current status
+ */
+async function checkOutScannedUnits(
+  args: Omit<FulfilAndCheckOutArgs, "requireExplicitCheckout">,
+  knownStatus?: BookingStatus
+): Promise<FulfilAndCheckOutResult> {
+  const { bookingId, organizationId, userId, assetIds, kitIds = [] } = args;
+
+  // Only scanned items leave on this path, so an empty scan has nothing to
+  // check out. Refused before anything is assigned.
+  if (assetIds.length === 0 && kitIds.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      status: 400,
+      label,
+      message: "Scan at least one item to check out.",
+      shouldBeCaptured: false,
+    });
+  }
+
+  // This path checks out scanned asset ids only, so a scanned kit would be
+  // counted but stay booked. Refused before anything is assigned; "Scan to
+  // check out" expands a kit into its members.
+  if (kitIds.length > 0) {
+    throw new ShelfError({
+      cause: null,
+      status: 400,
+      label,
+      message:
+        "Kits can't be checked out from the reservation scanner. Use Scan to check out for kits.",
+      shouldBeCaptured: false,
+    });
+  }
+
+  const status = knownStatus ?? (await readBookingStatus(args));
   // Checked before anything is assigned, so a booking that cannot be checked
   // out is left exactly as it was.
-  if (!CHECKOUT_STATUSES.includes(booking.status)) {
+  if (!CHECKOUT_STATUSES.includes(status)) {
     throw new ShelfError({
       cause: null,
       status: 400,
@@ -161,31 +205,6 @@ export async function fulfilAndCheckOut({
       bookingId,
       organizationId,
       userId,
-    });
-  }
-
-  // A booking does not go out while a reservation is unassigned. The scanned
-  // units stay assigned, so the operator scans only what is still reserved.
-  const requests: GuardModelRequest[] = await db.bookingModelRequest.findMany({
-    where: { bookingId, booking: { organizationId } },
-    select: {
-      quantity: true,
-      fulfilledQuantity: true,
-      fulfilledAt: true,
-      assetModel: { select: { name: true } },
-    },
-  });
-  const outstanding = getOutstandingModelRequests<GuardModelRequest>(requests);
-  if (outstanding.length > 0) {
-    const summary = outstanding
-      .map((r) => `${r.quantity - r.fulfilledQuantity} × ${r.assetModel.name}`)
-      .join(", ");
-    throw new ShelfError({
-      cause: null,
-      status: 400,
-      label,
-      message: `Cannot check out — ${summary} still unassigned. The scanned units were assigned; scan the remaining reserved units to check out.`,
-      shouldBeCaptured: false,
     });
   }
 

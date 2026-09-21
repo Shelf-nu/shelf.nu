@@ -56,7 +56,6 @@ import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
-import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -529,22 +528,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ).length;
     const totalAssets = assets.length;
 
-    // Book-by-model: a booking with unfulfilled model reservations cannot be
-    // checked out. The shared checkout service hard-blocks the RESERVED →
-    // ONGOING transition until every `BookingModelRequest` is assigned to
-    // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // request is outstanding). Read through the same predicate the service
-    // uses, and fold it into the state flag so the app never offers a "Check
-    // Out" the server would reject — the app instead guides the operator to
-    // assign the reserved units first (see the booking-detail "Assign to
-    // check out" CTA).
-    const hasOutstandingModelRequests =
-      getOutstandingModelRequests(booking.modelRequests).length > 0;
-
-    const canCheckoutByState =
-      booking.status === "RESERVED" &&
-      totalAssets > 0 &&
-      !hasOutstandingModelRequests;
+    // A check-out needs at least one item on the booking and nothing more.
+    // Unassigned model reservations stay open on the ongoing booking, so they
+    // play no part in this flag; the app confirms them with the operator
+    // before submitting.
+    const canCheckoutByState = booking.status === "RESERVED" && totalAssets > 0;
     // Checkinable while ONGOING/OVERDUE AND something is still to check in.
     // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: booked units not
     // yet reconciled = remainingToCheckIn > 0 (booked − returned/consumed/lost/
