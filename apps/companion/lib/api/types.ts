@@ -298,12 +298,15 @@ export type AssetDetail = {
    * is resolved server-side, so the screen prints it and derives nothing.
    *
    * - `from`: the booking's start, an ISO instant.
-   * - `custodianName`: `null` when the booking has no custodian.
+   * - `custodianName`: named as the bookings list names the same booking's
+   *   holder; `null` when the booking has no custodian.
    * - `canOpen`: whether this viewer may open the booking. The row is only
    *   tappable when true; the booking screen refuses everyone else.
    *
    * `null` when the asset is not checked out, is quantity-tracked, or the
-   * viewer may not see custody. Absent on older servers — render nothing.
+   * viewer may not see who holds it: that takes custody-view permission,
+   * unless the booking is the viewer's own. Absent on older servers — render
+   * nothing.
    */
   activeBooking?: {
     id: string;

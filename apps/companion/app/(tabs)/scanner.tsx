@@ -49,6 +49,14 @@ import {
 } from "@/lib/batch-blockers";
 import { markBookingDirty, markBookingsListDirty } from "@/lib/booking-refresh";
 import {
+  countBookingBatch,
+  describeBatch,
+  describeBatchConfirm,
+  describeBatchResult,
+  describeSelection,
+  type SelectionCounts,
+} from "@/lib/booking-kit-rows";
+import {
   checkoutBlocker,
   eligibleKitMembers,
 } from "@/lib/booking-scan-eligibility";
@@ -2213,15 +2221,39 @@ function ScannerContent() {
       fulfilMatch.matched
   );
 
+  /**
+   * The check-out or check-in list, counted the way the booking screen counts
+   * the same selection: a kit is one thing once every member of it the batch
+   * can move is in the list. A scanned kit enters the list as its member
+   * assets, so a count of rows would name each member.
+   *
+   * Only the check-out and check-in modes read it. Their lists hold asset rows
+   * alone, and they are only filled once the booking context has loaded.
+   */
+  const bookingBatchCounts = useMemo(
+    () =>
+      countBookingBatch({
+        assets: bookingCtx?.bookedAssets ?? [],
+        assetIds: bookingCheckinItems.map((item) => item.targetId),
+        selectMode: isBookingCheckoutMode ? "checkout" : "checkin",
+        checkedInAssetIds: [...(bookingCtx?.checkedInAssetIds ?? [])],
+      }),
+    [bookingCtx, bookingCheckinItems, isBookingCheckoutMode]
+  );
+
   const handleBookingCheckin = () => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
 
-    const count = bookingCheckinItems.length;
+    // Counted now, from the list: the request carries member asset ids, so the
+    // server's reply cannot tell a scanned kit from its assets.
+    const batch = bookingBatchCounts;
     Alert.alert(
       "Check In Assets",
-      `Check in ${count} ${count === 1 ? "asset" : "assets"} for "${
-        bookingName || "this booking"
-      }"?`,
+      describeBatchConfirm({
+        direction: "checkin",
+        counts: batch,
+        bookingName,
+      }),
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -2268,13 +2300,12 @@ function ScannerContent() {
                   }
                 : prev
             );
-            const msg = result?.isComplete
-              ? `All assets checked in! "${
-                  bookingName || "Booking"
-                }" is now complete.`
-              : `${
-                  result?.checkedInCount ?? bookingCheckinItems.length
-                } checked in, ${result?.remainingCount ?? "some"} remaining.`;
+            const msg = describeBatchResult({
+              direction: "checkin",
+              counts: batch,
+              isComplete: result?.isComplete,
+              bookingName,
+            });
             Alert.alert("Checked In", msg, [
               {
                 text: "OK",
@@ -2305,11 +2336,16 @@ function ScannerContent() {
     );
   };
 
-  /** Send a confirmed scan-to-check-out batch and report what went out. */
-  const submitBookingCheckout = async () => {
+  /**
+   * Send a confirmed scan-to-check-out batch and report what went out.
+   *
+   * @param batch What the drawer and its confirm named, counted from the list
+   *   before the submit: the request carries member asset ids, so the server's
+   *   reply cannot tell a scanned kit from its assets.
+   */
+  const submitBookingCheckout = async (batch: SelectionCounts) => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
 
-    const count = bookingCheckinItems.length;
     setIsBookingSubmitting(true);
     const assetIds = bookingCheckinItems.map((i) => i.targetId);
     const timeZone = (() => {
@@ -2361,13 +2397,21 @@ function ScannerContent() {
           }
         : prev
     );
-    // The server drops ids it already counts as out, so its numbers can be
-    // lower than the submitted list — report those, not ours.
+    // The batch is named as the drawer and its confirm named it; only the
+    // server can say whether anything is left to check out, and whether it
+    // skipped an asset another check-out already took.
     Alert.alert(
       "Checked Out",
-      `${result?.checkedOutCount ?? count} checked out, ${
-        result?.remainingCount ?? "some"
-      } remaining.`,
+      describeBatchResult({
+        direction: "checkout",
+        counts: batch,
+        isComplete: result?.isComplete,
+        bookingName,
+        assets:
+          result?.checkedOutCount === undefined
+            ? undefined
+            : { sent: submittedIds.size, moved: result.checkedOutCount },
+      }),
       [
         {
           text: "OK",
@@ -2399,6 +2443,10 @@ function ScannerContent() {
   const handleBookingCheckout = () => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
 
+    // Counted now, from the list: the request carries member asset ids, so the
+    // server's reply cannot tell a scanned kit from its assets.
+    const batch = bookingBatchCounts;
+
     // The batch that takes a RESERVED booking out is the one that leaves its
     // unassigned reservations open, so that is where the operator confirms
     // it. Later batches find the booking already out with them open.
@@ -2411,21 +2459,25 @@ function ScannerContent() {
         { text: "Cancel", style: "cancel" },
         {
           text: unassignedConfirm.confirmLabel,
-          onPress: () => void submitBookingCheckout(),
+          onPress: () => void submitBookingCheckout(batch),
         },
       ]);
       return;
     }
 
-    const count = bookingCheckinItems.length;
     Alert.alert(
       "Check Out Assets",
-      `Check out ${count} ${count === 1 ? "asset" : "assets"} for "${
-        bookingName || "this booking"
-      }"?`,
+      describeBatchConfirm({
+        direction: "checkout",
+        counts: batch,
+        bookingName,
+      }),
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Check Out", onPress: () => void submitBookingCheckout() },
+        {
+          text: "Check Out",
+          onPress: () => void submitBookingCheckout(batch),
+        },
       ]
     );
   };
@@ -2859,12 +2911,8 @@ function ScannerContent() {
                       bookingCheckinItems.length > 1 ? "s" : ""
                     } scanned`
                   : isBookingCheckoutMode
-                  ? `${bookingCheckinItems.length} asset${
-                      bookingCheckinItems.length > 1 ? "s" : ""
-                    } to check out`
-                  : `${bookingCheckinItems.length} asset${
-                      bookingCheckinItems.length > 1 ? "s" : ""
-                    } to check in`
+                  ? `${describeBatch(bookingBatchCounts)} to check out`
+                  : `${describeBatch(bookingBatchCounts)} to check in`
               }
               submitLabel={
                 isBookingFulfilMode
@@ -2885,12 +2933,8 @@ function ScannerContent() {
                   : isBookingAddMode
                   ? "Add to Booking"
                   : isBookingCheckoutMode
-                  ? `Check Out ${bookingCheckinItems.length} ${
-                      bookingCheckinItems.length === 1 ? "Asset" : "Assets"
-                    }`
-                  : `Check In ${bookingCheckinItems.length} ${
-                      bookingCheckinItems.length === 1 ? "Asset" : "Assets"
-                    }`
+                  ? `Check Out ${describeSelection(bookingBatchCounts)}`
+                  : `Check In ${describeSelection(bookingBatchCounts)}`
               }
               submitIcon={
                 isBookingFulfilMode

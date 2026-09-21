@@ -89,7 +89,7 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
       id: "booking-1",
       name: "Shoot",
       description: null,
-      status: "DRAFT", // DRAFT → skips getPartiallyCheckedInAssetIds
+      status: "DRAFT", // DRAFT → skips getDetailedPartialCheckinData
       from: null,
       to: null,
       createdAt: new Date("2026-01-01T00:00:00.000Z"),
