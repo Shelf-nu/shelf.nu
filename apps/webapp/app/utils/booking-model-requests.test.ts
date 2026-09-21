@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   canAssignModelUnits,
+  canCancelModelReservation,
+  canEditModelReservations,
   countReservedModelUnits,
   countUnassignedModelUnits,
   getOutstandingModelRequests,
@@ -161,6 +163,59 @@ describe("canAssignModelUnits", () => {
     // Fail closed: a status added later shouldn't silently start advertising
     // work on a booking whose lifecycle nobody has reviewed here.
     expect(canAssignModelUnits("SOME_FUTURE_STATUS")).toBe(false);
+  });
+});
+
+describe("canCancelModelReservation", () => {
+  it("allows cancelling a reservation nothing has been assigned to", () => {
+    expect(canCancelModelReservation({ fulfilledQuantity: 0 })).toBe(true);
+  });
+
+  it("refuses once a single unit is on the booking", () => {
+    // Deleting the row would strip that asset's provenance via the FK's
+    // ON DELETE SET NULL, so the server refuses. Reducing the quantity to the
+    // assigned count is the route that releases the rest.
+    expect(canCancelModelReservation({ fulfilledQuantity: 1 })).toBe(false);
+  });
+
+  it("refuses a fully assigned reservation", () => {
+    expect(canCancelModelReservation({ fulfilledQuantity: 5 })).toBe(false);
+  });
+});
+
+describe("canEditModelReservations", () => {
+  it("allows adjusting the reservation while the booking is live", () => {
+    // A booking that is already out is exactly when an operator learns a unit
+    // is damaged or was never collected, and the reservation still holds that
+    // unit against every other booking in the window.
+    for (const status of ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"]) {
+      expect(canEditModelReservations(status)).toBe(true);
+    }
+  });
+
+  it("refuses once the booking is finished, cancelled or archived", () => {
+    for (const status of ["COMPLETE", "CANCELLED", "ARCHIVED"]) {
+      expect(canEditModelReservations(status)).toBe(false);
+    }
+  });
+
+  it("answers the same statuses as assigning units", () => {
+    // The two questions have to move together: a reservation an operator can
+    // still fulfil is one they must also be able to correct, and the reverse.
+    for (const status of [
+      "DRAFT",
+      "RESERVED",
+      "ONGOING",
+      "OVERDUE",
+      "COMPLETE",
+      "CANCELLED",
+      "ARCHIVED",
+      "SOME_FUTURE_STATUS",
+    ]) {
+      expect(canEditModelReservations(status)).toBe(
+        canAssignModelUnits(status)
+      );
+    }
   });
 });
 
