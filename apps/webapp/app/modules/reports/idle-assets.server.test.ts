@@ -69,7 +69,9 @@ describe("idleAssetsReport", () => {
   });
 
   it("finds the last use with the archive-aware predicate in all three helpers", async () => {
-    await idleAssetsReport({ organizationId: "org-1" });
+    // `currency` formats the Idle Value KPI string, which these assertions do
+    // not read — supplied because the report requires it, not as a variable.
+    await idleAssetsReport({ organizationId: "org-1", currency: "USD" });
 
     // Rows fetch, idle count, and KPI computation each scan assets once.
     const calls = vi.mocked(db.asset.findMany).mock.calls;
@@ -103,6 +105,7 @@ describe("idleAssetsReport", () => {
 
     const result = await idleAssetsReport({
       organizationId: "org-1",
+      currency: "USD",
       idleThresholdDays: 30,
     });
 

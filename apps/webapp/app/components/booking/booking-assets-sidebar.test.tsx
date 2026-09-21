@@ -212,6 +212,45 @@ describe("BookingAssetsSidebar QT stock badges", () => {
     expect(trigger).toHaveClass("bg-red-50");
   });
 
+  it("renders no stock badge for a kit-driven row even when the loose pool is empty", async () => {
+    // A kit holding the asset's last units: the loose pool reads 0/0, and the
+    // row is booked through the kit (`assetKitId` set), so neither badge
+    // applies. The same figures on a standalone row are the red case above.
+    const kit = {
+      id: "kit-1",
+      name: "Projector case",
+      image: null,
+      imageExpiration: null,
+      category: null,
+    };
+    const asset = makeQtAsset({ assetKits: [{ id: "ak-1", kit }] });
+    const booking = makeBooking({ status: "RESERVED" });
+    fetcher.data = {
+      ...makePayload({ asset, bookedQuantity: 1 }),
+      bookingAssets: [{ id: "ba-kit", quantity: 1, assetKitId: "ak-1", asset }],
+    };
+
+    render(
+      <BookingAssetsSidebar
+        booking={booking}
+        availableUnitsByAsset={{
+          [asset.id]: { bookable: 0, physicalNow: 0, reserved: 0 },
+        }}
+      />
+    );
+
+    await openSidebar();
+
+    // Kit groups start collapsed; the member row only exists once expanded.
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Toggle kit expand" })
+    );
+
+    expect(await screen.findByText("Boards")).toBeInTheDocument();
+    expect(screen.queryByText("Insufficient stock")).not.toBeInTheDocument();
+    expect(screen.queryByText("Checked out elsewhere")).not.toBeInTheDocument();
+  });
+
   it("renders the amber PendingReturnBadge on a not-started booking when rowQty fits bookable but exceeds physicalNow, with an explanatory tooltip", async () => {
     // "Boards" real case: 10 total, 7 needed; 7 return before this RESERVED
     // booking's window opens (bookable=10) but only 3 are on the shelf

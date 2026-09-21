@@ -168,8 +168,9 @@ export type SelectedBookingItem = {
  * the predicate the bulk check-in dialog uses to filter its submitted set, so
  * the dropdown's enable/disable state can never disagree with the dialog.
  *
- * Intent-named delegate of {@link isAssetCheckedOutInBooking}, paired with
- * {@link isAssetCheckableOut} for symmetric, self-documenting call sites.
+ * Intent-named delegate of {@link isAssetCheckedOutInBooking}. Check-out
+ * eligibility lives in `makeCheckoutEligibility` (`~/modules/booking/helpers`),
+ * the rule the scan drawer and the booking list's bulk actions share.
  *
  * @param asset - The selected asset (needs `id` and `status`).
  * @param partialCheckinDetails - Per-booking partial check-in records by id.
@@ -185,71 +186,6 @@ export function isAssetCheckableIn(
     asset,
     partialCheckinDetails,
     bookingStatus
-  );
-}
-
-/**
- * Whether a selected asset is eligible to be CHECKED OUT for this booking.
- *
- * Two flavours of eligibility, decided by the asset's tracking type:
- *
- * - **INDIVIDUAL** (and the legacy fallback): binary. An asset can be checked
- *   out only when it is still booked — i.e. NOT already checked out. "Already
- *   checked out" means its id is in the booking's per-booking partial-checkout
- *   records OR its own status is CHECKED_OUT.
- * - **QUANTITY_TRACKED** with a `remainingByAssetId` map supplied: top-off
- *   aware. The asset stays eligible as long as it still has units remaining
- *   for THIS booking (`remaining > 0`), even if some units have already been
- *   checked out (the "partially checked out, top up the rest" case). When the
- *   map is omitted or doesn't contain this asset's id, falls back to the
- *   binary check — legacy loaders that don't yet plumb the remaining map keep
- *   their existing behaviour.
- *
- * Mirrors the bulk check-out dialog's filter so the dropdown and dialog agree.
- * Keeping the QT branch HERE (in one helper) is deliberate: list-bulk-actions
- * dropdown, the bulk partial-checkout dialog, and any future consumer all go
- * through one source of truth — no duplicated `type === "QUANTITY_TRACKED"`
- * checks scattered across call sites.
- *
- * NOTE: there is intentionally no QT branch on the check-IN side; check-in
- * eligibility is fully driven by `partialCheckinDetails` (consumed by
- * {@link isAssetCheckableIn} via {@link isAssetCheckedOutInBooking}), which
- * already covers the QUANTITY_TRACKED semantics correctly.
- *
- * @param asset - The selected asset (needs `id` and `status`). May also carry
- *   `type` so the QT branch can recognise it.
- * @param checkedOutAssetIds - Ids already checked out for this booking. A Set
- *   (not array) keeps membership O(1) across a large selection — matching the
- *   dialog's existing `checkedOutIdsSet`.
- * @param options.remainingByAssetId - Optional map of `assetId -> remaining
- *   units` for the current booking. When supplied for a QUANTITY_TRACKED
- *   asset, eligibility becomes `remaining > 0` instead of the binary check —
- *   so a partially-checked-out QT row stays eligible until every booked unit
- *   has been dispositioned. When the map is undefined (legacy callers) or the
- *   asset is missing from it, the binary fallback runs.
- * @returns `true` if the asset can be checked out.
- */
-export function isAssetCheckableOut(
-  asset: AssetWithStatus,
-  checkedOutAssetIds: Set<string>,
-  options?: { remainingByAssetId?: Record<string, number> }
-): boolean {
-  // QUANTITY_TRACKED + caller supplied the remaining map for this asset:
-  // top-off eligibility — stay actionable while units remain for this booking.
-  const isQtyTracked = (asset as { type?: string }).type === "QUANTITY_TRACKED";
-  if (
-    isQtyTracked &&
-    options?.remainingByAssetId &&
-    asset.id in options.remainingByAssetId
-  ) {
-    return (options.remainingByAssetId[asset.id] ?? 0) > 0;
-  }
-
-  // INDIVIDUAL (or QT without the map): binary fallback — preserves the
-  // pre-existing behaviour for every legacy loader that hasn't been updated
-  // to plumb the remaining map through yet.
-  return !(
-    checkedOutAssetIds.has(asset.id) || asset.status === AssetStatus.CHECKED_OUT
   );
 }
 
@@ -747,6 +683,13 @@ export type QtyStockAvailability = {
  * comparisons. RED is checked before AMBER — a genuine over-commit is
  * always the more actionable signal.
  *
+ * A kit-driven row (`BookingAsset.assetKitId` set) gets neither badge. Its
+ * units come out of the kit's own allocation (`AssetKit.quantity`), which
+ * `bookable` and `physicalNow` already subtract via `inKits`; measured
+ * against the loose pool it would read as short whenever the kit holds the
+ * asset's last units. The reserve and check-out guards skip these rows on
+ * the same `assetKitId IS NULL` predicate, so the badge and the guards agree.
+ *
  * @param args.rowQty - This row's booked quantity.
  * @param args.availability - The asset's workspace-availability figures, or
  *   `undefined` when the loader didn't ship the map (e.g. INDIVIDUAL assets,
@@ -755,17 +698,23 @@ export type QtyStockAvailability = {
  *   (`contextStatus` / `effectiveStatus`) — feeds
  *   {@link isQtyRowCheckedOutOrFulfilled}.
  * @param args.bookingStatus - The parent booking's status.
+ * @param args.isKitDriven - Whether the row is a kit-driven slice
+ *   (`BookingAsset.assetKitId` set). Required, not defaulted: a surface that
+ *   renders kit members and leaves it out would badge them against the loose
+ *   pool with nothing on screen to show the mistake.
  */
 export function resolveQtyStockBadgeVariant({
   rowQty,
   availability,
   contextStatus,
   bookingStatus,
+  isKitDriven,
 }: {
   rowQty: number;
   availability: QtyStockAvailability | undefined;
   contextStatus: string;
   bookingStatus: string;
+  isKitDriven: boolean;
 }): "insufficient" | "pending-return" | null {
   if (!availability) return null;
 
@@ -780,6 +729,10 @@ export function resolveQtyStockBadgeVariant({
   if (isQtyRowCheckedOutOrFulfilled(contextStatus)) {
     return null;
   }
+
+  // Bounded by the kit's allocation, not by the loose pool the figures
+  // below describe.
+  if (isKitDriven) return null;
 
   // Strict inequality — at-capacity is NOT a problem.
   if (rowQty > availability.bookable) {

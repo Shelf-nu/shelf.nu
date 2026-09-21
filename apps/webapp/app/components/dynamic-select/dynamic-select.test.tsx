@@ -172,6 +172,61 @@ describe("DynamicSelect", () => {
     });
   });
 
+  describe("Scrolling inside a modal dialog", () => {
+    /**
+     * Every `Sheet` is a modal Radix Dialog, which mounts
+     * `react-remove-scroll`. That listens for `wheel` on `document` and
+     * cancels any whose target is outside the dialog content. This popover is
+     * portalled to `document.body`, so it counts as outside and its option
+     * list stops responding to the wheel — while the scrollbar, a pointer
+     * interaction, keeps working. Stopping the event before it reaches
+     * `document` is what keeps the list scrollable.
+     */
+    it("stops wheel events from reaching document", async () => {
+      const items = createTestItems(3);
+      mockUseModelFilters.mockReturnValue(
+        createMockUseModelFiltersReturn(items)
+      );
+
+      render(
+        <DynamicSelect
+          model={defaultModel}
+          initialDataKey="categories"
+          countKey="totalCategories"
+          contentLabel="Category"
+        />
+      );
+
+      const user = userEvent.setup();
+      await act(async () => {
+        await user.click(screen.getByRole("button"));
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Item 1")).toBeInTheDocument();
+      });
+
+      // Stands in for react-remove-scroll's document-level listener.
+      const documentListener = vi.fn();
+      document.addEventListener("wheel", documentListener);
+
+      try {
+        act(() => {
+          screen.getByText("Item 1").dispatchEvent(
+            new WheelEvent("wheel", {
+              bubbles: true,
+              cancelable: true,
+              deltaY: 120,
+            })
+          );
+        });
+
+        expect(documentListener).not.toHaveBeenCalled();
+      } finally {
+        document.removeEventListener("wheel", documentListener);
+      }
+    });
+  });
+
   describe("WithoutValueItem rendering", () => {
     it("renders withoutValueItem when provided", async () => {
       const items = createTestItems(3);

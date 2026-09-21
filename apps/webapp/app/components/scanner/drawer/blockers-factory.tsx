@@ -89,7 +89,15 @@ export function createBlockers({
         </div>
 
         <hr className="my-2" />
-        <ul className="list-inside list-disc text-[12px] text-gray-500">
+        {/* The blocker list renders in the drawer's pinned footer, which does
+            not shrink — so its height is taken straight from the action button
+            below it. Drawers declare up to nine blocker categories, each able
+            to carry a description, and in scanner mode the whole drawer is only
+            `viewport - 400`. The cap is viewport-relative for that reason: a
+            fixed pixel cap that fits a laptop still buries the button on a
+            phone. The heading and "Resolve all" stay outside it, so the count
+            and the escape hatch are legible however long the list runs. */}
+        <ul className="max-h-[20vh] list-inside list-disc overflow-y-auto text-[12px] text-gray-500">
           {activeBlockers.map(({ blocker, originalIndex }) => (
             // Prefer an explicit `id` when provided; otherwise fall back to
             // the blocker's position in the original (unfiltered) config

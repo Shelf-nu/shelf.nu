@@ -2,12 +2,13 @@
  * Fulfil Reservations & Check Out Route
  *
  * Dedicated scanner route for bookings that still carry outstanding
- * `BookingModelRequest` rows (Phase 3d — Book-by-Model). Opening the
+ * `BookingModelRequest` rows (book-by-model). Opening the
  * route shows the operator *what's expected* (pending model rows
  * rendered from `modelRequests`), lets them scan concrete assets to
- * fulfil those requests, and — on submit — materialises the requests
- * AND transitions the booking from `RESERVED → ONGOING` in a single
- * atomic transaction via `fulfilModelRequestsAndCheckout`.
+ * fulfil those requests, and — on submit — delegates to
+ * `fulfilAndCheckOut`, which materialises the requests and then checks
+ * the booking out: the whole booking, or, under the workspace's
+ * explicit check-out requirement, only the scanned units.
  *
  * Mirrors `bookings.$bookingId.overview.scan-assets.tsx` for the
  * scanner shell (header, camera, `addScannedItemAtom`). The drawer
@@ -19,16 +20,16 @@
  * the normal checkout path directly; the fulfil detour would just be
  * ceremony.
  *
- * @see {@link file://./../../modules/booking/service.server.ts} —
- *   `fulfilModelRequestsAndCheckout` (T2).
+ * @see {@link file://./../../modules/booking/fulfil-and-checkout.server.ts}
+ *   — orchestrates the full vs. partial check-out.
  * @see {@link file://./../../components/scanner/drawer/uses/fulfil-reservations-drawer.tsx}
- *   — drawer UI (T5).
+ *   — drawer UI.
  * @see {@link file://./../../hooks/use-booking-fulfil-session-initialization.ts}
- *   — atom seeding hook (T4).
- * @see {@link file://./../../atoms/qr-scanner.ts} — fulfil atoms (T1).
+ *   — atom seeding hook.
+ * @see {@link file://./../../atoms/qr-scanner.ts} — fulfil atoms.
  */
 
-import { OrganizationRoles } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -49,13 +50,14 @@ import { db } from "~/database/db.server";
 import { useBookingFulfilSessionInitialization } from "~/hooks/use-booking-fulfil-session-initialization";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import {
-  fulfilModelRequestsAndCheckout,
-  getBooking,
-} from "~/modules/booking/service.server";
+import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
+import { getBooking } from "~/modules/booking/service.server";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -95,7 +97,7 @@ export const links: LinksFunction = () => [
  *   Only meaningful when `isBookingEarlyCheckout(booking.from)` is
  *   true; otherwise the service ignores it.
  *
- * Exported so the drawer (T5) can reuse the same schema for
+ * Exported so the drawer can reuse the same schema for
  * client-side form validation.
  */
 export const fulfilAndCheckoutSchema = z.object({
@@ -113,6 +115,8 @@ export const fulfilAndCheckoutSchema = z.object({
  *   already-included concrete assets.
  * - Rejects if the user can't manage the booking (mirrors
  *   scan-assets).
+ * - Tells the drawer whether submit sends out only the scanned items, so
+ *   its "something to check out" rule matches the action's.
  * - Short-circuits to `/bookings/:id` when there are zero outstanding
  *   model requests — the regular checkout flow is correct in that
  *   case and the fulfil scanner would be a confusing detour.
@@ -184,22 +188,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * Outstanding model requests — anything with `fulfilledAt === null`
-     * still needs fulfilment. If none remain, this route has nothing to
-     * do; send the operator back to the booking page where the normal
-     * checkout flow lives. `booked` reflects the original reservation
-     * intent (for progress denominators); `remaining` is what's still
-     * outstanding after any prior partial-scan progress, so the drawer
-     * pre-populates the right number of pending rows.
+     * Outstanding model requests, read through the shared predicate so this
+     * page offers the fulfil scanner exactly when the service will accept a
+     * fulfilment. If none remain, this route has nothing to do; send the
+     * operator back to the booking page where the normal checkout flow
+     * lives. `booked` reflects the original reservation intent (for progress
+     * denominators); `remaining` is what's still outstanding after any prior
+     * partial-scan progress, so the drawer pre-populates the right number of
+     * pending rows.
      */
-    const expectedModelRequests = booking.modelRequests
-      .filter((r) => r.fulfilledAt === null)
-      .map((r) => ({
-        assetModelId: r.assetModelId,
-        assetModelName: r.assetModel.name,
-        booked: r.quantity,
-        remaining: r.quantity - r.fulfilledQuantity,
-      }));
+    const expectedModelRequests = getOutstandingModelRequests(
+      booking.modelRequests
+    ).map((r) => ({
+      assetModelId: r.assetModelId,
+      assetModelName: r.assetModel.name,
+      booked: r.quantity,
+      remaining: r.quantity - r.fulfilledQuantity,
+    }));
 
     if (expectedModelRequests.length === 0) {
       return redirect(`/bookings/${bookingId}`);
@@ -243,6 +248,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       type: ba.asset.type as "INDIVIDUAL" | "QUANTITY_TRACKED",
     }));
 
+    /**
+     * Whether submit sends out only the scanned items, decided the same way
+     * `fulfilAndCheckOut` decides it: under the explicit check-out requirement,
+     * or once the booking is no longer RESERVED.
+     */
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const checksOutScannedOnly =
+      isExplicitCheckoutRequired({ role, bookingSettings }) ||
+      booking.status !== BookingStatus.RESERVED;
+
     const title = `Fulfil reservations & check out | ${booking.name}`;
     const header: HeaderData = {
       title,
@@ -254,6 +270,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking,
       expectedModelRequests,
       alreadyIncluded,
+      checksOutScannedOnly,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -264,11 +281,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 /**
  * Action for the fulfil-and-checkout route.
  *
- * Parses the drawer-submitted payload, delegates to
- * `fulfilModelRequestsAndCheckout` (single atomic tx: materialise
- * requests → create BookingAssets → optional early-date rewrite →
- * status transition → post-commit emails/scheduler), and redirects
- * back to the booking page on success.
+ * Parses the drawer-submitted payload and delegates to
+ * `fulfilAndCheckOut`, which materialises the requests into
+ * `BookingAsset` rows and then checks the booking out — the whole
+ * booking, or, under the workspace's explicit check-out requirement,
+ * only the scanned units — before redirecting back to the booking page
+ * on success.
  *
  * `hints` is required by the service for the timezone-aware early-
  * date rewrite and the check-in scheduler — matches how the existing
@@ -303,8 +321,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     );
 
     /**
-     * Pull the booking's from/to for the pre-tx conflict guard inside
-     * the service (mirrors the existing `checkoutBooking` caller in
+     * Pull the booking's from/to for the full check-out's pre-tx conflict
+     * guard (mirrors the existing `checkoutBooking` caller in
      * `bookings.$bookingId.overview.tsx`).
      */
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
@@ -318,11 +336,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       },
     });
 
-    // The loader restricts via `canUserManageBookingAssets`, but the ACTION had
-    // no equivalent — a direct POST skipped it entirely. SELF_SERVICE holds
-    // `booking:checkout`, and `fulfilModelRequestsAndCheckout` does not check
-    // ownership itself, so this is what stops a cross-user checkout. No-op for
-    // ADMIN/OWNER. Mirrors api+/mobile+/bookings.fulfil-and-checkout.ts.
+    // The loader's `canUserManageBookingAssets` only shapes what renders; this
+    // check is what stops a cross-user check-out on a direct POST. SELF_SERVICE
+    // holds `booking:checkout`, and `fulfilAndCheckOut` does not check
+    // ownership itself. No-op for ADMIN/OWNER. Mirrors
+    // api+/mobile+/bookings.fulfil-and-checkout.ts.
     if (isSelfServiceOrBase) {
       validateBookingOwnership({
         booking: basicBookingInfo,
@@ -332,7 +350,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    await fulfilModelRequestsAndCheckout({
+    // Decided after the booking and ownership checks, so a missing or foreign
+    // booking answers as such. Under the requirement only the scanned units
+    // are checked out.
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const requireExplicitCheckout = isExplicitCheckoutRequired({
+      role,
+      bookingSettings,
+    });
+
+    const { remainingAssetCount } = await fulfilAndCheckOut({
       bookingId,
       organizationId,
       userId,
@@ -342,17 +370,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       hints: getClientHint(request),
       from: basicBookingInfo.from,
       to: basicBookingInfo.to,
+      requireExplicitCheckout,
     });
 
     sendNotification({
       title: "Checked out",
-      message: "Your booking has been checked out successfully",
+      message:
+        remainingAssetCount > 0
+          ? `The scanned units are checked out. ${remainingAssetCount} more ${
+              remainingAssetCount === 1 ? "asset is" : "assets are"
+            } still to check out.`
+          : "Your booking has been checked out successfully",
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
 
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
+    // `error()` also sends the refusal to this user as an error notification.
+    // That toast is how a refused check-out reaches the operator in the drawer.
     const reason = makeShelfError(cause, { userId, bookingId });
     return data(error(reason), { status: reason.status });
   }
@@ -373,7 +409,7 @@ export const handle = {
  * Seeds the fulfil session atoms from the loader payload, renders the
  * drawer + camera, and forwards QR detections to the shared
  * `addScannedItemAtom`. All actual fulfil-specific UI lives in
- * `FulfilReservationsDrawer` (T5); this component is intentionally a
+ * `FulfilReservationsDrawer`; this component is intentionally a
  * thin harness, matching `scan-assets.tsx`.
  */
 export default function FulfilAndCheckoutForBooking() {
@@ -388,11 +424,15 @@ export default function FulfilAndCheckoutForBooking() {
 
   // The shell needs the loader payload to seed the fulfil session
   // atoms on mount via `useBookingFulfilSessionInitialization`. The
-  // drawer (T5) also reads `useLoaderData` directly for its own
+  // drawer also reads `useLoaderData` directly for its own
   // rendering — that's fine; `useLoaderData` dedupes via the router
   // context.
-  const { booking, expectedModelRequests, alreadyIncluded } =
-    useLoaderData<typeof loader>();
+  const {
+    booking,
+    expectedModelRequests,
+    alreadyIncluded,
+    checksOutScannedOnly,
+  } = useLoaderData<typeof loader>();
 
   useBookingFulfilSessionInitialization({
     session: {
@@ -405,6 +445,8 @@ export default function FulfilAndCheckoutForBooking() {
       bookingFrom: booking.from
         ? new Date(booking.from).toISOString()
         : new Date().toISOString(),
+      bookingStatus: booking.status,
+      checksOutScannedOnly,
       expectedModelRequests,
       alreadyIncluded,
     },

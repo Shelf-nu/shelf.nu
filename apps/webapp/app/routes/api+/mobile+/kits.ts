@@ -7,6 +7,7 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibility.server";
+import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -18,7 +19,9 @@ import {
  *
  * Returns paginated kits for the given organization, each with its category,
  * location, asset count, and custodian. Mirrors the mobile assets list route
- * (search, infinite scroll, status filter, and the my-custody filter).
+ * (search, infinite scroll, status filter, and the my-custody filter). A kit
+ * image whose signed URL has lapsed is re-signed, and the new URL written back
+ * to the kit, before it is sent.
  *
  * @see {@link file://./assets.ts} the asset twin of this route
  */
@@ -66,18 +69,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...(myCustody ? { custody: { custodian: { userId: user.id } } } : {}),
     };
 
-    const [kits, totalCount] = await Promise.all([
+    const [storedKits, totalCount] = await Promise.all([
       db.kit.findMany({
         where,
         select: {
           id: true,
+          // Scopes the write-back of a re-signed image below.
+          organizationId: true,
           name: true,
           status: true,
           image: true,
           imageExpiration: true,
           // Kits link to assets via the `AssetKit` pivot model — count that
-          // relation, then re-key to `assets` below so the mobile companion's
-          // existing API contract (`_count.assets`) is preserved.
+          // relation, then re-key it below to `_count.assets`, the key the
+          // companion reads.
           _count: { select: { assetKits: true } },
           category: { select: { id: true, name: true } },
           location: { select: { id: true, name: true } },
@@ -96,6 +101,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       db.kit.count({ where }),
     ]);
 
+    // A kit's `image` is a signed storage URL that stops working once
+    // `imageExpiration` passes, and the app has no way to renew it. Re-sign the
+    // lapsed ones so the list never receives a dead link. `organizationId` only
+    // scopes that write-back, so it is dropped before the response.
+    const kits = (await refreshExpiredKitImages(storedKits)).map(
+      ({ organizationId: _organizationId, ...kit }) => kit
+    );
+
     // Re-shape `_count.assetKits` → `_count.assets` so the response matches
     // the contract the companion app already consumes (see
     // `apps/companion/lib/api/types.ts` Kit shape).
@@ -103,10 +116,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...rest,
       _count: { assets: _count.assetKits },
       /**
-       * `kit: read` is held by BASE and SELF_SERVICE, and this list had no
-       * custody gate at all — a restricted viewer read every kit's holder
-       * from it. Null the object for holders the viewer may not see, matching
-       * the mobile detail routes; the caller's own custody stays visible.
+       * `kit: read` is held by BASE and SELF_SERVICE, so a restricted viewer
+       * reaches this list. Null the object for holders the viewer may not
+       * see, matching the mobile detail routes; the caller's own custody
+       * stays visible.
        */
       custody:
         rest.custody &&

@@ -35,7 +35,16 @@ const ROLE_PERMISSIONS = { OWNER: { qr: ["read", "update"] } };
  */
 ```
 
-Existing mirrors: none — the permissions mirror was extracted to
-`@shelf/permissions` (packages/permissions). If you create a new mirror,
-add it to this list; when you touch one, diff it against its canonical
-source before shipping.
+Existing mirrors:
+
+| Companion file                                                              | Canonical source                                                                      | Extraction target                             |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `lib/booking-kit-rows.ts` → `describeBookingRows`                           | `apps/webapp/app/utils/booking-rows.ts`                                               | `@shelf/labels`                               |
+| `app/(tabs)/bookings/[id].tsx` → the `outstandingModelRequests` predicate   | `apps/webapp/app/utils/booking-model-requests.ts` → `getOutstandingModelRequests`     | a pure `packages/*` booking module (none yet) |
+| `lib/display-codes.ts` → the code option labels                             | `apps/webapp/app/components/code-preview/code-preview.tsx`                            | `@shelf/labels`                               |
+| `components/shared/code-section.tsx` → `BWIP_FORMAT` / `IS_TWO_DIMENSIONAL` | `apps/webapp/app/components/barcode/barcode-display.tsx`                              | a pure `packages/*` barcode module (none yet) |
+| `lib/booking-reservation-checkout.ts` → unassigned-units confirm copy       | `apps/webapp/app/components/booking/checkout-dialog.tsx` + `summarizeUnassignedUnits` | `@shelf/labels`                               |
+
+The permissions mirror is gone — it was extracted to `@shelf/permissions`
+(packages/permissions). If you create a new mirror, add it to this table; when
+you touch one, diff it against its canonical source before shipping.

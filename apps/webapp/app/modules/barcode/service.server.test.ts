@@ -1366,6 +1366,39 @@ describe("parseBarcodesFromImportData", () => {
     ]);
   });
 
+  it("should keep a quoted barcode value that contains a comma as one barcode", async () => {
+    expect.assertions(2);
+    // why: the uniqueness lookup is a DB round trip; an empty result means no
+    // value in this cell is already linked, so the parse is what gets asserted.
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockResolvedValue([]);
+
+    const dataWithQuotedBarcode = [
+      {
+        key: "asset-1",
+        title: "Test Asset 1",
+        // How the export writes a value carrying the separator.
+        barcode_Code128: '"SN-2024,001",MBP002',
+      },
+    ];
+
+    const result = await parseBarcodesFromImportData({
+      data: dataWithQuotedBarcode,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].barcodes).toEqual([
+      {
+        type: BarcodeType.Code128,
+        value: "SN-2024,001",
+        existingId: undefined,
+      },
+      { type: BarcodeType.Code128, value: "MBP002", existingId: undefined },
+    ]);
+  });
+
   it("should normalize barcode values to uppercase", async () => {
     expect.assertions(2);
     //@ts-expect-error missing vitest type

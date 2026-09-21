@@ -1,3 +1,13 @@
+/**
+ * Mobile API route: home dashboard.
+ *
+ * Serves the companion's Home screen in one request: KPI counts, assets by
+ * status, the newest assets, upcoming, active and overdue bookings, and active
+ * audits. Org-scoped behind the mobile bearer auth. Lapsed photo URLs on the
+ * newest assets are re-signed before the response is sent.
+ *
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -7,6 +17,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import {
   getBookings,
   resolveCustodianScope,
@@ -79,7 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       teamMemberCount,
       assetsByStatus,
       myCustodyCount,
-      newestAssets,
+      storedNewestAssets,
       upcomingBookingsResult,
       activeBookingsResult,
       overdueBookingsResult,
@@ -133,6 +147,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           status: true,
           mainImage: true,
           thumbnailImage: true,
+          // Lets the re-sign below tell a lapsed photo URL.
+          mainImageExpiration: true,
           // Model cover image; `serializeAssetImage` below resolves the cascade
           ...ASSET_MODEL_IMAGE_SELECT,
           category: { select: { id: true, name: true, color: true } },
@@ -296,6 +312,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       custodianTeamMember?: { name: string; userId: string | null } | null;
       _count?: { bookingAssets: number };
     };
+
+    const newestAssets = await refreshExpiredAssetImages(storedNewestAssets, {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
 
     // Format booking results
     const formatBooking = (b: MobileDashboardBooking) => ({
