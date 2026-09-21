@@ -1,3 +1,17 @@
+/**
+ * Invite Service
+ *
+ * Creates workspace invites (single and CSV import), accepts or rejects them,
+ * checks that the signed-in user is the invitee, and lists pending invites
+ * for the team settings page.
+ *
+ * Invitee emails are stored lowercased, and every match against a stored
+ * email ignores letter case, because stored rows can still hold capitals.
+ *
+ * @see {@link file://./helpers.ts}
+ * @see {@link file://./../../routes/_auth+/accept-invite.$inviteId.tsx}
+ * @see {@link file://./../../routes/api+/settings.import-users.ts}
+ */
 import type {
   Invite,
   Organization,
@@ -27,7 +41,13 @@ import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
-import { generateRandomCode, inviteEmailText, splitName } from "./helpers";
+import {
+  caseInsensitiveEmailFilter,
+  generateRandomCode,
+  inviteEmailText,
+  normalizeInviteEmail,
+  splitName,
+} from "./helpers";
 import { processInvitationMessage } from "./message-validator.server";
 import { isInvitableRole } from "./roles";
 import { createTeamMember } from "../team-member/service.server";
@@ -100,7 +120,7 @@ export async function getExistingActiveInvite({
     return await db.invite.findFirst({
       where: {
         organizationId,
-        inviteeEmail,
+        inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
         OR: [
           //invite is either not rejected or not expired
           {
@@ -143,6 +163,8 @@ export async function createInvite(
     extraMessage,
   } = payload;
 
+  inviteeEmail = normalizeInviteEmail(inviteeEmail);
+
   try {
     // Add SSO validation before proceeding with invite
     await validateInvite(inviteeEmail, organizationId);
@@ -162,7 +184,7 @@ export async function createInvite(
 
     const existingUser = await db.user.findFirst({
       where: {
-        email: inviteeEmail,
+        email: caseInsensitiveEmailFilter(inviteeEmail),
         userOrganizations: {
           some: { organizationId },
         },
@@ -184,11 +206,16 @@ export async function createInvite(
     }
 
     if (!teamMemberId) {
+      /**
+       * The oldest earlier invite decides the team member, so a person who was
+       * invited more than once keeps the record that holds their history.
+       */
       const previousInvite = await db.invite.findFirst({
         where: {
           organizationId,
-          inviteeEmail,
+          inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
         },
+        orderBy: { createdAt: "asc" },
       });
 
       if (previousInvite?.teamMemberId) {
@@ -206,7 +233,7 @@ export async function createInvite(
       const previousActiveInvite = await db.invite.findFirst({
         where: {
           organizationId,
-          inviteeEmail,
+          inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
           status: InviteStatuses.PENDING,
           expiresAt: { gt: new Date() },
         },
@@ -404,7 +431,9 @@ export async function updateInviteStatus({
       const { firstName, lastName } = splitName(invite.inviteeTeamMember.name);
 
       const user = await createUserOrAttachOrg({
-        email: invite.inviteeEmail,
+        // A stored invite can hold capitals; the account is keyed on the
+        // normalised address.
+        email: normalizeInviteEmail(invite.inviteeEmail),
         organizationId: invite.organizationId,
         roles: invite.roles,
         password,
@@ -454,7 +483,7 @@ export async function updateInviteStatus({
     await db.invite.updateMany({
       where: {
         status: InviteStatuses.PENDING,
-        inviteeEmail: invite.inviteeEmail,
+        inviteeEmail: caseInsensitiveEmailFilter(invite.inviteeEmail),
         organizationId: invite.organizationId,
       },
       data: { status: InviteStatuses.INVALIDATED },
@@ -474,7 +503,12 @@ export async function updateInviteStatus({
 }
 
 /**
- * Checks if the user is already signed in and if the invite is for the same user
+ * Checks that the signed-in user is the person the invite was sent to.
+ *
+ * Emails are compared without regard to letter case, because a stored invite
+ * can keep the capitals of the address it was created with.
+ *
+ * @throws {ShelfError} "Wrong user" when the addresses differ
  */
 export async function checkUserAndInviteMatch({
   context,
@@ -498,7 +532,12 @@ export async function checkUserAndInviteMatch({
     })
     .catch(() => null);
 
-  if (user?.email !== invite?.inviteeEmail) {
+  const isInvitedUser =
+    !!user &&
+    normalizeInviteEmail(user.email) ===
+      normalizeInviteEmail(invite.inviteeEmail);
+
+  if (!isInvitedUser) {
     throw new ShelfError({
       cause: null,
       title: "Wrong user",
@@ -661,14 +700,25 @@ export async function bulkInviteUsers({
     }
     const sanitizedMessage = messageResult.message;
 
-    // Filter out entries with missing or invalid email/role
-    const validUsers = users.filter(
-      (user) =>
-        user.email &&
-        user.role &&
-        user.email.trim() !== "" &&
-        user.role.trim() !== ""
-    );
+    /**
+     * Filter out entries with missing or invalid email/role, then normalise
+     * the email so that duplicates, lookups and the stored invite all use the
+     * same form. The team member is named after the address as typed, because
+     * that name becomes the first name of an account created on acceptance.
+     */
+    const validUsers = users
+      .filter(
+        (user) =>
+          user.email &&
+          user.role &&
+          user.email.trim() !== "" &&
+          user.role.trim() !== ""
+      )
+      .map((user) => ({
+        ...user,
+        email: normalizeInviteEmail(user.email),
+        name: user.email.trim().split("@")[0],
+      }));
 
     /**
      * Defense in depth: `users` is typed as `InviteUserSchema[]`, but that type
@@ -726,7 +776,7 @@ export async function bulkInviteUsers({
     const emails = uniquePayloads.map((p) => p.email);
     const existingUsers = await db.user.findMany({
       where: {
-        email: { in: emails },
+        email: caseInsensitiveEmailFilter(emails),
         userOrganizations: {
           some: { organizationId },
         },
@@ -734,13 +784,16 @@ export async function bulkInviteUsers({
       select: { email: true },
     });
 
-    const existingEmailsInOrg = new Set(existingUsers.map((u) => u.email));
+    // Stored emails can contain capitals; compare in normalised form.
+    const existingEmailsInOrg = new Set(
+      existingUsers.map((u) => normalizeInviteEmail(u.email))
+    );
 
     // Batch check for existing invites in one query
     const existingInvites = await db.invite.findMany({
       where: {
         organizationId,
-        inviteeEmail: { in: emails },
+        inviteeEmail: caseInsensitiveEmailFilter(emails),
         status: InviteStatuses.PENDING,
         expiresAt: { gt: new Date() },
       },
@@ -755,8 +808,17 @@ export async function bulkInviteUsers({
       },
     });
 
+    /**
+     * One person can have several pending invites (for example, the same
+     * address stored with different capitals), so the "all skipped" checks
+     * below compare sets of addresses, not row counts.
+     */
+    const existingInviteEmails = new Set(
+      existingInvites.map((i) => normalizeInviteEmail(i.inviteeEmail))
+    );
+
     /* All emails are already invited */
-    if (existingInvites.length === emails.length) {
+    if (emails.every((email) => existingInviteEmails.has(email))) {
       sendNotification({
         title: "Users already invited",
         message:
@@ -774,7 +836,7 @@ export async function bulkInviteUsers({
     }
 
     /* All emails are already in organization */
-    if (existingUsers.length === emails.length) {
+    if (emails.every((email) => existingEmailsInOrg.has(email))) {
       sendNotification({
         title: "Users already member of organization",
         message: "All user in csv file are already part of your organization.",
@@ -791,7 +853,12 @@ export async function bulkInviteUsers({
     }
 
     /* All emails are either in organization already or invited already */
-    if (existingInvites.length + existingUsers.length === emails.length) {
+    if (
+      emails.every(
+        (email) =>
+          existingInviteEmails.has(email) || existingEmailsInOrg.has(email)
+      )
+    ) {
       sendNotification({
         title: "0 users invited",
         message:
@@ -808,8 +875,6 @@ export async function bulkInviteUsers({
       };
     }
 
-    const existingInviteEmails = existingInvites.map((i) => i.inviteeEmail);
-
     /**
      * We only have to send invite to the
      * - users who have not PENDING invitation and
@@ -817,8 +882,7 @@ export async function bulkInviteUsers({
      */
     let validPayloads = uniquePayloads.filter(
       (p) =>
-        !existingInviteEmails.includes(p.email) &&
-        !existingEmailsInOrg.has(p.email)
+        !existingInviteEmails.has(p.email) && !existingEmailsInOrg.has(p.email)
     );
 
     /** Remove the users with teamMemberId who already have a user associated */
@@ -829,11 +893,6 @@ export async function bulkInviteUsers({
 
       return !teamMembersWithUserId.includes(payload.teamMemberId);
     });
-
-    const validPayloadsWithName = validPayloads.map((p) => ({
-      ...p,
-      name: p.email.split("@")[0],
-    }));
 
     // Prepare invite data
     const expiresAt = new Date();
@@ -891,7 +950,7 @@ export async function bulkInviteUsers({
     await db.$transaction(async (tx) => {
       // Bulk create all required team members
       const createdTeamMembers = await tx.teamMember.createManyAndReturn({
-        data: validPayloadsWithName.map((p) => ({
+        data: validPayloads.map((p) => ({
           name: p.name,
           organizationId,
         })),
@@ -916,7 +975,7 @@ export async function bulkInviteUsers({
         return createdTm.id;
       }
 
-      const invitesToCreate = validPayloadsWithName.map((payload) => ({
+      const invitesToCreate = validPayloads.map((payload) => ({
         inviterId: userId,
         organizationId,
         inviteeEmail: payload.email,
@@ -947,11 +1006,13 @@ export async function bulkInviteUsers({
     });
 
     const skippedUsers = users.filter((user) => {
-      if (existingInviteEmails.includes(user.email)) {
+      const email = user.email ? normalizeInviteEmail(user.email) : "";
+
+      if (existingInviteEmails.has(email)) {
         return true;
       }
 
-      if (existingEmailsInOrg.has(user.email)) {
+      if (existingEmailsInOrg.has(email)) {
         return true;
       }
 

@@ -145,6 +145,11 @@ model User {
 
   @@unique([email, username])
   @@index([firstName, lastName])
+  // Invites and CSV import match an account without regard to letter case,
+  // comparing LOWER("email"), which the unique btree above cannot serve.
+  // Prisma has no syntax for an expression index, so it is created in
+  // migrations/20260921100000_add_user_email_lower_index.
+  // @@index([lower(email)])
   // Indexes for foreign keys
   @@index([tierId])
   @@index([lastSelectedOrganizationId])

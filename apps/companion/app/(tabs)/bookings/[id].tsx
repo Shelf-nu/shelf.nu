@@ -2839,6 +2839,8 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   assetCardSelected: {
     borderColor: colors.primary,
+    // A kit member sets its own left edge colour, which wins over borderColor.
+    borderLeftColor: colors.primary,
     backgroundColor: colors.primaryBg,
   },
   assetCardCheckedIn: {
