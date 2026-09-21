@@ -177,12 +177,14 @@ function installClaimSimulator() {
       // falling through to the claim branch below would silently increment
       // `fulfilledQuantity` on every upsert the suite runs.
       if (sql.includes("FOR UPDATE") && sql.includes('"BookingModelRequest"')) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const locked = await (db.bookingModelRequest.findUnique as any)();
+        const locked = await (
+          db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+        )();
         return locked ? [{ id: locked.id ?? "req-1" }] : [];
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const row = await (db.bookingModelRequest.findUnique as any)();
+      const row = await (
+        db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+      )();
       if (!row) return [];
       if (row.fulfilledQuantity >= row.quantity) return [];
       row.fulfilledQuantity += 1;
