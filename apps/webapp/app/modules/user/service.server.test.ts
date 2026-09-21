@@ -535,6 +535,44 @@ describe(createUserOrAttachOrg.name, () => {
       })
     );
   });
+
+  /**
+   * Rows differing only by case with none in the stored lowercase form: the
+   * account picked has to be the same on every call, so it is the oldest row.
+   * That only holds while the query asks the database for that order.
+   */
+  it("asks for the oldest row first when no row carries the lowercase form", async () => {
+    // @ts-expect-error missing vitest type
+    db.user.findMany.mockResolvedValueOnce([
+      {
+        id: "oldest-mixed-case-row",
+        email: "Hello@Supabase.com",
+        sso: false,
+        userOrganizations: [],
+      },
+      {
+        id: "newer-mixed-case-row",
+        email: "HELLO@SUPABASE.COM",
+        sso: false,
+        userOrganizations: [],
+      },
+    ]);
+
+    const result = await createUserOrAttachOrg({
+      email: USER_EMAIL,
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.BASE],
+      password: USER_PASSWORD,
+      firstName: "Existing",
+      createdWithInvite: true,
+    });
+
+    expect(db.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { createdAt: "asc" } })
+    );
+    expect(result.id).toBe("oldest-mixed-case-row");
+    expect(db.user.create).not.toHaveBeenCalled();
+  });
 });
 
 /**

@@ -324,11 +324,15 @@ export async function createUserOrAttachOrg({
     /**
      * `User.email` can contain capitals, so the existing account is matched
      * without regard to letter case. When rows differ only by case, the
-     * lowercase row wins, because that is the form sign-in uses.
+     * lowercase row wins, because that is the form sign-in uses; where no row
+     * carries that form, the oldest one does. Order the query: without it the
+     * fallback returns whichever row Postgres happened to read first, so the
+     * same invite can attach to a different account on a later call.
      */
     const matchingUsers = await db.user.findMany({
       where: { email: caseInsensitiveEmailFilter(email) },
       select: USER_WITH_SSO_DETAILS_SELECT,
+      orderBy: { createdAt: "asc" },
     });
     const shelfUser =
       matchingUsers.find(
