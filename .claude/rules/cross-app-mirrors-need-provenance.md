@@ -44,6 +44,7 @@ Existing mirrors:
 | `lib/display-codes.ts` → the code option labels                             | `apps/webapp/app/components/code-preview/code-preview.tsx`                            | `@shelf/labels`                               |
 | `components/shared/code-section.tsx` → `BWIP_FORMAT` / `IS_TWO_DIMENSIONAL` | `apps/webapp/app/components/barcode/barcode-display.tsx`                              | a pure `packages/*` barcode module (none yet) |
 | `lib/booking-reservation-checkout.ts` → unassigned-units confirm copy       | `apps/webapp/app/components/booking/checkout-dialog.tsx` + `summarizeUnassignedUnits` | `@shelf/labels`                               |
+| `lib/booking-model-reservation.ts` → `modelReservationBounds`               | `apps/webapp/app/modules/booking-model-request/service.server.ts` (the upsert bounds) | a pure `packages/*` booking module (none yet) |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`
 (packages/permissions). If you create a new mirror, add it to this table; when
