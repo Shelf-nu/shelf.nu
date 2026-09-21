@@ -3041,6 +3041,203 @@ describe("bulkReleaseKitCustody - emit-before-cascade", () => {
   });
 });
 
+describe("bulkReleaseKitCustody - per-kit custodian in events", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("records each kit's own custodian as targetUserId", async () => {
+    expect.assertions(2);
+
+    const kitsInCustody = [
+      {
+        id: "kit-1",
+        status: KitStatus.IN_CUSTODY,
+        custody: {
+          id: "kc-1",
+          custodian: { id: "tm-1", name: "Alice", user: { id: "user-alice" } },
+        },
+        assets: [
+          {
+            id: "asset-1",
+            status: AssetStatus.IN_CUSTODY,
+            title: "Asset 1",
+            custody: [{ id: "custody-1" }],
+            kit: { id: "kit-1", name: "Kit 1" },
+          },
+        ],
+      },
+      {
+        id: "kit-2",
+        status: KitStatus.IN_CUSTODY,
+        custody: {
+          id: "kc-2",
+          custodian: { id: "tm-2", name: "Bob", user: { id: "user-bob" } },
+        },
+        assets: [
+          {
+            id: "asset-2",
+            status: AssetStatus.IN_CUSTODY,
+            title: "Asset 2",
+            custody: [{ id: "custody-2" }],
+            kit: { id: "kit-2", name: "Kit 2" },
+          },
+        ],
+      },
+    ];
+
+    // why: the selection under test — two kits held by different people is
+    // the only shape that can tell a per-kit lookup from a per-call one.
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(kitsInCustody);
+    // why: maps each released kitCustody row back to its kit, which is how
+    // the event path resolves the kit an asset came through.
+    //@ts-expect-error missing vitest type
+    db.kitCustody.findMany.mockResolvedValue([
+      { id: "kc-1", kitId: "kit-1", custodianId: "tm-1" },
+      { id: "kc-2", kitId: "kit-2", custodianId: "tm-2" },
+    ]);
+    // why: read twice with different meanings — the rows this release removed,
+    // then the post-cascade check for assets still held elsewhere.
+    (db.custody.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([
+        { assetId: "asset-1", teamMemberId: "tm-1", kitCustodyId: "kc-1" },
+        { assetId: "asset-2", teamMemberId: "tm-2", kitCustodyId: "kc-2" },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const { recordEvents } = await import(
+      "~/modules/activity-event/service.server"
+    );
+    // why: the events and notes under test are written inside the transaction,
+    // so the body has to run against the same mocked delegates.
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await bulkReleaseKitCustody({
+      allowedTeamMemberIds: "all" as const,
+      role: "ADMIN" as const,
+      kitIds: ["kit-1", "kit-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    const events = (recordEvents as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0] as Array<{ assetId: string; targetUserId?: string }>;
+    const targetByAsset = new Map(
+      events.map((e) => [e.assetId, e.targetUserId])
+    );
+
+    expect(targetByAsset.get("asset-1")).toBe("user-alice");
+    expect(targetByAsset.get("asset-2")).toBe("user-bob");
+  });
+
+  it("names each kit's own custodian in the asset notes", async () => {
+    expect.assertions(4);
+
+    // The notes reach the kit by a different route than the events do — the
+    // asset's own `kit` relation, rebuilt from the `assetKits` pivot, not the
+    // released kitCustody row — so asserting the events cannot speak for them.
+    const kitsInCustody = [
+      {
+        id: "kit-1",
+        name: "Kit 1",
+        status: KitStatus.IN_CUSTODY,
+        custody: {
+          id: "kc-1",
+          custodian: {
+            id: "tm-1",
+            name: "Alice",
+            user: {
+              id: "user-alice",
+              firstName: "Alice",
+              lastName: "Ash",
+              displayName: null,
+            },
+          },
+        },
+        assetKits: [
+          {
+            asset: {
+              id: "asset-1",
+              status: AssetStatus.IN_CUSTODY,
+              title: "Asset 1",
+              custody: [{ id: "custody-1" }],
+            },
+          },
+        ],
+      },
+      {
+        id: "kit-2",
+        name: "Kit 2",
+        status: KitStatus.IN_CUSTODY,
+        custody: {
+          id: "kc-2",
+          custodian: {
+            id: "tm-2",
+            name: "Bob",
+            user: {
+              id: "user-bob",
+              firstName: "Bob",
+              lastName: "Birch",
+              displayName: null,
+            },
+          },
+        },
+        assetKits: [
+          {
+            asset: {
+              id: "asset-2",
+              status: AssetStatus.IN_CUSTODY,
+              title: "Asset 2",
+              custody: [{ id: "custody-2" }],
+            },
+          },
+        ],
+      },
+    ];
+
+    // why: as above — two kits, two holders, which is what makes a per-call
+    // custodian distinguishable from a per-kit one.
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue(kitsInCustody);
+    //@ts-expect-error missing vitest type
+    db.kitCustody.findMany.mockResolvedValue([
+      { id: "kc-1", kitId: "kit-1", custodianId: "tm-1" },
+      { id: "kc-2", kitId: "kit-2", custodianId: "tm-2" },
+    ]);
+    // why: the released rows, then the post-cascade still-held check.
+    (db.custody.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([
+        { assetId: "asset-1", teamMemberId: "tm-1", kitCustodyId: "kc-1" },
+        { assetId: "asset-2", teamMemberId: "tm-2", kitCustodyId: "kc-2" },
+      ])
+      .mockResolvedValueOnce([]);
+    // why: the notes are written inside the transaction.
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await bulkReleaseKitCustody({
+      allowedTeamMemberIds: "all" as const,
+      role: "ADMIN" as const,
+      kitIds: ["kit-1", "kit-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    const noteRows = (db.note.createMany as ReturnType<typeof vitest.fn>).mock
+      .calls[0][0].data as Array<{ assetId: string; content: string }>;
+    const contentByAsset = new Map(noteRows.map((n) => [n.assetId, n.content]));
+
+    // Assert the linked user id, not the rendered name: the note names a
+    // person by link, and an id cannot drift the way display text can.
+    expect(contentByAsset.get("asset-1")).toContain("user-alice");
+    expect(contentByAsset.get("asset-1")).not.toContain("user-bob");
+    expect(contentByAsset.get("asset-2")).toContain("user-bob");
+    expect(contentByAsset.get("asset-2")).not.toContain("user-alice");
+  });
+});
+
 describe("releaseCustody (single kit) - emit-before-cascade", () => {
   beforeEach(() => {
     vitest.clearAllMocks();

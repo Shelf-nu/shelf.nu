@@ -6907,11 +6907,14 @@ export async function bulkUpdateAssetLocation({
 
     // Create location activity notes
     const userLink = wrapUserLinkForNote({ ...user, id: userId });
-    // Filter out assets already at the target location
-    const actuallyChanged = assets.filter(
-      (a) => getPrimaryLocation(a)?.id !== newLocation?.id
-    );
-    const assetData = actuallyChanged.map((a) => ({
+    /**
+     * The rows the transaction above actually wrote — quantity-tracked assets
+     * are filtered out of this path entirely, and an asset already at the
+     * target moves nowhere. A location's timeline must not claim either of
+     * them arrived, so these notes read the set the transaction wrote rather
+     * than re-deriving one from every selected asset.
+     */
+    const assetData = assetsToUpdate.map((a) => ({
       id: a.id,
       title: a.title,
     }));
@@ -6921,7 +6924,7 @@ export async function bulkUpdateAssetLocation({
       string,
       { name: string; assets: typeof assetData }
     >();
-    for (const asset of actuallyChanged) {
+    for (const asset of assetsToUpdate) {
       const prev = getPrimaryLocation(asset);
       if (!prev) continue;
       const existing = byPrevLocation.get(prev.id);
