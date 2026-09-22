@@ -315,7 +315,7 @@ describe("fulfilAndCheckOut", () => {
     primeRulePath();
     // The first attempt assigned the unit, then its check-out was refused.
     vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
-      { assetId: "dell-1" },
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
     ] as never);
 
     await fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: true });
@@ -329,7 +329,7 @@ describe("fulfilAndCheckOut", () => {
   it("assigns only the scanned units not already on the booking, and checks out all of them", async () => {
     primeRulePath();
     vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
-      { assetId: "dell-1" },
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
     ] as never);
 
     await fulfilAndCheckOut({
@@ -438,6 +438,60 @@ describe("fulfilAndCheckOut", () => {
     );
     expect(partialCheckoutBooking).toHaveBeenCalledWith(
       expect.objectContaining({ assetIds: ["dell-2", "dell-3"] })
+    );
+  });
+
+  it("does not re-assign an INDIVIDUAL asset the booking holds only through a kit", async () => {
+    expect.assertions(2);
+    primeRulePath();
+    // why: the scan names `dell-1` directly, and the booking already holds it
+    // as a kit-driven row — no standalone row, so no unique index objects.
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        assetId: "dell-1",
+        assetKitId: "ak-9",
+        asset: { type: AssetType.INDIVIDUAL },
+      },
+    ] as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      requireExplicitCheckout: true,
+    });
+
+    // One physical unit already on the booking. A loose row would book it
+    // twice, and nothing at the database level would refuse it.
+    expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+    // It still goes out — being refused a second row is not being left behind.
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+  });
+
+  it("still assigns a quantity-tracked scan the booking holds through a kit", async () => {
+    expect.assertions(1);
+    primeRulePath();
+    // why: a quantity-tracked asset's free-pool units legitimately coexist
+    // with the units committed to a kit, so a loose scan is a real addition.
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        assetId: "dell-1",
+        assetKitId: "ak-9",
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ] as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      requireExplicitCheckout: true,
+    });
+
+    expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
     );
   });
 
@@ -569,7 +623,6 @@ describe("fulfilAndCheckOut", () => {
           bookingId: "booking-1",
           booking: { organizationId: "org-1" },
           assetId: { in: ["dell-1"] },
-          assetKitId: null,
         },
       })
     );
