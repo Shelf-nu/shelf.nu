@@ -91,9 +91,14 @@ function primeScannedKit(
   options: {
     bookedAssetKitIds?: string[];
     memberTypes?: Record<string, AssetType>;
+    returnedAssetIds?: string[];
   } = {}
 ) {
-  const { bookedAssetKitIds = [], memberTypes = {} } = options;
+  const {
+    bookedAssetKitIds = [],
+    memberTypes = {},
+    returnedAssetIds = [],
+  } = options;
   vi.mocked(buildKitSlicesForBooking).mockResolvedValue([
     slice("ak-1", "dell-2"),
     slice("ak-2", "dell-3"),
@@ -104,6 +109,7 @@ function primeScannedKit(
     { id: "ba-ak-2", assetId: "dell-3", assetKitId: "ak-2" },
   ].map((row) => ({
     ...row,
+    checkedInAt: returnedAssetIds.includes(row.assetId) ? new Date() : null,
     asset: { type: memberTypes[row.assetId] ?? AssetType.INDIVIDUAL },
   }));
 
@@ -546,6 +552,25 @@ describe("fulfilAndCheckOut", () => {
     // caller look like it asked for something.
     expect(partialCheckoutBooking).toHaveBeenCalledWith(
       expect.objectContaining({ assetIds: ["dell-2"], checkouts: undefined })
+    );
+  });
+
+  it("leaves out a kit member already returned on this booking", async () => {
+    expect.assertions(1);
+    primeRulePath();
+    primeScannedKit({ returnedAssetIds: ["dell-2"] });
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    // Naming a returned asset refuses the whole check-out, taking the loose
+    // scans down with it. A kit holding one returned member and one still to
+    // go is ordinary on an ongoing booking.
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1", "dell-3"] })
     );
   });
 

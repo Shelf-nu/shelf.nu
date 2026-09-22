@@ -354,6 +354,7 @@ async function checkOutScannedUnits(
           select: {
             id: true,
             assetId: true,
+            checkedInAt: true,
             asset: { select: { type: true } },
           },
         })
@@ -363,6 +364,12 @@ async function checkOutScannedUnits(
   const individualKitMemberAssetIds: string[] = [];
   for (const row of scannedKitRows) {
     if (row.asset.type !== AssetType.QUANTITY_TRACKED) {
+      // A member already returned on this booking cannot go out again, and
+      // naming one refuses the WHOLE check-out — including the loose assets
+      // scanned alongside it. A kit holding one returned member and one still
+      // to go is ordinary on an ongoing booking, so the row is skipped rather
+      // than left to fail the batch.
+      if (row.checkedInAt) continue;
       individualKitMemberAssetIds.push(row.assetId);
       continue;
     }
