@@ -16213,7 +16213,9 @@ describe("model reservation guard — write paths", () => {
       // booking — the rule `updateBookingAssets` already applies to its own
       // slices.
       const created = vitest.mocked(db.booking.update).mock.calls[0]?.[0] as {
-        data: { bookingAssets: { create: Array<{ assetKitId: string | null }> } };
+        data: {
+          bookingAssets: { create: Array<{ assetKitId: string | null }> };
+        };
       };
       expect(created.data.bookingAssets.create).toEqual([]);
       // Nothing arrived, so nothing may discharge a reservation either.
