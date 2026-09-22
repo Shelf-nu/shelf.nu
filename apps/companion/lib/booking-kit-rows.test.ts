@@ -25,6 +25,7 @@ import {
   describeBatch,
   describeBookingRows,
   describeSelection,
+  getBookingAssetState,
   isBookingAssetSelectable,
   resolveBookingKitBadge,
   resolveKitSelectionState,
@@ -726,8 +727,8 @@ function qtyMember(
   const member = { ...inKit(id, "kit-1", "Camera Kit") };
   member.type = "QUANTITY_TRACKED";
   member.quantity = booked;
-  member.checkedOutQuantity = out;
-  member.dispositionedQuantity = back;
+  member.dispatchedUnitsTotal = out;
+  member.dispositionedUnitsTotal = back;
   // Booked minus dispositioned, which is what the server sends and what the
   // old rule read. On a never-dispatched row it equals the booked quantity,
   // which is exactly the number that made the bug.
@@ -827,6 +828,104 @@ test("a member on a second trip is not called back in", () => {
     }),
     { tone: "AVAILABLE", label: "Available" }
   );
+});
+
+/**
+ * The member ROW badge and the kit HEADER badge answer the same question from
+ * the same counters, so no row may read "Returned" under a header that still
+ * says the kit is out — and vice versa. Only a badge keyed on units can hold
+ * that: the endpoint's remaining cap reaches zero on a second trip while the
+ * units are still in the field.
+ */
+function rowAndHeaderAgree(member: BookingAsset): {
+  rowSaysDone: boolean;
+  headerSaysDone: boolean;
+} {
+  const state = getBookingAssetState({
+    booked: member.quantity ?? 0,
+    remOut: member.remainingToCheckOut,
+    remIn: member.remainingToCheckIn,
+    dispatched: member.dispatchedUnitsTotal,
+    dispositioned: member.dispositionedUnitsTotal,
+    bookingStatus: "ONGOING",
+  });
+  const badge = resolveBookingKitBadge({
+    kit: cameraKit,
+    members: [member],
+    bookingStatus: "ONGOING",
+    checkedInAssetIds: [],
+  });
+  return {
+    rowSaysDone: state.key === "COMPLETE",
+    headerSaysDone: badge?.tone === "PARTIALLY_CHECKED_IN",
+  };
+}
+
+test("the row badge and the kit header agree on a never-dispatched member", () => {
+  const { rowSaysDone, headerSaysDone } = rowAndHeaderAgree(
+    qtyMember("m1", 4, 0, 0)
+  );
+  assert.equal(rowSaysDone, false);
+  assert.equal(headerSaysDone, false);
+});
+
+test("the row badge and the kit header agree on a fully returned member", () => {
+  const { rowSaysDone, headerSaysDone } = rowAndHeaderAgree(
+    qtyMember("m1", 2, 2, 2)
+  );
+  assert.equal(rowSaysDone, true);
+  assert.equal(headerSaysDone, true);
+});
+
+test("the row badge and the kit header agree on a member out a second time", () => {
+  // 4 booked, 8 sent out across two trips, 4 back. Judged by the endpoint's
+  // remaining cap the row reads "Returned" while the header still reads the
+  // kit as out — the same screen claiming both.
+  const member = qtyMember("m1", 4, 8, 4);
+  assert.equal(member.remainingToCheckIn, 0);
+  const { rowSaysDone, headerSaysDone } = rowAndHeaderAgree(member);
+  assert.equal(rowSaysDone, false);
+  assert.equal(headerSaysDone, false);
+});
+
+test("a member with units out reads as checked out on its row", () => {
+  const state = getBookingAssetState({
+    booked: 4,
+    dispatched: 4,
+    dispositioned: 0,
+    bookingStatus: "ONGOING",
+  });
+  assert.equal(state.key, "ONGOING");
+});
+
+test("a partly dispatched member names how many units are out", () => {
+  const state = getBookingAssetState({
+    booked: 4,
+    dispatched: 2,
+    dispositioned: 0,
+    bookingStatus: "ONGOING",
+  });
+  assert.equal(state.label, "2/4 out");
+});
+
+test("a never-dispatched member reads as reserved, not as out", () => {
+  const state = getBookingAssetState({
+    booked: 4,
+    dispatched: 0,
+    dispositioned: 0,
+    bookingStatus: "ONGOING",
+  });
+  assert.equal(state.key, "RESERVED");
+});
+
+test("an older server without unit totals keeps the remaining-based badge", () => {
+  const state = getBookingAssetState({
+    booked: 4,
+    remOut: 0,
+    remIn: 0,
+    bookingStatus: "ONGOING",
+  });
+  assert.equal(state.key, "COMPLETE");
 });
 
 test("check-out is unchanged by the units-out rule", () => {

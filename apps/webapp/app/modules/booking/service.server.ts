@@ -144,7 +144,7 @@ import {
   attributeSessionCheckoutToSlices,
   checkoutSessionsToLogsByAsset,
   compareSlicesForGreedyFill,
-  computeDispatchedUnitsByAsset,
+  computeDispatchedUnitsTotalByAsset,
 } from "./checkout-attribution";
 import {
   ADDABLE_BOOKING_STATUSES,
@@ -4849,13 +4849,10 @@ export async function isBookingFullyCheckedIn(
   };
   const slices = bookingAssets as SliceRow[];
 
-  // Dispatched units per ASSET, judged slice by slice: a slice's progressive
-  // session units when any were attributed to it, otherwise its whole booked
-  // quantity when its marker is stamped. One asset can mix both across its
-  // slices (a button-checked-out slice plus a progressively-scanned sibling),
-  // so neither sessions nor stamps alone may answer for the asset — see
-  // `computeDispatchedUnitsByAsset`.
-  const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
+  // Units sent out per ASSET, judged slice by slice and across every departure.
+  // The shared helper is what keeps this gate and the check-in the mobile
+  // booking route offers on the same answer.
+  const dispatchedUnitsTotalByAsset = computeDispatchedUnitsTotalByAsset({
     slices,
     checkoutSessions: partialCheckouts as Array<{
       assetIds: string[];
@@ -4863,22 +4860,6 @@ export async function isBookingFullyCheckedIn(
       bookingAssetIds: string[];
     }>,
   });
-
-  // Booked units summed per ASSET across all of its slices (standalone +
-  // kit-driven) — reconciliation below is asset-level.
-  const bookedUnitsByAsset = new Map<string, number>();
-  /** Cumulative units sent out per asset, summed across its slices. */
-  const countedOutUnitsByAsset = new Map<string, number>();
-  for (const s of slices) {
-    bookedUnitsByAsset.set(
-      s.assetId,
-      (bookedUnitsByAsset.get(s.assetId) ?? 0) + s.quantity
-    );
-    countedOutUnitsByAsset.set(
-      s.assetId,
-      (countedOutUnitsByAsset.get(s.assetId) ?? 0) + (s.checkedOutQuantity ?? 0)
-    );
-  }
 
   /** QT assets already judged — an asset's slices are evaluated as one. */
   const qtyAssetIdsEvaluated = new Set<string>();
@@ -4910,23 +4891,12 @@ export async function isBookingFullyCheckedIn(
     if (qtyAssetIdsEvaluated.has(ba.assetId)) continue;
     qtyAssetIdsEvaluated.add(ba.assetId);
 
-    // Obligated units = what actually went out for this asset, judged slice
-    // by slice (session-attributed units per slice, else the stamped slice's
-    // booked quantity). Judging per slice keeps one progressively-scanned
-    // sibling from erasing a button-checked-out slice's obligation, and one
-    // scanned-out asset from stripping the obligation off every other asset
-    // on the booking.
-    const booked = bookedUnitsByAsset.get(ba.assetId) ?? 0;
-    // Whichever record accounts for more units. The marker-and-session figure
-    // is capped at the booked quantity, which is right for one trip and wrong
-    // for two: an asset that went out, came back and went out again has sent
-    // out more units than it ever booked, and only the cumulative counter
-    // carries that. Taking the larger keeps every single-trip booking judged
-    // exactly as before.
-    const obligatedUnits = Math.max(
-      Math.min(dispatchedUnitsByAsset.get(ba.assetId) ?? 0, booked),
-      countedOutUnitsByAsset.get(ba.assetId) ?? 0
-    );
+    // Obligated units = what actually went out for this asset, judged slice by
+    // slice and summed across every departure. Judging per slice keeps one
+    // progressively-scanned sibling from erasing a button-checked-out slice's
+    // obligation, and one scanned-out asset from stripping the obligation off
+    // every other asset on the booking.
+    const obligatedUnits = dispatchedUnitsTotalByAsset.get(ba.assetId) ?? 0;
     if (obligatedUnits === 0) {
       // Never dispatched in any form — nothing to reconcile.
       continue;

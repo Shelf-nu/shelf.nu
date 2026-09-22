@@ -1,8 +1,4 @@
-import {
-  ASSET_STATUS_LABELS,
-  BOOKING_RESERVE_BLOCKED_LABELS,
-  BOOKING_STATUS_LABELS,
-} from "@shelf/labels";
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { useState, useCallback, useMemo, useRef } from "react";
 import {
   View,
@@ -71,6 +67,7 @@ import {
   describeBookingRows,
   describeSelection,
   isBookingAssetSelectable,
+  getBookingAssetState,
   resolveBookingKitBadge,
   resolveKitSelectionState,
   splitRemovalSelection,
@@ -79,50 +76,6 @@ import {
   type SelectionCounts,
 } from "@/lib/booking-kit-rows";
 import { filterBookingAssets } from "@/lib/booking-search";
-
-/**
- * Booking-scoped lifecycle state for a QUANTITY_TRACKED asset row. The asset's
- * GLOBAL status ("Available") is meaningless on a booking — what matters is how
- * many of the booked units are reserved / checked out / returned. Derived from
- * the server's per-asset remaining counts. `key` indexes the shared
- * `bookingStatusBadge` colours so the row reuses the booking colour vocabulary
- * (blue reserved, orange in-progress, green complete).
- *
- * @param args - booked units, remaining-to-check-out/in, and the parent
- *   booking's status (to tell a DRAFT line apart from a reserved one).
- * @returns The badge `{ key, label }` for this asset on this booking.
- */
-function getBookingAssetState({
-  booked,
-  remOut,
-  remIn,
-  bookingStatus,
-}: {
-  booked: number;
-  remOut?: number;
-  remIn?: number;
-  bookingStatus: string;
-}): { key: string; label: string } {
-  const clampedOut = Math.min(Math.max(remOut ?? booked, 0), booked);
-  const clampedIn = Math.min(Math.max(remIn ?? booked, 0), booked);
-  const checkedOut = booked - clampedOut; // units taken from the workspace
-  const checkedIn = booked - clampedIn; // units reconciled back in
-
-  // why: the labels that name a real status read from @shelf/labels. The
-  // fraction forms and "Returned" stay bespoke — they are booking-scoped
-  // progress, not statuses, so the package has no entry for them.
-  if (booked <= 0 || checkedOut <= 0) {
-    return bookingStatus === "DRAFT"
-      ? { key: "DRAFT", label: BOOKING_STATUS_LABELS.DRAFT }
-      : { key: "RESERVED", label: BOOKING_STATUS_LABELS.RESERVED };
-  }
-  if (checkedIn >= booked) return { key: "COMPLETE", label: "Returned" };
-  if (checkedIn > 0)
-    return { key: "ONGOING", label: `${checkedIn}/${booked} returned` };
-  if (checkedOut >= booked)
-    return { key: "ONGOING", label: ASSET_STATUS_LABELS.CHECKED_OUT };
-  return { key: "ONGOING", label: `${checkedOut}/${booked} out` };
-}
 
 /**
  * Segment colours for the booking lifecycle progress bar. Fixed hues matched to
@@ -162,9 +115,12 @@ export default function BookingDetailScreen() {
   const [checkedOutAssetIds, setCheckedOutAssetIds] = useState<string[]>([]);
   const [canCheckout, setCanCheckout] = useState(false);
   const [canCheckin, setCanCheckin] = useState(false);
-  // False when the workspace requires explicit (scan/select) check-in for this
-  // user's role — hide the quick "Check In All" button to match web policy.
-  const [canQuickCheckin, setCanQuickCheckin] = useState(true);
+  // Whether the quick "Check In All" is offered. Separate from `canCheckin`,
+  // which gates the scan and select paths: those submit to
+  // `partialCheckinBooking` and need units actually out, while this one
+  // completes the booking whatever went out. The workspace's explicit-check-in
+  // policy is already folded in by the server.
+  const [canCheckinAll, setCanCheckinAll] = useState(false);
   // The check-out twin: false hides "Check Out All Assets". Read through
   // canOfferQuickCheckout, which keeps the button for servers without the flag.
   const [canQuickCheckout, setCanQuickCheckout] = useState(true);
@@ -270,7 +226,11 @@ export default function BookingDetailScreen() {
     setCheckedOutAssetIds(data.checkedOutAssetIds ?? []);
     setCanCheckout(data.canCheckout);
     setCanCheckin(data.canCheckin);
-    setCanQuickCheckin(data.canQuickCheckin);
+    // An older server gates the quick check-in on `canCheckin` too, so read
+    // its absence as that server's own answer rather than hiding the button.
+    setCanCheckinAll(
+      data.canCheckinAll ?? (data.canCheckin && data.canQuickCheckin)
+    );
     setCanQuickCheckout(canOfferQuickCheckout(data));
     setBookingActions(data.bookingActions);
     // Clear stale selections — checked-in assets are no longer selectable
@@ -1081,6 +1041,8 @@ export default function BookingDetailScreen() {
               booked: item.quantity ?? 0,
               remOut: item.remainingToCheckOut,
               remIn: item.remainingToCheckIn,
+              dispatched: item.dispatchedUnitsTotal,
+              dispositioned: item.dispositionedUnitsTotal,
               bookingStatus: booking?.status ?? "",
             })
           : null;
@@ -2048,15 +2010,17 @@ export default function BookingDetailScreen() {
                 </TouchableOpacity>
               )}
 
-            {canCheckin && (
+            {(canCheckin || canCheckinAll) && (
               <View style={styles.checkinActions}>
                 {/* Quick "Check In All" is hidden when the workspace requires
                     explicit check-in for this role — the scan/select paths
                     below remain (they ARE explicit check-in). Mirrors web's
                     CheckinDropdown, which offers this "Quick check-in" (full
                     checkinBooking = return all remaining) on any ongoing
-                    booking, partial included. */}
-                {canQuickCheckin && (
+                    booking, partial included — including one whose rows were
+                    all added after check-out, which the explicit paths below
+                    cannot act on because nothing on it ever left. */}
+                {canCheckinAll && (
                   <TouchableOpacity
                     style={styles.actionButton}
                     onPress={handleFullCheckin}
@@ -2072,64 +2036,72 @@ export default function BookingDetailScreen() {
                   </TouchableOpacity>
                 )}
 
-                <TouchableOpacity
-                  style={styles.actionButtonOutline}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/scanner?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(booking.name)}`
-                    )
-                  }
-                  accessibilityLabel="Scan assets to check in"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="scan"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>
-                    Scan to Check In
-                  </Text>
-                </TouchableOpacity>
+                {canCheckin && (
+                  <>
+                    <TouchableOpacity
+                      style={styles.actionButtonOutline}
+                      onPress={() =>
+                        router.push(
+                          `/(tabs)/scanner?bookingId=${
+                            booking.id
+                          }&bookingName=${encodeURIComponent(booking.name)}`
+                        )
+                      }
+                      accessibilityLabel="Scan assets to check in"
+                      accessibilityRole="button"
+                    >
+                      <Ionicons
+                        name="scan"
+                        size={18}
+                        color={colors.buttonSecondaryText}
+                      />
+                      <Text style={styles.actionButtonOutlineText}>
+                        Scan to Check In
+                      </Text>
+                    </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[
-                    styles.actionButtonOutline,
-                    selectMode === "checkin" &&
-                      styles.actionButtonOutlineActive,
-                  ]}
-                  onPress={() => {
-                    toggleSelectMode("checkin");
-                  }}
-                  accessibilityLabel={
-                    selectMode === "checkin"
-                      ? "Cancel selection"
-                      : "Select assets to check in"
-                  }
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name={
-                      selectMode === "checkin" ? "close" : "checkbox-outline"
-                    }
-                    size={18}
-                    color={
-                      selectMode === "checkin"
-                        ? colors.error
-                        : colors.buttonSecondaryText
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.actionButtonOutlineText,
-                      selectMode === "checkin" && { color: colors.error },
-                    ]}
-                  >
-                    {selectMode === "checkin" ? "Cancel" : "Select to Check In"}
-                  </Text>
-                </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.actionButtonOutline,
+                        selectMode === "checkin" &&
+                          styles.actionButtonOutlineActive,
+                      ]}
+                      onPress={() => {
+                        toggleSelectMode("checkin");
+                      }}
+                      accessibilityLabel={
+                        selectMode === "checkin"
+                          ? "Cancel selection"
+                          : "Select assets to check in"
+                      }
+                      accessibilityRole="button"
+                    >
+                      <Ionicons
+                        name={
+                          selectMode === "checkin"
+                            ? "close"
+                            : "checkbox-outline"
+                        }
+                        size={18}
+                        color={
+                          selectMode === "checkin"
+                            ? colors.error
+                            : colors.buttonSecondaryText
+                        }
+                      />
+                      <Text
+                        style={[
+                          styles.actionButtonOutlineText,
+                          selectMode === "checkin" && { color: colors.error },
+                        ]}
+                      >
+                        {selectMode === "checkin"
+                          ? "Cancel"
+                          : "Select to Check In"}
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                )}
               </View>
             )}
 
@@ -2415,8 +2387,14 @@ export default function BookingDetailScreen() {
           // Cap the picker to the units that are actually out — what this
           // booking sent out, less what has come back. Capping at booked units
           // still to reconcile would propose returning units that never left,
-          // which the server refuses.
-          remaining={unitsStillOut(checkinQueue.queue[checkinQueue.index]) || 1}
+          // which the server refuses. A row with nothing out never enters the
+          // queue (`handlePartialCheckin` filters on the same helper), so the
+          // floor of 1 only keeps the picker renderable and never widens an
+          // offer.
+          remaining={Math.max(
+            1,
+            unitsStillOut(checkinQueue.queue[checkinQueue.index])
+          )}
           consumptionType={
             checkinQueue.queue[checkinQueue.index].consumptionType
           }

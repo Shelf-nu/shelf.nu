@@ -6,8 +6,8 @@
  * The phone cannot decide check-in from `remainingToCheckIn`. That counter is
  * booked minus dispositioned, so a row nothing was ever checked out for reads
  * as fully outstanding, and `partialCheckinBooking` then refuses it with
- * "Cannot check in assets that were never checked out". `checkedOutQuantity`
- * and `dispositionedQuantity` are what let it ask the right question, and
+ * "Cannot check in assets that were never checked out". `dispatchedUnitsTotal`
+ * and `dispositionedUnitsTotal` are what let it ask the right question, and
  * `canCheckin` has to answer that same question or the app offers a one-tap
  * check-in the server declines.
  *
@@ -181,8 +181,8 @@ function bookingRow(rows: ReturnType<typeof bookingAssetRow>[]) {
 
 type ResponseAsset = {
   id: string;
-  checkedOutQuantity?: number;
-  dispositionedQuantity?: number;
+  dispatchedUnitsTotal?: number;
+  dispositionedUnitsTotal?: number;
   remainingToCheckIn?: number;
   remainingToCheckOut?: number;
 };
@@ -200,9 +200,11 @@ async function readBooking() {
   const body = response.data as {
     booking: { assets: ResponseAsset[] };
     canCheckin: boolean;
+    canCheckinAll: boolean;
   };
   return {
     canCheckin: body.canCheckin,
+    canCheckinAll: body.canCheckinAll,
     assetById: new Map(body.booking.assets.map((a) => [a.id, a])),
   };
 }
@@ -239,8 +241,8 @@ describe("GET /api/mobile/bookings/:bookingId — units out per quantity row", (
     const { assetById, canCheckin } = await readBooking();
     const row = assetById.get("asset-a");
 
-    expect(row?.checkedOutQuantity).toBe(0);
-    expect(row?.dispositionedQuantity).toBe(0);
+    expect(row?.dispatchedUnitsTotal).toBe(0);
+    expect(row?.dispositionedUnitsTotal).toBe(0);
     // Unchanged, and exactly why it cannot be the check-in test.
     expect(row?.remainingToCheckIn).toBe(4);
     expect(row?.remainingToCheckOut).toBe(4);
@@ -267,8 +269,8 @@ describe("GET /api/mobile/bookings/:bookingId — units out per quantity row", (
     const { assetById, canCheckin } = await readBooking();
     const row = assetById.get("asset-a");
 
-    expect(row?.checkedOutQuantity).toBe(2);
-    expect(row?.dispositionedQuantity).toBe(0);
+    expect(row?.dispatchedUnitsTotal).toBe(2);
+    expect(row?.dispositionedUnitsTotal).toBe(0);
     expect(canCheckin).toBe(true);
   });
 
@@ -288,7 +290,7 @@ describe("GET /api/mobile/bookings/:bookingId — units out per quantity row", (
     const { assetById, canCheckin } = await readBooking();
 
     expect(db.partialBookingCheckout.findMany).toHaveBeenCalled();
-    expect(assetById.get("asset-a")?.checkedOutQuantity).toBe(5);
+    expect(assetById.get("asset-a")?.dispatchedUnitsTotal).toBe(5);
     expect(canCheckin).toBe(true);
   });
 
@@ -313,8 +315,8 @@ describe("GET /api/mobile/bookings/:bookingId — units out per quantity row", (
     const { assetById, canCheckin } = await readBooking();
     const row = assetById.get("asset-a");
 
-    expect(row?.checkedOutQuantity).toBe(2);
-    expect(row?.dispositionedQuantity).toBe(2);
+    expect(row?.dispatchedUnitsTotal).toBe(2);
+    expect(row?.dispositionedUnitsTotal).toBe(2);
     // Out and back again: nothing left, so no one-tap check-in.
     expect(canCheckin).toBe(false);
   });
@@ -353,8 +355,8 @@ describe("GET /api/mobile/bookings/:bookingId — units out per quantity row", (
     const { assetById, canCheckin } = await readBooking();
     const row = assetById.get("asset-a");
 
-    expect(row?.checkedOutQuantity).toBe(8);
-    expect(row?.dispositionedQuantity).toBe(8);
+    expect(row?.dispatchedUnitsTotal).toBe(8);
+    expect(row?.dispositionedUnitsTotal).toBe(8);
     expect(canCheckin).toBe(false);
   });
 
@@ -383,8 +385,8 @@ describe("GET /api/mobile/bookings/:bookingId — units out per quantity row", (
     const { assetById, canCheckin } = await readBooking();
     const row = assetById.get("asset-a");
 
-    expect(row?.checkedOutQuantity).toBe(8);
-    expect(row?.dispositionedQuantity).toBe(4);
+    expect(row?.dispatchedUnitsTotal).toBe(8);
+    expect(row?.dispositionedUnitsTotal).toBe(4);
     expect(row?.remainingToCheckIn).toBe(0);
     expect(canCheckin).toBe(false);
   });
@@ -412,8 +414,68 @@ describe("GET /api/mobile/bookings/:bookingId — units out per quantity row", (
 
     const { assetById, canCheckin } = await readBooking();
 
-    expect(assetById.get("asset-a")?.checkedOutQuantity).toBe(0);
-    expect(assetById.get("asset-b")?.checkedOutQuantity).toBe(1);
+    expect(assetById.get("asset-a")?.dispatchedUnitsTotal).toBe(0);
+    expect(assetById.get("asset-b")?.dispatchedUnitsTotal).toBe(1);
     expect(canCheckin).toBe(true);
+  });
+
+  it("counts a stamped slice whose stored counter is zero", async () => {
+    // The departure marker and the stored counter are separate records, and
+    // the marker alone has to answer: a slice stamped with nothing recorded
+    // against it went out in full. Without this the units-out figure would
+    // collapse to the stored counter and the row would lose its check-in.
+    vi.mocked(db.booking.findFirst).mockResolvedValue(
+      bookingRow([bookingAssetRow("asset-a", 5)])
+    );
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      sliceRow("asset-a", 5, { unitsOut: 0, stamped: true }),
+    ] as never);
+    vi.mocked(computeBookingAssetRemaining).mockResolvedValue(5);
+    vi.mocked(computeBookingAssetRemainingToCheckOut).mockResolvedValue(0);
+
+    const { assetById, canCheckin } = await readBooking();
+
+    expect(assetById.get("asset-a")?.dispatchedUnitsTotal).toBe(5);
+    expect(canCheckin).toBe(true);
+  });
+});
+
+describe("GET /api/mobile/bookings/:bookingId — the two check-in offers", () => {
+  it("still offers the quick check-in when nothing ever went out", async () => {
+    // `checkinBooking` completes a booking whatever went out, and the web
+    // offers it on any active booking, so the phone has to as well — otherwise
+    // a booking whose rows were all added after check-out closes from a
+    // browser and from nowhere on the phone.
+    vi.mocked(db.booking.findFirst).mockResolvedValue(
+      bookingRow([bookingAssetRow("asset-a", 4)])
+    );
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      sliceRow("asset-a", 4),
+    ] as never);
+    vi.mocked(computeBookingAssetRemaining).mockResolvedValue(4);
+    vi.mocked(computeBookingAssetRemainingToCheckOut).mockResolvedValue(4);
+
+    const { canCheckin, canCheckinAll } = await readBooking();
+
+    // The scan and select paths submit to `partialCheckinBooking`, which
+    // refuses every row on this booking.
+    expect(canCheckin).toBe(false);
+    expect(canCheckinAll).toBe(true);
+  });
+
+  it("offers both when units are out", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue(
+      bookingRow([bookingAssetRow("asset-a", 4)])
+    );
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      sliceRow("asset-a", 4, { unitsOut: 2, stamped: true }),
+    ] as never);
+    vi.mocked(computeBookingAssetRemaining).mockResolvedValue(4);
+    vi.mocked(computeBookingAssetRemainingToCheckOut).mockResolvedValue(2);
+
+    const { canCheckin, canCheckinAll } = await readBooking();
+
+    expect(canCheckin).toBe(true);
+    expect(canCheckinAll).toBe(true);
   });
 });

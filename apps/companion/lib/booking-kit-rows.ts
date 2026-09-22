@@ -25,7 +25,11 @@
  * @see ../../../apps/webapp/app/modules/booking/shape-booking-assets.ts — the
  *   web grouping this mirrors
  */
-import { KIT_STATUS_LABELS } from "@shelf/labels";
+import {
+  ASSET_STATUS_LABELS,
+  BOOKING_STATUS_LABELS,
+  KIT_STATUS_LABELS,
+} from "@shelf/labels";
 
 import type { BookingAsset, BookingKit } from "./api/types";
 
@@ -215,32 +219,26 @@ export type BookingKitBadge = {
  * back: what it sent out, less what has been returned, consumed, lost or
  * damaged.
  *
- * THE check-in test. `remainingToCheckIn` is not, and the difference is the
- * whole point of this helper: that counter is booked minus dispositioned, so it
- * counts units that never left. A row nothing was ever checked out for reads as
- * fully outstanding there, which is how a kit whose only member stayed on the
- * shelf came to be offered a tick box, a "Check In 1 Kit" button and a sheet
- * proposing its full booked quantity — all of it refused by the server with
- * "Cannot check in assets that were never checked out".
+ * THE check-in test, and `remainingToCheckIn` is not. That counter is booked
+ * minus dispositioned, so it counts units that never left: on a row nothing
+ * was ever checked out for it equals the whole booked quantity, while
+ * `partialCheckinBooking` refuses any row no slice of which carries a
+ * departure marker. Offer check-in on it and the server declines the submit.
  *
- * Bounded by `remainingToCheckIn`, because that is the cap
- * `partialCheckinBooking` applies to every claim it accepts. The two agree on
- * every single-trip booking. They part on a row that went out, came back and
- * went out again inside one booking: this booking has sent out more units than
- * the row ever booked, so the departure count keeps climbing while the
- * endpoint's cap — booked minus everything dispositioned — has already reached
- * zero. Offering those units would be the same fault this helper exists to
- * remove, in the other direction, so the second trip is not offered until the
- * endpoint can take it.
+ * Bounded by `remainingToCheckIn`, because that is the cap the endpoint
+ * applies to every claim it accepts. The two agree on every single-trip
+ * booking. They part on a row that went out, came back and went out again
+ * inside one booking: the departure count keeps climbing while the cap —
+ * booked minus everything dispositioned — has already reached zero. Those
+ * units are physically out and still cannot be checked in, so they must not be
+ * offered.
  *
- * Falls back to `remainingToCheckIn` when the server sends neither counter, so
- * this bundle keeps working against a server that predates them. That
- * fallback restores the old behaviour, including the bug — an older server
- * cannot tell dispatched units from booked ones, so there is nothing better to
- * answer with.
+ * Falls back to `remainingToCheckIn` against a server that sends no unit
+ * totals. That server cannot tell dispatched units from booked ones, so there
+ * is nothing better to answer with, bug included.
  *
- * INDIVIDUAL rows are not measured in units and are judged by status; this
- * returns their `remainingToCheckIn`, which the server does not send, hence 0.
+ * INDIVIDUAL rows are not measured in units and are judged by status; they
+ * carry no counters at all, so this returns 0 for them.
  *
  * @param item - the asset row from the booking detail response
  * @returns units still out and acceptable to the endpoint, never negative
@@ -248,14 +246,95 @@ export type BookingKitBadge = {
  *   the guard this keeps the screen on the right side of
  */
 export function unitsStillOut(item: BookingAsset): number {
-  const { checkedOutQuantity, dispositionedQuantity } = item;
-  if (checkedOutQuantity === undefined || dispositionedQuantity === undefined) {
-    return item.remainingToCheckIn ?? 0;
+  const { dispatchedUnitsTotal, dispositionedUnitsTotal, remainingToCheckIn } =
+    item;
+  // The route attaches all four counters to a quantity row or none of them,
+  // so one total missing means the whole set is.
+  if (
+    dispatchedUnitsTotal === undefined ||
+    dispositionedUnitsTotal === undefined
+  ) {
+    return remainingToCheckIn ?? 0;
   }
-  const stillOut = Math.max(0, checkedOutQuantity - dispositionedQuantity);
-  return item.remainingToCheckIn === undefined
-    ? stillOut
-    : Math.min(stillOut, item.remainingToCheckIn);
+  const stillOut = Math.max(0, dispatchedUnitsTotal - dispositionedUnitsTotal);
+  return Math.min(stillOut, remainingToCheckIn ?? 0);
+}
+
+/**
+ * Booking-scoped lifecycle state for a QUANTITY_TRACKED asset row. The asset's
+ * GLOBAL status ("Available") is meaningless on a booking — what matters is how
+ * many of the booked units are reserved / checked out / returned. `key` indexes
+ * the shared `bookingStatusBadge` colours so the row reuses the booking colour
+ * vocabulary (blue reserved, orange in-progress, green complete).
+ *
+ * Reads the unit totals when the server sends them, because they are what the
+ * kit header above this row is judged by (`isMemberBackIn`). Deriving "done"
+ * from `remainingToCheckIn` instead makes the two disagree on a row that went
+ * out, came back and went out again: the endpoint's cap reaches zero while the
+ * second trip is still in the field, so the row would read "Returned" under a
+ * header that still reads Available.
+ *
+ * @param args - booked units, the remaining counts, the booking-lifetime unit
+ *   totals when present, and the parent booking's status (to tell a DRAFT line
+ *   apart from a reserved one).
+ * @returns The badge `{ key, label }` for this asset on this booking.
+ */
+export function getBookingAssetState({
+  booked,
+  remOut,
+  remIn,
+  dispatched,
+  dispositioned,
+  bookingStatus,
+}: {
+  booked: number;
+  remOut?: number;
+  remIn?: number;
+  dispatched?: number;
+  dispositioned?: number;
+  bookingStatus: string;
+}): { key: string; label: string } {
+  const reserved =
+    bookingStatus === "DRAFT"
+      ? { key: "DRAFT", label: BOOKING_STATUS_LABELS.DRAFT }
+      : { key: "RESERVED", label: BOOKING_STATUS_LABELS.RESERVED };
+
+  if (booked <= 0) return reserved;
+
+  // why: the labels that name a real status read from @shelf/labels. The
+  // fraction forms and "Returned" stay bespoke — they are booking-scoped
+  // progress, not statuses, so the package has no entry for them.
+  if (dispatched !== undefined && dispositioned !== undefined) {
+    // Done when every unit this booking sent out is accounted for — the same
+    // threshold the kit header applies, so the two always agree.
+    if (dispositioned >= Math.max(booked, dispatched))
+      return { key: "COMPLETE", label: "Returned" };
+    if (dispatched <= 0) return reserved;
+
+    const stillOut = Math.max(0, dispatched - dispositioned);
+    if (stillOut >= booked)
+      return { key: "ONGOING", label: ASSET_STATUS_LABELS.CHECKED_OUT };
+    if (stillOut > 0)
+      return { key: "ONGOING", label: `${stillOut}/${booked} out` };
+    return {
+      key: "ONGOING",
+      label: `${Math.min(dispositioned, booked)}/${booked} returned`,
+    };
+  }
+
+  // An older server sends no totals; judge by the remaining counts alone.
+  const clampedOut = Math.min(Math.max(remOut ?? booked, 0), booked);
+  const clampedIn = Math.min(Math.max(remIn ?? booked, 0), booked);
+  const checkedOut = booked - clampedOut; // units taken from the workspace
+  const checkedIn = booked - clampedIn; // units reconciled back in
+
+  if (checkedOut <= 0) return reserved;
+  if (checkedIn >= booked) return { key: "COMPLETE", label: "Returned" };
+  if (checkedIn > 0)
+    return { key: "ONGOING", label: `${checkedIn}/${booked} returned` };
+  if (checkedOut >= booked)
+    return { key: "ONGOING", label: ASSET_STATUS_LABELS.CHECKED_OUT };
+  return { key: "ONGOING", label: `${checkedOut}/${booked} out` };
 }
 
 /**
@@ -263,26 +342,23 @@ export function unitsStillOut(item: BookingAsset): number {
  *
  * A quantity-tracked member is judged by units — booked, and every one of them
  * accounted for — because its global status returns to AVAILABLE while units
- * are still out. `dispositionedQuantity >= booked` is the web's own rule for
- * the same question (`getBookingContextKitStatus`), so a kit reads the same on
- * both surfaces.
- *
- * Falls back to `remainingToCheckIn === 0` when the server sends no
- * disposition count, which is the same statement in the arithmetic an older
- * server offers.
- *
- * Deliberately a threshold against the BOOKED quantity rather than
- * {@link unitsStillOut}, because the badge answers a different question from
- * the tick box: whether this booking is finished with the member, not whether
- * anything is out right now. A member booked 4 with 2 sent out and 2 returned
- * still reads as Available on both surfaces — the other 2 never left.
+ * are still out. `dispositioned >= booked` is the web's own rule for the same
+ * question (`getBookingContextKitStatus`), so a kit reads the same on both
+ * surfaces.
  *
  * The threshold is the LARGER of the booked quantity and what the booking has
- * actually sent out, so a member that went out, came back and went out again
- * is not called done while the second trip is still in the field. The two are
- * the same number on every single-trip booking, where nothing has sent out
- * more than it booked, so this only extends the web's rule to a case the web
- * does not reach.
+ * actually sent out, so a member on a second trip is not called done while
+ * that trip is in the field. The two are the same number on every single-trip
+ * booking, so this only extends the web's rule to a case the web cannot reach.
+ *
+ * Deliberately a threshold against the booked quantity rather than
+ * `unitsStillOut`: the badge answers whether this booking is FINISHED with the
+ * member, not whether anything is out right now. A member booked 4 with 2 sent
+ * out and 2 returned still reads Available on both surfaces — the other 2
+ * never left.
+ *
+ * Falls back to `remainingToCheckIn === 0` against a server that sends no unit
+ * totals, which is the same statement in the arithmetic that server offers.
  *
  * @see ../../../apps/webapp/app/utils/booking-assets.ts — `getBookingContextKitStatus`
  */
@@ -293,10 +369,10 @@ function isMemberBackIn(
   if (member.type === "QUANTITY_TRACKED") {
     const booked = member.quantity ?? 0;
     if (booked <= 0) return false;
-    return member.dispositionedQuantity === undefined
+    return member.dispositionedUnitsTotal === undefined
       ? (member.remainingToCheckIn ?? booked) === 0
-      : member.dispositionedQuantity >=
-          Math.max(booked, member.checkedOutQuantity ?? 0);
+      : member.dispositionedUnitsTotal >=
+          Math.max(booked, member.dispatchedUnitsTotal ?? 0);
   }
   return checkedInAssetIds.includes(member.id);
 }
