@@ -23,20 +23,28 @@
 -- label) and null the loser's "assetId"/"kitId" first — that returns it to the
 -- unclaimed pool rather than deleting a code someone may be holding.
 --
--- Recovery: `prisma migrate deploy` does NOT wrap a migration in a transaction,
--- so a failure on the second statement leaves the first index in place. Both are
--- therefore `IF NOT EXISTS`, which is what Prisma's own guidance recommends for
--- re-runnable steps — fix the duplicate data, then redeploy, and the index that
--- already exists is skipped instead of failing the migration a second time.
+-- Atomicity: `prisma migrate deploy` does NOT wrap a migration in a transaction.
+-- The schema engine's own architecture notes say so and name the remedy — "users
+-- have the option to add a BEGIN; and a COMMIT; to the migrations they want
+-- wrapped" — so the two builds are wrapped explicitly here. Without it, a
+-- duplicate in "kitId" would leave the "assetId" index committed and the
+-- migration failed, a half-applied state someone then has to unpick by hand.
 --
--- Locking: plain (non-CONCURRENT) CREATE UNIQUE INDEX. CREATE INDEX
--- CONCURRENTLY cannot run inside a migration that may already be in a
--- transaction, and the repo has no precedent for it. "Qr" is one row per asset
--- plus the unclaimed batches, so it is among the larger tables here; each build
--- holds a brief write lock on it, which blocks code creation and relinking — not
--- reads, and not scanning.
+-- `IF NOT EXISTS` stays on top of that, so a retry is safe even if one index
+-- somehow exists already (a hand-run statement, a resolve gone sideways).
+--
+-- Locking: plain (non-CONCURRENT) CREATE UNIQUE INDEX — CONCURRENTLY cannot run
+-- inside a transaction, which the BEGIN above now guarantees there is one, and
+-- the repo has no precedent for it either. "Qr" is one row per asset plus the
+-- unclaimed batches, so it is among the larger tables here; the builds hold a
+-- brief write lock on it, which blocks code creation and relinking — not reads,
+-- and not scanning.
+BEGIN;
+
 CREATE UNIQUE INDEX IF NOT EXISTS "Qr_assetId_unique_when_linked" ON "Qr"("assetId")
   WHERE "assetId" IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "Qr_kitId_unique_when_linked" ON "Qr"("kitId")
   WHERE "kitId" IS NOT NULL;
+
+COMMIT;
