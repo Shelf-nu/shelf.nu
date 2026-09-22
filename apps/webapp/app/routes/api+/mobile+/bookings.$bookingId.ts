@@ -41,7 +41,10 @@ import {
   computeBookingSliceUnitCounts,
   type QtyBookingAssetRow,
 } from "~/modules/booking/booking-slice-unit-counts.server";
-import { computeDispatchedUnitsByAsset } from "~/modules/booking/checkout-attribution";
+import {
+  combineDispatchedWithStoredUnits,
+  computeDispatchedUnitsByAsset,
+} from "~/modules/booking/checkout-attribution";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
@@ -488,67 +491,41 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
      * Units each quantity-tracked asset has SENT OUT on this booking, and how
      * many of those have come back.
      *
-     * "Still out" is `checkedOut - dispositioned`, and it is the only figure
+     * "Still out" is `dispatched - dispositioned`, and it is the only figure
      * that answers whether a row can be checked in. `remainingToCheckIn` —
      * booked minus dispositioned — cannot: it counts booked units that never
-     * left, so a row nothing was ever checked out for reads as fully
-     * outstanding, and `partialCheckinBooking` then refuses it with "Cannot
-     * check in assets that were never checked out".
+     * left, and `partialCheckinBooking` refuses a row no slice of which was
+     * ever stamped with "Cannot check in assets that were never checked out".
      *
-     * Checked-out units are read exactly as the completion gate reads them
-     * ({@link isBookingFullyCheckedIn}): whichever of the two records accounts
-     * for more units. Neither alone is enough. The session-derived figure is
-     * capped at the booked quantity, which is right for one trip and blind to a
-     * second; the stored counter carries every departure but is only as old as
-     * the column, so a booking stamped before it existed has nothing in it.
-     * Session attribution itself is per slice, because the all-at-once checkout
-     * stamps markers and writes no session rows while a progressive scan writes
-     * rows, and one asset can mix the two across its slices.
+     * Departures come from {@link combineDispatchedWithStoredUnits}, which the
+     * completion gate `isBookingFullyCheckedIn` reads through its one-call
+     * form. Sharing it is what keeps the check-in this route OFFERS and the
+     * check-in that gate DEMANDS from answering differently.
      *
-     * Dispositioned units are summed straight off the logs, UNCAPPED, which is
-     * also what the completion gate reads. The per-slice attribution caps each
-     * slice at ONE booked quantity, which is right for a single trip and hides
-     * the returns of a second: an asset that went out, came back and went out
-     * again has more units logged against it than it ever booked. Pairing a
-     * cumulative departure count with a capped return count leaves a fully
-     * reconciled row reading as still out, and the phone would keep offering a
-     * check-in the server refuses. Both counters have to measure the booking's
-     * whole lifetime or neither can.
+     * Returns are summed straight off the logs, UNCAPPED, which is the pairing
+     * that helper requires: the per-slice attribution bounds each slice at one
+     * booked quantity, so a row that went out, came back and went out again
+     * would report more departures than returns and read as permanently out.
      */
+    // The per-trip figure. Also what the lifecycle progress bar reads further
+    // down, which asks how far through THIS trip the booking is — a different
+    // question from what is still out, so it keeps the bounded count.
     const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
       slices: sliceRows,
       checkoutSessions: checkoutSessionRows,
     });
-    // Keyed by slice so each asset reads only its own rows. Re-scanning every
-    // slice per asset would cost assets x slices, and a booking large enough
-    // for these counters to matter is exactly the one that has many of both.
-    const storedUnitsBySlice = new Map(
-      sliceRows.map((slice) => [slice.id, slice.checkedOutQuantity ?? 0])
-    );
+    const dispatchedUnitsTotalByAsset = combineDispatchedWithStoredUnits({
+      slices: sliceRows,
+      dispatchedByAsset: dispatchedUnitsByAsset,
+    });
     // The log query is already scoped to this booking, to its quantity-tracked
     // assets and to the four disposition categories, so a plain sum per asset
     // IS the uncapped figure.
-    const dispositionedUnitsByAsset = new Map<string, number>();
+    const dispositionedUnitsTotalByAsset = new Map<string, number>();
     for (const log of dispositionLogRows) {
-      dispositionedUnitsByAsset.set(
+      dispositionedUnitsTotalByAsset.set(
         log.assetId,
-        (dispositionedUnitsByAsset.get(log.assetId) ?? 0) + log.quantity
-      );
-    }
-    const checkedOutUnitsByAsset = new Map<string, number>();
-    for (const [assetId, rows] of qtyBookingAssetRowsByAsset) {
-      let booked = 0;
-      let stored = 0;
-      for (const row of rows) {
-        booked += row.quantity;
-        stored += storedUnitsBySlice.get(row.id) ?? 0;
-      }
-      checkedOutUnitsByAsset.set(
-        assetId,
-        Math.max(
-          Math.min(dispatchedUnitsByAsset.get(assetId) ?? 0, booked),
-          stored
-        )
+        (dispositionedUnitsTotalByAsset.get(log.assetId) ?? 0) + log.quantity
       );
     }
 
@@ -609,8 +586,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       Math.min(
         Math.max(
           0,
-          (checkedOutUnitsByAsset.get(assetId) ?? 0) -
-            (dispositionedUnitsByAsset.get(assetId) ?? 0)
+          (dispatchedUnitsTotalByAsset.get(assetId) ?? 0) -
+            (dispositionedUnitsTotalByAsset.get(assetId) ?? 0)
         ),
         remainingByAsset.get(assetId)?.remainingToCheckIn ?? 0
       );
@@ -638,9 +615,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         ? unitsStillOut(a.id) > 0
         : a.status === AssetStatus.CHECKED_OUT
     );
-    const canCheckinByState =
-      (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
-      hasCheckinable;
+    const isActiveBooking =
+      booking.status === "ONGOING" || booking.status === "OVERDUE";
+    // Gates the EXPLICIT paths — scan and select — which submit to
+    // `partialCheckinBooking` and so need units that actually went out. The
+    // quick full check-in is gated separately, below.
+    const canCheckinByState = isActiveBooking && hasCheckinable;
 
     // Quick "check in all" and "check out all" are disallowed when the
     // workspace requires EXPLICIT (scan/select) check-in or check-out for the
@@ -724,6 +704,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // so without this the user meets the rule as a 403 instead of an absence.
     const canCheckout = canCheckoutByState && canCheckoutPerm;
     const canCheckin = canCheckinByState && canCheckinPerm;
+    /**
+     * Whether the quick "check in all" is offered.
+     *
+     * Deliberately NOT gated on `hasCheckinable`. It submits to
+     * `checkinBooking`, which completes a booking whatever went out and has no
+     * never-checked-out guard, so web offers it on any active booking the
+     * caller may check in (`CheckinDropdown` in `edit-booking-form.tsx`).
+     * Gating it on units being out would leave a booking whose rows were all
+     * added after check-out closable from a browser and from nowhere on the
+     * phone.
+     */
+    const canCheckinAll = isActiveBooking && canCheckinPerm && canQuickCheckin;
 
     const bookingActions = {
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
@@ -788,8 +780,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             ...a,
             remainingToCheckIn: rem.remainingToCheckIn,
             remainingToCheckOut: rem.remainingToCheckOut,
-            checkedOutQuantity: checkedOutUnitsByAsset.get(a.id) ?? 0,
-            dispositionedQuantity: dispositionedUnitsByAsset.get(a.id) ?? 0,
+            dispatchedUnitsTotal: dispatchedUnitsTotalByAsset.get(a.id) ?? 0,
+            dispositionedUnitsTotal:
+              dispositionedUnitsTotalByAsset.get(a.id) ?? 0,
           }
         : a;
     });
@@ -940,6 +933,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckout,
       canCheckin,
       canQuickCheckin,
+      canCheckinAll,
       canQuickCheckout,
       bookingActions,
     });
