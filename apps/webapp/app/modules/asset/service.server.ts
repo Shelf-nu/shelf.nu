@@ -5938,64 +5938,6 @@ export async function refreshExpiredAssetImages(
   });
 }
 
-export async function updateAssetQrCode({
-  assetId,
-  newQrId,
-  organizationId,
-}: {
-  organizationId: string;
-  assetId: string;
-  newQrId: string;
-}) {
-  // Disconnect all existing QR codes
-  try {
-    // Disconnect all existing QR codes
-    await db.asset
-      .update({
-        where: { id: assetId, organizationId },
-        data: {
-          qrCodes: {
-            set: [],
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Couldn't disconnect existing codes",
-          label,
-          additionalData: { assetId, organizationId, newQrId },
-        });
-      });
-
-    // Connect the new QR code
-    return await db.asset
-      .update({
-        where: { id: assetId, organizationId },
-        data: {
-          qrCodes: {
-            connect: { id: newQrId },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Couldn't connect the new QR code",
-          label,
-          additionalData: { assetId, organizationId, newQrId },
-        });
-      });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while updating asset QR code",
-      label,
-      additionalData: { assetId, organizationId, newQrId },
-    });
-  }
-}
-
 export async function bulkDeleteAssets({
   assetIds,
   organizationId,
