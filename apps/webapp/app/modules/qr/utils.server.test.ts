@@ -3,13 +3,13 @@
  *
  * The function answers "give me this asset's or kit's QR", creating one when
  * there isn't any — kits created by a content import have none until something
- * asks. That makes it a check-then-create, and the schema cannot stop a second
- * one being made: `Qr.assetId` and `Qr.kitId` are nullable and non-unique,
- * because an unclaimed code has neither and a code can be relinked. So the
- * serialisation has to come from the write path, which is what these cases pin.
+ * asks. That makes it a check-then-create.
  *
- * Two codes for one kit is not a visible failure — each renders a valid label
- * at a different URL, and scans split silently between them.
+ * Partial unique indexes stop a duplicate reaching the table, so what these
+ * cases pin is that two simultaneous first uses resolve *gracefully*: the
+ * second caller returns the code the first created, rather than seeing the
+ * constraint error the database would otherwise raise. The lock is what buys
+ * that, and nothing about the response would reveal its absence.
  *
  * @see {@link file://./utils.server.ts}
  */

@@ -120,10 +120,11 @@ export type CreateQrTxClient = Omit<ExtendedPrismaClient, ITXClientDenyList>;
  * Creates a QR code, optionally attached to an asset or a kit.
  *
  * Pass `tx` when the caller has already established that no code exists and is
- * holding a lock that keeps it true — see `generateQrObj`. Nothing in the
- * schema enforces one code per asset or kit (both columns are nullable and
- * non-unique, because an unclaimed code has neither), so that serialisation is
- * the caller's job.
+ * holding a lock that keeps it true — see `generateQrObj`. Partial unique
+ * indexes enforce one linked code per asset and per kit, so a second concurrent
+ * create fails on the constraint rather than succeeding; the lock is what turns
+ * that into "use the code the other caller made" instead of an error the user
+ * sees.
  *
  * @param args.assetId - Attach to this asset, if given.
  * @param args.kitId - Attach to this kit, if given.

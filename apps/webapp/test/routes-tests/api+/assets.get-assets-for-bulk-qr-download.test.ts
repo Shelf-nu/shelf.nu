@@ -39,10 +39,15 @@ vi.mock("~/utils/roles.server", () => ({
     },
   }),
 }));
+// why: the select-all path narrows a custodian filter through this, and it hits
+// the database; these cases pass explicit ids, so it only needs to resolve.
 vi.mock("~/modules/team-member/service.server", () => ({
   scopeCustodianFilterIds: vi.fn().mockResolvedValue("all"),
 }));
 
+// why: the query COUNT is the assertion, so the delegates have to be
+// observable — `qr.findMany` is the batched read under test, `findFirst` and
+// `$queryRaw` belong to the locked create that only a missing code should reach.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findMany: vi.fn() },
