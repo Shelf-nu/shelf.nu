@@ -15006,6 +15006,31 @@ async function addScannedAssetsToBookingWithinTx(
   );
 
   /**
+   * Kit memberships to actually write, dropping those whose INDIVIDUAL member
+   * the booking already holds loose.
+   *
+   * An INDIVIDUAL asset is one physical unit, and the two partial uniques let
+   * a standalone row and a kit-driven row for the same `(booking, asset)`
+   * coexist — so without this the booking would hold that one camera twice,
+   * inflating every count and its availability pressure on other bookings.
+   * The same rule `updateBookingAssets` applies to its own slices.
+   *
+   * QUANTITY_TRACKED is deliberately exempt: a free-pool slice legitimately
+   * coexists with kit slices, bounded on the separate kit axis.
+   * @see {@link file://./../../../../../.claude/rules/kit-members-via-kit-slices.md}
+   *
+   * The skipped member is still on the booking through the row it already
+   * has, so callers checking a scanned kit out must keep naming it.
+   */
+  const effectiveKitSlices = kitSlices.filter(
+    (slice) =>
+      !(
+        preExistingStandaloneScannedIds.has(slice.assetId) &&
+        scannedAssetsMetaById.get(slice.assetId)?.type === AssetType.INDIVIDUAL
+      )
+  );
+
+  /**
    * Quantity-tracked standalone scans draw on the shared pool, and nothing
    * above measures it: the conflict guard is INDIVIDUAL semantics — one asset
    * can be in one booking at a time — whereas a quantity-tracked asset
@@ -15084,7 +15109,7 @@ async function addScannedAssetsToBookingWithinTx(
    * the booking has already had whatever effect it was going to have.
    */
   const scannedAssetKitIds = [
-    ...new Set(kitSlices.map((slice) => slice.assetKitId)),
+    ...new Set(effectiveKitSlices.map((slice) => slice.assetKitId)),
   ];
   const preExistingScannedAssetKitIds = new Set<string>(
     scannedAssetKitIds.length > 0
@@ -15113,7 +15138,7 @@ async function addScannedAssetsToBookingWithinTx(
    * is the one type whose standalone and kit rows legitimately coexist, so it
    * has no single arrival row to stamp.
    */
-  const newKitDrivenScans = kitSlices
+  const newKitDrivenScans = effectiveKitSlices
     .filter((slice) => !preExistingScannedAssetKitIds.has(slice.assetKitId))
     .map((slice) => scannedAssetsMetaById.get(slice.assetId))
     .filter((meta): meta is ScannedAssetMeta => meta !== undefined)
@@ -15177,7 +15202,7 @@ async function addScannedAssetsToBookingWithinTx(
    * column whose FK accepts ANY kit — including another org's.
    */
   const referencedAssetKitIds = Array.from(
-    new Set(kitSlices.map((s) => s.assetKitId).filter(Boolean))
+    new Set(effectiveKitSlices.map((s) => s.assetKitId).filter(Boolean))
   );
   const assetKitById = new Map<string, { quantity: number; kitId: string }>(
     referencedAssetKitIds.length > 0
@@ -15248,7 +15273,7 @@ async function addScannedAssetsToBookingWithinTx(
           // the empty string — writing that would violate the FK, so it
           // normalizes to NULL. Both falling through is unreachable: a missing
           // `AssetKit` row means `assetKitId` below fails the FK first.
-          ...kitSlices.map((slice) => ({
+          ...effectiveKitSlices.map((slice) => ({
             assetId: slice.assetId,
             quantity:
               slice.quantity ??
@@ -15291,7 +15316,7 @@ async function addScannedAssetsToBookingWithinTx(
         (addedQtyByAssetId.get(sid) ?? 0) + (quantities[sid] ?? 1)
       );
     }
-    for (const slice of kitSlices) {
+    for (const slice of effectiveKitSlices) {
       const sliceQty =
         slice.quantity ?? assetKitById.get(slice.assetKitId)?.quantity ?? 1;
       addedQtyByAssetId.set(

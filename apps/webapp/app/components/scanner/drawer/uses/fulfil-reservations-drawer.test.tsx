@@ -452,6 +452,9 @@ function submittedValues(field: "assetIds" | "kitIds"): string[] {
 describe("FulfilReservationsDrawer kit scans", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // why: the drawer renders inside the app shell, which reads the layout
+    // route's loader for the sidebar state. Nothing here exercises that, but
+    // without it the shell throws before any row is rendered.
     useRouteLoaderDataMock.mockReturnValue({
       minimizedSidebar: false,
     } as never);
