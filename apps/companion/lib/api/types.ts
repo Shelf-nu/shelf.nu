@@ -803,10 +803,27 @@ export type BookingAsset = {
   assetKitId?: string | null;
   /** Per-slice breakdown; present when the server sends it (see gap 1). */
   slices?: BookingAssetSlice[];
-  /** Units currently checked out on this booking that can still be checked in. */
+  /**
+   * Booked units not yet returned, consumed, lost or damaged.
+   *
+   * NOT a check-in eligibility test on its own: it counts booked units that
+   * never left, so a row nothing was ever checked out for reads as fully
+   * outstanding. Use {@link unitsStillOut} for that. Kept because bundles in
+   * the field read it and an older server sends nothing else.
+   */
   remainingToCheckIn?: number;
   /** Units still reserved on this booking that can still be checked out. */
   remainingToCheckOut?: number;
+  /**
+   * Units this booking has actually SENT OUT, across every slice and every
+   * departure. Absent from an older server.
+   */
+  checkedOutQuantity?: number;
+  /**
+   * Units returned, consumed, lost or damaged on this booking, across every
+   * slice. Absent from an older server.
+   */
+  dispositionedQuantity?: number;
 };
 
 /**

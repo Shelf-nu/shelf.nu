@@ -449,6 +449,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             assetKitId: true,
             checkedOutAt: true,
             checkedInAt: true,
+            // Cumulative units this slice has sent out. The markers say
+            // WHETHER a slice went out; only this says HOW MANY, which is what
+            // sizes a check-in.
+            checkedOutQuantity: true,
           },
         }),
         kitIdsOnBooking.length > 0
@@ -479,6 +483,74 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         dispositionLogs: dispositionLogRows,
         checkoutSessions: checkoutSessionRows,
       });
+
+    /**
+     * Units each quantity-tracked asset has SENT OUT on this booking, and how
+     * many of those have come back.
+     *
+     * "Still out" is `checkedOut - dispositioned`, and it is the only figure
+     * that answers whether a row can be checked in. `remainingToCheckIn` —
+     * booked minus dispositioned — cannot: it counts booked units that never
+     * left, so a row nothing was ever checked out for reads as fully
+     * outstanding, and `partialCheckinBooking` then refuses it with "Cannot
+     * check in assets that were never checked out".
+     *
+     * Checked-out units are read exactly as the completion gate reads them
+     * ({@link isBookingFullyCheckedIn}): whichever of the two records accounts
+     * for more units. Neither alone is enough. The session-derived figure is
+     * capped at the booked quantity, which is right for one trip and blind to a
+     * second; the stored counter carries every departure but is only as old as
+     * the column, so a booking stamped before it existed has nothing in it.
+     * Session attribution itself is per slice, because the all-at-once checkout
+     * stamps markers and writes no session rows while a progressive scan writes
+     * rows, and one asset can mix the two across its slices.
+     *
+     * Dispositioned units are summed straight off the logs, UNCAPPED, which is
+     * also what the completion gate reads. The per-slice attribution caps each
+     * slice at ONE booked quantity, which is right for a single trip and hides
+     * the returns of a second: an asset that went out, came back and went out
+     * again has more units logged against it than it ever booked. Pairing a
+     * cumulative departure count with a capped return count leaves a fully
+     * reconciled row reading as still out, and the phone would keep offering a
+     * check-in the server refuses. Both counters have to measure the booking's
+     * whole lifetime or neither can.
+     */
+    const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
+      slices: sliceRows,
+      checkoutSessions: checkoutSessionRows,
+    });
+    // Keyed by slice so each asset reads only its own rows. Re-scanning every
+    // slice per asset would cost assets x slices, and a booking large enough
+    // for these counters to matter is exactly the one that has many of both.
+    const storedUnitsBySlice = new Map(
+      sliceRows.map((slice) => [slice.id, slice.checkedOutQuantity ?? 0])
+    );
+    // The log query is already scoped to this booking, to its quantity-tracked
+    // assets and to the four disposition categories, so a plain sum per asset
+    // IS the uncapped figure.
+    const dispositionedUnitsByAsset = new Map<string, number>();
+    for (const log of dispositionLogRows) {
+      dispositionedUnitsByAsset.set(
+        log.assetId,
+        (dispositionedUnitsByAsset.get(log.assetId) ?? 0) + log.quantity
+      );
+    }
+    const checkedOutUnitsByAsset = new Map<string, number>();
+    for (const [assetId, rows] of qtyBookingAssetRowsByAsset) {
+      let booked = 0;
+      let stored = 0;
+      for (const row of rows) {
+        booked += row.quantity;
+        stored += storedUnitsBySlice.get(row.id) ?? 0;
+      }
+      checkedOutUnitsByAsset.set(
+        assetId,
+        Math.max(
+          Math.min(dispatchedUnitsByAsset.get(assetId) ?? 0, booked),
+          stored
+        )
+      );
+    }
 
     /**
      * The assets in the web booking overview's default order, which the app
@@ -522,6 +594,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     );
     const remainingByAsset = new Map(qtRemaining.map((r) => [r.assetId, r]));
 
+    /**
+     * Units of a quantity-tracked asset that are out, not yet back, and that
+     * `partialCheckinBooking` would accept.
+     *
+     * Bounded by `remainingToCheckIn` because that is the cap the endpoint
+     * applies to every claim. The two agree on every single-trip booking; they
+     * part on a row that went out, came back and went out again inside one
+     * booking, where the departure count keeps climbing while the endpoint's
+     * cap — booked minus everything dispositioned — has already reached zero.
+     * The app applies the same bound, so the flag and the rows agree.
+     */
+    const unitsStillOut = (assetId: string): number =>
+      Math.min(
+        Math.max(
+          0,
+          (checkedOutUnitsByAsset.get(assetId) ?? 0) -
+            (dispositionedUnitsByAsset.get(assetId) ?? 0)
+        ),
+        remainingByAsset.get(assetId)?.remainingToCheckIn ?? 0
+      );
+
     // Compute booking capability flags
     const checkedOutCount = assets.filter(
       (a) => a.status === AssetStatus.CHECKED_OUT
@@ -534,18 +627,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // before submitting.
     const canCheckoutByState = booking.status === "RESERVED" && totalAssets > 0;
     // Checkinable while ONGOING/OVERDUE AND something is still to check in.
-    // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: booked units not
-    // yet reconciled = remainingToCheckIn > 0 (booked − returned/consumed/lost/
-    // damaged) — the SAME "remaining" the web check-in drawer caps at. Status
-    // cannot answer this for a QT asset: it stays AVAILABLE while some of its
-    // units are still out.
-    const hasCheckinable = assets.some((a) => {
-      if (a.type === AssetType.QUANTITY_TRACKED) {
-        const rem = remainingByAsset.get(a.id);
-        return rem ? rem.remainingToCheckIn > 0 : false;
-      }
-      return a.status === AssetStatus.CHECKED_OUT;
-    });
+    // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: units that went
+    // out on this booking and are not back yet. Status cannot answer this for a
+    // QT asset — it stays AVAILABLE while some of its units are still out — and
+    // neither can `remainingToCheckIn`, which counts booked units that never
+    // left, so a booking holding only never-dispatched rows would offer a
+    // check-in the server then refuses.
+    const hasCheckinable = assets.some((a) =>
+      a.type === AssetType.QUANTITY_TRACKED
+        ? unitsStillOut(a.id) > 0
+        : a.status === AssetStatus.CHECKED_OUT
+    );
     const canCheckinByState =
       (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
       hasCheckinable;
@@ -681,9 +773,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       0
     );
 
-    // Attach the per-asset remaining (computed up-front, above) to each QT
+    // Attach the per-asset counters (computed up-front, above) to each QT
     // asset so the app's pickers can cap inputs; INDIVIDUAL rows pass through
     // unchanged.
+    //
+    // `remainingToCheckIn` and `remainingToCheckOut` keep their meaning and
+    // their values: app bundles already in the field read them, and a bundle
+    // that does not know the two counters beside them falls back to the older
+    // rule rather than losing the picker entirely.
     const assetsForResponse = assets.map((a) => {
       const rem = remainingByAsset.get(a.id);
       return rem
@@ -691,6 +788,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             ...a,
             remainingToCheckIn: rem.remainingToCheckIn,
             remainingToCheckOut: rem.remainingToCheckOut,
+            checkedOutQuantity: checkedOutUnitsByAsset.get(a.id) ?? 0,
+            dispositionedQuantity: dispositionedUnitsByAsset.get(a.id) ?? 0,
           }
         : a;
     });
@@ -714,10 +813,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // dispatched units are judged slice by slice from stamps + session
     // attribution (an asset can mix a button-checked-out slice with a
     // progressively-scanned sibling — see `computeDispatchedUnitsByAsset`).
-    const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
-      slices: sliceRows,
-      checkoutSessions: checkoutSessionRows,
-    });
     const sliceMarkersByAssetId = new Map<
       string,
       { out: boolean; allStampedIn: boolean }

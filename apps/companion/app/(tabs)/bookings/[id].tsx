@@ -74,6 +74,7 @@ import {
   resolveBookingKitBadge,
   resolveKitSelectionState,
   splitRemovalSelection,
+  unitsStillOut,
   type BookingRow,
   type SelectionCounts,
 } from "@/lib/booking-kit-rows";
@@ -489,10 +490,10 @@ export default function BookingDetailScreen() {
     if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
     const selected = booking.assets.filter((a) => selectedAssetIds.has(a.id));
     // QT assets get a returned/consumed/lost/damaged split; INDIVIDUAL rows
-    // just flip back to available. Checkinable = booked units still to
-    // reconcile (remainingToCheckIn > 0), matching the web check-in drawer.
+    // just flip back to available. Checkinable = units this booking sent out
+    // that are not back yet, the same rule the rows were offered by.
     const qtAssets = selected.filter(
-      (a) => a.type === "QUANTITY_TRACKED" && (a.remainingToCheckIn ?? 0) > 0
+      (a) => a.type === "QUANTITY_TRACKED" && unitsStillOut(a) > 0
     );
     const individualIds = selected
       .filter((a) => a.type !== "QUANTITY_TRACKED")
@@ -2411,12 +2412,11 @@ export default function BookingDetailScreen() {
           key={checkinQueue.queue[checkinQueue.index].id}
           visible
           assetTitle={checkinQueue.queue[checkinQueue.index].title}
-          // Cap the picker to booked units still to reconcile
-          // (remainingToCheckIn = booked − returned/consumed/lost/damaged), the
-          // SAME "remaining" the web check-in drawer uses.
-          remaining={
-            checkinQueue.queue[checkinQueue.index].remainingToCheckIn ?? 1
-          }
+          // Cap the picker to the units that are actually out — what this
+          // booking sent out, less what has come back. Capping at booked units
+          // still to reconcile would propose returning units that never left,
+          // which the server refuses.
+          remaining={unitsStillOut(checkinQueue.queue[checkinQueue.index]) || 1}
           consumptionType={
             checkinQueue.queue[checkinQueue.index].consumptionType
           }
