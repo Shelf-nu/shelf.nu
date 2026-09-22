@@ -29,6 +29,9 @@ vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
     bookingAsset: { findMany: vi.fn() },
+    // why: the kit-member guard asks which loose scans belong to a kit. Default
+    // to none so only the cases about that rule have to stage memberships.
+    asset: { findMany: vi.fn() },
     bookingModelRequest: { findMany: vi.fn() },
   },
 }));
@@ -71,6 +74,7 @@ beforeEach(() => {
   // why: default to a slice that owes nothing, so only the cases about
   // quantity-tracked members have to state a figure.
   vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(0);
+  vi.mocked(db.asset.findMany).mockResolvedValue([]);
 });
 
 /** One `AssetKit` membership, in the shape `buildKitSlicesForBooking` returns. */
@@ -591,6 +595,77 @@ describe("fulfilAndCheckOut", () => {
     expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
       expect.objectContaining({ assetIds: ["dell-1"] })
     );
+  });
+
+  it("refuses a loose scan of a unit that belongs to a kit", async () => {
+    expect.assertions(3);
+    // why: `dell-1` is a member of `kit-9`, which this scan does not name, and
+    // it has no row on the booking yet — so the scan would take it out alone.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        title: "Camera A",
+        assetKits: [{ kitId: "kit-9" }],
+        bookingAssets: [],
+      },
+    ] as never);
+
+    const refused = fulfilAndCheckOut({
+      ...baseArgs,
+      requireExplicitCheckout: true,
+    });
+
+    await expect(refused).rejects.toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
+    });
+    await expect(refused).rejects.toThrow(/belongs to a kit/i);
+    // Refused before anything is written: sending one member out would answer
+    // the reservation and check the booking out with the kit left split.
+    expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+  });
+
+  it("allows the member when its kit is scanned in the same breath", async () => {
+    expect.assertions(1);
+    primeRulePath();
+    primeScannedKit();
+    // why: same membership as above, but `kit-1` IS named by this scan, which
+    // is the supported way to send a kit member out.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        title: "Camera A",
+        assetKits: [{ kitId: "kit-1" }],
+        bookingAssets: [],
+      },
+    ] as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    expect(partialCheckoutBooking).toHaveBeenCalled();
+  });
+
+  it("allows the member when it is already on this booking", async () => {
+    expect.assertions(1);
+    primeRulePath();
+    // why: a member already committed through its kit row is not being taken
+    // anywhere new by the scan, so refusing it would be noise.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        title: "Camera A",
+        assetKits: [{ kitId: "kit-9" }],
+        bookingAssets: [{ id: "ba-1" }],
+      },
+    ] as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      requireExplicitCheckout: true,
+    });
+
+    expect(partialCheckoutBooking).toHaveBeenCalled();
   });
 
   it("leaves out a kit member already returned on this booking", async () => {

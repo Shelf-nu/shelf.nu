@@ -99,6 +99,7 @@ export async function fulfilAndCheckOut({
   // surface — web drawer, mobile endpoint, companion — books a kit the same
   // org-scoped way. See `.claude/rules/kit-members-via-kit-slices.md`.
   const scannedKits = await resolveScannedKits(args);
+  await assertScannedUnitsAreNotKitMembers(args, scannedKits);
 
   // Under the requirement the flow is known up front, so the scan is judged
   // before anything is read. Without it the booking's status decides.
@@ -119,6 +120,75 @@ export async function fulfilAndCheckOut({
   }
 
   return checkOutScannedUnits(args, scannedKits, status);
+}
+
+/**
+ * Refuses a loose scan of a unit that belongs to a kit.
+ *
+ * An INDIVIDUAL asset committed to a kit is not a free unit. Sending it out on
+ * its own answers the reservation and checks the booking out, leaving the kit
+ * split: one item in the field, the rest on the shelf, and nothing on the
+ * booking saying so. The operator wanted a kit and got a part of one.
+ *
+ * Only a scan that would genuinely take the unit out alone is refused. A kit
+ * scanned in the same breath is the supported way to send the member out, and
+ * a member already on this booking is not being taken anywhere new by the scan
+ * — it is already committed through the row it has.
+ *
+ * Runs before either flow writes anything, so a refused scan leaves the
+ * booking exactly as it was. Enforced here rather than in the drawer alone
+ * because the mobile scanner reaches the same entry point.
+ *
+ * @param args - The booking, the caller's workspace and the loose scans
+ * @param scannedKits - The kits scanned alongside them
+ * @throws {ShelfError} 400 naming the units that belong to a kit
+ */
+async function assertScannedUnitsAreNotKitMembers(
+  {
+    bookingId,
+    organizationId,
+    kitIds = [],
+  }: Pick<
+    FulfilAndCheckOutArgs,
+    "bookingId" | "organizationId" | "kitIds" | "assetIds"
+  >,
+  scannedKits: ScannedKits
+): Promise<void> {
+  if (scannedKits.looseAssetIds.length === 0) return;
+
+  const scannedKitIds = new Set(kitIds);
+  const kitMembers = await db.asset.findMany({
+    where: {
+      id: { in: scannedKits.looseAssetIds },
+      organizationId,
+      type: AssetType.INDIVIDUAL,
+      assetKits: { some: {} },
+    },
+    select: {
+      title: true,
+      assetKits: { select: { kitId: true } },
+      // Empty when this scan would be the unit's first arrival on the booking,
+      // which is the only case that can split a kit.
+      bookingAssets: { where: { bookingId }, select: { id: true } },
+    },
+  });
+
+  const refused = kitMembers.filter(
+    (asset) =>
+      asset.bookingAssets.length === 0 &&
+      !asset.assetKits.some((membership) => scannedKitIds.has(membership.kitId))
+  );
+  if (refused.length === 0) return;
+
+  const names = refused.map((asset) => `"${asset.title}"`).join(", ");
+  throw new ShelfError({
+    cause: null,
+    status: 400,
+    label,
+    message: `${names} belongs to a kit, so it can't go out on its own. Scan the kit to take all of it, or scan another unit of the same model.`,
+    shouldBeCaptured: false,
+    additionalData: { bookingId, organizationId },
+  });
 }
 
 /** A scanned kit's memberships, split by what this booking already holds. */

@@ -74,6 +74,7 @@ import {
   expectedModelRequestsAtom,
   fulfilSessionAtom,
   removeScannedItemAtom,
+  removeScannedItemsByAssetIdAtom,
   scannedItemsAtom,
   type FulfilSessionInfo,
 } from "~/atoms/qr-scanner";
@@ -92,6 +93,7 @@ import type {
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import type { UnassignedModelUnits } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
+import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
 
@@ -202,6 +204,7 @@ export default function FulfilReservationsDrawer({
   const items = useAtomValue(scannedItemsAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
+  const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
 
   /**
    * Ids of the concrete `BookingAsset`s already on the booking. An asset in
@@ -597,6 +600,59 @@ export default function FulfilReservationsDrawer({
     count: Math.max(0, model.remaining - model.matched),
   }));
 
+  /**
+   * Units the scan would take out of a kit.
+   *
+   * An INDIVIDUAL asset committed to a kit is not a free unit: sending it out
+   * alone answers the reservation and checks the booking out with the kit
+   * split — one item in the field, the rest on the shelf. The server refuses
+   * these, so the block here is what turns a refusal at submit into something
+   * the operator can see and fix while scanning.
+   *
+   * Not blocked when the asset's kit was scanned too (that is how a member is
+   * meant to go out) or when it is already on the booking (it is committed
+   * through the row it has, so the scan takes it nowhere new).
+   */
+  const kitMemberScanIds = useMemo(() => {
+    const scannedKitIds = new Set(
+      Object.values(items)
+        .filter((item) => item?.type === "kit" && item?.data)
+        .map((item) => (item?.data as KitFromQr).id)
+    );
+
+    return scannedBuckets.rows
+      .filter((row) => {
+        const asset = row.asset;
+        if (!asset || asset.type !== AssetType.INDIVIDUAL) return false;
+        if (alreadyIncludedIds.has(asset.id)) return false;
+        const memberships = asset.assetKits ?? [];
+        if (memberships.length === 0) return false;
+        return !memberships.some((membership) =>
+          scannedKitIds.has(membership.kitId)
+        );
+      })
+      .map((row) => row.asset!.id);
+  }, [scannedBuckets.rows, items, alreadyIncludedIds]);
+
+  const [hasBlockers, Blockers] = createBlockers({
+    blockerConfigs: [
+      {
+        condition: kitMemberScanIds.length > 0,
+        count: kitMemberScanIds.length,
+        message: (count: number) => (
+          <>
+            <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong>
+            {count > 1 ? "belong" : "belongs"} to a kit.
+          </>
+        ),
+        description:
+          "Scan the kit to take all of it, or scan another unit of the same model. Sending one member out on its own would split the kit.",
+        onResolve: () => removeAssetsFromList(kitMemberScanIds),
+      },
+    ],
+    onResolveAll: () => removeAssetsFromList(kitMemberScanIds),
+  });
+
   return (
     <ConfigurableDrawer
       schema={fulfilAndCheckoutSchema}
@@ -609,6 +665,8 @@ export default function FulfilReservationsDrawer({
       // rows still need to be visible so the operator knows what's
       // expected.
       renderWhenEmpty
+      Blockers={Blockers}
+      disableSubmit={hasBlockers}
       defaultExpanded={defaultExpanded}
       className={tw(
         "[&_.default-base-drawer-header]:rounded-b [&_.default-base-drawer-header]:border [&_.default-base-drawer-header]:px-4 [&_thead]:hidden",
@@ -626,7 +684,11 @@ export default function FulfilReservationsDrawer({
           assetIds={assetIdsToSubmit}
           kitIds={kitIdsToSubmit}
           isLoading={isLoading}
-          disableSubmit={shouldDisableSubmit}
+          // This drawer submits through `CheckoutDialog`, not the drawer's own
+          // button, so `ConfigurableDrawer`'s `disableSubmit` never reaches it
+          // — the blocker has to be folded in here too or it would show a
+          // warning over a live button.
+          disableSubmit={shouldDisableSubmit || hasBlockers}
           notice={notice}
           unassignedUnits={unassignedUnits}
           // Only a RESERVED booking's first check-out can move its start date.

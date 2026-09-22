@@ -486,6 +486,55 @@ describe("FulfilReservationsDrawer kit scans", () => {
     expect(submittedValues("assetIds")).toEqual([]);
   });
 
+  it("blocks a loose scan of a unit that belongs to a kit", () => {
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-member": {
+          id: "asset-member",
+          title: "Camera A",
+          type: "INDIVIDUAL",
+          assetModelId: "model-0",
+          // Committed to a kit that this scan does not name.
+          assetKits: [{ id: "ak-1", kitId: "kit-9" }],
+        } as never,
+      },
+    });
+
+    expect(screen.getByText(/belongs to a kit/i)).toBeInTheDocument();
+    // Sending one member out alone would answer the reservation and check the
+    // booking out with the kit split, so submit is refused until it is removed.
+    expect(screen.getByRole("button", { name: /check out/i })).toBeDisabled();
+  });
+
+  it("does not block the member when its kit is scanned too", () => {
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-member": {
+          id: "asset-member",
+          title: "Camera A",
+          type: "INDIVIDUAL",
+          assetModelId: "model-0",
+          assetKits: [{ id: "ak-1", kitId: "kit-9" }],
+        } as never,
+      },
+      scannedKits: {
+        "qr-kit": makeKit({
+          id: "kit-9",
+          name: "Kit Nine",
+          members: [
+            {
+              id: "asset-member",
+              type: "INDIVIDUAL",
+              assetModelId: "model-0",
+            } as never,
+          ],
+        }),
+      },
+    });
+
+    expect(screen.queryByText(/belongs to a kit/i)).not.toBeInTheDocument();
+  });
+
   it("renders and submits a kit whose members assign nothing", () => {
     renderDrawer(1, {
       scannedKits: {
