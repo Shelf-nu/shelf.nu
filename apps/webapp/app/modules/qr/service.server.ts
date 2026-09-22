@@ -7,9 +7,10 @@ import {
   type User,
   type Kit,
 } from "@prisma/client";
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { TypeNumber, ErrorCorrectionLevel } from "qrcode-generator";
 import type { LoaderFunctionArgs } from "react-router";
-import { db } from "~/database/db.server";
+import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
@@ -107,15 +108,40 @@ export async function getQrOrganizationLookup({ qrId }: { qrId: Qr["id"] }) {
   return qr;
 }
 
-export async function createQr({
-  userId,
-  assetId,
-  kitId,
-  organizationId,
-}: Pick<Qr, "userId" | "organizationId"> & {
-  assetId?: Asset["id"];
-  kitId?: Kit["id"];
-}) {
+/**
+ * The transaction client `createQr` accepts. Spelled as the extended client
+ * minus the methods a transaction cannot offer, because a hand-written
+ * structural type is not assignable from the real `$transaction` callback
+ * argument — the extended delegates carry more than the shape they are used at.
+ */
+export type CreateQrTxClient = Omit<ExtendedPrismaClient, ITXClientDenyList>;
+
+/**
+ * Creates a QR code, optionally attached to an asset or a kit.
+ *
+ * Pass `tx` when the caller has already established that no code exists and is
+ * holding a lock that keeps it true — see `generateQrObj`. Nothing in the
+ * schema enforces one code per asset or kit (both columns are nullable and
+ * non-unique, because an unclaimed code has neither), so that serialisation is
+ * the caller's job.
+ *
+ * @param args.assetId - Attach to this asset, if given.
+ * @param args.kitId - Attach to this kit, if given.
+ * @param tx - Run inside an existing transaction.
+ * @returns The created QR row.
+ */
+export async function createQr(
+  {
+    userId,
+    assetId,
+    kitId,
+    organizationId,
+  }: Pick<Qr, "userId" | "organizationId"> & {
+    assetId?: Asset["id"];
+    kitId?: Kit["id"];
+  },
+  tx?: CreateQrTxClient
+) {
   const data = {
     id: id(),
     ...(userId && {
@@ -148,7 +174,7 @@ export async function createQr({
     }),
   };
 
-  return db.qr.create({
+  return (tx ?? db).qr.create({
     data,
   });
 }
