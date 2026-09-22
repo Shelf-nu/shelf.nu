@@ -35,15 +35,19 @@
  * @see {@link file://./service.server.ts}
  * @see {@link file://./../booking-settings/explicit-checkout.ts}
  */
-import { BookingStatus } from "@prisma/client";
+import { AssetType, BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
   addScannedAssetsToBooking,
   buildKitSlicesForBooking,
+  computeBookingAssetSliceRemainingToCheckOut,
   fulfilModelRequestsAndCheckout,
   partialCheckoutBooking,
 } from "~/modules/booking/service.server";
-import type { KitSliceSpec } from "~/modules/booking/service.server";
+import type {
+  CheckoutDispositionInput,
+  KitSliceSpec,
+} from "~/modules/booking/service.server";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking";
@@ -126,11 +130,14 @@ type ScannedKits = {
    */
   newSlices: KitSliceSpec[];
   /**
-   * Every member asset of every scanned kit, including the ones already
-   * booked. Check-out acts on all of them: scanning a kit that is already on
-   * the booking is exactly how an operator sends it out.
+   * Every `AssetKit` id the scan named, including memberships this booking
+   * already holds — scanning a kit already on the booking is exactly how an
+   * operator sends it out, so those rows still have to leave.
+   *
+   * It is the discriminator on the kit-driven `BookingAsset` rows, and so the
+   * way to find the rows this scan is responsible for once they exist.
    */
-  memberAssetIds: string[];
+  assetKitIds: string[];
   /**
    * The scanned assets that are NOT members of a scanned kit — the ones to
    * add as standalone rows.
@@ -162,7 +169,7 @@ async function resolveScannedKits({
   "bookingId" | "organizationId" | "kitIds" | "assetIds"
 >): Promise<ScannedKits> {
   if (kitIds.length === 0) {
-    return { newSlices: [], memberAssetIds: [], looseAssetIds: assetIds };
+    return { newSlices: [], assetKitIds: [], looseAssetIds: assetIds };
   }
 
   // Unfiltered, so one read serves every half: the memberships already on the
@@ -185,7 +192,7 @@ async function resolveScannedKits({
     newSlices: allSlices.filter(
       (slice) => !bookedAssetKitIds.has(slice.assetKitId)
     ),
-    memberAssetIds,
+    assetKitIds: allSlices.map((slice) => slice.assetKitId),
     looseAssetIds: assetIds.filter((id) => !memberAssetIdSet.has(id)),
   };
 }
@@ -290,17 +297,71 @@ async function checkOutScannedUnits(
     });
   }
 
-  // Every member of a scanned kit leaves with it, whether this scan put it on
-  // the booking or a previous one did. Deduped against the loose scans so an
-  // asset named twice is checked out once.
+  /**
+   * What a scanned kit sends out, resolved to the rows it owns.
+   *
+   * A bare asset id claims that asset's WHOLE remaining quantity on the
+   * booking, summed across every slice it holds. For an INDIVIDUAL member that
+   * is exact — it has one row. For a QUANTITY_TRACKED member it is not: the
+   * same asset can sit in this kit, in another kit, and in the free pool at
+   * once, so an asset-wide claim sends out units the operator never scanned
+   * and stamps `checkedOutAt` on slices that never left.
+   *
+   * So QT members are named per slice instead, by `bookingAssetId` and the
+   * units that slice still owes. Read after the assign above, because a
+   * membership added by this very scan has no row before it.
+   * @see {@link file://./../../../../../.claude/rules/booking-checkout-is-recorded-per-slice.md}
+   */
+  const scannedKitRows =
+    scannedKits.assetKitIds.length > 0
+      ? await db.bookingAsset.findMany({
+          where: {
+            bookingId,
+            booking: { organizationId },
+            assetKitId: { in: scannedKits.assetKitIds },
+          },
+          select: {
+            id: true,
+            assetId: true,
+            asset: { select: { type: true } },
+          },
+        })
+      : [];
+
+  const kitSliceCheckouts: CheckoutDispositionInput[] = [];
+  const individualKitMemberAssetIds: string[] = [];
+  for (const row of scannedKitRows) {
+    if (row.asset.type !== AssetType.QUANTITY_TRACKED) {
+      individualKitMemberAssetIds.push(row.assetId);
+      continue;
+    }
+    // Remaining, never booked: a slice already partly out would otherwise
+    // over-claim and trip the per-asset cap.
+    const sliceRemaining = await computeBookingAssetSliceRemainingToCheckOut(
+      db,
+      bookingId,
+      row.id
+    );
+    if (sliceRemaining > 0) {
+      kitSliceCheckouts.push({
+        assetId: row.assetId,
+        bookingAssetId: row.id,
+        quantity: sliceRemaining,
+      });
+    }
+  }
+
+  // The loose scans plus the kit members that are safe to name asset-wide.
+  // Deduped so an asset named twice is checked out once.
   const assetIdsToCheckOut = [
-    ...new Set([...assetIds, ...scannedKits.memberAssetIds]),
+    ...new Set([...assetIds, ...individualKitMemberAssetIds]),
   ];
 
   const result = await partialCheckoutBooking({
     id: bookingId,
     organizationId,
     assetIds: assetIdsToCheckOut,
+    checkouts: kitSliceCheckouts.length > 0 ? kitSliceCheckouts : undefined,
     userId,
     hints: args.hints,
     intentChoice: args.checkoutIntentChoice,
