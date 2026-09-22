@@ -13,6 +13,7 @@ import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { ADMIN_EMAIL } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
+import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { emailMatchesDomains } from "~/utils/misc";
 import {
   createStripeCustomer,
@@ -226,10 +227,19 @@ export async function createOrganization({
     const org = await db.organization.create({ data });
 
     if (image?.size && image?.size > 0) {
+      const blob = Buffer.from(await image.arrayBuffer());
+
       await db.image.create({
         data: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
+          blob,
+          // Derived from the bytes, never from the caller's `File.type`: this
+          // row is served back inline by `api+/image.$imageId`, so the stored
+          // content type decides how a browser renders it.
+          contentType: assertUploadedImageContentType(blob, {
+            userId,
+            organizationId: org.id,
+            field: "image",
+          }),
           ownerOrg: {
             connect: {
               id: org.id,
@@ -324,9 +334,18 @@ export async function updateOrganization({
         });
       }
 
+      const blob = Buffer.from(await image.arrayBuffer());
+
       const imageData = {
-        blob: Buffer.from(await image.arrayBuffer()),
-        contentType: image.type,
+        blob,
+        // Derived from the bytes, never from the caller's `File.type`: this
+        // row is served back inline by `api+/image.$imageId`, so the stored
+        // content type decides how a browser renders it.
+        contentType: assertUploadedImageContentType(blob, {
+          userId,
+          organizationId: id,
+          field: "image",
+        }),
         ownerOrg: {
           connect: {
             id: id,
