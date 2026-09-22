@@ -49,7 +49,14 @@ type Props = {
   subtitle?: string;
   /** Upper bound for the quantity (inclusive). Submit is disabled above it. */
   max: number;
-  /** Initial value when the sheet opens (clamped to [1, max]). Defaults to 1. */
+  /**
+   * Lower bound for the quantity (inclusive). Defaults to 1, which is the
+   * floor for a plain count. Raise it when part of the quantity is already
+   * committed and cannot be taken back — editing a booking's model
+   * reservation cannot drop below the units already assigned to the booking.
+   */
+  min?: number;
+  /** Initial value when the sheet opens (clamped to [min, max]). Defaults to `min`. */
   defaultValue?: number;
   /** Display unit echoed under the input (e.g. "pcs"); null/undefined hides it. */
   unitOfMeasure?: string | null;
@@ -108,6 +115,7 @@ export function QuantityInputSheet({
   title,
   subtitle,
   max,
+  min = 1,
   defaultValue,
   unitOfMeasure,
   secondary,
@@ -137,7 +145,10 @@ export function QuantityInputSheet({
   // action (different member/holder), so stale values must not leak across.
   useEffect(() => {
     if (visible) {
-      const seed = Math.min(Math.max(defaultValue ?? 1, 1), Math.max(max, 1));
+      const seed = Math.min(
+        Math.max(defaultValue ?? min, min),
+        Math.max(max, min)
+      );
       setValue(String(seed));
       if (hasSecondaryField) {
         // Clamp the secondary seed to the primary seed — the two fields move
@@ -147,12 +158,20 @@ export function QuantityInputSheet({
         );
       }
     }
-  }, [visible, defaultValue, max, hasSecondaryField, secondaryDefaultValue]);
+  }, [
+    visible,
+    defaultValue,
+    max,
+    min,
+    hasSecondaryField,
+    secondaryDefaultValue,
+  ]);
 
   const parsed = value ? parseInt(value, 10) : NaN;
   const hasValue = Number.isFinite(parsed);
   const overMax = hasValue && parsed > max;
-  const isValid = hasValue && parsed >= 1 && parsed <= max;
+  const underMin = hasValue && parsed < min;
+  const isValid = hasValue && parsed >= min && parsed <= max;
 
   const parsedSecondary = secondaryValue ? parseInt(secondaryValue, 10) : NaN;
   const hasSecondary = Number.isFinite(parsedSecondary);
@@ -164,7 +183,7 @@ export function QuantityInputSheet({
       hasValue &&
       parsedSecondary <= parsed);
   const canConfirm = isValid && isSecondaryValid && !isSubmitting;
-  const canDecrease = !isSubmitting && hasValue && parsed > 1;
+  const canDecrease = !isSubmitting && hasValue && parsed > min;
   const canIncrease = !isSubmitting && !(hasValue && parsed >= max);
 
   /**
@@ -187,15 +206,16 @@ export function QuantityInputSheet({
     });
   };
 
-  /** Step the current value by `delta`, clamped to [1, max]. */
+  /** Step the current value by `delta`, clamped to [min, max]. */
   const step = (delta: number) => {
     const current = hasValue ? parsed : 0;
-    const next = Math.min(Math.max(current + delta, 1), Math.max(max, 1));
+    const next = Math.min(Math.max(current + delta, min), Math.max(max, min));
     setValue(String(next));
     clampSecondaryTo(next);
   };
 
   const maxLabel = formatQuantity(max, unitOfMeasure) ?? String(max);
+  const minLabel = formatQuantity(min, unitOfMeasure) ?? String(min);
   const echo = hasValue ? formatQuantity(parsed, unitOfMeasure) : null;
 
   /**
@@ -269,12 +289,16 @@ export function QuantityInputSheet({
                 const next = cleaned ? parseInt(cleaned, 10) : NaN;
                 if (Number.isFinite(next)) clampSecondaryTo(next);
               }}
-              placeholder={`Max: ${max}`}
+              placeholder={min > 1 ? `${min}–${max}` : `Max: ${max}`}
               placeholderTextColor={colors.placeholderText}
               editable={!isSubmitting}
               keyboardType="number-pad"
               returnKeyType="done"
-              accessibilityLabel={`Quantity, maximum ${maxLabel}`}
+              accessibilityLabel={
+                min > 1
+                  ? `Quantity, between ${minLabel} and ${maxLabel}`
+                  : `Quantity, maximum ${maxLabel}`
+              }
             />
             <TouchableOpacity
               style={[
@@ -295,6 +319,8 @@ export function QuantityInputSheet({
           {/* Echo / bounds hint under the input */}
           {overMax ? (
             <Text style={styles.errorHint}>Only {maxLabel} available.</Text>
+          ) : underMin ? (
+            <Text style={styles.errorHint}>At least {minLabel}.</Text>
           ) : (
             <Text style={styles.echoHint}>
               {echo ? `${echo} of ${maxLabel}` : `Up to ${maxLabel}`}
