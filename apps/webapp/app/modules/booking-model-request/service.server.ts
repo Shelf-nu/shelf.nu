@@ -1968,13 +1968,20 @@ export async function materializeModelRequestForAsset({
  * inherit identical behaviour, and a future surface gets it by construction
  * rather than by remembering to call this.
  *
+ * How the asset arrived is likewise not a property of the unit: one inside a
+ * kit is the same camera as a loose one, so it answers the same promise. The
+ * limit is per PHYSICAL unit, not per row — an asset claims at most once per
+ * booking, enforced here against the stamps already on the booking so no
+ * caller can opt out of it.
+ *
  * Callers MUST persist the returned provenance — see
  * {@link file://./../../../../../packages/database/prisma/schema.prisma}
  * `BookingAsset.bookingModelRequestId`.
  *
  * @param args.bookingId - Booking being fulfilled.
- * @param args.assets - The assets being added. Pre-fetched by every caller
- *   already, so it is taken as data rather than re-queried here.
+ * @param args.assets - The assets being added, deduplicated by the caller:
+ *   one entry is one claim. Pre-fetched by every caller already, so it is
+ *   taken as data rather than re-queried here.
  * @param args.organizationId - Caller's org, for the error payload.
  * @param args.userId - Actor, for the per-assignment activity note.
  * @param args.tx - Interactive transaction client. Required: the decrements,
@@ -2021,7 +2028,39 @@ export async function fulfilModelRequestsForAssets({
   });
   if (outstandingCount === 0) return fulfilledRequestIdByAssetId;
 
+  /**
+   * Assets that already answered a promise on this booking.
+   *
+   * One physical unit discharges at most one reserved unit per booking,
+   * however it got there: loose, inside a kit, or one of each. The stamp on
+   * `BookingAsset.bookingModelRequestId` is the record of that, so a stamped
+   * row anywhere on the booking means this asset has already claimed and must
+   * not claim again — otherwise a 2-unit reservation reads as satisfied with
+   * one camera behind it.
+   *
+   * Keyed on the stamp rather than on "does a row exist", so the rule also
+   * holds for a row that arrived before it could carry one: the asset is on
+   * the booking, nothing was claimed for it, and claiming now is correct.
+   *
+   * One indexed read for the whole call, not one per asset — the
+   * interactive-transaction budget noted above is why.
+   */
+  const assetIds = assets.map((asset) => asset.id);
+  const alreadyClaimedRows: Array<{ assetId: string }> =
+    await tx.bookingAsset.findMany({
+      where: {
+        bookingId,
+        assetId: { in: assetIds },
+        bookingModelRequestId: { not: null },
+      },
+      select: { assetId: true },
+    });
+  const alreadyClaimedAssetIds = new Set(
+    alreadyClaimedRows.map((row) => row.assetId)
+  );
+
   for (const asset of assets) {
+    if (alreadyClaimedAssetIds.has(asset.id)) continue;
     // Sequential, not `Promise.all`: several assets of the SAME model compete
     // for one request row, and each call reads `fulfilledQuantity` then writes
     // back. Running them concurrently inside one transaction would let two
