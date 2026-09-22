@@ -58,10 +58,20 @@ const dbMock = vi.hoisted<MockDb>(() => ({
   user: {
     findUniqueOrThrow: vi.fn(),
     findUnique: vi.fn(),
+    // why: createOrganization reads the owner only to build the team member's
+    // display name — not the behaviour under test, so it is stubbed to let the
+    // logo path be reached.
     findFirstOrThrow: vi.fn(),
   },
   userOrganization: { findMany: vi.fn(), update: vi.fn() },
-  organization: { update: vi.fn(), create: vi.fn() },
+  organization: {
+    update: vi.fn(),
+    // why: this is the assertion target. Whether it was called is exactly what
+    // distinguishes "validated before writing" from "left an orphan workspace".
+    create: vi.fn(),
+  },
+  // why: the second write in the same flow, asserted both for the content type
+  // it persists and for not running when validation refuses the bytes.
   image: { create: vi.fn() },
 }));
 
@@ -253,7 +263,9 @@ function logoFile(bytes: BlobPart) {
   return new File([bytes], "logo.png", { type: "image/png" });
 }
 
-const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_BYTES = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
 const HTML_BYTES = "<script>alert(document.domain)</script>";
 
 describe("createOrganization logo validation", () => {
