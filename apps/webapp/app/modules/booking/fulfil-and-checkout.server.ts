@@ -389,10 +389,25 @@ async function checkOutScannedUnits(
     }
   }
 
-  // The loose scans plus the kit members that are safe to name asset-wide.
-  // Deduped so an asset named twice is checked out once.
+  /**
+   * The scans that may be named asset-wide.
+   *
+   * Built from `looseAssetIds`, never the raw scan: an asset named both loose
+   * and through a scanned kit is already covered above — by its slice if it is
+   * quantity-tracked, by `individualKitMemberAssetIds` if it is not. Naming it
+   * here as well would add a bare claim on top, and a bare claim takes the
+   * asset's whole remaining across every slice it holds, which is the
+   * over-checkout the per-slice dispositions exist to avoid.
+   *
+   * A quantity-tracked asset scanned both ways therefore sends out its kit
+   * slice and not its free-pool one. The kit slice owns the member, the same
+   * precedence the assign side applies; the free-pool units stay booked for a
+   * scan that names them alone.
+   *
+   * Deduped so an asset reachable twice is checked out once.
+   */
   const assetIdsToCheckOut = [
-    ...new Set([...assetIds, ...individualKitMemberAssetIds]),
+    ...new Set([...scannedKits.looseAssetIds, ...individualKitMemberAssetIds]),
   ];
 
   const result = await partialCheckoutBooking({

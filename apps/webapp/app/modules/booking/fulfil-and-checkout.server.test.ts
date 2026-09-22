@@ -555,6 +555,37 @@ describe("fulfilAndCheckOut", () => {
     );
   });
 
+  it("does not also claim a quantity-tracked member asset-wide when it was scanned loose too", async () => {
+    expect.assertions(2);
+    primeRulePath();
+    primeScannedKit({ memberTypes: { "dell-2": AssetType.QUANTITY_TRACKED } });
+    vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(3);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      // `dell-2` is a member of the scanned kit and was also scanned loose.
+      assetIds: ["dell-1", "dell-2"],
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    // Naming it asset-wide on top of its slice claim would take the asset's
+    // whole remaining across every slice it holds — its free pool and any
+    // other kit — which is what the per-slice disposition exists to avoid.
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: ["dell-1", "dell-3"],
+        checkouts: [
+          { assetId: "dell-2", bookingAssetId: "ba-ak-1", quantity: 3 },
+        ],
+      })
+    );
+    // And it is not assigned a loose row either — the kit slice owns it.
+    expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+  });
+
   it("leaves out a kit member already returned on this booking", async () => {
     expect.assertions(1);
     primeRulePath();
