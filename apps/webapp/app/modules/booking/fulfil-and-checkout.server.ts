@@ -14,7 +14,12 @@
  *   units are assigned with {@link addScannedAssetsToBooking}, the scan-to-add
  *   path, which discharges matching reservations. Then only the scanned ids are
  *   checked out with {@link partialCheckoutBooking}. The booking's other assets
- *   stay booked for a later scan or select. Kits are refused on this path.
+ *   stay booked for a later scan or select.
+ *
+ * A scanned kit is handled the same way on either flow: its memberships are
+ * resolved server-side, the ones not yet on the booking are added, and every
+ * member leaves with it. INDIVIDUAL members answer matching model
+ * reservations, because a unit inside a kit is the same unit as a loose one.
  *
  * Either way a check-out needs at least one item to go out, and nothing more:
  * reserved units no scan covered stay open on the ongoing booking, to be
@@ -34,9 +39,11 @@ import { BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
   addScannedAssetsToBooking,
+  buildKitSlicesForBooking,
   fulfilModelRequestsAndCheckout,
   partialCheckoutBooking,
 } from "~/modules/booking/service.server";
+import type { KitSliceSpec } from "~/modules/booking/service.server";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking";
@@ -76,20 +83,30 @@ export type FulfilAndCheckOutResult = {
  * @param args - The scan, the booking, the caller, and whether the rule applies
  * @returns The booking's id, name and status, and how many assets remain
  * @throws {ShelfError} 404 when the booking is not in the workspace; 400 when
- *   nothing would go out, a kit is scanned on the scanned-only path, or the
- *   booking cannot be checked out in its current status
+ *   nothing would go out, or the booking cannot be checked out in its current
+ *   status
  */
 export async function fulfilAndCheckOut({
   requireExplicitCheckout,
   ...args
 }: FulfilAndCheckOutArgs): Promise<FulfilAndCheckOutResult> {
+  // Callers send the kit ids their operator scanned; the memberships behind
+  // them are resolved here rather than trusted from the client, so every
+  // surface — web drawer, mobile endpoint, companion — books a kit the same
+  // org-scoped way. See `.claude/rules/kit-members-via-kit-slices.md`.
+  const scannedKits = await resolveScannedKits(args);
+
   // Under the requirement the flow is known up front, so the scan is judged
   // before anything is read. Without it the booking's status decides.
   let status: BookingStatus | undefined;
   if (!requireExplicitCheckout) {
     status = await readBookingStatus(args);
     if (status === BookingStatus.RESERVED) {
-      const booking = await fulfilModelRequestsAndCheckout(args);
+      const booking = await fulfilModelRequestsAndCheckout({
+        ...args,
+        assetIds: scannedKits.looseAssetIds,
+        kitSlices: scannedKits.newSlices,
+      });
       return {
         booking: { id: booking.id, name: booking.name, status: booking.status },
         remainingAssetCount: 0,
@@ -97,7 +114,80 @@ export async function fulfilAndCheckOut({
     }
   }
 
-  return checkOutScannedUnits(args, status);
+  return checkOutScannedUnits(args, scannedKits, status);
+}
+
+/** A scanned kit's memberships, split by what this booking already holds. */
+type ScannedKits = {
+  /**
+   * Memberships not yet on the booking. These become new kit-driven
+   * `BookingAsset` rows, and their INDIVIDUAL members discharge matching
+   * model reservations.
+   */
+  newSlices: KitSliceSpec[];
+  /**
+   * Every member asset of every scanned kit, including the ones already
+   * booked. Check-out acts on all of them: scanning a kit that is already on
+   * the booking is exactly how an operator sends it out.
+   */
+  memberAssetIds: string[];
+  /**
+   * The scanned assets that are NOT members of a scanned kit — the ones to
+   * add as standalone rows.
+   *
+   * An operator who scans a camera and then the case it lives in has named
+   * one physical unit twice. The two partial unique indexes let a standalone
+   * row and a kit-driven row coexist, so inserting both books the unit twice
+   * and every count on the booking doubles. The kit slice owns the member,
+   * matching the same-call precedence in `updateBookingAssets` and the
+   * scan-to-assign route.
+   */
+  looseAssetIds: string[];
+};
+
+/**
+ * Resolves the scanned kit ids into their `AssetKit` memberships.
+ *
+ * @param args - The booking, the caller's workspace and the scanned kit ids
+ * @returns The memberships to add, and every member asset to check out
+ * @throws {ShelfError} If the membership lookup fails
+ */
+async function resolveScannedKits({
+  bookingId,
+  organizationId,
+  kitIds = [],
+  assetIds,
+}: Pick<
+  FulfilAndCheckOutArgs,
+  "bookingId" | "organizationId" | "kitIds" | "assetIds"
+>): Promise<ScannedKits> {
+  if (kitIds.length === 0) {
+    return { newSlices: [], memberAssetIds: [], looseAssetIds: assetIds };
+  }
+
+  // Unfiltered, so one read serves every half: the memberships already on the
+  // booking are the ones to skip when adding and to keep when checking out,
+  // and every member is a candidate to drop from the loose bucket.
+  const allSlices = await buildKitSlicesForBooking({ kitIds, organizationId });
+
+  const bookedAssetKitRows = await db.bookingAsset.findMany({
+    where: { bookingId, assetKitId: { not: null } },
+    select: { assetKitId: true },
+  });
+  const bookedAssetKitIds = new Set(
+    bookedAssetKitRows.map((row) => row.assetKitId)
+  );
+
+  const memberAssetIds = [...new Set(allSlices.map((slice) => slice.assetId))];
+  const memberAssetIdSet = new Set(memberAssetIds);
+
+  return {
+    newSlices: allSlices.filter(
+      (slice) => !bookedAssetKitIds.has(slice.assetKitId)
+    ),
+    memberAssetIds,
+    looseAssetIds: assetIds.filter((id) => !memberAssetIdSet.has(id)),
+  };
 }
 
 /**
@@ -131,14 +221,16 @@ async function readBookingStatus({
  * Assigns the scanned units, then checks out only those.
  *
  * @param args - The scan, the booking and the caller
+ * @param scannedKits - The scanned kits' memberships, already resolved
  * @param knownStatus - The booking's status, when the caller already read it
  * @returns The booking's id, name and status, and how many assets remain
  * @throws {ShelfError} 404 when the booking is not in the workspace; 400 when
- *   nothing was scanned, a kit was scanned, or the booking cannot be checked
- *   out in its current status
+ *   nothing was scanned, or the booking cannot be checked out in its current
+ *   status
  */
 async function checkOutScannedUnits(
   args: Omit<FulfilAndCheckOutArgs, "requireExplicitCheckout">,
+  scannedKits: ScannedKits,
   knownStatus?: BookingStatus
 ): Promise<FulfilAndCheckOutResult> {
   const { bookingId, organizationId, userId, assetIds, kitIds = [] } = args;
@@ -151,20 +243,6 @@ async function checkOutScannedUnits(
       status: 400,
       label,
       message: "Scan at least one item to check out.",
-      shouldBeCaptured: false,
-    });
-  }
-
-  // This path checks out scanned asset ids only, so a scanned kit would be
-  // counted but stay booked. Refused before anything is assigned; "Scan to
-  // check out" expands a kit into its members.
-  if (kitIds.length > 0) {
-    throw new ShelfError({
-      cause: null,
-      status: 400,
-      label,
-      message:
-        "Kits can't be checked out from the reservation scanner. Use Scan to check out for kits.",
       shouldBeCaptured: false,
     });
   }
@@ -191,27 +269,38 @@ async function checkOutScannedUnits(
     where: {
       bookingId,
       booking: { organizationId },
-      assetId: { in: assetIds },
+      assetId: { in: scannedKits.looseAssetIds },
       assetKitId: null,
     },
     select: { assetId: true },
   });
   const alreadyAssignedIds = new Set(alreadyAssigned.map((row) => row.assetId));
-  const assetIdsToAssign = assetIds.filter((id) => !alreadyAssignedIds.has(id));
+  const assetIdsToAssign = scannedKits.looseAssetIds.filter(
+    (id) => !alreadyAssignedIds.has(id)
+  );
 
-  if (assetIdsToAssign.length > 0) {
+  if (assetIdsToAssign.length > 0 || scannedKits.newSlices.length > 0) {
     await addScannedAssetsToBooking({
       assetIds: assetIdsToAssign,
+      kitIds,
+      kitSlices: scannedKits.newSlices,
       bookingId,
       organizationId,
       userId,
     });
   }
 
+  // Every member of a scanned kit leaves with it, whether this scan put it on
+  // the booking or a previous one did. Deduped against the loose scans so an
+  // asset named twice is checked out once.
+  const assetIdsToCheckOut = [
+    ...new Set([...assetIds, ...scannedKits.memberAssetIds]),
+  ];
+
   const result = await partialCheckoutBooking({
     id: bookingId,
     organizationId,
-    assetIds,
+    assetIds: assetIdsToCheckOut,
     userId,
     hints: args.hints,
     intentChoice: args.checkoutIntentChoice,
