@@ -24,6 +24,10 @@ vi.mock("~/database/db.server", () => ({
     userOrganization: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      // why: the first-set is conditional — it writes only while the token is
+      // still null — so the get-or-create path goes through updateMany, whose
+      // count says whether this caller or a concurrent one won.
+      updateMany: vi.fn(),
     },
     user: { findUnique: vi.fn() },
   },
@@ -42,6 +46,8 @@ const ORG_ID = "org-1";
 const WHERE = {
   userId_organizationId: { userId: USER_ID, organizationId: ORG_ID },
 };
+/** `updateMany` takes plain columns, not the compound-unique wrapper. */
+const WHERE_FLAT = { userId: USER_ID, organizationId: ORG_ID };
 
 const allVisible = {
   selfServiceCanSeeBookings: true,
@@ -136,7 +142,9 @@ describe("calendar feed tokens", () => {
     vi.mocked(db.userOrganization.findUnique).mockResolvedValue({
       calendarTokenId: null,
     } as never);
-    vi.mocked(db.userOrganization.update).mockResolvedValue({} as never);
+    vi.mocked(db.userOrganization.updateMany).mockResolvedValue({
+      count: 1,
+    } as never);
 
     const token = await getOrCreateCalendarToken({
       userId: USER_ID,
@@ -145,10 +153,35 @@ describe("calendar feed tokens", () => {
 
     expect(typeof token).toBe("string");
     expect(token.length).toBeGreaterThan(20); // unguessable, not a short id
-    expect(db.userOrganization.update).toHaveBeenCalledWith({
-      where: WHERE,
+    // The predicate is the guard: writing only while the token is null is what
+    // makes two simultaneous first uses resolve to one token.
+    expect(db.userOrganization.updateMany).toHaveBeenCalledWith({
+      where: { ...WHERE_FLAT, calendarTokenId: null },
       data: { calendarTokenId: token },
     });
+  });
+
+  it("returns the token that persisted when a concurrent caller set one first", async () => {
+    // Two callers reach the first-use path together — a double-click, two tabs,
+    // a retried request. Only one write can land, and the other must report the
+    // token the row actually holds rather than the one it generated, which
+    // would hand the subscriber a URL that resolves to nothing.
+    vi.mocked(db.userOrganization.findUnique)
+      // The read that decides this is first use.
+      .mockResolvedValueOnce({ calendarTokenId: null } as never)
+      // The re-read after losing the conditional write.
+      .mockResolvedValueOnce({ calendarTokenId: "winner-token" } as never);
+    // count 0 = the row was no longer null, so someone else got there first.
+    vi.mocked(db.userOrganization.updateMany).mockResolvedValue({
+      count: 0,
+    } as never);
+
+    const token = await getOrCreateCalendarToken({
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(token).toBe("winner-token");
   });
 
   it("throws when the user is not a member of the workspace", async () => {
