@@ -308,8 +308,7 @@ async function checkOutScannedUnits(
     alreadyOnBooking
       .filter(
         (row) =>
-          row.assetKitId === null ||
-          row.asset.type === AssetType.INDIVIDUAL
+          row.assetKitId === null || row.asset.type === AssetType.INDIVIDUAL
       )
       .map((row) => row.assetId)
   );
