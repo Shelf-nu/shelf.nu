@@ -134,11 +134,10 @@ export function PresetListItem({
         {formatPreview(preset.query, columns)}
       </button>
 
-      {/* Rename and delete action buttons. Revealed on hover on pointer
-          devices; always present on touch, where there is no hover. */}
+      {/* Rename and delete action buttons */}
       <div
         className={tw(
-          "mt-0.5 flex gap-1 focus-within:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+          "mt-0.5 flex gap-1 opacity-0 focus-within:opacity-100 group-hover:opacity-100"
         )}
       >
         {/* Rename stays with the owner: the name is theirs to choose */}
