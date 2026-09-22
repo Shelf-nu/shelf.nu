@@ -18,8 +18,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// why: React Router v7 single fetch returns `data()` envelopes, not Responses,
-// so the status a failed action reports is otherwise unreadable in a test.
 const createDataMock = vi.hoisted(
   () => () =>
     vi.fn(
@@ -35,6 +33,8 @@ const dataMock = vi.hoisted(createDataMock);
 
 const qrMocks = vi.hoisted(() => ({ getQr: vi.fn() }));
 
+// why: React Router v7 single fetch returns `data()` envelopes, not Responses,
+// so the status a failed action reports is otherwise unreadable in a test.
 vi.mock("react-router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router")>();
   return { ...actual, data: dataMock };

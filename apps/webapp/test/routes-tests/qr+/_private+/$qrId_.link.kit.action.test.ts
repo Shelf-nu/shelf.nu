@@ -16,8 +16,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// why: React Router v7 single fetch returns `data()` envelopes, not Responses,
-// so the status a failed action reports is otherwise unreadable in a test.
 const createDataMock = vi.hoisted(
   () => () =>
     vi.fn(
@@ -32,6 +30,8 @@ const createDataMock = vi.hoisted(
 const dataMock = vi.hoisted(createDataMock);
 const qrMocks = vi.hoisted(() => ({ getQr: vi.fn() }));
 
+// why: React Router v7 single fetch returns `data()` envelopes, not Responses,
+// so the status a failed action reports is otherwise unreadable in a test.
 vi.mock("react-router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router")>();
   return { ...actual, data: dataMock };
@@ -125,6 +125,23 @@ describe("qr+/_private+/$qrId_.link.kit action", () => {
 
     expect(response.status).toBe(403);
     expect(db.kit.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a QR that is already linked to a different kit", async () => {
+    // The symmetric case to the asset refusal above, and the one that would
+    // move a label off the kit it currently identifies.
+    qrMocks.getQr.mockResolvedValue({
+      id: "qr-target",
+      organizationId: "org-1",
+      assetId: null,
+      kitId: "kit-other",
+    });
+
+    const response = await runAction(linkRequest());
+
+    expect(response.status).toBe(403);
+    expect(db.kit.update).not.toHaveBeenCalled();
+    expect(db.qr.update).not.toHaveBeenCalled();
   });
 
   it("links a free QR and claims it for the organization", async () => {
