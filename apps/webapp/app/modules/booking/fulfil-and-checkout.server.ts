@@ -272,16 +272,47 @@ async function checkOutScannedUnits(
   // allows one standalone row per asset, so a retry of the same scan assigns
   // only the units not already on the booking. The check-out below still
   // takes every scanned id.
-  const alreadyAssigned = await db.bookingAsset.findMany({
+  const alreadyOnBooking = await db.bookingAsset.findMany({
     where: {
       bookingId,
       booking: { organizationId },
       assetId: { in: scannedKits.looseAssetIds },
-      assetKitId: null,
     },
-    select: { assetId: true },
+    select: {
+      assetId: true,
+      assetKitId: true,
+      asset: { select: { type: true } },
+    },
   });
-  const alreadyAssignedIds = new Set(alreadyAssigned.map((row) => row.assetId));
+
+  /**
+   * Scans that must not be assigned again, for either of two reasons.
+   *
+   * A standalone row already holds the unit, whatever its type — assigning it
+   * twice would collide with `BookingAsset_manual_unique`.
+   *
+   * An INDIVIDUAL asset held only through a kit is the subtler one: it has no
+   * standalone row, so the unique index does not object, and a loose row would
+   * quietly book that one physical unit a second time. This scanner has no
+   * blockers by design, so an operator scanning a case and then a camera
+   * inside it reaches here freely. The mirror of the rule the scan-to-add path
+   * applies to kit slices.
+   *
+   * QUANTITY_TRACKED is exempt from the second reason: a free-pool slice
+   * legitimately coexists with kit slices.
+   *
+   * Either way the asset still leaves with the booking — it is on it already,
+   * through the row it has.
+   */
+  const alreadyAssignedIds = new Set(
+    alreadyOnBooking
+      .filter(
+        (row) =>
+          row.assetKitId === null ||
+          row.asset.type === AssetType.INDIVIDUAL
+      )
+      .map((row) => row.assetId)
+  );
   const assetIdsToAssign = scannedKits.looseAssetIds.filter(
     (id) => !alreadyAssignedIds.has(id)
   );
