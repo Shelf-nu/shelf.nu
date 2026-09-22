@@ -16220,6 +16220,38 @@ describe("model reservation guard — write paths", () => {
       expect(fulfilmentCandidateIds()).toEqual([]);
     });
 
+    it("keeps the kit slice for a QUANTITY_TRACKED asset the booking already holds loose", async () => {
+      expect.assertions(1);
+      // why: same staging as the INDIVIDUAL case above — `asset-qt` already
+      // holds a standalone row — so the two tests differ only by asset type.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([{ assetId: "asset-qt", quantity: 4 }]);
+
+      await addScannedAssetsToBooking({
+        assetIds: [],
+        kitSlices: [
+          { assetId: "asset-qt", assetKitId: "ak-1", kitId: "kit-1" },
+        ],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      });
+
+      // A quantity-tracked asset is a pool, not a unit: units committed to a
+      // kit and units taken from the free pool are two legitimate rows,
+      // bounded on separate axes. Only INDIVIDUAL is exempted, and removing
+      // that clause has to fail here rather than pass quietly.
+      const created = vitest.mocked(db.booking.update).mock.calls[0]?.[0] as {
+        data: {
+          bookingAssets: { create: Array<{ assetKitId: string | null }> };
+        };
+      };
+      expect(created.data.bookingAssets.create).toEqual([
+        expect.objectContaining({ assetId: "asset-qt", assetKitId: "ak-1" }),
+      ]);
+    });
+
     it("creates no rows when the guard refuses", async () => {
       expect.assertions(2);
       guard.mockRejectedValueOnce(refusal());
