@@ -29,6 +29,7 @@ import {
   resolveBookingKitBadge,
   resolveKitSelectionState,
   splitRemovalSelection,
+  unitsStillOut,
   type BookingRow,
 } from "./booking-kit-rows";
 import type { BookingAsset, BookingKit } from "./api/types";
@@ -709,6 +710,163 @@ test("check-in skips a quantity-tracked asset with nothing left to reconcile", (
     ),
     false
   );
+});
+
+// ---------------------------------------------------------------------------
+// Check-in eligibility by units actually out
+// ---------------------------------------------------------------------------
+
+/** A kit member booked `booked` units, with `out` sent and `back` returned. */
+function qtyMember(
+  id: string,
+  booked: number,
+  out: number,
+  back: number
+): BookingAsset {
+  const member = { ...inKit(id, "kit-1", "Camera Kit") };
+  member.type = "QUANTITY_TRACKED";
+  member.quantity = booked;
+  member.checkedOutQuantity = out;
+  member.dispositionedQuantity = back;
+  // Booked minus dispositioned, which is what the server sends and what the
+  // old rule read. On a never-dispatched row it equals the booked quantity,
+  // which is exactly the number that made the bug.
+  member.remainingToCheckIn = Math.max(0, booked - back);
+  return member;
+}
+
+test("units still out is what went out less what came back", () => {
+  assert.equal(unitsStillOut(qtyMember("m1", 4, 3, 1)), 2);
+});
+
+test("units still out never goes negative", () => {
+  assert.equal(unitsStillOut(qtyMember("m1", 4, 2, 3)), 0);
+});
+
+test("check-in skips a quantity-tracked asset that never went out", () => {
+  // The reported bug: booked 4, nothing dispatched. `remainingToCheckIn` is 4
+  // and offering on it got the server's "never checked out" refusal.
+  const member = qtyMember("m1", 4, 0, 0);
+  assert.equal(member.remainingToCheckIn, 4);
+  assert.equal(isBookingAssetSelectable(member, "checkin", []), false);
+});
+
+test("check-in offers a quantity-tracked asset that is partly out", () => {
+  assert.equal(
+    isBookingAssetSelectable(qtyMember("m1", 4, 2, 0), "checkin", []),
+    true
+  );
+});
+
+test("check-in skips a quantity-tracked asset whose units are all back", () => {
+  assert.equal(
+    isBookingAssetSelectable(qtyMember("m1", 2, 2, 2), "checkin", []),
+    false
+  );
+});
+
+test("a kit whose member never went out is not offered for check-in", () => {
+  assert.equal(
+    resolveKitSelectionState({
+      members: [qtyMember("m1", 4, 0, 0)],
+      selectMode: "checkin",
+      selectedAssetIds: new Set(),
+      checkedInAssetIds: [],
+    }),
+    "unselectable"
+  );
+});
+
+test("a kit whose member never went out still reads as Available", () => {
+  // Never dispatched is not the same as back: the badge must not claim a
+  // return that never happened.
+  assert.deepEqual(
+    resolveBookingKitBadge({
+      kit: cameraKit,
+      members: [qtyMember("m1", 4, 0, 0)],
+      bookingStatus: "ONGOING",
+      checkedInAssetIds: [],
+    }),
+    { tone: "AVAILABLE", label: "Available" }
+  );
+});
+
+test("a kit whose units are all back reads as already checked in", () => {
+  assert.deepEqual(
+    resolveBookingKitBadge({
+      kit: cameraKit,
+      members: [qtyMember("m1", 2, 2, 2)],
+      bookingStatus: "ONGOING",
+      checkedInAssetIds: [],
+    }),
+    { tone: "PARTIALLY_CHECKED_IN", label: "Already checked in" }
+  );
+});
+
+test("units still out never exceeds what the endpoint will accept", () => {
+  // A second trip inside one booking: 8 units have been sent out, 4 came back,
+  // so 4 are physically out. `partialCheckinBooking` caps each claim at booked
+  // minus everything dispositioned, which is 0 here, so those 4 cannot be
+  // checked in yet and must not be offered.
+  const member = qtyMember("m1", 4, 8, 4);
+  assert.equal(member.remainingToCheckIn, 0);
+  assert.equal(unitsStillOut(member), 0);
+  assert.equal(isBookingAssetSelectable(member, "checkin", []), false);
+});
+
+test("a member on a second trip is not called back in", () => {
+  // 4 booked, 8 sent out across two trips, 4 back. Reading the returns against
+  // the booked quantity alone would call it done while the second trip is out.
+  const member = qtyMember("m1", 4, 8, 4);
+  assert.deepEqual(
+    resolveBookingKitBadge({
+      kit: cameraKit,
+      members: [member],
+      bookingStatus: "ONGOING",
+      checkedInAssetIds: [],
+    }),
+    { tone: "AVAILABLE", label: "Available" }
+  );
+});
+
+test("check-out is unchanged by the units-out rule", () => {
+  // A never-dispatched row is exactly what check-out is for.
+  const member = qtyMember("m1", 4, 0, 0);
+  member.remainingToCheckOut = 4;
+  assert.equal(isBookingAssetSelectable(member, "checkout", []), true);
+});
+
+test("an older server without the two counters keeps the old rule", () => {
+  const member = { ...inKit("m1", "kit-1", "Camera Kit") };
+  member.type = "QUANTITY_TRACKED";
+  member.quantity = 4;
+  member.remainingToCheckIn = 4;
+
+  assert.equal(unitsStillOut(member), 4);
+  assert.equal(isBookingAssetSelectable(member, "checkin", []), true);
+});
+
+test("an older server judges a member back in by what is left to reconcile", () => {
+  const member = { ...inKit("m1", "kit-1", "Camera Kit") };
+  member.type = "QUANTITY_TRACKED";
+  member.quantity = 5;
+  member.remainingToCheckIn = 0;
+
+  assert.deepEqual(
+    resolveBookingKitBadge({
+      kit: cameraKit,
+      members: [member],
+      bookingStatus: "ONGOING",
+      checkedInAssetIds: [],
+    }),
+    { tone: "PARTIALLY_CHECKED_IN", label: "Already checked in" }
+  );
+});
+
+test("an individual row is judged by status, not by units", () => {
+  const out = asset({ id: "a1", status: "CHECKED_OUT" });
+  assert.equal(isBookingAssetSelectable(out, "checkin", []), true);
+  assert.equal(isBookingAssetSelectable(out, "checkin", ["a1"]), false);
 });
 
 test("a header with nothing picked reads as none", () => {
