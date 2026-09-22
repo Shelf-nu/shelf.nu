@@ -203,7 +203,9 @@ export async function createOrganization({
      * so a logo this service is going to refuse must not cost the caller a slot.
      */
     const logo =
-      image?.size && image.size > 0 ? await readValidatedLogo(image, userId) : null;
+      image?.size && image.size > 0
+        ? await readValidatedLogo(image, userId)
+        : null;
 
     const data = {
       name,
@@ -1003,6 +1005,32 @@ export async function transferOwnership({
         where: { id: newOwnerUserOrg.id },
         data: { roles: { set: [OrganizationRoles.OWNER] } },
       });
+
+      /**
+       * A free trial belongs to the person, not to the workspace: once the
+       * outgoing owner has spent theirs, whoever receives the workspace does
+       * not get a second one on the same equipment.
+       *
+       * This runs for EVERY transfer, including the ones that carry no
+       * subscription. A workspace whose plan has already ended or been
+       * cancelled has nothing left to hand over, yet it still arrives full of
+       * assets the new owner would otherwise trial on. It rides in the
+       * ownership transaction so the workspace and the spent trial can never
+       * come apart.
+       *
+       * The flag is written whether or not billing is switched on, so the
+       * record of who has already had their trial stays true on any instance.
+       */
+      if (
+        currentOwnerUserOrg.user.usedFreeTrial &&
+        !newOwnerUserOrg.user.usedFreeTrial
+      ) {
+        await tx.user.update({
+          where: { id: newOwnerId },
+          data: { usedFreeTrial: true },
+          select: { id: true },
+        });
+      }
     });
 
     // Handle subscription transfer AFTER the ownership transfer succeeds
@@ -1053,16 +1081,6 @@ export async function transferOwnership({
             }
 
             subscriptionTransferred = true;
-
-            // Transfer usedFreeTrial flag if original owner used it
-            // This prevents the new owner from starting another trial
-            if (currentOwnerUserOrg.user.usedFreeTrial) {
-              await db.user.update({
-                where: { id: newOwnerId },
-                data: { usedFreeTrial: true },
-                select: { id: true },
-              });
-            }
 
             // Check if new owner has a payment method on their Stripe customer
             // If not, set the warning flag so they see the banner
