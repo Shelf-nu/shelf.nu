@@ -68,6 +68,8 @@ beforeEach(() => {
   // `clearAllMocks` clears calls, not implementations, so the default has to
   // be restored here or a case that stages kits leaks into the next one.
   vi.mocked(buildKitSlicesForBooking).mockResolvedValue([]);
+  // why: default to a slice that owes nothing, so only the cases about
+  // quantity-tracked members have to state a figure.
   vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(0);
 });
 
@@ -505,6 +507,8 @@ describe("fulfilAndCheckOut", () => {
     expect.assertions(2);
     primeRulePath();
     primeScannedKit({ memberTypes: { "dell-3": AssetType.QUANTITY_TRACKED } });
+    // why: the slice owes 4 units; the assertion below pins that the claim
+    // carries the slice's own figure rather than the asset-wide one.
     vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(4);
 
     await fulfilAndCheckOut({
@@ -539,6 +543,7 @@ describe("fulfilAndCheckOut", () => {
     expect.assertions(1);
     primeRulePath();
     primeScannedKit({ memberTypes: { "dell-3": AssetType.QUANTITY_TRACKED } });
+    // why: a slice that owes nothing must produce no disposition at all.
     vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(0);
 
     await fulfilAndCheckOut({
@@ -559,6 +564,8 @@ describe("fulfilAndCheckOut", () => {
     expect.assertions(2);
     primeRulePath();
     primeScannedKit({ memberTypes: { "dell-2": AssetType.QUANTITY_TRACKED } });
+    // why: the slice owes 3 of its booked units, so that is what the
+    // check-out must claim for it — not the asset's remaining everywhere.
     vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(3);
 
     await fulfilAndCheckOut({
