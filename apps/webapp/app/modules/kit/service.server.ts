@@ -5250,15 +5250,16 @@ export async function updateKitAssets({
         : 1;
 
     /**
-     * Detect existing-in-kit assets whose submitted quantity differs from
-     * the current `AssetKit.quantity`. These trigger an `assetKit.update`
-     * + (if the kit is in custody) a cascade to the kit-allocated
-     * `Custody` row, with a paired `CUSTODY_ASSIGNED` (increase) or
-     * `CUSTODY_RELEASED` (decrease) event.
+     * Existing-in-kit assets whose submitted quantity differs from the current
+     * `AssetKit.quantity`. Each triggers an `assetKit.update` and, when the kit
+     * is in custody, a cascade to the kit-allocated `Custody` row with a paired
+     * `CUSTODY_ASSIGNED` (increase) or `CUSTODY_RELEASED` (decrease) event.
      *
-     * Today the picker doesn't yet expose a qty input, so the
-     * `assetQuantities` map is typically empty and this bucket stays
-     * empty too — keeps the new code path dormant until T5 wires the UI.
+     * Empty under `addOnly`, which means create what is missing and change
+     * nothing that exists. Callers in that mode submit a set they believe the
+     * kit does NOT already contain — the scanner decides that from the
+     * membership its page loaded with — so a row that turns out to exist is one
+     * they did not know about, and its quantity belongs to whoever set it.
      */
     type QtyChangedAsset = {
       id: string;
@@ -5266,39 +5267,39 @@ export async function updateKitAssets({
       previousQuantity: number;
       newQuantity: number;
     };
-    const qtyChangedAssets: QtyChangedAsset[] = allAssetsForKit.flatMap(
-      (asset) => {
-        // Only consider assets that are already in this kit AND have a
-        // submitted quantity that differs from the current pivot value.
-        const currentPivot = asset.assetKits.find((ak) => ak.kitId === kit.id);
-        if (!currentPivot) return [];
+    const qtyChangedAssets: QtyChangedAsset[] = (
+      addOnly ? [] : allAssetsForKit
+    ).flatMap((asset) => {
+      // Only consider assets that are already in this kit AND have a
+      // submitted quantity that differs from the current pivot value.
+      const currentPivot = asset.assetKits.find((ak) => ak.kitId === kit.id);
+      if (!currentPivot) return [];
 
-        const submitted = assetQuantities[asset.id];
-        if (submitted == null) return [];
+      const submitted = assetQuantities[asset.id];
+      if (submitted == null) return [];
 
-        // INDIVIDUAL is always 1 — picker shouldn't submit anything else,
-        // but defensively coerce.
-        const newQty =
-          asset.type === AssetType.INDIVIDUAL ? 1 : Math.max(0, submitted);
-        if (newQty === currentPivot.quantity) return [];
+      // INDIVIDUAL is always 1 — picker shouldn't submit anything else,
+      // but defensively coerce.
+      const newQty =
+        asset.type === AssetType.INDIVIDUAL ? 1 : Math.max(0, submitted);
+      if (newQty === currentPivot.quantity) return [];
 
-        // Submitting qty=0 for an existing-in-kit asset is treated as a
-        // no-op here. The picker contract is: to remove an asset from the
-        // kit, omit its id from `assetIds` — that routes through
-        // `removedAssets` (which deletes the pivot row + cascades to
-        // kit-allocated Custody).
-        if (newQty <= 0) return [];
+      // Submitting qty=0 for an existing-in-kit asset is treated as a
+      // no-op here. The picker contract is: to remove an asset from the
+      // kit, omit its id from `assetIds` — that routes through
+      // `removedAssets` (which deletes the pivot row + cascades to
+      // kit-allocated Custody).
+      if (newQty <= 0) return [];
 
-        return [
-          {
-            id: asset.id,
-            title: asset.title,
-            previousQuantity: currentPivot.quantity,
-            newQuantity: newQty,
-          },
-        ];
-      }
-    );
+      return [
+        {
+          id: asset.id,
+          title: asset.title,
+          previousQuantity: currentPivot.quantity,
+          newQuantity: newQty,
+        },
+      ];
+    });
 
     /**
      * Server-side strict-available validation. The picker enforces this
@@ -5332,7 +5333,20 @@ export async function updateKitAssets({
       tx: db,
     });
 
-    for (const asset of allAssetsForKit) {
+    /**
+     * Whose submitted quantity is worth measuring against the pool: only the
+     * rows this call will actually write.
+     *
+     * Under `addOnly` an existing membership's submitted quantity is ignored, so
+     * measuring it can only raise a 400 about a row that is not changing — and
+     * that 400 refuses the genuinely new assets in the same request. Derived
+     * from `newlyAddedAssets`, which is computed from the membership read inside
+     * this function, so an asset added concurrently counts as existing here
+     * even though the caller believed it was new.
+     */
+    const assetsToMeasure = addOnly ? newlyAddedAssets : allAssetsForKit;
+
+    for (const asset of assetsToMeasure) {
       if (asset.type !== AssetType.QUANTITY_TRACKED) continue;
       const submitted = assetQuantities[asset.id];
       if (submitted == null) continue;
