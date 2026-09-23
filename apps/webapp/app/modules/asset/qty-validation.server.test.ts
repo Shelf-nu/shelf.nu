@@ -148,7 +148,7 @@ describe("validateQtyTrackedFields", () => {
           createMode,
           ctx
         )
-      ).toThrow(/is missing consumptionType/);
+      ).toThrow(/is missing a consumption type/);
     });
 
     it("throws when QUANTITY_TRACKED row is missing quantity", () => {
