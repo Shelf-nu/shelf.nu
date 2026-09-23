@@ -5,9 +5,9 @@
  * `parseQtyTrackedCsvRow`) and the update-from-content import
  * (`applyBulkUpdatesFromImport` → `parseQtyTrackedUpdateRow`) need to
  * validate the same set of columns with the same per-field error
- * messages — customers may have screenshots of the create-path errors
- * and the update path must read identically. Extracting the validator
- * keeps the two parsers from drifting field-by-field.
+ * messages, so a user who hits a rule on one path reads the same
+ * sentence on the other. Extracting the validator keeps the two
+ * parsers from drifting field-by-field.
  *
  * Create path (`parseQtyTrackedCsvRow`):
  *   - `type` defaults to INDIVIDUAL when omitted
@@ -26,6 +26,12 @@
  * @see {@link file://./../../utils/import-update.server.ts} — `applyBulkUpdatesFromImport` consumer
  */
 import { AssetType, ConsumptionType } from "@prisma/client";
+import {
+  ASSET_TYPE_ADJECTIVES,
+  ASSET_TYPE_LABELS,
+  CONSUMPTION_TYPE_ADJECTIVES,
+  CONSUMPTION_TYPE_DESCRIPTIONS,
+} from "@shelf/labels";
 
 import { sanitizeUnitOfMeasureLabel } from "~/utils/asset-quantity";
 import { ShelfError } from "~/utils/error";
@@ -41,6 +47,19 @@ type QtyValidationExtraData = {
 };
 
 const LABEL = "Assets";
+
+/**
+ * Both consumption values, each named the way the asset form names it.
+ *
+ * A CSV cell has to hold the raw enum member, so the literal leads and the
+ * label explains it. A message that gave only the label would read well and
+ * leave the reader with nothing to type.
+ */
+const CONSUMPTION_CHOICES = `ONE_WAY (${CONSUMPTION_TYPE_ADJECTIVES.ONE_WAY}: ${CONSUMPTION_TYPE_DESCRIPTIONS.ONE_WAY}) or TWO_WAY (${CONSUMPTION_TYPE_ADJECTIVES.TWO_WAY}: ${CONSUMPTION_TYPE_DESCRIPTIONS.TWO_WAY})`;
+
+/** Attributive form, for prose that puts the method in front of a noun. */
+const QTY_TRACKED = ASSET_TYPE_ADJECTIVES.QUANTITY_TRACKED;
+const INDIVIDUAL_TRACKED = ASSET_TYPE_ADJECTIVES.INDIVIDUAL;
 
 /**
  * Accepted string values for the `type` CSV column.
@@ -123,8 +142,10 @@ export type QtyValidationMode =
  * value so the import surface can show "row 14: quantity must be a
  * positive integer" rather than a generic 500 from deeper in the chain.
  *
- * The exact error messages here are part of the public contract —
- * customers may have screenshots, so do NOT reword them when refactoring.
+ * Each message names every column a QUANTITY_TRACKED row needs, not just the
+ * one that failed. A row is validated against one rule at a time, so a message
+ * that mentioned only its own rule would teach the file's full shape one
+ * upload at a time.
  *
  * @param cells - The raw CSV cells (string keys, undefined when absent)
  * @param mode - `create` vs `update` (controls required-vs-optional rules)
@@ -157,7 +178,7 @@ export function validateQtyTrackedFields(
       throw new ShelfError({
         cause: null,
         title: "Invalid asset type",
-        message: `Invalid type "${cells.type}" for ${rowLabel}. Must be "INDIVIDUAL" or "QUANTITY_TRACKED".`,
+        message: `Invalid type "${cells.type}" for ${rowLabel}. Use INDIVIDUAL (${ASSET_TYPE_LABELS.INDIVIDUAL}) or QUANTITY_TRACKED (${ASSET_TYPE_LABELS.QUANTITY_TRACKED}).`,
         label: LABEL,
         status: 400,
         shouldBeCaptured: false,
@@ -201,7 +222,7 @@ export function validateQtyTrackedFields(
         throw new ShelfError({
           cause: null,
           title: "Quantity required",
-          message: `Quantity is required (and must be > 0) for QUANTITY_TRACKED ${rowLabel}.`,
+          message: `Quantity-tracked ${rowLabel} needs a quantity of at least 1. A ${QTY_TRACKED} row needs both the quantity and consumptionType columns filled in.`,
           label: LABEL,
           status: 400,
           shouldBeCaptured: false,
@@ -212,7 +233,7 @@ export function validateQtyTrackedFields(
       throw new ShelfError({
         cause: null,
         title: "Quantity required",
-        message: `Quantity is required (and must be > 0) for QUANTITY_TRACKED ${rowLabel}.`,
+        message: `Quantity-tracked ${rowLabel} has quantity "${cells.quantity}", but must hold at least 1. Leave the cell empty to keep the current stock level.`,
         label: LABEL,
         status: 400,
         shouldBeCaptured: false,
@@ -223,8 +244,8 @@ export function validateQtyTrackedFields(
     if (parsedQty !== undefined && parsedQty > 1) {
       throw new ShelfError({
         cause: null,
-        title: "Invalid quantity for INDIVIDUAL",
-        message: `INDIVIDUAL assets must have quantity 1 (or omit the column). Got "${cells.quantity}" for ${rowLabel}. To track stock, set type=QUANTITY_TRACKED.`,
+        title: `Invalid quantity for an ${INDIVIDUAL_TRACKED} asset`,
+        message: `${ASSET_TYPE_LABELS.INDIVIDUAL} assets must have quantity 1 (or omit the column). Got "${cells.quantity}" for ${rowLabel}. To track stock instead, set the type column to QUANTITY_TRACKED (${ASSET_TYPE_LABELS.QUANTITY_TRACKED}), which also needs quantity (a whole number greater than 0) and consumptionType (ONE_WAY or TWO_WAY).`,
         label: LABEL,
         status: 400,
         shouldBeCaptured: false,
@@ -275,7 +296,7 @@ export function validateQtyTrackedFields(
       throw new ShelfError({
         cause: null,
         title: "Invalid consumption type",
-        message: `Invalid consumptionType "${cells.consumptionType}" for ${rowLabel}. Must be "ONE_WAY" or "TWO_WAY".`,
+        message: `Invalid consumptionType "${cells.consumptionType}" for ${rowLabel}. Use ${CONSUMPTION_CHOICES}.`,
         label: LABEL,
         status: 400,
         shouldBeCaptured: false,
@@ -299,7 +320,7 @@ export function validateQtyTrackedFields(
     throw new ShelfError({
       cause: null,
       title: "Consumption type required",
-      message: `Consumption type is required for QUANTITY_TRACKED ${rowLabel}. Must be "ONE_WAY" or "TWO_WAY".`,
+      message: `Quantity-tracked ${rowLabel} is missing a consumption type. Set the consumptionType column to ${CONSUMPTION_CHOICES}.`,
       label: LABEL,
       status: 400,
       shouldBeCaptured: false,

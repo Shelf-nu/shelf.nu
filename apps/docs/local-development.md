@@ -31,8 +31,10 @@ Commands are scoped to specific packages using `pnpm --filter <package>` or run 
 # Webapp
 pnpm webapp:dev        # Start webapp dev server
 pnpm webapp:build      # Build webapp for production
-pnpm webapp:test       # Run webapp unit tests
-pnpm webapp:validate   # Run all webapp checks (lint, typecheck, format, tests)
+pnpm webapp:test               # Run webapp unit tests
+pnpm webapp:test:changed       # Run only tests affected by your changes vs local main
+pnpm webapp:validate           # Run webapp checks (lint, typecheck, format, affected tests)
+pnpm webapp:validate:full      # Same, with the full test suite
 
 # Docs
 pnpm docs:dev          # Start docs dev server
@@ -181,7 +183,7 @@ pnpm db:reset            # Reset database (careful!)
 ```bash
 pnpm turbo lint        # Run ESLint (all packages)
 pnpm run format        # Format code with Prettier
-pnpm webapp:validate   # Run all checks (lint, typecheck, format, tests)
+pnpm webapp:validate   # Run all checks (lint, typecheck, format, affected tests)
 pnpm webapp:doctor     # React health scan (react-doctor) — webapp
 pnpm companion:doctor  # React Native health scan (react-doctor) — companion app
 ```

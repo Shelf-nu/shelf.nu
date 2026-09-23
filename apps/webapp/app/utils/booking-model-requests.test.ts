@@ -5,7 +5,10 @@ import {
   canEditModelReservations,
   countReservedModelUnits,
   countUnassignedModelUnits,
+  getModelPoolRemaining,
+  getModelRequestQuantityIssue,
   getOutstandingModelRequests,
+  isModelPoolOverCommitted,
   summarizeUnassignedUnits,
 } from "./booking-model-requests";
 
@@ -266,5 +269,172 @@ describe("summarizeUnassignedUnits", () => {
         { name: "HP LaserJet", count: 1 },
       ])
     ).toBe("1 × HP LaserJet");
+  });
+});
+
+describe("isModelPoolOverCommitted", () => {
+  const counts = {
+    total: 5,
+    inCustody: 0,
+    reservedConcrete: 0,
+    reservedViaRequest: 0,
+  };
+
+  it("is false when the promises fit the stock", () => {
+    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 3 })).toBe(
+      false
+    );
+  });
+
+  it("is false when the stock is exactly spoken for", () => {
+    // The boundary matters: exactly-empty is not over-committed, and it is the
+    // case an off-by-one here would misreport as a shortfall on every full pool.
+    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 5 })).toBe(
+      false
+    );
+  });
+
+  it("is true when more units are promised than exist", () => {
+    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 6 })).toBe(
+      true
+    );
+  });
+
+  it("counts custody and both kinds of reservation against the pool", () => {
+    // 5 total − 2 in custody − 2 concrete − 2 via request = −1.
+    expect(
+      isModelPoolOverCommitted({
+        total: 5,
+        inCustody: 2,
+        reservedConcrete: 2,
+        reservedViaRequest: 2,
+      })
+    ).toBe(true);
+  });
+});
+
+describe("getModelPoolRemaining", () => {
+  it("returns how many units are free", () => {
+    expect(
+      getModelPoolRemaining({
+        total: 5,
+        inCustody: 1,
+        reservedConcrete: 2,
+        reservedViaRequest: 0,
+      })
+    ).toBe(2);
+  });
+
+  it("goes negative when the pool owes more than it holds", () => {
+    // The signed result is the reason this exists: `available` is clamped at
+    // zero, so it reports this case and an exactly-empty pool identically.
+    expect(
+      getModelPoolRemaining({
+        total: 5,
+        inCustody: 0,
+        reservedConcrete: 4,
+        reservedViaRequest: 3,
+      })
+    ).toBe(-2);
+  });
+});
+
+describe("getModelRequestQuantityIssue", () => {
+  /** An over-committed pool: 5 units exist, 10 are claimed over this window. */
+  const overCommitted = {
+    floor: 1,
+    capacity: 0,
+    current: 5,
+    total: 5,
+  };
+
+  it("allows a reduction when the pool is over-committed", () => {
+    expect.assertions(1);
+    // The remediation the "Over-reserved" badge asks for. Capping it would
+    // leave no legal quantity at all: Remove is hidden once a unit is assigned.
+    expect(getModelRequestQuantityIssue(1, overCommitted)).toBeNull();
+  });
+
+  it("allows a reduction when the capacity is negative", () => {
+    expect.assertions(1);
+    expect(
+      getModelRequestQuantityIssue(3, {
+        floor: 0,
+        capacity: -2,
+        current: 5,
+        total: 5,
+      })
+    ).toBeNull();
+  });
+
+  it("allows holding at the current quantity when over-committed", () => {
+    expect.assertions(1);
+    expect(getModelRequestQuantityIssue(5, overCommitted)).toBeNull();
+  });
+
+  it("rejects an increase past the capacity", () => {
+    expect.assertions(1);
+    expect(
+      getModelRequestQuantityIssue(8, {
+        floor: 0,
+        capacity: 6,
+        current: 4,
+        total: 10,
+      })
+    ).toBe(
+      "Only 6 of 10 available in this window — reduce the quantity to continue."
+    );
+  });
+
+  it("allows an increase up to the capacity", () => {
+    expect.assertions(1);
+    expect(
+      getModelRequestQuantityIssue(6, {
+        floor: 0,
+        capacity: 6,
+        current: 4,
+        total: 10,
+      })
+    ).toBeNull();
+  });
+
+  it("never quotes a negative number of available units", () => {
+    expect.assertions(1);
+    // Over-committed AND an increase — the only path that both reports a
+    // capacity and has a negative one to report.
+    expect(
+      getModelRequestQuantityIssue(6, {
+        floor: 0,
+        capacity: -2,
+        current: 5,
+        total: 5,
+      })
+    ).toBe(
+      "Only 0 of 5 available in this window — reduce the quantity to continue."
+    );
+  });
+
+  it("rejects going below the already-assigned floor", () => {
+    expect.assertions(1);
+    expect(
+      getModelRequestQuantityIssue(1, { ...overCommitted, floor: 3 })
+    ).toBe("3 units are already assigned — 3 is the lowest this can go.");
+  });
+
+  it("uses the singular when one unit is assigned", () => {
+    expect.assertions(1);
+    expect(
+      getModelRequestQuantityIssue(0, { ...overCommitted, floor: 1 })
+    ).toBe("1 unit is already assigned — 1 is the lowest this can go.");
+  });
+
+  it("still enforces the floor when pool availability is unknown", () => {
+    expect.assertions(2);
+    const unknownPool = { floor: 2, capacity: null, current: 4, total: null };
+    expect(getModelRequestQuantityIssue(1, unknownPool)).toBe(
+      "2 units are already assigned — 2 is the lowest this can go."
+    );
+    // No capacity to judge against, so any quantity above the floor passes.
+    expect(getModelRequestQuantityIssue(99, unknownPool)).toBeNull();
   });
 });
