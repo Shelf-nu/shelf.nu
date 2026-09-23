@@ -5,6 +5,7 @@ import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
+import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import { ASSET_REMINDER_INCLUDE_FIELDS } from "./fields";
 import {
   ASSETS_EVENT_TYPE_MAP,
@@ -16,6 +17,21 @@ import { getUserByID } from "../user/service.server";
 
 const label = "Asset Reminder";
 
+/**
+ * Creates a reminder on an asset and schedules its email.
+ *
+ * The asset must belong to `organizationId`: the reminder is listed in, and
+ * emailed to, that workspace, and the email shows the asset's title and image.
+ * The ownership check, the reminder and its activity note commit in one
+ * transaction, and the email is scheduled only after that commit — so a
+ * refused or failed request leaves no reminder row and no queued job behind.
+ *
+ * @param args.assetId - Asset the reminder is about; must be in `organizationId`
+ * @param args.organizationId - The caller's validated workspace
+ * @param args.teamMembers - Recipients; must be linked users of the same workspace
+ * @returns The created reminder
+ * @throws {ShelfError} 400 when the asset is not in the workspace or a recipient is no longer available
+ */
 export async function createAssetReminder({
   name,
   message,
@@ -44,46 +60,56 @@ export async function createAssetReminder({
         displayName: true,
       } satisfies Prisma.UserSelect,
     });
-    const assetReminder = await db.assetReminder.create({
-      data: {
-        name,
-        message,
-        alertDateTime,
-        assetId,
-        createdById,
-        organizationId,
-        teamMembers: {
-          connect: teamMembers.map((id) => ({ id })),
+
+    const assetReminder = await db.$transaction(async (tx) => {
+      await assertAssetsBelongToOrg(
+        { assetIds: [assetId], organizationId },
+        tx
+      );
+
+      const reminder = await tx.assetReminder.create({
+        data: {
+          name,
+          message,
+          alertDateTime,
+          assetId,
+          createdById,
+          organizationId,
+          teamMembers: {
+            connect: teamMembers.map((id) => ({ id })),
+          },
         },
-      },
+      });
+
+      await createNote(
+        {
+          assetId,
+          organizationId,
+          userId: createdById,
+          type: "UPDATE",
+          content: `${wrapUserLinkForNote({
+            ...user,
+            id: createdById,
+          })} created a new reminder ${wrapLinkForNote(
+            `/assets/${assetId}/reminders?${new URLSearchParams({
+              s: reminder.name,
+            }).toString()}`,
+            reminder.name
+          )}.`,
+        },
+        tx
+      );
+
+      return reminder;
     });
 
-    await Promise.all([
-      createNote({
-        assetId,
-        // why: scope the note's asset to the reminder's org so a caller
-        // cannot attach a note to another tenant's asset (cross-org IDOR)
-        organizationId,
-        userId: createdById,
-        type: "UPDATE",
-        content: `${wrapUserLinkForNote({
-          ...user,
-          id: createdById,
-        })} created a new reminder ${wrapLinkForNote(
-          `/assets/${assetId}/reminders?${new URLSearchParams({
-            s: assetReminder.name,
-          }).toString()}`,
-          assetReminder.name
-        )}.`,
-      }),
-      scheduleAssetReminder({
-        data: {
-          reminderId: assetReminder.id,
-          eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
-        },
-        when: alertDateTime,
-      }),
-    ]);
+    await scheduleAssetReminder({
+      data: {
+        reminderId: assetReminder.id,
+        eventType: ASSETS_EVENT_TYPE_MAP.REMINDER,
+      },
+      when: alertDateTime,
+    });
 
     return assetReminder;
   } catch (cause) {
