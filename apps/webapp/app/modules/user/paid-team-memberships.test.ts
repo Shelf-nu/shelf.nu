@@ -7,7 +7,8 @@
  * the app disables (owner on Free or Plus, or switched off by a Shelf admin)
  * and a personal workspace must never appear: each would tell someone they
  * are covered by a plan that does not cover them. Someone who owns a Team
- * workspace gets nothing at all: the page treats them as an owner.
+ * workspace, or whose own tier is not free, gets nothing at all: the page
+ * shows them their own plan or the owner prompt instead.
  *
  * @see {@link file://./paid-team-memberships.ts}
  */
@@ -52,6 +53,7 @@ describe("getPaidTeamMemberships", () => {
   it("returns a Team workspace the user joined whose owner is on Team", () => {
     const result = getPaidTeamMemberships({
       userId: USER_ID,
+      userTierId: TierId.free,
       memberships: [membership({ id: "t1", name: "Camera Crew" })],
     });
 
@@ -65,6 +67,7 @@ describe("getPaidTeamMemberships", () => {
   ])("counts a %s member", (role) => {
     const result = getPaidTeamMemberships({
       userId: USER_ID,
+      userTierId: TierId.free,
       memberships: [membership({ roles: [role] })],
     });
 
@@ -76,6 +79,7 @@ describe("getPaidTeamMemberships", () => {
     (ownerTierId) => {
       const result = getPaidTeamMemberships({
         userId: USER_ID,
+        userTierId: TierId.free,
         memberships: [membership({ ownerTierId })],
       });
 
@@ -88,6 +92,7 @@ describe("getPaidTeamMemberships", () => {
     (ownerTierId) => {
       const result = getPaidTeamMemberships({
         userId: USER_ID,
+        userTierId: TierId.free,
         memberships: [membership({ ownerTierId })],
       });
 
@@ -98,6 +103,7 @@ describe("getPaidTeamMemberships", () => {
   it("leaves out a workspace a Shelf admin switched off, whatever the owner's tier", () => {
     const result = getPaidTeamMemberships({
       userId: USER_ID,
+      userTierId: TierId.free,
       memberships: [
         membership({ workspaceDisabled: true, ownerTierId: TierId.tier_2 }),
       ],
@@ -111,6 +117,7 @@ describe("getPaidTeamMemberships", () => {
     // owner, so it must not say they need no plan of their own.
     const result = getPaidTeamMemberships({
       userId: USER_ID,
+      userTierId: TierId.free,
       memberships: [
         membership({ id: "joined" }),
         membership({
@@ -128,6 +135,7 @@ describe("getPaidTeamMemberships", () => {
     // Ownership is recorded twice; the organization's `userId` alone is enough.
     const result = getPaidTeamMemberships({
       userId: USER_ID,
+      userTierId: TierId.free,
       memberships: [
         membership({ id: "joined" }),
         membership({
@@ -144,6 +152,7 @@ describe("getPaidTeamMemberships", () => {
   it("still counts joined teams for someone who owns only a PERSONAL workspace", () => {
     const result = getPaidTeamMemberships({
       userId: USER_ID,
+      userTierId: TierId.free,
       memberships: [
         membership({
           id: "personal",
@@ -162,6 +171,7 @@ describe("getPaidTeamMemberships", () => {
   it("leaves out a PERSONAL workspace, even one owned by a paid user", () => {
     const result = getPaidTeamMemberships({
       userId: USER_ID,
+      userTierId: TierId.free,
       memberships: [
         membership({
           type: OrganizationType.PERSONAL,
@@ -176,6 +186,7 @@ describe("getPaidTeamMemberships", () => {
   it("returns every paid team the user joined, in the input order", () => {
     const result = getPaidTeamMemberships({
       userId: USER_ID,
+      userTierId: TierId.free,
       memberships: [
         membership({ id: "a", name: "Camera Crew" }),
         membership({
@@ -204,13 +215,31 @@ describe("getPaidTeamMemberships", () => {
 
   it("returns nothing when the user has no memberships", () => {
     expect(
-      getPaidTeamMemberships({ userId: USER_ID, memberships: [] })
+      getPaidTeamMemberships({
+        userId: USER_ID,
+        userTierId: TierId.free,
+        memberships: [],
+      })
     ).toEqual([]);
   });
+
+  it.each([TierId.tier_1, TierId.tier_2, TierId.custom])(
+    "returns nothing for a user on %s, who has a plan of their own",
+    (userTierId) => {
+      const result = getPaidTeamMemberships({
+        userId: USER_ID,
+        userTierId,
+        memberships: [membership({ id: "joined" })],
+      });
+
+      expect(result).toEqual([]);
+    }
+  );
 
   it("exposes only the workspace id and name", () => {
     const [team] = getPaidTeamMemberships({
       userId: USER_ID,
+      userTierId: TierId.free,
       memberships: [membership()],
     });
 

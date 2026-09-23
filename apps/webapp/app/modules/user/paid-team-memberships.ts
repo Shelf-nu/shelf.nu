@@ -72,10 +72,14 @@ function isOwnedBy(membership: MembershipForPaidTeams, userId: string) {
 /**
  * The active, paid Team workspaces a user belongs to without owning them.
  *
+ * Only a user on the free tier can be covered by someone else's plan. A user
+ * on any other tier (Plus, Team or custom) has a plan of their own, whether or
+ * not a Stripe product for it is recognised, so they get an empty list.
+ *
  * Owning a Team workspace makes the user a billing party, so anyone who owns
- * one gets an empty list and the page treats them as an owner, even if they
- * have also joined someone else's paid team. This is the same precedence the
- * admin user list applies in `getAccountStatus`.
+ * one also gets an empty list and the page treats them as an owner, even if
+ * they have also joined someone else's paid team. This is the same precedence
+ * the admin user list applies in `getAccountStatus`.
  *
  * Otherwise a membership counts when all of these hold:
  * - the workspace is a TEAM (a PERSONAL workspace has no other members);
@@ -88,17 +92,24 @@ function isOwnedBy(membership: MembershipForPaidTeams, userId: string) {
  * disabled, so a member is never told a disabled workspace covers them.
  *
  * @param args.userId - The signed-in user
+ * @param args.userTierId - The signed-in user's own tier
  * @param args.memberships - That user's `UserOrganization` rows, with each
  *   organization's type, owner id, `workspaceDisabled` flag and owner tier
  * @returns The matching workspaces as `{ id, name }`, in the input order
  */
 export function getPaidTeamMemberships({
   userId,
+  userTierId,
   memberships,
 }: {
   userId: string;
+  userTierId: TierId;
   memberships: MembershipForPaidTeams[];
 }): PaidTeamMembership[] {
+  if (userTierId !== TierId.free) {
+    return [];
+  }
+
   const teamMemberships = memberships.filter(
     ({ organization }) => organization.type === OrganizationType.TEAM
   );

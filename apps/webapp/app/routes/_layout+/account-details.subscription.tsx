@@ -106,11 +106,15 @@ export async function loader({ context }: LoaderFunctionArgs) {
     ]);
 
     /**
-     * Active, paid Team workspaces the user joined without owning them (id and
-     * name only). The page tells such a member that their team's plan covers
-     * them instead of showing them as being on Free.
+     * Active, paid Team workspaces a free-tier user joined without owning them
+     * (id and name only). The page tells such a member that their team's plan
+     * covers them instead of showing them as being on Free.
      */
-    const paidTeams = getPaidTeamMemberships({ userId, memberships });
+    const paidTeams = getPaidTeamMemberships({
+      userId,
+      userTierId: user.tierId,
+      memberships,
+    });
 
     /** Get the Stripe customer */
     const customer = (await getStripeCustomer(
