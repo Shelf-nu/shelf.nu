@@ -31,7 +31,6 @@ import {
   ASSET_TYPE_LABELS,
   CONSUMPTION_TYPE_ADJECTIVES,
   CONSUMPTION_TYPE_DESCRIPTIONS,
-  CONSUMPTION_TYPE_LABELS,
 } from "@shelf/labels";
 
 import { sanitizeUnitOfMeasureLabel } from "~/utils/asset-quantity";
