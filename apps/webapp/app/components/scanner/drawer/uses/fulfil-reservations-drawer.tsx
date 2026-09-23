@@ -143,10 +143,14 @@ type ScannedAssetRow = {
    * - `"duplicate"`  — asset is already on the booking via `alreadyIncluded`
    *                    and the whole booking goes out anyway; the scan is a
    *                    no-op and is not submitted.
+   * - `"viaKit"`     — the asset's own kit was scanned too, so it arrives as
+   *                    part of that kit rather than as a loose unit
    * - `"included"`   — asset is already on the booking and submit sends out
    *                    only scanned items; the scan checks this item out.
    */
-  bucket: "matched" | "unmatched" | "duplicate" | "included";
+  bucket: "matched" | "unmatched" | "duplicate" | "included" | "viaKit";
+  /** Name of the scanned kit this asset arrives with — `viaKit` rows only. */
+  viaKitName?: string;
 };
 
 /**
@@ -244,15 +248,29 @@ export default function FulfilReservationsDrawer({
     const rows: ScannedAssetRow[] = [];
     const kitRows: ScannedKitRow[] = [];
 
-    // An asset scanned on its own outranks the same asset arriving inside a
-    // kit, so one asset never assigns two reserved units. Resolved up-front
-    // rather than in scan order, so the attribution does not depend on which
-    // QR the operator reached first.
-    const directlyScannedAssetIds = new Set<string>();
+    /**
+     * Members of the kits in this scan, and which kit each arrives with.
+     *
+     * A member whose kit is also scanned goes on the booking as part of that
+     * kit — the server drops it from the loose bucket, because the two rows
+     * would otherwise book one physical unit twice. So the kit owns the
+     * assignment and the asset's own row reports what it is rather than
+     * claiming a unit of its own; crediting both would count one camera twice.
+     *
+     * Resolved up-front rather than in scan order, so the attribution does not
+     * depend on which QR the operator reached first.
+     */
+    const kitNameByMemberId = new Map<string, string>();
     for (const item of Object.values(items)) {
-      if (!item || (item.type && item.type !== "asset")) continue;
-      const id = (item.data as AssetFromQr | undefined)?.id;
-      if (id) directlyScannedAssetIds.add(id);
+      if (!item || item.type !== "kit") continue;
+      const kit = item.data as KitFromQr | undefined;
+      if (!kit) continue;
+      for (const assetKit of kit.assetKits ?? []) {
+        const member = assetKit.asset;
+        if (!member || member.type !== AssetType.INDIVIDUAL) continue;
+        if (kitNameByMemberId.has(member.id)) continue;
+        kitNameByMemberId.set(member.id, kit.name);
+      }
     }
 
     // Members that have already assigned a unit via an earlier kit row. Two
@@ -280,7 +298,6 @@ export default function FulfilReservationsDrawer({
           if (member.type !== AssetType.INDIVIDUAL) continue;
           if (
             assignedKitMemberIds.has(member.id) ||
-            directlyScannedAssetIds.has(member.id) ||
             alreadyIncludedIds.has(member.id)
           ) {
             continue;
@@ -317,6 +334,13 @@ export default function FulfilReservationsDrawer({
           asset,
           bucket: session?.checksOutScannedOnly ? "included" : "duplicate",
         });
+        continue;
+      }
+
+      // Its kit is in this scan, so the kit row above is what assigns it.
+      const viaKitName = asset ? kitNameByMemberId.get(asset.id) : undefined;
+      if (asset && viaKitName) {
+        rows.push({ qrId, asset, bucket: "viaKit", viaKitName });
         continue;
       }
 
@@ -551,7 +575,11 @@ export default function FulfilReservationsDrawer({
         <DefaultLoadingState qrId={pendingQrId} error={error} />
       )}
       renderItem={(data) => (
-        <ScannedAssetRowBody asset={data as AssetFromQr} bucket={row.bucket} />
+        <ScannedAssetRowBody
+          asset={data as AssetFromQr}
+          bucket={row.bucket}
+          viaKitName={row.viaKitName}
+        />
       )}
     />
   );
@@ -601,6 +629,7 @@ export default function FulfilReservationsDrawer({
     const unmatched = scannedBuckets.rows.filter(
       (r) => r.bucket === "unmatched"
     );
+    const viaKit = scannedBuckets.rows.filter((r) => r.bucket === "viaKit");
 
     return (
       <>
@@ -613,6 +642,10 @@ export default function FulfilReservationsDrawer({
             kits whose members assign reserved units. */}
         {matched.map(renderScannedItemRow)}
         {matchingKits.map(renderScannedKitRow)}
+
+        {/* Scanned alongside their own kit: the kit above assigns them, so
+            they sit with it rather than among the warnings. */}
+        {viaKit.map(renderScannedItemRow)}
 
         {/* Items already on the booking, scanned to check them out. */}
         {included.map(renderScannedItemRow)}
@@ -911,6 +944,9 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
  * `renderItem` slot). Branches on `bucket` for the status chip:
  *
  * - `"matched"`   → green "Ready" chip.
+ * - `"viaKit"`    → blue chip naming the scanned kit it arrives with. Not a
+ *   warning and not a second assignment: the kit row is what assigns it, and
+ *   this row says so rather than looking like an idle duplicate.
  * - `"unmatched"` → yellow warning badge. Copy explicitly states the
  *   asset will land on the booking _and_ go with this checkout so
  *   the operator knows both side-effects are coupled into one submit
@@ -924,9 +960,11 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
 function ScannedAssetRowBody({
   asset,
   bucket,
+  viaKitName,
 }: {
   asset: AssetFromQr;
   bucket: ScannedAssetRow["bucket"];
+  viaKitName?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -948,6 +986,17 @@ function ScannedAssetRowBody({
               withDot={false}
             >
               Ready
+            </Badge>
+          ) : bucket === "viaKit" ? (
+            <Badge
+              color={BADGE_COLORS.blue.bg}
+              textColor={BADGE_COLORS.blue.text}
+              withDot={false}
+              className="max-w-full"
+            >
+              {viaKitName
+                ? `Arrives with ${viaKitName}`
+                : "Arrives with its kit"}
             </Badge>
           ) : bucket === "included" ? (
             <Badge
