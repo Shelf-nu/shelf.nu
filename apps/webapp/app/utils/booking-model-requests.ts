@@ -200,6 +200,125 @@ export function countReservedModelUnits(
   );
 }
 
+/** The counts that decide whether a model's pool is over-committed. */
+export type ModelPoolCounts = {
+  /** INDIVIDUAL assets of this model in the workspace. */
+  total: number;
+  /** Units held in custody, which are out of the bookable pool. */
+  inCustody: number;
+  /** Units reserved on overlapping bookings as concrete `BookingAsset` rows. */
+  reservedConcrete: number;
+  /** Units reserved on overlapping bookings as model-level requests. */
+  reservedViaRequest: number;
+};
+
+/**
+ * Units of a model left over this window — **signed**, so a pool that owes more
+ * than it holds reads negative.
+ *
+ * Computed from the parts rather than read off `available`, and that is the
+ * whole point: the service clamps `available` with `Math.max(0, …)`, so an
+ * over-committed pool and an exactly-empty one both arrive as zero. Every
+ * question that turns on the difference — is this over-reserved, how many units
+ * may this booking still claim, what do we tell the operator — needs the
+ * unclamped figure, and `available` cannot answer any of them.
+ *
+ * @param counts - The model's pool counts, as the loader supplies them.
+ * @returns Units free, negative when over-committed.
+ */
+export function getModelPoolRemaining(counts: ModelPoolCounts): number {
+  return (
+    counts.total -
+    counts.inCustody -
+    counts.reservedConcrete -
+    counts.reservedViaRequest
+  );
+}
+
+/**
+ * Whether more units of a model are promised over this window than exist.
+ *
+ * Reservations are a read-then-decide, so two operators reserving at once can
+ * both be told there is room and both commit; the pool then owes more than it
+ * holds and somebody arrives to an empty shelf. This is the state the
+ * "Over-reserved" badge exists to show.
+ *
+ * @param counts - The model's pool counts, as the loader supplies them.
+ * @returns `true` when the promises exceed the stock.
+ */
+export function isModelPoolOverCommitted(counts: ModelPoolCounts): boolean {
+  return getModelPoolRemaining(counts) < 0;
+}
+
+/** The bounds a model reservation's quantity is judged against. */
+export type ModelRequestQuantityBounds = {
+  /**
+   * Units already matched to a concrete asset. The reservation can never go
+   * below this: those assets are on the booking already.
+   */
+  floor: number;
+  /**
+   * Units this booking may climb to — `null` when the pool is unknown, as it is
+   * for a model fetched via typeahead beyond the seed list. May be zero or
+   * negative when other bookings owe more than the pool holds.
+   */
+  capacity: number | null;
+  /** The reservation's stored quantity, which a change is measured against. */
+  current: number;
+  /** Units of the model in the workspace, for the message. */
+  total: number | null;
+};
+
+/**
+ * The reason a quantity is not allowed on an existing model reservation, or
+ * `null` when it is.
+ *
+ * Mirrors the two bounds `upsertBookingModelRequest` enforces, in its order —
+ * the floor first, because it is the one the server applies unconditionally.
+ *
+ * **A reduction is exempt from the capacity bound**, and the exemption is the
+ * point rather than a convenience: a reduction hands units back, so nothing
+ * about the pool can refuse it, and measuring anyway fails in the one case that
+ * matters most. When other bookings owe more than the pool holds, the capacity
+ * is zero or negative, so capping would reject every quantity the floor allows
+ * — while "Over-reserved" asks the operator to reduce, and Remove is
+ * unavailable once a unit is assigned. The server skips its own availability
+ * guard on a reduction for exactly this reason; a client that caps them
+ * contradicts it and strands the operator.
+ *
+ * @param quantity - The quantity being proposed.
+ * @param bounds - The floor, the capacity, the stored quantity and the total.
+ * @returns The message to show, or `null` when the quantity is allowed.
+ */
+export function getModelRequestQuantityIssue(
+  quantity: number,
+  bounds: ModelRequestQuantityBounds
+): string | null {
+  const { floor, capacity, current, total } = bounds;
+
+  if (floor > 0 && quantity < floor) {
+    return `${floor} ${
+      floor === 1 ? "unit is" : "units are"
+    } already assigned — ${floor} is the lowest this can go.`;
+  }
+
+  // Nothing to measure against, or not an increase.
+  if (capacity == null || quantity <= current) {
+    return null;
+  }
+
+  if (quantity > capacity) {
+    // Clamped: a negative remainder is a real state of the pool, but "Only -2
+    // available" is not a sentence to show anyone.
+    return `Only ${Math.max(
+      0,
+      capacity
+    )} of ${total} available in this window — reduce the quantity to continue.`;
+  }
+
+  return null;
+}
+
 /** Reserved units of one model that no asset has been assigned to yet. */
 export type UnassignedModelUnits = {
   /** The asset model's name. */
