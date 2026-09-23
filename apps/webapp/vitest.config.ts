@@ -7,7 +7,14 @@ import react from "@vitejs/plugin-react";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-  plugins: [react(), tsconfigPaths()],
+  plugins: [
+    react(),
+    // Only the webapp's own tsconfig defines the aliases tests use (`~/*`,
+    // `@factories`, `@mocks`). Pointing the plugin at it stops it crawling
+    // every tsconfig in the monorepo — including the companion's, which
+    // extends an Expo base that CI's webapp-only install does not contain.
+    tsconfigPaths({ projects: ["./tsconfig.json"] }),
+  ],
   test: {
     globals: true,
     environment: "happy-dom",
