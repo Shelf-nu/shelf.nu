@@ -1035,6 +1035,7 @@ describe("checkOutQuantity — availability accounting", () => {
         quantity: 25,
         userId: "user-1",
         organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
       });
     } catch (err) {
       caught = err;
@@ -1061,6 +1062,7 @@ describe("checkOutQuantity — availability accounting", () => {
       quantity: 15,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(mockCustodyCreate).toHaveBeenCalledTimes(1);
@@ -1084,6 +1086,7 @@ describe("checkOutQuantity — availability accounting", () => {
       quantity: 90,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     // Assert the aggregate was invoked with the ONGOING/OVERDUE filter —
@@ -1142,6 +1145,7 @@ describe("checkOutQuantity — activity events", () => {
       quantity: 5,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(mockRecordEvent).toHaveBeenCalledTimes(1);
@@ -1172,6 +1176,7 @@ describe("checkOutQuantity — activity events", () => {
       quantity: 3,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(mockRecordEvent).toHaveBeenCalledWith(
@@ -3265,6 +3270,132 @@ describe("bulk custody — refusals of the selection answer 400", () => {
   });
 });
 
+/**
+ * The per-unit custody path carries the same self-service restriction as the
+ * whole-asset one. It lives in `checkOutQuantity` rather than at its routes
+ * because three of them reach custody through it — web bulk, web single-asset
+ * and mobile — and a guard at one leaves the other two to remember.
+ */
+describe("checkOutQuantity — SELF_SERVICE guard", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockTeamMemberFindFirst = db.teamMember.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyCreate = db.custody.create as ReturnType<typeof vitest.fn>;
+
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 100,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    // why: earlier suites in this file leave rejections on the asset write
+    // mocks; `clearAllMocks` drops call history but keeps implementations.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...lockedAsset });
+    (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+    (
+      db.bookingAsset.aggregate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      null
+    );
+  });
+
+  it("refuses a SELF_SERVICE actor handing units to someone else", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "other-user" } });
+
+    let caught: unknown;
+    try {
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-other",
+        quantity: 5,
+        userId: "user-1",
+        organizationId: "org-1",
+        role: OrganizationRoles.SELF_SERVICE,
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    const error = caught as ShelfError;
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(403);
+    expect(error.message).toBe(
+      "Self service users can only assign custody to themselves."
+    );
+    // Nothing may be written: the refusal has to come before the custody row.
+    expect(mockCustodyCreate).not.toHaveBeenCalled();
+  });
+
+  it("allows a SELF_SERVICE actor handing units to themselves", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "user-1" } });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-self",
+      quantity: 5,
+      userId: "user-1",
+      organizationId: "org-1",
+      role: OrganizationRoles.SELF_SERVICE,
+    });
+
+    expect(mockCustodyCreate).toHaveBeenCalled();
+  });
+
+  it("does not restrict the custodian for a non-SELF_SERVICE actor", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "other-user" } });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-other",
+      quantity: 5,
+      userId: "user-1",
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    expect(mockCustodyCreate).toHaveBeenCalled();
+  });
+
+  it("refuses a custodian from another workspace before writing", async () => {
+    // The lookup is org-scoped, so a foreign team member resolves to nothing.
+    mockTeamMemberFindFirst.mockResolvedValue(null);
+
+    let caught: unknown;
+    try {
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-foreign",
+        quantity: 5,
+        userId: "user-1",
+        organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    const error = caught as ShelfError;
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(403);
+    expect(mockCustodyCreate).not.toHaveBeenCalled();
+  });
+});
+
 describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -5348,6 +5479,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
       });
 
       // The custody row is still written — only the status is protected.
@@ -5364,6 +5496,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
       });
 
       expect(currentStatus).toBe(AssetStatus.IN_CUSTODY);

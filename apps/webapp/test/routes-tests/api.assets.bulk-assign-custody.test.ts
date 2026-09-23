@@ -2,7 +2,11 @@ import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { bulkCheckOutAssets } from "~/modules/asset/service.server";
+import {
+  bulkCheckOutAssets,
+  checkOutQuantity,
+  computeCustodyAvailability,
+} from "~/modules/asset/service.server";
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -32,9 +36,15 @@ const teamMemberServiceMocks = vi.hoisted(() => ({
   getTeamMember: vi.fn(),
 }));
 
-// why: testing route handler without executing actual database operations
+// why: testing route handler without executing actual database operations.
+// `asset.findFirst` backs the pre-flight availability pass over the
+// quantity-tracked scans.
+const dbMocks = vi.hoisted(() => ({
+  assetFindFirst: vi.fn(),
+}));
+
 vi.mock("~/database/db.server", () => ({
-  db: {},
+  db: { asset: { findFirst: dbMocks.assetFindFirst } },
 }));
 
 // why: the route resolves the acting user's timezone via
@@ -60,6 +70,12 @@ vi.mock("~/modules/asset/service.server", () => ({
   bulkCheckOutAssets: vi
     .fn()
     .mockResolvedValue({ success: true, skippedQuantityTracked: 0 }),
+  // why: the per-unit path is what the scanner submits; the route's job is to
+  // split the submission and forward role, which is what these assert.
+  checkOutQuantity: vi.fn().mockResolvedValue({}),
+  computeCustodyAvailability: vi
+    .fn()
+    .mockResolvedValue({ inCustody: 0, checkedOut: 0, available: 100 }),
 }));
 
 // why: testing team member organization validation without database lookups
@@ -86,7 +102,11 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
       const assetIds = JSON.parse(formData.get("assetIds") || "[]");
       const custodian = JSON.parse(formData.get("custodian") || "{}");
       const currentSearchParams = formData.get("currentSearchParams") || null;
-      return { assetIds, custodian, currentSearchParams };
+      // `AssetQuantitiesSchema` is `.optional().default("{}")`, so the real
+      // parse never yields `undefined` here. Mirror that: a mock that omits
+      // the field tests a shape the route can't actually receive.
+      const quantities = JSON.parse(formData.get("quantities") || "{}");
+      return { assetIds, custodian, currentSearchParams, quantities };
     }),
   };
 });
@@ -100,6 +120,8 @@ vi.mock("~/modules/asset-index-settings/service.server", () => ({
 
 const requirePermissionMock = vi.mocked(requirePermission);
 const mockGetTeamMember = teamMemberServiceMocks.getTeamMember;
+const mockCheckOutQuantity = vi.mocked(checkOutQuantity);
+const mockComputeCustodyAvailability = vi.mocked(computeCustodyAvailability);
 
 function createActionArgs(
   overrides: Partial<ActionFunctionArgs> = {}
@@ -120,6 +142,17 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetTeamMember.mockReset();
   requirePermissionMock.mockReset();
+  // why: `clearAllMocks` drops call history but not implementations, and the
+  // availability pre-flight must answer for every test that reaches it.
+  mockComputeCustodyAvailability.mockResolvedValue({
+    inCustody: 0,
+    checkedOut: 0,
+    available: 100,
+  });
+  dbMocks.assetFindFirst.mockResolvedValue({
+    title: "USB-C Cables",
+    quantity: 100,
+  });
 });
 
 describe("api/assets/bulk-assign-custody", () => {
@@ -293,5 +326,115 @@ describe("api/assets/bulk-assign-custody", () => {
     expect(bulkCheckOutAssets).toHaveBeenCalledWith(
       expect.objectContaining({ role: OrganizationRoles.ADMIN })
     );
+  });
+  /**
+   * The scanner submits a `quantities` map; the assets index submits none.
+   * That single field is what decides whether an asset is handed over unit by
+   * unit or as a whole, so both directions are pinned here.
+   */
+  describe("quantity-tracked scans", () => {
+    function quantityRequest(quantities: Record<string, number>) {
+      const formData = new FormData();
+      formData.set("assetIds", JSON.stringify(["asset-qty", "asset-plain"]));
+      formData.set(
+        "custodian",
+        JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+      );
+      formData.set("currentSearchParams", "");
+      formData.set("quantities", JSON.stringify(quantities));
+
+      return new Request("https://example.com/api/assets/bulk-assign-custody", {
+        method: "POST",
+        body: formData,
+      });
+    }
+
+    beforeEach(() => {
+      requirePermissionMock.mockResolvedValue({
+        organizationId: "org-1",
+        role: OrganizationRoles.SELF_SERVICE,
+        canUseBarcodes: false,
+      } as any);
+      mockGetTeamMember.mockResolvedValue({
+        id: "team-member-123",
+        userId: "user-123",
+      });
+    });
+
+    it("hands a named asset to checkOutQuantity and forwards the acting role", async () => {
+      await action(
+        createActionArgs({ request: quantityRequest({ "asset-qty": 7 }) })
+      );
+
+      expect(mockCheckOutQuantity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetId: "asset-qty",
+          quantity: 7,
+          teamMemberId: "team-member-123",
+          userId: "user-123",
+          organizationId: "org-1",
+          // The service owns the SELF_SERVICE self-restriction for this path,
+          // so a route that drops `role` silently disables it.
+          role: OrganizationRoles.SELF_SERVICE,
+        })
+      );
+    });
+
+    it("leaves assets without a quantity on the bulk path", async () => {
+      await action(
+        createActionArgs({ request: quantityRequest({ "asset-qty": 7 }) })
+      );
+
+      // This is what keeps the assets-index behaviour unchanged: it sends no
+      // quantities, so every one of its ids lands here and quantity-tracked
+      // ones keep being skipped by the bulk service.
+      expect(bulkCheckOutAssets).toHaveBeenCalledWith(
+        expect.objectContaining({ assetIds: ["asset-plain"] })
+      );
+      expect(mockCheckOutQuantity).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips the bulk call entirely when every scan carries a quantity", async () => {
+      const formData = new FormData();
+      formData.set("assetIds", JSON.stringify(["asset-qty"]));
+      formData.set(
+        "custodian",
+        JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+      );
+      formData.set("currentSearchParams", "");
+      formData.set("quantities", JSON.stringify({ "asset-qty": 3 }));
+
+      await action(
+        createActionArgs({
+          request: new Request(
+            "https://example.com/api/assets/bulk-assign-custody",
+            { method: "POST", body: formData }
+          ),
+        })
+      );
+
+      // Calling it with an empty list would trip its own "all selected assets
+      // are quantity-tracked" 400 and fail a scan that is entirely valid.
+      expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing when one scan asks for more units than are free", async () => {
+      mockComputeCustodyAvailability.mockResolvedValue({
+        inCustody: 96,
+        checkedOut: 0,
+        available: 4,
+      });
+
+      const response = (await action(
+        createActionArgs({ request: quantityRequest({ "asset-qty": 7 }) })
+      )) as any;
+
+      // Each checkOutQuantity commits its own transaction, so a refusal
+      // discovered mid-loop would strand the assets already written — and a
+      // retry would add them a second time, because the call increments.
+      expect(response.status).toBe(400);
+      expect(mockCheckOutQuantity).not.toHaveBeenCalled();
+      expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+    });
   });
 });

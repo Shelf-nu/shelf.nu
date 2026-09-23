@@ -1,8 +1,10 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
+import { db } from "~/database/db.server";
 import {
   bulkCheckOutAssets,
   checkOutQuantity,
+  computeCustodyAvailability,
 } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -103,9 +105,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     /**
-     * The SELF_SERVICE "assign-to-self" guard now lives inside
-     * `bulkCheckOutAssets` itself (centralised so web + mobile share
-     * one source of truth). We just pass `role` through.
+     * The SELF_SERVICE "assign-to-self" guard lives inside the services
+     * themselves — `bulkCheckOutAssets` for whole assets and
+     * `checkOutQuantity` for the per-unit path — so web and mobile share one
+     * source of truth. The route passes `role` through to both.
      */
     // Acting user's timezone: when "select all" is active the affected set is
     // resolved from the current date filters, which must truncate the day in
@@ -116,10 +119,54 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     /**
-     * Per-asset first: each is its own transaction with its own availability
-     * check, so a refusal names the asset that could not go and leaves the
-     * rest of the scan untouched rather than half-applied behind a bulk write.
+     * Check the whole scan before writing any of it.
+     *
+     * Each `checkOutQuantity` call is its own transaction, so once one has
+     * committed nothing puts it back. Without this pass, a scan whose third
+     * asset is over-subscribed would leave the first two assigned while the
+     * drawer reports the submission as failed — and a retry would then add
+     * those two a second time, because the call increments an existing custody
+     * row rather than setting it.
+     *
+     * This is a pre-flight, not a lock: each write re-checks availability
+     * under its own row lock, which is what actually prevents over-allocation
+     * if the pool moves in between. What the pre-flight buys is that the
+     * refusal operators can actually provoke — asking for more than is free —
+     * happens before anything is written.
      */
+    const unavailable: string[] = [];
+    for (const assetId of quantityAssetIds) {
+      const asset = await db.asset.findFirst({
+        where: { id: assetId, organizationId },
+        select: { title: true, quantity: true },
+      });
+
+      if (!asset) continue; // `checkOutQuantity` refuses it by name.
+
+      const { available } = await computeCustodyAvailability(db, {
+        assetId,
+        totalQuantity: asset.quantity ?? 0,
+      });
+
+      if (quantities[assetId] > available) {
+        unavailable.push(
+          `"${asset.title}" (asked for ${quantities[assetId]}, ${available} free)`
+        );
+      }
+    }
+
+    if (unavailable.length) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not enough units available",
+        message: `Nothing was assigned. ${unavailable.join("; ")}.`,
+        additionalData: { unavailable },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     for (const assetId of quantityAssetIds) {
       await checkOutQuantity({
         assetId,
@@ -127,6 +174,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         quantity: quantities[assetId],
         userId,
         organizationId,
+        role,
       });
     }
 

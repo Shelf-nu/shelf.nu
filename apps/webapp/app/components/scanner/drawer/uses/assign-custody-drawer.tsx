@@ -18,6 +18,10 @@ import {
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { CheckmarkIcon } from "~/components/icons/library";
+import {
+  assignableUnits,
+  buildQuantitiesPayload,
+} from "~/components/scanner/drawer/custody-scan-quantities";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -348,6 +352,9 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // Per-row units for quantity-tracked scans, written by
   // `ScannedAssetQuantityInput` and keyed by asset id.
   const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
+  // The scanned rows themselves — the submit sends a quantity for every
+  // quantity-tracked row, not only the ones whose input was edited.
+  const items = useAtomValue(scannedItemsAtom);
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
@@ -360,18 +367,13 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
       // Handle asset request
       if (assetIds && assetIds.length > 0) {
-        /**
-         * Units per quantity-tracked scan, keyed by asset id. Narrowed to the
-         * ids in this submit so a row scanned and then removed cannot carry a
-         * stale number through. Assets absent from the map are whole units and
-         * take the ordinary bulk path.
-         */
         const quantities = JSON.stringify(
-          Object.fromEntries(
-            Object.entries(assetQuantities).filter(([assetId]) =>
-              assetIds.includes(assetId)
-            )
-          )
+          buildQuantitiesPayload({
+            items,
+            assetIds,
+            assetQuantities,
+            unitsFor: assignableUnits,
+          })
         );
 
         // Create object data structure for assets
@@ -572,13 +574,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 // Implement item renderers if they're not already defined elsewhere
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const qtyTracked = isQuantityTracked(asset);
-  /**
-   * Units this scan may hand over, from the server's own custody pool
-   * (`pickerMeta.maxAllowed`). Falls back to the asset's stock when the API
-   * answered without picker meta, which keeps the row usable and leaves the
-   * write to refuse an over-allocation.
-   */
-  const maxAllowed = asset.pickerMeta?.maxAllowed ?? asset.quantity ?? 0;
+  const maxAllowed = assignableUnits(asset);
   // Use predefined presets to create label configurations
   const availabilityConfigs = [
     assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),

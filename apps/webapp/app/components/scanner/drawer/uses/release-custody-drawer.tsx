@@ -16,6 +16,10 @@ import {
 } from "~/atoms/qr-scanner";
 import { Form } from "~/components/custom-form";
 import { CheckmarkIcon } from "~/components/icons/library";
+import {
+  buildQuantitiesPayload,
+  releasableUnits,
+} from "~/components/scanner/drawer/custody-scan-quantities";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -268,6 +272,9 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // Per-row units for quantity-tracked scans, written by
   // `ScannedAssetQuantityInput` and keyed by asset id.
   const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
+  // The scanned rows themselves — the submit sends a quantity for every
+  // quantity-tracked row, not only the ones whose input was edited.
+  const items = useAtomValue(scannedItemsAtom);
 
   const zo = useZorm("BulkReleaseCustody", BulkReleaseCustodySchema, {
     onValidSubmit: (e) => {
@@ -277,17 +284,13 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
       // Handle asset request
       if (assetIds && assetIds.length > 0) {
-        /**
-         * Units per quantity-tracked scan, narrowed to this submit so a row
-         * scanned and then removed cannot carry a stale number through.
-         * Assets absent from the map are released whole by the bulk path.
-         */
         const quantities = JSON.stringify(
-          Object.fromEntries(
-            Object.entries(assetQuantities).filter(([assetId]) =>
-              assetIds.includes(assetId)
-            )
-          )
+          buildQuantitiesPayload({
+            items,
+            assetIds,
+            assetQuantities,
+            unitsFor: releasableUnits,
+          })
         );
         // Create object data structure for assets
         const assetData = {
@@ -430,15 +433,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 // Implement item renderers if they're not already defined elsewhere
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const qtyTracked = isQuantityTracked(asset);
-  /**
-   * Units of this asset in anyone's hands — the ceiling on what a release can
-   * cover. Which of them the chosen custodian actually holds is settled on the
-   * write by `releaseQuantity`, which refuses with the number they do hold.
-   */
-  const inCustody = (asset.custody ?? []).reduce(
-    (sum, row) => sum + (row.quantity ?? 0),
-    0
-  );
+  const inCustody = releasableUnits(asset);
   // Use predefined presets to create label configurations with appropriate conditions for release custody
   const availabilityConfigs = [
     {

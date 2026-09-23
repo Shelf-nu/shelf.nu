@@ -31,10 +31,13 @@ export const ASSET_CUSTODY_INCLUDE = {
   custody: {
     select: {
       // Units this row holds. The release scanner bounds its quantity input by
-      // the sum across rows — how much of the asset is in anyone's hands. Which
-      // of it a given custodian may hand back is decided by `releaseQuantity`
-      // on the write, which knows who was chosen.
+      // the operator-assigned rows — see `kitCustodyId` below.
       quantity: true,
+      // Which axis this row belongs to: null is operator-assigned, non-null
+      // means the row was inherited from the kit's custody and cascades with
+      // it. Only the operator axis can be handed back asset-by-asset, so the
+      // release scanner needs to tell them apart before offering a ceiling.
+      kitCustodyId: true,
       custodian: { select: CUSTODIAN_SELECT },
     },
   },

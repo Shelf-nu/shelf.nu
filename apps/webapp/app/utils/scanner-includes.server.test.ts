@@ -46,6 +46,14 @@ describe("KIT_INCLUDE", () => {
 });
 
 describe("custody selections", () => {
+  it("carries which axis each asset-side custody row belongs to", () => {
+    // The release scanner's ceiling counts operator-assigned rows only —
+    // kit-inherited ones go back with the kit. Without this field every row
+    // reads `kitCustodyId: undefined`, the filter keeps all of them, and the
+    // input offers units the write refuses.
+    expect(ASSET_CUSTODY_INCLUDE.custody.select.kitCustodyId).toBe(true);
+  });
+
   it("carries the units each asset-side custody row holds", () => {
     // The release scanner bounds its quantity input by the sum across rows.
     // Absent, every row reads `quantity: undefined`, the sum is `NaN`, and the

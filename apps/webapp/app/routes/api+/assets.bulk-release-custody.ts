@@ -110,30 +110,61 @@ export async function action({ request, context }: ActionFunctionArgs) {
      * it, so the single holder is resolved here and anything else is refused
      * by name rather than guessed at. Splitting a release across custodians is
      * what the asset's own custody list is for.
+     *
+     * Only operator-assigned rows are candidates: a `Custody` row carrying a
+     * `kitCustodyId` was inherited from the kit and goes back by releasing the
+     * kit, which cascade-deletes it.
+     *
+     * Every holder is resolved before any release runs, because each
+     * `releaseQuantity` call commits its own transaction — resolving inside
+     * the write loop would let a refusal on a later asset leave earlier ones
+     * already released while the drawer reports the whole submission failed.
      */
-    for (const assetId of quantityAssetIds) {
-      const holders = await db.custody.findMany({
-        where: { assetId, kitCustodyId: null, asset: { organizationId } },
-        select: { teamMemberId: true, asset: { select: { title: true } } },
+    /** One resolved `{ assetId, teamMemberId }` per quantity-tracked scan. */
+    const resolvedReleases: { assetId: string; teamMemberId: string }[] = [];
+
+    if (quantityAssetIds.length) {
+      const custodyRows = await db.custody.findMany({
+        where: {
+          assetId: { in: quantityAssetIds },
+          kitCustodyId: null,
+          asset: { organizationId },
+        },
+        select: {
+          assetId: true,
+          teamMemberId: true,
+          asset: { select: { title: true } },
+        },
       });
 
-      if (holders.length !== 1) {
-        throw new ShelfError({
-          cause: null,
-          status: 400,
-          label: "Assets",
-          shouldBeCaptured: false,
-          message:
-            holders.length === 0
-              ? "This asset has no units in anyone's custody to release."
-              : `"${holders[0].asset.title}" is held by more than one person. Release it from the asset's custody list, where each holder is listed separately.`,
-          additionalData: { assetId, holders: holders.length },
+      for (const assetId of quantityAssetIds) {
+        const holders = custodyRows.filter((row) => row.assetId === assetId);
+
+        if (holders.length !== 1) {
+          throw new ShelfError({
+            cause: null,
+            status: 400,
+            label: "Assets",
+            shouldBeCaptured: false,
+            message:
+              holders.length === 0
+                ? "This asset has no units in anyone's custody to release."
+                : `"${holders[0].asset.title}" is held by more than one person. Release it from the asset's custody list, where each holder is listed separately.`,
+            additionalData: { assetId, holders: holders.length },
+          });
+        }
+
+        resolvedReleases.push({
+          assetId,
+          teamMemberId: holders[0].teamMemberId,
         });
       }
+    }
 
+    for (const { assetId, teamMemberId } of resolvedReleases) {
       await releaseQuantity({
         assetId,
-        teamMemberId: holders[0].teamMemberId,
+        teamMemberId,
         quantity: quantities[assetId],
         userId,
         organizationId,
