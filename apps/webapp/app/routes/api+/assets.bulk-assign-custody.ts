@@ -68,10 +68,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
      * single-asset primitive the asset page uses, and the bulk call below never
      * sees it. An index submission sends no quantities and is unchanged.
      */
-    const quantityAssetIds = assetIds.filter((id) =>
+    /**
+     * One entry per asset, not per scanned code.
+     *
+     * The scanner keys its rows by CODE, so an asset scanned through both its
+     * QR and its barcode arrives twice under the same id. The per-unit writes
+     * below run once per entry, so a duplicate would hand the quantity over
+     * twice; the bulk path matches on an id set and is unaffected either way.
+     * Duplicates carry no information — `quantities` holds one number per
+     * asset — so collapsing them is lossless, and kinder than refusing a scan
+     * where the operator did nothing wrong.
+     */
+    const uniqueAssetIds = [...new Set(assetIds)];
+
+    const quantityAssetIds = uniqueAssetIds.filter((id) =>
       Object.prototype.hasOwnProperty.call(quantities, id)
     );
-    const bulkAssetIds = assetIds.filter(
+    const bulkAssetIds = uniqueAssetIds.filter(
       (id) => !Object.prototype.hasOwnProperty.call(quantities, id)
     );
 

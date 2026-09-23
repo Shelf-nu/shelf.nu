@@ -229,6 +229,19 @@ describe("api/assets/bulk-release-custody", () => {
     expect(mockReleaseQuantity).not.toHaveBeenCalled();
   });
 
+  it("releases once for an asset scanned under two codes", async () => {
+    dbMocks.custodyFindMany.mockResolvedValue([holder("asset-qty", "tm-1")]);
+
+    // The scanner keys rows by code, so one asset scanned by QR and by barcode
+    // arrives twice. Releasing per occurrence would hand back double.
+    await action(makeRequest(["asset-qty", "asset-qty"], { "asset-qty": 4 }));
+
+    expect(mockReleaseQuantity).toHaveBeenCalledTimes(1);
+    expect(mockReleaseQuantity).toHaveBeenCalledWith(
+      expect.objectContaining({ assetId: "asset-qty", quantity: 4 })
+    );
+  });
+
   it("considers only operator-assigned custody rows as holders", async () => {
     dbMocks.custodyFindMany.mockResolvedValue([holder("asset-qty", "tm-1")]);
 

@@ -424,6 +424,34 @@ describe("api/assets/bulk-assign-custody", () => {
       expect(bulkCheckOutAssets).not.toHaveBeenCalled();
     });
 
+    it("assigns once for an asset scanned under two codes", async () => {
+      const formData = new FormData();
+      // The scanner keys rows by code, so one asset scanned by QR and by
+      // barcode arrives twice. Assigning per occurrence would hand over double,
+      // and `checkOutQuantity` increments rather than sets.
+      formData.set("assetIds", JSON.stringify(["asset-qty", "asset-qty"]));
+      formData.set(
+        "custodian",
+        JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+      );
+      formData.set("currentSearchParams", "");
+      formData.set("quantities", JSON.stringify({ "asset-qty": 4 }));
+
+      await action(
+        createActionArgs({
+          request: new Request(
+            "https://example.com/api/assets/bulk-assign-custody",
+            { method: "POST", body: formData }
+          ),
+        })
+      );
+
+      expect(mockCheckOutQuantity).toHaveBeenCalledTimes(1);
+      expect(mockCheckOutQuantity).toHaveBeenCalledWith(
+        expect.objectContaining({ assetId: "asset-qty", quantity: 4 })
+      );
+    });
+
     it("writes nothing when one scan asks for more units than are free", async () => {
       mockComputeCustodyAvailability.mockResolvedValue({
         inCustody: 96,
