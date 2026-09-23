@@ -1,24 +1,21 @@
 /**
  * Paid team memberships for the subscription page.
  *
- * Shelf bills the workspace OWNER: a Team workspace is paid for when its
- * owner's tier is a paid one. An invited member of that workspace pays nothing
- * themselves and sits on the free tier, so their own Stripe customer and tier
- * say nothing about the plan they work under. This module answers the question
- * the subscription page needs for them: which paid Team workspaces is this
- * user a member of, without owning them.
+ * Shelf bills the workspace OWNER: a Team workspace runs on its owner's tier.
+ * An invited member of that workspace pays nothing themselves and sits on the
+ * free tier, so their own Stripe customer and tier say nothing about the plan
+ * they work under. This module answers the question the subscription page
+ * needs for them: which active, paid Team workspaces is this user a member of,
+ * without owning them.
  *
  * Kept out of the route module so it can be unit-tested: a route may not export
  * helpers, since every retained export pulls its `*.server` imports into the
  * client bundle.
  *
- * @see {@link file://./account-status.ts} for the same owner-tier rule on the admin user list
  * @see {@link file://./../../routes/_layout+/account-details.subscription.tsx}
+ * @see {@link file://./../../utils/stripe.server.ts} `disabledTeamOrg`, the rule {@link ownerTierRunsTeamWorkspace} mirrors
  */
-import type { TierId } from "@prisma/client";
-import { OrganizationRoles, OrganizationType } from "@prisma/client";
-
-import { isPaidTier } from "./account-status";
+import { OrganizationRoles, OrganizationType, TierId } from "@prisma/client";
 
 /** A workspace membership, as far as the paid-team check is concerned. */
 export type MembershipForPaidTeams = {
@@ -43,13 +40,29 @@ export type MembershipForPaidTeams = {
 export type PaidTeamMembership = { id: string; name: string };
 
 /**
- * The paid Team workspaces a user belongs to without owning them.
+ * Whether a workspace owner's tier keeps their Team workspaces running.
+ *
+ * Only Team (`tier_2`) and custom owners do. `disabledTeamOrg` in
+ * `~/utils/stripe.server` disables a Team workspace whose owner is on `free`
+ * or Plus (`tier_1`), so a member of such a workspace is not covered by any
+ * plan. The two rules must stay the same: change one, change both.
+ *
+ * @param tierId - The workspace OWNER's tier
+ * @returns `true` when the owner's Team workspaces are active
+ */
+export function ownerTierRunsTeamWorkspace(tierId: TierId): boolean {
+  return tierId === TierId.tier_2 || tierId === TierId.custom;
+}
+
+/**
+ * The active, paid Team workspaces a user belongs to without owning them.
  *
  * A membership counts when all of these hold:
  * - the workspace is a TEAM (a PERSONAL workspace has no other members);
  * - the user does not own it. Ownership is recorded twice, as an OWNER role
  *   and as the organization's `userId`, so either one excludes it;
- * - the owner's tier is a paid one ({@link isPaidTier}).
+ * - the owner's tier keeps the workspace running
+ *   ({@link ownerTierRunsTeamWorkspace}).
  *
  * @param args.userId - The signed-in user
  * @param args.memberships - That user's `UserOrganization` rows, with each
@@ -69,7 +82,7 @@ export function getPaidTeamMemberships({
         organization.type === OrganizationType.TEAM &&
         !roles.includes(OrganizationRoles.OWNER) &&
         organization.userId !== userId &&
-        isPaidTier(organization.owner.tierId)
+        ownerTierRunsTeamWorkspace(organization.owner.tierId)
     )
     .map(({ organization }) => ({
       id: organization.id,

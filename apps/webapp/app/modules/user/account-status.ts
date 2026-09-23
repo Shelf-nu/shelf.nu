@@ -49,13 +49,10 @@ export type UserForAccountStatus = {
 /**
  * Whether a tier is one somebody pays for.
  *
- * A workspace's plan is its OWNER's tier, so pass the owner's `tierId` when
- * the question is "is this workspace paid for".
- *
  * @param tierId - The tier to test
  * @returns `true` for every tier except the free one
  */
-export function isPaidTier(tierId: TierId): boolean {
+function isPaidTier(tierId: TierId): boolean {
   return tierId !== TierId.free;
 }
 

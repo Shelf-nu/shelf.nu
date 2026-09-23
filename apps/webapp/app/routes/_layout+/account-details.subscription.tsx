@@ -100,9 +100,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
     ]);
 
     /**
-     * Paid Team workspaces the user joined without owning them (id and name
-     * only). The page tells such a member that their team's plan covers them
-     * instead of showing them as being on Free.
+     * Active, paid Team workspaces the user joined without owning them (id and
+     * name only). The page tells such a member that their team's plan covers
+     * them instead of showing them as being on Free.
      */
     const paidTeams = getPaidTeamMemberships({ userId, memberships });
 
@@ -165,12 +165,19 @@ export async function loader({ context }: LoaderFunctionArgs) {
       };
     });
 
+    let subTitle = "Manage your account plan.";
+    if (customer?.subscriptions.data.length === 0) {
+      // A member covered by a paid team needs no plan of their own, so they
+      // are not asked to pick one.
+      subTitle =
+        paidTeams.length > 0
+          ? "You have no subscriptions of your own."
+          : "Pick an account plan that fits your workflow.";
+    }
+
     return payload({
       title: `Subscriptions`,
-      subTitle:
-        customer?.subscriptions.data.length === 0
-          ? "Pick an account plan that fits your workflow."
-          : "Manage your account plan.",
+      subTitle,
       tier: user.tierId,
       tierLimit,
       prices,

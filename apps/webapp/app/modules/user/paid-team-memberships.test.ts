@@ -3,9 +3,10 @@
  *
  * The subscription page tells an invited member that their team's plan covers
  * them, so the list must hold exactly the Team workspaces the user joined and
- * whose owner pays. A workspace the user owns, a free team and a personal
+ * whose owner's tier keeps them running. A workspace the user owns, a team
+ * whose owner is on Free or Plus (the app disables it) and a personal
  * workspace must never appear: each would tell someone they are covered by a
- * plan nobody is paying for.
+ * plan that does not cover them.
  *
  * @see {@link file://./paid-team-memberships.ts}
  */
@@ -13,7 +14,10 @@ import { OrganizationRoles, OrganizationType, TierId } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import type { MembershipForPaidTeams } from "./paid-team-memberships";
-import { getPaidTeamMemberships } from "./paid-team-memberships";
+import {
+  getPaidTeamMemberships,
+  ownerTierRunsTeamWorkspace,
+} from "./paid-team-memberships";
 
 const USER_ID = "user1";
 
@@ -64,7 +68,7 @@ describe("getPaidTeamMemberships", () => {
     expect(result).toHaveLength(1);
   });
 
-  it.each([TierId.tier_1, TierId.tier_2, TierId.custom])(
+  it.each([TierId.tier_2, TierId.custom])(
     "counts a team whose owner is on %s",
     (ownerTierId) => {
       const result = getPaidTeamMemberships({
@@ -76,14 +80,17 @@ describe("getPaidTeamMemberships", () => {
     }
   );
 
-  it("leaves out a team whose owner is on the free tier", () => {
-    const result = getPaidTeamMemberships({
-      userId: USER_ID,
-      memberships: [membership({ ownerTierId: TierId.free })],
-    });
+  it.each([TierId.free, TierId.tier_1])(
+    "leaves out a team whose owner is on %s, which the app disables",
+    (ownerTierId) => {
+      const result = getPaidTeamMemberships({
+        userId: USER_ID,
+        memberships: [membership({ ownerTierId })],
+      });
 
-    expect(result).toEqual([]);
-  });
+      expect(result).toEqual([]);
+    }
+  );
 
   it("leaves out a workspace the user holds the OWNER role in", () => {
     const result = getPaidTeamMemberships({
@@ -127,6 +134,7 @@ describe("getPaidTeamMemberships", () => {
         membership({ id: "a", name: "Camera Crew" }),
         membership({ id: "own", roles: [OrganizationRoles.OWNER] }),
         membership({ id: "free", ownerTierId: TierId.free }),
+        membership({ id: "plus", ownerTierId: TierId.tier_1 }),
         membership({
           id: "b",
           name: "Lighting Team",
@@ -155,5 +163,18 @@ describe("getPaidTeamMemberships", () => {
     });
 
     expect(Object.keys(team).sort()).toEqual(["id", "name"]);
+  });
+});
+
+describe("ownerTierRunsTeamWorkspace", () => {
+  // Mirrors `disabledTeamOrg` in ~/utils/stripe.server, which disables a Team
+  // workspace whose owner is on free or tier_1.
+  it.each([
+    [TierId.free, false],
+    [TierId.tier_1, false],
+    [TierId.tier_2, true],
+    [TierId.custom, true],
+  ])("%s -> %s", (tierId, expected) => {
+    expect(ownerTierRunsTeamWorkspace(tierId)).toBe(expected);
   });
 });
