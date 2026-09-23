@@ -590,11 +590,15 @@ describe("FulfilReservationsDrawer kit scans", () => {
     });
 
     expect(getModelsToggle()).toHaveTextContent("1 / 4");
-    // The loose scan owns the assignment; the kit still goes out and says so.
-    expect(screen.getByText("Ready")).toBeTruthy();
-    expect(
-      screen.getByText("Will be added to booking and checked out")
-    ).toBeTruthy();
+    // The kit owns the assignment, matching the server: it drops the loose
+    // scan and books the unit through the kit slice, because both rows would
+    // book one physical camera twice.
+    expect(screen.getByText("Assigns 1 reserved unit")).toBeTruthy();
+    // So the asset's own row reports where it arrives from rather than
+    // claiming a unit of its own — one camera, one reserved unit.
+    expect(screen.getByText("Arrives with Grip Kit")).toBeTruthy();
+    expect(screen.queryByText("Ready")).toBeNull();
+    // Both still submit: the server decides which row carries it.
     expect(submittedValues("assetIds")).toEqual(["asset-flag"]);
     expect(submittedValues("kitIds")).toEqual(["kit-grip"]);
   });
