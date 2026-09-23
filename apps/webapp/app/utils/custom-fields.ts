@@ -190,6 +190,22 @@ function formatInvalidNumericMessage(
 }
 
 /**
+ * The subset of a custom-field definition needed to turn a raw cell into a
+ * stored value.
+ *
+ * Narrow on purpose: a definition parsed from a CSV column header
+ * (`getDefinitionFromCsvHeader`) has no database row behind it, so it carries
+ * no `id`. A persisted `CustomField` satisfies this shape too, and its `id`
+ * travels to Sentry when a numeric value is rejected.
+ */
+export type CustomFieldDefinitionForValue = Pick<
+  CustomField,
+  "name" | "type"
+> & {
+  id?: string;
+};
+
+/**
  * Sanitizes and validates numeric input for AMOUNT and NUMBER custom fields.
  *
  * Accepted formats:
@@ -213,7 +229,7 @@ function formatInvalidNumericMessage(
  */
 function sanitizeNumericInput(
   raw: unknown,
-  def: CustomField
+  def: CustomFieldDefinitionForValue
 ): { numericValue: number; normalizedText: string } {
   const throwInvalid = (reason?: string): never => {
     const baseMessage = formatInvalidNumericMessage(def.name, raw);
@@ -333,7 +349,7 @@ function sanitizeNumericInput(
 
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
-  def: CustomField
+  def: CustomFieldDefinitionForValue
 ): ShelfAssetCustomFieldValueType["value"] | undefined => {
   try {
     const { raw } = value;

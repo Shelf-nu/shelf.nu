@@ -153,6 +153,10 @@ import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
+import {
+  MAX_REPORTED_ROW_ERRORS,
+  validateContentImportRows,
+} from "./import-preflight.server";
 import type {
   MoveAssetLocationUnitsArgs,
   MoveUnitsResult,
@@ -4642,6 +4646,39 @@ export async function createAssetsFromContentImport({
   canUseBarcodes?: boolean;
 }) {
   try {
+    /**
+     * Nothing below this point may run against a file with invalid rows. The
+     * taxonomy helpers and the row loop each write as they go, outside any
+     * transaction, so a row rejected part way through would leave everything
+     * before it committed — and a retry would create those rows a second time.
+     */
+    const existingCustomFields = await db.customField.findMany({
+      where: { organizationId, active: true, deletedAt: null },
+      select: { name: true, type: true },
+    });
+
+    const rowErrors = validateContentImportRows({ data, existingCustomFields });
+
+    if (rowErrors.length > 0) {
+      const total = rowErrors.length;
+      throw new ShelfError({
+        cause: null,
+        title: "Import file has errors",
+        message: `Found ${total} problem${
+          total === 1 ? "" : "s"
+        } in your file. Nothing was imported — fix the rows below and upload again.`,
+        additionalData: {
+          userId,
+          organizationId,
+          rowErrors: rowErrors.slice(0, MAX_REPORTED_ROW_ERRORS),
+          totalErrors: total,
+        },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     // Create cache instance for this import operation
     const imageCache = new LRUCache<string, CachedImage>({
       maxSize: importImageCacheServer.MAX_CACHE_SIZE,
@@ -4957,22 +4994,10 @@ export async function createAssetsFromContentImport({
       const { type, quantity, minQuantity, unitOfMeasure, consumptionType } =
         parseQtyTrackedCsvRow(asset);
 
-      // AssetModel is INDIVIDUAL-only — a model represents N
-      // distinguishable units of the same template, whereas a
-      // QUANTITY_TRACKED asset is a stock pool. Reject the row up-front
-      // with a row-friendly message rather than silently dropping the
-      // model link or relying on createAsset's downstream guard.
-      if (type === AssetType.QUANTITY_TRACKED && assetModelId) {
-        throw new ShelfError({
-          cause: null,
-          title: "Asset model not allowed",
-          message: `Asset "${asset.title}": models can only be linked to INDIVIDUAL assets. Remove the assetModel cell or change type to INDIVIDUAL.`,
-          label: "Assets",
-          status: 400,
-          shouldBeCaptured: false,
-          additionalData: { assetKey: asset.key, assetTitle: asset.title },
-        });
-      }
+      // AssetModel is INDIVIDUAL-only, and the qty-tracked columns must parse:
+      // both are settled by `validateContentImportRows` before this loop starts,
+      // so neither can fail here. `createAsset` keeps its own guards for the
+      // callers that do not come through the importer.
 
       await createAsset({
         id: assetId, // Pass the pre-generated ID

@@ -148,7 +148,7 @@ describe("validateQtyTrackedFields", () => {
           createMode,
           ctx
         )
-      ).toThrow(/Consumption type is required/);
+      ).toThrow(/is missing consumptionType/);
     });
 
     it("throws when QUANTITY_TRACKED row is missing quantity", () => {
@@ -158,7 +158,7 @@ describe("validateQtyTrackedFields", () => {
           createMode,
           ctx
         )
-      ).toThrow(/Quantity is required/);
+      ).toThrow(/needs a quantity of at least 1/);
     });
 
     it("throws when QUANTITY_TRACKED row has zero quantity", () => {
@@ -172,7 +172,7 @@ describe("validateQtyTrackedFields", () => {
           createMode,
           ctx
         )
-      ).toThrow(/Quantity is required/);
+      ).toThrow(/needs a quantity of at least 1/);
     });
 
     it("strips Markdoc-style injection chars from unitOfMeasure", () => {
@@ -197,7 +197,7 @@ describe("validateQtyTrackedFields", () => {
           createMode,
           ctx
         )
-      ).toThrow(/INDIVIDUAL/);
+      ).toThrow(/must have quantity 1/);
     });
 
     it("accepts UPPER/lower variations of consumptionType", () => {
@@ -240,7 +240,7 @@ describe("validateQtyTrackedFields", () => {
     it("rejects 0 quantity for QUANTITY_TRACKED on update", () => {
       expect(() =>
         validateQtyTrackedFields({ quantity: "0" }, updateQtyMode, ctx)
-      ).toThrow(/Quantity is required/);
+      ).toThrow(/must hold at least 1/);
     });
 
     it("accepts a missing consumptionType for QUANTITY_TRACKED on update", () => {
