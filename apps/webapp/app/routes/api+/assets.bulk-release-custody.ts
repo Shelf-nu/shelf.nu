@@ -1,4 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
+import { AssetType, OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
@@ -59,7 +59,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       const custodies = await db.custody.findMany({
         where: {
           assetId: { in: assetIds },
-          asset: { organizationId },
+          asset: {
+            organizationId,
+            // Only the assets this release will actually touch.
+            // `bulkCheckInAssets` skips QUANTITY_TRACKED rows — they are
+            // released individually, with a quantity — and it reports the count
+            // it skipped. Judging them here refuses the whole request over
+            // custody nobody was going to release: a self-service user
+            // selecting their own individual asset alongside a qty-tracked one
+            // that a colleague holds units of got a 403 for the lot.
+            type: { not: AssetType.QUANTITY_TRACKED },
+          },
         },
         select: { custodian: { select: { id: true, userId: true } } },
       });
