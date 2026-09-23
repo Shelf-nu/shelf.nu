@@ -231,8 +231,7 @@ describe("fulfil-and-checkout action", () => {
   });
 
   it("tells the user why a check-out was refused", async () => {
-    const message =
-      "Cannot check out — 1 × Dell still unassigned. The scanned units were assigned; scan the remaining reserved units to check out.";
+    const message = "Scan at least one item to check out.";
     fulfilMock.mockRejectedValueOnce(
       new ShelfError({
         cause: null,

@@ -34,6 +34,7 @@ import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.model-requests";
 import { BADGE_COLORS } from "~/utils/badge-colors";
+import { canCancelModelReservation } from "~/utils/booking-model-requests";
 import { getValidationErrors } from "~/utils/http";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
@@ -297,20 +298,40 @@ function ExistingRequestRow({
   }, [request.quantity]);
 
   /**
-   * Client schema for the inline update — same shape as the server
-   * schema, with a superRefine that enforces "can't exceed the cap
-   * this booking is allowed to climb to". We fall back to the bare
-   * server schema when loader-side availability is missing (model
-   * fetched via typeahead beyond the seed list) and let the server
-   * be the authority.
+   * Units already matched to a concrete asset. The reservation can never go
+   * below this: those assets are on the booking, and a smaller reservation
+   * would promise fewer units than the booking is already holding.
+   */
+  const floor = request.fulfilledQuantity;
+
+  /**
+   * Client schema for the inline update — same shape as the server schema,
+   * with a superRefine for the two bounds the server enforces: the floor of
+   * already-assigned units, and the cap this booking is allowed to climb to.
+   *
+   * The cap needs loader-side availability, which is missing for a model
+   * fetched via typeahead beyond the seed list; the floor comes off the row
+   * itself and is always known, so it is checked either way.
    */
   const clientSchema = useMemo(() => {
+    const withFloor = UpsertModelRequestSchema.superRefine((data, ctx) => {
+      if (floor > 0 && data.quantity < floor) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["quantity"],
+          message: `${floor} ${
+            floor === 1 ? "unit is" : "units are"
+          } already assigned — ${floor} is the lowest this can go.`,
+        });
+      }
+    });
+
     if (capacityForThisBooking == null || model == null) {
-      return UpsertModelRequestSchema;
+      return withFloor;
     }
     const max = capacityForThisBooking;
     const total = model.total;
-    return UpsertModelRequestSchema.superRefine((data, ctx) => {
+    return withFloor.superRefine((data, ctx) => {
       if (data.quantity > max) {
         ctx.addIssue({
           code: "custom",
@@ -319,7 +340,7 @@ function ExistingRequestRow({
         });
       }
     });
-  }, [capacityForThisBooking, model]);
+  }, [capacityForThisBooking, model, floor]);
 
   const zo = useZorm(`EditModelRequest-${request.assetModelId}`, clientSchema);
 
@@ -372,6 +393,7 @@ function ExistingRequestRow({
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
             <span>
               {request.quantity} reserved
+              {floor > 0 ? ` · ${floor} assigned` : null}
               {model ? ` · ${model.total} total in workspace` : null}
             </span>
             {hasShortfall ? (
@@ -412,7 +434,7 @@ function ExistingRequestRow({
               type="number"
               {...numberInputWheelGuard}
               name={zo.fields.quantity()}
-              min={1}
+              min={Math.max(1, floor)}
               step={1}
               value={quantityInput}
               onChange={(e) => setQuantityInput(e.target.value)}
@@ -437,24 +459,28 @@ function ExistingRequestRow({
             </Button>
           </updateFetcher.Form>
 
-          <removeFetcher.Form
-            method="DELETE"
-            action={`/api/bookings/${bookingId}/model-requests`}
-          >
-            <input
-              type="hidden"
-              name="assetModelId"
-              value={request.assetModelId}
-            />
-            <Button
-              type="submit"
-              variant="secondary"
-              disabled={disabled}
-              aria-label={`Remove reservation for ${request.assetModelName}`}
+          {/* The quantity input beside this one, floored at the assigned
+              count, is the route that works once units are on the booking. */}
+          {canCancelModelReservation(request) ? (
+            <removeFetcher.Form
+              method="DELETE"
+              action={`/api/bookings/${bookingId}/model-requests`}
             >
-              {isRemoving ? "Removing..." : "Remove"}
-            </Button>
-          </removeFetcher.Form>
+              <input
+                type="hidden"
+                name="assetModelId"
+                value={request.assetModelId}
+              />
+              <Button
+                type="submit"
+                variant="secondary"
+                disabled={disabled}
+                aria-label={`Remove reservation for ${request.assetModelName}`}
+              >
+                {isRemoving ? "Removing..." : "Remove"}
+              </Button>
+            </removeFetcher.Form>
+          ) : null}
         </div>
       </div>
 

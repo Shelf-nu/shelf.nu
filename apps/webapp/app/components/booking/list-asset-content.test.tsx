@@ -951,6 +951,36 @@ describe("ListAssetContent", () => {
       expect(tooltip.textContent).toMatch(/record of what was booked/i);
     });
 
+    it("names the reserved model a row answered, and explains it in a keyboard-reachable tooltip", async () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        // The loader resolved the name behind `bookingModelRequestId`.
+        fulfilsModelName: "Dell Latitude 5550",
+      } as unknown as AssetWithBooking);
+
+      const trigger = screen.getByText("Fulfils Dell Latitude 5550");
+      expect(trigger).toBeInTheDocument();
+      // Focusable trigger: the tooltip must not be hover-only (WCAG 2.1 AA).
+      expect(trigger.tagName).toBe("BUTTON");
+
+      await userEvent.hover(trigger);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toMatch(/without naming them/i);
+      expect(tooltip.textContent).toMatch(/counts toward it/i);
+    });
+
+    it("does NOT label a row that answered no reservation", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      // Every other row on a booking: added directly, with no promise to
+      // answer. That is most rows, so a badge here would be noise.
+      renderRow({ ...baseAsset } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText(/^Fulfils /)).not.toBeInTheDocument();
+    });
+
     it("does NOT label a live kit member", () => {
       mockUseLoaderData.mockReturnValue(finishedBooking);
 
