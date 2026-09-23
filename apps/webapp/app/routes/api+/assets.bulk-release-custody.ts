@@ -115,10 +115,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
      * `kitCustodyId` was inherited from the kit and goes back by releasing the
      * kit, which cascade-deletes it.
      *
-     * Every holder is resolved before any release runs, because each
-     * `releaseQuantity` call commits its own transaction — resolving inside
-     * the write loop would let a refusal on a later asset leave earlier ones
-     * already released while the drawer reports the whole submission failed.
+     * The whole scan is checked before any of it is released — both that each
+     * asset has exactly one holder AND that the holder has the units asked
+     * for. Each `releaseQuantity` call commits its own transaction, so a
+     * refusal discovered mid-loop would leave earlier assets already released
+     * while the drawer reports the submission failed, and a retry would then
+     * release them a second time. `releaseQuantity` re-checks the quantity
+     * under its own row lock, which is what actually prevents over-release if
+     * custody moves in between; this pass is what makes the refusal arrive
+     * before anything is written.
      */
     /** One resolved `{ assetId, teamMemberId }` per quantity-tracked scan. */
     const resolvedReleases: { assetId: string; teamMemberId: string }[] = [];
@@ -133,6 +138,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         select: {
           assetId: true,
           teamMemberId: true,
+          quantity: true,
           asset: { select: { title: true } },
         },
       });
@@ -151,6 +157,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
                 ? "This asset has no units in anyone's custody to release."
                 : `"${holders[0].asset.title}" is held by more than one person. Release it from the asset's custody list, where each holder is listed separately.`,
             additionalData: { assetId, holders: holders.length },
+          });
+        }
+
+        if (quantities[assetId] > holders[0].quantity) {
+          throw new ShelfError({
+            cause: null,
+            status: 400,
+            label: "Assets",
+            shouldBeCaptured: false,
+            message: `Nothing was released. "${holders[0].asset.title}" has only ${holders[0].quantity} unit(s) in custody.`,
+            additionalData: {
+              assetId,
+              requested: quantities[assetId],
+              held: holders[0].quantity,
+            },
           });
         }
 

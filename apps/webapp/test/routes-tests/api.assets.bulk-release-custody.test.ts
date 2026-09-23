@@ -67,6 +67,9 @@ vi.mock("~/modules/asset-index-settings/service.server", () => ({
   getAssetIndexSettings: vi.fn().mockResolvedValue({ mode: "SIMPLE" }),
 }));
 
+// why: the route reads the acting user's timezone to forward to the bulk call
+// (select-all date filters truncate in it). Stub it so this suite needs no
+// db.user lookup.
 vi.mock("~/utils/date-format.server", () => ({
   resolveUserFormatPrefsById: vi.fn().mockResolvedValue({ timeZone: "UTC" }),
 }));
@@ -115,8 +118,15 @@ function makeRequest(assetIds: string[], quantities: Record<string, number>) {
 }
 
 /** A resolved operator custody row as the route selects it. */
-function holder(assetId: string, teamMemberId: string, title = "USB-C Cables") {
-  return { assetId, teamMemberId, asset: { title } };
+function holder(
+  assetId: string,
+  teamMemberId: string,
+  {
+    title = "USB-C Cables",
+    quantity = 50,
+  }: { title?: string; quantity?: number } = {}
+) {
+  return { assetId, teamMemberId, quantity, asset: { title } };
 }
 
 beforeEach(() => {
@@ -126,7 +136,7 @@ beforeEach(() => {
     role: OrganizationRoles.ADMIN,
     canUseBarcodes: false,
     canSeeAllCustody: true,
-  } as any);
+  } as Awaited<ReturnType<typeof requirePermission>>);
 });
 
 describe("api/assets/bulk-release-custody", () => {
@@ -177,8 +187,8 @@ describe("api/assets/bulk-release-custody", () => {
 
   it("refuses by name when an asset is held by more than one person", async () => {
     dbMocks.custodyFindMany.mockResolvedValue([
-      holder("asset-shared", "tm-1", "Drill Bits"),
-      holder("asset-shared", "tm-2", "Drill Bits"),
+      holder("asset-shared", "tm-1", { title: "Drill Bits" }),
+      holder("asset-shared", "tm-2", { title: "Drill Bits" }),
     ]);
 
     const response = (await action(
@@ -189,6 +199,29 @@ describe("api/assets/bulk-release-custody", () => {
     expect(response.status).toBe(400);
     expect(body.error.message).toContain("Drill Bits");
     expect(body.error.message).toContain("held by more than one person");
+    expect(mockReleaseQuantity).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when one asset asks for more units than its holder has", async () => {
+    dbMocks.custodyFindMany.mockResolvedValue([
+      holder("asset-ok", "tm-1", { quantity: 50 }),
+      holder("asset-short", "tm-2", { title: "Drill Bits", quantity: 2 }),
+    ]);
+
+    const response = (await action(
+      makeRequest(["asset-ok", "asset-short"], {
+        "asset-ok": 1,
+        "asset-short": 5,
+      })
+    )) as unknown as Response;
+    const body = await response.json();
+
+    // `releaseQuantity` checks this too, but inside the asset's own
+    // transaction — by then `asset-ok` would already be committed, and a retry
+    // would release it a second time.
+    expect(response.status).toBe(400);
+    expect(body.error.message).toContain("Drill Bits");
+    expect(body.error.message).toContain("only 2 unit(s)");
     expect(mockReleaseQuantity).not.toHaveBeenCalled();
   });
 

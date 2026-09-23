@@ -161,7 +161,7 @@ describe("api/assets/bulk-assign-custody", () => {
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
       canUseBarcodes: false,
-    } as any);
+    } as Awaited<ReturnType<typeof requirePermission>>);
 
     // Custodian not found due to org filter
     mockGetTeamMember.mockRejectedValue(new Error("Not found"));
@@ -185,7 +185,9 @@ describe("api/assets/bulk-assign-custody", () => {
       }
     );
 
-    const response = (await action(createActionArgs({ request }))) as any;
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     expect(response.status).toBe(404);
 
@@ -201,7 +203,7 @@ describe("api/assets/bulk-assign-custody", () => {
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
       canUseBarcodes: false,
-    } as any);
+    } as Awaited<ReturnType<typeof requirePermission>>);
 
     // Valid team member from same org
     mockGetTeamMember.mockResolvedValue({
@@ -228,11 +230,13 @@ describe("api/assets/bulk-assign-custody", () => {
       }
     );
 
-    const response = (await action(createActionArgs({ request }))) as any;
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     // Success case returns Response wrapping the payload
     expect(response instanceof Response).toBe(true);
-    const responseData = await (response as unknown as Response).json();
+    const responseData = await response.json();
     expect(responseData).toEqual({ error: null, success: true });
 
     expect(mockGetTeamMember).toHaveBeenCalledWith({
@@ -253,7 +257,7 @@ describe("api/assets/bulk-assign-custody", () => {
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
       canUseBarcodes: false,
-    } as any);
+    } as Awaited<ReturnType<typeof requirePermission>>);
 
     mockGetTeamMember.mockResolvedValue({
       id: "team-member-456",
@@ -295,7 +299,7 @@ describe("api/assets/bulk-assign-custody", () => {
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
       canUseBarcodes: false,
-    } as any);
+    } as Awaited<ReturnType<typeof requirePermission>>);
 
     mockGetTeamMember.mockResolvedValue({
       id: "team-member-123",
@@ -318,10 +322,12 @@ describe("api/assets/bulk-assign-custody", () => {
       { method: "POST", body: formData }
     );
 
-    const response = (await action(createActionArgs({ request }))) as any;
+    const response = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
 
     expect(response instanceof Response).toBe(true);
-    const responseData = await (response as unknown as Response).json();
+    const responseData = await response.json();
     expect(responseData).toEqual({ error: null, success: true });
     expect(bulkCheckOutAssets).toHaveBeenCalledWith(
       expect.objectContaining({ role: OrganizationRoles.ADMIN })
@@ -354,7 +360,7 @@ describe("api/assets/bulk-assign-custody", () => {
         organizationId: "org-1",
         role: OrganizationRoles.SELF_SERVICE,
         canUseBarcodes: false,
-      } as any);
+      } as Awaited<ReturnType<typeof requirePermission>>);
       mockGetTeamMember.mockResolvedValue({
         id: "team-member-123",
         userId: "user-123",
@@ -427,7 +433,7 @@ describe("api/assets/bulk-assign-custody", () => {
 
       const response = (await action(
         createActionArgs({ request: quantityRequest({ "asset-qty": 7 }) })
-      )) as any;
+      )) as unknown as Response;
 
       // Each checkOutQuantity commits its own transaction, so a refusal
       // discovered mid-loop would strand the assets already written — and a
