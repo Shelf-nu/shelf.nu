@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
+  scannedAssetQuantitiesAtom,
   scannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
@@ -54,6 +55,7 @@ import {
   DefaultLoadingState,
   TextLoader,
 } from "../generic-item-row";
+import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
 
 // Export the schema so it can be reused
 export const AssignCustodyToSignedItemsSchema = z.object({
@@ -105,13 +107,32 @@ export default function AssignCustodyDrawer({
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
 
   // Asset blockers
+  //
+  // INDIVIDUAL only, for the same reason the kit blocker below gives:
+  // `Asset.status` is one flag for the whole row, so a quantity-tracked pool
+  // reads IN_CUSTODY while a single unit is held and the rest is free stock.
+  // Judging those rows here would refuse custody of units sitting on the shelf.
+  // What a qty row may claim is its own free pool, which the server re-checks
+  // on the write.
   const assetsAlreadyInCustody = assets
-    .filter((asset) => !!asset && asset.status === AssetStatus.IN_CUSTODY)
+    .filter(
+      (asset) =>
+        !!asset &&
+        asset.type === AssetType.INDIVIDUAL &&
+        asset.status === AssetStatus.IN_CUSTODY
+    )
     .map((asset) => asset.id);
 
-  // Asset is checked out
+  // Asset is checked out. INDIVIDUAL only — same reasoning as above: one unit
+  // out on a booking flips the whole qty-tracked row to CHECKED_OUT while the
+  // remaining units are still free to hand over.
   const assetsAreCheckedOut = assets
-    .filter((asset) => !!asset && asset.status === AssetStatus.CHECKED_OUT)
+    .filter(
+      (asset) =>
+        !!asset &&
+        asset.type === AssetType.INDIVIDUAL &&
+        asset.status === AssetStatus.CHECKED_OUT
+    )
     .map((asset) => asset.id);
 
   // Asset is part of a kit. Only INDIVIDUAL assets get blocked here —
@@ -281,6 +302,11 @@ export default function AssignCustodyDrawer({
         }
         return null;
       }}
+      // Custody context so the API attaches `pickerMeta` with the pool
+      // `checkOutQuantity` enforces — the ceiling the qty input below is
+      // bounded by. No id: the custodian is chosen after scanning and the pool
+      // does not depend on who ends up holding the units.
+      searchParams={{ pickerContext: JSON.stringify({ type: "custody" }) }}
     />
   );
 
@@ -319,6 +345,9 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   const disabled = useDisabled();
   const { isSelfService } = useUserRoleHelper();
   const { teamMembers } = useLoaderData<ScannerLoader>();
+  // Per-row units for quantity-tracked scans, written by
+  // `ScannedAssetQuantityInput` and keyed by asset id.
+  const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema, {
     onValidSubmit: (e) => {
       e.preventDefault();
@@ -331,10 +360,25 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
       // Handle asset request
       if (assetIds && assetIds.length > 0) {
+        /**
+         * Units per quantity-tracked scan, keyed by asset id. Narrowed to the
+         * ids in this submit so a row scanned and then removed cannot carry a
+         * stale number through. Assets absent from the map are whole units and
+         * take the ordinary bulk path.
+         */
+        const quantities = JSON.stringify(
+          Object.fromEntries(
+            Object.entries(assetQuantities).filter(([assetId]) =>
+              assetIds.includes(assetId)
+            )
+          )
+        );
+
         // Create object data structure for assets
         const assetData = {
           custodian,
           assetIds,
+          quantities,
         };
 
         // Convert to FormData
@@ -527,6 +571,14 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
 // Implement item renderers if they're not already defined elsewhere
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
+  const qtyTracked = isQuantityTracked(asset);
+  /**
+   * Units this scan may hand over, from the server's own custody pool
+   * (`pickerMeta.maxAllowed`). Falls back to the asset's stock when the API
+   * answered without picker meta, which keeps the row usable and leaves the
+   * write to refuse an over-allocation.
+   */
+  const maxAllowed = asset.pickerMeta?.maxAllowed ?? asset.quantity ?? 0;
   // Use predefined presets to create label configurations
   const availabilityConfigs = [
     assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
@@ -562,6 +614,17 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
         </span>
         <AssetAvailabilityLabels />
       </div>
+
+      {/* Quantity-tracked rows hand over a number of units, not the whole
+          item. Hidden once nothing is free — the row is still listed, and the
+          blocker below explains why it cannot go. */}
+      {qtyTracked && maxAllowed > 0 ? (
+        <ScannedAssetQuantityInput
+          assetId={asset.id}
+          max={maxAllowed}
+          unit={asset.unitOfMeasure || "units"}
+        />
+      ) : null}
     </div>
   );
 }

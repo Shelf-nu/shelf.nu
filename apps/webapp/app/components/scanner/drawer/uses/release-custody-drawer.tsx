@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
+  scannedAssetQuantitiesAtom,
   scannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
@@ -48,6 +49,7 @@ import {
   DefaultLoadingState,
   TextLoader,
 } from "../generic-item-row";
+import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
 
 // Export the schema so it can be reused
 export const ReleaseCustodyFromScannedItemsSchema = z.object({
@@ -104,9 +106,21 @@ export default function ReleaseCustodyDrawer({
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
 
-  // Asset blockers - here we look for assets NOT in custody (AVAILABLE OF CHECKED_OUT)
+  // Asset blockers — assets NOT in custody (AVAILABLE or CHECKED_OUT).
+  //
+  // INDIVIDUAL only, matching the kit blocker below: `Asset.status` is one flag
+  // for the whole row, so a quantity-tracked asset holding a partial custody
+  // slice can read AVAILABLE (most units free) or CHECKED_OUT (some units out
+  // on a booking) while units genuinely are in someone's hands. Blocking those
+  // rows refuses a release that is legitimate; what can actually be released is
+  // per custodian, which the server checks on the write.
   const assetsNotInCustody = assets
-    .filter((asset) => !!asset && asset.status !== AssetStatus.IN_CUSTODY)
+    .filter(
+      (asset) =>
+        !!asset &&
+        asset.type === AssetType.INDIVIDUAL &&
+        asset.status !== AssetStatus.IN_CUSTODY
+    )
     .map((asset) => asset.id);
 
   // Asset is part of a kit. Only block INDIVIDUAL assets — qty-tracked
@@ -251,6 +265,9 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   });
 
   const disabled = useDisabled();
+  // Per-row units for quantity-tracked scans, written by
+  // `ScannedAssetQuantityInput` and keyed by asset id.
+  const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
 
   const zo = useZorm("BulkReleaseCustody", BulkReleaseCustodySchema, {
     onValidSubmit: (e) => {
@@ -260,9 +277,22 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
       // Handle asset request
       if (assetIds && assetIds.length > 0) {
+        /**
+         * Units per quantity-tracked scan, narrowed to this submit so a row
+         * scanned and then removed cannot carry a stale number through.
+         * Assets absent from the map are released whole by the bulk path.
+         */
+        const quantities = JSON.stringify(
+          Object.fromEntries(
+            Object.entries(assetQuantities).filter(([assetId]) =>
+              assetIds.includes(assetId)
+            )
+          )
+        );
         // Create object data structure for assets
         const assetData = {
           assetIds,
+          quantities,
         };
 
         // Convert to FormData
@@ -399,6 +429,16 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
 // Implement item renderers if they're not already defined elsewhere
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
+  const qtyTracked = isQuantityTracked(asset);
+  /**
+   * Units of this asset in anyone's hands — the ceiling on what a release can
+   * cover. Which of them the chosen custodian actually holds is settled on the
+   * write by `releaseQuantity`, which refuses with the number they do hold.
+   */
+  const inCustody = (asset.custody ?? []).reduce(
+    (sum, row) => sum + (row.quantity ?? 0),
+    0
+  );
   // Use predefined presets to create label configurations with appropriate conditions for release custody
   const availabilityConfigs = [
     {
@@ -414,7 +454,11 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     },
     // For release custody, we highlight assets that are NOT in custody (opposite of assign custody)
     {
-      condition: asset.status !== AssetStatus.IN_CUSTODY,
+      // Whole-asset statement, so INDIVIDUAL only — a qty-tracked row can hold
+      // units for someone while its overall status reads otherwise.
+      condition:
+        asset.type === AssetType.INDIVIDUAL &&
+        asset.status !== AssetStatus.IN_CUSTODY,
       badgeText: "Not in custody",
       tooltipTitle: "Asset is not in custody",
       tooltipContent: "This asset is not in custody and cannot be released.",
@@ -453,6 +497,16 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
         </span>
         <AssetAvailabilityLabels />
       </div>
+
+      {/* Quantity-tracked rows hand back a number of units, not the whole
+          item. Hidden when nothing is held — there is nothing to release. */}
+      {qtyTracked && inCustody > 0 ? (
+        <ScannedAssetQuantityInput
+          assetId={asset.id}
+          max={inCustody}
+          unit={asset.unitOfMeasure || "units"}
+        />
+      ) : null}
     </div>
   );
 }

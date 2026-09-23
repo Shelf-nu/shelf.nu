@@ -2,7 +2,10 @@ import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
-import { bulkCheckInAssets } from "~/modules/asset/service.server";
+import {
+  bulkCheckInAssets,
+  releaseQuantity,
+} from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
@@ -42,9 +45,23 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, currentSearchParams } = parseData(
+    const { assetIds, currentSearchParams, quantities } = parseData(
       formData,
       BulkReleaseCustodySchema.and(CurrentSearchParamsSchema)
+    );
+
+    /**
+     * Units per quantity-tracked asset, sent only by the scanner — see the
+     * field's note on `BulkReleaseCustodySchema`. Named assets are released
+     * through `releaseQuantity`, the same primitive the asset page uses, and
+     * never reach the bulk call. An index submission sends none, so its
+     * behaviour is unchanged.
+     */
+    const quantityAssetIds = assetIds.filter((id) =>
+      Object.prototype.hasOwnProperty.call(quantities, id)
+    );
+    const bulkAssetIds = assetIds.filter(
+      (id) => !Object.prototype.hasOwnProperty.call(quantities, id)
     );
 
     /**
@@ -86,26 +103,65 @@ export async function action({ request, context }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
-    const { skippedQuantityTracked } = await bulkCheckInAssets({
-      userId,
-      role,
-      assetIds,
-      organizationId,
-      currentSearchParams,
-      settings,
-      timeZone,
-      // `asset: custody` is a SELF_SERVICE permission, so narrow the
-      // select-all custodian filter to the caller's own custody — otherwise a
-      // self-service user could act on exactly the set a colleague holds.
-      allowedTeamMemberIds: await scopeCustodianFilterIds({
-        teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
-          "teamMember"
-        ),
-        canSeeAllCustody,
+    /**
+     * Releasing needs a custodian, and this scanner never asks for one — a
+     * bulk release takes the asset back from whoever holds it. For a
+     * quantity-tracked asset that is only unambiguous while one person holds
+     * it, so the single holder is resolved here and anything else is refused
+     * by name rather than guessed at. Splitting a release across custodians is
+     * what the asset's own custody list is for.
+     */
+    for (const assetId of quantityAssetIds) {
+      const holders = await db.custody.findMany({
+        where: { assetId, kitCustodyId: null, asset: { organizationId } },
+        select: { teamMemberId: true, asset: { select: { title: true } } },
+      });
+
+      if (holders.length !== 1) {
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          label: "Assets",
+          shouldBeCaptured: false,
+          message:
+            holders.length === 0
+              ? "This asset has no units in anyone's custody to release."
+              : `"${holders[0].asset.title}" is held by more than one person. Release it from the asset's custody list, where each holder is listed separately.`,
+          additionalData: { assetId, holders: holders.length },
+        });
+      }
+
+      await releaseQuantity({
+        assetId,
+        teamMemberId: holders[0].teamMemberId,
+        quantity: quantities[assetId],
         userId,
         organizationId,
-      }),
-    });
+      });
+    }
+
+    const { skippedQuantityTracked } = bulkAssetIds.length
+      ? await bulkCheckInAssets({
+          userId,
+          role,
+          assetIds: bulkAssetIds,
+          organizationId,
+          currentSearchParams,
+          settings,
+          timeZone,
+          // `asset: custody` is a SELF_SERVICE permission, so narrow the
+          // select-all custodian filter to the caller's own custody — otherwise a
+          // self-service user could act on exactly the set a colleague holds.
+          allowedTeamMemberIds: await scopeCustodianFilterIds({
+            teamMemberIds: new URLSearchParams(
+              currentSearchParams ?? ""
+            ).getAll("teamMember"),
+            canSeeAllCustody,
+            userId,
+            organizationId,
+          }),
+        })
+      : { skippedQuantityTracked: 0 };
 
     const skippedNote =
       skippedQuantityTracked > 0

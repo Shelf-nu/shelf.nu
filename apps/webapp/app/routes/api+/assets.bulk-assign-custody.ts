@@ -1,6 +1,9 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
-import { bulkCheckOutAssets } from "~/modules/asset/service.server";
+import {
+  bulkCheckOutAssets,
+  checkOutQuantity,
+} from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
@@ -48,9 +51,26 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, custodian, currentSearchParams } = parseData(
+    const { assetIds, custodian, currentSearchParams, quantities } = parseData(
       formData,
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
+    );
+
+    /**
+     * Units per quantity-tracked asset, sent only by the scanner.
+     *
+     * Bulk custody skips quantity-tracked assets because selecting rows on the
+     * assets index gives no way to say how many units each hand-over covers.
+     * The scanner does: it shows one row per scan with its own quantity input.
+     * So an asset named here is assigned through `checkOutQuantity`, the same
+     * single-asset primitive the asset page uses, and the bulk call below never
+     * sees it. An index submission sends no quantities and is unchanged.
+     */
+    const quantityAssetIds = assetIds.filter((id) =>
+      Object.prototype.hasOwnProperty.call(quantities, id)
+    );
+    const bulkAssetIds = assetIds.filter(
+      (id) => !Object.prototype.hasOwnProperty.call(quantities, id)
     );
 
     /**
@@ -95,28 +115,45 @@ export async function action({ context, request }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
-    const { skippedQuantityTracked } = await bulkCheckOutAssets({
-      userId,
-      role,
-      assetIds,
-      custodianId: custodian.id,
-      custodianName: custodian.name,
-      organizationId,
-      currentSearchParams,
-      settings,
-      timeZone,
-      // `asset: custody` is a SELF_SERVICE permission, so narrow the
-      // select-all custodian filter to the caller's own custody — otherwise a
-      // self-service user could act on exactly the set a colleague holds.
-      allowedTeamMemberIds: await scopeCustodianFilterIds({
-        teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
-          "teamMember"
-        ),
-        canSeeAllCustody,
+    /**
+     * Per-asset first: each is its own transaction with its own availability
+     * check, so a refusal names the asset that could not go and leaves the
+     * rest of the scan untouched rather than half-applied behind a bulk write.
+     */
+    for (const assetId of quantityAssetIds) {
+      await checkOutQuantity({
+        assetId,
+        teamMemberId: custodian.id,
+        quantity: quantities[assetId],
         userId,
         organizationId,
-      }),
-    });
+      });
+    }
+
+    const { skippedQuantityTracked } = bulkAssetIds.length
+      ? await bulkCheckOutAssets({
+          userId,
+          role,
+          assetIds: bulkAssetIds,
+          custodianId: custodian.id,
+          custodianName: custodian.name,
+          organizationId,
+          currentSearchParams,
+          settings,
+          timeZone,
+          // `asset: custody` is a SELF_SERVICE permission, so narrow the
+          // select-all custodian filter to the caller's own custody — otherwise a
+          // self-service user could act on exactly the set a colleague holds.
+          allowedTeamMemberIds: await scopeCustodianFilterIds({
+            teamMemberIds: new URLSearchParams(
+              currentSearchParams ?? ""
+            ).getAll("teamMember"),
+            canSeeAllCustody,
+            userId,
+            organizationId,
+          }),
+        })
+      : { skippedQuantityTracked: 0 };
 
     const skippedNote =
       skippedQuantityTracked > 0
