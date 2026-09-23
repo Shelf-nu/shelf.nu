@@ -190,6 +190,41 @@ export function isAssetCheckableIn(
 }
 
 /**
+ * The DISTINCT assets on a booking that are still out — i.e. plain-status
+ * `CHECKED_OUT` and not already reconciled by an earlier partial check-in.
+ *
+ * Returns ids rather than rows because the caller compares this against a
+ * deduped selection to decide whether a submission is the FINAL check-in (the
+ * one that closes the booking, and so the one that needs the early-check-in
+ * confirmation). `bookingAssets` holds one entry per `BookingAsset` slice, so a
+ * QUANTITY_TRACKED asset booked both standalone and as a kit member appears
+ * more than once; counting rows on one side of that comparison and assets on
+ * the other makes the two never agree, and the confirmation is skipped for
+ * exactly the bookings most likely to need it.
+ *
+ * @param bookingAssets - One entry per `BookingAsset` slice (needs `id` and
+ *   `status`).
+ * @param checkedInAssetIds - Asset ids already checked in on this booking,
+ *   from `partialCheckinProgress`.
+ * @returns The set of distinct asset ids still checked out.
+ */
+export function getRemainingCheckedOutAssetIds(
+  bookingAssets: { id: string; status: string }[],
+  checkedInAssetIds: Iterable<string>
+): Set<string> {
+  const alreadyCheckedIn = new Set(checkedInAssetIds);
+  return new Set(
+    bookingAssets
+      .filter(
+        (asset) =>
+          asset.status === AssetStatus.CHECKED_OUT &&
+          !alreadyCheckedIn.has(asset.id)
+      )
+      .map((asset) => asset.id)
+  );
+}
+
+/**
  * Normalizes the raw `selectedBulkItemsAtom` selection into a flat list of
  * enriched asset objects (plus kit entries kept for grouping), so every
  * consumer — the bulk-actions dropdown and both partial check-in/out dialogs —
