@@ -87,11 +87,11 @@ export const links: LinksFunction = () => [
  * - `assetIds`: concrete asset IDs the operator scanned in the drawer
  *   (matched OR off-model — server matches them against outstanding
  *   `BookingModelRequest` rows and creates `BookingAsset` rows).
- * - `kitIds`: present for forward compatibility — kit-level
- *   `BookingModelRequest`s don't exist today, so the server will
- *   reject non-empty kits when there are outstanding model requests.
- *   We still plumb the field through so the drawer can evolve without
- *   a schema change.
+ * - `kitIds`: kit IDs the operator scanned in the drawer. The server
+ *   resolves each into kit-driven `BookingAsset` rows and assigns their
+ *   INDIVIDUAL members against outstanding `BookingModelRequest` rows,
+ *   exactly as it does for a directly scanned asset. Members are not
+ *   listed in `assetIds` — sending one both ways would book it twice.
  * - `checkoutIntentChoice`: the operator's answer to the early-
  *   checkout alert (`with-adjusted-date` | `without-adjusted-date`).
  *   Only meaningful when `isBookingEarlyCheckout(booking.from)` is

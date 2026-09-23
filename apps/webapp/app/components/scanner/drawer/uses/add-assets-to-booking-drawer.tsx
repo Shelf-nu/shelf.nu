@@ -331,7 +331,8 @@ export default function AddAssetsToBookingDrawer({
           of a kit.
         </>
       ),
-      description: "Note: Scan Kit QR to add the full kit",
+      description:
+        "Note: Scan the kit QR to add them — the kit fulfils any reserved units its assets cover",
       onResolve: () => removeAssetsFromList(assetsPartOfKitIds),
     },
     {

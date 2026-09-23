@@ -48,7 +48,7 @@ import {
  * Body: {
  *   bookingId: string,
  *   assetIds: string[],   // concrete assets the operator scanned
- *   kitIds?: string[],    // scanned kits (no model requests); 400 under the explicit check-out requirement
+ *   kitIds?: string[],    // scanned kits; the server resolves their members, whose INDIVIDUAL units answer reservations
  *   timeZone?: string,    // device tz for scheduler/email timestamps
  * }
  *
