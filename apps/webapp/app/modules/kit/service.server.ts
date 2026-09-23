@@ -5333,7 +5333,20 @@ export async function updateKitAssets({
       tx: db,
     });
 
-    for (const asset of allAssetsForKit) {
+    /**
+     * Whose submitted quantity is worth measuring against the pool: only the
+     * rows this call will actually write.
+     *
+     * Under `addOnly` an existing membership's submitted quantity is ignored, so
+     * measuring it can only raise a 400 about a row that is not changing — and
+     * that 400 refuses the genuinely new assets in the same request. Derived
+     * from `newlyAddedAssets`, which is computed from the membership read inside
+     * this function, so an asset added concurrently counts as existing here
+     * even though the caller believed it was new.
+     */
+    const assetsToMeasure = addOnly ? newlyAddedAssets : allAssetsForKit;
+
+    for (const asset of assetsToMeasure) {
       if (asset.type !== AssetType.QUANTITY_TRACKED) continue;
       const submitted = assetQuantities[asset.id];
       if (submitted == null) continue;
