@@ -23,8 +23,10 @@ const label = "Asset Reminder";
  * The asset must belong to `organizationId`: the reminder is listed in, and
  * emailed to, that workspace, and the email shows the asset's title and image.
  * The ownership check, the reminder and its activity note commit in one
- * transaction, and the email is scheduled only after that commit — so a
- * refused or failed request leaves no reminder row and no queued job behind.
+ * transaction, so a refused request (asset or recipient outside the workspace)
+ * writes nothing. The email is scheduled only after that commit, so no job is
+ * ever queued for a rolled-back reminder. Scheduling itself is not
+ * transactional: if it fails, the reminder and note remain and this throws.
  *
  * @param args.assetId - Asset the reminder is about; must be in `organizationId`
  * @param args.organizationId - The caller's validated workspace
