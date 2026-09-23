@@ -200,6 +200,56 @@ export function countReservedModelUnits(
   );
 }
 
+/** The counts that decide whether a model's pool is over-committed. */
+export type ModelPoolCounts = {
+  /** INDIVIDUAL assets of this model in the workspace. */
+  total: number;
+  /** Units held in custody, which are out of the bookable pool. */
+  inCustody: number;
+  /** Units reserved on overlapping bookings as concrete `BookingAsset` rows. */
+  reservedConcrete: number;
+  /** Units reserved on overlapping bookings as model-level requests. */
+  reservedViaRequest: number;
+};
+
+/**
+ * Units of a model left over this window — **signed**, so a pool that owes more
+ * than it holds reads negative.
+ *
+ * Computed from the parts rather than read off `available`, and that is the
+ * whole point: the service clamps `available` with `Math.max(0, …)`, so an
+ * over-committed pool and an exactly-empty one both arrive as zero. Every
+ * question that turns on the difference — is this over-reserved, how many units
+ * may this booking still claim, what do we tell the operator — needs the
+ * unclamped figure, and `available` cannot answer any of them.
+ *
+ * @param counts - The model's pool counts, as the loader supplies them.
+ * @returns Units free, negative when over-committed.
+ */
+export function getModelPoolRemaining(counts: ModelPoolCounts): number {
+  return (
+    counts.total -
+    counts.inCustody -
+    counts.reservedConcrete -
+    counts.reservedViaRequest
+  );
+}
+
+/**
+ * Whether more units of a model are promised over this window than exist.
+ *
+ * Reservations are a read-then-decide, so two operators reserving at once can
+ * both be told there is room and both commit; the pool then owes more than it
+ * holds and somebody arrives to an empty shelf. This is the state the
+ * "Over-reserved" badge exists to show.
+ *
+ * @param counts - The model's pool counts, as the loader supplies them.
+ * @returns `true` when the promises exceed the stock.
+ */
+export function isModelPoolOverCommitted(counts: ModelPoolCounts): boolean {
+  return getModelPoolRemaining(counts) < 0;
+}
+
 /** Reserved units of one model that no asset has been assigned to yet. */
 export type UnassignedModelUnits = {
   /** The asset model's name. */

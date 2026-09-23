@@ -34,7 +34,11 @@ import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.model-requests";
 import { BADGE_COLORS } from "~/utils/badge-colors";
-import { canCancelModelReservation } from "~/utils/booking-model-requests";
+import {
+  canCancelModelReservation,
+  getModelPoolRemaining,
+  isModelPoolOverCommitted,
+} from "~/utils/booking-model-requests";
 import { getValidationErrors } from "~/utils/http";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
@@ -277,15 +281,18 @@ function ExistingRequestRow({
   const isRemoving = useDisabled(removeFetcher);
   const disabled = isUpdating || isRemoving;
 
-  // The loader-provided `available` already excludes the current
-  // booking's reservation, so `available + request.quantity` is the
-  // number this booking could still climb to. If `request.quantity`
-  // exceeds that we have a shortfall — warn with an amber badge.
+  // What this booking could still climb to: everything free over the window
+  // plus what it already holds. Both figures come from the SIGNED remainder,
+  // never `model.available` — the service clamps that at zero, so an
+  // over-committed pool and an exactly-empty one arrive identical, and the
+  // ceiling shown to the operator would be the clamped one.
   const capacityForThisBooking = model
-    ? model.available + request.quantity
+    ? getModelPoolRemaining(model) + request.quantity
     : null;
-  const hasShortfall =
-    capacityForThisBooking != null && request.quantity > capacityForThisBooking;
+  // Ask the pool question directly. Comparing `request.quantity` against a
+  // capacity that already contains it is an identity — it reduces to "is the
+  // remainder negative", which is what this says out loud.
+  const hasShortfall = model != null && isModelPoolOverCommitted(model);
 
   // Inline-edit state for the quantity. Resets whenever the loader
   // refreshes the server-authoritative `request.quantity` (e.g. after
