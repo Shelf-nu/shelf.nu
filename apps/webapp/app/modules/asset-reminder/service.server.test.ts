@@ -56,9 +56,9 @@ const REMINDER_ARGS = {
 describe("createAssetReminder", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(db.$transaction).mockImplementation(
+    (db.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
       // why: run the transaction body against the same mocked client
-      (callback: unknown) => (callback as (tx: typeof db) => unknown)(db)
+      (callback: (tx: typeof db) => unknown) => callback(db)
     );
     vi.mocked(db.teamMember.count).mockResolvedValue(1);
     vi.mocked(db.asset.findMany).mockResolvedValue([
