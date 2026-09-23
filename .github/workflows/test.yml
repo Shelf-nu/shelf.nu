@@ -69,6 +69,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
 
       - name: 📥 Install deps
         run: pnpm install --frozen-lockfile
@@ -92,6 +93,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
 
       - name: 📥 Install deps
         run: pnpm install --frozen-lockfile
@@ -99,8 +101,55 @@ jobs:
       - name: 🔎 Type check
         run: pnpm run typecheck
 
-  vitest:
-    name: ⚡ Vitest
+  # The webapp suite is split across parallel runners. Its cost is per-file
+  # module loading (each file gets a fresh worker that re-imports its whole
+  # graph), not test bodies, so it scales with runner count, not with tuning.
+  # Keep the shard count in `matrix.shard` and `--shard=…/N` in step with each
+  # other.
+  vitest-shard:
+    name: ⚡ Vitest (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      # Let every shard finish so one failure does not hide failures elsewhere.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # A full install, not `--filter "@shelf/webapp..."`: webapp tests import
+      # companion source (e.g. test/mobile/qr-utils.test.ts), and Vite reads
+      # the companion's tsconfig, which extends an Expo base. With the pnpm
+      # cache warm the full install takes seconds anyway.
+      - name: 📥 Install deps
+        run: pnpm install --frozen-lockfile
+        env:
+          # The next step generates the client from the real schema path;
+          # Prisma's own postinstall cannot find it and would only warn.
+          PRISMA_SKIP_POSTINSTALL_GENERATE: "true"
+
+      - name: 🔧 Generate Prisma client
+        run: pnpm --filter @shelf/database run db:generate
+
+      - name: ⚡ Run vitest
+        run: pnpm --filter @shelf/webapp test -- --run --shard=${{ matrix.shard }}/4
+
+  # Suites the webapp vitest run does not reach. They are small, so they share
+  # one job, running beside the shards rather than after them.
+  workspace-tests:
+    name: 🧩 Package & companion tests
     runs-on: ubuntu-latest
     steps:
       - name: ⬇️ Checkout repo
@@ -115,30 +164,45 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
 
       - name: 📥 Install deps
         run: pnpm install --frozen-lockfile
+        env:
+          PRISMA_SKIP_POSTINSTALL_GENERATE: "true"
 
+      # @shelf/database's own tests import the generated client.
       - name: 🔧 Generate Prisma client
         run: pnpm --filter @shelf/database run db:generate
 
-      - name: ⚡ Run vitest
-        run: pnpm --filter @shelf/webapp test -- --run
-
-      # Workspace packages run their own suites (node:test), which the webapp
-      # vitest run above does not reach. Without this step a package's `test`
-      # script is dead weight — @shelf/quantity-control's had never run in CI.
-      # NOT `turbo run test`: turbo.json marks that task persistent (vitest
-      # watch mode), so it would hang the job.
+      # Workspace packages run their own suites (node:test); this step is the
+      # only place CI runs a package's `test` script. NOT `turbo run test`:
+      # turbo.json marks that task persistent (vitest watch mode), so it would
+      # hang the job.
       - name: 🧩 Run workspace package tests
         run: pnpm -r --filter "./packages/*" run test
 
-      # Same reasoning one directory over: the companion's suite is node:test
-      # via tsx and the webapp vitest run does not reach it either, so its
-      # `lib/**` tests were dead weight. They are pure and take under a second
-      # — no simulator, no database.
+      # The companion's suite is node:test via tsx. Its `lib/**` tests are pure
+      # and take under a second — no simulator, no database.
       - name: 📱 Run companion tests
         run: pnpm --filter @shelf/companion test
+
+  # One stable check that reports the combined result of every shard, so the
+  # check name does not change when the shard count does. `always()` makes it
+  # run — and fail — when a shard fails, instead of being skipped (a skipped
+  # check reads as passing).
+  vitest:
+    name: ⚡ Vitest
+    runs-on: ubuntu-latest
+    needs: vitest-shard
+    if: always()
+    steps:
+      - name: ✅ All shards passed
+        env:
+          SHARDS_RESULT: ${{ needs.vitest-shard.result }}
+        run: |
+          echo "Vitest shards: $SHARDS_RESULT"
+          test "$SHARDS_RESULT" = "success"
 
   tooling:
     name: 🛠️ PR review tooling
@@ -156,6 +220,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
 
       - name: 📥 Install deps
         run: pnpm install --frozen-lockfile
