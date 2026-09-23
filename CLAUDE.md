@@ -13,10 +13,14 @@ Root-level convenience scripts follow the `<app>:<task>` pattern (e.g., `webapp:
 - `pnpm webapp:dev` - Start webapp dev server on port 3000
 - `pnpm webapp:build` - Build webapp for production
 - `pnpm webapp:test -- --run` - Run Vitest unit tests (always use `--run` flag)
-- `pnpm webapp:validate` - Run all tests, linting, and typecheck (use before commits)
+- `pnpm webapp:test:changed` - Run only the tests affected by your changes versus local `main` (seconds, not minutes)
+- `pnpm webapp:validate` - Run affected tests, linting, and typecheck (use before commits)
+- `pnpm webapp:validate:full` - Same, but with the full test suite (~3 min); CI always runs the full suite
 - `pnpm webapp:start` - Start webapp production server locally (loads `.env` from monorepo root)
 
 **IMPORTANT:** When running tests manually, ALWAYS use the `--run` flag to run tests once and exit. Without `--run`, Vitest runs in watch mode which consumes excessive memory. Never run multiple test processes in parallel as this can freeze the system.
+
+**Locally, run only the affected tests.** To verify a change, use `pnpm webapp:test:changed` (or a single file with `pnpm webapp:test -- --run <path>`). Do **not** run the full suite locally — no `pnpm webapp:validate:full`, no bare `pnpm webapp:test -- --run` — unless the user asks for it. CI runs the full suite on every PR, sharded across four runners, and that is the full-suite check.
 
 ### Companion App (Mobile)
 
@@ -507,7 +511,14 @@ Always run `pnpm webapp:validate` before committing - this runs:
 2. ESLint with auto-fix
 3. Prettier formatting
 4. TypeScript checking
-5. Unit tests
+5. Unit tests affected by your changes versus local `main` (`vitest --changed main`)
+
+Use `pnpm webapp:validate:full` to run the whole suite locally. CI runs the full
+suite on every PR, split across four parallel runners (`--shard`).
+
+**Keep local `main` current.** `--changed main` diffs against your local `main`
+branch, so a stale `main` widens the diff and runs more tests than needed —
+never fewer. Changes to `package.json` or the Vite/Vitest config re-run everything.
 
 ### Writing & Organizing Tests
 
@@ -631,7 +642,7 @@ Match the weight of the process to the size of the change. For a **trivial,
 fully-understood mechanical edit** — move a function to a `*.server` module, fix
 an import path, rename a symbol, a one-line guard swap — just make the edit
 directly with the file tools and run only the one relevant test if needed. Do
-**not** spin up a subagent, review loop, or full `validate` for it: the
+**not** spin up a subagent, review loop, or `validate` for it: the
 orchestration overhead (re-reading files, running the whole suite, writing a
 report) can turn a 30-second edit into many minutes. Reserve subagent-driven
 execution and full review loops for **substantial** work — new modules,
