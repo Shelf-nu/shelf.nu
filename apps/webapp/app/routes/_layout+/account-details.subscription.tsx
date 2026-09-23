@@ -20,6 +20,7 @@ import { InvoiceHistory } from "~/components/subscription/invoice-history";
 import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
+import { TeamPlanNotice } from "~/components/subscription/team-plan-notice";
 import { db } from "~/database/db.server";
 import { useUserData } from "~/hooks/use-user-data";
 import {
@@ -28,6 +29,7 @@ import {
 } from "~/modules/billing/price-validation.server";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 
+import { getPaidTeamMemberships } from "~/modules/user/paid-team-memberships";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
@@ -60,7 +62,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
      * NOTE: all users should be able to access the subscription route no matter which role they have
      * as its their own account settings.
      */
-    const [user, tierLimit] = await Promise.all([
+    const [user, tierLimit, memberships] = await Promise.all([
       getUserByID(userId, {
         select: {
           id: true,
@@ -74,7 +76,35 @@ export async function loader({ context }: LoaderFunctionArgs) {
         } satisfies Prisma.UserSelect,
       }),
       getUserTierLimit(userId),
+      /**
+       * The user's workspace memberships with each owner's tier. Shelf bills
+       * the workspace owner, so an invited member's own Stripe customer and
+       * tier do not show the plan they work under; the owner's tier does.
+       */
+      db.userOrganization.findMany({
+        where: { userId },
+        orderBy: { organization: { name: "asc" } },
+        select: {
+          roles: true,
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              userId: true,
+              owner: { select: { tierId: true } },
+            },
+          },
+        },
+      }),
     ]);
+
+    /**
+     * Paid Team workspaces the user joined without owning them (id and name
+     * only). The page tells such a member that their team's plan covers them
+     * instead of showing them as being on Free.
+     */
+    const paidTeams = getPaidTeamMemberships({ userId, memberships });
 
     /** Get the Stripe customer */
     const customer = (await getStripeCustomer(
@@ -147,6 +177,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
       customer,
       subscriptionsWithProducts,
       usedFreeTrial: user.usedFreeTrial,
+      paidTeams,
       openInvoices: openInvoices.map((inv) => {
         // Get subscription name from line items description
         let subscriptionName = "Subscription";
@@ -314,6 +345,7 @@ export default function SubscriptionPage() {
     openInvoices,
     paidInvoices,
     upcomingInvoices,
+    paidTeams,
   } = useLoaderData<typeof loader>();
   const user = useUserData();
   const hasUnpaidInvoice = user?.hasUnpaidInvoice ?? false;
@@ -335,6 +367,32 @@ export default function SubscriptionPage() {
       }
       return false;
     })
+  );
+
+  /**
+   * An invited member of a paid team, with no workspace plan of their own, is
+   * covered by the team's plan. They get the team notice in place of the
+   * "FREE version" message and the "no workspace plan" message.
+   */
+  const isCoveredByTeam = !hasWorkspacePlan && paidTeams.length > 0;
+
+  const pricingDialog = (
+    <DialogPortal>
+      <Dialog
+        open={pricingOpen}
+        onClose={() => setPricingOpen(false)}
+        className="h-[90vh] w-[90vw]"
+        title={
+          <h3 className="text-text-lg font-semibold">
+            Choose your workspace plan
+          </h3>
+        }
+      >
+        <div className="p-6">
+          <PricingTable prices={prices} />
+        </div>
+      </Dialog>
+    </DialogPortal>
   );
 
   /**
@@ -380,7 +438,15 @@ export default function SubscriptionPage() {
 
         {!hasWorkspacePlan ? (
           <div className="mb-8">
-            {hasNoSubscription ? (
+            {isCoveredByTeam ? (
+              <>
+                <TeamPlanNotice
+                  teams={paidTeams}
+                  onViewPlans={() => setPricingOpen(true)}
+                />
+                {pricingDialog}
+              </>
+            ) : hasNoSubscription ? (
               <>
                 <div className="mb-2 mt-3 flex items-center gap-3 rounded border border-gray-300 p-4">
                   <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
@@ -422,22 +488,7 @@ export default function SubscriptionPage() {
                     View workspace plans
                   </Button>
                 </div>
-                <DialogPortal>
-                  <Dialog
-                    open={pricingOpen}
-                    onClose={() => setPricingOpen(false)}
-                    className="h-[90vh] w-[90vw]"
-                    title={
-                      <h3 className="text-text-lg font-semibold">
-                        Choose your workspace plan
-                      </h3>
-                    }
-                  >
-                    <div className="p-6">
-                      <PricingTable prices={prices} />
-                    </div>
-                  </Dialog>
-                </DialogPortal>
+                {pricingDialog}
               </>
             )}
           </div>
