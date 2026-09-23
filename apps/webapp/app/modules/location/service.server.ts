@@ -29,6 +29,7 @@ import { geolocate } from "~/utils/geolocate.server";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
+import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
@@ -1347,11 +1348,23 @@ export async function generateLocationWithImages({
   image: File;
 }) {
   try {
+    // Every generated location shares the one uploaded file, so the bytes are
+    // read and validated once rather than per iteration.
+    const blob = Buffer.from(await image.arrayBuffer());
+    // Derived from the bytes, never from the caller's `File.type`: these rows
+    // are served back inline by `api+/image.$imageId`, so the stored content
+    // type decides how a browser renders them.
+    const contentType = assertUploadedImageContentType(blob, {
+      userId,
+      organizationId,
+      field: "image",
+    });
+
     for (let i = 1; i <= numberOfLocations; i++) {
       const imageCreated = await db.image.create({
         data: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
+          blob,
+          contentType,
           ownerOrg: { connect: { id: organizationId } },
           user: { connect: { id: userId } },
         },

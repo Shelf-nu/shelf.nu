@@ -2,6 +2,7 @@
   "name": "@shelf/companion",
   "version": "0.1.0",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "main": "expo-router/entry",
   "scripts": {
     "dev": "expo start --dev-client",
