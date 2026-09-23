@@ -3434,6 +3434,62 @@ describe("updateKitAssets - per-row qty submission", () => {
     });
   });
 
+  it("leaves an existing row's quantity alone in addOnly mode", async () => {
+    expect.assertions(2);
+
+    // The scanner's caller. `addOnly` means create what is missing and touch
+    // nothing that exists — including the quantity. An asset can be in the kit
+    // without the scanner knowing: the drawer's "already added" blocker reads
+    // the membership the page loaded with, so one added since then reaches the
+    // write unflagged. Applying the scanned quantity there would overwrite the
+    // number the other operator just set, and cascade it to kit custody.
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      location: null,
+      assetKits: [
+        {
+          kitId: "kit-1",
+          asset: {
+            id: "pens",
+            title: "Pens",
+            assetKits: [{ kitId: "kit-1" }],
+            bookingAssets: [],
+          },
+        },
+      ],
+      custody: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "pens",
+        title: "Pens",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        assetKits: [{ kitId: "kit-1", quantity: 60 }],
+        custody: [],
+        bookingAssets: [],
+        location: null,
+      },
+    ]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["pens"],
+      assetQuantities: { pens: 80 },
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+      addOnly: true,
+    });
+
+    expect(db.assetKit.update).not.toHaveBeenCalled();
+    expect(db.assetKit.createMany).not.toHaveBeenCalled();
+  });
+
   it("ignores assetQuantities for INDIVIDUAL — always writes quantity = 1", async () => {
     expect.assertions(1);
 
