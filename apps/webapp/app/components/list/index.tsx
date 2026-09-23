@@ -84,8 +84,15 @@ export type ListProps = {
    */
   disableSelectAllItems?: boolean;
 
-  /** Rows to render. Defaults to the loader's `items` — pass this only when a
-   * view renders rows the loader supplies under a different key. */
+  /**
+   * Rows to render. Defaults to the loader's `items` — pass this only when a
+   * view renders rows the loader supplies under a different key.
+   *
+   * These rows are also what the header's select-all checkbox ticks and what
+   * the title counts, so they must be the rows actually on screen. A list
+   * rendering one set while those two read `loaderData.items` gets a checkbox
+   * that selects rows nobody can see.
+   */
   items?: ListItemData[];
 };
 
@@ -151,6 +158,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                 title={title}
                 disableSelectAllItems={disableSelectAllItems}
                 hasBulkActions={!!bulkActions}
+                items={items}
               />
             </div>
             <div className="flex items-center justify-end gap-2">
@@ -166,6 +174,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
           >
             <ListHeader
               bulkActions={bulkActions}
+              items={items}
               hideFirstColumn={hideFirstHeaderColumn}
             >
               {headerChildren}

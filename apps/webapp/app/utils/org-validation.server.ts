@@ -117,6 +117,10 @@ export type OrgValidationTxClient = {
       where: { id: string; organizationId: string };
       select: { id: true; name: true };
     }) => Promise<{ id: string; name: string } | null>;
+    findMany: (args: {
+      where: { id: { in: string[] }; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string }[]>;
   };
 };
 
@@ -590,6 +594,54 @@ export async function assertAssetModelBelongsToOrg(
   }
 
   return found;
+}
+
+/**
+ * Asserts that every asset-model ID belongs to `organizationId`.
+ *
+ * Model ids reach the server from a bulk selection — the asset index's model
+ * view lets a user reserve units of several models on one booking — so they are
+ * request input and carry no org of their own. Dedupes first so a repeated id
+ * does not inflate the expected count; a no-op for an empty list.
+ *
+ * Returns nothing: callers reserve units by id and have the names already from
+ * the selection they submitted. Use {@link assertAssetModelBelongsToOrg} when a
+ * single model's label is needed for a note or toast.
+ *
+ * @param params.assetModelIds - AssetModel IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any ID is missing or belongs to another org
+ */
+export async function assertAssetModelsBelongToOrg(
+  {
+    assetModelIds,
+    organizationId,
+  }: { assetModelIds: AssetModel["id"][]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (assetModelIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(assetModelIds)];
+
+  const found = await client.assetModel.findMany({
+    where: { id: { in: uniqueIds }, organizationId },
+    select: { id: true },
+  });
+
+  if (found.length !== uniqueIds.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid asset models",
+      message:
+        "Some of the selected models do not exist in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
 }
 
 /**

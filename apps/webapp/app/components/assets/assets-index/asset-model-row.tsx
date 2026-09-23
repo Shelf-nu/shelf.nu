@@ -12,6 +12,7 @@
  * @see {@link file://./../../../modules/asset-model/rollup.server.ts}
  */
 import { memo } from "react";
+import type { ReactNode } from "react";
 import type { Currency } from "@prisma/client";
 import type { AssetModelRollupRow } from "~/modules/asset-model/rollup.server";
 import { BADGE_COLORS } from "~/utils/badge-colors";
@@ -68,13 +69,18 @@ function AvailabilitySplit({ item }: { item: AssetModelRollupRow }) {
  *   bucket, rendered muted — the query sorts it last.
  * @param extraProps.locale - Locale for currency formatting.
  * @param extraProps.currency - Workspace currency code.
+ * @param bulkActions - The list's bulk-action toolbar, passed by `List`. Read
+ *   only as a signal that a checkbox column precedes this row, which already
+ *   supplies the left gutter the name cell would otherwise draw.
  */
 export const AssetModelRow = memo(function AssetModelRow({
   item,
   extraProps,
+  bulkActions,
 }: {
   item: AssetModelRollupRow;
   extraProps?: { locale?: string; currency?: Currency };
+  bulkActions?: ReactNode;
 }) {
   const isNoModel = item.assetModelId === null;
   const locale = extraProps?.locale ?? "en-US";
@@ -83,16 +89,24 @@ export const AssetModelRow = memo(function AssetModelRow({
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex items-center gap-3 px-6 py-4">
+        <div
+          className={tw(
+            "flex items-center gap-3 py-4",
+            // Gutter is dropped from `md` up only, matching the kits index:
+            // below that the checkbox column is not what supplies the left
+            // inset, so removing it pushes the thumbnail against the edge.
+            bulkActions ? "md:pl-0 md:pr-6" : "px-6"
+          )}
+        >
           {isNoModel ? (
-            <div className="flex size-14 shrink-0 items-center justify-center rounded border border-dashed border-gray-300 text-gray-400">
+            <div className="flex size-12 shrink-0 items-center justify-center rounded border border-dashed border-gray-300 text-gray-400">
               —
             </div>
           ) : (
             <ImageWithPreview
               thumbnailUrl={item.thumbnailImage ?? item.image ?? undefined}
               alt={item.name ?? "Asset model"}
-              className="size-14 shrink-0 rounded border object-cover"
+              className="size-12 shrink-0 rounded border object-cover"
             />
           )}
           <div className="min-w-0">

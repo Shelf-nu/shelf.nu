@@ -38,8 +38,10 @@
  * @see {@link file://./../../routes/api+/bookings.$bookingId.model-requests.ts} — HTTP surface
  */
 
-import type { Asset, Prisma } from "@prisma/client";
+import type { Asset, BookingModelRequest, Prisma } from "@prisma/client";
 import { AssetType, BookingStatus } from "@prisma/client";
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { canEditModelReservations } from "~/utils/booking-model-requests";
 import type { ErrorLabel } from "~/utils/error";
@@ -1125,6 +1127,324 @@ type UpsertBookingModelRequestArgs = {
 };
 
 /**
+ * Validates and writes one model reservation inside a caller's transaction.
+ *
+ * Separate from {@link upsertBookingModelRequest} so a caller that already owns
+ * a transaction — creating a booking, or reserving several models at once —
+ * commits the reservation together with its own writes, all or nothing.
+ *
+ * **The caller's `tx` is what makes concurrent reservations serialise.**
+ * {@link getAssetModelAvailability} measures the free pool through the client
+ * it is handed, and the model lock only holds writers back for the transaction
+ * that goes on to write. Handed the global client instead, two concurrent
+ * reservations measure the same free pool and both commit.
+ *
+ * Emits the structured `ActivityEvent`s here, inside the transaction, so a
+ * rollback cannot leave an event describing a reservation that never
+ * committed. The human-readable booking note belongs to the caller, outside
+ * the transaction, because it is best-effort and must not be able to roll the
+ * reservation back.
+ *
+ * @param tx - The caller's interactive transaction client.
+ * @param args.quantity - The NEW TARGET quantity, not a delta, and never a
+ *   value the caller has not already checked is an integer ≥ 1.
+ * @param args.actor - The actor in both the forms this write needs:
+ *   `.snapshot` for the activity events below, `.link` for the caller's note.
+ *   Loaded outside the transaction so its window covers only the rows that
+ *   matter.
+ * @returns The written request plus the context the caller's note needs.
+ * @throws {ShelfError} 404 when the booking or the model is not in the
+ *   workspace; 400 when the booking no longer accepts reservation changes,
+ *   when the new quantity is below what is already assigned to it, or when the
+ *   pool cannot cover it.
+ */
+export async function writeBookingModelRequestInTx(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    bookingId,
+    assetModelId,
+    quantity,
+    organizationId,
+    userId,
+    actor,
+  }: {
+    bookingId: string;
+    assetModelId: string;
+    /** New target quantity. Must be ≥ 1. */
+    quantity: number;
+    organizationId: string;
+    userId: string;
+    actor: Awaited<ReturnType<typeof loadActorBestEffort>>;
+  }
+) {
+  const booking = await tx.booking.findUnique({
+    where: { id: bookingId, organizationId },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      from: true,
+      to: true,
+    },
+  });
+  if (!booking) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      status: 404,
+      message: "Booking not found in current workspace.",
+      shouldBeCaptured: false,
+    });
+  }
+  if (!canEditModelReservations(booking.status)) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      status: 400,
+      message:
+        "This booking is finished, cancelled or archived. Its reservations are a record of what was promised and can no longer be changed.",
+      shouldBeCaptured: false,
+    });
+  }
+
+  const assetModel = await tx.assetModel.findUnique({
+    where: { id: assetModelId, organizationId },
+    select: { id: true, name: true },
+  });
+  if (!assetModel) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      status: 404,
+      message: "Asset model not found in current workspace.",
+      shouldBeCaptured: false,
+    });
+  }
+
+  // Both locks before the read, because every decision below is made in
+  // application code against the row this read returns: the floor, whether
+  // this write is a reduction, and the completion stamp. Taken without the
+  // row lock that is a pre-write snapshot, and an assignment committing
+  // between the read and the upsert lands `fulfilledQuantity` above
+  // `quantity` — an invariant nothing in the database enforces.
+  //
+  // Pool first, then the row: assignment takes them in that order, and
+  // the reverse is a deadlock rather than a wrong answer.
+  await lockAssetModelForReservation(tx, assetModelId, organizationId);
+  await lockModelRequestRow(tx, bookingId, assetModelId);
+
+  const existing = await tx.bookingModelRequest.findUnique({
+    where: {
+      bookingId_assetModelId: { bookingId, assetModelId },
+    },
+    // `fulfilledAt` is selected purely for the audit trail: it is the
+    // second field this upsert can change, and the payload-shapes rule
+    // wants its own event rather than one umbrella row.
+    select: {
+      quantity: true,
+      fulfilledQuantity: true,
+      fulfilledAt: true,
+    },
+  });
+  const previousQuantity = existing?.quantity ?? null;
+  const existingFulfilled = existing?.fulfilledQuantity ?? 0;
+  const previousFulfilledAt = existing?.fulfilledAt ?? null;
+
+  if (quantity < existingFulfilled) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      status: 400,
+      message: `Cannot reduce this reservation below ${existingFulfilled} — that many units are already assigned to this booking. Set it to ${existingFulfilled} to release the rest, or remove those assets from the booking first.`,
+      shouldBeCaptured: false,
+    });
+  }
+
+  /**
+   * A reduction takes nothing from the pool, so nothing about the pool can
+   * refuse it — and measuring anyway would, in the one case that matters
+   * most. A booking holding more units than the pool now contains (an
+   * asset retired or moved into custody mid-booking) fails the comparison
+   * below at EVERY quantity, which would leave the operator unable to give
+   * back the units they are trying to give back.
+   *
+   * Sound only because `previousQuantity` is read under the row lock
+   * above. Off an unlocked read it is a guess, and a concurrent write can
+   * make a genuine INCREASE look like a reduction — which would skip the
+   * pool measurement on the one path that actually needs it.
+   */
+  const isReduction = previousQuantity != null && quantity <= previousQuantity;
+
+  if (!isReduction) {
+    const availability = await getAssetModelAvailability({
+      assetModelId,
+      organizationId,
+      bookingId,
+      from: booking.from,
+      to: booking.to,
+      db: tx,
+    });
+
+    /**
+     * What this booking would take from the pool once the upsert lands.
+     *
+     * `availability` excludes this booking, so BOTH halves of its footprint
+     * belong on this side of the comparison:
+     *
+     * - the units it already holds by name. Without them a booking holding
+     *   two of three units could still reserve three more by model — the
+     *   same over-commit this module's by-name guard refuses in the other
+     *   direction, and the two have to agree or a pair of writes that each
+     *   pass can still break the pool.
+     * - the units of this request that stay unassigned. Already-fulfilled
+     *   units are named units, so `newOutstanding` nets them out rather than
+     *   counting them twice.
+     *
+     * Units a custodian holds are discounted exactly as the by-name guard
+     * discounts them: the pool never offered them.
+     */
+    const heldByModel = await readOwnNamedUnits({
+      bookingId,
+      assetModelIds: [assetModelId],
+      organizationId,
+      tx,
+    });
+    const held = heldByModel.get(assetModelId);
+    const namedNotInCustody =
+      (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
+    const newOutstanding = quantity - existingFulfilled;
+
+    if (namedNotInCustody + newOutstanding > availability.available) {
+      const headroom = Math.max(
+        0,
+        availability.available - namedNotInCustody + existingFulfilled
+      );
+      const heldNote =
+        namedNotInCustody > 0
+          ? ` This booking already holds ${namedNotInCustody} ${
+              namedNotInCustody === 1 ? "unit" : "units"
+            } of it by name.`
+          : "";
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        message: `Cannot reserve ${quantity} × ${assetModel.name}. Only ${headroom} can be reserved in this window.${heldNote}`,
+        shouldBeCaptured: false,
+      });
+    }
+  }
+
+  // `fulfilledAt` transitions:
+  //   - create: always null (nothing fulfilled yet)
+  //   - update with newQuantity === fulfilledQuantity: mark complete
+  //   - update with newQuantity > fulfilledQuantity: re-open (null)
+  //   - update with newQuantity < fulfilledQuantity: rejected above
+  const isComplete = quantity === existingFulfilled && quantity > 0;
+  // Keep the ORIGINAL stamp when the request was already complete. Saving
+  // an unchanged quantity is not a new fulfilment, and stamping `now()`
+  // again silently rewrites when the reservation actually completed — the
+  // one timestamp the audit trail has for it.
+  const fulfilledAt = isComplete ? previousFulfilledAt ?? new Date() : null;
+
+  const request = await tx.bookingModelRequest.upsert({
+    where: {
+      bookingId_assetModelId: { bookingId, assetModelId },
+    },
+    create: {
+      bookingId,
+      assetModelId,
+      quantity,
+    },
+    update: {
+      quantity,
+      fulfilledAt,
+    },
+  });
+
+  /**
+   * Activity events — inside the tx, so a later failure can't leave an
+   * event describing a reservation that never committed.
+   *
+   * One event per field that actually changed (see the
+   * record-event-payload-shapes rule), never one umbrella "request
+   * updated" row: `quantity` and `fulfilledAt` move independently and
+   * reports need to count them independently.
+   *
+   * `assetModelId` goes in `meta` because `ActivityEvent` has no
+   * assetModelId cross-ref column; `assetModelName` rides along as a
+   * point-in-time snapshot so a later model rename doesn't rewrite
+   * history (same reasoning as `actorSnapshot`).
+   */
+  const modelMeta = {
+    assetModelId: assetModel.id,
+    assetModelName: assetModel.name,
+  };
+  const eventBase = {
+    organizationId,
+    actorUserId: userId,
+    actorSnapshot: actor?.snapshot ?? null,
+    entityType: "BOOKING" as const,
+    entityId: bookingId,
+    bookingId,
+  };
+
+  // `previousQuantity` comes from the pre-upsert read, so a concurrent
+  // create can make it stale: the second transaction serializes on the
+  // unique constraint, sees `existing === null`, but its upsert runs the
+  // UPDATE branch. The returned row settles which branch actually ran —
+  // Prisma stamps createdAt === updatedAt only on the create path.
+  const wasCreated =
+    request.createdAt.getTime() === request.updatedAt.getTime();
+  if (wasCreated) {
+    await recordEvent(
+      {
+        ...eventBase,
+        action: "BOOKING_MODEL_REQUESTED",
+        meta: { ...modelMeta, quantity },
+      },
+      tx
+    );
+  } else if (quantity !== previousQuantity) {
+    await recordEvent(
+      {
+        ...eventBase,
+        action: "BOOKING_MODEL_REQUEST_CHANGED",
+        field: "quantity",
+        fromValue: previousQuantity,
+        toValue: quantity,
+        meta: modelMeta,
+      },
+      tx
+    );
+  }
+
+  /**
+   * `fulfilledAt` gets its own event, and only when it genuinely flips
+   * set ⇄ unset. Comparing timestamps instead would fire on a no-op
+   * re-save of an already-complete request, which rewrites the stored
+   * `fulfilledAt` to `now()` without any real state change.
+   */
+  const wasFulfilled = previousFulfilledAt != null;
+  const isFulfilled = fulfilledAt != null;
+  if (existing && wasFulfilled !== isFulfilled) {
+    await recordEvent(
+      {
+        ...eventBase,
+        action: "BOOKING_MODEL_REQUEST_CHANGED",
+        field: "fulfilledAt",
+        fromValue: previousFulfilledAt?.toISOString() ?? null,
+        toValue: fulfilledAt?.toISOString() ?? null,
+        meta: modelMeta,
+      },
+      tx
+    );
+  }
+
+  return { request, booking, assetModel, previousQuantity, wasCreated };
+}
+
+/**
  * Upsert a model-level request row. Validates the new `quantity` against
  * current availability inside a transaction so two concurrent upserts
  * can't both pass the guard and oversubscribe the pool.
@@ -1165,274 +1485,16 @@ export async function upsertBookingModelRequest({
     // Serves both the in-tx event and the post-tx note.
     const actor = await loadActorBestEffort(userId);
 
-    const result = await db.$transaction(async (tx) => {
-      const booking = await tx.booking.findUnique({
-        where: { id: bookingId, organizationId },
-        select: {
-          id: true,
-          name: true,
-          status: true,
-          from: true,
-          to: true,
-        },
-      });
-      if (!booking) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          status: 404,
-          message: "Booking not found in current workspace.",
-          shouldBeCaptured: false,
-        });
-      }
-      if (!canEditModelReservations(booking.status)) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          status: 400,
-          message:
-            "This booking is finished, cancelled or archived. Its reservations are a record of what was promised and can no longer be changed.",
-          shouldBeCaptured: false,
-        });
-      }
-
-      const assetModel = await tx.assetModel.findUnique({
-        where: { id: assetModelId, organizationId },
-        select: { id: true, name: true },
-      });
-      if (!assetModel) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          status: 404,
-          message: "Asset model not found in current workspace.",
-          shouldBeCaptured: false,
-        });
-      }
-
-      // Both locks before the read, because every decision below is made in
-      // application code against the row this read returns: the floor, whether
-      // this write is a reduction, and the completion stamp. Taken without the
-      // row lock that is a pre-write snapshot, and an assignment committing
-      // between the read and the upsert lands `fulfilledQuantity` above
-      // `quantity` — an invariant nothing in the database enforces.
-      //
-      // Pool first, then the row: assignment takes them in that order, and
-      // the reverse is a deadlock rather than a wrong answer.
-      await lockAssetModelForReservation(tx, assetModelId, organizationId);
-      await lockModelRequestRow(tx, bookingId, assetModelId);
-
-      const existing = await tx.bookingModelRequest.findUnique({
-        where: {
-          bookingId_assetModelId: { bookingId, assetModelId },
-        },
-        // `fulfilledAt` is selected purely for the audit trail: it is the
-        // second field this upsert can change, and the payload-shapes rule
-        // wants its own event rather than one umbrella row.
-        select: {
-          quantity: true,
-          fulfilledQuantity: true,
-          fulfilledAt: true,
-        },
-      });
-      const previousQuantity = existing?.quantity ?? null;
-      const existingFulfilled = existing?.fulfilledQuantity ?? 0;
-      const previousFulfilledAt = existing?.fulfilledAt ?? null;
-
-      if (quantity < existingFulfilled) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          status: 400,
-          message: `Cannot reduce this reservation below ${existingFulfilled} — that many units are already assigned to this booking. Set it to ${existingFulfilled} to release the rest, or remove those assets from the booking first.`,
-          shouldBeCaptured: false,
-        });
-      }
-
-      /**
-       * A reduction takes nothing from the pool, so nothing about the pool can
-       * refuse it — and measuring anyway would, in the one case that matters
-       * most. A booking holding more units than the pool now contains (an
-       * asset retired or moved into custody mid-booking) fails the comparison
-       * below at EVERY quantity, which would leave the operator unable to give
-       * back the units they are trying to give back.
-       *
-       * Sound only because `previousQuantity` is read under the row lock
-       * above. Off an unlocked read it is a guess, and a concurrent write can
-       * make a genuine INCREASE look like a reduction — which would skip the
-       * pool measurement on the one path that actually needs it.
-       */
-      const isReduction =
-        previousQuantity != null && quantity <= previousQuantity;
-
-      if (!isReduction) {
-        const availability = await getAssetModelAvailability({
-          assetModelId,
-          organizationId,
-          bookingId,
-          from: booking.from,
-          to: booking.to,
-          db: tx,
-        });
-
-        /**
-         * What this booking would take from the pool once the upsert lands.
-         *
-         * `availability` excludes this booking, so BOTH halves of its footprint
-         * belong on this side of the comparison:
-         *
-         * - the units it already holds by name. Without them a booking holding
-         *   two of three units could still reserve three more by model — the
-         *   same over-commit this module's by-name guard refuses in the other
-         *   direction, and the two have to agree or a pair of writes that each
-         *   pass can still break the pool.
-         * - the units of this request that stay unassigned. Already-fulfilled
-         *   units are named units, so `newOutstanding` nets them out rather than
-         *   counting them twice.
-         *
-         * Units a custodian holds are discounted exactly as the by-name guard
-         * discounts them: the pool never offered them.
-         */
-        const heldByModel = await readOwnNamedUnits({
-          bookingId,
-          assetModelIds: [assetModelId],
-          organizationId,
-          tx,
-        });
-        const held = heldByModel.get(assetModelId);
-        const namedNotInCustody =
-          (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
-        const newOutstanding = quantity - existingFulfilled;
-
-        if (namedNotInCustody + newOutstanding > availability.available) {
-          const headroom = Math.max(
-            0,
-            availability.available - namedNotInCustody + existingFulfilled
-          );
-          const heldNote =
-            namedNotInCustody > 0
-              ? ` This booking already holds ${namedNotInCustody} ${
-                  namedNotInCustody === 1 ? "unit" : "units"
-                } of it by name.`
-              : "";
-          throw new ShelfError({
-            cause: null,
-            label,
-            status: 400,
-            message: `Cannot reserve ${quantity} × ${assetModel.name}. Only ${headroom} can be reserved in this window.${heldNote}`,
-            shouldBeCaptured: false,
-          });
-        }
-      }
-
-      // `fulfilledAt` transitions:
-      //   - create: always null (nothing fulfilled yet)
-      //   - update with newQuantity === fulfilledQuantity: mark complete
-      //   - update with newQuantity > fulfilledQuantity: re-open (null)
-      //   - update with newQuantity < fulfilledQuantity: rejected above
-      const isComplete = quantity === existingFulfilled && quantity > 0;
-      // Keep the ORIGINAL stamp when the request was already complete. Saving
-      // an unchanged quantity is not a new fulfilment, and stamping `now()`
-      // again silently rewrites when the reservation actually completed — the
-      // one timestamp the audit trail has for it.
-      const fulfilledAt = isComplete ? previousFulfilledAt ?? new Date() : null;
-
-      const request = await tx.bookingModelRequest.upsert({
-        where: {
-          bookingId_assetModelId: { bookingId, assetModelId },
-        },
-        create: {
-          bookingId,
-          assetModelId,
-          quantity,
-        },
-        update: {
-          quantity,
-          fulfilledAt,
-        },
-      });
-
-      /**
-       * Activity events — inside the tx, so a later failure can't leave an
-       * event describing a reservation that never committed.
-       *
-       * One event per field that actually changed (see the
-       * record-event-payload-shapes rule), never one umbrella "request
-       * updated" row: `quantity` and `fulfilledAt` move independently and
-       * reports need to count them independently.
-       *
-       * `assetModelId` goes in `meta` because `ActivityEvent` has no
-       * assetModelId cross-ref column; `assetModelName` rides along as a
-       * point-in-time snapshot so a later model rename doesn't rewrite
-       * history (same reasoning as `actorSnapshot`).
-       */
-      const modelMeta = {
-        assetModelId: assetModel.id,
-        assetModelName: assetModel.name,
-      };
-      const eventBase = {
-        organizationId,
-        actorUserId: userId,
-        actorSnapshot: actor?.snapshot ?? null,
-        entityType: "BOOKING" as const,
-        entityId: bookingId,
+    const result = await db.$transaction((tx) =>
+      writeBookingModelRequestInTx(tx, {
         bookingId,
-      };
-
-      // `previousQuantity` comes from the pre-upsert read, so a concurrent
-      // create can make it stale: the second transaction serializes on the
-      // unique constraint, sees `existing === null`, but its upsert runs the
-      // UPDATE branch. The returned row settles which branch actually ran —
-      // Prisma stamps createdAt === updatedAt only on the create path.
-      const wasCreated =
-        request.createdAt.getTime() === request.updatedAt.getTime();
-      if (wasCreated) {
-        await recordEvent(
-          {
-            ...eventBase,
-            action: "BOOKING_MODEL_REQUESTED",
-            meta: { ...modelMeta, quantity },
-          },
-          tx
-        );
-      } else if (quantity !== previousQuantity) {
-        await recordEvent(
-          {
-            ...eventBase,
-            action: "BOOKING_MODEL_REQUEST_CHANGED",
-            field: "quantity",
-            fromValue: previousQuantity,
-            toValue: quantity,
-            meta: modelMeta,
-          },
-          tx
-        );
-      }
-
-      /**
-       * `fulfilledAt` gets its own event, and only when it genuinely flips
-       * set ⇄ unset. Comparing timestamps instead would fire on a no-op
-       * re-save of an already-complete request, which rewrites the stored
-       * `fulfilledAt` to `now()` without any real state change.
-       */
-      const wasFulfilled = previousFulfilledAt != null;
-      const isFulfilled = fulfilledAt != null;
-      if (existing && wasFulfilled !== isFulfilled) {
-        await recordEvent(
-          {
-            ...eventBase,
-            action: "BOOKING_MODEL_REQUEST_CHANGED",
-            field: "fulfilledAt",
-            fromValue: previousFulfilledAt?.toISOString() ?? null,
-            toValue: fulfilledAt?.toISOString() ?? null,
-            meta: modelMeta,
-          },
-          tx
-        );
-      }
-
-      return { request, booking, assetModel, previousQuantity, wasCreated };
-    });
+        assetModelId,
+        quantity,
+        organizationId,
+        userId,
+        actor,
+      })
+    );
 
     // Activity note — best-effort, outside the tx so a markdoc hiccup
     // can't roll back the upsert. Phrasing depends on whether this was
@@ -1445,8 +1507,8 @@ export async function upsertBookingModelRequest({
     // Model names are user-supplied and render as literal text in the note.
     const modelName = stripMarkdocDelimiters(assetModel.name);
     let content: string | null = null;
-    // Same race-safe discriminator as the event above: the upsert result,
-    // not the stale pre-read. In the lost-race case (wasCreated false but
+    // Same race-safe discriminator the write core's events use: the upsert
+    // result, not the stale pre-read. In the lost-race case (wasCreated false but
     // previousQuantity null) the quantity comparisons are unknowable, so
     // the note is skipped — the event trail still records the change.
     if (wasCreated) {
@@ -1480,6 +1542,171 @@ export async function upsertBookingModelRequest({
       label,
       message: "Failed to reserve asset-model units on this booking.",
       additionalData: { bookingId, assetModelId, quantity, organizationId },
+    });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         upsertBookingModelRequests                         */
+/* -------------------------------------------------------------------------- */
+
+/** Units to add to one booking's reservation of one asset model. */
+type BookingModelRequestAddition = {
+  assetModelId: string;
+  /** Units to ADD, summed onto whatever the booking already reserves. */
+  quantity: number;
+};
+
+type UpsertBookingModelRequestsArgs = {
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  /** One entry per model. Repeated models are summed into a single write. */
+  additions: BookingModelRequestAddition[];
+};
+
+/**
+ * Reserves units of several asset models on one booking, in one transaction.
+ *
+ * **Additive.** Each `quantity` is added to what the booking already reserves
+ * for that model. {@link writeBookingModelRequestInTx} takes an absolute
+ * target, so this reads the current quantities and sums: passing an addition
+ * straight through would cut an existing reservation instead of growing it,
+ * and the write would still succeed, so nothing anywhere would report it.
+ *
+ * **All or nothing.** One model that does not fit aborts the batch, leaving
+ * the booking exactly as it was — a user never lands on a booking holding
+ * some of what they asked for with no indication of the rest. Every
+ * availability read happens through the same transaction as the writes, which
+ * is what stops two concurrent batches measuring the same free pool and both
+ * committing.
+ *
+ * The 4xx a failing model raises reaches the caller unchanged: it names which
+ * model was short, or which one is not in this workspace, and that is what the
+ * user has to act on.
+ *
+ * Writes no booking note. {@link upsertBookingModelRequest} narrates a single
+ * reservation change; the per-model `ActivityEvent`s the write core emits
+ * cover the batch.
+ *
+ * @param args.additions - Units to ADD per model, each a positive integer.
+ *   Never a target.
+ * @returns `{ requests }` — the written reservation rows, one per distinct
+ *   model.
+ * @throws {ShelfError} 400 when `additions` is empty or any quantity is not a
+ *   positive integer; whatever the write core raises for the first model that
+ *   fails.
+ */
+export async function upsertBookingModelRequests({
+  bookingId,
+  organizationId,
+  userId,
+  additions,
+}: UpsertBookingModelRequestsArgs) {
+  if (additions.length === 0) {
+    throw new ShelfError({
+      cause: null,
+      label,
+      status: 400,
+      message: "Select at least one model to reserve.",
+      shouldBeCaptured: false,
+    });
+  }
+
+  /**
+   * Units to add, one entry per model.
+   *
+   * A model repeated across entries is summed here rather than written twice:
+   * every write takes an absolute target computed from the quantity read at
+   * the top of the transaction, so a second write for the same model would be
+   * computed from the pre-batch quantity and would overwrite the first
+   * instead of adding to it.
+   *
+   * The quantity guard lives here because the write core is documented to
+   * take a value the caller has already checked is an integer ≥ 1 — it has no
+   * guard of its own, and a fractional or negative target would reach the
+   * database.
+   */
+  const additionsByModel = new Map<string, number>();
+  for (const addition of additions) {
+    if (!Number.isInteger(addition.quantity) || addition.quantity < 1) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        status: 400,
+        message: "Quantity must be a positive integer.",
+        shouldBeCaptured: false,
+      });
+    }
+    additionsByModel.set(
+      addition.assetModelId,
+      (additionsByModel.get(addition.assetModelId) ?? 0) + addition.quantity
+    );
+  }
+
+  // Loaded before the transaction opens, for the reason
+  // `upsertBookingModelRequest` gives: the actor read is a plain User lookup
+  // with nothing to serialise against the reservation writes, and hoisting it
+  // keeps the interactive-tx window to the rows that matter. One actor serves
+  // every write in the batch.
+  const actor = await loadActorBestEffort(userId);
+
+  try {
+    return await db.$transaction(async (tx) => {
+      // Read through `tx`, because it is the operand of every absolute target
+      // below. Read off the global client it is a snapshot another
+      // transaction is free to move before the writes land, and the batch
+      // would add to a quantity the booking no longer has.
+      //
+      // Scoped to the workspace even though every write re-proves it: this
+      // read takes a caller-supplied `bookingId`, and an id that belongs to
+      // another workspace has no quantities to offer this one.
+      const existing = await tx.bookingModelRequest.findMany({
+        where: {
+          bookingId,
+          booking: { organizationId },
+          assetModelId: { in: [...additionsByModel.keys()] },
+        },
+        select: { assetModelId: true, quantity: true },
+      });
+      const reservedByModel = new Map(
+        existing.map((row) => [row.assetModelId, row.quantity])
+      );
+
+      const requests: BookingModelRequest[] = [];
+      // Sorted by model id, NOT by the order the caller selected.
+      // `lockAssetModelForReservation` takes `SELECT … FOR UPDATE` on each
+      // model and holds it to commit, so two batches covering the same models
+      // in opposite orders would each hold what the other waits for. Postgres
+      // breaks that by aborting one of them, turning a valid reservation into
+      // a spurious failure. A deterministic global order cannot form a cycle.
+      const orderedModelIds = [...additionsByModel.keys()].sort();
+
+      for (const assetModelId of orderedModelIds) {
+        const addition = additionsByModel.get(assetModelId)!;
+        const { request } = await writeBookingModelRequestInTx(tx, {
+          bookingId,
+          assetModelId,
+          // The absolute target: what this booking already reserves of the
+          // model, plus what was asked for.
+          quantity: (reservedByModel.get(assetModelId) ?? 0) + addition,
+          organizationId,
+          userId,
+          actor,
+        });
+        requests.push(request);
+      }
+
+      return { requests };
+    });
+  } catch (cause) {
+    if (cause instanceof ShelfError) throw cause;
+    throw new ShelfError({
+      cause,
+      label,
+      message:
+        "Failed to reserve these asset models on this booking. Nothing was reserved.",
+      additionalData: { bookingId, organizationId, additions },
     });
   }
 }
@@ -2074,7 +2301,7 @@ type NoteActor = {
  * via `actorUserId` — only the display snapshot is lost. Passing an explicit
  * `null` snapshot also stops `recordEvent` retrying the same doomed lookup.
  */
-async function loadActorBestEffort(
+export async function loadActorBestEffort(
   userId: string
 ): Promise<{ link: string | null; snapshot: ActorSnapshot | null }> {
   try {

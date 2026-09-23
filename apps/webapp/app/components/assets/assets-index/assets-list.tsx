@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { m } from "framer-motion";
+import { useSetAtom } from "jotai";
 import { Package } from "lucide-react";
 import { useFetcher, useFetchers, useLoaderData } from "react-router";
+import { setDisabledBulkItemsAtom } from "~/atoms/list";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { LocationBadge } from "~/components/location/location-badge";
@@ -34,6 +36,12 @@ import type { AssetModelRollupRow } from "~/modules/asset-model/rollup.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { formatCustodyList } from "~/modules/custody/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { isPersonalOrg } from "~/utils/organization";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { AssetCodeBadge } from "../asset-code-badge";
 import { AssetImage } from "../asset-image";
@@ -46,10 +54,22 @@ import { AssetModelRow } from "./asset-model-row";
 import AssetQuickActions from "./asset-quick-actions";
 import { AssetIndexFilters } from "./filters";
 import { ListItemTagsColumn } from "./list-item-tags-column";
+import BookSelectedModelsDropdown from "./model-booking/book-selected-models-dropdown";
+import { getUnselectableModelRows } from "./model-booking/unselectable-model-rows";
 import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
 import { ResourceTitleLink } from "../../availability-calendar/resource-title-link";
 import { CategoryBadge } from "../category-badge";
 import { useAssetAvailabilityData } from "./use-asset-availability-data";
+
+/**
+ * The model view's bulk-action toolbar, built once.
+ *
+ * `List` hands this element to every row it renders, and `AssetModelRow` is
+ * memoised — a fresh element on each render would give the memo a new prop
+ * identity every time and re-render every row. Module scope is what keeps
+ * that identity stable.
+ */
+const MODEL_BULK_ACTIONS = <BookSelectedModelsDropdown />;
 
 export const AssetsList = ({
   customEmptyStateContent,
@@ -77,7 +97,7 @@ export const AssetsList = ({
   const advancedExtraProps = useMemo(() => ({ columns }), [columns]);
   const { isMd } = useViewportHeight();
   const isUserPage = useIsUserAssetsPage();
-  const { isBase } = useUserRoleHelper();
+  const { isBase, roles } = useUserRoleHelper();
   const fetchers = useFetchers();
   const { resources, events } = useAssetAvailabilityData(items);
   // Workspace pref + addon entitlement — used by the availability-view
@@ -106,6 +126,32 @@ export const AssetsList = ({
     () => ({ locale, currency: currentOrganization?.currency }),
     [locale, currentOrganization?.currency]
   );
+  /**
+   * Selection on the model view exists to feed the booking dropdown, so it is
+   * offered only where that dropdown has something to open: never in a
+   * personal workspace, which has no bookings, and never to a role that cannot
+   * create one. Withholding the element also withholds the checkbox column,
+   * which `List` renders only when `bulkActions` is present.
+   */
+  const canBookSelectedModels =
+    !disableBulkActions &&
+    !isPersonalOrg(currentOrganization) &&
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.create,
+    });
+  const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
+  // The "No model" bucket is not a model, so there are no units of it to
+  // reserve. It stays on the page — it answers "what has no model assigned" —
+  // and is registered as disabled so its checkbox refuses the click. Cleared
+  // on the other views, whose rows are all selectable: the view lives in a
+  // search param, which no route-change reset reaches.
+  useEffect(() => {
+    setDisabledBulkItems(
+      isModelView ? getUnselectableModelRows(modelRollupItems) : []
+    );
+  }, [isModelView, modelRollupItems, setDisabledBulkItems]);
   /** Find the fetcher used for toggling between asset index modes */
   const modeFetcher = fetchers.find(
     (fetcher) => fetcher.key === "asset-index-settings-mode"
@@ -199,10 +245,10 @@ export const AssetsList = ({
                   }
                 />
               </div>
-              {/* Freezing is switched off here: it pins the first header cell
-                  with `sticky left-[48px]` and an opaque background, an offset
-                  anchored to the bulk-select column. Model rows carry neither,
-                  so the pinned header would sit on top of the next column. */}
+              {/* Freezing is switched off here: it pins the header's name
+                  cell with `sticky left-[48px]`, and `AssetModelRow` applies no
+                  matching class to the name cell beneath it — so the pinned
+                  header would slide over unpinned body cells. */}
               <AssetIndexSettingsProvider freezeColumn={false}>
                 <List
                   title="Asset models"
@@ -218,6 +264,15 @@ export const AssetsList = ({
                   }
                   items={modelRollupItems}
                   extraItemComponentProps={modelExtraProps}
+                  bulkActions={
+                    canBookSelectedModels ? MODEL_BULK_ACTIONS : undefined
+                  }
+                  // "Select all N entries" has no meaning here: both booking
+                  // endpoints take an explicit list of models with a quantity
+                  // each, so a marker standing for "every model matching the
+                  // filters" would reserve only the page in front of the user
+                  // while the header claimed the whole set.
+                  disableSelectAllItems
                   customEmptyStateContent={{
                     title: "No asset models match your filters",
                     text: "Clear or change your filters to see models here.",

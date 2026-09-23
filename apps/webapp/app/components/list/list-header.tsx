@@ -23,6 +23,9 @@ type ListHeaderProps = {
   children: ReactNode;
   hideFirstColumn?: boolean;
   bulkActions?: ListProps["bulkActions"];
+  /** The rows on screen, which the select-all checkbox ticks. Defaults to the
+   * loader's `items` when the list renders those. */
+  items?: ListProps["items"];
   title?: string;
   className?: string;
 };
@@ -31,6 +34,7 @@ export const ListHeader = ({
   children,
   hideFirstColumn = false,
   bulkActions,
+  items,
   className,
 }: ListHeaderProps) => {
   const { modeIsAdvanced } = useAssetIndexViewState();
@@ -40,7 +44,7 @@ export const ListHeader = ({
   const headerContent = useMemo(
     () => (
       <tr>
-        {bulkActions ? <BulkListHeader /> : null}
+        {bulkActions ? <BulkListHeader items={items} /> : null}
         {hideFirstColumn ? null : (
           <Th
             className={tw(
@@ -75,7 +79,14 @@ export const ListHeader = ({
         {children}
       </tr>
     ),
-    [bulkActions, children, hideFirstColumn, modeIsAdvanced, freezeColumn]
+    [
+      bulkActions,
+      children,
+      hideFirstColumn,
+      items,
+      modeIsAdvanced,
+      freezeColumn,
+    ]
   );
 
   return (
