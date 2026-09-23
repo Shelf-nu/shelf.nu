@@ -57,12 +57,29 @@ export function ownerTierRunsTeamWorkspace(tierId: TierId): boolean {
 }
 
 /**
+ * Whether the user owns the workspace of this membership.
+ *
+ * Ownership is recorded twice, as an OWNER role and as the organization's
+ * `userId`, so either one counts.
+ */
+function isOwnedBy(membership: MembershipForPaidTeams, userId: string) {
+  return (
+    membership.roles.includes(OrganizationRoles.OWNER) ||
+    membership.organization.userId === userId
+  );
+}
+
+/**
  * The active, paid Team workspaces a user belongs to without owning them.
  *
- * A membership counts when all of these hold:
+ * Owning a Team workspace makes the user a billing party, so anyone who owns
+ * one gets an empty list and the page treats them as an owner, even if they
+ * have also joined someone else's paid team. This is the same precedence the
+ * admin user list applies in `getAccountStatus`.
+ *
+ * Otherwise a membership counts when all of these hold:
  * - the workspace is a TEAM (a PERSONAL workspace has no other members);
- * - the user does not own it. Ownership is recorded twice, as an OWNER role
- *   and as the organization's `userId`, so either one excludes it;
+ * - the user does not own it ({@link isOwnedBy});
  * - the workspace is not switched off (`workspaceDisabled`);
  * - the owner's tier keeps the workspace running
  *   ({@link ownerTierRunsTeamWorkspace}).
@@ -82,12 +99,17 @@ export function getPaidTeamMemberships({
   userId: string;
   memberships: MembershipForPaidTeams[];
 }): PaidTeamMembership[] {
-  return memberships
+  const teamMemberships = memberships.filter(
+    ({ organization }) => organization.type === OrganizationType.TEAM
+  );
+
+  if (teamMemberships.some((membership) => isOwnedBy(membership, userId))) {
+    return [];
+  }
+
+  return teamMemberships
     .filter(
-      ({ roles, organization }) =>
-        organization.type === OrganizationType.TEAM &&
-        !roles.includes(OrganizationRoles.OWNER) &&
-        organization.userId !== userId &&
+      ({ organization }) =>
         !organization.workspaceDisabled &&
         ownerTierRunsTeamWorkspace(organization.owner.tierId)
     )

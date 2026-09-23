@@ -5,8 +5,9 @@
  * them, so the list must hold exactly the Team workspaces the user joined and
  * whose owner's tier keeps them running. A workspace the user owns, a team
  * the app disables (owner on Free or Plus, or switched off by a Shelf admin)
- * and a personal workspace must never appear: each would tell someone they are covered by a
- * plan that does not cover them.
+ * and a personal workspace must never appear: each would tell someone they
+ * are covered by a plan that does not cover them. Someone who owns a Team
+ * workspace gets nothing at all: the page treats them as an owner.
  *
  * @see {@link file://./paid-team-memberships.ts}
  */
@@ -105,25 +106,57 @@ describe("getPaidTeamMemberships", () => {
     expect(result).toEqual([]);
   });
 
-  it("leaves out a workspace the user holds the OWNER role in", () => {
+  it("returns nothing for someone who owns a Team workspace by role, even alongside a paid team they joined", () => {
+    // Owning a team makes the user a billing party: the page treats them as an
+    // owner, so it must not say they need no plan of their own.
     const result = getPaidTeamMemberships({
       userId: USER_ID,
-      memberships: [membership({ roles: [OrganizationRoles.OWNER] })],
+      memberships: [
+        membership({ id: "joined" }),
+        membership({
+          id: "own",
+          roles: [OrganizationRoles.OWNER],
+          ownerTierId: TierId.free,
+        }),
+      ],
     });
 
     expect(result).toEqual([]);
   });
 
-  it("leaves out a workspace whose owner id is the user, whatever the role", () => {
+  it("returns nothing for someone who owns a Team workspace by owner id, whatever the role", () => {
     // Ownership is recorded twice; the organization's `userId` alone is enough.
     const result = getPaidTeamMemberships({
       userId: USER_ID,
       memberships: [
-        membership({ roles: [OrganizationRoles.ADMIN], ownerUserId: USER_ID }),
+        membership({ id: "joined" }),
+        membership({
+          id: "own",
+          roles: [OrganizationRoles.ADMIN],
+          ownerUserId: USER_ID,
+        }),
       ],
     });
 
     expect(result).toEqual([]);
+  });
+
+  it("still counts joined teams for someone who owns only a PERSONAL workspace", () => {
+    const result = getPaidTeamMemberships({
+      userId: USER_ID,
+      memberships: [
+        membership({
+          id: "personal",
+          type: OrganizationType.PERSONAL,
+          roles: [OrganizationRoles.OWNER],
+          ownerUserId: USER_ID,
+          ownerTierId: TierId.free,
+        }),
+        membership({ id: "joined", name: "Camera Crew" }),
+      ],
+    });
+
+    expect(result).toEqual([{ id: "joined", name: "Camera Crew" }]);
   });
 
   it("leaves out a PERSONAL workspace, even one owned by a paid user", () => {
@@ -145,7 +178,12 @@ describe("getPaidTeamMemberships", () => {
       userId: USER_ID,
       memberships: [
         membership({ id: "a", name: "Camera Crew" }),
-        membership({ id: "own", roles: [OrganizationRoles.OWNER] }),
+        membership({
+          id: "own-personal",
+          type: OrganizationType.PERSONAL,
+          roles: [OrganizationRoles.OWNER],
+          ownerUserId: USER_ID,
+        }),
         membership({ id: "free", ownerTierId: TierId.free }),
         membership({ id: "plus", ownerTierId: TierId.tier_1 }),
         membership({ id: "off", workspaceDisabled: true }),
