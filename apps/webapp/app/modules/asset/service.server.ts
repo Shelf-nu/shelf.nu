@@ -4668,7 +4668,7 @@ export async function createAssetsFromContentImport({
         title: "Import file has errors",
         message: `Found ${totalErrors} problem${
           totalErrors === 1 ? "" : "s"
-        } in your file. Nothing was imported — fix the rows below and upload again.`,
+        } in your file. Nothing was imported. Fix the rows below and upload again.`,
         additionalData: {
           userId,
           organizationId,

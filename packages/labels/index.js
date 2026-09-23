@@ -328,3 +328,14 @@ export const ASSET_TYPE_ADJECTIVES = Object.freeze({
   INDIVIDUAL: "individually tracked",
   QUANTITY_TRACKED: "quantity-tracked",
 });
+
+/**
+ * The same consumption types used attributively, as in "used up items".
+ * {@link CONSUMPTION_TYPE_LABELS} names the option as the picker titles it and
+ * carries a parenthetical that is redundant next to the raw value, so prose
+ * that already shows ONE_WAY or TWO_WAY uses these instead.
+ */
+export const CONSUMPTION_TYPE_ADJECTIVES = Object.freeze({
+  ONE_WAY: "used up",
+  TWO_WAY: "returnable",
+});

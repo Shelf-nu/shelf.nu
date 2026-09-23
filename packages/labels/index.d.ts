@@ -219,3 +219,8 @@ export declare const ASSET_TYPE_ADJECTIVES: {
   readonly INDIVIDUAL: "individually tracked";
   readonly QUANTITY_TRACKED: "quantity-tracked";
 };
+
+export declare const CONSUMPTION_TYPE_ADJECTIVES: {
+  readonly ONE_WAY: "used up";
+  readonly TWO_WAY: "returnable";
+};

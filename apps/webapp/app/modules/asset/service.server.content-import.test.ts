@@ -145,7 +145,7 @@ function runImport(data: Record<string, string>[]) {
   });
 }
 
-describe("createAssetsFromContentImport — pre-flight write boundary", () => {
+describe("createAssetsFromContentImport pre-flight write boundary", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
   });
