@@ -18,6 +18,7 @@ import { Form } from "~/components/custom-form";
 import { CheckmarkIcon } from "~/components/icons/library";
 import {
   buildQuantitiesPayload,
+  operatorHolderCount,
   releasableUnits,
 } from "~/components/scanner/drawer/custody-scan-quantities";
 import { Button } from "~/components/shared/button";
@@ -127,6 +128,32 @@ export default function ReleaseCustodyDrawer({
     )
     .map((asset) => asset.id);
 
+  /**
+   * Quantity-tracked rows a release can never act on, split by why.
+   *
+   * A release scan names no custodian, so the route resolves the single
+   * operator holder and refuses anything else. Both of these reach that
+   * refusal, and one of them reaches it silently: a row with nothing
+   * operator-held renders no quantity input, so it is submitted as a whole
+   * asset and skipped with the rest of the quantity-tracked batch, reporting
+   * success while doing nothing.
+   *
+   * Units held through a kit are not counted — they go back with the kit.
+   */
+  const qtyAssetsWithNothingHeld = assets
+    .filter(
+      (asset) =>
+        !!asset && isQuantityTracked(asset) && operatorHolderCount(asset) === 0
+    )
+    .map((asset) => asset.id);
+
+  const qtyAssetsWithSeveralHolders = assets
+    .filter(
+      (asset) =>
+        !!asset && isQuantityTracked(asset) && operatorHolderCount(asset) > 1
+    )
+    .map((asset) => asset.id);
+
   // Asset is part of a kit. Only block INDIVIDUAL assets — qty-tracked
   // assets can have a partial-custody slice independent of any kit
   // allocation, so a kit membership shouldn't prevent releasing
@@ -162,6 +189,32 @@ export default function ReleaseCustodyDrawer({
 
   // Create blockers configuration
   const blockerConfigs = [
+    {
+      condition: qtyAssetsWithNothingHeld.length > 0,
+      count: qtyAssetsWithNothingHeld.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s have" : " has"}`}</strong> no
+          units in anyone's custody.
+        </>
+      ),
+      description:
+        "Units held through a kit are released by scanning the kit's QR.",
+      onResolve: () => removeAssetsFromList(qtyAssetsWithNothingHeld),
+    },
+    {
+      condition: qtyAssetsWithSeveralHolders.length > 0,
+      count: qtyAssetsWithSeveralHolders.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> held
+          by more than one person.
+        </>
+      ),
+      description:
+        "Release these from the asset's custody list, where each holder is listed separately.",
+      onResolve: () => removeAssetsFromList(qtyAssetsWithSeveralHolders),
+    },
     {
       condition: assetsNotInCustody.length > 0,
       count: assetsNotInCustody.length,
@@ -214,7 +267,12 @@ export default function ReleaseCustodyDrawer({
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
     onResolveAll: () => {
-      removeAssetsFromList([...assetsNotInCustody, ...assetsArePartOfKit]);
+      removeAssetsFromList([
+        ...qtyAssetsWithNothingHeld,
+        ...qtyAssetsWithSeveralHolders,
+        ...assetsNotInCustody,
+        ...assetsArePartOfKit,
+      ]);
       removeItemsFromList([
         ...errors.map(([qrId]) => qrId),
         ...qrIdsOfKitsNotInCustody,

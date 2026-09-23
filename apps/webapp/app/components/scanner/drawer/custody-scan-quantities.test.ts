@@ -18,6 +18,7 @@ import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import {
   assignableUnits,
   buildQuantitiesPayload,
+  operatorHolderCount,
   releasableUnits,
 } from "./custody-scan-quantities";
 
@@ -80,6 +81,41 @@ describe("releasableUnits", () => {
   it("is zero for an asset held only through a kit, so no input renders", () => {
     expect(
       releasableUnits(
+        assetWithCustody([{ quantity: 30, kitCustodyId: "kit-custody-1" }])
+      )
+    ).toBe(0);
+  });
+});
+
+describe("operatorHolderCount", () => {
+  it("counts the people holding operator-assigned units", () => {
+    expect(
+      operatorHolderCount(
+        assetWithCustody([
+          { quantity: 5, kitCustodyId: null },
+          { quantity: 3, kitCustodyId: null },
+        ])
+      )
+    ).toBe(2);
+  });
+
+  it("does not count a kit-inherited holder", () => {
+    // A release scan names no custodian, so it is only unambiguous while one
+    // person holds units. Counting the kit here would make a releasable asset
+    // look shared and block it.
+    expect(
+      operatorHolderCount(
+        assetWithCustody([
+          { quantity: 5, kitCustodyId: null },
+          { quantity: 30, kitCustodyId: "kit-custody-1" },
+        ])
+      )
+    ).toBe(1);
+  });
+
+  it("is zero for an asset held only through a kit", () => {
+    expect(
+      operatorHolderCount(
         assetWithCustody([{ quantity: 30, kitCustodyId: "kit-custody-1" }])
       )
     ).toBe(0);

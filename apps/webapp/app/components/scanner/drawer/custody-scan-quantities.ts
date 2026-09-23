@@ -46,9 +46,27 @@ export function assignableUnits(asset: AssetFromQr): number {
  * `releaseQuantity`, which refuses with the number they do hold.
  */
 export function releasableUnits(asset: AssetFromQr): number {
-  return (asset.custody ?? [])
-    .filter((row) => row.kitCustodyId == null)
-    .reduce((sum, row) => sum + (row.quantity ?? 0), 0);
+  return operatorCustodyRows(asset).reduce(
+    (sum, row) => sum + (row.quantity ?? 0),
+    0
+  );
+}
+
+/**
+ * How many people hold operator-assigned units of this asset.
+ *
+ * A release scan names no custodian — it takes the asset back from whoever has
+ * it — so it is only unambiguous while exactly one person does. The route
+ * refuses anything else by name, pointing at the asset's own custody list; the
+ * drawer reads this to say so before the operator submits.
+ */
+export function operatorHolderCount(asset: AssetFromQr): number {
+  return operatorCustodyRows(asset).length;
+}
+
+/** Custody rows on the operator axis — see {@link releasableUnits}. */
+function operatorCustodyRows(asset: AssetFromQr) {
+  return (asset.custody ?? []).filter((row) => row.kitCustodyId == null);
 }
 
 /**
