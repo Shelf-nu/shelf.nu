@@ -137,6 +137,8 @@ export type IconType =
   | "unavailable"
   | "change"
   | "booking-exist"
+  | "model-bookings"
+  | "model-booking-exist"
   | "download-qr"
   | "qr-code"
   | "mouse-pointer-click"
