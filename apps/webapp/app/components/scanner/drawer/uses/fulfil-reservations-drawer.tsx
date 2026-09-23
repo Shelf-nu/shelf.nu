@@ -16,15 +16,24 @@
  *                                  `assetModelId` matches an expected
  *                                  model and whose session count is
  *                                  within `booked`. Green "Ready".
+ *                                  Scanned kits carrying such members
+ *                                  sit here too.
  *   3. Unmatched scanned rows   — off-model scans OR over-scans of an
- *                                  expected model. Yellow warning
- *                                  badge clarifying the asset will
- *                                  both land on the booking _and_ go
- *                                  with this checkout.
+ *                                  expected model, plus kits whose
+ *                                  members assign nothing. Yellow
+ *                                  warning badge clarifying the item
+ *                                  will both land on the booking _and_
+ *                                  go with this checkout.
  *   4. Already included         — concrete `BookingAsset`s already on
  *                                  the booking. Collapsed by default,
  *                                  green "Already included" chip,
  *                                  read-only.
+ *
+ * Kits take part in the same matching. A scanned kit goes on the booking
+ * whole and its INDIVIDUAL members assign outstanding reserved units on the
+ * way, exactly as loose scans of those members would. Members are never
+ * submitted as loose asset ids — the form sends the kit id and the server
+ * resolves it into kit-driven rows.
  *
  * The submit button integrates the existing `CheckoutDialog`, so the
  * early-checkout prompt matches the non-fulfil checkout path. A check-out
@@ -56,6 +65,7 @@
 
 import { useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { AssetType } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { ChevronDownIcon, Package as PackageIcon } from "lucide-react";
 import { z } from "zod";
@@ -64,6 +74,7 @@ import {
   expectedModelRequestsAtom,
   fulfilSessionAtom,
   removeScannedItemAtom,
+  removeScannedItemsByAssetIdAtom,
   scannedItemsAtom,
   type FulfilSessionInfo,
 } from "~/atoms/qr-scanner";
@@ -75,21 +86,28 @@ import ImageWithPreview from "~/components/image-with-preview/image-with-preview
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
-import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import type { UnassignedModelUnits } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
+import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
 
 /**
  * Zod schema for the fulfil-and-checkout form payload.
  *
- * - `assetIds`: every resolved scan the submit acts on. The server
+ * - `assetIds`: every resolved asset scan the submit acts on. The server
  *   assigns matching assets to outstanding `BookingModelRequest` rows,
  *   adds off-model assets as new `BookingAsset` rows, and checks out.
- * - `kitIds`: always empty from this drawer; kit scans are not part of
- *   this flow.
+ *   Kit members are not listed here — sending one both as a loose id and
+ *   inside its kit would book it twice.
+ * - `kitIds`: every resolved kit scan. The server resolves each into
+ *   kit-driven `BookingAsset` rows and assigns their members to
+ *   outstanding `BookingModelRequest` rows.
  * - `checkoutIntentChoice`: populated only by the `CheckoutDialog`
  *   early-checkout alert buttons. Undefined on the plain submit path
  *   (not-early) — the server treats undefined as "keep original
@@ -125,10 +143,30 @@ type ScannedAssetRow = {
    * - `"duplicate"`  — asset is already on the booking via `alreadyIncluded`
    *                    and the whole booking goes out anyway; the scan is a
    *                    no-op and is not submitted.
+   * - `"viaKit"`     — the asset's own kit was scanned too, so it arrives as
+   *                    part of that kit rather than as a loose unit
    * - `"included"`   — asset is already on the booking and submit sends out
    *                    only scanned items; the scan checks this item out.
    */
-  bucket: "matched" | "unmatched" | "duplicate" | "included";
+  bucket: "matched" | "unmatched" | "duplicate" | "included" | "viaKit";
+  /** Name of the scanned kit this asset arrives with — `viaKit` rows only. */
+  viaKitName?: string;
+};
+
+/**
+ * Shape of a scanned kit row after member matching. `qrId` preserves the
+ * insertion order from `scannedItemsAtom`, as for asset rows.
+ *
+ * A kit has no bucket of its own: it always goes on the booking and always
+ * goes out with this check-out. What varies is how much of the booking's
+ * outstanding reservation it settles, which `matchedMemberCount` carries.
+ */
+type ScannedKitRow = {
+  qrId: string;
+  /** Real `KitFromQr` payload once resolved, undefined while loading. */
+  kit: KitFromQr | undefined;
+  /** Members of this kit that assign an outstanding reserved unit. */
+  matchedMemberCount: number;
 };
 
 /**
@@ -170,18 +208,12 @@ export default function FulfilReservationsDrawer({
   const items = useAtomValue(scannedItemsAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
+  const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
 
   /**
-   * Classify scanned items into matched / unmatched buckets using the
-   * row-matching rules below. The matched-count tally is
-   * derived per-render (not stored in state) so a scan can flip
-   * buckets as the upstream model list changes.
-   *
-   * Assets that haven't resolved yet (`asset === undefined`) flow
-   * through `GenericItemRow`'s loading branch. We still classify them
-   * — parking them in "unmatched" is safe: once the fetch resolves,
-   * this memo re-runs and the row migrates to "matched" if a slot is
-   * free.
+   * Ids of the concrete `BookingAsset`s already on the booking. An asset in
+   * here can never be a fresh match, whether it arrives as a loose scan or
+   * inside a scanned kit.
    */
   const alreadyIncludedIds = useMemo(() => {
     const set = new Set<string>();
@@ -191,22 +223,104 @@ export default function FulfilReservationsDrawer({
     return set;
   }, [session?.alreadyIncluded]);
 
+  /**
+   * Classify scanned items into asset rows (matched / unmatched / duplicate /
+   * included) and kit rows, and tally what each assigns against the
+   * outstanding reservations. The tally is derived per-render (not stored in
+   * state) so a row can change bucket as the upstream model list changes.
+   *
+   * Items that haven't resolved yet (`data === undefined`) carry no type, so
+   * they flow through the asset path into `GenericItemRow`'s loading branch.
+   * Parking them in "unmatched" is safe: once the fetch resolves, this memo
+   * re-runs and the row lands where it belongs — including as a kit row.
+   */
   const scannedBuckets = useMemo(() => {
-    // assetModelId → number of scans consumed against that model's
+    const expectedByModelId = new Map(
+      expectedModelRequests.map((expected) => [expected.assetModelId, expected])
+    );
+
+    // assetModelId → number of units consumed against that model's
     // `remaining` quota so far in this iteration. "Remaining" already
     // accounts for pre-fulfilled units — a model with `quantity: 3,
-    // fulfilledQuantity: 2` ships `remaining: 1`, so only one scan can
+    // fulfilledQuantity: 2` ships `remaining: 1`, so only one unit can
     // match before we flip to "unmatched" (over-scan).
     const matchedCountByModel = new Map<string, number>();
     const rows: ScannedAssetRow[] = [];
+    const kitRows: ScannedKitRow[] = [];
+
+    /**
+     * Members of the kits in this scan, and which kit each arrives with.
+     *
+     * A member whose kit is also scanned goes on the booking as part of that
+     * kit — the server drops it from the loose bucket, because the two rows
+     * would otherwise book one physical unit twice. So the kit owns the
+     * assignment and the asset's own row reports what it is rather than
+     * claiming a unit of its own; crediting both would count one camera twice.
+     *
+     * Resolved up-front rather than in scan order, so the attribution does not
+     * depend on which QR the operator reached first.
+     */
+    const kitNameByMemberId = new Map<string, string>();
+    for (const item of Object.values(items)) {
+      if (!item || item.type !== "kit") continue;
+      const kit = item.data as KitFromQr | undefined;
+      if (!kit) continue;
+      for (const assetKit of kit.assetKits ?? []) {
+        const member = assetKit.asset;
+        if (!member || member.type !== AssetType.INDIVIDUAL) continue;
+        if (kitNameByMemberId.has(member.id)) continue;
+        kitNameByMemberId.set(member.id, kit.name);
+      }
+    }
+
+    // Members that have already assigned a unit via an earlier kit row. Two
+    // kits can share a member; it settles one reservation, not two.
+    const assignedKitMemberIds = new Set<string>();
 
     for (const [qrId, item] of Object.entries(items)) {
       if (!item) continue;
-      // Only assets participate in model-request matching. Kits
-      // aren't supported in this flow — the
-      // route loader filters them out of the expected list. Skip
-      // defensively without adding them to `rows`.
-      if (item.type && item.type !== "asset") continue;
+
+      if (item.type === "kit") {
+        const kit = (item.data ?? undefined) as KitFromQr | undefined;
+        let matchedMemberCount = 0;
+        // One `AssetKit` row per member, but guard the count against a
+        // payload listing a member twice.
+        const seenMemberIds = new Set<string>();
+
+        for (const assetKit of kit?.assetKits ?? []) {
+          const member = assetKit.asset;
+          if (!member || seenMemberIds.has(member.id)) continue;
+          seenMemberIds.add(member.id);
+
+          // Only whole assets settle a reservation: a QUANTITY_TRACKED
+          // member contributes a slice of its pool, which is not the unit a
+          // `BookingModelRequest` reserves.
+          if (member.type !== AssetType.INDIVIDUAL) continue;
+          if (
+            assignedKitMemberIds.has(member.id) ||
+            alreadyIncludedIds.has(member.id)
+          ) {
+            continue;
+          }
+
+          const expected = member.assetModelId
+            ? expectedByModelId.get(member.assetModelId)
+            : undefined;
+          if (!expected) continue;
+
+          const consumed = matchedCountByModel.get(expected.assetModelId) ?? 0;
+          if (consumed >= expected.remaining) continue;
+
+          matchedCountByModel.set(expected.assetModelId, consumed + 1);
+          assignedKitMemberIds.add(member.id);
+          matchedMemberCount += 1;
+        }
+
+        // Members that match nothing are not an error — the kit still goes
+        // on the booking and still goes out.
+        kitRows.push({ qrId, kit, matchedMemberCount });
+        continue;
+      }
 
       const asset = (item.data ?? undefined) as AssetFromQr | undefined;
 
@@ -223,10 +337,15 @@ export default function FulfilReservationsDrawer({
         continue;
       }
 
+      // Its kit is in this scan, so the kit row above is what assigns it.
+      const viaKitName = asset ? kitNameByMemberId.get(asset.id) : undefined;
+      if (asset && viaKitName) {
+        rows.push({ qrId, asset, bucket: "viaKit", viaKitName });
+        continue;
+      }
+
       const modelId = asset?.assetModelId ?? null;
-      const expected = modelId
-        ? expectedModelRequests.find((e) => e.assetModelId === modelId)
-        : undefined;
+      const expected = modelId ? expectedByModelId.get(modelId) : undefined;
 
       if (expected) {
         const consumed = matchedCountByModel.get(expected.assetModelId) ?? 0;
@@ -248,7 +367,7 @@ export default function FulfilReservationsDrawer({
       rows.push({ qrId, asset, bucket: "unmatched" });
     }
 
-    return { rows, matchedCountByModel };
+    return { rows, kitRows, matchedCountByModel };
   }, [
     items,
     expectedModelRequests,
@@ -321,6 +440,27 @@ export default function FulfilReservationsDrawer({
   }, [scannedBuckets.rows]);
 
   /**
+   * Kit ids to submit: every resolved kit scan. Unresolved scans are excluded
+   * for the same reason asset scans are — the server can't act on an id we
+   * don't know yet.
+   *
+   * Their members stay out of `assetIdsToSubmit`: the server resolves each
+   * kit into kit-driven `BookingAsset` rows, and a member sent as a loose id
+   * as well would land on the booking twice.
+   */
+  const kitIdsToSubmit = useMemo(() => {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const row of scannedBuckets.kitRows) {
+      const id = row.kit?.id;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+    return ids;
+  }, [scannedBuckets.kitRows]);
+
+  /**
    * Synthetic pending rows: one per outstanding unit per model. Built
    * after all hooks so the hook-count is stable across renders; safe
    * because it reads only memoized values above.
@@ -349,6 +489,62 @@ export default function FulfilReservationsDrawer({
     }
     return rows;
   }, [progressByModel]);
+
+  // Declared above the early return below: every hook in this component
+  // must run on every render, and the blocker's inputs are all resolved by
+  // this point.
+  /**
+   * Units the scan would take out of a kit.
+   *
+   * An INDIVIDUAL asset committed to a kit is not a free unit: sending it out
+   * alone answers the reservation and checks the booking out with the kit
+   * split — one item in the field, the rest on the shelf. The server refuses
+   * these, so the block here is what turns a refusal at submit into something
+   * the operator can see and fix while scanning.
+   *
+   * Not blocked when the asset's kit was scanned too (that is how a member is
+   * meant to go out) or when it is already on the booking (it is committed
+   * through the row it has, so the scan takes it nowhere new).
+   */
+  const kitMemberScanIds = useMemo(() => {
+    const scannedKitIds = new Set(
+      Object.values(items)
+        .filter((item) => item?.type === "kit" && item?.data)
+        .map((item) => (item?.data as KitFromQr).id)
+    );
+
+    return scannedBuckets.rows
+      .filter((row) => {
+        const asset = row.asset;
+        if (!asset || asset.type !== AssetType.INDIVIDUAL) return false;
+        if (alreadyIncludedIds.has(asset.id)) return false;
+        const memberships = asset.assetKits ?? [];
+        if (memberships.length === 0) return false;
+        return !memberships.some((membership) =>
+          scannedKitIds.has(membership.kitId)
+        );
+      })
+      .map((row) => row.asset!.id);
+  }, [scannedBuckets.rows, items, alreadyIncludedIds]);
+
+  const [hasBlockers, Blockers] = createBlockers({
+    blockerConfigs: [
+      {
+        condition: kitMemberScanIds.length > 0,
+        count: kitMemberScanIds.length,
+        message: (count: number) => (
+          <>
+            <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong>
+            {count > 1 ? "belong" : "belongs"} to a kit.
+          </>
+        ),
+        description:
+          "Scan the kit to take all of it, or scan another unit of the same model. Sending one member out on its own would split the kit.",
+        onResolve: () => removeAssetsFromList(kitMemberScanIds),
+      },
+    ],
+    onResolveAll: () => removeAssetsFromList(kitMemberScanIds),
+  });
 
   // Early return AFTER all hooks so the hook order stays stable
   // across renders (React rules of hooks). The session only turns
@@ -379,7 +575,30 @@ export default function FulfilReservationsDrawer({
         <DefaultLoadingState qrId={pendingQrId} error={error} />
       )}
       renderItem={(data) => (
-        <ScannedAssetRowBody asset={data as AssetFromQr} bucket={row.bucket} />
+        <ScannedAssetRowBody
+          asset={data as AssetFromQr}
+          bucket={row.bucket}
+          viaKitName={row.viaKitName}
+        />
+      )}
+    />
+  );
+
+  /** Render a single scanned kit row. */
+  const renderScannedKitRow = (row: ScannedKitRow): ReactNode => (
+    <GenericItemRow
+      key={row.qrId}
+      qrId={row.qrId}
+      item={items[row.qrId]}
+      onRemove={removeItem}
+      renderLoading={(pendingQrId, error) => (
+        <DefaultLoadingState qrId={pendingQrId} error={error} />
+      )}
+      renderItem={(data) => (
+        <ScannedKitRowBody
+          kit={data as KitFromQr}
+          matchedMemberCount={row.matchedMemberCount}
+        />
       )}
     />
   );
@@ -390,9 +609,19 @@ export default function FulfilReservationsDrawer({
    * already-included).
    * Duplicates sit ABOVE unmatched so the operator sees the blocker
    * (red "Already on this booking") before the softer yellow warning.
+   *
+   * Kits join the group their contribution matches: one that assigns
+   * reserved units reads as good news beside the matched scans, one that
+   * assigns none beside the yellow warnings it shares copy with.
    */
   const customRenderAllItems = (): ReactNode => {
     const matched = scannedBuckets.rows.filter((r) => r.bucket === "matched");
+    const matchingKits = scannedBuckets.kitRows.filter(
+      (r) => r.matchedMemberCount > 0
+    );
+    const nonMatchingKits = scannedBuckets.kitRows.filter(
+      (r) => r.matchedMemberCount === 0
+    );
     const included = scannedBuckets.rows.filter((r) => r.bucket === "included");
     const duplicate = scannedBuckets.rows.filter(
       (r) => r.bucket === "duplicate"
@@ -400,6 +629,7 @@ export default function FulfilReservationsDrawer({
     const unmatched = scannedBuckets.rows.filter(
       (r) => r.bucket === "unmatched"
     );
+    const viaKit = scannedBuckets.rows.filter((r) => r.bucket === "viaKit");
 
     return (
       <>
@@ -408,8 +638,14 @@ export default function FulfilReservationsDrawer({
           <PendingModelRow key={row.key} assetModelName={row.assetModelName} />
         ))}
 
-        {/* Bucket 2: matched scanned rows (green "Ready" chip). */}
+        {/* Bucket 2: matched scanned rows (green "Ready" chip), then the
+            kits whose members assign reserved units. */}
         {matched.map(renderScannedItemRow)}
+        {matchingKits.map(renderScannedKitRow)}
+
+        {/* Scanned alongside their own kit: the kit above assigns them, so
+            they sit with it rather than among the warnings. */}
+        {viaKit.map(renderScannedItemRow)}
 
         {/* Items already on the booking, scanned to check them out. */}
         {included.map(renderScannedItemRow)}
@@ -419,8 +655,10 @@ export default function FulfilReservationsDrawer({
             the operator clears the blocker first. */}
         {duplicate.map(renderScannedItemRow)}
 
-        {/* Bucket 4: unmatched scanned rows (yellow warning badge). */}
+        {/* Bucket 4: unmatched scanned rows (yellow warning badge), then
+            the kits that assign nothing but still go out. */}
         {unmatched.map(renderScannedItemRow)}
+        {nonMatchingKits.map(renderScannedKitRow)}
 
         {/* Bucket 5: already-included collapser (collapsed by default). */}
         {session.alreadyIncluded.length > 0 ? (
@@ -436,6 +674,7 @@ export default function FulfilReservationsDrawer({
    */
   const hasSomethingToCheckOut =
     assetIdsToSubmit.length > 0 ||
+    kitIdsToSubmit.length > 0 ||
     (!session.checksOutScannedOnly && session.alreadyIncluded.length > 0);
   const shouldDisableSubmit = Boolean(isLoading) || !hasSomethingToCheckOut;
   const notice = !hasSomethingToCheckOut
@@ -450,6 +689,7 @@ export default function FulfilReservationsDrawer({
     count: Math.max(0, model.remaining - model.matched),
   }));
 
+
   return (
     <ConfigurableDrawer
       schema={fulfilAndCheckoutSchema}
@@ -462,6 +702,8 @@ export default function FulfilReservationsDrawer({
       // rows still need to be visible so the operator knows what's
       // expected.
       renderWhenEmpty
+      Blockers={Blockers}
+      disableSubmit={hasBlockers}
       defaultExpanded={defaultExpanded}
       className={tw(
         "[&_.default-base-drawer-header]:rounded-b [&_.default-base-drawer-header]:border [&_.default-base-drawer-header]:px-4 [&_thead]:hidden",
@@ -477,8 +719,13 @@ export default function FulfilReservationsDrawer({
             from: new Date(session.bookingFrom),
           }}
           assetIds={assetIdsToSubmit}
+          kitIds={kitIdsToSubmit}
           isLoading={isLoading}
-          disableSubmit={shouldDisableSubmit}
+          // This drawer submits through `CheckoutDialog`, not the drawer's own
+          // button, so `ConfigurableDrawer`'s `disableSubmit` never reaches it
+          // — the blocker has to be folded in here too or it would show a
+          // warning over a live button.
+          disableSubmit={shouldDisableSubmit || hasBlockers}
           notice={notice}
           unassignedUnits={unassignedUnits}
           // Only a RESERVED booking's first check-out can move its start date.
@@ -697,6 +944,9 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
  * `renderItem` slot). Branches on `bucket` for the status chip:
  *
  * - `"matched"`   → green "Ready" chip.
+ * - `"viaKit"`    → blue chip naming the scanned kit it arrives with. Not a
+ *   warning and not a second assignment: the kit row is what assigns it, and
+ *   this row says so rather than looking like an idle duplicate.
  * - `"unmatched"` → yellow warning badge. Copy explicitly states the
  *   asset will land on the booking _and_ go with this checkout so
  *   the operator knows both side-effects are coupled into one submit
@@ -710,9 +960,11 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
 function ScannedAssetRowBody({
   asset,
   bucket,
+  viaKitName,
 }: {
   asset: AssetFromQr;
   bucket: ScannedAssetRow["bucket"];
+  viaKitName?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -734,6 +986,17 @@ function ScannedAssetRowBody({
               withDot={false}
             >
               Ready
+            </Badge>
+          ) : bucket === "viaKit" ? (
+            <Badge
+              color={BADGE_COLORS.blue.bg}
+              textColor={BADGE_COLORS.blue.text}
+              withDot={false}
+              className="max-w-full"
+            >
+              {viaKitName
+                ? `Arrives with ${viaKitName}`
+                : "Arrives with its kit"}
             </Badge>
           ) : bucket === "included" ? (
             <Badge
@@ -763,6 +1026,64 @@ function ScannedAssetRowBody({
             </Badge>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Body of a scanned-kit row (rendered inside `GenericItemRow`'s `renderItem`
+ * slot). A kit always lands on the booking and always goes out with this
+ * check-out, so the badge reports the one thing that varies: how many of its
+ * members assign an outstanding reserved unit.
+ *
+ * A kit that assigns none carries the same yellow warning as an off-model
+ * asset scan — it is accepted, and the operator should see that it does not
+ * move the progress strips.
+ *
+ * @param kit - Resolved kit payload from the scanned-item endpoint.
+ * @param matchedMemberCount - Members assigning a reserved unit; see
+ *   {@link ScannedKitRow}.
+ */
+function ScannedKitRowBody({
+  kit,
+  matchedMemberCount,
+}: {
+  kit: KitFromQr;
+  matchedMemberCount: number;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="word-break whitespace-break-spaces font-medium text-gray-800">
+        {kit.name}
+        <span className="ml-1.5 text-xs font-medium text-gray-500">
+          {kit._count.assetKits}{" "}
+          {kit._count.assetKits === 1 ? "asset" : "assets"}
+        </span>
+      </span>
+      <div className="flex flex-wrap items-center gap-1">
+        <span className={assetTypePillClass}>kit</span>
+        {matchedMemberCount > 0 ? (
+          <Badge
+            color={BADGE_COLORS.green.bg}
+            textColor={BADGE_COLORS.green.text}
+            withDot={false}
+            className="max-w-full"
+          >
+            {matchedMemberCount === 1
+              ? "Assigns 1 reserved unit"
+              : `Assigns ${matchedMemberCount} reserved units`}
+          </Badge>
+        ) : (
+          <Badge
+            color={BADGE_COLORS.amber.bg}
+            textColor={BADGE_COLORS.amber.text}
+            withDot={false}
+            className="max-w-full"
+          >
+            Will be added to booking and checked out
+          </Badge>
+        )}
       </div>
     </div>
   );
@@ -868,6 +1189,8 @@ type FulfilCheckoutFormProps = {
   booking: { id: string; name: string; from: Date };
   /** Matched + unmatched scanned asset ids to attach to the booking. */
   assetIds: string[];
+  /** Scanned kit ids to attach to the booking as kit-driven rows. */
+  kitIds: string[];
   /** `true` while a submit is in-flight. */
   isLoading?: boolean;
   /** `true` while nothing would go out, or while a submit is in flight. */
@@ -900,13 +1223,13 @@ type FulfilCheckoutFormProps = {
  * 2. On-time booking → plain submit button, no `checkoutIntentChoice`
  *    field — the server treats undefined as "keep original from".
  *
- * `assetIds` is serialized as `assetIds[0]=…&assetIds[1]=…` so the
- * Zod schema picks it up as an array. `kitIds` is intentionally empty
- * (kit scans are not part of this flow).
+ * `assetIds` and `kitIds` are serialized as `assetIds[0]=…&assetIds[1]=…`
+ * so the Zod schema picks each up as an array.
  */
 function FulfilCheckoutForm({
   booking,
   assetIds,
+  kitIds,
   isLoading,
   disableSubmit,
   notice,
@@ -943,6 +1266,17 @@ function FulfilCheckoutForm({
             type="hidden"
             name={`assetIds[${index}]`}
             value={assetId}
+          />
+        ))}
+
+        {/* Hidden kit ids — the server resolves each into kit-driven rows
+            and assigns their members to outstanding reservations. */}
+        {kitIds.map((kitId, index) => (
+          <input
+            key={kitId}
+            type="hidden"
+            name={`kitIds[${index}]`}
+            value={kitId}
           />
         ))}
 

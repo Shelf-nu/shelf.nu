@@ -203,7 +203,9 @@ export async function createOrganization({
      * so a logo this service is going to refuse must not cost the caller a slot.
      */
     const logo =
-      image?.size && image.size > 0 ? await readValidatedLogo(image, userId) : null;
+      image?.size && image.size > 0
+        ? await readValidatedLogo(image, userId)
+        : null;
 
     const data = {
       name,

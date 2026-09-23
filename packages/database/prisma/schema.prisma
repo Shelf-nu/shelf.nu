@@ -1562,8 +1562,14 @@ model BookingAsset {
   quantity  Int     @default(1) // For quantity-tracked assets: how many booked
 
   // The model reservation this row discharged, when it came from one. `null`
-  // for assets added directly — picked, scanned onto the booking, or pulled in
-  // via a kit. That is most rows.
+  // for assets added directly — picked or scanned onto a booking with no
+  // matching reservation to answer. That is most rows.
+  //
+  // A kit-driven row carries it too: a unit sitting inside a kit answers a
+  // promise for units of its model exactly like a loose one, and the pool math
+  // counts it either way. At most ONE row per (booking, asset) is ever stamped
+  // — one physical unit discharges one reserved unit, however many rows the
+  // asset holds on the booking.
   //
   // Without it the link is narrative only: `materializeModelRequestForAsset`
   // writes a note ("assigned X (Model A) — 2 remaining") and then the

@@ -10115,6 +10115,47 @@ describe("removeAssets", () => {
       ]);
     });
 
+    it("reopens the reservation a removed KIT-DRIVEN row had discharged", async () => {
+      expect.assertions(2);
+      const fulfilledAt = new Date("2026-05-02T10:00:00Z");
+      // The unit arrived inside a kit, so its stamp sits on the kit-driven
+      // row. The rollback counts stamps, not row shapes, which is what lets
+      // one code path serve both arrivals.
+      const mockBooking = arrangeModelRemoval(
+        { quantity: 2, fulfilledQuantity: 2, fulfilledAt },
+        [
+          {
+            assetId: "asset-1",
+            quantity: 1,
+            assetKitId: "ak-1",
+            bookingModelRequestId: "req-1",
+          } as never,
+        ]
+      );
+
+      await removeAssets({
+        booking: mockBooking,
+        firstName: "Test",
+        lastName: "User",
+        displayName: null,
+        userId: "user-1",
+        organizationId: "org-1",
+      });
+
+      expect(db.bookingModelRequest.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { fulfilledQuantity: 1, fulfilledAt: null },
+        })
+      );
+      expect(modelRequestChangedEvents()).toEqual([
+        expect.objectContaining({
+          field: "fulfilledAt",
+          fromValue: fulfilledAt.toISOString(),
+          toValue: null,
+        }),
+      ]);
+    });
+
     it("leaves the reservation closed when the removed asset discharged nothing", async () => {
       expect.assertions(2);
       // Reserve 3, all satisfied. A fourth asset of the same model was added
@@ -15871,6 +15912,18 @@ describe("model reservation guard — write paths", () => {
     );
   }
 
+  /**
+   * Ids fulfilment was offered, in order. Deliberately separate from
+   * {@link handedAssetIds}: the pool guard judges standalone rows only, while
+   * fulfilment also takes kit arrivals, so the two lists differ by design.
+   */
+  function fulfilmentCandidateIds(call = 0): string[] {
+    const fulfil = fulfilModelRequestsForAssets as ReturnType<typeof vitest.fn>;
+    return (fulfil.mock.calls[call][0].assets as Array<{ id: string }>).map(
+      (asset) => asset.id
+    );
+  }
+
   beforeEach(() => {
     vitest.clearAllMocks();
     guard.mockResolvedValue(undefined);
@@ -15968,6 +16021,75 @@ describe("model reservation guard — write paths", () => {
       );
     });
 
+    it("offers fulfilment the kit arrival as well as the new standalone row", async () => {
+      expect.assertions(2);
+
+      await updateBookingAssets({
+        id: "booking-1",
+        organizationId: "org-1",
+        assetIds: ["asset-ind", "asset-qt", "asset-held"],
+        quantities: { "asset-qt": 3 },
+        kitSlices: [
+          {
+            assetId: "asset-kit",
+            assetKitId: "ak-1",
+            kitId: "kit-1",
+            quantity: 1,
+          },
+        ],
+        userId: "user-1",
+      });
+
+      // A unit inside a kit answers a promise for units of its model exactly
+      // like a loose one. `asset-held` already holds a row, so it claims
+      // nothing new; `asset-qt` is offered and turned away downstream, where
+      // the INDIVIDUAL-only rule for model units lives.
+      expect(fulfilmentCandidateIds()).toEqual([
+        "asset-ind",
+        "asset-qt",
+        "asset-kit",
+      ]);
+      // The pool guard stays standalone-only — the two lists are not the same
+      // question, and widening one does not widen the other.
+      expect(handedAssetIds()).toEqual(["asset-ind"]);
+    });
+
+    it("offers fulfilment nothing for a kit membership the booking already holds", async () => {
+      expect.assertions(1);
+      // why: the path reads pre-existing rows twice with different scopes —
+      // once for standalone collisions, once for every row on the booking.
+      // The flat fixture cannot answer both, so this one reads the scope.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: { where?: { assetKitId?: unknown } }) =>
+        Promise.resolve(
+          args?.where?.assetKitId === null
+            ? []
+            : [{ assetId: "asset-kit", assetKitId: "ak-1" }]
+        )
+      );
+
+      await updateBookingAssets({
+        id: "booking-1",
+        organizationId: "org-1",
+        assetIds: [],
+        kitSlices: [
+          {
+            assetId: "asset-kit",
+            assetKitId: "ak-1",
+            kitId: "kit-1",
+            quantity: 1,
+          },
+        ],
+        userId: "user-1",
+      });
+
+      // The kit insert is `ON CONFLICT DO NOTHING`, so re-saving the same kit
+      // creates no row and therefore delivers no unit. Re-saving a booking
+      // must not walk a reservation down.
+      expect(fulfilmentCandidateIds()).toEqual([]);
+    });
+
     it("writes nothing when the guard refuses", async () => {
       expect.assertions(3);
       guard.mockRejectedValueOnce(refusal());
@@ -16027,6 +16149,109 @@ describe("model reservation guard — write paths", () => {
         (fulfilModelRequestsForAssets as ReturnType<typeof vitest.fn>).mock
           .invocationCallOrder[0]
       );
+    });
+
+    it("lets a scanned kit's member discharge a reservation, and stamps its row", async () => {
+      expect.assertions(2);
+      // why: the helper's own decrement logic is covered in
+      // booking-model-request/service.server.test.ts; here it only has to
+      // report which reservation the member answered.
+      (
+        fulfilModelRequestsForAssets as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce(new Map([["asset-kit", "request-1"]]));
+
+      await addScannedAssetsToBooking({
+        assetIds: [],
+        kitSlices: [
+          { assetId: "asset-kit", assetKitId: "ak-1", kitId: "kit-1" },
+        ],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      });
+
+      expect(fulfilmentCandidateIds()).toEqual(["asset-kit"]);
+      // The stamp lands on the kit-driven row, which is the only row this
+      // asset has here — without it the removal path has nothing to count and
+      // the reservation could never reopen.
+      expect(vitest.mocked(db.booking.update).mock.calls[0][0]).toMatchObject({
+        data: {
+          bookingAssets: {
+            create: [
+              expect.objectContaining({
+                assetId: "asset-kit",
+                assetKitId: "ak-1",
+                bookingModelRequestId: "request-1",
+              }),
+            ],
+          },
+        },
+      });
+    });
+
+    it("skips a kit slice for an INDIVIDUAL asset the booking already holds loose", async () => {
+      expect.assertions(2);
+      // why: the flat fixture answers every pre-existing read; here it says
+      // `asset-kit` already has a standalone row on this booking.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([{ assetId: "asset-kit", quantity: 1 }]);
+
+      await addScannedAssetsToBooking({
+        assetIds: [],
+        kitSlices: [
+          { assetId: "asset-kit", assetKitId: "ak-1", kitId: "kit-1" },
+        ],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      });
+
+      // One INDIVIDUAL asset is one physical unit. The two partial uniques let
+      // a standalone row and a kit-driven row coexist, so writing the slice
+      // would book the same camera twice and inflate every count on the
+      // booking — the rule `updateBookingAssets` already applies to its own
+      // slices.
+      const created = vitest.mocked(db.booking.update).mock.calls[0]?.[0] as {
+        data: {
+          bookingAssets: { create: Array<{ assetKitId: string | null }> };
+        };
+      };
+      expect(created.data.bookingAssets.create).toEqual([]);
+      // Nothing arrived, so nothing may discharge a reservation either.
+      expect(fulfilmentCandidateIds()).toEqual([]);
+    });
+
+    it("keeps the kit slice for a QUANTITY_TRACKED asset the booking already holds loose", async () => {
+      expect.assertions(1);
+      // why: same staging as the INDIVIDUAL case above — `asset-qt` already
+      // holds a standalone row — so the two tests differ only by asset type.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([{ assetId: "asset-qt", quantity: 4 }]);
+
+      await addScannedAssetsToBooking({
+        assetIds: [],
+        kitSlices: [
+          { assetId: "asset-qt", assetKitId: "ak-1", kitId: "kit-1" },
+        ],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      });
+
+      // A quantity-tracked asset is a pool, not a unit: units committed to a
+      // kit and units taken from the free pool are two legitimate rows,
+      // bounded on separate axes. Only INDIVIDUAL is exempted, and removing
+      // that clause has to fail here rather than pass quietly.
+      const created = vitest.mocked(db.booking.update).mock.calls[0]?.[0] as {
+        data: {
+          bookingAssets: { create: Array<{ assetKitId: string | null }> };
+        };
+      };
+      expect(created.data.bookingAssets.create).toEqual([
+        expect.objectContaining({ assetId: "asset-qt", assetKitId: "ak-1" }),
+      ]);
     });
 
     it("creates no rows when the guard refuses", async () => {

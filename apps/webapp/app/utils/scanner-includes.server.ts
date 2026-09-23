@@ -71,6 +71,10 @@ export const KIT_INCLUDE = {
       // the user scans a kit's QR. Without this, the booking UI
       // can't tell which kit a row came from.
       id: true,
+      // The kit's slice of this asset — how many units the kit holds, which
+      // is what a kit-driven `BookingAsset` row is worth. Read by the
+      // booking drawers when a scanned kit becomes rows on the booking.
+      quantity: true,
       asset: {
         select: {
           id: true,
@@ -81,6 +85,11 @@ export const KIT_INCLUDE = {
           type: true,
           availableToBook: true,
           custody: true,
+          // Which `AssetModel` the member is an instance of. The fulfil
+          // drawer matches a kit's members against the booking's
+          // outstanding `BookingModelRequest`s on this id, so a kit scan
+          // discharges reserved units the same way a loose scan does.
+          assetModelId: true,
         },
       },
     },
