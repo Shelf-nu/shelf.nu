@@ -29,7 +29,9 @@ All database commands run via the `@shelf/database` package:
 ### Quality & Testing
 
 - `pnpm webapp:test -- --run` – Execute the Vitest unit test suite (always use `--run` to avoid watch mode).
-- `pnpm webapp:validate` – Run the full validation pipeline (Prisma generation, ESLint, Prettier, TypeScript, unit tests). Run this before committing substantive code changes.
+- `pnpm webapp:test:changed` – Run only the tests affected by your changes versus local `main`. This is the default way to verify a change locally.
+- `pnpm webapp:validate` – Run the validation pipeline (Prisma generation, ESLint, Prettier, TypeScript, affected unit tests). Run this before committing substantive code changes.
+- `pnpm webapp:validate:full` – Same, with the full test suite. Do not run it locally unless asked; CI runs the full suite on every PR, sharded across four runners.
 - `pnpm turbo lint` – ESLint checking (all packages).
 - `pnpm --filter @shelf/webapp lint:fix` – Fix ESLint issues automatically.
 - `pnpm turbo typecheck` – TypeScript type checking (all packages).
@@ -42,6 +44,7 @@ All database commands run via the `@shelf/database` package:
 - Happy DOM environment for React component testing
 - Run with `pnpm webapp:test -- --run` for a single run
 - **IMPORTANT:** Always use `--run` flag. Without it, Vitest runs in watch mode which consumes excessive memory.
+- **Locally, run only the affected tests** (`pnpm webapp:test:changed`). The full suite belongs to CI.
 
 #### Validation Pipeline
 
@@ -51,7 +54,10 @@ Always run `pnpm webapp:validate` before committing - this runs:
 2. ESLint with auto-fix
 3. Prettier formatting
 4. TypeScript checking
-5. Unit tests
+5. Unit tests affected by your changes versus local `main` (`vitest --changed main`)
+
+Use `pnpm webapp:validate:full` only when a full local run is explicitly needed;
+CI runs the full suite on every PR.
 
 ### Writing & Organizing Tests
 
