@@ -180,6 +180,28 @@ describe("createAssetsFromContentImport — pre-flight write boundary", () => {
     });
   });
 
+  it("sends the true problem count alongside the truncated list", async () => {
+    // The payload is a contract the compiler cannot check: the import page
+    // shows "the first N of M" only when these two disagree.
+    await expect(
+      runImport(
+        Array.from({ length: 125 }, (_unused, index) =>
+          row({ title: `Broken ${index}`, type: "QUANTITY_TRACKED" })
+        )
+      )
+    ).rejects.toMatchObject({
+      additionalData: { totalErrors: 125 },
+    });
+
+    await runImport(
+      Array.from({ length: 125 }, (_unused, index) =>
+        row({ title: `Broken ${index}`, type: "QUANTITY_TRACKED" })
+      )
+    ).catch((cause: { additionalData: { rowErrors: unknown[] } }) => {
+      expect(cause.additionalData.rowErrors).toHaveLength(100);
+    });
+  });
+
   it("numbers the reported rows as spreadsheet lines", async () => {
     await expect(
       runImport([row(), row({ title: "bad", type: "QUANTITY_TRACKED" })])

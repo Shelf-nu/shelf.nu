@@ -16,7 +16,7 @@
  * @see {@link file://./qty-validation.server.ts} — the shared column rules
  */
 import type { CustomField } from "@prisma/client";
-import { AssetType } from "@prisma/client";
+import { AssetType, CustomFieldType } from "@prisma/client";
 
 import {
   buildCustomFieldValue,
@@ -30,11 +30,23 @@ import type { CreateAssetFromContentImportPayload } from "./types";
 export const MAX_CONTENT_IMPORT_ROWS = 1000;
 
 /**
- * The most row errors carried back to the browser. A file where every row is
- * wrong would otherwise produce a response measured in megabytes; the true
- * count travels separately as `totalErrors`.
+ * The most row errors listed back to the browser. A file where every row is
+ * wrong would otherwise produce a response measured in megabytes, so the list
+ * is truncated and {@link ImportPreflightResult.totalErrors} carries how many
+ * there really were.
  */
 export const MAX_REPORTED_ROW_ERRORS = 100;
+
+/**
+ * Every custom field type the database will accept.
+ *
+ * `getDefinitionFromCsvHeader` casts whatever a `cf:` header declares straight
+ * to `CustomFieldType` without checking it, so a typo like `type:numbre`
+ * reaches `db.customField.create` as an invalid enum member unless it is
+ * rejected here.
+ */
+const CUSTOM_FIELD_TYPES = Object.values(CustomFieldType);
+const CUSTOM_FIELD_TYPE_SET = new Set<string>(CUSTOM_FIELD_TYPES);
 
 /**
  * One problem found in one row.
@@ -47,6 +59,19 @@ export type ImportRowError = {
   row: number;
   title: string;
   message: string;
+};
+
+/**
+ * The outcome of a pre-flight pass.
+ *
+ * `errors` is truncated to {@link MAX_REPORTED_ROW_ERRORS} so the response
+ * stays a sane size; `totalErrors` counts every problem found. The two differ
+ * exactly when a file had more problems than are listed, which is what lets the
+ * import page say "showing the first 100 of 412".
+ */
+export type ImportPreflightResult = {
+  errors: ImportRowError[];
+  totalErrors: number;
 };
 
 /**
@@ -76,10 +101,11 @@ function cell(
  * cannot itself write.
  *
  * @param args.data - Parsed CSV rows from `extractCSVDataFromContentImport`
- * @param args.existingCustomFields - Active custom fields already in the
- *   workspace, used to catch a header whose declared type contradicts one
- * @returns Every problem found, capped at {@link MAX_REPORTED_ROW_ERRORS}.
- *   Empty means the file is safe to import.
+ * @param args.existingCustomFields - Non-deleted custom fields already in the
+ *   workspace, matching `upsertCustomField`'s own lookup, used to catch a
+ *   header whose declared type contradicts one
+ * @returns The problems found and how many there were. An empty `errors` means
+ *   the file is safe to import.
  */
 export function validateContentImportRows({
   data,
@@ -87,15 +113,18 @@ export function validateContentImportRows({
 }: {
   data: CreateAssetFromContentImportPayload[];
   existingCustomFields: Pick<CustomField, "name" | "type">[];
-}): ImportRowError[] {
+}): ImportPreflightResult {
   if (data.length > MAX_CONTENT_IMPORT_ROWS) {
-    return [
-      {
-        row: 0,
-        title: "File too large",
-        message: `This file has ${data.length} rows, but the maximum is ${MAX_CONTENT_IMPORT_ROWS}. Please split it into smaller files and import them one at a time.`,
-      },
-    ];
+    return {
+      errors: [
+        {
+          row: 0,
+          title: "File too large",
+          message: `This file has ${data.length} rows, but the maximum is ${MAX_CONTENT_IMPORT_ROWS}. Please split it into smaller files and import them one at a time.`,
+        },
+      ],
+      totalErrors: 1,
+    };
   }
 
   // Custom field names are matched case-insensitively everywhere else
@@ -111,12 +140,23 @@ export function validateContentImportRows({
   const errors: ImportRowError[] = [];
 
   /**
-   * Column headers already reported as contradicting an existing custom field.
-   * A bad header is a property of the file, not of a row, so it is reported
-   * once — reporting it per row would fill the whole error budget with copies
-   * of one sentence and bury every other problem in the file.
+   * Column headers already reported as faulty. A bad header is a property of
+   * the file, not of a row, so it is reported once — reporting it per row would
+   * fill the whole error budget with copies of one sentence and bury every
+   * other problem in the file.
    */
-  const reportedHeaderMismatches = new Set<string>();
+  const reportedHeaderProblems = new Set<string>();
+
+  /**
+   * Custom field types declared by headers in THIS file, keyed by lowercased
+   * field name.
+   *
+   * Kept apart from `existingTypeByName` so the two conflicts read differently:
+   * one field named by two headers with different types is a contradiction
+   * inside the file, and telling the user it "already exists in this workspace"
+   * would be false.
+   */
+  const inFileTypeByName = new Map<string, { type: string; header: string }>();
 
   for (const [index, asset] of data.entries()) {
     const row = index + 2;
@@ -165,16 +205,32 @@ export function validateContentImportRows({
       }
 
       const definition = getDefinitionFromCsvHeader(key);
-      const existingType = existingTypeByName.get(
-        definition.name.trim().toLowerCase()
-      );
+      const fieldKey = definition.name.trim().toLowerCase();
+
+      // The header's type is cast, never checked, by the shared parser, so an
+      // unknown one reaches `db.customField.create` as an invalid enum member.
+      if (!CUSTOM_FIELD_TYPE_SET.has(definition.type)) {
+        if (!reportedHeaderProblems.has(key)) {
+          reportedHeaderProblems.add(key);
+          errors.push({
+            row: 0,
+            title: "Unknown custom field type",
+            message: `Column "${key}": "${definition.type.toLowerCase()}" is not a custom field type. Use one of: ${CUSTOM_FIELD_TYPES.map(
+              (type) => type.toLowerCase()
+            ).join(", ")}.`,
+          });
+        }
+        continue;
+      }
+
+      const existingType = existingTypeByName.get(fieldKey);
 
       // `upsertCustomField` refuses to change an existing field's type, so a
       // contradicting header fails the import however well-formed its values
       // are. Reporting it here keeps that refusal from aborting mid-import.
       if (existingType && existingType !== definition.type) {
-        if (!reportedHeaderMismatches.has(key)) {
-          reportedHeaderMismatches.add(key);
+        if (!reportedHeaderProblems.has(key)) {
+          reportedHeaderProblems.add(key);
           errors.push({
             row: 0,
             title: "Custom field type mismatch",
@@ -184,6 +240,30 @@ export function validateContentImportRows({
           });
         }
         continue;
+      }
+
+      // Two headers naming one field with different types are drafted
+      // separately by `createCustomFieldsIfNotExists`, which keys by the whole
+      // header string; `upsertCustomField` then creates the first and rejects
+      // the second. Matching types are left alone — the importer accepts them,
+      // and refusing here would make this stricter than what it guards.
+      const inFile = inFileTypeByName.get(fieldKey);
+      if (inFile && inFile.type !== definition.type) {
+        if (!reportedHeaderProblems.has(key)) {
+          reportedHeaderProblems.add(key);
+          errors.push({
+            row: 0,
+            title: "Conflicting custom field columns",
+            message: `Columns "${inFile.header}" and "${key}" both define custom field "${definition.name}", but with different types. Give them the same type, or rename one column.`,
+          });
+        }
+        continue;
+      }
+      if (!inFile) {
+        inFileTypeByName.set(fieldKey, {
+          type: definition.type,
+          header: key,
+        });
       }
 
       try {
@@ -202,11 +282,13 @@ export function validateContentImportRows({
         });
       }
     }
-
-    if (errors.length >= MAX_REPORTED_ROW_ERRORS) {
-      return errors.slice(0, MAX_REPORTED_ROW_ERRORS);
-    }
   }
 
-  return errors;
+  // The scan always runs to the end: stopping at the reporting limit would make
+  // the count equal the limit, and the file's real size is what the import page
+  // reports. `MAX_CONTENT_IMPORT_ROWS` already bounds the work.
+  return {
+    errors: errors.slice(0, MAX_REPORTED_ROW_ERRORS),
+    totalErrors: errors.length,
+  };
 }

@@ -24,11 +24,11 @@ describe("validateContentImportRows", () => {
         data: [row(), row({ title: "Arri AS-2" })],
         existingCustomFields: [],
       })
-    ).toEqual([]);
+    ).toEqual({ errors: [], totalErrors: 0 });
   });
 
   it("reports EVERY bad row, not just the first", () => {
-    const errors = validateContentImportRows({
+    const { errors } = validateContentImportRows({
       data: [
         row({ title: "A", type: "QUANTITY_TRACKED" }),
         row({ title: "B" }),
@@ -42,7 +42,7 @@ describe("validateContentImportRows", () => {
   });
 
   it("numbers rows as spreadsheet lines (header is row 1)", () => {
-    const errors = validateContentImportRows({
+    const { errors } = validateContentImportRows({
       data: [row(), row({ title: "bad", type: "QUANTITY_TRACKED" })],
       existingCustomFields: [],
     });
@@ -52,7 +52,7 @@ describe("validateContentImportRows", () => {
   });
 
   it("rejects a QUANTITY_TRACKED row that is missing consumptionType", () => {
-    const errors = validateContentImportRows({
+    const { errors } = validateContentImportRows({
       data: [row({ type: "QUANTITY_TRACKED", quantity: "5" })],
       existingCustomFields: [],
     });
@@ -62,7 +62,7 @@ describe("validateContentImportRows", () => {
   });
 
   it("rejects an asset model on a QUANTITY_TRACKED row", () => {
-    const errors = validateContentImportRows({
+    const { errors } = validateContentImportRows({
       data: [
         row({
           type: "QUANTITY_TRACKED",
@@ -79,7 +79,7 @@ describe("validateContentImportRows", () => {
   });
 
   it("rejects a non-numeric AMOUNT custom field value", () => {
-    const errors = validateContentImportRows({
+    const { errors } = validateContentImportRows({
       data: [row({ "cf:Price,type:amount": "$1,2ab" })],
       existingCustomFields: [],
     });
@@ -89,7 +89,7 @@ describe("validateContentImportRows", () => {
   });
 
   it("rejects a header whose type contradicts an existing custom field", () => {
-    const errors = validateContentImportRows({
+    const { errors } = validateContentImportRows({
       data: [row({ "cf:Price,type:text": "free text" })],
       existingCustomFields: [{ name: "Price", type: "AMOUNT" }],
     });
@@ -101,7 +101,7 @@ describe("validateContentImportRows", () => {
   it("reports a contradicting header once, not once per row", () => {
     // The header is a property of the file. Reported per row it would fill the
     // whole error budget with copies of one sentence.
-    const errors = validateContentImportRows({
+    const { errors } = validateContentImportRows({
       data: Array.from({ length: 40 }, () =>
         row({ "cf:Price,type:text": "free text" })
       ),
@@ -113,7 +113,7 @@ describe("validateContentImportRows", () => {
   });
 
   it("matches existing custom fields case-insensitively", () => {
-    const errors = validateContentImportRows({
+    const { errors } = validateContentImportRows({
       data: [row({ "cf:PRICE,type:text": "free text" })],
       existingCustomFields: [{ name: "price", type: "AMOUNT" }],
     });
@@ -122,7 +122,7 @@ describe("validateContentImportRows", () => {
   });
 
   it("refuses a file over the row cap without validating rows", () => {
-    const errors = validateContentImportRows({
+    const { errors } = validateContentImportRows({
       data: Array.from({ length: MAX_CONTENT_IMPORT_ROWS + 1 }, () => row()),
       existingCustomFields: [],
     });
@@ -132,8 +132,10 @@ describe("validateContentImportRows", () => {
     expect(errors[0].message).toContain(String(MAX_CONTENT_IMPORT_ROWS));
   });
 
-  it("caps how many errors it returns", () => {
-    const errors = validateContentImportRows({
+  it("caps the listed errors but still counts the rest", () => {
+    // The count is what the import page reports; truncating the list must not
+    // truncate it, or a 125-problem file reads as exactly 100.
+    const { errors, totalErrors } = validateContentImportRows({
       data: Array.from({ length: MAX_REPORTED_ROW_ERRORS + 25 }, () =>
         row({ type: "QUANTITY_TRACKED" })
       ),
@@ -141,5 +143,40 @@ describe("validateContentImportRows", () => {
     });
 
     expect(errors).toHaveLength(MAX_REPORTED_ROW_ERRORS);
+    expect(totalErrors).toBe(MAX_REPORTED_ROW_ERRORS + 25);
+  });
+
+  it("rejects a header declaring a type that does not exist", () => {
+    const { errors } = validateContentImportRows({
+      data: [row({ "cf:Price,type:numbre": "10" })],
+      existingCustomFields: [],
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].title).toBe("Unknown custom field type");
+    expect(errors[0].row).toBe(0);
+  });
+
+  it("rejects two columns defining one custom field with different types", () => {
+    const { errors } = validateContentImportRows({
+      data: [
+        row({ "cf:Price,type:text": "free", "cf:PRICE,type:number": "10" }),
+      ],
+      existingCustomFields: [],
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].title).toBe("Conflicting custom field columns");
+  });
+
+  it("accepts two columns defining one custom field with the SAME type", () => {
+    // The importer accepts these today; refusing here would make pre-flight
+    // stricter than the code it guards.
+    const { errors } = validateContentImportRows({
+      data: [row({ "cf:Price,type:text": "a", "cf:PRICE,type:text": "b" })],
+      existingCustomFields: [],
+    });
+
+    expect(errors).toEqual([]);
   });
 });
