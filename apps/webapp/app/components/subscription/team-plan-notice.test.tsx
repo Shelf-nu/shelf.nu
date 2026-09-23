@@ -84,6 +84,8 @@ describe("TeamPlanNotice", () => {
   });
 
   it("opens the plans when 'View plans' is clicked", async () => {
+    // why: the notice only reports the click; opening the dialog is the
+    // page's job, so a spy is the observable outcome here.
     const onViewPlans = vi.fn();
     render(
       <TeamPlanNotice

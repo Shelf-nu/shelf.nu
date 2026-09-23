@@ -26,6 +26,8 @@ export type MembershipForPaidTeams = {
     type: OrganizationType;
     /** The owner's user id: the workspace's billing party. */
     userId: string;
+    /** Set by a Shelf admin to switch the workspace off for everyone. */
+    workspaceDisabled: boolean;
     /** The owner, whose tier is the plan the workspace runs on. */
     owner: { tierId: TierId };
   };
@@ -61,12 +63,16 @@ export function ownerTierRunsTeamWorkspace(tierId: TierId): boolean {
  * - the workspace is a TEAM (a PERSONAL workspace has no other members);
  * - the user does not own it. Ownership is recorded twice, as an OWNER role
  *   and as the organization's `userId`, so either one excludes it;
+ * - the workspace is not switched off (`workspaceDisabled`);
  * - the owner's tier keeps the workspace running
  *   ({@link ownerTierRunsTeamWorkspace}).
  *
+ * The last two are the checks the app layout uses to show a Team workspace as
+ * disabled, so a member is never told a disabled workspace covers them.
+ *
  * @param args.userId - The signed-in user
  * @param args.memberships - That user's `UserOrganization` rows, with each
- *   organization's type, owner id and owner tier
+ *   organization's type, owner id, `workspaceDisabled` flag and owner tier
  * @returns The matching workspaces as `{ id, name }`, in the input order
  */
 export function getPaidTeamMemberships({
@@ -82,6 +88,7 @@ export function getPaidTeamMemberships({
         organization.type === OrganizationType.TEAM &&
         !roles.includes(OrganizationRoles.OWNER) &&
         organization.userId !== userId &&
+        !organization.workspaceDisabled &&
         ownerTierRunsTeamWorkspace(organization.owner.tierId)
     )
     .map(({ organization }) => ({

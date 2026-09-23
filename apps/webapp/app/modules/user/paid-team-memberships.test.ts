@@ -4,8 +4,8 @@
  * The subscription page tells an invited member that their team's plan covers
  * them, so the list must hold exactly the Team workspaces the user joined and
  * whose owner's tier keeps them running. A workspace the user owns, a team
- * whose owner is on Free or Plus (the app disables it) and a personal
- * workspace must never appear: each would tell someone they are covered by a
+ * the app disables (owner on Free or Plus, or switched off by a Shelf admin)
+ * and a personal workspace must never appear: each would tell someone they are covered by a
  * plan that does not cover them.
  *
  * @see {@link file://./paid-team-memberships.ts}
@@ -30,6 +30,7 @@ function membership(
     type?: OrganizationType;
     ownerUserId?: string;
     ownerTierId?: TierId;
+    workspaceDisabled?: boolean;
   } = {}
 ): MembershipForPaidTeams {
   const id = overrides.id ?? "team1";
@@ -40,6 +41,7 @@ function membership(
       name: overrides.name ?? `Workspace ${id}`,
       type: overrides.type ?? OrganizationType.TEAM,
       userId: overrides.ownerUserId ?? "somebody-else",
+      workspaceDisabled: overrides.workspaceDisabled ?? false,
       owner: { tierId: overrides.ownerTierId ?? TierId.tier_2 },
     },
   };
@@ -92,6 +94,17 @@ describe("getPaidTeamMemberships", () => {
     }
   );
 
+  it("leaves out a workspace a Shelf admin switched off, whatever the owner's tier", () => {
+    const result = getPaidTeamMemberships({
+      userId: USER_ID,
+      memberships: [
+        membership({ workspaceDisabled: true, ownerTierId: TierId.tier_2 }),
+      ],
+    });
+
+    expect(result).toEqual([]);
+  });
+
   it("leaves out a workspace the user holds the OWNER role in", () => {
     const result = getPaidTeamMemberships({
       userId: USER_ID,
@@ -135,6 +148,7 @@ describe("getPaidTeamMemberships", () => {
         membership({ id: "own", roles: [OrganizationRoles.OWNER] }),
         membership({ id: "free", ownerTierId: TierId.free }),
         membership({ id: "plus", ownerTierId: TierId.tier_1 }),
+        membership({ id: "off", workspaceDisabled: true }),
         membership({
           id: "b",
           name: "Lighting Team",

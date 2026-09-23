@@ -97,6 +97,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
               name: true,
               type: true,
               userId: true,
+              workspaceDisabled: true,
               owner: { select: { tierId: true } },
             },
           },
