@@ -34,7 +34,12 @@ import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { UpsertModelRequestSchema } from "~/routes/api+/bookings.$bookingId.model-requests";
 import { BADGE_COLORS } from "~/utils/badge-colors";
-import { canCancelModelReservation } from "~/utils/booking-model-requests";
+import {
+  canCancelModelReservation,
+  getModelPoolRemaining,
+  getModelRequestQuantityIssue,
+  isModelPoolOverCommitted,
+} from "~/utils/booking-model-requests";
 import { getValidationErrors } from "~/utils/http";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
@@ -277,15 +282,22 @@ function ExistingRequestRow({
   const isRemoving = useDisabled(removeFetcher);
   const disabled = isUpdating || isRemoving;
 
-  // The loader-provided `available` already excludes the current
-  // booking's reservation, so `available + request.quantity` is the
-  // number this booking could still climb to. If `request.quantity`
-  // exceeds that we have a shortfall — warn with an amber badge.
+  // What this booking could still climb to: everything free over the window
+  // plus what it already holds. Both figures come from the SIGNED remainder,
+  // never `model.available` — the service clamps that at zero, so an
+  // over-committed pool and an exactly-empty one arrive identical, and the
+  // ceiling shown to the operator would be the clamped one.
   const capacityForThisBooking = model
-    ? model.available + request.quantity
+    ? getModelPoolRemaining(model) + request.quantity
     : null;
-  const hasShortfall =
-    capacityForThisBooking != null && request.quantity > capacityForThisBooking;
+  // Ask the pool question directly. Comparing `request.quantity` against a
+  // capacity that already contains it is an identity — it reduces to "is the
+  // remainder negative", which is what this says out loud.
+  const hasShortfall = model != null && isModelPoolOverCommitted(model);
+  // Clamped for display only. An over-committed pool makes the capacity
+  // negative, which is a true fact about the pool and not a sentence to put in
+  // front of anyone.
+  const shortfallUnitsLeft = Math.max(0, capacityForThisBooking ?? 0);
 
   // Inline-edit state for the quantity. Resets whenever the loader
   // refreshes the server-authoritative `request.quantity` (e.g. after
@@ -305,42 +317,30 @@ function ExistingRequestRow({
   const floor = request.fulfilledQuantity;
 
   /**
-   * Client schema for the inline update — same shape as the server schema,
-   * with a superRefine for the two bounds the server enforces: the floor of
-   * already-assigned units, and the cap this booking is allowed to climb to.
+   * Client schema for the inline update — the server schema plus the two bounds
+   * `upsertBookingModelRequest` enforces, resolved by the shared helper so the
+   * two agree on which changes the pool may refuse. Notably it may refuse none
+   * of a reduction; see `getModelRequestQuantityIssue`.
    *
-   * The cap needs loader-side availability, which is missing for a model
+   * The capacity needs loader-side availability, which is missing for a model
    * fetched via typeahead beyond the seed list; the floor comes off the row
    * itself and is always known, so it is checked either way.
    */
-  const clientSchema = useMemo(() => {
-    const withFloor = UpsertModelRequestSchema.superRefine((data, ctx) => {
-      if (floor > 0 && data.quantity < floor) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["quantity"],
-          message: `${floor} ${
-            floor === 1 ? "unit is" : "units are"
-          } already assigned — ${floor} is the lowest this can go.`,
+  const clientSchema = useMemo(
+    () =>
+      UpsertModelRequestSchema.superRefine((data, ctx) => {
+        const issue = getModelRequestQuantityIssue(data.quantity, {
+          floor,
+          capacity: capacityForThisBooking,
+          current: request.quantity,
+          total: model?.total ?? null,
         });
-      }
-    });
-
-    if (capacityForThisBooking == null || model == null) {
-      return withFloor;
-    }
-    const max = capacityForThisBooking;
-    const total = model.total;
-    return withFloor.superRefine((data, ctx) => {
-      if (data.quantity > max) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["quantity"],
-          message: `Only ${max} of ${total} available in this window — reduce the quantity to continue.`,
-        });
-      }
-    });
-  }, [capacityForThisBooking, model, floor]);
+        if (issue) {
+          ctx.addIssue({ code: "custom", path: ["quantity"], message: issue });
+        }
+      }),
+    [capacityForThisBooking, model, floor, request.quantity]
+  );
 
   const zo = useZorm(`EditModelRequest-${request.assetModelId}`, clientSchema);
 
@@ -400,8 +400,8 @@ function ExistingRequestRow({
               <AvailabilityBadge
                 badgeText="Over-reserved"
                 tooltipTitle="Model over-reserved"
-                tooltipContent={`Only ${capacityForThisBooking} unit${
-                  capacityForThisBooking === 1 ? "" : "s"
+                tooltipContent={`Only ${shortfallUnitsLeft} unit${
+                  shortfallUnitsLeft === 1 ? "" : "s"
                 } available for this window — someone else may have reserved more after you. Reduce the quantity or remove the reservation to resolve.`}
               />
             ) : null}
