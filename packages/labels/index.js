@@ -283,3 +283,48 @@ export const AUDIT_ASSET_STATUS_TONES = Object.freeze({
   MISSING: "danger",
   UNEXPECTED: "warning",
 });
+
+/**
+ * How an asset's tracking method is named, on the website and on the phone.
+ *
+ * These are the words the tracking-method picker shows. The CSV importer names
+ * the same concepts, but a CSV cell must hold the raw enum member, so an import
+ * message pairs the literal value with the label rather than replacing it.
+ */
+export const ASSET_TYPE_LABELS = Object.freeze({
+  INDIVIDUAL: "Individually tracked",
+  QUANTITY_TRACKED: "Tracked by quantity",
+});
+
+/**
+ * How a quantity-tracked asset's consumption behaviour is named.
+ *
+ * The parenthetical restates the enum member in words, because "used up" and
+ * "returnable" are the concepts while ONE_WAY and TWO_WAY are what the data
+ * holds — someone reading a CSV template and someone reading the asset form
+ * have to arrive at the same place.
+ */
+export const CONSUMPTION_TYPE_LABELS = Object.freeze({
+  ONE_WAY: "Used up (one-way)",
+  TWO_WAY: "Returnable (two-way)",
+});
+
+/**
+ * What each consumption type means for the stock, as a clause that follows its
+ * label. Kept apart from the label so a surface can show the name alone.
+ */
+export const CONSUMPTION_TYPE_DESCRIPTIONS = Object.freeze({
+  ONE_WAY: "consumed and not returned",
+  TWO_WAY: "checked out and returned",
+});
+
+/**
+ * The same tracking methods used attributively, as in "quantity-tracked
+ * assets". {@link ASSET_TYPE_LABELS} names the method — the title of the
+ * picker card — and reads wrongly in front of a noun; this reads wrongly as a
+ * title. Both are needed, and the bulk dialogs already use these words.
+ */
+export const ASSET_TYPE_ADJECTIVES = Object.freeze({
+  INDIVIDUAL: "individually tracked",
+  QUANTITY_TRACKED: "quantity-tracked",
+});

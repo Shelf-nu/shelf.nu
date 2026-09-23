@@ -199,3 +199,23 @@ export declare const AUDIT_STATUS_TONES: Readonly<
 export declare const AUDIT_ASSET_STATUS_TONES: Readonly<
   Record<AuditAssetStatusKey, StatusTone>
 >;
+
+export declare const ASSET_TYPE_LABELS: {
+  readonly INDIVIDUAL: "Individually tracked";
+  readonly QUANTITY_TRACKED: "Tracked by quantity";
+};
+
+export declare const CONSUMPTION_TYPE_LABELS: {
+  readonly ONE_WAY: "Used up (one-way)";
+  readonly TWO_WAY: "Returnable (two-way)";
+};
+
+export declare const CONSUMPTION_TYPE_DESCRIPTIONS: {
+  readonly ONE_WAY: "consumed and not returned";
+  readonly TWO_WAY: "checked out and returned";
+};
+
+export declare const ASSET_TYPE_ADJECTIVES: {
+  readonly INDIVIDUAL: "individually tracked";
+  readonly QUANTITY_TRACKED: "quantity-tracked";
+};
