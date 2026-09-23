@@ -7,6 +7,8 @@ import {
   countUnassignedModelUnits,
   getOutstandingModelRequests,
   summarizeUnassignedUnits,
+  getModelPoolRemaining,
+  isModelPoolOverCommitted,
 } from "./booking-model-requests";
 
 /**
@@ -266,5 +268,72 @@ describe("summarizeUnassignedUnits", () => {
         { name: "HP LaserJet", count: 1 },
       ])
     ).toBe("1 × HP LaserJet");
+  });
+});
+
+describe("isModelPoolOverCommitted", () => {
+  const counts = {
+    total: 5,
+    inCustody: 0,
+    reservedConcrete: 0,
+    reservedViaRequest: 0,
+  };
+
+  it("is false when the promises fit the stock", () => {
+    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 3 })).toBe(
+      false
+    );
+  });
+
+  it("is false when the stock is exactly spoken for", () => {
+    // The boundary matters: exactly-empty is not over-committed, and it is the
+    // case an off-by-one here would misreport as a shortfall on every full pool.
+    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 5 })).toBe(
+      false
+    );
+  });
+
+  it("is true when more units are promised than exist", () => {
+    expect(isModelPoolOverCommitted({ ...counts, reservedConcrete: 6 })).toBe(
+      true
+    );
+  });
+
+  it("counts custody and both kinds of reservation against the pool", () => {
+    // 5 total − 2 in custody − 2 concrete − 2 via request = −1.
+    expect(
+      isModelPoolOverCommitted({
+        total: 5,
+        inCustody: 2,
+        reservedConcrete: 2,
+        reservedViaRequest: 2,
+      })
+    ).toBe(true);
+  });
+});
+
+describe("getModelPoolRemaining", () => {
+  it("returns how many units are free", () => {
+    expect(
+      getModelPoolRemaining({
+        total: 5,
+        inCustody: 1,
+        reservedConcrete: 2,
+        reservedViaRequest: 0,
+      })
+    ).toBe(2);
+  });
+
+  it("goes negative when the pool owes more than it holds", () => {
+    // The signed result is the reason this exists: `available` is clamped at
+    // zero, so it reports this case and an exactly-empty pool identically.
+    expect(
+      getModelPoolRemaining({
+        total: 5,
+        inCustody: 0,
+        reservedConcrete: 4,
+        reservedViaRequest: 3,
+      })
+    ).toBe(-2);
   });
 });
