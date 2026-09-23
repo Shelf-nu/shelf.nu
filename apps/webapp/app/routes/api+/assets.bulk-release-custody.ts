@@ -192,17 +192,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
     }
 
-    for (const { assetId, teamMemberId } of resolvedReleases) {
-      await releaseQuantity({
-        assetId,
-        teamMemberId,
-        quantity: quantities[assetId],
-        userId,
-        organizationId,
-        role,
-      });
-    }
-
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckInAssets({
           userId,
@@ -225,6 +214,28 @@ export async function action({ request, context }: ActionFunctionArgs) {
           }),
         })
       : { skippedQuantityTracked: 0 };
+
+    /**
+     * The whole-asset path runs first, and the per-unit writes after it.
+     *
+     * Neither service joins the other's transaction — each opens its own — so
+     * a mixed submission cannot be made all-or-nothing without reworking
+     * primitives that four other custody routes depend on, and holding their
+     * row locks across a whole scan. What the order buys is that the operation
+     * which can still refuse mid-flight goes first: every quantity release
+     * below has already been checked against its holder and their units by the
+     * pass above, while `bulkCheckInAssets` validates its own set as it runs.
+     */
+    for (const { assetId, teamMemberId } of resolvedReleases) {
+      await releaseQuantity({
+        assetId,
+        teamMemberId,
+        quantity: quantities[assetId],
+        userId,
+        organizationId,
+        role,
+      });
+    }
 
     const skippedNote =
       skippedQuantityTracked > 0
