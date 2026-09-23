@@ -111,13 +111,15 @@ export async function generateQrObj({
      * No code yet — a kit or asset created by a content import has none until
      * something asks for one.
      *
-     * Partial unique indexes hold the invariant — one linked code per asset and
-     * per kit — so the failure mode without a lock is a constraint error shown
-     * to whichever caller arrives second, not two codes. Taking a lock on the
-     * owning row and re-reading under it turns that into the right answer: the
-     * loser returns the code the winner created. The indexes have to be partial
-     * because both columns are nullable on purpose — an unclaimed printed code
-     * has neither, and there are many at once.
+     * Nothing in the schema holds this invariant, so the lock is what does.
+     * `Qr.assetId` and `Qr.kitId` are nullable and non-unique because an
+     * unclaimed printed code has neither and there are many at once, which
+     * rules out a plain unique constraint. Take a lock on the owning row,
+     * re-read under it, and only then create: without that, two callers
+     * arriving together — a preview and a download, two tabs — both see nothing
+     * and both create one, and the kit ends up with two codes at two URLs whose
+     * scan histories diverge. Two rows like that reached production before this
+     * lock existed.
      */
     if (!qr) {
       qr = await db.$transaction(async (tx) => {
