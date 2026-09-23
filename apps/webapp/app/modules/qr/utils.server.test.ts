@@ -5,11 +5,11 @@
  * there isn't any — kits created by a content import have none until something
  * asks. That makes it a check-then-create.
  *
- * Partial unique indexes stop a duplicate reaching the table, so what these
- * cases pin is that two simultaneous first uses resolve *gracefully*: the
- * second caller returns the code the first created, rather than seeing the
- * constraint error the database would otherwise raise. The lock is what buys
- * that, and nothing about the response would reveal its absence.
+ * Nothing in the schema stops a second code being written, so the lock these
+ * cases pin is the only thing that does. The failure it prevents is silent:
+ * each code renders a valid label at its own URL, and a kit's scan history
+ * divides between them with nothing to indicate why. Two such rows reached
+ * production before the lock existed.
  *
  * @see {@link file://./utils.server.ts}
  */

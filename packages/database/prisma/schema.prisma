@@ -658,13 +658,6 @@ model Qr {
   scans     Scan[]
 
   @@index([assetId], name: "Qr_assetId_idx")
-  // At most one code per asset and one per kit. A plain @@unique cannot say
-  // this: both columns are nullable on purpose — an unclaimed printed code has
-  // neither, and there are many such rows at once — so the constraint has to be
-  // partial. Prisma has no syntax for a partial index, so the two are created
-  // in migrations/20260922120000_qr_one_code_per_asset_and_kit.
-  // @@unique([assetId]) where assetId is not null
-  // @@unique([kitId])   where kitId   is not null
   // Indexes for foreign keys
   @@index([kitId])
   @@index([userId])
