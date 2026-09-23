@@ -1,12 +1,16 @@
 /**
- * Route tests for the scanner's bulk release-custody endpoint.
+ * The bulk release-custody endpoint, from the per-unit angle.
  *
- * The endpoint splits one submission into a per-unit path and a whole-asset
- * path on the presence of a `quantities` entry, and each `releaseQuantity`
- * call commits its own transaction. These pin the split and, more importantly,
- * that a refusal happens before anything is written.
+ * It splits one submission into a per-unit path and a whole-asset path on the
+ * presence of a `quantities` entry, and each `releaseQuantity` call commits
+ * its own transaction. These pin the split and, more importantly, that a
+ * refusal happens before anything is written.
  *
- * @see {@link file://./../../app/routes/api+/assets.bulk-release-custody.ts}
+ * The role angle lives in `assets.bulk-release-custody.test.ts` beside this
+ * file — that suite covers which selections the route's own self-service guard
+ * judges, which deliberately excludes quantity-tracked rows.
+ *
+ * @see {@link file://./../../../app/routes/api+/assets.bulk-release-custody.ts}
  */
 
 import { OrganizationRoles } from "@prisma/client";

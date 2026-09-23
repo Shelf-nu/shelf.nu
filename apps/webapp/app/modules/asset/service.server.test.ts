@@ -1233,6 +1233,7 @@ describe("releaseQuantity — activity events", () => {
       quantity: 4,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(mockRecordEvent).toHaveBeenCalledTimes(1);
@@ -1276,6 +1277,7 @@ describe("releaseQuantity — activity events", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     // `updateMany` + a `status: { not: CHECKED_OUT }` guard, so releasing the
@@ -1311,6 +1313,7 @@ describe("releaseQuantity — activity events", () => {
       quantity: 4,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(mockAssetUpdate).not.toHaveBeenCalledWith(
@@ -1389,6 +1392,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     // Exactly one log, classified as consumption. Writing RETURN here is the
@@ -1425,6 +1429,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       consumed: 10,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     // 10 gloves used up, 30 handed back in good condition. Destroying all 40
@@ -1459,6 +1464,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       consumed: 10,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     // One event per field that changed: stock dropped by the consumed
@@ -1501,6 +1507,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       consumed: 0,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
@@ -1537,6 +1544,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
@@ -1562,6 +1570,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
@@ -1586,6 +1595,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
         consumed: 5,
         userId: "user-1",
         organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
       })
     ).rejects.toThrow(/consumable/i);
 
@@ -1606,6 +1616,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
         consumed: 11,
         userId: "user-1",
         organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
       })
     ).rejects.toThrow();
 
@@ -1631,6 +1642,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     // The three write methods the mocked client exposes — the same set
@@ -1660,6 +1672,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(db.assetLocation.update).toHaveBeenCalledWith({
@@ -1689,6 +1702,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     expect(db.assetLocation.update).not.toHaveBeenCalled();
@@ -1709,6 +1723,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 40,
       userId: "user-1",
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
     });
 
     // Guarded `updateMany` — see the sibling assertion in the
@@ -3393,6 +3408,110 @@ describe("checkOutQuantity — SELF_SERVICE guard", () => {
     expect(error).toBeInstanceOf(ShelfError);
     expect(error.status).toBe(403);
     expect(mockCustodyCreate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Releasing carries the same self-service restriction as assigning, and for
+ * the release path this is the ONLY place it can live: the bulk route
+ * deliberately excludes quantity-tracked rows from its own guard, so that
+ * one asset a colleague holds cannot refuse a whole selection nobody asked
+ * to release.
+ */
+describe("releaseQuantity — SELF_SERVICE guard", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockTeamMemberFindFirst = db.teamMember.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyUpdate = db.custody.update as ReturnType<typeof vitest.fn>;
+  const mockCustodyDelete = db.custody.delete as ReturnType<typeof vitest.fn>;
+
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 100,
+    consumptionType: "RETURNABLE" as const,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    // why: earlier suites leave rejections on the asset write mocks;
+    // `clearAllMocks` drops call history but keeps implementations.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...lockedAsset });
+    (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "custody-1",
+      quantity: 20,
+    });
+    (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 20 },
+    });
+  });
+
+  it("refuses a SELF_SERVICE actor releasing someone else's hold", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "other-user" } });
+
+    let caught: unknown;
+    try {
+      await releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-colleague",
+        quantity: 5,
+        userId: "user-1",
+        organizationId: "org-1",
+        role: OrganizationRoles.SELF_SERVICE,
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    const error = caught as ShelfError;
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(403);
+    expect(error.message).toBe(
+      "Self service users can only release custody they hold themselves."
+    );
+    // The refusal must land before the custody row is touched.
+    expect(mockCustodyUpdate).not.toHaveBeenCalled();
+    expect(mockCustodyDelete).not.toHaveBeenCalled();
+  });
+
+  it("allows a SELF_SERVICE actor releasing their own hold", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "user-1" } });
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-self",
+      quantity: 5,
+      userId: "user-1",
+      organizationId: "org-1",
+      role: OrganizationRoles.SELF_SERVICE,
+    });
+
+    expect(mockCustodyUpdate).toHaveBeenCalled();
+  });
+
+  it("does not restrict the holder for a non-SELF_SERVICE actor", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "other-user" } });
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-colleague",
+      quantity: 5,
+      userId: "user-1",
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    expect(mockCustodyUpdate).toHaveBeenCalled();
   });
 });
 
@@ -5526,6 +5645,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
       });
 
       expect(currentStatus).toBe(AssetStatus.CHECKED_OUT);
@@ -5540,6 +5660,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
       });
 
       expect(currentStatus).toBe(AssetStatus.AVAILABLE);

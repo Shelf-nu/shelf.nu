@@ -199,6 +199,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         quantity: quantities[assetId],
         userId,
         organizationId,
+        role,
       });
     }
 
