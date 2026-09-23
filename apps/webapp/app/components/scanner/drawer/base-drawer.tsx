@@ -58,8 +58,18 @@ export default function BaseDrawer({
   footer,
   collapsedHeight = 170,
 }: BaseDrawerProps) {
+  // The scanner's global mode owns whether the drawer is open. Hardware-
+  // scanner mode has no viewfinder to watch, so the scanned list is what the
+  // operator needs on screen; camera mode keeps the drawer low so the
+  // viewfinder stays visible.
+  const mode = useGlobalModeViaObserver();
+
+  // Seeded from the mode the drawer MOUNTS into, not just from later switches:
+  // on a desktop-width viewport scanner mode is already active on the first
+  // render, so a reconciler that fires only on a CHANGE of mode would leave
+  // that drawer collapsed forever.
   const [expanded, setExpanded] = useState(
-    defaultExpanded !== undefined ? defaultExpanded : false
+    defaultExpanded || mode === "scanner"
   );
   const { vh } = useViewportHeight();
 
@@ -74,13 +84,12 @@ export default function BaseDrawer({
   const [chromeHeight, setChromeHeight] = useState<number | null>(null);
   const [footerHeight, setFooterHeight] = useState(0);
 
-  // Handle scanning mode changes. When the global scanning mode toggles, the
-  // drawer should snap to the mode's preferred expanded state (scanner = open,
-  // everything else = collapsed). We compare against the previous mode during
-  // render and reconcile in-place — the recommended pattern for resetting
-  // state on a prop/observer change, per
+  // Snap to the new mode's preferred state whenever the mode toggles. The
+  // previous mode is compared during render and the state reconciled in place
+  // — the recommended pattern for adjusting state on a prop/observer change,
+  // per
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
-  const mode = useGlobalModeViaObserver();
+  // This handles switches only; the mount case is seeded above.
   const previousModeRef = useRef(mode);
   if (previousModeRef.current !== mode) {
     previousModeRef.current = mode;

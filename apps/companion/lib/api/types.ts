@@ -803,10 +803,36 @@ export type BookingAsset = {
   assetKitId?: string | null;
   /** Per-slice breakdown; present when the server sends it (see gap 1). */
   slices?: BookingAssetSlice[];
-  /** Units currently checked out on this booking that can still be checked in. */
+  /**
+   * Booked units not yet returned, consumed, lost or damaged, and the cap the
+   * check-in endpoint applies to every claim.
+   *
+   * NOT a check-in eligibility test on its own: it counts booked units that
+   * never left, so a row nothing was ever checked out for reads as fully
+   * outstanding. `unitsStillOut` in `lib/booking-kit-rows` is that test.
+   */
   remainingToCheckIn?: number;
   /** Units still reserved on this booking that can still be checked out. */
   remainingToCheckOut?: number;
+  /**
+   * Units this booking has SENT OUT, summed across every slice and every
+   * departure and NOT capped at the booked quantity — a row that went out,
+   * came back and went out again reports more than it booked.
+   *
+   * Named apart from the web's `checkedOutQuantity` on purpose: that one is
+   * per-slice and capped at booked, and so is the counter of the same name the
+   * lifecycle progress bar reads. Reading this one with either rule in mind
+   * gives a wrong answer that still renders. Absent from an older server.
+   */
+  dispatchedUnitsTotal?: number;
+  /**
+   * Units returned, consumed, lost or damaged on this booking, summed across
+   * every slice and likewise UNCAPPED. Only meaningful against
+   * {@link BookingAsset.dispatchedUnitsTotal} — the two measure the same
+   * lifetime, and mixing either with a capped counter misreports a repeat
+   * trip. Absent from an older server.
+   */
+  dispositionedUnitsTotal?: number;
 };
 
 /**
@@ -958,6 +984,12 @@ export type BookingDetailResponse = {
    */
   checkedOutAssetIds?: string[];
   canCheckout: boolean;
+  /**
+   * Whether the EXPLICIT check-in paths — scan and select — are offered. They
+   * submit to `partialCheckinBooking`, which refuses a row no slice of which
+   * ever went out, so this is false on an active booking holding only
+   * never-dispatched rows. Use {@link canCheckinAll} for the quick path.
+   */
   canCheckin: boolean;
   /**
    * False when the workspace requires explicit (scan/select) check-in for the
@@ -965,6 +997,16 @@ export type BookingDetailResponse = {
    * web, which never offers quick check-in under that policy.
    */
   canQuickCheckin: boolean;
+  /**
+   * Whether the quick "Check In All" is offered: an active booking, the
+   * permission, and a workspace that allows quick check-in. It completes the
+   * booking whatever went out, so unlike {@link canCheckin} it does not ask
+   * whether anything is still in the field — matching web's `CheckinDropdown`.
+   *
+   * Absent on an older server; read absence as `canCheckin && canQuickCheckin`,
+   * which is how that server gated the same button.
+   */
+  canCheckinAll?: boolean;
   /**
    * False when the workspace requires explicit (scan/select) check-out for the
    * caller's role. The app then hides the one-tap "Check Out All Assets", which
