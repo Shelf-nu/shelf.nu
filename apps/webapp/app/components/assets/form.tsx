@@ -7,6 +7,11 @@ import {
   PopoverPortal,
   PopoverContent,
 } from "@radix-ui/react-popover";
+import {
+  ASSET_TYPE_LABELS,
+  CONSUMPTION_TYPE_DESCRIPTIONS,
+  CONSUMPTION_TYPE_LABELS,
+} from "@shelf/labels";
 import { useAtom, useAtomValue } from "jotai";
 import {
   useActionData,
@@ -1480,17 +1485,22 @@ function BulkCreatePreview({ titles }: { titles: string[] }) {
   );
 }
 
-/** Radio card options for the tracking method selector. */
+/**
+ * Radio card options for the tracking method selector.
+ *
+ * Titles come from `@shelf/labels` so the picker, the CSV importer's errors and
+ * the companion app name a tracking method identically.
+ */
 const TRACKING_OPTIONS = [
   {
     value: AssetType.INDIVIDUAL,
-    title: "Individually tracked",
+    title: ASSET_TYPE_LABELS.INDIVIDUAL,
     description:
       "Each item gets its own QR code, custody record, and booking entry. Best for unique or high-value items.",
   },
   {
     value: AssetType.QUANTITY_TRACKED,
-    title: "Tracked by quantity",
+    title: ASSET_TYPE_LABELS.QUANTITY_TRACKED,
     description:
       "A single record represents a pool of identical items. Custody and bookings are managed by numeric quantity.",
   },
@@ -1576,15 +1586,20 @@ function TrackingMethodCards({
   return cards;
 }
 
-/** Label + description pairs for consumption type options. */
+/**
+ * Label + description pairs for consumption type options.
+ *
+ * Both halves come from `@shelf/labels`, so this picker and the CSV importer's
+ * errors describe a consumption type in the same words.
+ */
 const CONSUMPTION_OPTIONS = [
   {
     value: ConsumptionType.ONE_WAY,
-    label: "Used up (one-way) — consumed and not returned",
+    label: `${CONSUMPTION_TYPE_LABELS.ONE_WAY} — ${CONSUMPTION_TYPE_DESCRIPTIONS.ONE_WAY}`,
   },
   {
     value: ConsumptionType.TWO_WAY,
-    label: "Returnable (two-way) — checked out and returned",
+    label: `${CONSUMPTION_TYPE_LABELS.TWO_WAY} — ${CONSUMPTION_TYPE_DESCRIPTIONS.TWO_WAY}`,
   },
 ] as const;
 

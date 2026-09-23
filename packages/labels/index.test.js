@@ -27,6 +27,10 @@ import {
   AUDIT_DELETED_ASSET_LABELS,
   AUDIT_STATUS_LABELS,
   AUDIT_STATUS_TONES,
+  ASSET_TYPE_ADJECTIVES,
+  ASSET_TYPE_LABELS,
+  CONSUMPTION_TYPE_DESCRIPTIONS,
+  CONSUMPTION_TYPE_LABELS,
   KIT_STATUS_LABELS,
   auditAssetStatusLabel,
   auditDeletedAssetLabel,
@@ -219,4 +223,23 @@ test("a deleted asset with no snapshotted title says only what it is", () => {
 
 test("surrounding whitespace never reaches the rendered name", () => {
   assert.equal(auditDeletedAssetLabel("  Tripod  "), "Tripod (deleted)");
+});
+
+test("ASSET_TYPE maps cover the AssetType enum", () => {
+  // enum AssetType { INDIVIDUAL, QUANTITY_TRACKED }
+  assertSameKeys(ASSET_TYPE_LABELS, ["INDIVIDUAL", "QUANTITY_TRACKED"]);
+  // The adjective is used wherever the label would sit in front of a noun, so
+  // a missing one renders "undefined assets".
+  assertSameKeys(ASSET_TYPE_ADJECTIVES, Object.keys(ASSET_TYPE_LABELS));
+});
+
+test("CONSUMPTION_TYPE maps cover the ConsumptionType enum", () => {
+  // enum ConsumptionType { ONE_WAY, TWO_WAY }
+  assertSameKeys(CONSUMPTION_TYPE_LABELS, ["ONE_WAY", "TWO_WAY"]);
+  // A label without its description would render "Used up (one-way) —
+  // undefined" wherever the two are joined.
+  assertSameKeys(
+    CONSUMPTION_TYPE_DESCRIPTIONS,
+    Object.keys(CONSUMPTION_TYPE_LABELS)
+  );
 });

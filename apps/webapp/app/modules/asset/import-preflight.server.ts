@@ -17,6 +17,7 @@
  */
 import type { CustomField } from "@prisma/client";
 import { AssetType, CustomFieldType } from "@prisma/client";
+import { ASSET_TYPE_ADJECTIVES } from "@shelf/labels";
 
 import {
   buildCustomFieldValue,
@@ -194,7 +195,7 @@ export function validateContentImportRows({
       errors.push({
         row,
         title: "Asset model not allowed",
-        message: `Asset "${asset.title}": asset models can only be linked to individually tracked assets. Remove the assetModel cell, or set the type column to INDIVIDUAL.`,
+        message: `Asset "${asset.title}": asset models can only be linked to ${ASSET_TYPE_ADJECTIVES.INDIVIDUAL} assets. Remove the assetModel cell, or set the type column to INDIVIDUAL.`,
       });
     }
 
