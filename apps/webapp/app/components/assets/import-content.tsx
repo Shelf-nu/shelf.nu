@@ -313,7 +313,7 @@ export const ImportContent = () => {
                 The first row is used as column headers — it won't be imported
               </li>
               <li>
-                Your file is checked before anything is imported — if any row is
+                Your file is checked before anything is imported. If any row is
                 invalid, nothing is created and you'll get a list of every
                 problem to fix
               </li>
@@ -617,7 +617,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                           key={`${rowError.row}-${rowError.message}`}
                         >
                           <td className="px-2 py-1">
-                            {rowError.row > 0 ? rowError.row : "—"}
+                            {rowError.row > 0 ? rowError.row : "File"}
                           </td>
                           <td className="px-2 py-1">{rowError.message}</td>
                         </tr>

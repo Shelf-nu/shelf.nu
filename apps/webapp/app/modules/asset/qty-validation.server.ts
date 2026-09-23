@@ -29,6 +29,7 @@ import { AssetType, ConsumptionType } from "@prisma/client";
 import {
   ASSET_TYPE_ADJECTIVES,
   ASSET_TYPE_LABELS,
+  CONSUMPTION_TYPE_ADJECTIVES,
   CONSUMPTION_TYPE_DESCRIPTIONS,
   CONSUMPTION_TYPE_LABELS,
 } from "@shelf/labels";
@@ -52,10 +53,10 @@ const LABEL = "Assets";
  * Both consumption values, each named the way the asset form names it.
  *
  * A CSV cell has to hold the raw enum member, so the literal leads and the
- * label explains it — a message that gave only the label would read well and
+ * label explains it. A message that gave only the label would read well and
  * leave the reader with nothing to type.
  */
-const CONSUMPTION_CHOICES = `ONE_WAY \u2014 ${CONSUMPTION_TYPE_LABELS.ONE_WAY}, ${CONSUMPTION_TYPE_DESCRIPTIONS.ONE_WAY} \u2014 or TWO_WAY \u2014 ${CONSUMPTION_TYPE_LABELS.TWO_WAY}, ${CONSUMPTION_TYPE_DESCRIPTIONS.TWO_WAY}`;
+const CONSUMPTION_CHOICES = `ONE_WAY (${CONSUMPTION_TYPE_ADJECTIVES.ONE_WAY}: ${CONSUMPTION_TYPE_DESCRIPTIONS.ONE_WAY}) or TWO_WAY (${CONSUMPTION_TYPE_ADJECTIVES.TWO_WAY}: ${CONSUMPTION_TYPE_DESCRIPTIONS.TWO_WAY})`;
 
 /** Attributive form, for prose that puts the method in front of a noun. */
 const QTY_TRACKED = ASSET_TYPE_ADJECTIVES.QUANTITY_TRACKED;
