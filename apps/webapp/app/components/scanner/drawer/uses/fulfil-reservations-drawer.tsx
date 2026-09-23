@@ -689,7 +689,6 @@ export default function FulfilReservationsDrawer({
     count: Math.max(0, model.remaining - model.matched),
   }));
 
-
   return (
     <ConfigurableDrawer
       schema={fulfilAndCheckoutSchema}
