@@ -466,6 +466,62 @@ export default function FulfilReservationsDrawer({
     return rows;
   }, [progressByModel]);
 
+  // Declared above the early return below: every hook in this component
+  // must run on every render, and the blocker's inputs are all resolved by
+  // this point.
+  /**
+   * Units the scan would take out of a kit.
+   *
+   * An INDIVIDUAL asset committed to a kit is not a free unit: sending it out
+   * alone answers the reservation and checks the booking out with the kit
+   * split — one item in the field, the rest on the shelf. The server refuses
+   * these, so the block here is what turns a refusal at submit into something
+   * the operator can see and fix while scanning.
+   *
+   * Not blocked when the asset's kit was scanned too (that is how a member is
+   * meant to go out) or when it is already on the booking (it is committed
+   * through the row it has, so the scan takes it nowhere new).
+   */
+  const kitMemberScanIds = useMemo(() => {
+    const scannedKitIds = new Set(
+      Object.values(items)
+        .filter((item) => item?.type === "kit" && item?.data)
+        .map((item) => (item?.data as KitFromQr).id)
+    );
+
+    return scannedBuckets.rows
+      .filter((row) => {
+        const asset = row.asset;
+        if (!asset || asset.type !== AssetType.INDIVIDUAL) return false;
+        if (alreadyIncludedIds.has(asset.id)) return false;
+        const memberships = asset.assetKits ?? [];
+        if (memberships.length === 0) return false;
+        return !memberships.some((membership) =>
+          scannedKitIds.has(membership.kitId)
+        );
+      })
+      .map((row) => row.asset!.id);
+  }, [scannedBuckets.rows, items, alreadyIncludedIds]);
+
+  const [hasBlockers, Blockers] = createBlockers({
+    blockerConfigs: [
+      {
+        condition: kitMemberScanIds.length > 0,
+        count: kitMemberScanIds.length,
+        message: (count: number) => (
+          <>
+            <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong>
+            {count > 1 ? "belong" : "belongs"} to a kit.
+          </>
+        ),
+        description:
+          "Scan the kit to take all of it, or scan another unit of the same model. Sending one member out on its own would split the kit.",
+        onResolve: () => removeAssetsFromList(kitMemberScanIds),
+      },
+    ],
+    onResolveAll: () => removeAssetsFromList(kitMemberScanIds),
+  });
+
   // Early return AFTER all hooks so the hook order stays stable
   // across renders (React rules of hooks). The session only turns
   // null during a transient unmount window — the init hook's cleanup
@@ -600,58 +656,6 @@ export default function FulfilReservationsDrawer({
     count: Math.max(0, model.remaining - model.matched),
   }));
 
-  /**
-   * Units the scan would take out of a kit.
-   *
-   * An INDIVIDUAL asset committed to a kit is not a free unit: sending it out
-   * alone answers the reservation and checks the booking out with the kit
-   * split — one item in the field, the rest on the shelf. The server refuses
-   * these, so the block here is what turns a refusal at submit into something
-   * the operator can see and fix while scanning.
-   *
-   * Not blocked when the asset's kit was scanned too (that is how a member is
-   * meant to go out) or when it is already on the booking (it is committed
-   * through the row it has, so the scan takes it nowhere new).
-   */
-  const kitMemberScanIds = useMemo(() => {
-    const scannedKitIds = new Set(
-      Object.values(items)
-        .filter((item) => item?.type === "kit" && item?.data)
-        .map((item) => (item?.data as KitFromQr).id)
-    );
-
-    return scannedBuckets.rows
-      .filter((row) => {
-        const asset = row.asset;
-        if (!asset || asset.type !== AssetType.INDIVIDUAL) return false;
-        if (alreadyIncludedIds.has(asset.id)) return false;
-        const memberships = asset.assetKits ?? [];
-        if (memberships.length === 0) return false;
-        return !memberships.some((membership) =>
-          scannedKitIds.has(membership.kitId)
-        );
-      })
-      .map((row) => row.asset!.id);
-  }, [scannedBuckets.rows, items, alreadyIncludedIds]);
-
-  const [hasBlockers, Blockers] = createBlockers({
-    blockerConfigs: [
-      {
-        condition: kitMemberScanIds.length > 0,
-        count: kitMemberScanIds.length,
-        message: (count: number) => (
-          <>
-            <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong>
-            {count > 1 ? "belong" : "belongs"} to a kit.
-          </>
-        ),
-        description:
-          "Scan the kit to take all of it, or scan another unit of the same model. Sending one member out on its own would split the kit.",
-        onResolve: () => removeAssetsFromList(kitMemberScanIds),
-      },
-    ],
-    onResolveAll: () => removeAssetsFromList(kitMemberScanIds),
-  });
 
   return (
     <ConfigurableDrawer
