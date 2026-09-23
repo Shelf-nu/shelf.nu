@@ -50,6 +50,11 @@ import {
   getOrCreateCustomerId,
 } from "~/utils/stripe.server";
 
+/**
+ * Loads the signed-in user's own Stripe customer, subscriptions, invoices and
+ * prices, plus the active, paid Team workspaces they are a member of.
+ * Redirects to `/account-details/general` when premium features are off.
+ */
 export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -340,6 +345,11 @@ export const handle = {
   ),
 };
 
+/**
+ * The user's own plan, add-ons and invoices, with the pricing table for anyone
+ * who has no workspace plan. An invited member covered by a paid team sees the
+ * team notice in place of the Free message.
+ */
 export default function SubscriptionPage() {
   const {
     title,
