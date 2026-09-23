@@ -99,8 +99,12 @@ function fakeFindMany(args: {
 }
 
 async function submit(assetIds: string[]) {
+  // Indexed names, as `BulkUpdateDialogContent` emits them. A repeated
+  // `assetIds[]` key would collapse to its last value in `parseData`, so only
+  // one id would reach the guard and the multi-asset cases below would not
+  // actually be multi-asset.
   const body = new URLSearchParams();
-  assetIds.forEach((id) => body.append("assetIds[]", id));
+  assetIds.forEach((id, i) => body.append(`assetIds[${i}]`, id));
 
   const response = await action(
     createActionArgs({
