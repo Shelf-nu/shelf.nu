@@ -518,7 +518,9 @@ suite on every PR, split across four parallel runners (`--shard`).
 
 **Keep local `main` current.** `--changed main` diffs against your local `main`
 branch, so a stale `main` widens the diff and runs more tests than needed —
-never fewer. Changes to `package.json` or the Vite/Vitest config re-run everything.
+never fewer. Changes to `package.json`, the Vite/Vitest config, a `[.csv]` route or an
+`api+/mobile+/` route re-run everything (`forceRerunTriggers` in `vitest.config.ts`): the
+contract tests guarding those routes read them from disk, so `--changed` cannot link them.
 
 ### Writing & Organizing Tests
 

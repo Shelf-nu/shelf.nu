@@ -5,14 +5,14 @@ import { defineConfig } from "vite";
 import type { UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tsconfigPaths from "vite-tsconfig-paths";
+import { configDefaults } from "vitest/config";
 
 export default defineConfig({
   plugins: [
     react(),
     // Only the webapp's own tsconfig defines the aliases tests use (`~/*`,
     // `@factories`, `@mocks`). Pointing the plugin at it stops it crawling
-    // every tsconfig in the monorepo — including the companion's, which
-    // extends an Expo base that CI's webapp-only install does not contain.
+    // every tsconfig in the monorepo.
     tsconfigPaths({ projects: ["./tsconfig.json"] }),
   ],
   test: {
@@ -25,6 +25,20 @@ export default defineConfig({
     // default. Tests keep the default `testTimeout`, so a slow test body still
     // fails fast.
     hookTimeout: 30_000,
+    // `vitest --changed` (behind `test:changed` and `validate`) picks tests
+    // through the import graph. The CSV and mobile-auth contract tests find
+    // their routes with `readdirSync` instead of importing them, so no graph
+    // edge links a route edit to them. A change under these globs forces the
+    // full suite so those contracts always run. Keep each glob in step with
+    // the directory its contract test enumerates, and keep the defaults
+    // (package.json, vite/vitest config) — setting this option replaces them.
+    forceRerunTriggers: [
+      ...configDefaults.forceRerunTriggers,
+      // test/routes-tests/csv-download-contract.test.ts
+      "**/app/routes/**/*\\[.csv\\].{ts,tsx}",
+      // test/routes-tests/api+/mobile-auth-contract.test.ts
+      "**/app/routes/api+/mobile+/**",
+    ],
     // Route tests live in `test/routes-tests/`, NEVER under `app/routes/` —
     // the dev server warms every file under `app/routes/` as a client module,
     // so a co-located route test importing a `*.server` module breaks

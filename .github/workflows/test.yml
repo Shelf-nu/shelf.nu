@@ -129,11 +129,12 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      # Only the webapp and the workspace packages it depends on — about a
-      # third fewer packages than a full install (no companion/Expo, docs or
-      # root tooling). The `...` suffix is what pulls in its dependencies.
+      # A full install, not `--filter "@shelf/webapp..."`: webapp tests import
+      # companion source (e.g. test/mobile/qr-utils.test.ts), and Vite reads
+      # the companion's tsconfig, which extends an Expo base. With the pnpm
+      # cache warm the full install takes seconds anyway.
       - name: 📥 Install deps
-        run: pnpm install --frozen-lockfile --filter "@shelf/webapp..."
+        run: pnpm install --frozen-lockfile
         env:
           # The next step generates the client from the real schema path;
           # Prisma's own postinstall cannot find it and would only warn.
@@ -169,6 +170,10 @@ jobs:
         run: pnpm install --frozen-lockfile
         env:
           PRISMA_SKIP_POSTINSTALL_GENERATE: "true"
+
+      # @shelf/database's own tests import the generated client.
+      - name: 🔧 Generate Prisma client
+        run: pnpm --filter @shelf/database run db:generate
 
       # Workspace packages run their own suites (node:test); this step is the
       # only place CI runs a package's `test` script. NOT `turbo run test`:
