@@ -153,10 +153,7 @@ import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
-import {
-  MAX_REPORTED_ROW_ERRORS,
-  validateContentImportRows,
-} from "./import-preflight.server";
+import { validateContentImportRows } from "./import-preflight.server";
 import type {
   MoveAssetLocationUnitsArgs,
   MoveUnitsResult,
@@ -4652,26 +4649,31 @@ export async function createAssetsFromContentImport({
      * transaction, so a row rejected part way through would leave everything
      * before it committed — and a retry would create those rows a second time.
      */
+    // Mirrors `upsertCustomField`'s own lookup, which matches on name and
+    // `deletedAt` and ignores `active` — filtering on active here would miss a
+    // conflict it goes on to reject.
     const existingCustomFields = await db.customField.findMany({
-      where: { organizationId, active: true, deletedAt: null },
+      where: { organizationId, deletedAt: null },
       select: { name: true, type: true },
     });
 
-    const rowErrors = validateContentImportRows({ data, existingCustomFields });
+    const { errors: rowErrors, totalErrors } = validateContentImportRows({
+      data,
+      existingCustomFields,
+    });
 
     if (rowErrors.length > 0) {
-      const total = rowErrors.length;
       throw new ShelfError({
         cause: null,
         title: "Import file has errors",
-        message: `Found ${total} problem${
-          total === 1 ? "" : "s"
+        message: `Found ${totalErrors} problem${
+          totalErrors === 1 ? "" : "s"
         } in your file. Nothing was imported — fix the rows below and upload again.`,
         additionalData: {
           userId,
           organizationId,
-          rowErrors: rowErrors.slice(0, MAX_REPORTED_ROW_ERRORS),
-          totalErrors: total,
+          rowErrors,
+          totalErrors,
         },
         label: "Assets",
         status: 400,
