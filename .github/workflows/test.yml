@@ -129,8 +129,15 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # Only the webapp and the workspace packages it depends on — about a
+      # third fewer packages than a full install (no companion/Expo, docs or
+      # root tooling). The `...` suffix is what pulls in its dependencies.
       - name: 📥 Install deps
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter "@shelf/webapp..."
+        env:
+          # The next step generates the client from the real schema path;
+          # Prisma's own postinstall cannot find it and would only warn.
+          PRISMA_SKIP_POSTINSTALL_GENERATE: "true"
 
       - name: 🔧 Generate Prisma client
         run: pnpm --filter @shelf/database run db:generate
@@ -138,22 +145,41 @@ jobs:
       - name: ⚡ Run vitest
         run: pnpm --filter @shelf/webapp test -- --run --shard=${{ matrix.shard }}/4
 
-      # The suites below are small and not sharded, so they run once, on the
-      # first shard.
-      #
-      # Workspace packages run their own suites (node:test), which the webapp
-      # vitest run above does not reach; this step is the only place CI runs a
-      # package's `test` script. NOT `turbo run test`: turbo.json marks that
-      # task persistent (vitest watch mode), so it would hang the job.
+  # Suites the webapp vitest run does not reach. They are small, so they share
+  # one job, running beside the shards rather than after them.
+  workspace-tests:
+    name: 🧩 Package & companion tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 📥 Install deps
+        run: pnpm install --frozen-lockfile
+        env:
+          PRISMA_SKIP_POSTINSTALL_GENERATE: "true"
+
+      # Workspace packages run their own suites (node:test); this step is the
+      # only place CI runs a package's `test` script. NOT `turbo run test`:
+      # turbo.json marks that task persistent (vitest watch mode), so it would
+      # hang the job.
       - name: 🧩 Run workspace package tests
-        if: matrix.shard == 1
         run: pnpm -r --filter "./packages/*" run test
 
-      # Same reasoning one directory over: the companion's suite is node:test
-      # via tsx and the webapp vitest run does not reach it. Its `lib/**` tests
-      # are pure and take under a second — no simulator, no database.
+      # The companion's suite is node:test via tsx. Its `lib/**` tests are pure
+      # and take under a second — no simulator, no database.
       - name: 📱 Run companion tests
-        if: matrix.shard == 1
         run: pnpm --filter @shelf/companion test
 
   # One stable check that reports the combined result of every shard, so the
