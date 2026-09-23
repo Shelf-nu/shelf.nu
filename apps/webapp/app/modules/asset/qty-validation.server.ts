@@ -159,7 +159,7 @@ export function validateQtyTrackedFields(
       throw new ShelfError({
         cause: null,
         title: "Invalid asset type",
-        message: `Invalid type "${cells.type}" for ${rowLabel}. Must be "INDIVIDUAL" or "QUANTITY_TRACKED".`,
+        message: `Invalid type "${cells.type}" for ${rowLabel}. Use INDIVIDUAL (individually tracked) or QUANTITY_TRACKED (tracked by quantity).`,
         label: LABEL,
         status: 400,
         shouldBeCaptured: false,
@@ -203,7 +203,7 @@ export function validateQtyTrackedFields(
         throw new ShelfError({
           cause: null,
           title: "Quantity required",
-          message: `QUANTITY_TRACKED ${rowLabel} needs a quantity of at least 1. QUANTITY_TRACKED rows need both quantity and consumptionType.`,
+          message: `Quantity-tracked ${rowLabel} needs a quantity of at least 1. Quantity-tracked rows need both the quantity and consumptionType columns filled in.`,
           label: LABEL,
           status: 400,
           shouldBeCaptured: false,
@@ -214,7 +214,7 @@ export function validateQtyTrackedFields(
       throw new ShelfError({
         cause: null,
         title: "Quantity required",
-        message: `QUANTITY_TRACKED ${rowLabel} has quantity "${cells.quantity}", but a quantity-tracked asset must hold at least 1. Leave the cell empty to keep the current stock level.`,
+        message: `Quantity-tracked ${rowLabel} has quantity "${cells.quantity}", but a quantity-tracked asset must hold at least 1. Leave the cell empty to keep the current stock level.`,
         label: LABEL,
         status: 400,
         shouldBeCaptured: false,
@@ -226,7 +226,7 @@ export function validateQtyTrackedFields(
       throw new ShelfError({
         cause: null,
         title: "Invalid quantity for INDIVIDUAL",
-        message: `INDIVIDUAL assets must have quantity 1 (or omit the column). Got "${cells.quantity}" for ${rowLabel}. To track stock instead, set type=QUANTITY_TRACKED — which also needs quantity (a whole number greater than 0) and consumptionType (ONE_WAY or TWO_WAY).`,
+        message: `Individually tracked assets must have quantity 1 (or omit the column). Got "${cells.quantity}" for ${rowLabel}. To track stock instead, set the type column to QUANTITY_TRACKED — which also needs quantity (a whole number greater than 0) and consumptionType (ONE_WAY or TWO_WAY).`,
         label: LABEL,
         status: 400,
         shouldBeCaptured: false,
@@ -277,7 +277,7 @@ export function validateQtyTrackedFields(
       throw new ShelfError({
         cause: null,
         title: "Invalid consumption type",
-        message: `Invalid consumptionType "${cells.consumptionType}" for ${rowLabel}. Must be "ONE_WAY" or "TWO_WAY".`,
+        message: `Invalid consumptionType "${cells.consumptionType}" for ${rowLabel}. Use ONE_WAY (consumed on checkout) or TWO_WAY (returned with a consumption report).`,
         label: LABEL,
         status: 400,
         shouldBeCaptured: false,
@@ -301,7 +301,7 @@ export function validateQtyTrackedFields(
     throw new ShelfError({
       cause: null,
       title: "Consumption type required",
-      message: `QUANTITY_TRACKED ${rowLabel} is missing consumptionType: use ONE_WAY (consumed on checkout) or TWO_WAY (returned with a consumption report). QUANTITY_TRACKED rows need both quantity and consumptionType.`,
+      message: `Quantity-tracked ${rowLabel} is missing a consumption type: set consumptionType to ONE_WAY (consumed on checkout) or TWO_WAY (returned with a consumption report). Quantity-tracked rows need both the quantity and consumptionType columns filled in.`,
       label: LABEL,
       status: 400,
       shouldBeCaptured: false,
