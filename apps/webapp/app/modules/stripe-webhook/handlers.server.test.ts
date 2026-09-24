@@ -153,6 +153,7 @@ import type { WebhookUser } from "./helpers.server";
 
 const TEAM_PRODUCT = "prod_team";
 const BARCODES_PRODUCT = "prod_barcodes";
+const BARCODES_PRODUCT_V2 = "prod_barcodes_v2";
 const AUDITS_PRODUCT = "prod_audits";
 
 /** The Stripe products the line items resolve to, keyed by product id. */
@@ -167,6 +168,10 @@ const PRODUCTS: Record<
   },
   [BARCODES_PRODUCT]: {
     id: BARCODES_PRODUCT,
+    metadata: { product_type: "addon", addon_type: "barcodes" },
+  },
+  [BARCODES_PRODUCT_V2]: {
+    id: BARCODES_PRODUCT_V2,
     metadata: { product_type: "addon", addon_type: "barcodes" },
   },
 };
@@ -453,6 +458,29 @@ describe("handleSubscriptionUpdated", () => {
       expect.objectContaining({ customer: "cus_1" })
     );
     expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps an add-on whose product was swapped for another product of the same add-on", async () => {
+    const subscription = buildSubscription({
+      productIds: [TEAM_PRODUCT, BARCODES_PRODUCT_V2],
+    });
+
+    await handleSubscriptionUpdated(
+      buildEvent("customer.subscription.updated", subscription, {
+        items: {
+          data: buildSubscription({
+            productIds: [TEAM_PRODUCT, BARCODES_PRODUCT],
+          }).items.data,
+        },
+      }),
+      user
+    );
+
+    // The bundled sync still reaches the handler; nothing is switched off and
+    // the customer's other subscriptions are not even consulted.
+    expect(mockBarcodeAddonWebhook).toHaveBeenCalledTimes(1);
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsList).not.toHaveBeenCalled();
   });
 
   it("ignores item updates that keep the same products", async () => {

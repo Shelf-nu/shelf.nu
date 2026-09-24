@@ -97,13 +97,19 @@ async function syncBundledAddons({
  *
  * @param args.event - The `customer.subscription.updated` event
  * @param args.subscription - The subscription as it is after the update
+ * @param args.hasAuditAddon - Whether the subscription still carries an Audits item
+ * @param args.hasBarcodeAddon - Whether the subscription still carries a Barcodes item
  */
 async function disableAddonsRemovedFromSubscription({
   event,
   subscription,
+  hasAuditAddon,
+  hasBarcodeAddon,
 }: {
   event: Stripe.Event;
   subscription: Stripe.Subscription;
+  hasAuditAddon: boolean;
+  hasBarcodeAddon: boolean;
 }) {
   const organizationId = subscription.metadata?.organizationId;
   if (!organizationId) return;
@@ -144,6 +150,13 @@ async function disableAddonsRemovedFromSubscription({
     if (product.metadata?.product_type !== "addon") continue;
     const addonType = product.metadata.addon_type;
     if (addonType !== "audits" && addonType !== "barcodes") continue;
+
+    // An add-on product replaced by another product of the same add-on looks
+    // removed, but the subscription still carries the add-on; the bundled
+    // sync above has just confirmed it.
+    const stillOnSubscription =
+      addonType === "audits" ? hasAuditAddon : hasBarcodeAddon;
+    if (stillOnSubscription) continue;
 
     // A standalone add-on subscription bought next to the bundled one, for
     // instance, may still pay for the add-on.
@@ -550,7 +563,12 @@ export async function handleSubscriptionUpdated(
     hasAuditAddon,
     hasBarcodeAddon,
   });
-  await disableAddonsRemovedFromSubscription({ event, subscription });
+  await disableAddonsRemovedFromSubscription({
+    event,
+    subscription,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  });
 
   const newSubscriptionIsHigherTier = isHigherTier(
     tierId as TierId,
