@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
+import type { AddonType } from "~/modules/billing/price-validation.server";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import {
   getOrganizationTierLimit,
@@ -409,6 +410,60 @@ export const getCustomerSubscriptionsWithProducts = async (
     });
   }
 };
+
+/**
+ * Whether another live subscription of this customer still carries the add-on
+ * for the same workspace.
+ *
+ * A workspace can hold an add-on twice: bundled on its Team subscription and
+ * as a standalone add-on subscription, for instance one bought while the
+ * bundled one was lapsed. The organization flag is a single bit for both, so
+ * before an event on one subscription switches the add-on off, the other
+ * subscription is checked; otherwise a still-paid add-on goes dark until the
+ * next webhook happens to switch it back on.
+ *
+ * The subscription the event is about is skipped: its own status is what
+ * triggered the check. Product metadata is read the same way as in
+ * `getDataFromStripeEvent`, so an archived add-on product on a live
+ * subscription still counts.
+ *
+ * @param args.customerId - The Stripe customer the subscriptions belong to
+ * @param args.organizationId - The workspace whose add-on flag is at stake
+ * @param args.addonType - Which add-on to look for
+ * @param args.exceptSubscriptionId - The subscription that raised the event
+ * @returns `true` if another active or trialing subscription linked to the
+ *   workspace carries the add-on
+ */
+export async function customerHasOtherActiveAddonSubscription({
+  customerId,
+  organizationId,
+  addonType,
+  exceptSubscriptionId,
+}: {
+  customerId: string;
+  organizationId: string;
+  addonType: AddonType;
+  exceptSubscriptionId: string;
+}): Promise<boolean> {
+  const subscriptions = await getCustomerSubscriptionsWithProducts(customerId);
+
+  return subscriptions.some(
+    (sub) =>
+      sub.id !== exceptSubscriptionId &&
+      (sub.status === "active" || sub.status === "trialing") &&
+      sub.metadata?.organizationId === organizationId &&
+      sub.items.data.some((item) => {
+        const product = item.price?.product;
+        return (
+          typeof product === "object" &&
+          product !== null &&
+          !product.deleted &&
+          product.metadata?.product_type === "addon" &&
+          product.metadata?.addon_type === addonType
+        );
+      })
+  );
+}
 
 export async function createBillingPortalSession({
   customerId,

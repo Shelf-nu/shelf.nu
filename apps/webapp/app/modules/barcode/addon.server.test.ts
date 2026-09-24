@@ -18,8 +18,15 @@ const { mockPremiumIsEnabled } = vi.hoisted(() => ({
   mockPremiumIsEnabled: { value: true },
 }));
 
+// why: the other-subscription check is a Stripe round trip of its own; each
+// test states whether another live subscription still carries the add-on
+const { mockHasOtherActiveAddonSubscription } = vi.hoisted(() => ({
+  mockHasOtherActiveAddonSubscription: vi.fn(),
+}));
+
 vi.mock("~/utils/stripe.server", () => ({
   stripe: mockStripe,
+  customerHasOtherActiveAddonSubscription: mockHasOtherActiveAddonSubscription,
   get premiumIsEnabled() {
     return mockPremiumIsEnabled.value;
   },
@@ -529,6 +536,10 @@ describe("getBarcodeSubscriptionInfo", () => {
 });
 
 describe("handleBarcodeAddonWebhook", () => {
+  beforeEach(() => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(false);
+  });
+
   it("checkout.session.completed enables barcodesEnabled + barcodesEnabledAt", async () => {
     await handleBarcodeAddonWebhook({
       eventType: "checkout.session.completed",
@@ -652,6 +663,60 @@ describe("handleBarcodeAddonWebhook", () => {
     });
 
     expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps barcodes on when another live subscription still carries the add-on for this workspace", async () => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(true);
+
+    await handleBarcodeAddonWebhook({
+      eventType: "customer.subscription.paused",
+      subscription: {
+        id: "sub_bundled",
+        customer: "cus_1",
+        status: "paused",
+      } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockHasOtherActiveAddonSubscription).toHaveBeenCalledWith({
+      customerId: "cus_1",
+      organizationId: "org_1",
+      addonType: "barcodes",
+      exceptSubscriptionId: "sub_bundled",
+    });
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps barcodes on through an inactive status change while another subscription covers it", async () => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(true);
+
+    await handleBarcodeAddonWebhook({
+      eventType: "customer.subscription.updated",
+      subscription: {
+        id: "sub_bundled",
+        customer: { id: "cus_1" },
+        status: "canceled",
+      } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockHasOtherActiveAddonSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ customerId: "cus_1" })
+    );
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not consult other subscriptions when the status change keeps the add-on active", async () => {
+    await handleBarcodeAddonWebhook({
+      eventType: "customer.subscription.updated",
+      subscription: { id: "sub_1", customer: "cus_1", status: "active" } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockHasOtherActiveAddonSubscription).not.toHaveBeenCalled();
+    expect(mockOrgUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { barcodesEnabled: true } })
+    );
   });
 });
 

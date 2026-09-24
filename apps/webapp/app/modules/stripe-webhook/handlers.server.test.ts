@@ -7,9 +7,14 @@
  * subscription's lifecycle exactly as they do for a standalone add-on
  * subscription: paused or cancelled means off, an item dropped from the
  * subscription means off, and the add-on handlers see every status change.
+ *
+ * The event parser runs for real. The Stripe SDK is replaced at the product
+ * lookup, so each test states which products the subscription's line items
+ * resolve to, and the suite proves that bundled products reach the add-on
+ * handlers through the same parsing as in production.
  */
 import { TierId } from "@prisma/client";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // why: env module reads process.env at import time; the webhook helpers need
@@ -37,25 +42,43 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: Stripe SDK makes external API calls. The event parser is where line
-// items are resolved to tier/add-on products, so each test states its result.
-const { mockGetDataFromStripeEvent, mockProductsRetrieve } = vi.hoisted(() => ({
-  mockGetDataFromStripeEvent: vi.fn(),
+// why: the Stripe SDK makes external API calls. Only the client is replaced:
+// `~/utils/stripe.server` stays real, so its event parser resolves line items
+// to tier and add-on products through this product lookup. The SDK's error
+// classes are kept so the handlers can tell a missing product from a
+// transient failure.
+const { mockProductsRetrieve } = vi.hoisted(() => ({
   mockProductsRetrieve: vi.fn(),
 }));
-vi.mock("~/utils/stripe.server", () => ({
-  stripe: {
+vi.mock("stripe", async (importOriginal) => {
+  const actual = await importOriginal<{ default: typeof Stripe }>();
+  const client = {
     products: { retrieve: mockProductsRetrieve },
     subscriptions: { update: vi.fn() },
-  },
-  getDataFromStripeEvent: mockGetDataFromStripeEvent,
-  customerHasPaymentMethod: vi.fn(),
-  fetchStripeSubscription: vi.fn(),
-  getCustomerActiveSubscription: vi.fn(),
-  getCustomerNotificationData: vi.fn(),
-  getInvoiceNotificationData: vi.fn(),
-  getStripeCustomer: vi.fn(),
-}));
+  };
+  return {
+    ...actual,
+    default: Object.assign(
+      vi.fn().mockImplementation(() => client),
+      { errors: actual.default.errors }
+    ),
+  };
+});
+
+// why: the customer and invoice helpers reach Stripe endpoints the mocked
+// client does not provide; the handlers under test never need their result
+vi.mock(import("~/utils/stripe.server"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    customerHasPaymentMethod: vi.fn(),
+    fetchStripeSubscription: vi.fn(),
+    getCustomerActiveSubscription: vi.fn(),
+    getCustomerNotificationData: vi.fn(),
+    getInvoiceNotificationData: vi.fn(),
+    getStripeCustomer: vi.fn(),
+  };
+});
 
 // why: the add-on handlers are the collaborators under test — what matters is
 // that the tier branch reaches them with the event, not what they write
@@ -99,6 +122,7 @@ vi.mock("~/modules/addon-trial/scheduler.server", () => ({
   scheduleTrialEndsTomorrowEmail: vi.fn(),
 }));
 vi.mock("~/modules/organization/service.server", () => ({
+  getOrganizationByUserId: vi.fn(),
   resetPersonalWorkspaceBranding: vi.fn(),
 }));
 vi.mock("~/utils/date-format.server", () => ({
@@ -119,6 +143,30 @@ import type { WebhookUser } from "./helpers.server";
 const TEAM_PRODUCT = "prod_team";
 const BARCODES_PRODUCT = "prod_barcodes";
 const AUDITS_PRODUCT = "prod_audits";
+
+/** The Stripe products the line items resolve to, keyed by product id. */
+const PRODUCTS: Record<
+  string,
+  { id: string; metadata: Record<string, string> }
+> = {
+  [TEAM_PRODUCT]: { id: TEAM_PRODUCT, metadata: { shelf_tier: "tier_2" } },
+  [AUDITS_PRODUCT]: {
+    id: AUDITS_PRODUCT,
+    metadata: { product_type: "addon", addon_type: "audits" },
+  },
+  [BARCODES_PRODUCT]: {
+    id: BARCODES_PRODUCT,
+    metadata: { product_type: "addon", addon_type: "barcodes" },
+  },
+};
+
+/** The error Stripe raises for a product id it does not know. */
+function missingProductError(productId: string) {
+  return new Stripe.errors.StripeInvalidRequestError({
+    message: `No such product: '${productId}'`,
+    code: "resource_missing",
+  });
+}
 
 const user = {
   id: "user-1",
@@ -148,6 +196,7 @@ function buildSubscription({
     items: {
       data: productIds.map((product, index) => ({
         id: `si_${index}`,
+        plan: { product },
         price: { id: `price_${product}`, product },
       })),
     },
@@ -166,42 +215,21 @@ function buildEvent(
   } as unknown as Stripe.Event;
 }
 
-/** What the event parser returns for a tier subscription, bundled or not. */
-function parsedTierSubscription(subscription: Stripe.Subscription) {
-  const productIds = subscription.items.data.map((item) =>
-    typeof item.price.product === "string" ? item.price.product : ""
-  );
-  return {
-    subscription,
-    customerId: "cus_1",
-    tierId: "tier_2",
-    productType: undefined,
-    product: { id: TEAM_PRODUCT, metadata: { shelf_tier: "tier_2" } },
-    hasAuditAddon: productIds.includes(AUDITS_PRODUCT),
-    hasBarcodeAddon: productIds.includes(BARCODES_PRODUCT),
-  };
-}
-
-/** What the event parser returns for a standalone add-on subscription. */
-function parsedAddonSubscription(subscription: Stripe.Subscription) {
-  return {
-    subscription,
-    customerId: "cus_1",
-    tierId: undefined,
-    productType: "addon",
-    product: {
-      id: BARCODES_PRODUCT,
-      metadata: { product_type: "addon", addon_type: "barcodes" },
-    },
-    hasAuditAddon: false,
-    hasBarcodeAddon: true,
-  };
+/** The product ids looked up on Stripe, in call order. */
+function productLookups() {
+  return mockProductsRetrieve.mock.calls.map(([productId]) => productId);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockUserUpdate.mockResolvedValue({ id: "user-1" });
   mockOrgUpdate.mockResolvedValue({ id: "org-1" });
+  mockProductsRetrieve.mockImplementation((productId: string) => {
+    const product = PRODUCTS[productId];
+    return product
+      ? Promise.resolve(product)
+      : Promise.reject(missingProductError(productId));
+  });
 });
 
 describe("handleSubscriptionPaused", () => {
@@ -210,15 +238,14 @@ describe("handleSubscriptionPaused", () => {
       productIds: [TEAM_PRODUCT, BARCODES_PRODUCT],
       status: "paused",
     });
-    mockGetDataFromStripeEvent.mockResolvedValue(
-      parsedTierSubscription(subscription)
-    );
 
     await handleSubscriptionPaused(
       buildEvent("customer.subscription.paused", subscription),
       user
     );
 
+    // The add-on is found by resolving the line items to Stripe products.
+    expect(productLookups()).toEqual([TEAM_PRODUCT, BARCODES_PRODUCT]);
     expect(mockBarcodeAddonWebhook).toHaveBeenCalledWith({
       eventType: "customer.subscription.paused",
       subscription,
@@ -232,9 +259,6 @@ describe("handleSubscriptionPaused", () => {
 
   it("leaves the add-on handlers alone for a tier-only subscription", async () => {
     const subscription = buildSubscription({ status: "paused" });
-    mockGetDataFromStripeEvent.mockResolvedValue(
-      parsedTierSubscription(subscription)
-    );
 
     await handleSubscriptionPaused(
       buildEvent("customer.subscription.paused", subscription),
@@ -251,9 +275,6 @@ describe("handleSubscriptionPaused", () => {
       status: "paused",
       metadata: {},
     });
-    mockGetDataFromStripeEvent.mockResolvedValue(
-      parsedTierSubscription(subscription)
-    );
 
     await handleSubscriptionPaused(
       buildEvent("customer.subscription.paused", subscription),
@@ -268,9 +289,6 @@ describe("handleSubscriptionPaused", () => {
       productIds: [BARCODES_PRODUCT],
       status: "paused",
     });
-    mockGetDataFromStripeEvent.mockResolvedValue(
-      parsedAddonSubscription(subscription)
-    );
 
     await handleSubscriptionPaused(
       buildEvent("customer.subscription.paused", subscription),
@@ -288,9 +306,6 @@ describe("handleSubscriptionDeleted", () => {
       productIds: [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT],
       status: "canceled",
     });
-    mockGetDataFromStripeEvent.mockResolvedValue(
-      parsedTierSubscription(subscription)
-    );
 
     await handleSubscriptionDeleted(
       buildEvent("customer.subscription.deleted", subscription),
@@ -320,9 +335,6 @@ describe("handleSubscriptionDeleted", () => {
         transferred_to_subscription: "sub_2",
       },
     });
-    mockGetDataFromStripeEvent.mockResolvedValue(
-      parsedTierSubscription(subscription)
-    );
 
     await handleSubscriptionDeleted(
       buildEvent("customer.subscription.deleted", subscription),
@@ -330,6 +342,27 @@ describe("handleSubscriptionDeleted", () => {
     );
 
     expect(mockBarcodeAddonWebhook).not.toHaveBeenCalled();
+  });
+
+  it("hands a cancelled standalone add-on subscription to its handler", async () => {
+    const subscription = buildSubscription({
+      productIds: [BARCODES_PRODUCT],
+      status: "canceled",
+    });
+
+    await handleSubscriptionDeleted(
+      buildEvent("customer.subscription.deleted", subscription),
+      user
+    );
+
+    // The handler needs the subscription to check the customer's other
+    // subscriptions before switching the add-on off.
+    expect(mockBarcodeAddonWebhook).toHaveBeenCalledWith({
+      eventType: "customer.subscription.deleted",
+      subscription,
+      organizationId: "org-1",
+    });
+    expect(mockUserUpdate).not.toHaveBeenCalled();
   });
 });
 
@@ -339,9 +372,6 @@ describe("handleSubscriptionUpdated", () => {
       productIds: [TEAM_PRODUCT, BARCODES_PRODUCT],
       status: "past_due",
     });
-    mockGetDataFromStripeEvent.mockResolvedValue(
-      parsedTierSubscription(subscription)
-    );
 
     await handleSubscriptionUpdated(
       buildEvent("customer.subscription.updated", subscription, {
@@ -359,13 +389,6 @@ describe("handleSubscriptionUpdated", () => {
 
   it("switches off an add-on whose line item was removed from the subscription", async () => {
     const subscription = buildSubscription({ productIds: [TEAM_PRODUCT] });
-    mockGetDataFromStripeEvent.mockResolvedValue(
-      parsedTierSubscription(subscription)
-    );
-    mockProductsRetrieve.mockResolvedValue({
-      id: BARCODES_PRODUCT,
-      metadata: { product_type: "addon", addon_type: "barcodes" },
-    });
 
     await handleSubscriptionUpdated(
       buildEvent("customer.subscription.updated", subscription, {
@@ -392,9 +415,6 @@ describe("handleSubscriptionUpdated", () => {
     const subscription = buildSubscription({
       productIds: [TEAM_PRODUCT, BARCODES_PRODUCT],
     });
-    mockGetDataFromStripeEvent.mockResolvedValue(
-      parsedTierSubscription(subscription)
-    );
 
     await handleSubscriptionUpdated(
       buildEvent("customer.subscription.updated", subscription, {
@@ -403,8 +423,59 @@ describe("handleSubscriptionUpdated", () => {
       user
     );
 
-    expect(mockProductsRetrieve).not.toHaveBeenCalled();
+    // Only the parser's lookups; nothing was resolved for the removal check.
+    expect(productLookups()).toEqual([TEAM_PRODUCT, BARCODES_PRODUCT]);
     expect(mockOrgUpdate).not.toHaveBeenCalled();
     expect(mockBarcodeAddonWebhook).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips a removed item whose product Stripe no longer knows and still handles the rest", async () => {
+    const subscription = buildSubscription({ productIds: [TEAM_PRODUCT] });
+
+    const response = await handleSubscriptionUpdated(
+      buildEvent("customer.subscription.updated", subscription, {
+        items: {
+          data: buildSubscription({
+            productIds: [TEAM_PRODUCT, "prod_gone", BARCODES_PRODUCT],
+          }).items.data,
+        },
+      }),
+      user
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockOrgUpdate).toHaveBeenCalledWith({
+      where: { id: "org-1" },
+      data: { barcodesEnabled: false },
+      select: { id: true },
+    });
+  });
+
+  it("rethrows any other product lookup failure so Stripe retries the webhook", async () => {
+    const subscription = buildSubscription({ productIds: [TEAM_PRODUCT] });
+    mockProductsRetrieve.mockImplementation((productId: string) =>
+      productId === "prod_flaky"
+        ? Promise.reject(
+            new Stripe.errors.StripeConnectionError({
+              message: "An error occurred with our connection to Stripe.",
+            })
+          )
+        : Promise.resolve(PRODUCTS[productId])
+    );
+
+    await expect(
+      handleSubscriptionUpdated(
+        buildEvent("customer.subscription.updated", subscription, {
+          items: {
+            data: buildSubscription({
+              productIds: [TEAM_PRODUCT, "prod_flaky", BARCODES_PRODUCT],
+            }).items.data,
+          },
+        }),
+        user
+      )
+    ).rejects.toBeInstanceOf(Stripe.errors.StripeConnectionError);
+
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
   });
 });

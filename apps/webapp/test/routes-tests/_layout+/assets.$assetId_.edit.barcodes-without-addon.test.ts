@@ -23,12 +23,18 @@ vi.mock("~/modules/asset/service.server", () => ({
   updateAsset: vi.fn().mockResolvedValue({ id: "asset-1", title: "A" }),
   updateAssetMainImage: vi.fn().mockResolvedValue(false),
 }));
+// why: custom fields widen the parsed schema through Prisma; an empty set
+// keeps the parse deterministic.
 vi.mock("~/modules/custom-field/service.server", () => ({
   getActiveCustomFields: vi.fn().mockResolvedValue([]),
 }));
+// why: tag resolution reads Prisma; a fixed set keeps the payload assertions
+// on the barcode fields.
 vi.mock("~/modules/tag/service.server", () => ({
   buildTagsSet: vi.fn().mockReturnValue({ set: [] }),
 }));
+// why: asset models are loader-only data behind Prisma and play no part in
+// the action under test.
 vi.mock("~/modules/asset-model/service.server", () => ({
   getAssetModels: vi
     .fn()
@@ -40,6 +46,8 @@ vi.mock("~/modules/asset-model/service.server", () => ({
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
+// why: notifications go over the event bus; the action must not need that
+// transport to complete.
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
@@ -93,7 +101,7 @@ describe("assets.$assetId_.edit — barcodes without the add-on", () => {
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
       canUseBarcodes: false,
-    } as never);
+    } as Awaited<ReturnType<typeof requirePermission>>);
 
     await action(buildArgs());
 
@@ -106,7 +114,7 @@ describe("assets.$assetId_.edit — barcodes without the add-on", () => {
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
       canUseBarcodes: true,
-    } as never);
+    } as Awaited<ReturnType<typeof requirePermission>>);
 
     await action(
       buildArgs({

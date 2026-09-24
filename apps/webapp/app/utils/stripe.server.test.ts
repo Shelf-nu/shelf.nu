@@ -42,6 +42,7 @@ vi.mock("~/database/db.server", () => ({
 
 // Import after mocking
 import {
+  customerHasOtherActiveAddonSubscription,
   getCustomerNotificationData,
   getInvoiceNotificationData,
   getUserActiveSubscriptions,
@@ -556,5 +557,112 @@ describe("getOwnerSubscriptionInfo", () => {
 
     expect(result.hasActiveSubscription).toBe(false);
     expect(result.subscriptions).toEqual([]);
+  });
+});
+
+describe("customerHasOtherActiveAddonSubscription", () => {
+  const teamItem = {
+    price: { product: { id: "prod_team", metadata: { shelf_tier: "tier_2" } } },
+  };
+  const barcodesItem = {
+    price: {
+      product: {
+        id: "prod_barcodes",
+        metadata: { product_type: "addon", addon_type: "barcodes" },
+      },
+    },
+  };
+  const auditsItem = {
+    price: {
+      product: {
+        id: "prod_audits",
+        metadata: { product_type: "addon", addon_type: "audits" },
+      },
+    },
+  };
+
+  /** Serves the given subscriptions through the list-then-retrieve calls. */
+  function customerHas(subscriptions: Array<Record<string, unknown>>) {
+    mockSubscriptionsList.mockResolvedValue({
+      data: subscriptions.map(({ id }) => ({ id })),
+    });
+    mockSubscriptionsRetrieve.mockImplementation((id: string) =>
+      Promise.resolve(subscriptions.find((sub) => sub.id === id))
+    );
+  }
+
+  const args = {
+    customerId: "cus_1",
+    organizationId: "org_1",
+    addonType: "barcodes" as const,
+    exceptSubscriptionId: "sub_tier",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("finds the add-on on another live subscription linked to the same workspace", async () => {
+    customerHas([
+      {
+        id: "sub_tier",
+        status: "paused",
+        metadata: { organizationId: "org_1" },
+        items: { data: [teamItem, barcodesItem] },
+      },
+      {
+        id: "sub_addon",
+        status: "active",
+        metadata: { organizationId: "org_1" },
+        items: { data: [barcodesItem] },
+      },
+    ]);
+
+    await expect(customerHasOtherActiveAddonSubscription(args)).resolves.toBe(
+      true
+    );
+    expect(mockSubscriptionsList).toHaveBeenCalledWith({ customer: "cus_1" });
+  });
+
+  it("ignores the subscription that raised the event", async () => {
+    customerHas([
+      {
+        id: "sub_tier",
+        status: "active",
+        metadata: { organizationId: "org_1" },
+        items: { data: [teamItem, barcodesItem] },
+      },
+    ]);
+
+    await expect(customerHasOtherActiveAddonSubscription(args)).resolves.toBe(
+      false
+    );
+  });
+
+  it("ignores other workspaces, other add-ons and subscriptions that are not live", async () => {
+    customerHas([
+      {
+        id: "sub_other_workspace",
+        status: "active",
+        metadata: { organizationId: "org_2" },
+        items: { data: [barcodesItem] },
+      },
+      {
+        id: "sub_audits",
+        status: "active",
+        metadata: { organizationId: "org_1" },
+        items: { data: [auditsItem] },
+      },
+      {
+        id: "sub_lapsed",
+        status: "past_due",
+        metadata: { organizationId: "org_1" },
+        items: { data: [barcodesItem] },
+      },
+    ]);
+
+    await expect(customerHasOtherActiveAddonSubscription(args)).resolves.toBe(
+      false
+    );
   });
 });

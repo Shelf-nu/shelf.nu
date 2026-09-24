@@ -23,6 +23,8 @@ vi.mock("~/modules/kit/service.server", () => ({
   updateKitImage: vi.fn().mockResolvedValue(undefined),
   updateKitLocation: vi.fn().mockResolvedValue(undefined),
 }));
+// why: the loader reads categories and locations through Prisma; the action
+// under test does not use them.
 vi.mock("~/modules/asset/service.server", () => ({
   getCategoriesForCreateAndEdit: vi.fn(),
   getLocationsForCreateAndEdit: vi.fn(),
@@ -33,6 +35,8 @@ vi.mock("~/modules/asset/service.server", () => ({
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
+// why: notifications go over the event bus; the action must not need that
+// transport to complete.
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
@@ -82,7 +86,7 @@ describe("kits.$kitId_.edit — barcodes without the add-on", () => {
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
       canUseBarcodes: false,
-    } as never);
+    } as Awaited<ReturnType<typeof requirePermission>>);
 
     await action(buildArgs());
 
@@ -93,7 +97,7 @@ describe("kits.$kitId_.edit — barcodes without the add-on", () => {
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
       canUseBarcodes: true,
-    } as never);
+    } as Awaited<ReturnType<typeof requirePermission>>);
 
     await action(
       buildArgs({

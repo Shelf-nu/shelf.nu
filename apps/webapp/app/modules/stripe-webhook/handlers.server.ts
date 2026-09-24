@@ -1,5 +1,5 @@
 import { TierId } from "@prisma/client";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { sendAuditTrialEndsSoonEmail } from "~/emails/stripe/audit-trial-ends-soon";
@@ -51,8 +51,9 @@ const OK = () => new Response(null, { status: 200 });
  * organization flags the standalone add-on handlers maintain.
  *
  * Only add-ons present on this subscription are touched. A workspace can also
- * hold a standalone add-on subscription, and that one is governed by its own
- * webhook events.
+ * hold a standalone add-on subscription, governed by its own webhook events;
+ * the add-on handlers keep the flag on while any other live subscription of
+ * the customer still carries the add-on for the workspace.
  *
  * @param args.eventType - The Stripe event type being handled
  * @param args.subscription - The tier subscription from the event
@@ -124,8 +125,20 @@ async function disableAddonsRemovedFromSubscription({
     if (!productId || currentProductIds.has(productId)) continue;
 
     // Same metadata reading as `getDataFromStripeEvent`: an archived add-on
-    // product is still an add-on for the purpose of taking it away.
-    const product = await stripe.products.retrieve(productId);
+    // product is still an add-on for the purpose of taking it away. A product
+    // Stripe no longer knows cannot be an add-on this app tracks, so that item
+    // is skipped; any other failure is rethrown so Stripe retries the webhook
+    // instead of the removal being lost.
+    let product: Stripe.Product;
+    try {
+      product = await stripe.products.retrieve(productId);
+    } catch (cause) {
+      const isUnknownProduct =
+        cause instanceof Stripe.errors.StripeInvalidRequestError &&
+        (cause.code === "resource_missing" || cause.statusCode === 404);
+      if (!isUnknownProduct) throw cause;
+      continue;
+    }
     if (product.metadata?.product_type !== "addon") continue;
     if (product.metadata.addon_type === "audits") removed.auditsEnabled = false;
     if (product.metadata.addon_type === "barcodes") {
@@ -607,6 +620,7 @@ export async function handleSubscriptionDeleted(
     ) {
       await handleAuditAddonWebhook({
         eventType: event.type,
+        subscription,
         organizationId,
       });
     }
@@ -617,6 +631,7 @@ export async function handleSubscriptionDeleted(
     ) {
       await handleBarcodeAddonWebhook({
         eventType: event.type,
+        subscription,
         organizationId,
       });
     }
