@@ -13,6 +13,7 @@
 import Markdoc from "@markdoc/markdoc";
 import { AssetType, BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
+import type { Mock } from "vitest";
 import { db } from "~/database/db.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { ShelfError } from "~/utils/error";
@@ -178,12 +179,12 @@ function installClaimSimulator() {
       // `fulfilledQuantity` on every upsert the suite runs.
       if (sql.includes("FOR UPDATE") && sql.includes('"BookingModelRequest"')) {
         const locked = await (
-          db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+          db.bookingModelRequest.findUnique as FindUniqueRequestMock
         )();
         return locked ? [{ id: locked.id ?? "req-1" }] : [];
       }
       const row = await (
-        db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+        db.bookingModelRequest.findUnique as FindUniqueRequestMock
       )();
       if (!row) return [];
       if (row.fulfilledQuantity >= row.quantity) return [];
@@ -275,6 +276,19 @@ function markdocTagsIn(content: string) {
 
 const from = new Date("2026-05-01T09:00:00Z");
 const to = new Date("2026-05-05T18:00:00Z");
+
+/**
+ * The `findUnique` mock as this suite drives it: the `$queryRaw` stub calls it
+ * with no arguments and mutates the reservation row it resolves to.
+ */
+type FindUniqueRequestMock = Mock<
+  () => Promise<{
+    id?: string;
+    fulfilledQuantity: number;
+    quantity: number;
+    fulfilledAt?: Date | null;
+  } | null>
+>;
 
 describe("getAssetModelAvailability", () => {
   beforeEach(() => {
@@ -609,7 +623,7 @@ describe("upsertBookingModelRequest", () => {
     // `continue` in `assertModelUnitsNotReservedElsewhere`).
     const rowLock = lockOn("BookingModelRequest");
     const readOrder = (
-      db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+      db.bookingModelRequest.findUnique as FindUniqueRequestMock
     ).mock.invocationCallOrder[0];
 
     expect(rowLock).toBeDefined();
@@ -1422,7 +1436,7 @@ describe("removeBookingModelRequest", () => {
     // provenance this guard exists to keep.
     const rowLock = lockOn("BookingModelRequest");
     const readOrder = (
-      db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+      db.bookingModelRequest.findUnique as FindUniqueRequestMock
     ).mock.invocationCallOrder[0];
 
     expect(rowLock).toBeDefined();
