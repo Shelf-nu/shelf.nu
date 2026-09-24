@@ -443,6 +443,23 @@
         "manage-kits",
         "change-role"
       ],
+      "nonRegisteredMember": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
       "assetModel": [
         "create",
         "read",
@@ -972,6 +989,23 @@
         "manage-kits",
         "change-role"
       ],
+      "nonRegisteredMember": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
       "assetModel": [
         "create",
         "read",
@@ -1119,6 +1153,7 @@
       ],
       "reports": [],
       "teamMemberNote": [],
+      "nonRegisteredMember": [],
       "assetModel": [],
       "emailSettings": [],
       "user-data": [
@@ -1186,6 +1221,7 @@
       ],
       "reports": [],
       "teamMemberNote": [],
+      "nonRegisteredMember": [],
       "assetModel": [
         "read"
       ],
@@ -1628,6 +1664,23 @@
         "change-role"
       ],
       "teamMemberNote": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "nonRegisteredMember": [
         "create",
         "read",
         "update",
@@ -2173,6 +2226,23 @@
         "manage-kits",
         "change-role"
       ],
+      "nonRegisteredMember": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
       "assetModel": [
         "create",
         "read",
@@ -2686,6 +2756,23 @@
         "change-role"
       ],
       "teamMemberNote": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "nonRegisteredMember": [
         "create",
         "read",
         "update",
@@ -3231,6 +3318,23 @@
         "manage-kits",
         "change-role"
       ],
+      "nonRegisteredMember": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
       "assetModel": [
         "create",
         "read",
@@ -3744,6 +3848,23 @@
         "change-role"
       ],
       "teamMemberNote": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "nonRegisteredMember": [
         "create",
         "read",
         "update",
@@ -4289,6 +4410,23 @@
         "manage-kits",
         "change-role"
       ],
+      "nonRegisteredMember": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
       "assetModel": [
         "create",
         "read",
@@ -4802,6 +4940,23 @@
         "change-role"
       ],
       "teamMemberNote": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "nonRegisteredMember": [
         "create",
         "read",
         "update",
@@ -5347,6 +5502,23 @@
         "manage-kits",
         "change-role"
       ],
+      "nonRegisteredMember": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
       "assetModel": [
         "create",
         "read",
@@ -5494,6 +5666,7 @@
       ],
       "reports": [],
       "teamMemberNote": [],
+      "nonRegisteredMember": [],
       "assetModel": [
         "read"
       ],
@@ -5936,6 +6109,23 @@
         "change-role"
       ],
       "teamMemberNote": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
+      "nonRegisteredMember": [
         "create",
         "read",
         "update",
@@ -6481,6 +6671,23 @@
         "manage-kits",
         "change-role"
       ],
+      "nonRegisteredMember": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "checkout",
+        "checkin",
+        "export",
+        "import",
+        "archive",
+        "cancel",
+        "extend",
+        "manage-assets",
+        "custody",
+        "manage-kits",
+        "change-role"
+      ],
       "assetModel": [
         "create",
         "read",
@@ -6628,6 +6835,7 @@
       ],
       "reports": [],
       "teamMemberNote": [],
+      "nonRegisteredMember": [],
       "assetModel": [
         "read"
       ],
@@ -6670,6 +6878,7 @@
       "auditNote": [],
       "reports": [],
       "teamMemberNote": [],
+      "nonRegisteredMember": [],
       "assetModel": [],
       "emailSettings": [],
       "user-data": [],
@@ -6703,6 +6912,7 @@
       "auditNote": [],
       "reports": [],
       "teamMemberNote": [],
+      "nonRegisteredMember": [],
       "assetModel": [],
       "emailSettings": [],
       "user-data": [],
