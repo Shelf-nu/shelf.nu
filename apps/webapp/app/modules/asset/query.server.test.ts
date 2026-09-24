@@ -1413,6 +1413,15 @@ describe("POOL_AGGREGATE_JOIN, the SQL twin of getAssetAvailability", () => {
     );
   });
 
+  it("looks up each slice's booking by key rather than joining every active booking", () => {
+    // Without the fence the planner joins every RESERVED / ONGOING / OVERDUE
+    // booking in the database once per asset. Same result, several times the
+    // cost on the Stock status sort, which runs this for every asset.
+    expect(sql).toMatch(
+      /CROSS JOIN LATERAL \(\s+SELECT b\.name, b\.status, b\."from", b\."to"\s+FROM public\."Booking" b\s+WHERE b\.id = ba\."bookingId"[\s\S]*?OFFSET 0\s+\) bk/
+    );
+  });
+
   it("nets the ledger against what a booking still owes", () => {
     expect(sql).toContain(
       `cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')`
