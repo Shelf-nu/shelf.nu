@@ -181,6 +181,21 @@ export type PrismaClientOrTx = {
     >;
   };
   consumptionLog: {
+    /**
+     * The checked-out read (`computeCheckedOutBreakdownForAsset`): the RETURN /
+     * CONSUME / LOSS / DAMAGE logs on the asset's active bookings, with their
+     * slice tag.
+     */
+    findMany: (args: {
+      where: Prisma.ConsumptionLogWhereInput;
+      select: { bookingId: true; bookingAssetId: true; quantity: true };
+    }) => Promise<
+      Array<{
+        bookingId: string | null;
+        bookingAssetId: string | null;
+        quantity: number;
+      }>
+    >;
     groupBy: (args: {
       by: ["bookingId"];
       where: Prisma.ConsumptionLogWhereInput;
