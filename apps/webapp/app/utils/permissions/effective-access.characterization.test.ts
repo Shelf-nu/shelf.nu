@@ -20,7 +20,17 @@ vi.mock("~/modules/organization/context.server", () => ({
   getSelectedOrganization: vi.fn(),
 }));
 
-import { buildEffectiveAccessSnapshot } from "./effective-access.probes";
+// why: resolveCalendarVisibility's module imports the bookings entitlement
+// helpers, which load the user and tier services; the probes never call them
+vi.mock("~/utils/subscription.server", () => ({
+  canUseBookings: vi.fn(),
+  assertCanUseBookings: vi.fn(),
+}));
+
+import {
+  ROLE_SETS,
+  buildEffectiveAccessSnapshot,
+} from "./effective-access.probes";
 
 // @vitest-environment node
 
@@ -29,5 +39,23 @@ describe("effective access", () => {
     await expect(
       `${JSON.stringify(buildEffectiveAccessSnapshot(), null, 2)}\n`
     ).toMatchFileSnapshot("./__snapshots__/effective-access.json");
+  });
+
+  it("records every role set in every mixed-role probe", () => {
+    const roleSetKeys = ROLE_SETS.map((roles) =>
+      roles.length ? roles.join("+") : "(none)"
+    );
+    const snapshot = buildEffectiveAccessSnapshot();
+    const mixedRoleKeys = Object.keys(snapshot).filter((k) =>
+      /^B[89]:/.test(k)
+    );
+
+    expect(mixedRoleKeys.length).toBeGreaterThanOrEqual(59);
+    for (const probeKey of mixedRoleKeys) {
+      expect(
+        Object.keys(snapshot[probeKey] as Record<string, unknown>),
+        probeKey
+      ).toEqual(roleSetKeys);
+    }
   });
 });

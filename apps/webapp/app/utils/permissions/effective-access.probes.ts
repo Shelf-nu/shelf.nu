@@ -19,11 +19,13 @@ import { OrganizationRoles } from "@prisma/client";
 import { getDefaultModeForRole } from "~/modules/asset-index-settings/service.server";
 import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingOwnershipScope } from "~/modules/booking/utils.server";
+import { resolveCalendarVisibility } from "~/modules/calendar-subscription/service.server";
 import { INVITABLE_ROLES } from "~/modules/invite/roles";
 import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import {
   bookingWriteScopeClause,
+  isSelfServiceOrBaseRole,
   resolveCanSeeAllBookings,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
@@ -38,6 +40,7 @@ import {
 } from "~/utils/role-precedence";
 import { isDemotion } from "~/utils/roles";
 import {
+  isOrganizationOwner,
   resolveCanSeeAllCustody,
   resolveEffectiveRole,
 } from "~/utils/roles.server";
@@ -111,6 +114,182 @@ function outcome(fn: () => unknown): "allowed" | "denied" {
   } catch {
     return "denied";
   }
+}
+
+// ---------------------------------------------------------------------------
+// Mixed-role baseline (Task 1c)
+//
+// Probes for every decision whose answer for a MIXED membership depends on
+// how the call site reads the role: positionally (`roles[0]`, mobile
+// `getMobileUserContext().role`), as "any role held" (`useUserRoleHelper`
+// flags, companion `isRestrictedRole`), or as the effective role. Inline call
+// sites are reproduced here with the inputs the call site derives; each probe
+// cites its lines. A task that migrates a call site rewrites its probe to
+// reproduce the migrated code, and the fixture diff must equal the key's row in
+// the plan's Task 1c mapping table.
+// ---------------------------------------------------------------------------
+
+const E = PermissionEntity;
+const A = PermissionAction;
+
+/** Statuses a booking can still be changed in. */
+const OPEN_STATUSES = ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] as const;
+
+/** Statuses whose items can no longer change. */
+const CLOSED_STATUSES: readonly string[] = [
+  "COMPLETE",
+  "ARCHIVED",
+  "CANCELLED",
+];
+
+/** Delete rules compare the status with DRAFT only: one draft, one not. */
+const DRAFT_OR_NOT = ["DRAFT", "RESERVED"] as const;
+
+/** Whether the caller is the booking's custodian. */
+const CUSTODIAN_CASES = ["caller", "someoneElse"] as const;
+
+/** Whether the caller holds the booking (edit form / assets column wording). */
+const HOLDER_CASES = ["holder", "notHolder"] as const;
+
+/** A bulk selection, by how many of its bookings are drafts. */
+const SELECTION_CASES = ["allDraft", "someDraft", "noneDraft"] as const;
+
+/** The caller's effective role on web membership screens (reached with teamMember:update). */
+const CALLER_ROLES = [R.OWNER, R.ADMIN] as const;
+
+type RelationshipName = keyof typeof RELATIONSHIPS;
+const RELATIONSHIP_NAMES = Object.keys(RELATIONSHIPS) as RelationshipName[];
+
+/** The four combinations of the two booking see-toggles (custody toggles off). */
+const BOOKING_TOGGLES = TOGGLE_COMBOS.filter(
+  (t) => !t.selfServiceCanSeeCustody && !t.baseUserCanSeeCustody
+);
+
+/** Settings tabs of a team workspace, in `settings.tsx:60-66` order. */
+const ALL_SETTINGS_TABS = [
+  "general",
+  "bookings",
+  "emails",
+  "custom-fields",
+  "asset-models",
+  "team",
+];
+
+/** A role change moves nothing: what every SSO transition does today. */
+const NO_TRANSFER = { ownership: false, bookingsCreatedForOthers: false };
+
+/** How a route answered: allowed, or the first check that refused. */
+type Verdict =
+  | "allowed"
+  | "denied:gate"
+  | "denied:owner"
+  | "denied:self"
+  | "denied:custodian"
+  | "denied:status";
+
+/**
+ * Evaluates `fn` for every `ROLE_SETS` entry, keyed like the rest of the
+ * fixture. Every mixed-role probe is keyed by role set first.
+ */
+function perRoleSet<T>(
+  fn: (roles: OrganizationRoles[]) => T
+): Record<string, T> {
+  return Object.fromEntries(
+    ROLE_SETS.map((roles) => [key(roles), fn(roles as OrganizationRoles[])])
+  );
+}
+
+/** Evaluates `fn` for each named case. */
+function perCase<C extends string, T>(
+  cases: readonly C[],
+  fn: (c: C) => T
+): Record<C, T> {
+  return Object.fromEntries(cases.map((c) => [c, fn(c)])) as Record<C, T>;
+}
+
+/** Evaluates `fn` for each toggle combination, keyed by `toggleKey`. */
+function perToggle<T>(
+  toggles: typeof TOGGLE_COMBOS,
+  fn: (t: (typeof TOGGLE_COMBOS)[number]) => T
+): Record<string, T> {
+  return Object.fromEntries(toggles.map((t) => [toggleKey(t), fn(t)]));
+}
+
+/**
+ * The matrix grant `requirePermission` / `requireMobilePermission` check: the
+ * union over every held role, ADMIN/OWNER allow-all (`hasPermission` →
+ * `roleHasPermission`).
+ */
+function can(
+  roles: OrganizationRoles[],
+  entity: PermissionEntity,
+  action: PermissionAction | PermissionAction[]
+): boolean {
+  return userHasPermission({ roles, entity, action });
+}
+
+/** The first check that refuses, in call-site order; "allowed" when none does. */
+function firstRefusal(
+  checks: ReadonlyArray<readonly [Verdict, () => boolean]>
+): Verdict {
+  for (const [verdict, refuses] of checks) {
+    if (refuses()) return verdict;
+  }
+  return "allowed";
+}
+
+/** Whether a throwing guard refuses. */
+function throws(fn: () => unknown): boolean {
+  return outcome(fn) === "denied";
+}
+
+/**
+ * `getMobileUserContext().role`: `roles[0] ?? BASE`
+ * (`modules/api/mobile-auth.server.ts:379`). The mobile routes below
+ * destructure this same field, never the `effectiveRole` the context also
+ * returns.
+ */
+function mobilePositionalRole(roles: OrganizationRoles[]): OrganizationRoles {
+  return roles[0] ?? R.BASE;
+}
+
+/** The inline "restricted" test mobile routes run on the positional role. */
+function isRestricted(role: string): boolean {
+  return role === R.SELF_SERVICE || role === R.BASE;
+}
+
+/** Whether the membership holds any of `set`: Prisma `roles: { hasSome: set }`. */
+function holdsAny(
+  roles: OrganizationRoles[],
+  set: OrganizationRoles[]
+): boolean {
+  return roles.some((role) => set.includes(role));
+}
+
+/**
+ * `useUserRoleHelper()`'s flags (`hooks/user-user-role-helper.ts:14-31`). Each
+ * is true when the role is held ANYWHERE in the membership. An empty
+ * membership stands in for the loading state (`roles` undefined): every flag
+ * is false either way.
+ */
+function hookFlags(roles: OrganizationRoles[]) {
+  const isAdministrator = roles.includes(R.ADMIN);
+  const isOwner = roles.includes(R.OWNER);
+  const isSelfService = roles.includes(R.SELF_SERVICE);
+  const isBase = roles.includes(R.BASE);
+  return {
+    isAdministrator,
+    isOwner,
+    isAdministratorOrOwner: isAdministrator || isOwner,
+    isSelfService,
+    isBase,
+    isBaseOrSelfService: isBase || isSelfService,
+  };
+}
+
+/** `organizationRolesMap[role]`, `null` where the map has no entry. */
+function roleLabel(role: string | undefined): string | null {
+  return role ? organizationRolesMap[role] ?? null : null;
 }
 
 /**
@@ -305,6 +484,910 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // D-33: default asset index mode.
   snapshot["D-33"] = Object.fromEntries(
     SINGLE_ROLES.map((role) => [role, getDefaultModeForRole(role)])
+  );
+
+  // ===================== Bookings: Task 4b =====================
+
+  // B9:D-14: "view other bookings" link in the adjust-quantity dialog:
+  // `!isBaseOrSelfService` (components/booking/adjust-booking-asset-quantity-dialog.tsx:114-115).
+  // Recorded per booking see-toggle pair: the migrated gate (B1) reads them.
+  snapshot["B9:D-14:adjust-quantity-link"] = perRoleSet((roles) =>
+    perToggle(BOOKING_TOGGLES, () => !hookFlags(roles).isBaseOrSelfService)
+  );
+
+  // B9:F3: calendar feed visibility, `roles[0]`
+  // (modules/calendar-subscription/service.server.ts:297-326,
+  // `resolveCalendarVisibility`). Calls the real function: Task 4b changes its
+  // body, not its signature, so this probe needs no rewrite.
+  snapshot["B9:F3:calendar-feed"] = perRoleSet((roles) =>
+    perToggle(TOGGLE_COMBOS, (t) =>
+      resolveCalendarVisibility({ roles, organization: t })
+    )
+  );
+
+  // ===================== Bookings: Task 4c =====================
+
+  // B9:D-15: the web write gate for every membership (web callers pass the
+  // effective role from requirePermission, roles.server.ts:194).
+  snapshot["B9:D-15:web-server"] = perRoleSet((roles) =>
+    Object.fromEntries(
+      RELATIONSHIP_NAMES.flatMap((rel) =>
+        [false, true].flatMap((checkCustodianOnly) =>
+          [false, true].map((blockBaseEntirely) => [
+            `${rel}|custodianOnly=${checkCustodianOnly}|blockBase=${blockBaseEntirely}`,
+            outcome(() =>
+              validateBookingOwnership({
+                booking: RELATIONSHIPS[rel],
+                userId: "caller",
+                role: webRole(roles),
+                action: "probe",
+                checkCustodianOnly,
+                blockBaseEntirely,
+              })
+            ),
+          ])
+        )
+      )
+    )
+  );
+
+  // B9:D-16: web query-side write scopes for every membership.
+  snapshot["B9:D-16:web-server"] = perRoleSet((roles) => ({
+    writeScopeClause:
+      bookingWriteScopeClause({ userId: "caller", role: webRole(roles) }) ??
+      null,
+    bulkOwnershipScope: getBookingOwnershipScope({
+      role: webRole(roles),
+      userId: "caller",
+    }),
+  }));
+
+  // B9:D-15: mobile archive (routes/api+/mobile+/bookings.archive.ts:55-60
+  // gate booking:archive; :66 positional role; :80-85 ownership).
+  snapshot["B9:D-15:mobile-archive"] = perRoleSet((roles) =>
+    perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.archive)],
+        [
+          "denied:owner",
+          () =>
+            throws(() =>
+              validateBookingOwnership({
+                booking: RELATIONSHIPS[rel],
+                userId: "caller",
+                role: mobilePositionalRole(roles),
+                action: "archive",
+              })
+            ),
+        ],
+      ])
+    )
+  );
+
+  // B9:D-15: mobile cancel (bookings.cancel.ts:61-66 gate booking:cancel;
+  // :76 positional role; :93-98 ownership).
+  snapshot["B9:D-15:mobile-cancel"] = perRoleSet((roles) =>
+    perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.cancel)],
+        [
+          "denied:owner",
+          () =>
+            throws(() =>
+              validateBookingOwnership({
+                booking: RELATIONSHIPS[rel],
+                userId: "caller",
+                role: mobilePositionalRole(roles),
+                action: "cancel",
+              })
+            ),
+        ],
+      ])
+    )
+  );
+
+  // B9:D-22: mobile delete (bookings.delete.ts:56-61 gate booking:delete;
+  // :67 positional role; :86-113 ownership for a restricted role, then the
+  // BASE-only draft rule).
+  snapshot["B9:D-22:mobile-delete"] = perRoleSet((roles) => {
+    const role = mobilePositionalRole(roles);
+    return Object.fromEntries(
+      RELATIONSHIP_NAMES.flatMap((rel) =>
+        DRAFT_OR_NOT.map((status) => [
+          `${rel}|${status}`,
+          firstRefusal([
+            ["denied:gate", () => !can(roles, E.booking, A.delete)],
+            [
+              "denied:owner",
+              () =>
+                isRestricted(role) &&
+                throws(() =>
+                  validateBookingOwnership({
+                    booking: RELATIONSHIPS[rel],
+                    userId: "caller",
+                    role,
+                    action: "delete",
+                  })
+                ),
+            ],
+            ["denied:status", () => role === R.BASE && status !== "DRAFT"],
+          ]),
+        ])
+      )
+    );
+  });
+
+  // B9:D-15/D-19: mobile duplicate (bookings.duplicate.ts:58-63 gate
+  // booking:create; :69 positional role; :91-96 ownership; :103-105 a
+  // restricted caller must be the source booking's custodian).
+  snapshot["B9:D-15/D-19:mobile-duplicate"] = perRoleSet((roles) => {
+    const role = mobilePositionalRole(roles);
+    return perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.create)],
+        [
+          "denied:owner",
+          () =>
+            throws(() =>
+              validateBookingOwnership({
+                booking: RELATIONSHIPS[rel],
+                userId: "caller",
+                role,
+                action: "duplicate",
+              })
+            ),
+        ],
+        [
+          "denied:custodian",
+          () =>
+            isRestricted(role) &&
+            RELATIONSHIPS[rel].custodianUserId !== "caller",
+        ],
+      ])
+    );
+  });
+
+  // B9:D-15: mobile model requests (bookings.$bookingId.model-requests.ts:96-101
+  // gate booking:update; :126-138 a restricted caller must be the custodian).
+  snapshot["B9:D-15:mobile-model-requests"] = perRoleSet((roles) => {
+    const restricted = isRestricted(mobilePositionalRole(roles));
+    return perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.update)],
+        [
+          "denied:owner",
+          () => restricted && RELATIONSHIPS[rel].custodianUserId !== "caller",
+        ],
+      ])
+    );
+  });
+
+  // B9:D-16: mobile available-models booking lookup (bookings.available-models.ts:79-112;
+  // no matrix gate): a restricted caller is limited to bookings in its custody scope.
+  snapshot["B9:D-16:mobile-available-models"] = perRoleSet((roles) =>
+    isRestricted(mobilePositionalRole(roles)) ? "custodian-scope" : "workspace"
+  );
+
+  // B9:D-15: web "can see actions" on a booking (any restricted role held):
+  // editBookingForm components/booking/forms/edit-booking-form.tsx:265-269,
+  // bookingAssetsColumn components/booking/booking-assets-column.tsx:188-189.
+  snapshot["B9:D-15:web-form-actions"] = perRoleSet((roles) => {
+    const { isBaseOrSelfService } = hookFlags(roles);
+    return perCase(HOLDER_CASES, (holder) => {
+      const visible =
+        !isBaseOrSelfService || (isBaseOrSelfService && holder === "holder");
+      return { editBookingForm: visible, bookingAssetsColumn: visible };
+    });
+  });
+
+  // ===================== Bookings: Task 4d =====================
+
+  // B9:D-19/D-29: picker scopes for every membership on the web (effective
+  // role). Task 4d rewrites the booking-custodian half, Task 5b the custody halves.
+  snapshot["B9:D-19/D-29:web-server"] = perRoleSet((roles) =>
+    Object.fromEntries(
+      (
+        ["custody-filter", "custody-assignment", "booking-custodian"] as const
+      ).flatMap((purpose) =>
+        [false, true].map((canSeeAllCustody) => [
+          `${purpose}|seeAll=${canSeeAllCustody}`,
+          resolveCustodianPickerScope({
+            purpose,
+            role: webRole(roles),
+            canSeeAllCustody,
+            userId: "caller",
+          }),
+        ])
+      )
+    )
+  );
+
+  // B9:D-19: mobile booking-custodian picker (routes/api+/mobile+/team-members.ts:34-46;
+  // resolveMostPrivilegedRole, which keeps an unknown role instead of BASE).
+  snapshot["B9:D-19:mobile-team-members"] = perRoleSet(
+    (roles) =>
+      resolveCustodianPickerScope({
+        purpose: "booking-custodian",
+        role: resolveMostPrivilegedRole(roles),
+        canSeeAllCustody: false,
+        userId: "caller",
+      }).mode
+  );
+
+  // B9:D-19: mobile custodian self-lock on create (bookings.create.ts:92-97
+  // gate booking:create; :106-110; :134) and update (bookings.update.ts:82-87
+  // gate booking:update; :93-97; :144: the booking itself is the caller's, so
+  // the :114 check passes and only the lock is probed).
+  snapshot["B9:D-19:mobile-self-lock"] = perRoleSet((roles) => {
+    const restricted = isRestricted(mobilePositionalRole(roles));
+    const lock = (action: PermissionAction, custodian: string) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, action)],
+        ["denied:self", () => restricted && custodian !== "caller"],
+      ]);
+    return perCase(CUSTODIAN_CASES, (custodian) => ({
+      create: lock(A.create, custodian),
+      update: lock(A.update, custodian),
+    }));
+  });
+
+  // B9:D-15: mobile update / reserve on another member's booking, custodian
+  // only: update bookings.update.ts:82-87 (booking:update), :114; reserve
+  // bookings.reserve.ts:78-83 (booking:create), :124.
+  snapshot["B9:D-15:mobile-update-reserve"] = perRoleSet((roles) => {
+    const restricted = isRestricted(mobilePositionalRole(roles));
+    const custodianOnly = (rel: RelationshipName, action: PermissionAction) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, action)],
+        [
+          "denied:owner",
+          () => restricted && RELATIONSHIPS[rel].custodianUserId !== "caller",
+        ],
+      ]);
+    return perCase(RELATIONSHIP_NAMES, (rel) => ({
+      update: custodianOnly(rel, A.update),
+      reserve: custodianOnly(rel, A.create),
+    }));
+  });
+
+  // B9:D-25: mobile time-limit bypass `isAdminOrOwner = !isSelfServiceOrBase`
+  // on the positional role: create :107-110,:170; update :93-97,:180; reserve
+  // :90-93,:260.
+  snapshot["B9:D-25:mobile-time-bypass"] = perRoleSet((roles) => {
+    const bypass = !isRestricted(mobilePositionalRole(roles));
+    const gated = (action: PermissionAction) =>
+      can(roles, E.booking, action) ? bypass : "denied:gate";
+    return {
+      create: gated(A.create),
+      update: gated(A.update),
+      reserve: gated(A.create),
+    };
+  });
+
+  // B9:D-46: does a reservation made by this member trigger the org broadcast?
+  // web: bookings.$bookingId.overview.tsx reserve intent (~1692-1705) passes
+  // requirePermission's isSelfServiceOrBase (effective role); mobile:
+  // bookings.reserve.ts:90-93,:299 passes the positional one.
+  snapshot["B9:D-46:reservation-trigger"] = perRoleSet((roles) => ({
+    web: isSelfServiceOrBaseRole(webRole(roles)),
+    mobile: can(roles, E.booking, A.create)
+      ? isRestricted(mobilePositionalRole(roles))
+      : "denied:gate",
+  }));
+
+  // B9:D-19: web custodian field lock / seed (any restricted role held):
+  // edit-booking-form.tsx:541, new-booking-form.tsx:169,
+  // components/assets/assets-index/create-booking-for-selected-assets-dialog.tsx:68,144.
+  snapshot["B9:D-19:web-custodian-lock"] = perRoleSet((roles) => {
+    const locked = hookFlags(roles).isBaseOrSelfService;
+    return {
+      editBookingForm: locked,
+      newBookingForm: locked,
+      createBookingForSelectedAssets: locked,
+    };
+  });
+
+  // ===================== Bookings: Task 4e =====================
+
+  // B9:D-20: web add-items rule for every membership, as each call-site style
+  // passes the flag: scan-assets.tsx:68,77 / fulfil loader (effective role ===
+  // SELF_SERVICE), manage-assets / manage-kits (requirePermission's isSelfServiceOrBase).
+  snapshot["B9:D-20:web-server"] = perRoleSet((roles) =>
+    perCase(BOOKING_STATUSES, (status) => ({
+      selfServiceFlag: canUserManageBookingAssets(
+        { status, from: null, to: null } as never,
+        webRole(roles) === R.SELF_SERVICE
+      ),
+      restrictedFlag: canUserManageBookingAssets(
+        { status, from: null, to: null } as never,
+        isSelfServiceOrBaseRole(webRole(roles))
+      ),
+    }))
+  );
+
+  // B9:D-15/D-20: mobile add-scanned-assets (bookings.add-scanned-assets.ts:80-85
+  // gate booking:update; :138-148 custodian check; :158 add rule), positional role.
+  snapshot["B9:D-15/D-20:mobile-add-scanned"] = perRoleSet((roles) => {
+    const restricted = isRestricted(mobilePositionalRole(roles));
+    return Object.fromEntries(
+      CUSTODIAN_CASES.flatMap((custodian) =>
+        BOOKING_STATUSES.map((status) => [
+          `custodian=${custodian}|${status}`,
+          firstRefusal([
+            ["denied:gate", () => !can(roles, E.booking, A.update)],
+            ["denied:owner", () => restricted && custodian !== "caller"],
+            [
+              "denied:status",
+              () =>
+                !canUserManageBookingAssets(
+                  { status, from: null, to: null } as never,
+                  restricted
+                ),
+            ],
+          ]),
+        ])
+      )
+    );
+  });
+
+  // B9:D-24: mobile partial check-in (bookings.partial-checkin.ts:45-50 gate
+  // booking:checkin; :103-112 positional SELF_SERVICE custodian shortcut, else
+  // the add-items rule with the positional SELF_SERVICE flag).
+  snapshot["B9:D-24:mobile-partial-checkin"] = perRoleSet((roles) => {
+    const isSelfService = mobilePositionalRole(roles) === R.SELF_SERVICE;
+    return Object.fromEntries(
+      CUSTODIAN_CASES.flatMap((custodian) =>
+        BOOKING_STATUSES.map((status) => [
+          `custodian=${custodian}|${status}`,
+          firstRefusal([
+            ["denied:gate", () => !can(roles, E.booking, A.checkin)],
+            [
+              "denied:status",
+              () => {
+                const isCheckinEligible =
+                  status === "ONGOING" || status === "OVERDUE";
+                const isCustodian = custodian === "caller";
+                const canCheckin =
+                  isSelfService && isCheckinEligible && isCustodian
+                    ? true
+                    : canUserManageBookingAssets(
+                        { status, from: null, to: null } as never,
+                        isSelfService
+                      );
+                return !canCheckin;
+              },
+            ],
+          ]),
+        ])
+      )
+    );
+  });
+
+  // B9:D-20: booking assets column "can't manage items" on an open booking
+  // (booking-assets-column.tsx:85,140): `(isBase || isSelfService) && status !== DRAFT`.
+  snapshot["B9:D-20:web-assets-column"] = perRoleSet((roles) => {
+    const { isBase, isSelfService } = hookFlags(roles);
+    return perCase(
+      OPEN_STATUSES,
+      (status) => (isBase || isSelfService) && status !== "DRAFT"
+    );
+  });
+
+  // B9:D-15/D-21: booking asset row actions (list-asset-content.tsx:96,144-161,
+  // kit membership aside): everyone without a restricted role; otherwise the
+  // custodian within the union removable statuses.
+  snapshot["B9:D-15/D-21:web-list-asset-actions"] = perRoleSet((roles) => {
+    const { isBaseOrSelfService } = hookFlags(roles);
+    return Object.fromEntries(
+      CUSTODIAN_CASES.flatMap((custodian) =>
+        BOOKING_STATUSES.map((status) => [
+          `custodian=${custodian}|${status}`,
+          !isBaseOrSelfService
+            ? true
+            : custodian !== "caller"
+            ? false
+            : canRoleRemoveBookingAssets({
+                roles,
+                booking: { status } as never,
+              }),
+        ])
+      )
+    );
+  });
+
+  // B9:D-21 (+B2): kit row "Remove" menu (kit-row.tsx:95,324):
+  // `(!isBase && isDraft) || isReserved`.
+  snapshot["B9:D-21:web-kit-row-remove"] = perRoleSet((roles) => {
+    const { isBase } = hookFlags(roles);
+    return perCase(
+      BOOKING_STATUSES,
+      (status) => (!isBase && status === "DRAFT") || status === "RESERVED"
+    );
+  });
+
+  // ===================== Bookings: Task 4f =====================
+
+  // B9:D-26: explicit check-out / check-in switch for every membership.
+  // web: bookings.$bookingId.overview.tsx:1721,1764 (assertQuickCheckoutAllowed
+  // -> isExplicitCheckoutRequired), :1775-1804 (inline check-in), effective
+  // role. mobile + client (bookings.checkout.ts:113,
+  // bookings.fulfil-and-checkout.ts:133-134, bookings.checkin.ts:107-110,
+  // api+/mobile+/bookings.$bookingId.ts:633-639, edit-booking-form.tsx:445-448,470-475)
+  // use resolveMostPrivilegedRole, which keeps an unknown role unknown.
+  snapshot["B9:D-26:explicit-scan"] = perRoleSet((roles) =>
+    Object.fromEntries(
+      [false, true].flatMap((admin) =>
+        [false, true].map((selfService) => {
+          const checkout = (role: OrganizationRoles) =>
+            isExplicitCheckoutRequired({
+              role,
+              bookingSettings: {
+                requireExplicitCheckoutForAdmin: admin,
+                requireExplicitCheckoutForSelfService: selfService,
+              },
+            });
+          const checkin = (role: OrganizationRoles) =>
+            (role === R.ADMIN && admin) ||
+            (role === R.SELF_SERVICE && selfService);
+          const web = webRole(roles);
+          const mobile = resolveMostPrivilegedRole(roles);
+          return [
+            `admin=${admin}|selfService=${selfService}`,
+            {
+              webCheckout: checkout(web),
+              webCheckin: checkin(web),
+              mobileAndClientCheckout: checkout(mobile),
+              mobileAndClientCheckin: checkin(mobile),
+            },
+          ];
+        })
+      )
+    )
+  );
+
+  // B9:D-25: client time-limit bypass `isAdministratorOrOwner` (any ADMIN/OWNER
+  // held): edit-booking-form.tsx:169,183; new-booking-form.tsx:74-96;
+  // components/assets/assets-index/create-booking-for-selected-assets-dialog.tsx:38-59;
+  // bookings.$bookingId.overview.duplicate.tsx:247-277; extend-booking-dialog.tsx:47-55.
+  snapshot["B9:D-25:web-client-time-bypass"] = perRoleSet(
+    (roles) => hookFlags(roles).isAdministratorOrOwner
+  );
+
+  // B9:D-17: bookings index bulk menu (bookings._index.tsx:297,360): `!isBaseOrSelfService`.
+  snapshot["B9:D-17:web-bookings-bulk-menu"] = perRoleSet(
+    (roles) => !hookFlags(roles).isBaseOrSelfService
+  );
+
+  // B9:D-27: reservation presented as a request (`isBase`):
+  // edit-booking-form.tsx:283 (process sidebar), :357 (button label),
+  // booking-status-badge.tsx:22,30-34 (tooltip).
+  snapshot["B9:D-27:web-reservation-request"] = perRoleSet((roles) => {
+    const { isBase } = hookFlags(roles);
+    return {
+      processSidebar: isBase,
+      reserveButtonLabel: isBase,
+      statusBadgeTooltip: isBase,
+    };
+  });
+
+  // ===================== Bookings: Task 4g (menu half: 4f) =====================
+
+  // B9:D-22: booking Delete menu item (actions-dropdown.tsx:56,170):
+  // `(isBaseOrSelfService && isDraft) || !isBaseOrSelfService`.
+  snapshot["B9:D-22:web-delete-menu"] = perRoleSet((roles) => {
+    const { isBaseOrSelfService } = hookFlags(roles);
+    return perCase(
+      DRAFT_OR_NOT,
+      (status) =>
+        (isBaseOrSelfService && status === "DRAFT") || !isBaseOrSelfService
+    );
+  });
+
+  // B9:D-17/D-22: bookings bulk delete: the menu renders only when
+  // `!isBaseOrSelfService` (bookings._index.tsx:360), and its Delete is disabled
+  // by `(isBase && !someBookingInDraft) || isBase` (bulk-actions-dropdown.tsx:77,93).
+  snapshot["B9:D-17/D-22:web-bulk-delete"] = perRoleSet((roles) => {
+    const { isBase, isBaseOrSelfService } = hookFlags(roles);
+    return perCase(SELECTION_CASES, (selection) => {
+      if (isBaseOrSelfService) return "no-menu";
+      const someBookingInDraft = selection !== "noneDraft";
+      const deleteDisabled = (isBase && !someBookingInDraft) || isBase;
+      return deleteDisabled ? "disabled" : "enabled";
+    });
+  });
+
+  // ===================== Custody & assets: Task 5c =====================
+
+  // B9:D-29/D-30: mobile custody routes judge "self only" by the positional
+  // role, after an asset:custody (kit:custody) gate:
+  // custody.assign.ts:38-42,72,74 · custody.release.ts:32-36,41 ·
+  // custody.assign-quantity.ts:83-87,93,136 (+ note wording, D-30) ·
+  // custody.release-quantity.ts:109-113,119,167 · bulk-assign-custody.ts:40-44,74,76 ·
+  // bulk-release-custody.ts:38-42,70,72 · kits.bulk-actions.ts:93-98,100-101,119,158.
+  snapshot["B9:D-29:mobile-custody"] = perRoleSet((roles) => {
+    const selfOnly = mobilePositionalRole(roles) === R.SELF_SERVICE;
+    const scope = (entity: PermissionEntity) =>
+      !can(roles, entity, A.custody)
+        ? "denied:gate"
+        : selfOnly
+        ? "self"
+        : "anyone";
+    return {
+      "custody.assign": scope(E.asset),
+      "custody.release": scope(E.asset),
+      "custody.assign-quantity": scope(E.asset),
+      "custody.assign-quantity:note": scope(E.asset),
+      "custody.release-quantity": scope(E.asset),
+      "bulk-assign-custody": scope(E.asset),
+      "bulk-release-custody": scope(E.asset),
+      "kits.bulk-actions": scope(E.kit),
+    };
+  });
+
+  // B9:D-33: mobile routes pass the positional role to getAssetIndexSettings:
+  // custody.assign.ts:74, bulk-assign-custody.ts:76, bulk-release-custody.ts:72
+  // (asset:custody gate), bulk-update-location.ts:32-36,64,69 (asset:update gate).
+  snapshot["B9:D-33:mobile-index-mode"] = perRoleSet((roles) => {
+    const mode = (action: PermissionAction) =>
+      can(roles, E.asset, action)
+        ? getDefaultModeForRole(mobilePositionalRole(roles))
+        : "denied:gate";
+    return {
+      "custody.assign": mode(A.custody),
+      "bulk-assign-custody": mode(A.custody),
+      "bulk-release-custody": mode(A.custody),
+      "bulk-update-location": mode(A.update),
+    };
+  });
+
+  // B9:D-29/D-30: web custody UI "self only" / "Take" wording = `isSelfService`
+  // (SELF_SERVICE held anywhere): components/assets/actions-dropdown.tsx:59,79,194,227;
+  // components/assets/bulk-actions-dropdown.tsx:87; components/assets/bulk-assign-custody-dialog.tsx:25;
+  // components/kits/actions-dropdown.tsx:76; components/kits/bulk-actions-dropdown.tsx:69;
+  // components/kits/bulk-assign-custody-dialog.tsx:21; components/scanner/drawer/uses/assign-custody-drawer.tsx:320;
+  // routes/_layout+/assets.$assetId.overview.assign-custody.tsx:432;
+  // assets.$assetId.overview.release-custody.tsx:257; kits.$kitId.assets.assign-custody.tsx:444;
+  // kits.$kitId.assets.release-custody.tsx:148; assets.$assetId.overview.tsx:815.
+  snapshot["B9:D-29:web-client-self-only"] = perRoleSet(
+    (roles) => hookFlags(roles).isSelfService
+  );
+
+  // ===================== Assets: Task 5d =====================
+
+  // B9:D-33: default index mode on the web (effective role) for every membership.
+  snapshot["B9:D-33:web-server"] = perRoleSet((roles) =>
+    getDefaultModeForRole(webRole(roles))
+  );
+
+  // B9:D-33: index mode seeded when an invite is accepted, from the INVITE's
+  // roles[0] (modules/user/service.server.ts:380-384, 396-400,
+  // `ensureAssetIndexModeForRole`).
+  snapshot["B9:D-33:invite-accept"] = perRoleSet((roles) =>
+    getDefaultModeForRole(roles[0])
+  );
+
+  // B9:D-34: asset write affordances:
+  // codePreview `!isBaseOrSelfService` (components/code-preview/code-preview.tsx:133,319,328);
+  // sequentialIdPrompt `isOwner || isOrgAdmin` (routes/_layout+/_layout.tsx:197-202);
+  // sequentialIdEndpoint `includes(OWNER) || includes(ADMIN)` (routes/api+/generate-sequential-ids.tsx:35);
+  // scannerLocations `!isSelfServiceOrBase`, effective role (routes/_layout+/scanner.tsx:108).
+  // The palette's Create asset/kit entries are in B9:D-38:palette.
+  snapshot["B9:D-34:asset-write-affordances"] = perRoleSet((roles) => {
+    const flags = hookFlags(roles);
+    return {
+      codePreview: !flags.isBaseOrSelfService,
+      sequentialIdPrompt: flags.isOwner || flags.isAdministrator,
+      sequentialIdEndpoint: roles.includes(R.OWNER) || roles.includes(R.ADMIN),
+      scannerLocations: !isSelfServiceOrBaseRole(webRole(roles)),
+    };
+  });
+
+  // B9:D-35: asset index bulk menu (assets-list.tsx:74,217): `!isBase`.
+  snapshot["B9:D-35:assets-bulk-menu"] = perRoleSet(
+    (roles) => !hookFlags(roles).isBase
+  );
+
+  // B9:D-36: kit index bulk menu (routes/_layout+/kits._index.tsx:314,436): `!isBase`.
+  snapshot["B9:D-36:kits-bulk-menu"] = perRoleSet(
+    (roles) => !hookFlags(roles).isBase
+  );
+
+  // B9:D-37: "Set reminder" (components/assets/actions-dropdown.tsx:59,313,424):
+  // `isAdministratorOrOwner`.
+  snapshot["B9:D-37:set-reminder"] = perRoleSet(
+    (roles) => hookFlags(roles).isAdministratorOrOwner
+  );
+
+  // ===================== Audits: Tasks 6a, 6b =====================
+
+  // B9:D-42: mobile audit scope, positional role:
+  // audits.ts (no matrix gate today), audits.complete.ts:43-47 gate
+  // audit:update, :50; audits.record-scan.ts:57-61 gate audit:update, :41.
+  snapshot["B9:D-42:mobile-audits"] = perRoleSet((roles) => {
+    const scope = isRestricted(mobilePositionalRole(roles))
+      ? "assigned"
+      : "all";
+    const gated = can(roles, E.audit, A.update) ? scope : "denied:gate";
+    return {
+      audits: scope,
+      "audits.complete": gated,
+      "audits.record-scan": gated,
+    };
+  });
+
+  // B9:D-43: web audit "is admin": allow-list `includes(ADMIN|OWNER)`
+  // (audits.$auditId.tsx:298-299; audits.$auditId.overview.tsx:181-182) and
+  // deny-list on the effective role (audits.$auditId.tsx:156,175,200).
+  snapshot["B9:D-43:web-audit-admin"] = perRoleSet((roles) => ({
+    detailAndOverviewAllowList: holdsAny(roles, [R.ADMIN, R.OWNER]),
+    effectiveRoleDenyList: !isSelfServiceOrBaseRole(webRole(roles)),
+  }));
+
+  // ===================== Admin areas: Tasks 7b, 7e =====================
+
+  // B9:D-38: settings tabs for a team workspace (routes/_layout+/settings.tsx:60-83):
+  // every tab removed when `isBaseOrSelfService`.
+  snapshot["B9:D-38:settings-tabs"] = perRoleSet((roles) =>
+    hookFlags(roles).isBaseOrSelfService ? [] : ALL_SETTINGS_TABS
+  );
+
+  // B9:D-38: sidebar (hooks/use-sidebar-nav-items.tsx:71; `hidden:
+  // isBaseOrSelfService` at :126,145,152,159,189,196,202,208,230; Audits has no gate).
+  snapshot["B9:D-38:sidebar"] = perRoleSet((roles) => {
+    const shown = !hookFlags(roles).isBaseOrSelfService;
+    return {
+      home: shown,
+      categories: shown,
+      tags: shown,
+      locations: shown,
+      audits: true,
+      reminders: shown,
+      reports: shown,
+      organization: shown,
+      team: shown,
+      workspaceSettings: shown,
+    };
+  });
+
+  // B9:D-38/D-34: command-palette quick-nav (components/layout/command-palette/
+  // command-palette.tsx:160-219 `isVisible`, context :510-532); inviteUser is
+  // `roles.includes("ADMIN") || roles.includes("OWNER")` (:511-513). Role part
+  // only: team also needs a non-personal workspace.
+  snapshot["B9:D-38:palette"] = perRoleSet((roles) => {
+    const shown = !hookFlags(roles).isBaseOrSelfService;
+    return {
+      audits: shown,
+      team: shown,
+      settings: shown,
+      home: shown,
+      createAsset: shown,
+      createKit: shown,
+      inviteUser: roles.includes(R.ADMIN) || roles.includes(R.OWNER),
+    };
+  });
+
+  // B9:D-39: admin list bulk menus, `!isBaseOrSelfService`:
+  // categories.tsx:152,171; tags.tsx:156,179; locations._index.tsx:101,129;
+  // settings.custom-fields.index.tsx:129,154; settings.asset-models.index.tsx:98,121;
+  // settings.team.nrm.tsx:157,184.
+  snapshot["B9:D-39:admin-bulk-menus"] = perRoleSet((roles) => {
+    const shown = !hookFlags(roles).isBaseOrSelfService;
+    return {
+      categories: shown,
+      tags: shown,
+      locations: shown,
+      customFields: shown,
+      assetModels: shown,
+      nonRegisteredMembers: shown,
+    };
+  });
+
+  // ===================== Membership: Tasks 8a-8f =====================
+
+  // B9:D-01/D-10: how a membership is shown:
+  // teamList modules/settings/service.server.ts:116-117 + settings.team.users.tsx:235;
+  // inviteList modules/invite/service.server.ts:636-644 (BASE fallback) + settings.team.invites.tsx:226;
+  // memberPage routes/_layout+/settings.team.users.$userId.tsx:151-154,172-174,180,199-201;
+  // calendarFeedRole modules/calendar-subscription/service.server.ts:232.
+  snapshot["B9:D-01:membership-display"] = perRoleSet((roles) => {
+    const first = roles[0];
+    const inviteRole = roles[0] ?? R.BASE;
+    return {
+      teamList: {
+        roleEnum: first ?? null,
+        label: roleLabel(first),
+        rowActions: roleLabel(first) !== "Owner",
+      },
+      inviteList: {
+        roleEnum: inviteRole,
+        label: roleLabel(inviteRole),
+        rowActions: roleLabel(inviteRole) !== "Owner",
+      },
+      memberPage: {
+        roleEnum: first ?? null,
+        label: roleLabel(first),
+        showActions: roleLabel(first) !== "Owner",
+      },
+      calendarFeedRole: roles[0] ?? R.BASE,
+    };
+  });
+
+  // B9:D-07: team member row menu, caller × target
+  // (components/workspace/users-actions-dropdown.tsx:53,154,185): locked when
+  // the caller holds ADMIN and the target's team-list roleEnum (roles[0]) is
+  // ADMIN. The page needs teamMember:read (settings.team.users.tsx:48-54); the
+  // row menu is hidden for an "Owner" label (settings.team.users.tsx:235).
+  snapshot["B9:D-07:users-menu"] = perRoleSet((caller) => {
+    const { isAdministrator } = hookFlags(caller);
+    const reachesPage = can(caller, E.teamMember, A.read);
+    return perRoleSet((target) => {
+      const roleEnum = target[0];
+      if (!reachesPage) return "no-page";
+      if (roleLabel(roleEnum) === "Owner") return "no-menu";
+      return isAdministrator && roleEnum === R.ADMIN ? "locked" : "open";
+    });
+  });
+
+  // B9:D-07: server revoke (modules/user/utils.server.ts:135-154; caller role
+  // is requirePermission's effective role), then revokeAccessToOrganization
+  // refusing any OWNER-holding membership (modules/user/service.server.ts:1710-1742).
+  snapshot["B9:D-07:revoke-guard"] = perRoleSet((target) =>
+    perCase(CALLER_ROLES, (caller) =>
+      (target.includes(R.ADMIN) && caller !== R.OWNER) ||
+      target.includes(R.OWNER)
+        ? "refused"
+        : "allowed"
+    )
+  );
+
+  // B9:D-07: changeUserRole guards on the member's roles[0]
+  // (modules/user/service.server.ts:1849-1930), changing them to BASE.
+  snapshot["B9:D-07:change-role-guard"] = perRoleSet((target) =>
+    perCase(CALLER_ROLES, (caller) => {
+      const currentRole = target[0];
+      const refused =
+        currentRole === R.OWNER ||
+        (currentRole === R.ADMIN && caller !== R.OWNER);
+      return refused ? "refused" : "allowed";
+    })
+  );
+
+  // B9:D-02/D-03: does a manual role change transfer the member's entities?
+  // server modules/user/utils.server.ts:385-388 `isDemotion(roles[0], newRole)`;
+  // dialog components/workspace/change-role-dialog.tsx:148-151, whose
+  // currentRoleEnum is the team list's roles[0].
+  snapshot["B9:D-02/D-03:role-change-transfers"] = perRoleSet((roles) =>
+    perCase([R.ADMIN, R.SELF_SERVICE, R.BASE] as const, (to) => {
+      const transfers = isDemotion(roles[0] as OrganizationRoles, to);
+      return { server: transfers, dialog: transfers };
+    })
+  );
+
+  // B9:D-05 (+F6, F12): SSO group-claim transition, `reconcileSsoGroupMembership`
+  // (modules/user/service.server.ts:577-686; the function the plan's brief
+  // called `handleSCIMTransition` was renamed before this task ran). A
+  // membership with no mapped group keeps the row when it holds OWNER
+  // (:601-616, `keepOwnerAccess`, which reports `newRole: currentRoles[0]`) and
+  // otherwise deletes it via `revokeAccessToOrganization` (:619, :1710-1835),
+  // which independently refuses to remove an OWNER-holding row (:1731-1742).
+  // Any mapped group overwrites `roles` with `userOrganization.update`
+  // (:643-657) and transfers nothing.
+  snapshot["B9:D-05:sso-transition"] = perRoleSet((current) =>
+    perCase(["ADMIN", "SELF_SERVICE", "BASE", "none"] as const, (desired) => {
+      if (desired === "none") {
+        return current.includes(R.OWNER)
+          ? {
+              rolesAfter: current,
+              newRole: current[0] ?? null,
+              transfers: NO_TRANSFER,
+            }
+          : { rolesAfter: null, newRole: null, transfers: NO_TRANSFER };
+      }
+      return {
+        rolesAfter: [desired],
+        newRole: desired,
+        transfers: NO_TRANSFER,
+      };
+    })
+  );
+
+  // B9:F4: announcement audience role: layout badge
+  // routes/_layout+/_layout.tsx:221-226 (`roles[0]`; no role → count 0), updates
+  // page routes/_layout+/updates.tsx and routes/api+/updates.tsx
+  // (requirePermission's effective role).
+  snapshot["B9:F4:announcements"] = perRoleSet((roles) => ({
+    layoutBadgeRole: roles[0] ?? null,
+    updatesPageRole: webRole(roles),
+  }));
+
+  // B9:D-06/D-08/D-09: "held anywhere" membership reads: owner
+  // (utils/roles.server.ts:299-314), new-owner eligibility
+  // (modules/organization/service.server.ts:958), transfer recipients
+  // (routes/api+/user.transfer-recipients.ts:34-40, hasSome OWNER/ADMIN).
+  snapshot["B9:D-06/D-08/D-09:owner-and-recipients"] = perRoleSet((roles) => ({
+    ownsWorkspace: isOrganizationOwner({
+      userOrganizations: [{ organization: { id: "org" }, roles }],
+      organizationId: "org",
+    }),
+    eligibleAsNewOwner: roles.includes(R.ADMIN),
+    receivesTransfers: holdsAny(roles, [R.OWNER, R.ADMIN]),
+  }));
+
+  // ===================== Notifications: Task 9 =====================
+
+  // B9:D-45/D-48/D-49: Prisma audience filters, `roles: { hasSome: … }`:
+  // orgBookingBroadcasts modules/organization/service.server.ts:567
+  // (getOrganizationAdminsEmails) + lowStock :618 (getOrganizationAdminsForNotification);
+  // bookingNotifyPicker modules/team-member/service.server.ts:1241;
+  // reminderPicker routes/api+/reminders.team-members.ts:55;
+  // modelFiltersRecipients routes/api+/model-filters.ts:222.
+  snapshot["B9:D-45/D-48/D-49:audiences"] = perRoleSet((roles) => ({
+    orgBookingBroadcasts: holdsAny(roles, [R.OWNER, R.ADMIN]),
+    lowStock: holdsAny(roles, [R.OWNER, R.ADMIN]),
+    bookingNotifyPicker: holdsAny(roles, [R.ADMIN, R.OWNER]),
+    reminderPicker: holdsAny(roles, [R.ADMIN, R.OWNER]),
+    modelFiltersRecipients: holdsAny(roles, [R.ADMIN, R.OWNER]),
+  }));
+
+  // B9:D-47: manage a booking's recipients:
+  // actionsDropdown `!isBaseOrSelfService` (components/booking/actions-dropdown.tsx:56,158);
+  // recipientsField `isAdministratorOrOwner` (new-booking-form.tsx:202,
+  // components/assets/assets-index/create-booking-for-selected-assets-dialog.tsx:180);
+  // server loader/action and bookings.new action on requirePermission's
+  // isSelfServiceOrBase (overview.tsx:181,2104; bookings.new.tsx:340).
+  snapshot["B9:D-47:manage-recipients"] = perRoleSet((roles) => {
+    const flags = hookFlags(roles);
+    const server = !isSelfServiceOrBaseRole(webRole(roles));
+    return {
+      actionsDropdown: !flags.isBaseOrSelfService,
+      recipientsField: flags.isAdministratorOrOwner,
+      overviewLoaderAndAction: server,
+      bookingsNewAction: server,
+    };
+  });
+
+  // ===================== Companion: Task 10 (B8) =====================
+  // Reproduced here because the webapp cannot import the companion. Task 10
+  // rewrites them onto the same resolver its lib/role-access.ts uses.
+
+  // B8:D-20/D-21: booking detail item actions (apps/companion/app/(tabs)/bookings/[id].tsx):
+  // isRestrictedRole = SELF_SERVICE or BASE held anywhere (:147-149);
+  // add = manage models / scan / browse (:1426,1777,1805);
+  // remove = select to remove (:1835); fulfilCta (:1981).
+  snapshot["B8:D-20/D-21:companion-booking-items"] = perRoleSet((roles) => {
+    const isRestrictedRole = roles.some(
+      (r) => r === R.SELF_SERVICE || r === R.BASE
+    );
+    return perCase(BOOKING_STATUSES, (status) => {
+      const editable =
+        !CLOSED_STATUSES.includes(status) &&
+        (!isRestrictedRole || status === "DRAFT");
+      return {
+        add: editable,
+        remove: editable,
+        fulfilCta: !isRestrictedRole && status === "RESERVED",
+      };
+    });
+  });
+
+  // B8:D-15: companion "writes only own bookings" (bookings/[id].tsx:1398-1399).
+  snapshot["B8:D-15:companion-own-writes"] = perRoleSet(
+    (roles) =>
+      roles.some((r) => r === R.SELF_SERVICE || r === R.BASE) &&
+      !roles.some((r) => r === R.OWNER || r === R.ADMIN)
+  );
+
+  // B8:D-29: companion custody "take for yourself only": SELF_SERVICE held
+  // anywhere (app/(tabs)/scanner.tsx:231; app/(tabs)/assets/[id].tsx:87).
+  snapshot["B8:D-29:companion-self-custody"] = perRoleSet((roles) =>
+    roles.includes(R.SELF_SERVICE)
+  );
+
+  // B8:D-42: companion "All audits" toggle (lib/permissions.ts:37-39,
+  // userCanSeeOrgWideAudits): OWNER or ADMIN held anywhere.
+  snapshot["B8:D-42:companion-audit-scope"] = perRoleSet(
+    (roles) =>
+      roles.length > 0 && roles.some((r) => r === R.OWNER || r === R.ADMIN)
   );
 
   return snapshot;
