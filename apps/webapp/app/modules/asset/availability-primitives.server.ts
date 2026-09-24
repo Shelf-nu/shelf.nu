@@ -554,3 +554,132 @@ export async function assertAssetQuantityNotBelowReservations({
     });
   }
 }
+
+/**
+ * The reads {@link computeCustodyAvailability} issues. Structural rather than a
+ * Prisma type so an interactive transaction client and the global `db` both
+ * satisfy it without a cast.
+ */
+export type CustodyAvailabilityClient = {
+  custody: {
+    aggregate: (args: {
+      where: {
+        assetId: string;
+        kitCustodyId: null;
+        asset: { organizationId: string };
+      };
+      _sum: { quantity: true };
+    }) => Promise<{ _sum: { quantity: number | null } }>;
+  };
+  assetKit: {
+    aggregate: (args: {
+      where: { assetId: string; organizationId: string };
+      _sum: { quantity: true };
+    }) => Promise<{ _sum: { quantity: number | null } }>;
+  };
+  bookingAsset: {
+    aggregate: (args: {
+      where: {
+        assetId: string;
+        assetKitId: null;
+        booking: { status: { in: BookingStatus[] } };
+      };
+      _sum: { quantity: true };
+    }) => Promise<{ _sum: { quantity: number | null } }>;
+  };
+};
+
+/** What {@link computeCustodyAvailability} resolves an asset's pool into. */
+export type CustodyAvailability = {
+  /** Units a custodian already holds directly. */
+  inCustody: number;
+  /** Units allocated to kits. */
+  inKits: number;
+  /** Units out on an ONGOING or OVERDUE booking, kit-driven rows excluded. */
+  checkedOut: number;
+  /** `total − inCustody − inKits − checkedOut`. */
+  available: number;
+};
+
+/**
+ * How many units of a quantity-tracked asset may be handed to a custodian
+ * right now.
+ *
+ * `available = total − in custody − allocated to kits − out on an active
+ * booking`, which is the same shape as `getAssetAvailabilityBatch`'s
+ * `physicalAvailable`. The two must agree: an operator who is told a booking
+ * can take 45 units should not be offered 71 for custody one screen away.
+ *
+ * Each term is scoped so the axes do not overlap, and none of these filters is
+ * optional:
+ *
+ * - custody counts OPERATOR rows only (`kitCustodyId: null`). A kit in custody
+ *   cascades a `Custody` row onto every member, and those units are already in
+ *   `inKits` — counting both deducts them twice and understates the pool.
+ * - checked-out counts non-kit-driven `BookingAsset` rows only
+ *   (`assetKitId: null`), for the same reason.
+ * - both are org-scoped, because this is a reusable export and the asset id may
+ *   come from request input.
+ *
+ * RESERVED bookings are deliberately NOT subtracted: those units are still
+ * physically on the shelf until their booking is checked out, so they are valid
+ * targets for custody today. That booking re-validates availability at its own
+ * check-out.
+ *
+ * Lives in this leaf rather than beside `getAssetAvailabilityBatch` so
+ * `asset/service.server` can read it without dragging in the
+ * `availability.server → booking/service.server` graph — see this file's
+ * header. That is also why it aggregates directly instead of delegating to the
+ * batch primitive.
+ *
+ * Shared so the number the scanner's quantity input is capped by and the number
+ * the write enforces are the same number rather than two derivations of it — a
+ * cap that disagrees with the write refuses assignments the server would have
+ * accepted, or offers ones it then rejects.
+ *
+ * @param client - Transaction client, or `db` for a read-only caller
+ * @param args.assetId - The quantity-tracked asset
+ * @param args.organizationId - Workspace the asset belongs to
+ * @param args.totalQuantity - Its `Asset.quantity` (workspace stock)
+ * @returns The parts and the total, so a caller can name them in an error
+ */
+export async function computeCustodyAvailability(
+  client: CustodyAvailabilityClient,
+  {
+    assetId,
+    organizationId,
+    totalQuantity,
+  }: { assetId: string; organizationId: string; totalQuantity: number }
+): Promise<CustodyAvailability> {
+  const [custodySum, kitSum, bookingCheckedOutSum] = await Promise.all([
+    client.custody.aggregate({
+      where: { assetId, kitCustodyId: null, asset: { organizationId } },
+      _sum: { quantity: true },
+    }),
+    client.assetKit.aggregate({
+      where: { assetId, organizationId },
+      _sum: { quantity: true },
+    }),
+    client.bookingAsset.aggregate({
+      where: {
+        assetId,
+        assetKitId: null,
+        booking: {
+          status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        },
+      },
+      _sum: { quantity: true },
+    }),
+  ]);
+
+  const inCustody = custodySum._sum.quantity ?? 0;
+  const inKits = kitSum._sum.quantity ?? 0;
+  const checkedOut = bookingCheckedOutSum._sum.quantity ?? 0;
+
+  return {
+    inCustody,
+    inKits,
+    checkedOut,
+    available: totalQuantity - inCustody - inKits - checkedOut,
+  };
+}

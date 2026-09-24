@@ -43,7 +43,10 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 // pulls canvas/lottie UI deps and crashes happy-dom at collection time — e.g.
 // the reports `*.server.test.ts` files import this module via
 // `refreshExpiredAssetImages`). See the leaf's header doc.
-import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import {
+  assertAssetQuantityNotBelowReservations,
+  computeCustodyAvailability,
+} from "~/modules/asset/availability-primitives.server";
 import {
   assertStockNotBelowManualPlacements,
   reconcileManualPlacementsForStockDecrease,
@@ -8236,79 +8239,6 @@ export async function getLocationsForCreateAndEdit({
 /* -------------------------------------------------------------------------- */
 
 /** Arguments for checking out a quantity of a QUANTITY_TRACKED asset to a custodian. */
-/**
- * The reads {@link computeCustodyAvailability} issues. Structural rather than a
- * Prisma type so an interactive transaction client and the global `db` both
- * satisfy it without a cast.
- */
-type CustodyAvailabilityClient = {
-  custody: {
-    aggregate: (args: {
-      where: { assetId: string };
-      _sum: { quantity: true };
-    }) => Promise<{ _sum: { quantity: number | null } }>;
-  };
-  bookingAsset: {
-    aggregate: (args: {
-      where: {
-        assetId: string;
-        booking: { status: { in: BookingStatus[] } };
-      };
-      _sum: { quantity: true };
-    }) => Promise<{ _sum: { quantity: number | null } }>;
-  };
-};
-
-/**
- * How many units of a quantity-tracked asset may be handed to a custodian
- * right now.
- *
- * `available = total − in custody − out on an active booking`.
- *
- * RESERVED bookings are deliberately NOT subtracted: those units are still
- * physically on the shelf until their booking is checked out, so they are valid
- * targets for custody today. That booking re-validates availability at its own
- * check-out.
- *
- * Shared so the number the scanner's quantity input is capped by and the number
- * {@link checkOutQuantity} enforces are the same number rather than two
- * derivations of it — a cap that disagrees with the write refuses assignments
- * the server would have accepted, or offers ones it then rejects.
- *
- * @param client - Transaction client, or `db` for a read-only caller
- * @param args.assetId - The quantity-tracked asset
- * @param args.totalQuantity - Its `Asset.quantity` (workspace stock)
- * @returns The parts and the total, so a caller can name them in an error
- */
-export async function computeCustodyAvailability(
-  client: CustodyAvailabilityClient,
-  { assetId, totalQuantity }: { assetId: string; totalQuantity: number }
-): Promise<{ inCustody: number; checkedOut: number; available: number }> {
-  const [custodySum, bookingCheckedOutSum] = await Promise.all([
-    client.custody.aggregate({
-      where: { assetId },
-      _sum: { quantity: true },
-    }),
-    client.bookingAsset.aggregate({
-      where: {
-        assetId,
-        booking: {
-          status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-        },
-      },
-      _sum: { quantity: true },
-    }),
-  ]);
-
-  const inCustody = custodySum._sum.quantity ?? 0;
-  const checkedOut = bookingCheckedOutSum._sum.quantity ?? 0;
-  return {
-    inCustody,
-    checkedOut,
-    available: totalQuantity - inCustody - checkedOut,
-  };
-}
-
 type CheckOutQuantityArgs = {
   /** The asset to check out from */
   assetId: string;
@@ -8463,14 +8393,18 @@ export async function checkOutQuantity({
        * checkout time.
        */
       const totalQuantity = asset.quantity ?? 0;
-      const { inCustody, checkedOut, available } =
-        await computeCustodyAvailability(tx, { assetId, totalQuantity });
+      const { inCustody, inKits, checkedOut, available } =
+        await computeCustodyAvailability(tx, {
+          assetId,
+          organizationId,
+          totalQuantity,
+        });
 
       /** Step 6: Validate sufficient availability */
       if (quantity > available) {
         throw new ShelfError({
           cause: null,
-          message: `Cannot check out ${quantity} units. Only ${available} units are available (${inCustody} in custody, ${checkedOut} checked out on active bookings).`,
+          message: `Cannot check out ${quantity} units. Only ${available} units are available (${inCustody} in custody, ${inKits} allocated to kits, ${checkedOut} checked out on active bookings).`,
           label,
           status: 400,
           additionalData: {
@@ -8478,6 +8412,7 @@ export async function checkOutQuantity({
             quantity,
             available,
             inCustody,
+            inKits,
             checkedOut,
           },
         });

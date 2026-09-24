@@ -65,6 +65,28 @@ export function operatorHolderCount(asset: AssetFromQr): number {
 }
 
 /**
+ * Whether a scanned row's state badges should be shown.
+ *
+ * `Asset.status` and kit membership are whole-row facts, so on a
+ * quantity-tracked asset they fire while most of its units are free: a 71-unit
+ * asset with 26 in a kit reads "Part of kit", which an operator reasonably
+ * takes to mean the asset cannot go. Badges are the row's answer to "can I use
+ * this", so on a quantity row they only earn their place once the answer is no.
+ *
+ * INDIVIDUAL rows are unaffected — for them the whole-row fact IS the answer.
+ *
+ * @param asset - The scanned row.
+ * @param usableUnits - Units this drawer may move, as it computes them —
+ *   {@link assignableUnits} or {@link releasableUnits}.
+ */
+export function shouldShowStateBadges(
+  asset: AssetFromQr,
+  usableUnits: number
+): boolean {
+  return !isQuantityTracked(asset) || usableUnits <= 0;
+}
+
+/**
  * Whether any of this asset's units are held because its KIT is in custody.
  *
  * Distinguishes "there is nothing to release" from "what is held belongs to

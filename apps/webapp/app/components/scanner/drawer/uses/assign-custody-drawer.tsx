@@ -21,6 +21,7 @@ import { CheckmarkIcon } from "~/components/icons/library";
 import {
   assignableUnits,
   buildQuantitiesPayload,
+  shouldShowStateBadges,
 } from "~/components/scanner/drawer/custody-scan-quantities";
 import { Button } from "~/components/shared/button";
 import {
@@ -575,12 +576,19 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const qtyTracked = isQuantityTracked(asset);
   const maxAllowed = assignableUnits(asset);
+  // Whole-row state badges are suppressed while a quantity row still has free
+  // units — see `shouldShowStateBadges`.
+  const showStateBadges = shouldShowStateBadges(asset, maxAllowed);
   // Use predefined presets to create label configurations
   const availabilityConfigs = [
-    assetLabelPresets.inCustody(asset.status === AssetStatus.IN_CUSTODY),
-    assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
+    assetLabelPresets.inCustody(
+      showStateBadges && asset.status === AssetStatus.IN_CUSTODY
+    ),
+    assetLabelPresets.checkedOut(
+      showStateBadges && asset.status === AssetStatus.CHECKED_OUT
+    ),
     assetLabelPresets.partOfKit(
-      asset.assetKits.length > 0,
+      showStateBadges && asset.assetKits.length > 0,
       isQuantityTracked(asset)
     ),
   ];

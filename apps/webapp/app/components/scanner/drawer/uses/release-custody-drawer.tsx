@@ -21,6 +21,7 @@ import {
   hasKitInheritedCustody,
   operatorHolderCount,
   releasableUnits,
+  shouldShowStateBadges,
 } from "~/components/scanner/drawer/custody-scan-quantities";
 import { Button } from "~/components/shared/button";
 import {
@@ -521,6 +522,14 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const qtyTracked = isQuantityTracked(asset);
   const inCustody = releasableUnits(asset);
+  /**
+   * Badges that say the row cannot be used are suppressed while a quantity row
+   * still has releasable units — see `shouldShowStateBadges`. The "In custody
+   * of" badge below is NOT gated: on a release surface it names the person the
+   * units are coming back from, which is the row's most useful fact, not a
+   * claim that the row is unusable.
+   */
+  const showStateBadges = shouldShowStateBadges(asset, inCustody);
   // Use predefined presets to create label configurations with appropriate conditions for release custody
   const availabilityConfigs = [
     {
@@ -546,9 +555,11 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       tooltipContent: "This asset is not in custody and cannot be released.",
       priority: 100,
     },
-    assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
+    assetLabelPresets.checkedOut(
+      showStateBadges && asset.status === AssetStatus.CHECKED_OUT
+    ),
     assetLabelPresets.partOfKit(
-      asset.assetKits.length > 0,
+      showStateBadges && asset.assetKits.length > 0,
       isQuantityTracked(asset)
     ),
   ];

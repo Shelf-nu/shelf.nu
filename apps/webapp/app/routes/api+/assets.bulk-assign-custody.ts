@@ -1,10 +1,10 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
 import { db } from "~/database/db.server";
+import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import {
   bulkCheckOutAssets,
   checkOutQuantity,
-  computeCustodyAvailability,
 } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -158,6 +158,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
       const { available } = await computeCustodyAvailability(db, {
         assetId,
+        organizationId,
         totalQuantity: asset.quantity ?? 0,
       });
 

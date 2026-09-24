@@ -2,10 +2,10 @@ import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import {
   bulkCheckOutAssets,
   checkOutQuantity,
-  computeCustodyAvailability,
 } from "~/modules/asset/service.server";
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
 import { requirePermission } from "~/utils/roles.server";
@@ -73,9 +73,17 @@ vi.mock("~/modules/asset/service.server", () => ({
   // why: the per-unit path is what the scanner submits; the route's job is to
   // split the submission and forward role, which is what these assert.
   checkOutQuantity: vi.fn().mockResolvedValue({}),
-  computeCustodyAvailability: vi
-    .fn()
-    .mockResolvedValue({ inCustody: 0, checkedOut: 0, available: 100 }),
+}));
+
+// why: the availability pre-flight lives in the dependency-free leaf, so it is
+// mocked separately from the service module.
+vi.mock("~/modules/asset/availability-primitives.server", () => ({
+  computeCustodyAvailability: vi.fn().mockResolvedValue({
+    inCustody: 0,
+    inKits: 0,
+    checkedOut: 0,
+    available: 100,
+  }),
 }));
 
 // why: testing team member organization validation without database lookups
@@ -146,6 +154,7 @@ beforeEach(() => {
   // availability pre-flight must answer for every test that reaches it.
   mockComputeCustodyAvailability.mockResolvedValue({
     inCustody: 0,
+    inKits: 0,
     checkedOut: 0,
     available: 100,
   });
@@ -455,6 +464,7 @@ describe("api/assets/bulk-assign-custody", () => {
     it("writes nothing when one scan asks for more units than are free", async () => {
       mockComputeCustodyAvailability.mockResolvedValue({
         inCustody: 96,
+        inKits: 0,
         checkedOut: 0,
         available: 4,
       });

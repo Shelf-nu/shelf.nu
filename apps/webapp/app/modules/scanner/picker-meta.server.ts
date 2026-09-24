@@ -19,8 +19,8 @@
 import { AssetType } from "@prisma/client";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
-import { computeCustodyAvailability } from "~/modules/asset/service.server";
 import { getKitPickerMeta } from "~/modules/kit/picker-meta.server";
 import { getLocationPickerMeta } from "~/modules/location/picker-meta.server";
 
@@ -113,6 +113,7 @@ export async function getScannerPickerMeta({
     // uses, so the input's ceiling and the write's rule cannot drift apart.
     const { available } = await computeCustodyAvailability(db, {
       assetId,
+      organizationId,
       totalQuantity: totalQty,
     });
     return {

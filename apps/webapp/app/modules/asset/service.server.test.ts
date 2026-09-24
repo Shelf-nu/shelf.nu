@@ -13,6 +13,7 @@ import {
   recordEvents,
 } from "~/modules/activity-event/service.server";
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import type * as AvailabilityPrimitivesModule from "~/modules/asset/availability-primitives.server";
 import { getCategory } from "~/modules/category/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
@@ -129,6 +130,11 @@ vitest.mock("~/database/db.server", () => ({
     // partial uniques — operator-only WHERE kitCustodyId IS NULL and
     // kit-only WHERE kitCustodyId IS NOT NULL. `aggregate` totals every
     // Custody row on the asset for the availability calc.
+    // why: custody availability subtracts units allocated to kits, so the
+    // quantity paths read `AssetKit` as well as `Custody`.
+    assetKit: {
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+    },
     custody: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       findFirst: vitest.fn().mockResolvedValue(null),
@@ -207,9 +213,16 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
 // `updateAsset` imports the guard from the dependency-free leaf (not
 // `availability.server`) to avoid the heavy transitive import chain — mock the
 // leaf so the stub intercepts.
-vitest.mock("~/modules/asset/availability-primitives.server", () => ({
-  assertAssetQuantityNotBelowReservations: vitest.fn(),
-}));
+// why: only the stock-lowering guard is stubbed — `computeCustodyAvailability`
+// lives in this same leaf and IS the math the checkout suites assert, so it
+// must keep running for real against the mocked db.
+vitest.mock(
+  "~/modules/asset/availability-primitives.server",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof AvailabilityPrimitivesModule>();
+    return { ...actual, assertAssetQuantityNotBelowReservations: vitest.fn() };
+  }
+);
 
 // why: avoid touching real consumption log writes during checkOutQuantity tests
 vitest.mock("~/modules/consumption-log/service.server", () => ({
@@ -1017,6 +1030,58 @@ describe("checkOutQuantity — availability accounting", () => {
     (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
       count: 1,
     });
+  });
+
+  it("refuses units that are allocated to a kit", async () => {
+    // A kit holds part of the stock, so those units are not free to hand to a
+    // custodian — the same rule booking availability already applies. Without
+    // the kit term this asset reads as 100 free and the checkout succeeds,
+    // putting units in someone's hands and inside a kit at the same time.
+    mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.assetKit.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 30 },
+    });
+
+    let caught: unknown;
+    try {
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 80,
+        userId: "user-1",
+        organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    const error = caught as ShelfError;
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(400);
+    // 100 total − 30 in kits = 70 free.
+    expect(error.message).toContain("Only 70 units are available");
+    expect(mockCustodyCreate).not.toHaveBeenCalled();
+  });
+
+  it("leaves the pool alone when no units are in a kit", async () => {
+    mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 20 } });
+    mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.assetKit.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 80,
+      userId: "user-1",
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    expect(mockCustodyCreate).toHaveBeenCalled();
   });
 
   it("rejects when booking-reserved units push requested qty over available", async () => {

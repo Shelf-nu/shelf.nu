@@ -21,6 +21,7 @@ import {
   hasKitInheritedCustody,
   operatorHolderCount,
   releasableUnits,
+  shouldShowStateBadges,
 } from "./custody-scan-quantities";
 
 /** A scanned row, cut down to the fields these helpers read. */
@@ -120,6 +121,33 @@ describe("operatorHolderCount", () => {
         assetWithCustody([{ quantity: 30, kitCustodyId: "kit-custody-1" }])
       )
     ).toBe(0);
+  });
+});
+
+describe("shouldShowStateBadges", () => {
+  it("hides them on a quantity row that still has free units", () => {
+    // 71 units with 26 in a kit reads "Part of kit", which an operator takes
+    // to mean the asset cannot go — while 45 units are free to take.
+    expect(
+      shouldShowStateBadges({ type: "QUANTITY_TRACKED" } as AssetFromQr, 45)
+    ).toBe(false);
+  });
+
+  it("shows them on a quantity row with nothing free", () => {
+    expect(
+      shouldShowStateBadges({ type: "QUANTITY_TRACKED" } as AssetFromQr, 0)
+    ).toBe(true);
+  });
+
+  it("always shows them for an individual asset", () => {
+    // For an INDIVIDUAL row the whole-asset status IS the answer, so gating it
+    // would hide the reason the row cannot go.
+    expect(
+      shouldShowStateBadges({ type: "INDIVIDUAL" } as AssetFromQr, 0)
+    ).toBe(true);
+    expect(
+      shouldShowStateBadges({ type: "INDIVIDUAL" } as AssetFromQr, 1)
+    ).toBe(true);
   });
 });
 
