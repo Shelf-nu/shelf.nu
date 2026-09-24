@@ -2,6 +2,8 @@ import type { Booking, Currency } from "@prisma/client";
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
+import { canRemoveBookingItems } from "./permissions/role-access";
+import type { BookingStatusName, RoleAccess } from "./permissions/role-access";
 import type { UserNameFields } from "./user";
 import { resolveTeamMemberName } from "./user";
 
@@ -131,6 +133,71 @@ export function canRoleRemoveBookingAssets({
   return roles.some(
     (role) => REMOVABLE_STATUSES_BY_ROLE[role]?.includes(booking.status)
   );
+}
+
+/**
+ * Whether items may be added through the booking SCAN page in this status.
+ *
+ * The scan page keeps its own rule, `bookings.scanAddAfterDraft`, which is
+ * wider than the manage-items rule for BASE. Closed bookings refuse everyone.
+ *
+ * @param args.access - The caller's access
+ * @param args.bookingStatus - The booking's status
+ * @returns `true` when the scan page may add items
+ */
+export function canScanAddBookingItems({
+  access,
+  bookingStatus,
+}: {
+  access: RoleAccess;
+  bookingStatus: BookingStatusName;
+}): boolean {
+  if (!REMOVABLE_STATUSES.includes(bookingStatus)) {
+    return false;
+  }
+  return (
+    access.policy.bookings.scanAddAfterDraft ||
+    bookingStatus === BookingStatus.DRAFT
+  );
+}
+
+/**
+ * Whether a surface should offer removing items from a booking in this status.
+ *
+ * Every remove path is gated on `booking:update`, which BASE holds, so the
+ * matrix grant alone does not settle it: the status half comes from the
+ * caller's policy (`canRemoveBookingItems`). The grant is passed in rather than
+ * derived here so this stays pure; callers compute it with `userHasPermission`,
+ * which denies while the session's roles are still loading.
+ *
+ * Ownership is still the caller's to enforce.
+ *
+ * @param args.canUpdateBooking - The caller holds `booking:update`
+ * @param args.access - The caller's access
+ * @param args.bookingStatus - The booking's status
+ * @returns `true` when removal may be offered
+ */
+export function mayRemoveBookingItems({
+  canUpdateBooking,
+  access,
+  bookingStatus,
+}: {
+  canUpdateBooking: boolean;
+  access: RoleAccess;
+  bookingStatus: BookingStatusName;
+}): boolean {
+  return canUpdateBooking && canRemoveBookingItems({ access, bookingStatus });
+}
+
+/**
+ * Whether the booking custodian is fixed to the caller themself: the booking
+ * form's custodian picker, its seed, and the server guards on create and edit.
+ *
+ * @param access - The caller's access
+ * @returns `true` when the caller may only book for themself
+ */
+export function bookingCustodianIsSelf(access: RoleAccess): boolean {
+  return access.policy.bookings.custodianPicker === "self";
 }
 
 export const bookingStatusColorMap: {

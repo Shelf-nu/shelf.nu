@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { ShelfError } from "./error";
+import type { RoleAccess } from "./permissions/role-access";
 import { resolveMostPrivilegedRole } from "./role-precedence";
 import { resolveBookingHolderName, type UserNameFields } from "./user";
 
@@ -62,10 +63,73 @@ export function canSeeBooking({
     return true;
   }
 
+  return isBookingCustodian({ booking, userId });
+}
+
+/**
+ * Whether the caller holds a booking, through EITHER custody link.
+ *
+ * A booking assigned by picking a team member can carry
+ * `custodianUserId = NULL`, so matching the user link alone misses bookings
+ * that belong to the caller. This is the custody half of {@link canSeeBooking},
+ * for callers that need "is it theirs" without the workspace see-toggle.
+ *
+ * @param params.booking - The booking's two custody links
+ * @param params.userId - The caller
+ * @returns `true` when either link names the caller
+ */
+export function isBookingCustodian({
+  booking,
+  userId,
+}: {
+  booking: BookingCustodyLinks;
+  userId: string;
+}): boolean {
   return (
     booking.custodianUserId === userId ||
     booking.custodianTeamMember?.userId === userId
   );
+}
+
+/**
+ * Refuses a booking PDF / .ics download the caller may not have.
+ *
+ * Roles whose policy grants `bookings.documentsForOthers` download any
+ * booking's documents; everyone else only a booking they are the custodian of
+ * (the user link). Creating the booking is not enough, and the booking
+ * see-toggle does not widen this.
+ *
+ * @param params.access - The caller's access
+ * @param params.booking - The booking's user custody link
+ * @param params.userId - The caller
+ * @param params.action - Verb phrase for the refusal ("view", "download the calendar for")
+ * @throws {ShelfError} 403 when the caller may not download this booking's documents
+ */
+export function assertCanDownloadBookingDocuments({
+  access,
+  booking,
+  userId,
+  action,
+}: {
+  access: RoleAccess;
+  booking: { custodianUserId: string | null };
+  userId: string;
+  action: string;
+}): void {
+  if (
+    access.policy.bookings.documentsForOthers ||
+    booking.custodianUserId === userId
+  ) {
+    return;
+  }
+
+  throw new ShelfError({
+    cause: null,
+    label: "Booking",
+    message: `You are not authorized to ${action} this booking.`,
+    status: 403,
+    shouldBeCaptured: false,
+  });
 }
 
 /**

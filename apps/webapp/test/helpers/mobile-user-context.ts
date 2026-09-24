@@ -13,11 +13,14 @@
  *
  *     mobileUserContext({ roles: ["BASE"], canSeeAllBookings: true })
  *
- * `access` is folded from `roles` with every workspace toggle off, since this
- * helper's `overrides` carry pre-resolved outcomes (`canSeeAllCustody`,
- * `canSeeAllBookings`), not raw per-role toggle inputs. A test asserting on
- * `access.bookings.seeAll` / `access.custody.seeAll` under a widened override
- * builds that `RoleAccess` itself via `resolveRoleAccess`.
+ * `access` is folded from the SAME toggles `canSeeAllBookings` /
+ * `canSeeAllCustody` resolve to (each switches both the `selfService` and
+ * `baseUser` pair of its axis on), so the shorthand flags and `access` can
+ * never disagree. A test that needs one axis widened without the other, or a
+ * SELF_SERVICE-only / BASE-only toggle, passes `workspace` directly: it is
+ * merged in last and wins over the shorthand:
+ *
+ *     mobileUserContext({ roles: ["BASE"], workspace: { baseUserCanSeeCustody: true } })
  */
 
 import { OrganizationRoles } from "@prisma/client";
@@ -25,7 +28,9 @@ import {
   isSelfServiceOrBaseRole,
   resolveMostPrivilegedRole,
 } from "~/utils/booking-authorization.server";
+import type { WorkspaceAccessSettings } from "~/utils/permissions/role-access";
 import { resolveRoleAccess } from "~/utils/permissions/role-access";
+import { ALL_TOGGLES_OFF } from "./role-access";
 
 export function mobileUserContext(
   overrides: {
@@ -34,11 +39,24 @@ export function mobileUserContext(
     canUseAudits?: boolean;
     canSeeAllCustody?: boolean;
     canSeeAllBookings?: boolean;
+    /** Toggles to switch on; `canSeeAll*: true` switches the matching pair on. */
+    workspace?: Partial<WorkspaceAccessSettings>;
   } = {}
 ) {
   const roles = overrides.roles ?? [OrganizationRoles.ADMIN];
   const effectiveRole = resolveMostPrivilegedRole(roles);
   const restricted = isSelfServiceOrBaseRole(effectiveRole);
+  const workspace: WorkspaceAccessSettings = {
+    ...ALL_TOGGLES_OFF,
+    ...(overrides.canSeeAllBookings
+      ? { selfServiceCanSeeBookings: true, baseUserCanSeeBookings: true }
+      : {}),
+    ...(overrides.canSeeAllCustody
+      ? { selfServiceCanSeeCustody: true, baseUserCanSeeCustody: true }
+      : {}),
+    ...overrides.workspace,
+  };
+  const access = resolveRoleAccess({ roles, workspace });
 
   return {
     role: roles[0] ?? OrganizationRoles.BASE,
@@ -47,19 +65,8 @@ export function mobileUserContext(
     isSelfServiceOrBase: restricted,
     canUseBarcodes: overrides.canUseBarcodes ?? true,
     canUseAudits: overrides.canUseAudits ?? true,
-    canSeeAllCustody: overrides.canSeeAllCustody ?? !restricted,
-    canSeeAllBookings: overrides.canSeeAllBookings ?? !restricted,
-    // The membership's resolved reach, with every workspace toggle off (see
-    // the file-level doc for why this default cannot read the overrides
-    // above).
-    access: resolveRoleAccess({
-      roles,
-      workspace: {
-        selfServiceCanSeeBookings: false,
-        baseUserCanSeeBookings: false,
-        selfServiceCanSeeCustody: false,
-        baseUserCanSeeCustody: false,
-      },
-    }),
+    canSeeAllCustody: overrides.canSeeAllCustody ?? access.custody.seeAll,
+    canSeeAllBookings: overrides.canSeeAllBookings ?? access.bookings.seeAll,
+    access,
   };
 }

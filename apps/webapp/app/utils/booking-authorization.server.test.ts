@@ -17,10 +17,13 @@
 import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
+import { accessFor } from "@helpers/role-access";
 import {
+  assertCanDownloadBookingDocuments,
   bookingWriteScopeClause,
   canSeeBooking,
   canSeeBookingCustodian,
+  isBookingCustodian,
   resolveBookingCustodianName,
   resolveMostPrivilegedRole,
   validateBookingOwnership,
@@ -489,5 +492,93 @@ describe("canSeeBookingCustodian", () => {
     expect(
       canSeeBookingCustodian({ canSeeAllCustody: true, booking, userId: ME })
     ).toBe(true);
+  });
+});
+
+describe("isBookingCustodian", () => {
+  it("matches the user link", () => {
+    expect(
+      isBookingCustodian({
+        booking: { custodianUserId: "me", custodianTeamMember: null },
+        userId: "me",
+      })
+    ).toBe(true);
+  });
+
+  it("matches a booking held through the team-member link alone", () => {
+    expect(
+      isBookingCustodian({
+        booking: {
+          custodianUserId: null,
+          custodianTeamMember: { userId: "me" },
+        },
+        userId: "me",
+      })
+    ).toBe(true);
+  });
+
+  it("refuses another user's booking on both links", () => {
+    expect(
+      isBookingCustodian({
+        booking: {
+          custodianUserId: "other",
+          custodianTeamMember: { userId: "other" },
+        },
+        userId: "me",
+      })
+    ).toBe(false);
+  });
+});
+
+describe("assertCanDownloadBookingDocuments", () => {
+  const notMine = { custodianUserId: "someone-else" };
+
+  it.each([OrganizationRoles.OWNER, OrganizationRoles.ADMIN])(
+    "%s downloads any booking's documents",
+    (role) => {
+      expect(() =>
+        assertCanDownloadBookingDocuments({
+          access: accessFor([role]),
+          booking: notMine,
+          userId: "me",
+          action: "view",
+        })
+      ).not.toThrow();
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "%s downloads only as the custodian",
+    (role) => {
+      expect(() =>
+        assertCanDownloadBookingDocuments({
+          access: accessFor([role]),
+          booking: { custodianUserId: "me" },
+          userId: "me",
+          action: "view",
+        })
+      ).not.toThrow();
+      expect(() =>
+        assertCanDownloadBookingDocuments({
+          access: accessFor([role]),
+          booking: notMine,
+          userId: "me",
+          action: "view",
+        })
+      ).toThrow(expect.objectContaining({ status: 403 }));
+    }
+  );
+
+  it("is not widened by the booking see-toggle", () => {
+    expect(() =>
+      assertCanDownloadBookingDocuments({
+        access: accessFor([OrganizationRoles.SELF_SERVICE], {
+          selfServiceCanSeeBookings: true,
+        }),
+        booking: notMine,
+        userId: "me",
+        action: "view",
+      })
+    ).toThrow(expect.objectContaining({ status: 403 }));
   });
 });

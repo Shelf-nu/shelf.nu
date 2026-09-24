@@ -9,10 +9,14 @@
  */
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import {
+  bookingCustodianIsSelf,
   canRoleRemoveBookingAssets,
+  canScanAddBookingItems,
   canUserManageBookingAssets,
   canUserRemoveBookingAssets,
+  mayRemoveBookingItems,
 } from "./bookings";
 
 /** The statuses in which a booking is a closed record. */
@@ -134,5 +138,85 @@ describe("canRoleRemoveBookingAssets", () => {
   it("denies when roles are missing or empty", () => {
     expect(removalsFor(undefined)).toEqual([]);
     expect(removalsFor([])).toEqual([]);
+  });
+});
+
+const CLOSED = ["COMPLETE", "ARCHIVED", "CANCELLED"] as const;
+const R = OrganizationRoles;
+
+describe("canScanAddBookingItems", () => {
+  it("lets BASE scan-add to a live booking, unlike SELF_SERVICE", () => {
+    expect(
+      canScanAddBookingItems({
+        access: accessFor([R.BASE]),
+        bookingStatus: "RESERVED",
+      })
+    ).toBe(true);
+    expect(
+      canScanAddBookingItems({
+        access: accessFor([R.SELF_SERVICE]),
+        bookingStatus: "RESERVED",
+      })
+    ).toBe(false);
+    expect(
+      canScanAddBookingItems({
+        access: accessFor([R.SELF_SERVICE]),
+        bookingStatus: "DRAFT",
+      })
+    ).toBe(true);
+  });
+
+  it("refuses a closed booking for every role", () => {
+    for (const role of [R.OWNER, R.ADMIN, R.SELF_SERVICE, R.BASE]) {
+      for (const bookingStatus of CLOSED) {
+        expect(
+          canScanAddBookingItems({ access: accessFor([role]), bookingStatus })
+        ).toBe(false);
+      }
+    }
+  });
+});
+
+describe("mayRemoveBookingItems", () => {
+  it("needs the booking:update grant as well as the status rule", () => {
+    expect(
+      mayRemoveBookingItems({
+        canUpdateBooking: false,
+        access: accessFor([R.ADMIN]),
+        bookingStatus: "DRAFT",
+      })
+    ).toBe(false);
+  });
+
+  it("stops BASE at DRAFT and SELF_SERVICE at RESERVED", () => {
+    const may = (
+      role: OrganizationRoles,
+      bookingStatus: "DRAFT" | "RESERVED" | "ONGOING"
+    ) =>
+      mayRemoveBookingItems({
+        canUpdateBooking: true,
+        access: accessFor([role]),
+        bookingStatus,
+      });
+
+    expect([may(R.BASE, "DRAFT"), may(R.BASE, "RESERVED")]).toEqual([
+      true,
+      false,
+    ]);
+    expect([
+      may(R.SELF_SERVICE, "RESERVED"),
+      may(R.SELF_SERVICE, "ONGOING"),
+    ]).toEqual([true, false]);
+    expect(may(R.ADMIN, "ONGOING")).toBe(true);
+  });
+});
+
+describe("bookingCustodianIsSelf", () => {
+  it("fixes the custodian for SELF_SERVICE and BASE only", () => {
+    expect(
+      [R.OWNER, R.ADMIN, R.SELF_SERVICE, R.BASE].map((r) =>
+        bookingCustodianIsSelf(accessFor([r]))
+      )
+    ).toEqual([false, false, true, true]);
   });
 });
