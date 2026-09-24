@@ -3,7 +3,7 @@
  * submit.
  *
  * The routes treat a missing entry as "not a quantity asset", so a row left
- * out of the payload is not handed over in smaller units — it is skipped
+ * out of the payload is not handed over in smaller units. It is skipped
  * entirely, with the submission still reporting success. Nothing downstream
  * can tell the two apart, which is why the omission has to be caught here.
  *
@@ -69,7 +69,7 @@ describe("releasableUnits", () => {
   it("ignores units inherited from a kit's custody", () => {
     // Those rows cascade off the kit's own custody, and both the route's
     // holder lookup and `releaseQuantity` scope themselves to the operator
-    // axis — so offering them here promises a release that always errors.
+    // axis, so offering them here promises a release that always errors.
     expect(
       releasableUnits(
         assetWithCustody([
@@ -127,7 +127,7 @@ describe("operatorHolderCount", () => {
 describe("shouldShowStateBadges", () => {
   it("hides them on a quantity row that still has free units", () => {
     // 71 units with 26 in a kit reads "Part of kit", which an operator takes
-    // to mean the asset cannot go — while 45 units are free to take.
+    // to mean the asset cannot go, while 45 units are free to take.
     expect(
       shouldShowStateBadges({ type: "QUANTITY_TRACKED" } as AssetFromQr, 45)
     ).toBe(false);
@@ -153,7 +153,7 @@ describe("shouldShowStateBadges", () => {
 
 describe("hasKitInheritedCustody", () => {
   it("separates units held by the kit from nothing being held", () => {
-    // The two look identical to a release — both leave zero operator units —
+    // The two look identical to a release (both leave zero operator units)
     // but only one should send the operator to the kit's QR.
     expect(
       hasKitInheritedCustody(
@@ -175,7 +175,7 @@ describe("hasKitInheritedCustody", () => {
 describe("buildQuantitiesPayload", () => {
   it("emits a row the operator never touched, at the 1 its input displays", () => {
     // The whole point: `ScannedAssetQuantityInput` writes the atom only on
-    // edit, so accepting the default leaves no entry — and reading the atom's
+    // edit, so accepting the default leaves no entry, and reading the atom's
     // keys alone would drop the ordinary one-unit hand-over.
     const payload = buildQuantitiesPayload({
       items: { qr1: assetItem({ id: "asset-1" }) },
@@ -198,7 +198,7 @@ describe("buildQuantitiesPayload", () => {
     expect(payload).toEqual({ "asset-1": 6 });
   });
 
-  it("leaves individual assets out — they are handed over whole", () => {
+  it("leaves individual assets out, they are handed over whole", () => {
     const payload = buildQuantitiesPayload({
       items: { qr1: assetItem({ id: "asset-1", type: "INDIVIDUAL" }) },
       assetIds: ["asset-1"],

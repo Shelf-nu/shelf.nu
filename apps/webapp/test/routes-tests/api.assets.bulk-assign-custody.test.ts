@@ -474,7 +474,7 @@ describe("api/assets/bulk-assign-custody", () => {
       )) as unknown as Response;
 
       // Each checkOutQuantity commits its own transaction, so a refusal
-      // discovered mid-loop would strand the assets already written — and a
+      // discovered mid-loop would strand the assets already written, and a
       // retry would add them a second time, because the call increments.
       expect(response.status).toBe(400);
       expect(mockCheckOutQuantity).not.toHaveBeenCalled();

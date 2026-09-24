@@ -75,8 +75,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
      * QR and its barcode arrives twice under the same id. The per-unit writes
      * below run once per entry, so a duplicate would hand the quantity over
      * twice; the bulk path matches on an id set and is unaffected either way.
-     * Duplicates carry no information — `quantities` holds one number per
-     * asset — so collapsing them is lossless, and kinder than refusing a scan
+     * Duplicates carry no information (`quantities` holds one number per
+     * asset), so collapsing them is lossless, and kinder than refusing a scan
      * where the operator did nothing wrong.
      */
     const uniqueAssetIds = [...new Set(assetIds)];
@@ -119,8 +119,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     /**
      * The SELF_SERVICE "assign-to-self" guard lives inside the services
-     * themselves — `bulkCheckOutAssets` for whole assets and
-     * `checkOutQuantity` for the per-unit path — so web and mobile share one
+     * themselves: `bulkCheckOutAssets` for whole assets and
+     * `checkOutQuantity` for the per-unit path, so web and mobile share one
      * source of truth. The route passes `role` through to both.
      */
     // Acting user's timezone: when "select all" is active the affected set is
@@ -137,14 +137,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
      * Each `checkOutQuantity` call is its own transaction, so once one has
      * committed nothing puts it back. Without this pass, a scan whose third
      * asset is over-subscribed would leave the first two assigned while the
-     * drawer reports the submission as failed — and a retry would then add
+     * drawer reports the submission as failed, and a retry would then add
      * those two a second time, because the call increments an existing custody
      * row rather than setting it.
      *
      * This is a pre-flight, not a lock: each write re-checks availability
      * under its own row lock, which is what actually prevents over-allocation
      * if the pool moves in between. What the pre-flight buys is that the
-     * refusal operators can actually provoke — asking for more than is free —
+     * refusal operators can actually provoke (asking for more than is free)
      * happens before anything is written.
      */
     const unavailable: string[] = [];
@@ -204,7 +204,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           settings,
           timeZone,
           // `asset: custody` is a SELF_SERVICE permission, so narrow the
-          // select-all custodian filter to the caller's own custody — otherwise a
+          // select-all custodian filter to the caller's own custody, otherwise a
           // self-service user could act on exactly the set a colleague holds.
           allowedTeamMemberIds: await scopeCustodianFilterIds({
             teamMemberIds: new URLSearchParams(
@@ -219,7 +219,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const skippedNote =
       skippedQuantityTracked > 0
-        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — assign custody individually.`
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped. Assign custody individually.`
         : "";
 
     sendNotification({

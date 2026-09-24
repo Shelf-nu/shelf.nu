@@ -113,7 +113,7 @@ export default function ReleaseCustodyDrawer({
   // Setup blockers
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
 
-  // Asset blockers — assets NOT in custody (AVAILABLE or CHECKED_OUT).
+  // Asset blockers for assets NOT in custody (AVAILABLE or CHECKED_OUT).
   //
   // INDIVIDUAL only, matching the kit blocker below: `Asset.status` is one flag
   // for the whole row, so a quantity-tracked asset holding a partial custody
@@ -141,8 +141,8 @@ export default function ReleaseCustodyDrawer({
    * success while doing nothing.
    *
    * "Held by the kit" and "held by nobody" are separated because the advice
-   * differs — one is redirected to the kit's QR, the other has nothing to
-   * release at all — and telling an operator to scan a kit for an asset that
+   * differs: one is redirected to the kit's QR, the other has nothing to
+   * release at all, and telling an operator to scan a kit for an asset that
    * simply is not in custody sends them looking for a kit that has it.
    */
   const qtyAssetsHeldViaKitOnly = assets
@@ -360,7 +360,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // Per-row units for quantity-tracked scans, written by
   // `ScannedAssetQuantityInput` and keyed by asset id.
   const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
-  // The scanned rows themselves — the submit sends a quantity for every
+  // The scanned rows themselves. The submit sends a quantity for every
   // quantity-tracked row, not only the ones whose input was edited.
   const items = useAtomValue(scannedItemsAtom);
 
@@ -524,7 +524,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const inCustody = releasableUnits(asset);
   /**
    * Badges that say the row cannot be used are suppressed while a quantity row
-   * still has releasable units — see `shouldShowStateBadges`. The "In custody
+   * still has releasable units. See `shouldShowStateBadges`. The "In custody
    * of" badge below is NOT gated: on a release surface it names the person the
    * units are coming back from, which is the row's most useful fact, not a
    * claim that the row is unusable.
@@ -545,7 +545,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     },
     // For release custody, we highlight assets that are NOT in custody (opposite of assign custody)
     {
-      // Whole-asset statement, so INDIVIDUAL only — a qty-tracked row can hold
+      // Whole-asset statement, so INDIVIDUAL only: a qty-tracked row can hold
       // units for someone while its overall status reads otherwise.
       condition:
         asset.type === AssetType.INDIVIDUAL &&
@@ -594,7 +594,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       </div>
 
       {/* Quantity-tracked rows hand back a number of units, not the whole
-          item. Hidden when nothing is held — there is nothing to release. */}
+          item. Hidden when nothing is held, since there is nothing to release. */}
       {qtyTracked && inCustody > 0 ? (
         <ScannedAssetQuantityInput
           assetId={asset.id}

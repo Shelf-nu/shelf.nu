@@ -615,7 +615,7 @@ export type CustodyAvailability = {
  *
  * - custody counts OPERATOR rows only (`kitCustodyId: null`). A kit in custody
  *   cascades a `Custody` row onto every member, and those units are already in
- *   `inKits` — counting both deducts them twice and understates the pool.
+ *   `inKits`, so counting both deducts them twice and understates the pool.
  * - checked-out counts non-kit-driven `BookingAsset` rows only
  *   (`assetKitId: null`), for the same reason.
  * - both are org-scoped, because this is a reusable export and the asset id may
@@ -628,12 +628,12 @@ export type CustodyAvailability = {
  *
  * Lives in this leaf rather than beside `getAssetAvailabilityBatch` so
  * `asset/service.server` can read it without dragging in the
- * `availability.server → booking/service.server` graph — see this file's
+ * `availability.server` to `booking/service.server` graph. See this file's
  * header. That is also why it aggregates directly instead of delegating to the
  * batch primitive.
  *
  * Shared so the number the scanner's quantity input is capped by and the number
- * the write enforces are the same number rather than two derivations of it — a
+ * the write enforces are the same number rather than two derivations of it. A
  * cap that disagrees with the write refuses assignments the server would have
  * accepted, or offers ones it then rejects.
  *

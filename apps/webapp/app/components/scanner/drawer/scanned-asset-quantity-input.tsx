@@ -3,7 +3,7 @@
  * location, kit, booking, assign custody and release custody.
  *
  *   - Clamped to [1, max].
- *   - Defaults to 1 — "scan to take one", edited up from there.
+ *   - Defaults to 1 ("scan to take one"), edited up from there.
  *   - Stops click propagation so tapping it doesn't trigger the surrounding
  *     row's selection / remove behaviour.
  *
@@ -14,7 +14,7 @@
  *
  * State lives in `scannedAssetQuantitiesAtom`, keyed by `assetId`, so the
  * drawer's clear / remove paths drop entries for free. This bound is a
- * display aid only — the services re-check the real pool on the write.
+ * display aid only: the services re-check the real pool on the write.
  */
 
 import type { ChangeEvent } from "react";
@@ -65,8 +65,8 @@ export function ScannedAssetQuantityInput({
         step={1}
         value={value}
         className="w-16"
-        // The shared Input is sized for a form field — 16px text on 14px
-        // padding — which dwarfs a row it is meant to sit inside. These land
+        // The shared Input is sized for a form field (16px text on 14px
+        // padding), which dwarfs a row it is meant to sit inside. These land
         // after the defaults in `tw()`, so they win.
         inputClassName="px-2 py-1 text-sm text-right"
         onChange={(e: ChangeEvent<HTMLInputElement>) => {

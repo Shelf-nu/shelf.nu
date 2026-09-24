@@ -51,7 +51,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
 
     /**
-     * Units per quantity-tracked asset, sent only by the scanner — see the
+     * Units per quantity-tracked asset, sent only by the scanner. See the
      * field's note on `BulkReleaseCustodySchema`. Named assets are released
      * through `releaseQuantity`, the same primitive the asset page uses, and
      * never reach the bulk call. An index submission sends none, so its
@@ -64,8 +64,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
      * QR and its barcode arrives twice under the same id. The per-unit writes
      * below run once per entry, so a duplicate would hand the quantity over
      * twice; the bulk path matches on an id set and is unaffected either way.
-     * Duplicates carry no information — `quantities` holds one number per
-     * asset — so collapsing them is lossless, and kinder than refusing a scan
+     * Duplicates carry no information (`quantities` holds one number per
+     * asset), so collapsing them is lossless, and kinder than refusing a scan
      * where the operator did nothing wrong.
      */
     const uniqueAssetIds = [...new Set(assetIds)];
@@ -127,7 +127,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
 
     /**
-     * Releasing needs a custodian, and this scanner never asks for one — a
+     * Releasing needs a custodian, and this scanner never asks for one: a
      * bulk release takes the asset back from whoever holds it. For a
      * quantity-tracked asset that is only unambiguous while one person holds
      * it, so the single holder is resolved here and anything else is refused
@@ -138,7 +138,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
      * `kitCustodyId` was inherited from the kit and goes back by releasing the
      * kit, which cascade-deletes it.
      *
-     * The whole scan is checked before any of it is released — both that each
+     * The whole scan is checked before any of it is released: both that each
      * asset has exactly one holder AND that the holder has the units asked
      * for. Each `releaseQuantity` call commits its own transaction, so a
      * refusal discovered mid-loop would leave earlier assets already released
@@ -215,7 +215,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           settings,
           timeZone,
           // `asset: custody` is a SELF_SERVICE permission, so narrow the
-          // select-all custodian filter to the caller's own custody — otherwise a
+          // select-all custodian filter to the caller's own custody, otherwise a
           // self-service user could act on exactly the set a colleague holds.
           allowedTeamMemberIds: await scopeCustodianFilterIds({
             teamMemberIds: new URLSearchParams(
@@ -231,7 +231,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     /**
      * The whole-asset path runs first, and the per-unit writes after it.
      *
-     * Neither service joins the other's transaction — each opens its own — so
+     * Neither service joins the other's transaction (each opens its own), so
      * a mixed submission cannot be made all-or-nothing without reworking
      * primitives that four other custody routes depend on, and holding their
      * row locks across a whole scan. What the order buys is that the operation
@@ -252,7 +252,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const skippedNote =
       skippedQuantityTracked > 0
-        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — release custody individually.`
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped. Release custody individually.`
         : "";
 
     sendNotification({

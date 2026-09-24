@@ -8332,7 +8332,7 @@ export async function checkOutQuantity({
        * Step 4: Resolve the custodian, and refuse a self-service caller
        * handing units to anyone but themselves.
        *
-       * `teamMemberId` is request input, so the lookup is org-scoped — a team
+       * `teamMemberId` is request input, so the lookup is org-scoped: a team
        * member from another workspace resolves to nothing and is refused here
        * rather than being written into a custody row.
        *
@@ -8490,7 +8490,7 @@ export async function checkOutQuantity({
       });
 
       /**
-       * Step 9: Activity event — emit `CUSTODY_ASSIGNED` inside the tx so
+       * Step 9: Activity event. Emit `CUSTODY_ASSIGNED` inside the tx so
        * it commits atomically with the custody upsert. The `viaQuantity`
        * meta flag distinguishes qty-tracked custody slices from
        * INDIVIDUAL-asset custody assignments.
@@ -8549,8 +8549,8 @@ type ReleaseQuantityArgs = {
    * Required, not optional: a SELF_SERVICE caller may only release custody
    * they hold themselves, and a missing role would silently fall open. The
    * bulk route deliberately does NOT judge quantity-tracked rows in its own
-   * guard — they are released per asset, so refusing the whole selection over
-   * one would reject work nobody asked for — which leaves this the only place
+   * guard: they are released per asset, so refusing the whole selection over
+   * one would reject work nobody asked for, which leaves this the only place
    * the restriction can be applied to them.
    */
   role: OrganizationRoles;
@@ -8653,7 +8653,7 @@ export async function releaseQuantity({
        * Step 3a: Refuse a self-service caller releasing someone else's hold.
        *
        * `teamMemberId` is resolved by the caller from the asset's custody
-       * rows, so it names whoever currently holds the units — which for a
+       * rows, so it names whoever currently holds the units, which for a
        * self-service user is exactly what must be checked before those units
        * are taken off them. The lookup is org-scoped, so a team member from
        * another workspace is refused here rather than written into a log.

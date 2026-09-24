@@ -213,7 +213,7 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
 // `updateAsset` imports the guard from the dependency-free leaf (not
 // `availability.server`) to avoid the heavy transitive import chain — mock the
 // leaf so the stub intercepts.
-// why: only the stock-lowering guard is stubbed — `computeCustodyAvailability`
+// why: only the stock-lowering guard is stubbed. `computeCustodyAvailability`
 // lives in this same leaf and IS the math the checkout suites assert, so it
 // must keep running for real against the mocked db.
 vitest.mock(
@@ -1034,7 +1034,7 @@ describe("checkOutQuantity — availability accounting", () => {
 
   it("refuses units that are allocated to a kit", async () => {
     // A kit holds part of the stock, so those units are not free to hand to a
-    // custodian — the same rule booking availability already applies. Without
+    // custodian, the same rule booking availability already applies. Without
     // the kit term this asset reads as 100 free and the checkout succeeds,
     // putting units in someone's hands and inside a kit at the same time.
     mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
@@ -3353,10 +3353,10 @@ describe("bulk custody — refusals of the selection answer 400", () => {
 /**
  * The per-unit custody path carries the same self-service restriction as the
  * whole-asset one. It lives in `checkOutQuantity` rather than at its routes
- * because three of them reach custody through it — web bulk, web single-asset
- * and mobile — and a guard at one leaves the other two to remember.
+ * because three of them reach custody through it (web bulk, web single-asset
+ * and mobile), and a guard at one leaves the other two to remember.
  */
-describe("checkOutQuantity — SELF_SERVICE guard", () => {
+describe("checkOutQuantity: SELF_SERVICE guard", () => {
   const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
   const mockTeamMemberFindFirst = db.teamMember.findFirst as ReturnType<
     typeof vitest.fn
@@ -3483,7 +3483,7 @@ describe("checkOutQuantity — SELF_SERVICE guard", () => {
  * one asset a colleague holds cannot refuse a whole selection nobody asked
  * to release.
  */
-describe("releaseQuantity — SELF_SERVICE guard", () => {
+describe("releaseQuantity: SELF_SERVICE guard", () => {
   const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
   const mockTeamMemberFindFirst = db.teamMember.findFirst as ReturnType<
     typeof vitest.fn

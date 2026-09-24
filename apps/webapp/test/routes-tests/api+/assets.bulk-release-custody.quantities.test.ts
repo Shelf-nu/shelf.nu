@@ -7,7 +7,7 @@
  * refusal happens before anything is written.
  *
  * The role angle lives in `assets.bulk-release-custody.test.ts` beside this
- * file — that suite covers which selections the route's own self-service guard
+ * file. That suite covers which selections the route's own self-service guard
  * judges, which deliberately excludes quantity-tracked rows.
  *
  * @see {@link file://./../../../app/routes/api+/assets.bulk-release-custody.ts}
@@ -221,7 +221,7 @@ describe("api/assets/bulk-release-custody", () => {
     const body = await response.json();
 
     // `releaseQuantity` checks this too, but inside the asset's own
-    // transaction — by then `asset-ok` would already be committed, and a retry
+    // transaction. By then `asset-ok` would already be committed, and a retry
     // would release it a second time.
     expect(response.status).toBe(400);
     expect(body.error.message).toContain("Drill Bits");

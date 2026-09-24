@@ -24,14 +24,14 @@ const CUSTODIAN_SELECT = {
 /**
  * Custody selection for a scanned ASSET.
  *
- * `Asset.custody` is a list of `Custody` rows — one per holder — each carrying
+ * `Asset.custody` is a list of `Custody` rows, one per holder, each carrying
  * the units that holder has.
  */
 export const ASSET_CUSTODY_INCLUDE = {
   custody: {
     select: {
       // Units this row holds. The release scanner bounds its quantity input by
-      // the operator-assigned rows — see `kitCustodyId` below.
+      // the operator-assigned rows. See `kitCustodyId` below.
       quantity: true,
       // Which axis this row belongs to: null is operator-assigned, non-null
       // means the row was inherited from the kit's custody and cascades with
@@ -50,7 +50,7 @@ export const ASSET_CUSTODY_INCLUDE = {
  * it is a different model from the asset-side `Custody`: it records who holds
  * the kit and carries no `quantity`, because units live on the `Custody` rows
  * it cascades to. So the two selections above and below cannot be merged into
- * one shared constant, however alike they look — and a field only `Custody`
+ * one shared constant, however alike they look, and a field only `Custody`
  * has must never be added here.
  *
  * Getting that wrong takes down far more than kit scans: both scanned-item

@@ -47,7 +47,7 @@ describe("KIT_INCLUDE", () => {
 
 describe("custody selections", () => {
   it("carries which axis each asset-side custody row belongs to", () => {
-    // The release scanner's ceiling counts operator-assigned rows only —
+    // The release scanner's ceiling counts operator-assigned rows only:
     // kit-inherited ones go back with the kit. Without this field every row
     // reads `kitCustodyId: undefined`, the filter keeps all of them, and the
     // input offers units the write refuses.
@@ -62,7 +62,7 @@ describe("custody selections", () => {
   });
 
   it("refuses an asset-only field on the kit side at compile time", () => {
-    // `Kit.custody` is a `KitCustody` — no `quantity`. Both scanned-item
+    // `Kit.custody` is a `KitCustody`, which has no `quantity`. Both scanned-item
     // endpoints resolve the asset and kit branches in one query, so an invalid
     // kit selection fails EVERY scan, and Prisma's error surfaces as "this code
     // doesn't belong to your current organization". Nothing at runtime can

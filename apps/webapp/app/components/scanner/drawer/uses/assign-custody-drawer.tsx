@@ -128,7 +128,7 @@ export default function AssignCustodyDrawer({
     )
     .map((asset) => asset.id);
 
-  // Asset is checked out. INDIVIDUAL only — same reasoning as above: one unit
+  // Asset is checked out. INDIVIDUAL only, same reasoning as above: one unit
   // out on a booking flips the whole qty-tracked row to CHECKED_OUT while the
   // remaining units are still free to hand over.
   const assetsAreCheckedOut = assets
@@ -137,6 +137,22 @@ export default function AssignCustodyDrawer({
         !!asset &&
         asset.type === AssetType.INDIVIDUAL &&
         asset.status === AssetStatus.CHECKED_OUT
+    )
+    .map((asset) => asset.id);
+
+  /**
+   * Quantity-tracked rows with nothing free to hand over.
+   *
+   * Their units are all in custody, allocated to a kit, or out on a booking.
+   * The row renders no quantity input, so it would be submitted as a whole
+   * asset and skipped with the rest of the quantity-tracked batch: the drawer
+   * would report success while nothing moved. The status blockers above cannot
+   * catch these, because they are scoped to INDIVIDUAL assets on purpose.
+   */
+  const qtyAssetsWithNothingFree = assets
+    .filter(
+      (asset) =>
+        !!asset && isQuantityTracked(asset) && assignableUnits(asset) <= 0
     )
     .map((asset) => asset.id);
 
@@ -190,6 +206,19 @@ export default function AssignCustodyDrawer({
 
   // Create blockers configuration
   const blockerConfigs = [
+    {
+      condition: qtyAssetsWithNothingFree.length > 0,
+      count: qtyAssetsWithNothingFree.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s have" : " has"}`}</strong> no
+          units available.
+        </>
+      ),
+      description:
+        "Every unit is already in custody, allocated to a kit, or out on a booking.",
+      onResolve: () => removeAssetsFromList(qtyAssetsWithNothingFree),
+    },
     {
       condition: assetsAlreadyInCustody.length > 0,
       count: assetsAlreadyInCustody.length,
@@ -276,6 +305,7 @@ export default function AssignCustodyDrawer({
     blockerConfigs,
     onResolveAll: () => {
       removeAssetsFromList([
+        ...qtyAssetsWithNothingFree,
         ...assetsAlreadyInCustody,
         ...assetsAreCheckedOut,
         ...assetsArePartOfKit,
@@ -308,7 +338,7 @@ export default function AssignCustodyDrawer({
         return null;
       }}
       // Custody context so the API attaches `pickerMeta` with the pool
-      // `checkOutQuantity` enforces — the ceiling the qty input below is
+      // `checkOutQuantity` enforces, the ceiling the qty input below is
       // bounded by. No id: the custodian is chosen after scanning and the pool
       // does not depend on who ends up holding the units.
       searchParams={{ pickerContext: JSON.stringify({ type: "custody" }) }}
@@ -353,7 +383,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // Per-row units for quantity-tracked scans, written by
   // `ScannedAssetQuantityInput` and keyed by asset id.
   const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
-  // The scanned rows themselves — the submit sends a quantity for every
+  // The scanned rows themselves. The submit sends a quantity for every
   // quantity-tracked row, not only the ones whose input was edited.
   const items = useAtomValue(scannedItemsAtom);
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema, {
@@ -577,7 +607,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const qtyTracked = isQuantityTracked(asset);
   const maxAllowed = assignableUnits(asset);
   // Whole-row state badges are suppressed while a quantity row still has free
-  // units — see `shouldShowStateBadges`.
+  // units. See `shouldShowStateBadges`.
   const showStateBadges = shouldShowStateBadges(asset, maxAllowed);
   // Use predefined presets to create label configurations
   const availabilityConfigs = [
@@ -622,7 +652,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       </div>
 
       {/* Quantity-tracked rows hand over a number of units, not the whole
-          item. Hidden once nothing is free — the row is still listed, and the
+          item. Hidden once nothing is free: the row is still listed, and the
           blocker below explains why it cannot go. */}
       {qtyTracked && maxAllowed > 0 ? (
         <ScannedAssetQuantityInput
