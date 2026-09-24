@@ -216,15 +216,20 @@ describe("SSO group-claim revocation", () => {
     });
   });
 
-  it("lands the owner in the workspace they kept", async () => {
+  it("lands the owner in the workspace they kept and repairs their team member", async () => {
     // The owner keeps access although no group claim maps, so this workspace
-    // is still a valid landing org.
+    // is still a valid landing org, and a missing team member is re-created
+    // as for any login that keeps access.
     dbMocks.queryRaw.mockResolvedValue([{ id: "uo-1" }]);
-    dbMocks.teamMemberFindFirst.mockResolvedValue({ id: TEAM_MEMBER_ID });
+    dbMocks.teamMemberFindFirst.mockResolvedValue(null);
 
     const result = await login(["g-alumni"], ["OWNER"]);
 
     expect(result.org).toMatchObject({ id: ORG_ID });
+    expect(dbMocks.teamMemberCreate).toHaveBeenCalledWith({
+      data: { name: "Jane Doe", organizationId: ORG_ID, userId: USER_ID },
+      select: { id: true },
+    });
   });
 
   it("keeps access when ownership was transferred to the user mid-login", async () => {
