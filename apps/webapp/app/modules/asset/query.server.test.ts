@@ -1390,10 +1390,26 @@ describe("POOL_AGGREGATE_JOIN — the SQL twin of getAssetAvailability", () => {
     );
   });
 
-  it("measures checked-out units as dispatched, not booked", () => {
-    expect(sql).toContain(`"checkedOutQuantity" > 0`);
+  it("counts what is still out as what left minus what came back", () => {
+    // Mirror of computeUnitsStillOutBySlice. What left: the whole slice for an
+    // all-at-once checkout, otherwise the larger of the session claims and the
+    // stored counter.
     expect(sql).toContain(
-      `WHEN a.status = 'CHECKED_OUT' AND status IN ('ONGOING', 'OVERDUE') THEN quantity`
+      `WHEN a.status = 'CHECKED_OUT' AND NOT bool_or(oc.claimed > 0) OVER (PARTITION BY oc."bookingId")`
+    );
+    expect(sql).toContain(`ELSE LEAST(oc.quantity, oc.claimed)`);
+    // The cumulative counter floors both readings, so a slice sent out a
+    // second time, by either checkout, still counts.
+    expect(sql).toMatch(/END,\s+oc\.counter\s+\) AS departed/);
+    // What came back comes off the slice, never below zero or above booked.
+    expect(sql).toContain(`LEAST(od.quantity, GREATEST(od.departed - (`);
+    // Untagged claims and returns fill standalone slices first, then by id in
+    // the byte order JavaScript compares these ids in.
+    expect(sql).toContain(
+      `ORDER BY NOT ob.standalone, ob.slice_id COLLATE "C"`
+    );
+    expect(sql).toContain(
+      `ORDER BY NOT od.standalone, od.slice_id COLLATE "C"`
     );
   });
 
@@ -1401,7 +1417,9 @@ describe("POOL_AGGREGATE_JOIN — the SQL twin of getAssetAvailability", () => {
     expect(sql).toContain(
       `cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')`
     );
-    expect(sql).toContain(`GREATEST(quantity - logged, 0) AS remaining`);
+    expect(sql).toContain(
+      `GREATEST(act.quantity - COALESCE(booked_logs.q, 0), 0) AS remaining`
+    );
   });
 
   it("sweeps bookings as intervals for the peak, releases before claims at a tie", () => {

@@ -2395,17 +2395,18 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
  * everything filtering and sorting on them needs, computed once per asset.
  *
  * A LATERAL rather than inline scalar subqueries in the SELECT list, because a
- * value in the SELECT list is invisible to the WHERE clause — SQL evaluates
+ * value in the SELECT list is invisible to the WHERE clause: SQL evaluates
  * WHERE first. Putting them here means the projection, the filter and the sort
  * all reference the same aliases, so a filter can never disagree with the
  * column it filters. It also cannot fan the asset out into duplicate rows the
  * way a plain join on AssetKit or BookingAsset would (an asset can sit in many
- * kits and on many bookings) — the same hazard the custody_agg LATERAL exists
+ * kits and on many bookings), the same hazard the custody_agg LATERAL exists
  * for.
  *
  * The figures are the SQL twin of `getAssetAvailabilityBatch`
  * (`modules/asset/availability.server.ts`), the primitive the booking engine
- * consults. Three of its rules are load-bearing and easy to lose:
+ * and the asset page consult. Change one, change the other. Four rules are
+ * load-bearing and easy to lose:
  *
  * - **Units inside a kit are counted once, as `in_kits`.** A kit in custody
  *   writes `Custody` rows tagged `kitCustodyId` for its members, and a booked
@@ -2415,14 +2416,21 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
  *   `_all` variants exist for the status badge's LABEL ("In custody" is still
  *   the right word for a member of a kit in custody); they never feed
  *   arithmetic.
- * - **What a booking still owes is booked minus ledgered.** `ConsumptionLog`
- *   rows in the reservation-reducing categories record units that came back or
- *   were consumed against a booking; `remaining` subtracts them per slice.
- *   What has actually LEFT is `checkedOutQuantity` minus the same ledger, with
- *   the legacy all-at-once rule (asset status CHECKED_OUT, no counter) taken
- *   from `computeCheckedOutBreakdown`.
+ * - **What a booking still owes is booked minus logged.** `ConsumptionLog`
+ *   rows in the RETURN / CONSUME / LOSS / DAMAGE categories record units that
+ *   came back or were used up against a booking; `remaining` subtracts the
+ *   booking's total from each slice, as `getAssetAvailability` does.
+ * - **What is still out is what left minus what came back**, per slice, as
+ *   `computeUnitsStillOutBySlice` (`modules/booking/checkout-attribution.ts`)
+ *   computes it. What left: the larger of one trip's reading (the whole slice
+ *   when the asset is CHECKED_OUT and no session claim names it on that
+ *   booking, the all-at-once checkout; otherwise its session claims capped at
+ *   the booked quantity) and its stored, cumulative `checkedOutQuantity`.
+ *   Untagged claims and untagged returns both fill
+ *   standalone slices first, then by id in byte order, which is JavaScript's
+ *   string order for these ids.
  * - **Bookings are intervals, and `peak_booked` is their peak.** The sweep is
- *   `peakConcurrent` in SQL: +remaining at each booking's start, −remaining at
+ *   `peakConcurrent` in SQL: +remaining at each booking's start, -remaining at
  *   its end, running sum ordered by time with releases before claims at a tie,
  *   maximum taken. Only the future matters, so starts are clamped to `now()`,
  *   bookings already over are dropped, and an OVERDUE booking never ends.
@@ -2436,6 +2444,7 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
   LEFT JOIN LATERAL (
     WITH active AS (
       SELECT
+        ba.id AS slice_id,
         ba."bookingId",
         bk.name,
         bk.status,
@@ -2443,30 +2452,109 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
         CASE WHEN bk.status = 'OVERDUE' THEN 'infinity'::timestamptz ELSE bk."to" END AS end_at,
         (ba."assetKitId" IS NULL) AS standalone,
         ba.quantity,
-        ba."checkedOutQuantity",
-        COALESCE((
-          SELECT SUM(cl.quantity)
-          FROM public."ConsumptionLog" cl
-          WHERE cl."bookingId" = ba."bookingId"
-            AND cl."assetId" = a.id
-            AND cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')
-        ), 0)::int AS logged
+        ba."checkedOutQuantity" AS counter
       FROM public."BookingAsset" ba
       JOIN public."Booking" bk ON bk.id = ba."bookingId"
       WHERE ba."assetId" = a.id
         AND bk.status IN ('RESERVED', 'ONGOING', 'OVERDUE')
     ),
+    -- What came back or was used up, per booking and slice tag (NULL = untagged).
+    logs AS (
+      SELECT cl."bookingId", cl."bookingAssetId" AS tag, SUM(cl.quantity)::int AS q
+      FROM public."ConsumptionLog" cl
+      WHERE cl."assetId" = a.id
+        AND cl."bookingId" IN (SELECT "bookingId" FROM active)
+        AND cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')
+      GROUP BY cl."bookingId", cl."bookingAssetId"
+    ),
+    -- Check-out session claims for this asset, per booking and slice tag. The
+    -- three arrays are positional; a misaligned quantities array means one
+    -- unit per entry, and '' or a missing tag means untagged.
+    claims AS (
+      SELECT
+        p."bookingId",
+        NULLIF(u.tag, '') AS tag,
+        SUM(CASE
+          WHEN cardinality(p.quantities) = cardinality(p."assetIds") THEN COALESCE(u.q, 1)
+          ELSE 1
+        END)::int AS q
+      FROM public."PartialBookingCheckout" p
+      CROSS JOIN LATERAL unnest(p."assetIds", p.quantities, p."bookingAssetIds") AS u(aid, q, tag)
+      WHERE p."bookingId" IN (SELECT "bookingId" FROM active WHERE status IN ('ONGOING', 'OVERDUE'))
+        AND u.aid = a.id
+      GROUP BY p."bookingId", NULLIF(u.tag, '')
+    ),
+    out_base AS (
+      SELECT
+        act.slice_id,
+        act."bookingId",
+        act.standalone,
+        act.quantity,
+        act.counter,
+        COALESCE((SELECT c.q FROM claims c WHERE c."bookingId" = act."bookingId" AND c.tag = act.slice_id), 0) AS claim_tagged,
+        COALESCE((SELECT c.q FROM claims c WHERE c."bookingId" = act."bookingId" AND c.tag IS NULL), 0) AS claim_pool,
+        COALESCE((SELECT l.q FROM logs l WHERE l."bookingId" = act."bookingId" AND l.tag = act.slice_id), 0) AS disp_tagged,
+        COALESCE((SELECT l.q FROM logs l WHERE l."bookingId" = act."bookingId" AND l.tag IS NULL), 0) AS disp_pool
+      FROM active act
+      WHERE act.status IN ('ONGOING', 'OVERDUE')
+    ),
+    -- Untagged claims fill standalone slices first, then by id in byte order,
+    -- each up to its booked quantity less its tagged claims.
+    out_claimed AS (
+      SELECT
+        ob.*,
+        ob.claim_tagged + LEAST(
+          GREATEST(ob.quantity - ob.claim_tagged, 0),
+          GREATEST(ob.claim_pool - COALESCE(SUM(GREATEST(ob.quantity - ob.claim_tagged, 0)) OVER fill, 0), 0)
+        ) AS claimed
+      FROM out_base ob
+      WINDOW fill AS (
+        PARTITION BY ob."bookingId"
+        ORDER BY NOT ob.standalone, ob.slice_id COLLATE "C"
+        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+      )
+    ),
+    out_departed AS (
+      SELECT
+        oc.*,
+        GREATEST(
+          CASE
+            WHEN a.status = 'CHECKED_OUT' AND NOT bool_or(oc.claimed > 0) OVER (PARTITION BY oc."bookingId")
+              THEN oc.quantity
+            ELSE LEAST(oc.quantity, oc.claimed)
+          END,
+          oc.counter
+        ) AS departed
+      FROM out_claimed oc
+    ),
+    -- Untagged returns fill in the same order, each slice up to what it has out.
+    out_now AS (
+      SELECT
+        od.slice_id,
+        LEAST(od.quantity, GREATEST(od.departed - (
+          od.disp_tagged + LEAST(
+            GREATEST(od.departed - od.disp_tagged, 0),
+            GREATEST(od.disp_pool - COALESCE(SUM(GREATEST(od.departed - od.disp_tagged, 0)) OVER fill, 0), 0)
+          )
+        ), 0)) AS units
+      FROM out_departed od
+      WINDOW fill AS (
+        PARTITION BY od."bookingId"
+        ORDER BY NOT od.standalone, od.slice_id COLLATE "C"
+        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+      )
+    ),
     slices AS (
       SELECT
-        active.*,
-        GREATEST(quantity - logged, 0) AS remaining,
-        CASE
-          WHEN "checkedOutQuantity" > 0 THEN LEAST(quantity, GREATEST("checkedOutQuantity" - logged, 0))
-          WHEN a.status = 'CHECKED_OUT' AND status IN ('ONGOING', 'OVERDUE') THEN quantity
-          ELSE 0
-        END AS out_now,
-        COALESCE(end_at, 'infinity'::timestamptz) > now() AS ahead
-      FROM active
+        act.*,
+        GREATEST(act.quantity - COALESCE(booked_logs.q, 0), 0) AS remaining,
+        COALESCE(out_now.units, 0) AS out_now,
+        COALESCE(act.end_at, 'infinity'::timestamptz) > now() AS ahead
+      FROM active act
+      LEFT JOIN (
+        SELECT "bookingId", SUM(q)::int AS q FROM logs GROUP BY "bookingId"
+      ) booked_logs ON booked_logs."bookingId" = act."bookingId"
+      LEFT JOIN out_now ON out_now.slice_id = act.slice_id
     )
     SELECT
       COALESCE((
