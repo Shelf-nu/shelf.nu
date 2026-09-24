@@ -185,6 +185,8 @@ export default function LocationEditPage() {
           name={location.name}
           description={location.description}
           address={location.address}
+          imageUrl={location.imageUrl}
+          thumbnailUrl={location.thumbnailUrl}
           parentId={location.parentId}
           referer={referer}
           excludeLocationId={location.id}
