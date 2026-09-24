@@ -196,6 +196,16 @@ export const defaultFields: Column[] = [
 ];
 
 /**
+ * Default columns that carry part of what another column shows, keyed by the
+ * column they belong with. The Quantity cell holds only the number and the
+ * unit lives in `unitOfMeasure`, so a user who shows Quantity needs the unit
+ * column shown too.
+ */
+const visibleWithColumn: Partial<Record<ColumnLabelKey, ColumnLabelKey>> = {
+  unitOfMeasure: "quantity",
+};
+
+/**
  * Adds default columns that a saved column set lacks, each at its default
  * position.
  *
@@ -205,6 +215,10 @@ export const defaultFields: Column[] = [
  * every saved column at or after that position moves down by one, so the
  * user's own order is kept and the new column sits next to its neighbours in
  * the default layout (e.g. `unitOfMeasure` right after `quantity`).
+ *
+ * A missing column takes its default visibility, except that a column listed
+ * in {@link visibleWithColumn} is shown when the saved column it belongs with
+ * is shown, so adding it never hides information the user already saw.
  *
  * @param columns - The row's saved columns; not modified
  * @param missing - Names of the default columns to add
@@ -220,6 +234,9 @@ export function insertMissingDefaultColumns(
     .filter((field) => missing.includes(field.name))
     .sort((a, b) => a.position - b.position);
 
+  const isShownInSavedSet = (name?: ColumnLabelKey) =>
+    Boolean(name && columns.some((col) => col.name === name && col.visible));
+
   return toInsert.reduce<Column[]>(
     (acc, field) => [
       ...acc.map((col) =>
@@ -227,7 +244,11 @@ export function insertMissingDefaultColumns(
           ? { ...col, position: col.position + 1 }
           : col
       ),
-      { ...field },
+      {
+        ...field,
+        visible:
+          field.visible || isShownInSavedSet(visibleWithColumn[field.name]),
+      },
     ],
     [...columns]
   );

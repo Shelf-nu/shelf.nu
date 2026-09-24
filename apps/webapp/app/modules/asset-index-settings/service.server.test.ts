@@ -120,16 +120,18 @@ describe("getAssetIndexSettings with a column set saved before the unit column",
     });
   }
 
-  it("adds Unit of measure at position 18, hidden, right after Quantity", async () => {
+  it("adds Unit of measure at position 18, right after Quantity, shown because Quantity is shown", async () => {
     const saved = [...SAVED_DEFAULTS, ...SAVED_BARCODES, SAVED_CUSTOM_FIELD];
 
     const settings = await loadSavedColumns(saved, true);
     const columns = settings.columns as Column[];
 
     expect(updateMock).toHaveBeenCalledTimes(1);
+    // The Quantity cell holds only the number, so a user who sees Quantity
+    // keeps seeing the unit.
     expect(columns.find((col) => col.name === "unitOfMeasure")).toEqual({
       name: "unitOfMeasure",
-      visible: false,
+      visible: true,
       position: 18,
     });
 
@@ -150,6 +152,21 @@ describe("getAssetIndexSettings with a column set saved before the unit column",
     // Positions stay unique, so the order is unambiguous.
     const positions = columns.map((col) => col.position);
     expect(new Set(positions).size).toBe(positions.length);
+  });
+
+  it("adds Unit of measure hidden when Quantity is hidden", async () => {
+    const quantityHidden = SAVED_DEFAULTS.map((col) =>
+      col.name === "quantity" ? { ...col, visible: false } : col
+    );
+
+    const settings = await loadSavedColumns(quantityHidden, false);
+    const columns = settings.columns as Column[];
+
+    expect(columns.find((col) => col.name === "unitOfMeasure")).toEqual({
+      name: "unitOfMeasure",
+      visible: false,
+      position: 18,
+    });
   });
 
   it("keeps a user's own column order around the new column", async () => {
