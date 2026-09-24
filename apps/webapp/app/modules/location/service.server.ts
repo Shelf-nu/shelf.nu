@@ -885,6 +885,9 @@ export async function createLocation({
   }
 }
 
+/** A location's id and the public URLs of its stored image files. */
+type LocationImageFiles = Pick<Location, "id" | "imageUrl" | "thumbnailUrl">;
+
 /**
  * Removes a location's image and thumbnail from the public storage bucket.
  *
@@ -895,11 +898,9 @@ export async function createLocation({
  *
  * @param location - The deleted location's id and its stored image URLs
  */
-async function safeRemoveLocationImageFiles(location: {
-  id: Location["id"];
-  imageUrl: Location["imageUrl"];
-  thumbnailUrl: Location["thumbnailUrl"];
-}): Promise<void> {
+async function safeRemoveLocationImageFiles(
+  location: LocationImageFiles
+): Promise<void> {
   const files = [
     { publicUrl: location.imageUrl, kind: "image" },
     { publicUrl: location.thumbnailUrl, kind: "thumbnail" },
@@ -926,6 +927,36 @@ async function safeRemoveLocationImageFiles(location: {
         })
       );
     }
+  }
+}
+
+/**
+ * Removes the stored image files of many deleted locations.
+ *
+ * Works through the locations 10 at a time, so a large selection never has
+ * more than a few storage requests open at once. Never rejects: each failed
+ * file is logged by {@link safeRemoveLocationImageFiles}.
+ *
+ * @param locations - The deleted locations and their stored image URLs
+ */
+async function safeRemoveImageFilesOfLocations(
+  locations: LocationImageFiles[]
+): Promise<void> {
+  const STORAGE_CLEANUP_BATCH_SIZE = 10;
+  const locationsWithFiles = locations.filter(
+    (location) => !!location.imageUrl || !!location.thumbnailUrl
+  );
+
+  for (
+    let i = 0;
+    i < locationsWithFiles.length;
+    i += STORAGE_CLEANUP_BATCH_SIZE
+  ) {
+    await Promise.allSettled(
+      locationsWithFiles
+        .slice(i, i + STORAGE_CLEANUP_BATCH_SIZE)
+        .map((location) => safeRemoveLocationImageFiles(location))
+    );
   }
 }
 
@@ -1266,8 +1297,9 @@ export async function createLocationsIfNotExists({
  * rows, and their stored image files.
  *
  * The locations and `Image` rows are deleted in one transaction. The image and
- * thumbnail files are removed after it commits, see
- * {@link safeRemoveLocationImageFiles}.
+ * thumbnail files are removed in the background after it commits, so this
+ * resolves without waiting on storage, see
+ * {@link safeRemoveImageFilesOfLocations}.
  *
  * @param locationIds - IDs to delete, or `ALL_SELECTED_KEY` for every location
  *   in the organization
@@ -1317,25 +1349,12 @@ export async function bulkDeleteLocations({
     });
 
     /**
-     * The transaction has committed, so the files can go. Batches run in
-     * parallel with a small cap, because selecting every location can mean
-     * thousands of storage requests.
+     * Not awaited: the transaction has committed, so the response does not wait
+     * on storage. A select-all delete can mean thousands of files. Cleanup is
+     * best effort either way: a run cut short leaves an orphaned file, the same
+     * outcome as a storage failure.
      */
-    const locationsWithFiles = locations.filter(
-      (location) => !!location.imageUrl || !!location.thumbnailUrl
-    );
-    const STORAGE_CLEANUP_BATCH_SIZE = 10;
-    for (
-      let i = 0;
-      i < locationsWithFiles.length;
-      i += STORAGE_CLEANUP_BATCH_SIZE
-    ) {
-      await Promise.allSettled(
-        locationsWithFiles
-          .slice(i, i + STORAGE_CLEANUP_BATCH_SIZE)
-          .map((location) => safeRemoveLocationImageFiles(location))
-      );
-    }
+    void safeRemoveImageFilesOfLocations(locations);
   } catch (cause) {
     throw new ShelfError({
       cause,

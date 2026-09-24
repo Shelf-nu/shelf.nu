@@ -190,6 +190,9 @@ describe("deleteLocation", () => {
 });
 
 describe("bulkDeleteLocations", () => {
+  // Bulk delete resolves once the transaction commits and removes the files
+  // in the background, so these tests wait for the cleanup to settle.
+
   it("removes the files of every deleted location after the transaction commits", async () => {
     dbMocks.location.findMany.mockResolvedValue([
       makeLocation("loc-1"),
@@ -212,8 +215,10 @@ describe("bulkDeleteLocations", () => {
     expect(dbMocks.location.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["loc-1", "loc-2", "loc-3"] } },
     });
+    await vi.waitFor(() =>
+      expect(removePublicFileMock).toHaveBeenCalledTimes(3)
+    );
     // Locations in a batch are cleaned up in parallel, so compare as a set.
-    expect(removePublicFileMock).toHaveBeenCalledTimes(3);
     expect(removePublicFileMock.mock.calls).toEqual(
       expect.arrayContaining([
         [{ publicUrl: imageUrlFor("loc-1") }],
@@ -224,6 +229,30 @@ describe("bulkDeleteLocations", () => {
     expect(
       dbMocks.location.deleteMany.mock.invocationCallOrder[0]
     ).toBeLessThan(removePublicFileMock.mock.invocationCallOrder[0]);
+  });
+
+  it("resolves without waiting for the storage cleanup to finish", async () => {
+    dbMocks.location.findMany.mockResolvedValue([makeLocation("loc-1")]);
+    const releaseRemovals: Array<() => void> = [];
+    removePublicFileMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseRemovals.push(resolve);
+        })
+    );
+
+    await expect(
+      bulkDeleteLocations({ locationIds: ["loc-1"], organizationId: "org-1" })
+    ).resolves.toBeUndefined();
+
+    // The image removal has started and is still pending.
+    expect(removePublicFileMock).toHaveBeenCalledTimes(1);
+
+    releaseRemovals.forEach((release) => release());
+    await vi.waitFor(() =>
+      expect(removePublicFileMock).toHaveBeenCalledTimes(2)
+    );
+    releaseRemovals.forEach((release) => release());
   });
 
   it("removes files for every location across cleanup batches", async () => {
@@ -240,7 +269,9 @@ describe("bulkDeleteLocations", () => {
     expect(dbMocks.location.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { organizationId: "org-1" } })
     );
-    expect(removePublicFileMock).toHaveBeenCalledTimes(46);
+    await vi.waitFor(() =>
+      expect(removePublicFileMock).toHaveBeenCalledTimes(46)
+    );
     for (const location of locations) {
       expect(removePublicFileMock).toHaveBeenCalledWith({
         publicUrl: location.imageUrl,
@@ -265,7 +296,9 @@ describe("bulkDeleteLocations", () => {
       })
     ).resolves.toBeUndefined();
 
-    expect(removePublicFileMock).toHaveBeenCalledTimes(3);
+    await vi.waitFor(() =>
+      expect(removePublicFileMock).toHaveBeenCalledTimes(3)
+    );
     expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
     expect(loggerErrorSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -287,6 +320,8 @@ describe("bulkDeleteLocations", () => {
       message: "Something went wrong while bulk deleting locations.",
     });
 
+    // Give any background cleanup a chance to start before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(removePublicFileMock).not.toHaveBeenCalled();
   });
 });
