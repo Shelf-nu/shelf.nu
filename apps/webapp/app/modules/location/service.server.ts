@@ -932,8 +932,9 @@ async function safeRemoveLocationImageFiles(location: {
 /**
  * Deletes a location, its legacy `Image` row, and its stored image files.
  *
- * The image and thumbnail files are removed after the database delete
- * succeeds, see {@link safeRemoveLocationImageFiles}.
+ * The location and its `Image` row are deleted in one transaction. The image
+ * and thumbnail files are removed after it commits, see
+ * {@link safeRemoveLocationImageFiles}.
  *
  * @param id - ID of the location to delete
  * @param organizationId - Organization the location must belong to
@@ -945,15 +946,23 @@ export async function deleteLocation({
   organizationId,
 }: Pick<Location, "id" | "organizationId">) {
   try {
-    const location = await db.location.delete({
-      where: { id, organizationId },
-    });
-
-    if (location.imageId) {
-      await db.image.delete({
-        where: { id: location.imageId },
+    /**
+     * Both deletes commit together, so the cleanup below always runs once the
+     * location is gone. Its URLs cannot be read back after the row is deleted.
+     */
+    const location = await db.$transaction(async (tx) => {
+      const deleted = await tx.location.delete({
+        where: { id, organizationId },
       });
-    }
+
+      if (deleted.imageId) {
+        await tx.image.delete({
+          where: { id: deleted.imageId },
+        });
+      }
+
+      return deleted;
+    });
 
     await safeRemoveLocationImageFiles(location);
 

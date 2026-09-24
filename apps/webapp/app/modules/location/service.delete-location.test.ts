@@ -167,6 +167,26 @@ describe("deleteLocation", () => {
 
     expect(removePublicFileMock).not.toHaveBeenCalled();
   });
+
+  it("deletes the location and its legacy Image row in one transaction", async () => {
+    dbMocks.location.delete.mockResolvedValue(
+      makeLocation("loc-1", { imageId: "image-1" })
+    );
+    dbMocks.image.delete.mockRejectedValue(new Error("image delete failed"));
+
+    await expect(
+      deleteLocation({ id: "loc-1", organizationId: "org-1" })
+    ).rejects.toMatchObject({
+      message: "Something went wrong while deleting the location",
+    });
+
+    // Both deletes run inside the same transaction, so the failed Image
+    // delete rolls the location back and its files must stay.
+    expect(dbMocks.$transaction).toHaveBeenCalledTimes(1);
+    expect(dbMocks.location.delete).toHaveBeenCalledTimes(1);
+    expect(dbMocks.image.delete).toHaveBeenCalledTimes(1);
+    expect(removePublicFileMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("bulkDeleteLocations", () => {
