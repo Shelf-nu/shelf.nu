@@ -663,6 +663,20 @@ describe("quantity and unit of measure in the index export", () => {
     expect(drill).toEqual(['"Drill"', '""', '""', '""']);
   });
 
+  it("writes a unit that looks like a formula as plain text", () => {
+    const [, row] = buildCsvExportDataFromAssets({
+      assets: [{ ...ASSETS[0], unitOfMeasure: '=HYPERLINK("x")' }] as any,
+      columns: buildIndexExportColumns({
+        settingsColumns: columnsWithVisible("quantity", "unitOfMeasure"),
+        columnScope: "visible",
+      }),
+      currentOrganization: ORG,
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+
+    expect(row[2]).toBe('"\'=HYPERLINK(""x"")"');
+  });
+
   it("adds the unit right after quantity when only quantity is visible", () => {
     const [headers, gloves] = exportCsv(
       columnsWithVisible("sequentialId", "quantity", "minQuantity"),

@@ -52,7 +52,7 @@ import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getClientHint } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
-import { quoteCsvCell } from "./csv-cells";
+import { neutralizeSpreadsheetFormula, quoteCsvCell } from "./csv-cells";
 import { formatCurrency } from "./currency";
 import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
@@ -800,9 +800,11 @@ export const buildCsvExportDataFromAssets = ({
                 : "";
             break;
           case "unitOfMeasure":
+            // Free text that starts its own cell, so a stored "=..." must not
+            // reach a spreadsheet as a formula.
             value =
               isQuantityTracked(asset) && asset.unitOfMeasure
-                ? asset.unitOfMeasure
+                ? neutralizeSpreadsheetFormula(asset.unitOfMeasure)
                 : "";
             break;
           case "minQuantity":
