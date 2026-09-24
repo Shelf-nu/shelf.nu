@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
-import { AssetStatus, AssetType } from "@prisma/client";
+import { AssetStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { CircleX } from "lucide-react";
 import { useLoaderData } from "react-router";
@@ -45,7 +45,6 @@ import type {
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
-import type { KitFromScanner } from "~/utils/scanner-includes.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import {
@@ -54,6 +53,7 @@ import {
   kitLabelPresets,
 } from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
+import { buildAssignCustodyBlockers } from "./custody-blockers";
 import ConfigurableDrawer from "../configurable-drawer";
 import {
   GenericItemRow,
@@ -99,224 +99,18 @@ export default function AssignCustodyDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
-  // Filter and prepare data
-  const assets = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetFromQr);
-
-  const kits = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "kit")
-    .map((item) => item?.data as KitFromQr);
-
-  // Setup blockers
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
-
-  // Asset blockers
-  //
-  // INDIVIDUAL only, for the same reason the kit blocker below gives:
-  // `Asset.status` is one flag for the whole row, so a quantity-tracked pool
-  // reads IN_CUSTODY while a single unit is held and the rest is free stock.
-  // Judging those rows here would refuse custody of units sitting on the shelf.
-  // What a qty row may claim is its own free pool, which the server re-checks
-  // on the write.
-  const assetsAlreadyInCustody = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        asset.type === AssetType.INDIVIDUAL &&
-        asset.status === AssetStatus.IN_CUSTODY
-    )
-    .map((asset) => asset.id);
-
-  // Asset is checked out. INDIVIDUAL only, same reasoning as above: one unit
-  // out on a booking flips the whole qty-tracked row to CHECKED_OUT while the
-  // remaining units are still free to hand over.
-  const assetsAreCheckedOut = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        asset.type === AssetType.INDIVIDUAL &&
-        asset.status === AssetStatus.CHECKED_OUT
-    )
-    .map((asset) => asset.id);
-
-  /**
-   * Quantity-tracked rows with nothing free to hand over.
-   *
-   * Their units are all in custody, allocated to a kit, or out on a booking.
-   * The row renders no quantity input, so it would be submitted as a whole
-   * asset and skipped with the rest of the quantity-tracked batch: the drawer
-   * would report success while nothing moved. The status blockers above cannot
-   * catch these, because they are scoped to INDIVIDUAL assets on purpose.
-   */
-  const qtyAssetsWithNothingFree = assets
-    .filter(
-      (asset) =>
-        !!asset && isQuantityTracked(asset) && assignableUnits(asset) <= 0
-    )
-    .map((asset) => asset.id);
-
-  // Asset is part of a kit. Only INDIVIDUAL assets get blocked here —
-  // a qty-tracked asset can be partially in a kit and still have a
-  // free pool that's eligible for direct custody assignment. The
-  // server-side strict-available re-validation catches over-allocation.
-  const assetsArePartOfKit = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        asset.type === AssetType.INDIVIDUAL &&
-        asset.assetKits.length > 0 &&
-        asset.id
-    )
-    .map((asset) => asset.id);
-
-  // Kit blockers
-  // Kit is in custody
-  const kitsIsAlreadyInCustody = kits
-    .filter((kit) => kit.status === AssetStatus.IN_CUSTODY)
-    .map((kit) => kit.id);
-
-  // Kit has assets inside that that are in custody
-  const kitsWithAssetsInCustody = kits
-    .filter((kit) =>
-      kit.assetKits.some((ak) => ak.asset.status === AssetStatus.IN_CUSTODY)
-    )
-    .map((kit) => kit.id);
-  // Kit is checked out
-  const kitsAreCheckedOut = kits
-    .filter((kit) => kit.status === AssetStatus.CHECKED_OUT)
-    .map((kit) => kit.id);
-
-  // Find the QR IDs that correspond to kit IDs with blockers
-  // This is necessary because we need to remove the QR IDs from the items object, not the kit IDs
-  const getQrIdsForKitIds = (kitIds: string[]) =>
-    Object.entries(items)
-      .filter(([, item]) => {
-        if (!item || item.type !== "kit") return false;
-        return kitIds.includes((item.data as KitFromScanner)?.id);
-      })
-      .map(([qrId]) => qrId);
-
-  // Get the QR IDs for each type of kit blocker
-  const qrIdsOfKitsInCustody = getQrIdsForKitIds(kitsIsAlreadyInCustody);
-  const qrIdsOfKitsWithAssetsInCustody = getQrIdsForKitIds(
-    kitsWithAssetsInCustody
-  );
-  const qrIdsOfKitsCheckedOut = getQrIdsForKitIds(kitsAreCheckedOut);
-
-  // Create blockers configuration
-  const blockerConfigs = [
-    {
-      condition: qtyAssetsWithNothingFree.length > 0,
-      count: qtyAssetsWithNothingFree.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s have" : " has"}`}</strong> no
-          units available.
-        </>
-      ),
-      description:
-        "Every unit is already in custody, allocated to a kit, or out on a booking.",
-      onResolve: () => removeAssetsFromList(qtyAssetsWithNothingFree),
-    },
-    {
-      condition: assetsAlreadyInCustody.length > 0,
-      count: assetsAlreadyInCustody.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already <strong>in custody</strong>.
-        </>
-      ),
-      onResolve: () => removeAssetsFromList(assetsAlreadyInCustody),
-    },
-    {
-      condition: assetsAreCheckedOut.length > 0,
-      count: assetsAreCheckedOut.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          checked out.
-        </>
-      ),
-      description: "Note: Checked out assets cannot be assigned custody.",
-      onResolve: () => removeAssetsFromList(assetsAreCheckedOut),
-    },
-    {
-      condition: assetsArePartOfKit.length > 0,
-      count: assetsArePartOfKit.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong> are part
-          of a kit.
-        </>
-      ),
-      description: "Note: Scan Kit QR to add the full kit",
-      onResolve: () => removeAssetsFromList(assetsArePartOfKit),
-    },
-    {
-      condition: qrIdsOfKitsInCustody.length > 0,
-      count: qrIdsOfKitsInCustody.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
-          already <strong>in custody</strong>.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(qrIdsOfKitsInCustody),
-    },
-    {
-      condition: qrIdsOfKitsWithAssetsInCustody.length > 0,
-      count: qrIdsOfKitsWithAssetsInCustody.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
-          already have assets <strong>in custody</strong>.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(qrIdsOfKitsWithAssetsInCustody),
-    },
-    {
-      condition: qrIdsOfKitsCheckedOut.length > 0,
-      count: qrIdsOfKitsCheckedOut.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong>{" "}
-          checked out.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(qrIdsOfKitsCheckedOut),
-      description: "Note: Checked out kits cannot be assigned custody.",
-    },
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} QR codes `}</strong> are invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
-    },
-  ];
+  // Blockers live in `custody-blockers` so the list is a pure function of the
+  // scanned rows and can be tested without mounting this drawer.
+  const { blockerConfigs, onResolveAll } = buildAssignCustodyBlockers({
+    items,
+    removeAssetsFromList,
+    removeItemsFromList,
+  });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([
-        ...qtyAssetsWithNothingFree,
-        ...assetsAlreadyInCustody,
-        ...assetsAreCheckedOut,
-        ...assetsArePartOfKit,
-      ]);
-      removeItemsFromList([
-        ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfKitsInCustody,
-        ...qrIdsOfKitsWithAssetsInCustody,
-        ...qrIdsOfKitsCheckedOut,
-      ]);
-    },
+    onResolveAll,
   });
 
   // Render item row

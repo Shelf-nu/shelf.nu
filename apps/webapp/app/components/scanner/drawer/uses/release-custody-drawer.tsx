@@ -18,8 +18,6 @@ import { Form } from "~/components/custom-form";
 import { CheckmarkIcon } from "~/components/icons/library";
 import {
   buildQuantitiesPayload,
-  hasKitInheritedCustody,
-  operatorHolderCount,
   releasableUnits,
   shouldShowStateBadges,
 } from "~/components/scanner/drawer/custody-scan-quantities";
@@ -50,6 +48,7 @@ import {
   kitLabelPresets,
 } from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
+import { buildReleaseCustodyBlockers } from "./custody-blockers";
 import ConfigurableDrawer from "../configurable-drawer";
 import {
   GenericItemRow,
@@ -101,213 +100,18 @@ export default function ReleaseCustodyDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
-  // Filter and prepare data
-  const assets = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetFromQr);
-
-  const kits = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "kit")
-    .map((item) => item?.data as KitFromQr);
-
-  // Setup blockers
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
-
-  // Asset blockers for assets NOT in custody (AVAILABLE or CHECKED_OUT).
-  //
-  // INDIVIDUAL only, matching the kit blocker below: `Asset.status` is one flag
-  // for the whole row, so a quantity-tracked asset holding a partial custody
-  // slice can read AVAILABLE (most units free) or CHECKED_OUT (some units out
-  // on a booking) while units genuinely are in someone's hands. Blocking those
-  // rows refuses a release that is legitimate; what can actually be released is
-  // per custodian, which the server checks on the write.
-  const assetsNotInCustody = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        asset.type === AssetType.INDIVIDUAL &&
-        asset.status !== AssetStatus.IN_CUSTODY
-    )
-    .map((asset) => asset.id);
-
-  /**
-   * Quantity-tracked rows a release can never act on, split by why.
-   *
-   * A release scan names no custodian, so the route resolves the single
-   * operator holder and refuses anything else. All of these reach that
-   * refusal, and the first two reach it silently: a row with nothing
-   * operator-held renders no quantity input, so it is submitted as a whole
-   * asset and skipped with the rest of the quantity-tracked batch, reporting
-   * success while doing nothing.
-   *
-   * "Held by the kit" and "held by nobody" are separated because the advice
-   * differs: one is redirected to the kit's QR, the other has nothing to
-   * release at all, and telling an operator to scan a kit for an asset that
-   * simply is not in custody sends them looking for a kit that has it.
-   */
-  const qtyAssetsHeldViaKitOnly = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        isQuantityTracked(asset) &&
-        operatorHolderCount(asset) === 0 &&
-        hasKitInheritedCustody(asset)
-    )
-    .map((asset) => asset.id);
-
-  const qtyAssetsWithNothingHeld = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        isQuantityTracked(asset) &&
-        operatorHolderCount(asset) === 0 &&
-        !hasKitInheritedCustody(asset)
-    )
-    .map((asset) => asset.id);
-
-  const qtyAssetsWithSeveralHolders = assets
-    .filter(
-      (asset) =>
-        !!asset && isQuantityTracked(asset) && operatorHolderCount(asset) > 1
-    )
-    .map((asset) => asset.id);
-
-  // Asset is part of a kit. Only block INDIVIDUAL assets — qty-tracked
-  // assets can have a partial-custody slice independent of any kit
-  // allocation, so a kit membership shouldn't prevent releasing
-  // operator-only custody.
-  const assetsArePartOfKit = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        asset.type === AssetType.INDIVIDUAL &&
-        asset.assetKits.length > 0 &&
-        asset.id
-    )
-    .map((asset) => asset.id);
-
-  // Kit blockers
-  // Kit is not in custody (AVAILABLE OF CHECKED_OUT)
-  const kitsNotInCustody = kits
-    .filter((kit) => kit.status !== AssetStatus.IN_CUSTODY)
-    .map((kit) => kit.id);
-
-  // Find the QR IDs that correspond to kit IDs with blockers
-  // This is necessary because we need to remove the QR IDs from the items object, not the kit IDs
-  const getQrIdsForKitIds = (kitIds: string[]) =>
-    Object.entries(items)
-      .filter(([, item]) => {
-        if (!item || item.type !== "kit") return false;
-        return kitIds.includes((item.data as KitFromQr)?.id);
-      })
-      .map(([qrId]) => qrId);
-
-  // Get the QR IDs for each type of kit blocker
-  const qrIdsOfKitsNotInCustody = getQrIdsForKitIds(kitsNotInCustody);
-
-  // Create blockers configuration
-  const blockerConfigs = [
-    {
-      condition: qtyAssetsHeldViaKitOnly.length > 0,
-      count: qtyAssetsHeldViaKitOnly.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> held
-          through a kit.
-        </>
-      ),
-      description: "Scan the kit's QR to release the whole kit from custody.",
-      onResolve: () => removeAssetsFromList(qtyAssetsHeldViaKitOnly),
-    },
-    {
-      condition: qtyAssetsWithNothingHeld.length > 0,
-      count: qtyAssetsWithNothingHeld.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s have" : " has"}`}</strong> no
-          units in custody.
-        </>
-      ),
-      description: "There is nothing to release for them.",
-      onResolve: () => removeAssetsFromList(qtyAssetsWithNothingHeld),
-    },
-    {
-      condition: qtyAssetsWithSeveralHolders.length > 0,
-      count: qtyAssetsWithSeveralHolders.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> held
-          by more than one person.
-        </>
-      ),
-      description:
-        "Release these from the asset's custody list, where each holder is listed separately.",
-      onResolve: () => removeAssetsFromList(qtyAssetsWithSeveralHolders),
-    },
-    {
-      condition: assetsNotInCustody.length > 0,
-      count: assetsNotInCustody.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> not
-          in custody.
-        </>
-      ),
-      description: "Only assets in custody can be released.",
-      onResolve: () => removeAssetsFromList(assetsNotInCustody),
-    },
-    {
-      condition: assetsArePartOfKit.length > 0,
-      count: assetsArePartOfKit.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong> are part
-          of a kit.
-        </>
-      ),
-      description: "Note: Scan Kit QR to release the full kit from custody",
-      onResolve: () => removeAssetsFromList(assetsArePartOfKit),
-    },
-    {
-      condition: qrIdsOfKitsNotInCustody.length > 0,
-      count: qrIdsOfKitsNotInCustody.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong> not
-          in custody.
-        </>
-      ),
-      description: "Only kits in custody can be released.",
-      onResolve: () => removeItemsFromList(qrIdsOfKitsNotInCustody),
-    },
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} QR codes `}</strong> are invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
-    },
-  ];
+  // Blockers live in `custody-blockers` so the list is a pure function of the
+  // scanned rows and can be tested without mounting this drawer.
+  const { blockerConfigs, onResolveAll } = buildReleaseCustodyBlockers({
+    items,
+    removeAssetsFromList,
+    removeItemsFromList,
+  });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([
-        ...qtyAssetsHeldViaKitOnly,
-        ...qtyAssetsWithNothingHeld,
-        ...qtyAssetsWithSeveralHolders,
-        ...assetsNotInCustody,
-        ...assetsArePartOfKit,
-      ]);
-      removeItemsFromList([
-        ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfKitsNotInCustody,
-      ]);
-    },
+    onResolveAll,
   });
 
   // Render item row
