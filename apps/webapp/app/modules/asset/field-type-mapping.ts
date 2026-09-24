@@ -23,7 +23,7 @@ export type QueryFieldType =
  * `components/assets/assets-index/advanced-filters/helpers.ts`. The client map
  * drives which operators the filter UI offers; THIS one drives which SQL
  * builder runs. Updating only one is silent: the UI offers the right operators
- * and the query then compiles the wrong branch — a `stockStatus` filter typed
+ * and the query then compiles the wrong branch, a `stockStatus` filter typed
  * as a string emitted `a."stockStatus"` and 500'd with "column does not exist".
  * Change one, change both.
  *
@@ -31,7 +31,7 @@ export type QueryFieldType =
  * `stockStatus` is a verdict compared against a shared SQL expression by
  * `addEnumFilter`, and `available` / `reserved` are aggregates that
  * `addNumberFilter` maps to the same pool expressions the columns render. They
- * are typed here exactly like stored fields, which is the point — the whole
+ * are typed here exactly like stored fields, which is the point, the whole
  * reason Stock status is one enum column is that it then rides the ordinary
  * filter path instead of needing a bespoke URL param.
  *

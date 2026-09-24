@@ -7,7 +7,7 @@
  * blank and says, correctly, that we have no opinion. Without a bulk way to fix
  * that, the column diagnoses a problem the product cannot treat.
  *
- * Clearing is supported by submitting an empty field — undoing a threshold you
+ * Clearing is supported by submitting an empty field, undoing a threshold you
  * set by mistake should not require editing assets one at a time either.
  *
  * @see {@link file://../../modules/asset/service.server.ts} - `bulkUpdateAssetMinQuantity`
@@ -22,7 +22,7 @@ import { Button } from "../shared/button";
 
 /**
  * An empty string clears the threshold; anything else must be a whole number of
- * zero or more. Zero is deliberately valid — it is a real "warn me when nothing
+ * zero or more. Zero is deliberately valid, it is a real "warn me when nothing
  * is left" threshold, and the shared `isLowStock` predicate treats only `null`
  * as "no threshold set".
  */

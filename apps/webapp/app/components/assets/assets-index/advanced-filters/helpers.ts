@@ -40,7 +40,7 @@ const uiFieldTypeNames: Record<UIFieldType, string> = {
  * Determines how a field should be presented and interacted with in the UI
  * Used for generating appropriate form controls and filter interfaces
  *
- * `stockStatus`, `available` and `reserved` are DERIVED — no such column exists
+ * `stockStatus`, `available` and `reserved` are DERIVED, no such column exists
  * on `Asset`. They are typed here like stored fields so the filter UI offers the
  * right operators; the SQL layer maps them to computed expressions. This map
  * MUST stay in step with `getQueryFieldType` in

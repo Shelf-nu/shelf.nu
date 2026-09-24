@@ -6972,13 +6972,13 @@ export async function bulkUpdateAssetLocation({
  * Exists because `minQuantity` is the input the whole Stock status column
  * depends on, and almost nobody has set it: measured on a live workspace, 2 of
  * 12 quantity assets had one, and 0 of 10 in dev. Nothing in the product ever
- * asks for it — it is optional in the create form and in the CSV importer. A
+ * asks for it, it is optional in the create form and in the CSV importer. A
  * column that tells a customer "no reorder point" on most of their catalogue,
  * with only a one-at-a-time cure, diagnoses a problem it cannot treat.
  *
  * INDIVIDUAL assets are skipped, not rejected. `minQuantity` is meaningless for
  * a single tracked object, and a mixed selection is the normal case in a
- * workspace that has both kinds — failing the whole batch because a camera came
+ * workspace that has both kinds, failing the whole batch because a camera came
  * along for the ride would make the action unusable on exactly the lists people
  * select from.
  *
@@ -7026,7 +7026,7 @@ export async function bulkUpdateAssetMinQuantity({
     }
 
     // Org-scoped read, so every id below is already proven to belong here.
-    // Quantity assets only — see the note on skipping INDIVIDUAL above.
+    // Quantity assets only, see the note on skipping INDIVIDUAL above.
     const assetsBeforeUpdate = await db.asset.findMany({
       where: {
         id: { in: resolvedIds },

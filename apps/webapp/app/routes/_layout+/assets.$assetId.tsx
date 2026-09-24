@@ -162,7 +162,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             assetKitId: true,
             // `from` lets the status tooltip say WHEN each claim starts, which
             // is what reconciles "12 reserved" with "10 free right now".
-            // Mirrors the select in `getAssetQuantityRows` — the lazy-fetch
+            // Mirrors the select in `getAssetQuantityRows`, the lazy-fetch
             // endpoint and this inline-SSR path feed the SAME component, so a
             // field added to one has to be added to the other or the tooltip
             // silently loses the date on whichever surface was missed.
@@ -170,7 +170,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               select: { id: true, name: true, status: true, from: true },
             },
           },
-          // Soonest first — the tooltip caps how many slices it renders, so
+          // Soonest first, the tooltip caps how many slices it renders, so
           // this decides which ones survive the cut.
           orderBy: { booking: { from: "asc" } },
         },

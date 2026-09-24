@@ -758,7 +758,7 @@ export const buildCsvExportDataFromAssets = ({
             break;
           case "available":
             // Derived, so export-only in practice: the importer has no
-            // "available" input and never will — it is an output of custody,
+            // "available" input and never will, it is an output of custody,
             // kits and bookings. Included because "filter to Running low, then
             // export" is the reorder list an inventory manager actually wants,
             // and it is useless without the number next to the name.
@@ -770,7 +770,7 @@ export const buildCsvExportDataFromAssets = ({
           case "reserved":
             // NOT gated on quantity-tracking, matching the column exactly. An
             // individually-tracked asset is a pool of one and reads 1 here when
-            // a booking claims it — gating this emitted a blank cell for every
+            // a booking claims it, gating this emitted a blank cell for every
             // booked camera while the screen showed 1, so the export quietly
             // disagreed with the page it was exported from.
             value = asset.reserved != null ? `${asset.reserved}` : "";
@@ -779,7 +779,7 @@ export const buildCsvExportDataFromAssets = ({
             // Emit the human label, not the enum key: a CSV opened in a
             // spreadsheet is read by people, and "Running low" is the word they
             // saw on screen. Blank for INDIVIDUAL assets and for quantity
-            // assets with no reorder point, matching the column exactly — a
+            // assets with no reorder point, matching the column exactly, a
             // CSV that disagrees with the screen is worse than an empty cell.
             value =
               asset.stockStatus && asset.stockStatus !== "NO_THRESHOLD"

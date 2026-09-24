@@ -2,7 +2,7 @@
  * `Reserved` cell display logic.
  *
  * Pure, and separate from the cell, because the rule it encodes is one a
- * reasonable person gets wrong — it was got wrong once already, in a way no
+ * reasonable person gets wrong, it was got wrong once already, in a way no
  * compiler or existing test could see.
  *
  * **`reserved` is a SUM across every upcoming booking. It must never be
@@ -11,7 +11,7 @@
  * A cable booked every week for a year totals 500 reserved against a pool of
  * 10, and nothing at all is wrong with that asset. The first version of this
  * cell compared them and would have painted "490 short" on a perfectly healthy
- * row — precisely on the busiest workspaces, where a false alarm is most
+ * row, precisely on the busiest workspaces, where a false alarm is most
  * expensive and hardest to dismiss.
  *
  * Over-commitment is a fact about a MOMENT, not a total: the most units owed
@@ -35,7 +35,7 @@ export type ReservedDisplayInput = {
   quantity: number | null;
   /** The verdict from the shared classifier. Null for INDIVIDUAL assets. */
   stockStatus: StockStatus | null;
-  /** The most units owed to bookings at one instant ahead — what the verdict was computed from. */
+  /** The most units owed to bookings at one instant ahead, what the verdict was computed from. */
   peakBooked: number;
   /** Units held in direct custody (kit-inherited custody sits inside `inKits`). */
   inCustody: number;
@@ -48,7 +48,7 @@ export type ReservedDisplayInput = {
 export type ReservedDisplay = {
   /** Visible text. */
   text: string;
-  /** Whether to draw attention — same violet as the `Short` badge. */
+  /** Whether to draw attention, same violet as the `Short` badge. */
   isOversold: boolean;
   /** Full sentence for a screen reader, or null when there is nothing to flag. */
   title: string | null;
@@ -86,7 +86,7 @@ export function resolveReservedDisplay(
   /**
    * `peakBooked > 0` keeps the flag off a row whose shortfall comes entirely
    * from custody or kits. The verdict would still be SHORT there, and
-   * correctly so — but the reserved column is not the culprit and should not
+   * correctly so, but the reserved column is not the culprit and should not
    * claim to be.
    */
   const isOversold =
@@ -106,6 +106,6 @@ export function resolveReservedDisplay(
   return {
     text: `${reserved}${unit} · ${shortfall} short`,
     isOversold: true,
-    title: `At the busiest point ahead, bookings need ${peakBooked}${unit} at once${heldClause}, against ${owned}${unit} owned — short by ${shortfall}. ${reserved} promised across all upcoming bookings.`,
+    title: `At the busiest point ahead, bookings need ${peakBooked}${unit} at once${heldClause}, against ${owned}${unit} owned, short by ${shortfall}. ${reserved} promised across all upcoming bookings.`,
   };
 }

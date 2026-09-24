@@ -41,7 +41,7 @@ export const ASSET_QTY_STATUS_LABELS = Object.freeze({
 // Labels for the quantity FIGURES on a pool (not its status badge).
 //
 // `FREE_NOW` is the physical count: total minus custody, kits and checked-out.
-// It is deliberately NOT called "Available" — three different things in this
+// It is deliberately NOT called "Available", three different things in this
 // product were called that at once (this figure, the `Available` status badge,
 // and the `Available to book` flag), and only this one is time-bound. Without
 // the word "now" a row reading "Available 10" beside "Reserved 12" looks like a
@@ -368,7 +368,7 @@ export const CONSUMPTION_TYPE_ADJECTIVES = Object.freeze({
 // rents returnable equipment: "Out of stock" on a fully booked camera pool is
 // both the wrong noun and the wrong instruction (buy more vs. wait for the
 // return). NONE_FREE / LOW / ENOUGH read correctly for a consumable and for a
-// pooled asset alike. NO_THRESHOLD has no label on purpose — the cell renders
+// pooled asset alike. NO_THRESHOLD has no label on purpose, the cell renders
 // an em dash, because a badge there reads as a level, and "nobody set a floor"
 // is the absence of an opinion, not a healthy one.
 export const STOCK_STATUS_LABELS = Object.freeze({

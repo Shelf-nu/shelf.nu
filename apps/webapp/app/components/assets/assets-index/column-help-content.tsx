@@ -1,11 +1,11 @@
 /**
- * Column help content — the body of an assets-index header tooltip.
+ * Column help content, the body of an assets-index header tooltip.
  *
  * Renders the structured help from `COLUMN_HELP` so a definition is SHOWN
  * rather than described: `Available` renders as the subtraction it actually is,
  * `Stock status` renders the real badges beside their rules. Someone reading
  * the Stock status tooltip sees the same pills they will see in the column,
- * which is the whole point — a legend made of words about colours would make
+ * which is the whole point, a legend made of words about colours would make
  * them do the mapping themselves.
  *
  * Every block is optional, so a column can have a one-line summary and nothing
@@ -16,6 +16,7 @@
  */
 
 import { StockStatusBadge } from "~/components/assets/stock-status-badge";
+import { EmptyTableValue } from "~/components/shared/empty-table-value";
 import type { ColumnHelp } from "~/modules/asset-index-settings/column-help";
 
 /**
@@ -73,13 +74,15 @@ export function ColumnHelpContent({ help }: { help: ColumnHelp }) {
                 {row.status ? (
                   <StockStatusBadge status={row.status} />
                 ) : (
-                  // NOT StockStatusBadge here. It renders the shared
-                  // EmptyTableValue, whose "No data" copy is right in a table
-                  // cell and wrong in a legend — a legend entry reading
-                  // "— No data … no reorder point set" says the same thing
-                  // twice and neither time clearly. The bare dash is exactly
-                  // what the column shows.
-                  <span className="font-semibold text-gray-400">—</span>
+                  // NOT StockStatusBadge here: its empty state carries the
+                  // "No data" screen-reader label, which a legend row that
+                  // already explains the blank would repeat. The glyph is the
+                  // same one the column shows.
+                  <EmptyTableValue
+                    label=""
+                    className="font-semibold"
+                    aria-hidden="true"
+                  />
                 )}
               </span>
               <span className="pt-0.5 text-gray-600">{row.text}</span>
@@ -96,7 +99,11 @@ export function ColumnHelpContent({ help }: { help: ColumnHelp }) {
 
       {help.blankWhen ? (
         <p className="flex items-start gap-1.5 text-xs text-gray-500">
-          <span className="shrink-0 font-semibold text-gray-400">—</span>
+          <EmptyTableValue
+            label=""
+            className="shrink-0 font-semibold"
+            aria-hidden="true"
+          />
           <span>{help.blankWhen}</span>
         </p>
       ) : null}

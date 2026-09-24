@@ -21,7 +21,7 @@ export declare const ASSET_QTY_STATUS_LABELS: {
 /**
  * Labels for the quantity FIGURES on a pool. `FREE_NOW` is the physical count
  * and is rendered on four surfaces (assets index, asset page, reports PDF,
- * mobile asset screen) — keep them reading from here so they cannot drift.
+ * mobile asset screen), keep them reading from here so they cannot drift.
  */
 export declare const ASSET_QUANTITY_FIGURE_LABELS: {
   readonly TOTAL: string;

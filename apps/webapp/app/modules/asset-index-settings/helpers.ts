@@ -176,7 +176,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   // "Free now", not "Available". Three things in this product were called
   // "Available" at once: this column, the `AssetStatus` badge, and the
   // `Available to book` column beside it. Worse, this one is the only one that
-  // is time-bound — it means "free on the shelf TODAY", while the neighbouring
+  // is time-bound, it means "free on the shelf TODAY", while the neighbouring
   // `Reserved` and `Stock status` describe a FUTURE booking window. Printing a
   // now-figure and a later-figure side by side under interchangeable names
   // produced rows that read as self-contradicting: 10 free, 12 reserved, Short.
@@ -200,7 +200,7 @@ export const defaultFields: Column[] = [
   // `available`, because a free count with no denominator is not an answer:
   // "4 pcs" is a crisis at 4-of-5 and a non-event at 4-of-400. The customer
   // who started this asked to see available "also", meaning ALONGSIDE the
-  // total — shipping one and hiding the other answers half the question.
+  // total, shipping one and hiding the other answers half the question.
   { name: "id", visible: false, position: 0 },
   { name: "sequentialId", visible: true, position: 1 },
   { name: "qrId", visible: true, position: 2 },

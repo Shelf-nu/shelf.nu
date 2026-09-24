@@ -222,8 +222,8 @@ export type AdvancedIndexAsset = Pick<
    * Units free to hand over right now: `quantity` minus custody, kit
    * allocations and checked-out units. Computed in the index SQL, not stored.
    *
-   * Deliberately NOT reduced by future reservations — a reserved unit is still
-   * physically on the shelf — so read it alongside `reserved` rather than on
+   * Deliberately NOT reduced by future reservations, a reserved unit is still
+   * physically on the shelf, so read it alongside `reserved` rather than on
    * its own. `null` for INDIVIDUAL assets, which have no pool.
    */
   available: number | null;
@@ -237,7 +237,7 @@ export type AdvancedIndexAsset = Pick<
   inCustody: number | null;
   /**
    * Every custody unit, kit-inherited included. For the status badge's LABEL
-   * only — a member of a kit in custody is still "In custody" to a reader —
+   * only, a member of a kit in custody is still "In custody" to a reader,
    * never for arithmetic.
    */
   inCustodyAll: number | null;
@@ -254,7 +254,7 @@ export type AdvancedIndexAsset = Pick<
   reservedAll: number | null;
   /**
    * The most units owed to bookings at any single instant from now on, over
-   * standalone slices — `peakConcurrent` in SQL. This is the figure the `Short`
+   * standalone slices, `peakConcurrent` in SQL. This is the figure the `Short`
    * verdict is computed from, so it is also the figure the badge's tooltip
    * must quote.
    */
@@ -267,7 +267,7 @@ export type AdvancedIndexAsset = Pick<
    */
   nextReservedFrom: string | null;
   /**
-   * The single upcoming booking claiming the MOST units of this pool — the one
+   * The single upcoming booking claiming the MOST units of this pool, the one
    * the `SHORT` verdict is computed from. Null when there are no upcoming
    * bookings. Carried so a `Short` row can NAME the booking instead of only
    * announcing that a problem exists.
@@ -279,7 +279,7 @@ export type AdvancedIndexAsset = Pick<
   /**
    * Derived pool verdict powering the `Stock status` column. Computed in SQL as
    * the twin of `classifyStockStatus` (`@shelf/quantity-control`), which stays
-   * the tested source of truth and feeds mobile — the two are pinned to the
+   * the tested source of truth and feeds mobile, the two are pinned to the
    * same case matrix. `null` for INDIVIDUAL assets.
    */
   stockStatus: StockStatus | null;

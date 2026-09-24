@@ -5,13 +5,13 @@
  * problem" but "how much, and which booking is the biggest part of it".**
  *
  * The assets index can say `Short · 2 short` because the SQL names the booking.
- * The asset page — the page you land on to FIX it — listed four numbers and
+ * The asset page, the page you land on to FIX it, listed four numbers and
  * never said the pool was over-committed at all. That is a diagnosis with no
  * treatment, and it is the gap this closes.
  *
  * Pure and separate from the card so the rule is unit-testable, and so both
  * surfaces state the same shortfall. It defers to `committedUnits` from
- * `@shelf/quantity-control` rather than re-adding the claims by hand — the same
+ * `@shelf/quantity-control` rather than re-adding the claims by hand, the same
  * helper `classifyStockStatus` uses, so the page and the index can never quote
  * different numbers for the same asset.
  *

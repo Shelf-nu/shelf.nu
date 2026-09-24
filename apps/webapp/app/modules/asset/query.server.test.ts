@@ -1367,7 +1367,7 @@ describe("generateWhereClause - lowStockOnly", () => {
   });
 });
 
-describe("POOL_AGGREGATE_JOIN — the SQL twin of getAssetAvailability", () => {
+describe("POOL_AGGREGATE_JOIN, the SQL twin of getAssetAvailability", () => {
   const sql = POOL_AGGREGATE_JOIN.strings.join("?");
 
   it("counts direct custody only, leaving kit-inherited rows to in_kits", () => {

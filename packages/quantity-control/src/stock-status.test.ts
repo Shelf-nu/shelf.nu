@@ -5,7 +5,7 @@
  * and PRIORITY rather than happy paths: an over-committed pool is also empty, a
  * pool at exactly its floor is low, and a pool with no floor must never claim to
  * be fine. Two cases are pinned to real customer rows read from the live app on
- * 2026-08-17 — those are the regressions that matter, because they are the ones
+ * 2026-08-17, those are the regressions that matter, because they are the ones
  * a human already looked at and disagreed with.
  *
  * `peakBooked` is an INPUT here: the sweep that produces it is tested with
@@ -25,7 +25,7 @@ import {
   type StockStatusInputs,
 } from "./stock-status";
 
-/** A pool with nothing claimed and no floor — override one field per case. */
+/** A pool with nothing claimed and no floor, override one field per case. */
 function pool(over: Partial<StockStatusInputs> = {}): StockStatusInputs {
   return {
     total: 10,
@@ -65,7 +65,7 @@ test("SHORT wins over NONE_FREE when the booking peak exceeds the pool", () => {
   assert.equal(s, "SHORT");
 });
 
-test("SHORT fires with no threshold set — it is an integrity problem, not a level", () => {
+test("SHORT fires with no threshold set, it is an integrity problem, not a level", () => {
   assert.equal(
     classifyStockStatus(
       pool({ total: 5, available: 5, peakBooked: 6, minQuantity: null })

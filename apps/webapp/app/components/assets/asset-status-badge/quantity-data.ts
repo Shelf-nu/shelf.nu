@@ -30,7 +30,7 @@ export interface BookingAssetRecord {
     name?: string;
     status?: string;
     /**
-     * Booking start. Optional because not every loader selects it — a surface
+     * Booking start. Optional because not every loader selects it, a surface
      * that omits it simply renders no date rather than breaking. Serialised to
      * a string across the loader/fetcher boundary, hence the union.
      */
@@ -44,7 +44,7 @@ export interface AssetKitRecord {
   id?: string;
   /**
    * Units of this asset allocated to that kit. Declared explicitly because the
-   * index signature below would otherwise type it `unknown` — the field was
+   * index signature below would otherwise type it `unknown`, the field was
    * always selected and always present, just invisible to the compiler.
    */
   quantity?: number;
@@ -152,19 +152,19 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
    *
    * DIFFERENT FROM `available` ABOVE, on purpose, and the difference is the
    * whole point: `available` subtracts RESERVED units, so once commitments
-   * exceed the pool it goes NEGATIVE — the tooltip footer rendered
+   * exceed the pool it goes NEGATIVE, the tooltip footer rendered
    * "-2 free right now", and for a heavily-booked asset whose reservations sum
    * to 500 against a pool of 10 it would read "-490 free right now". There is
    * no such thing as negative free stock.
    *
    * A reserved unit has not left the building; it is claimed for a future date.
-   * So this counts only what is genuinely gone — custody and checked-out — and
+   * So this counts only what is genuinely gone, custody and checked-out, and
    * matches the `Free now` column on the assets index, which is derived
    * server-side from the same rule.
    *
    * `available` is deliberately left alone: `getQuantityBadgeLabelAndColor`
    * keys the "Reserved" vs "Partially reserved" label off it, and changing that
-   * would move badge labels across every surface in the app — a product
+   * would move badge labels across every surface in the app, a product
    * decision, not a display fix.
    */
   /**
@@ -213,7 +213,7 @@ export function getQuantityBadgeLabelAndColor(data: QuantityBreakdown): {
    *
    * These two branches ask a PHYSICAL question: is there anything left on the
    * shelf, or has it all gone? `available` subtracts future reservations, and a
-   * reserved unit has not moved — so mixing it in let a future booking decide
+   * reserved unit has not moved, so mixing it in let a future booking decide
    * how we describe the present.
    *
    * The bug that reached users: a pool of 10 with 5 units out on a booking and
@@ -222,8 +222,8 @@ export function getQuantityBadgeLabelAndColor(data: QuantityBreakdown): {
    * future booking is all it takes. It also made the badge contradict the
    * `Free now` column on the same row, which correctly said 5.
    *
-   * The `reserved` branch below deliberately keeps `available`. Its question —
-   * is every unit spoken for at some point — is about commitments, so
+   * The `reserved` branch below deliberately keeps `available`. Its question,
+   * is every unit spoken for at some point, is about commitments, so
    * commitments belong in the number.
    */
   if (checkedOut > 0) {

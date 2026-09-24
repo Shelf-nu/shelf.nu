@@ -11,7 +11,7 @@
  *
  * Only columns that have genuinely confused someone, or that carry a definition
  * a reasonable person could get wrong, appear here. A header row full of info
- * icons trains people to ignore all of them — which is why this is down to
+ * icons trains people to ignore all of them, which is why this is down to
  * THREE. An earlier pass annotated six, including `Total quantity` and
  * `Available to book`, whose labels already say what they are. The three that
  * remain are the ones whose value depends on the asset's tracking method, so the
@@ -58,7 +58,7 @@ export type ColumnHelp = {
 };
 
 /**
- * Help per column. A `Partial` on purpose — adding an entry should be a
+ * Help per column. A `Partial` on purpose, adding an entry should be a
  * decision, not a default.
  */
 export const COLUMN_HELP: Partial<Record<ColumnLabelKey, ColumnHelp>> = {
@@ -71,14 +71,14 @@ export const COLUMN_HELP: Partial<Record<ColumnLabelKey, ColumnHelp>> = {
       { op: "−", label: "Checked out" },
       { op: "=", label: "Free now", isResult: true },
     ],
-    note: "Units promised to a future booking are still on the shelf, so they are NOT subtracted here \u2014 that is why a row can read 10 free now and still be Short. Units inside a kit count under In kits, even while the kit is in custody or out on a booking.",
-    blankWhen: "Tracked individually — the Status column answers this instead.",
+    note: "Units promised to a future booking are still on the shelf, so they are NOT subtracted here. That is why a row can read 10 free now and still be Short. Units inside a kit count under In kits, even while the kit is in custody or out on a booking.",
+    blankWhen: "Tracked individually. The Status column answers this instead.",
   },
 
   reserved: {
     summary: "Units promised to bookings that have not started yet.",
     note: "For a quantity pool this counts across every upcoming booking, so it can be higher than you need on any one day. An individually-tracked asset shows how many upcoming bookings claim it.",
-    blankWhen: "Never — this column applies to every asset.",
+    blankWhen: "Never. This column applies to every asset.",
   },
 
   stockStatus: {
@@ -93,7 +93,7 @@ export const COLUMN_HELP: Partial<Record<ColumnLabelKey, ColumnHelp>> = {
       { status: "ENOUGH", text: "Above your reorder point" },
       { status: null, text: "No reorder point set, so we make no judgement" },
     ],
-    blankWhen: "Tracked individually — there is no pool to judge.",
+    blankWhen: "Tracked individually. There is no pool to judge.",
   },
 };
 

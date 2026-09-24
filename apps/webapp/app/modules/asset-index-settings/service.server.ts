@@ -355,7 +355,7 @@ export async function removeCustomFieldFromAssetIndexSettings({
  * after each insertion point.
  *
  * Existing users have reordered and hidden columns to taste, so their saved
- * list is the source of truth for everything already in it — this only decides
+ * list is the source of truth for everything already in it, this only decides
  * where a column they have never seen should first appear. Insertions are
  * applied in ascending default position so each shift accounts for the ones
  * before it; a field whose default position is past the end of the list simply
@@ -363,7 +363,7 @@ export async function removeCustomFieldFromAssetIndexSettings({
  *
  * @param existing - The user's saved columns, positions untouched except where shifted.
  * @param toAdd - Columns missing from `existing`, carrying their default position.
- * @returns A new array — neither input is mutated.
+ * @returns A new array, neither input is mutated.
  *
  * Exported for tests: this decides what EVERY existing customer sees the first
  * time a new column ships, and getting it wrong is invisible until someone
@@ -478,7 +478,7 @@ async function validateColumns({
       (name) => !existingDefaultFields.includes(name)
     );
 
-    // If default fields are missing, add them from our static defaults —
+    // If default fields are missing, add them from our static defaults,
     // AT their default position, not appended.
     //
     // Appending was fine while every new field belonged at the end. It stopped

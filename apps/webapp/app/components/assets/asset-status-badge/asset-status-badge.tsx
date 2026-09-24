@@ -89,8 +89,8 @@ export function AssetStatusBadge({
    *
    * Why this exists: deriving from `asset` needs `custody` AND `bookingAssets`
    * on the row. The assets index carries custody but not booking slices, so the
-   * derived breakdown came back reserved/checkedOut = 0 — or null when custody
-   * was 0 too — and the badge fell back to the raw `Asset.status`. It then
+   * derived breakdown came back reserved/checkedOut = 0, or null when custody
+   * was 0 too, and the badge fell back to the raw `Asset.status`. It then
    * REWROTE itself on first mouse-enter once the lazy fetch landed, so a row
    * reading "Available" flipped to "Reserved" under the cursor.
    *

@@ -25,7 +25,7 @@ import type { BookingAssetRecord, QuantityBreakdown } from "./quantity-data";
  *
  * A quantity pool has no natural ceiling on future bookings: a rental house can
  * have a cable booked every week for a year, and this card had no `take` on the
- * query and no cap on the render, so it would emit one bullet per booking —
+ * query and no cap on the render, so it would emit one bullet per booking,
  * hundreds of rows in a hover card, taller than the viewport, over a row the
  * user was only passing across.
  *
@@ -146,7 +146,7 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
   const sum = (slices: Slice[]) =>
     slices.reduce((acc, s) => acc + s.quantity, 0);
 
-  /** Distinct bookings across both sub-buckets — one booking can own several slices. */
+  /** Distinct bookings across both sub-buckets, one booking can own several slices. */
   const countBookings = (buckets: Buckets) =>
     new Set(
       [...buckets.standalone, ...buckets.kitDriven].map(
@@ -157,7 +157,7 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
   /**
    * Renders one bucket's slices, capped.
    *
-   * The cap is display-only — every total above it is computed from the FULL
+   * The cap is display-only, every total above it is computed from the FULL
    * set, so truncating the list can never make a number wrong. Slices arrive
    * soonest-first, so the survivors are the imminent ones.
    */
@@ -173,7 +173,7 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
             }-${i}`}
             className="pl-4 text-gray-600"
           >
-            • <SliceBookingName slice={b} /> — {b.quantity}{" "}
+            • <SliceBookingName slice={b} />: {b.quantity}{" "}
             {b.quantity === 1 ? "unit" : "units"}
             {b.from ? (
               <span className="text-gray-500">
@@ -213,7 +213,7 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
 
     /**
      * "X of Y" only reads correctly while X is bounded by Y, and this count is
-     * a SUM ACROSS BOOKINGS while `total` is a stock level — so the comparison
+     * a SUM ACROSS BOOKINGS while `total` is a stock level, so the comparison
      * is a category error the moment an asset is busy. A cable booked every
      * week for a year reads "500 reserved" against a pool of 10 and nothing is
      * wrong. The card used to render "500 of 10 reserved", then "10 available"
@@ -228,7 +228,7 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
     /**
      * The assets index sends totals but no slices (see `StatusColumn`), so
      * `bookingCount` is 0 there. Saying "across 0 bookings" would be worse than
-     * saying nothing — drop to the bare count and let the date line carry the
+     * saying nothing, drop to the bare count and let the date line carry the
      * "these are in the future" signal.
      */
     const headline = !exceedsPool
@@ -281,7 +281,7 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
             headlineCount: reserved,
             headlineLabel: "reserved",
           })}
-          {/* Only when the surface shipped no slices — otherwise each bullet
+          {/* Only when the surface shipped no slices, otherwise each bullet
               already carries its own date and this would just repeat the first
               one. This is the line that stops "12 reserved" and "10 free right
               now" reading as a contradiction: the units are still here, and
@@ -307,7 +307,7 @@ export function QuantityTooltipContent({ data }: { data: QuantityBreakdown }) {
         </p>
       )}
 
-      {/* "Free right now", not "available" — every other line in this card
+      {/* "Free right now", not "available", every other line in this card
           describes a booking window in the future, and this one describes the
           shelf today. Without the time word the card reads as arithmetic that
           does not close: "12 reserved" above "10 available". Matches the

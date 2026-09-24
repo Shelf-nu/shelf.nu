@@ -322,7 +322,7 @@ export function QuantityOverviewCard({
 
       {/*
         The problem, stated, in the same shape the page already uses for
-        "here is a fact about this asset, here is what to do about it" — the
+        "here is a fact about this asset, here is what to do about it", the
         unplaced-units card a few sections down. Gray body text, the number in
         semibold, the action as an ordinary link. An invented coloured alert
         panel would shout louder than anything else on the page and match
@@ -341,7 +341,7 @@ export function QuantityOverviewCard({
                   unit
                 )} in custody or kits,`
               : ""}{" "}
-            and you own {formatWithUnit(qty, unit)} &mdash; promised{" "}
+            and you own {formatWithUnit(qty, unit)}: promised{" "}
             <span className="font-medium text-gray-900">
               {formatWithUnit(overCommitment.shortBy, unit)}
             </span>{" "}

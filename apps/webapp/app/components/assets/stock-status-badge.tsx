@@ -17,7 +17,7 @@
  *    It has no pool, so the existing `Status` column answers for it.
  *
  * When a `breakdown` is supplied the badge also becomes a hover target showing
- * THAT ROW's numbers — available against the reorder point, and what is
+ * THAT ROW's numbers, available against the reorder point, and what is
  * consuming the difference. The verdict alone tells you a row needs attention
  * but not how bad it is, and the alternative was opening the asset page to find
  * out. The column-header tooltip explains what the words MEAN; this explains
@@ -48,7 +48,7 @@ import {
 import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
 
 /**
- * Badge palette per verdict. `NO_THRESHOLD` is absent on purpose — it has no
+ * Badge palette per verdict. `NO_THRESHOLD` is absent on purpose, it has no
  * badge, and the `Record` over the badged subset makes adding a status without
  * deciding its color a type error.
  */
@@ -67,7 +67,7 @@ const STOCK_STATUS_COLORS: Record<
  * neighbouring columns render, so the tooltip can never disagree with the row.
  */
 export type StockStatusBreakdown = {
-  /** `Asset.quantity` — every unit owned. */
+  /** `Asset.quantity`, every unit owned. */
   total: number;
   /** Free to hand over now: total minus custody, kits and checked-out. */
   available: number;
@@ -78,7 +78,7 @@ export type StockStatusBreakdown = {
   /** Standalone units that have actually left on ONGOING/OVERDUE bookings. */
   checkedOut: number;
   /**
-   * The most units owed to bookings at any single instant from now on — the
+   * The most units owed to bookings at any single instant from now on, the
    * booking engine's peak-concurrency sweep, and what the `SHORT` verdict is
    * computed from. Not the sum of every upcoming booking, and not the largest
    * one either.
@@ -89,7 +89,7 @@ export type StockStatusBreakdown = {
   /** Free-text unit label ("pcs", "boxes"), when the asset has one. */
   unitOfMeasure?: string | null;
   /**
-   * The upcoming booking claiming the most units — the biggest part of the
+   * The upcoming booking claiming the most units, the biggest part of the
    * peak. Present so the hover can NAME it and link to it: telling someone
    * they are two short without saying where to look is a diagnosis, not a
    * tool.
@@ -98,7 +98,7 @@ export type StockStatusBreakdown = {
   /**
    * This asset's id, so the no-reorder-point hover can link to the form that
    * sets one. Without it that hover says "set a reorder point" and offers no
-   * way to do it — advice with no door, on the state that covers MOST quantity
+   * way to do it, advice with no door, on the state that covers MOST quantity
    * assets in a real workspace.
    */
   assetId?: string | null;
@@ -108,13 +108,13 @@ export type StockStatusBreakdown = {
 type StockStatusBadgeProps = {
   /**
    * The verdict, or `null` for an INDIVIDUAL asset (no pool to judge). Pass the
-   * value straight through from the loader — do not pre-filter `NO_THRESHOLD`,
+   * value straight through from the loader, do not pre-filter `NO_THRESHOLD`,
    * because its rendering is this component's job.
    */
   status: StockStatus | null | undefined;
   /**
    * This row's figures. When present the badge gains a hover detail. Omitted by
-   * the column-header legend, which renders these same badges as a key — a
+   * the column-header legend, which renders these same badges as a key, a
    * tooltip nested inside a tooltip would be unreachable and is never wanted.
    */
   breakdown?: StockStatusBreakdown | null;
@@ -176,7 +176,7 @@ function DetailRow({
  *    three times buries the one line that matters, and most assets are touched
  *    by only one or two of the three.
  * 2. **No claims at all ⇒ no box.** With every claim row dropped the box
- *    degenerated to `Total 200 = Available 200` — the same number twice, with an
+ *    degenerated to `Total 200 = Available 200`, the same number twice, with an
  *    `=` implying arithmetic happened. The reason line above already says it.
  * 3. **The booking peak gets its own line BELOW the result**, never a `−` row
  *    inside the subtraction. Units promised to a booking that has not started
@@ -196,7 +196,7 @@ function StockStatusDetail({
 }: {
   /**
    * Narrowed to the BADGED statuses. `NO_THRESHOLD` has no label and no
-   * verdict to explain — it gets its own, shorter hover — so letting it in here
+   * verdict to explain, it gets its own, shorter hover, so letting it in here
    * would only make the label lookup unsound.
    */
   status: Exclude<StockStatus, "NO_THRESHOLD">;
@@ -228,7 +228,7 @@ function StockStatusDetail({
   /**
    * The one-line reason, quoting the comparison the verdict actually made.
    * `SHORT` quotes custody + kits + the booking PEAK rather than the reserved
-   * total, because that is the figure `classifyStockStatus` used — so it is
+   * total, because that is the figure `classifyStockStatus` used, so it is
    * read back through the same helper rather than re-added by hand here.
    */
   const reason =
@@ -254,7 +254,7 @@ function StockStatusDetail({
 
   /**
    * `LOW` and `ENOUGH` are DEFINED against the reorder point, so their reason
-   * line already quotes it — repeating it underneath just says 50 twice. The two
+   * line already quotes it, repeating it underneath just says 50 twice. The two
    * commitment verdicts never mention it, and there it is the missing context.
    */
   const showReorderPoint =
@@ -325,7 +325,7 @@ function StockStatusDetail({
         across which dates, on which page.
 
         `SHORT` is the only verdict with a single named culprit, so it is the
-        only one that gets a link. The others are a stock level, not an event —
+        only one that gets a link. The others are a stock level, not an event,
         their fix is ordering more or changing the reorder point, neither of
         which is a place we can send someone.
       */}
@@ -409,7 +409,7 @@ export function StockStatusBadge({ status, breakdown }: StockStatusBadgeProps) {
     </Badge>
   );
 
-  // No figures — the header legend renders badges as a key, and a tooltip
+  // No figures, the header legend renders badges as a key, and a tooltip
   // inside that tooltip would be unreachable.
   if (!breakdown) {
     return badge;
@@ -417,7 +417,7 @@ export function StockStatusBadge({ status, breakdown }: StockStatusBadgeProps) {
 
   /*
     HoverCard, not Tooltip. A Radix tooltip closes the moment the pointer leaves
-    its trigger, so a link inside one is unreachable — you can see it and never
+    its trigger, so a link inside one is unreachable, you can see it and never
     click it. That is not a styling detail: it is why this column could only
     ever describe a problem and never lead anywhere. HoverCard keeps the panel
     open while the pointer travels into it, which is what makes the booking link
@@ -428,7 +428,7 @@ export function StockStatusBadge({ status, breakdown }: StockStatusBadgeProps) {
       <HoverCardTrigger asChild>
         <button
           type="button"
-          aria-label={`${STOCK_STATUS_LABELS[status]} — show levels`}
+          aria-label={`${STOCK_STATUS_LABELS[status]}: show levels`}
           className="cursor-default rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
         >
           {badge}
@@ -437,7 +437,7 @@ export function StockStatusBadge({ status, breakdown }: StockStatusBadgeProps) {
       {/*
         Portalled, like every other hover card in this table. Without it the
         panel renders inside the table's stacking context and a neighbouring
-        cell paints on top of it — the card looks fine and its link is not
+        cell paints on top of it, the card looks fine and its link is not
         clickable, which would have quietly defeated the whole point.
       */}
       <HoverCardPortal>

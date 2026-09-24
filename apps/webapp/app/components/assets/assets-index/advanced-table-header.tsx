@@ -1,5 +1,5 @@
 /**
- * Advanced asset index — header row.
+ * Advanced asset index, header row.
  *
  * Renders one `<Th>` per visible column, in the user's saved order. Columns
  * whose meaning is not obvious from their label carry an `InfoTooltip` sourced

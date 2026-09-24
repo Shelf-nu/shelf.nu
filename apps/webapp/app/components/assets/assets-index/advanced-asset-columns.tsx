@@ -369,8 +369,8 @@ export function AdvancedIndexColumn({
 
     case "available":
       // Units free to hand over right now: total minus custody, kits and
-      // checked-out. Deliberately NOT reduced by future reservations — those
-      // units are still physically on the shelf — which is why `reserved` sits
+      // checked-out. Deliberately NOT reduced by future reservations, those
+      // units are still physically on the shelf, which is why `reserved` sits
       // next to it as its own column rather than in a tooltip.
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
@@ -389,7 +389,7 @@ export function AdvancedIndexColumn({
       //
       // NOT gated on quantity-tracking, unlike the two columns either side of
       // it. An individually-tracked asset is a pool of one, and it can be
-      // reserved exactly like a pool can — so a booked camera reads 1 here.
+      // reserved exactly like a pool can, so a booked camera reads 1 here.
       // Gating it produced the worst outcome in the whole change: a user booked
       // an asset, looked at a column headed "Reserved", and saw a dash. The
       // number was already in the query; the cell was throwing it away.
@@ -465,7 +465,7 @@ export function AdvancedIndexColumn({
  *
  * That state is why this component exists. A row reading `Free now 10 pcs ·
  * Total quantity 10 pcs · Reserved 12 · Short` is self-contradicting on its
- * face — three cells look healthy and only the pill objects. The cause is that
+ * face, three cells look healthy and only the pill objects. The cause is that
  * `Free now` answers "on the shelf today" while `Short` answers "when that
  * booking starts", and nothing marked the two apart. The cell that actually
  * holds the contradiction, `Reserved 12` against a total of 10, was rendered in
@@ -476,7 +476,7 @@ export function AdvancedIndexColumn({
  *
  * **Never "12 of 10".** That was the first attempt and it is unreadable: "of"
  * asks to be read as part-of-whole, which has no meaning once the first number
- * exceeds the second. The gap is also the number somebody can act on — nobody
+ * exceeds the second. The gap is also the number somebody can act on, nobody
  * orders "12 of 10", they order 2. Reserve "X of Y" for surfaces where X is
  * genuinely capped by Y, like the booking quantity dialogs.
  *
@@ -492,7 +492,7 @@ function ReservedCell({ item }: { item: AdvancedIndexAsset }) {
     );
   }
 
-  // The rule itself lives in `resolveReservedDisplay`, pure and unit-tested —
+  // The rule itself lives in `resolveReservedDisplay`, pure and unit-tested,
   // the sum-vs-pool trap it guards against is invisible to both the compiler
   // and a glance at this file.
   const { text, isOversold, title } = resolveReservedDisplay({
@@ -586,7 +586,7 @@ function StatusColumn({
     /**
      * The `_all` figures on purpose. The badge picks a WORD, and for a member
      * of a kit that is in custody or out on a booking the right word is still
-     * "In custody" / "Checked out" — those units left with the kit. The
+     * "In custody" / "Checked out", those units left with the kit. The
      * arithmetic figures (`inCustody`, `checkedOut`) exclude kit-driven units
      * so `Free now` counts them once; using them here would label such a row
      * "Available" beside a `Free now` of 0. This mirrors what the asset page
@@ -601,12 +601,12 @@ function StatusColumn({
       /**
        * **Not the `Free now` figure.** `available` feeds only the label choice
        * in `getQuantityBadgeLabelAndColor` ("Reserved" vs "Partially
-       * reserved"), which asks *is there anything left to PROMISE* — so it has
+       * reserved"), which asks *is there anything left to PROMISE*, so it has
        * to subtract reservations, and it is allowed to go negative.
        *
        * Passing the server's free-now number here instead made the index badge
        * read "Partially reserved" while the asset page, which derives the same
-       * label through `getQuantityData`, read "Reserved" — the same asset
+       * label through `getQuantityData`, read "Reserved", the same asset
        * described two different ways at the same moment. So this reproduces
        * `getQuantityData`'s formula exactly, field for field, rather than
        * substituting a number that merely looks similar.
@@ -625,8 +625,8 @@ function StatusColumn({
       /**
        * Empty on purpose. An asset can carry hundreds of future bookings, and
        * shipping a per-booking list for every row of the index just so a hover
-       * card can list them would blow up the payload for the busiest customers
-       * — the ones this feature is for. The card degrades to totals plus the
+       * card can list them would blow up the payload for the busiest customers,
+       * the ones this feature is for. The card degrades to totals plus the
        * `nextReservedFrom` scalar below, which is the part that actually
        * reconciles "12 reserved" with "10 free right now".
        */

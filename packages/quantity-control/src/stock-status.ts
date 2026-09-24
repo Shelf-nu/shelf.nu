@@ -1,5 +1,5 @@
 /**
- * `@shelf/quantity-control` — stock-status classification.
+ * `@shelf/quantity-control`, stock-status classification.
  *
  * The single derived verdict behind the assets index's `Stock status` column:
  * "for this pool of units, can I hand one out today, and is anything promised
@@ -9,7 +9,7 @@
  * ## Why this exists as a derived enum rather than more filters
  *
  * The advanced index derives its filters from its COLUMNS, and a filter can
- * only compare a field to a typed-in literal — there is no field-to-field
+ * only compare a field to a typed-in literal, there is no field-to-field
  * operator, so "available below its own minQuantity" is not expressible as a
  * user-authored filter. The webapp worked around that once already with the
  * standalone `lowStockOnly` URL param and its bespoke SQL branch in
@@ -33,9 +33,9 @@
  * - **Bookings are intervals, not a sum.** Two bookings that never overlap
  *   never compete for the same units, and a booking that is out today is not
  *   competing with one that starts after it returns. `peakBooked` is the most
- *   units owed to bookings at any single instant from now on — the same
+ *   units owed to bookings at any single instant from now on, the same
  *   peak-concurrency sweep the booking engine runs before it accepts a
- *   reservation — so `SHORT` fires exactly when that engine would refuse.
+ *   reservation, so `SHORT` fires exactly when that engine would refuse.
  *
  * ## Threshold semantics
  *
@@ -51,9 +51,9 @@
  * empty cell rather than a badge, so it cannot be read as a level, while still
  * being filterable as the setup worklist.
  *
- * @see {@link file://./low-stock.ts} — the threshold predicate this delegates to.
- * @see {@link file://./availability.ts} — `peakConcurrent`, the sweep behind `peakBooked`.
- * @see {@link file://../../labels/index.js} — the user-facing strings.
+ * @see {@link file://./low-stock.ts}, the threshold predicate this delegates to.
+ * @see {@link file://./availability.ts}, `peakConcurrent`, the sweep behind `peakBooked`.
+ * @see {@link file://../../labels/index.js}, the user-facing strings.
  */
 
 import { isLowStock } from "./low-stock";
@@ -76,7 +76,7 @@ export const STOCK_STATUSES = [
 export type StockStatus = (typeof STOCK_STATUSES)[number];
 
 /**
- * Sort weight per verdict — lower is more urgent, matching the declaration
+ * Sort weight per verdict, lower is more urgent, matching the declaration
  * order of {@link STOCK_STATUSES}. Ascending sort puts `SHORT` first.
  *
  * `NO_THRESHOLD` sorts last rather than beside `ENOUGH`, because it is the
@@ -92,13 +92,13 @@ export const STOCK_STATUS_SEVERITY: Readonly<Record<StockStatus, number>> =
 
 /** Resolved figures for one asset. All counts are units, not rows. */
 export type StockStatusInputs = {
-  /** `Asset.quantity` — total units owned. */
+  /** `Asset.quantity`, total units owned. */
   total: number;
   /**
    * Units free to hand over right now: `total − inCustody − inKits −
    * checkedOut`, where `checkedOut` is the standalone units that have actually
    * left on ONGOING/OVERDUE bookings. Deliberately NOT reduced by future
-   * reservations — a reserved unit is still physically on the shelf. Callers
+   * reservations, a reserved unit is still physically on the shelf. Callers
    * surface `reserved` as its own column precisely because it is not
    * subtracted here.
    */
@@ -156,20 +156,20 @@ export function committedUnits(a: {
  *
  * Evaluated most-urgent first, and the order is load-bearing:
  *
- * 1. `SHORT` — at some instant ahead, more units are owed than exist. Checked
+ * 1. `SHORT`, at some instant ahead, more units are owed than exist. Checked
  *    BEFORE `NONE_FREE` because an over-committed pool is usually also empty,
  *    and "you promised more than you have" is the actionable half of that. It
  *    is the only verdict that fires without a threshold being set, because it
  *    is an integrity problem rather than a stock level, and for booking-led
  *    workspaces it is a double-booking.
- * 2. `NONE_FREE` — nothing to hand over today. Named for what is true of both a
+ * 2. `NONE_FREE`, nothing to hand over today. Named for what is true of both a
  *    sold-out consumable and a fully checked-out equipment pool, without
  *    prescribing the opposite actions those two need (buy more vs. wait).
- * 3. `LOW` — at or below the floor, via {@link isLowStock}. Self-gating: with
+ * 3. `LOW`, at or below the floor, via {@link isLowStock}. Self-gating: with
  *    no `minQuantity` it cannot fire, so workspaces that never set thresholds
  *    never see it.
- * 4. `NO_THRESHOLD` — free stock, but no floor to judge it against.
- * 5. `ENOUGH` — above a floor somebody actually drew.
+ * 4. `NO_THRESHOLD`, free stock, but no floor to judge it against.
+ * 5. `ENOUGH`, above a floor somebody actually drew.
  *
  * @param a - Resolved figures for the asset (see {@link StockStatusInputs}).
  * @returns The verdict. Callers pass only QUANTITY_TRACKED assets; INDIVIDUAL
@@ -186,7 +186,7 @@ export function classifyStockStatus(a: StockStatusInputs): StockStatus {
 }
 
 /**
- * Whether a verdict should draw attention — used to decide the row highlight
+ * Whether a verdict should draw attention, used to decide the row highlight
  * and which footer counters are worth rendering.
  *
  * `NO_THRESHOLD` is deliberately NOT actionable: for a stock account it is a

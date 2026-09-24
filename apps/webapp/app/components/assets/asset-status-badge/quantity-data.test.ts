@@ -4,7 +4,7 @@
  * The cases below are all arithmetic, not opinion: a pool with units sitting on
  * the shelf must never be described as fully gone. That was reachable with one
  * checkout plus one future booking, because the "Partially" test used a number
- * that subtracts reservations — and a reserved unit has not moved.
+ * that subtracts reservations, and a reserved unit has not moved.
  *
  * @see {@link file://./quantity-data.ts}
  */
@@ -49,7 +49,7 @@ describe("quantity pool status label", () => {
   it("says Partially checked out while units remain on the shelf", () => {
     // why: THE regression. 5 out on a booking, 5 reserved for next month, 10
     // owned. The reservation-aware number hits zero and the badge used to read
-    // "Checked out" — while five units were physically present, and the
+    // "Checked out", while five units were physically present, and the
     // Free now column on the same row correctly said 5.
     const label = labelFor(
       asset({

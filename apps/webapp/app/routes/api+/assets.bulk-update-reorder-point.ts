@@ -75,7 +75,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     // Report what actually happened, not what was attempted. A selection can be
-    // entirely individually-tracked assets (skipped — they have no pool), or
+    // entirely individually-tracked assets (skipped, they have no pool), or
     // already hold this threshold, and telling someone it was set when nothing
     // moved is exactly the kind of small lie that costs trust in a bulk action.
     const noun = changedCount === 1 ? "asset" : "assets";

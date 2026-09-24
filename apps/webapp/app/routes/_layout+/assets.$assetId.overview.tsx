@@ -305,7 +305,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      *
      * The culprit is ONE grouped row, never a list: an asset can carry
      * hundreds of future bookings and this page must not pay for all of them
-     * to name one. Standalone slices only — a kit's slices are its `inKits`
+     * to name one. Standalone slices only, a kit's slices are its `inKits`
      * units, and the primitive excludes them for the same reason.
      */
     const availabilityAhead = isQuantityTracked(asset)

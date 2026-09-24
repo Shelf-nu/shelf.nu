@@ -81,12 +81,12 @@ export function generateWhereClause(
     // (`isLowStock`) compares AVAILABLE. Those disagree the moment any unit is
     // in custody: an asset with 6 total, 2 in custody and a threshold of 5 is
     // low by the alert's reckoning (4 <= 5) and NOT low by the filter's
-    // (6 > 5) — so the email fired and this toggle could not find the row.
+    // (6 > 5), so the email fired and this toggle could not find the row.
     // Expressed as the ALERT's predicate (`isLowStock`: a threshold is set and
     // available is at or below it) rather than as `verdict = 'LOW'`.
     //
     // The verdict is a priority ladder, so an asset with a threshold that has
-    // run out entirely reads NONE_FREE, not LOW — matching only 'LOW' silently
+    // run out entirely reads NONE_FREE, not LOW, matching only 'LOW' silently
     // dropped the most urgent rows from a toggle whose own label reads "at or
     // below reorder threshold". Zero is at or below any threshold, and the
     // alert emails about it, so the toggle must find it.
@@ -522,7 +522,7 @@ function addDateFilter(
 }
 
 function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
-  // Derived verdict, not a stored enum — compared as text against the same
+  // Derived verdict, not a stored enum, compared as text against the same
   // expression the column renders. This is the whole reason Stock status is one
   // enum column rather than three more bespoke URL params like `lowStockOnly`:
   // it arrives here through the ordinary filter path and gets is / isNot /
@@ -534,7 +534,7 @@ function addEnumFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
           filter.value
         ).trim()}`;
       case "isNot":
-        // NULL (an individually-tracked asset) is not "some other status" — it
+        // NULL (an individually-tracked asset) is not "some other status", it
         // has no verdict at all, so `IS DISTINCT FROM` would wrongly include
         // every individual asset in a "Stock status is not Enough" filter.
         return Prisma.sql`${whereClause} AND (${POOL_STOCK_STATUS_EXPR}) IS NOT NULL AND (${POOL_STOCK_STATUS_EXPR}) != ${String(
@@ -1719,7 +1719,7 @@ export function parseSortingOptions(sortBy: string[]): {
       // `detectPoolKeys`), so ORDER BY can reference them by name exactly like
       // a stored column.
       //
-      // Stock status sorts by SEVERITY, not alphabetically — "worst first" is
+      // Stock status sorts by SEVERITY, not alphabetically, "worst first" is
       // the only ordering anyone wants from it, and `Enough` < `Low` < `None
       // free` < `Short` alphabetically is meaningless. The ranks mirror
       // STOCK_STATUS_SEVERITY in @shelf/quantity-control. NULL (individually
@@ -2241,7 +2241,7 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
       a."consumptionType" AS "assetConsumptionType",
       -- Quantity-pool figures, from the single "pool" LATERAL in
       -- assetQueryJoins. They live in a join rather than inline subqueries so
-      -- the WHERE clause and ORDER BY can reference the SAME values by alias —
+      -- the WHERE clause and ORDER BY can reference the SAME values by alias,
       -- a filter cannot silently disagree with the column it filters.
       pool.in_kits AS "assetInKits",
       pool.peak_booked AS "assetPeakBooked",
@@ -2606,7 +2606,7 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
   ) pool ON TRUE`;
 
 /**
- * Units free to hand over right now. The ONE definition — referenced by the
+ * Units free to hand over right now. The ONE definition, referenced by the
  * projection, the `available` filter and the `available` sort.
  *
  * Reserved units are deliberately not subtracted: they are still physically on
@@ -3068,7 +3068,7 @@ const POOL_COLUMN_NAMES = ["available", "reserved", "stockStatus"] as const;
  * than always-on: it is five correlated aggregates per asset and most page
  * loads neither filter nor sort on them. Miss the gate and the query fails with
  * `missing FROM-clause entry for table "pool"`, so over-inclusion is the safe
- * direction — the same reasoning as `detectActiveSortKeys`.
+ * direction, the same reasoning as `detectActiveSortKeys`.
  *
  * @param filters - Parsed filters for this request.
  * @param sortBy - Raw sort specs (`field:direction[:fieldType]`).
@@ -3145,7 +3145,7 @@ export type BuildAdvancedAssetsQueryParams = {
   /**
    * Whether the "Low stock only" toggle is on. Its predicate resolves through
    * the shared stock-status expression, so it needs the `pool` LATERAL exactly
-   * like a `stockStatus` filter does — without this the slim phase omits the
+   * like a `stockStatus` filter does, without this the slim phase omits the
    * join and Postgres reports a missing FROM-clause entry.
    */
   lowStockOnly?: boolean;

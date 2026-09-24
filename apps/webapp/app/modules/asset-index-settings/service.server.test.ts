@@ -62,7 +62,7 @@ describe("insertColumnsAtDefaultPositions", () => {
   it("splices a new column at its default position and shifts the rest", () => {
     // why: this is the bug it exists to prevent. Appending instead put the
     // quantity-pool columns past every custom field, roughly 3000px off the
-    // right edge of a real workspace's table — a column nobody scrolls to is a
+    // right edge of a real workspace's table, a column nobody scrolls to is a
     // column that does not exist.
     const result = insertColumnsAtDefaultPositions(saved, [
       { name: "available", visible: true, position: 2 },

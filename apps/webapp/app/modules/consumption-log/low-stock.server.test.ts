@@ -550,7 +550,7 @@ describe("checkAndNotifyLowStock — never rejects", () => {
   });
 });
 
-describe("checkAndNotifyLowStock — the same figure as the Stock status column", () => {
+describe("checkAndNotifyLowStock, the same figure as the Stock status column", () => {
   it("subtracts kit units and standalone checked-out units, not just custody", async () => {
     // 10 owned, floor 5. Custody alone (0) says Enough; the column subtracts
     // 3 in kits and 3 out on a booking and says Running low at 4. The alert

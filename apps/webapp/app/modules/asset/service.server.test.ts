@@ -5967,7 +5967,7 @@ describe("bulkUpdateAssetMinQuantity", () => {
 
   it("only asks the database for QUANTITY_TRACKED assets in the caller's org", async () => {
     // why: the org scope is the IDOR guard for every id used downstream, and
-    // the type filter is what makes a mixed selection safe to submit — the
+    // the type filter is what makes a mixed selection safe to submit, the
     // dialog is reachable from a list containing individually-tracked assets.
     mockAssetFindMany.mockResolvedValue([]);
 
