@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
+  scannedAssetQuantitiesAtom,
   scannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
@@ -15,6 +16,11 @@ import {
 } from "~/atoms/qr-scanner";
 import { Form } from "~/components/custom-form";
 import { CheckmarkIcon } from "~/components/icons/library";
+import {
+  buildQuantitiesPayload,
+  releasableUnits,
+  shouldShowStateBadges,
+} from "~/components/scanner/drawer/custody-scan-quantities";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -42,12 +48,14 @@ import {
   kitLabelPresets,
 } from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
+import { buildReleaseCustodyBlockers } from "./custody-blockers";
 import ConfigurableDrawer from "../configurable-drawer";
 import {
   GenericItemRow,
   DefaultLoadingState,
   TextLoader,
 } from "../generic-item-row";
+import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
 
 // Export the schema so it can be reused
 export const ReleaseCustodyFromScannedItemsSchema = z.object({
@@ -92,116 +100,18 @@ export default function ReleaseCustodyDrawer({
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
 
-  // Filter and prepare data
-  const assets = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetFromQr);
-
-  const kits = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "kit")
-    .map((item) => item?.data as KitFromQr);
-
-  // Setup blockers
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
-
-  // Asset blockers - here we look for assets NOT in custody (AVAILABLE OF CHECKED_OUT)
-  const assetsNotInCustody = assets
-    .filter((asset) => !!asset && asset.status !== AssetStatus.IN_CUSTODY)
-    .map((asset) => asset.id);
-
-  // Asset is part of a kit. Only block INDIVIDUAL assets — qty-tracked
-  // assets can have a partial-custody slice independent of any kit
-  // allocation, so a kit membership shouldn't prevent releasing
-  // operator-only custody.
-  const assetsArePartOfKit = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        asset.type === AssetType.INDIVIDUAL &&
-        asset.assetKits.length > 0 &&
-        asset.id
-    )
-    .map((asset) => asset.id);
-
-  // Kit blockers
-  // Kit is not in custody (AVAILABLE OF CHECKED_OUT)
-  const kitsNotInCustody = kits
-    .filter((kit) => kit.status !== AssetStatus.IN_CUSTODY)
-    .map((kit) => kit.id);
-
-  // Find the QR IDs that correspond to kit IDs with blockers
-  // This is necessary because we need to remove the QR IDs from the items object, not the kit IDs
-  const getQrIdsForKitIds = (kitIds: string[]) =>
-    Object.entries(items)
-      .filter(([, item]) => {
-        if (!item || item.type !== "kit") return false;
-        return kitIds.includes((item.data as KitFromQr)?.id);
-      })
-      .map(([qrId]) => qrId);
-
-  // Get the QR IDs for each type of kit blocker
-  const qrIdsOfKitsNotInCustody = getQrIdsForKitIds(kitsNotInCustody);
-
-  // Create blockers configuration
-  const blockerConfigs = [
-    {
-      condition: assetsNotInCustody.length > 0,
-      count: assetsNotInCustody.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> not
-          in custody.
-        </>
-      ),
-      description: "Only assets in custody can be released.",
-      onResolve: () => removeAssetsFromList(assetsNotInCustody),
-    },
-    {
-      condition: assetsArePartOfKit.length > 0,
-      count: assetsArePartOfKit.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong> are part
-          of a kit.
-        </>
-      ),
-      description: "Note: Scan Kit QR to release the full kit from custody",
-      onResolve: () => removeAssetsFromList(assetsArePartOfKit),
-    },
-    {
-      condition: qrIdsOfKitsNotInCustody.length > 0,
-      count: qrIdsOfKitsNotInCustody.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong> not
-          in custody.
-        </>
-      ),
-      description: "Only kits in custody can be released.",
-      onResolve: () => removeItemsFromList(qrIdsOfKitsNotInCustody),
-    },
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} QR codes `}</strong> are invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
-    },
-  ];
+  // Blockers live in `custody-blockers` so the list is a pure function of the
+  // scanned rows and can be tested without mounting this drawer.
+  const { blockerConfigs, onResolveAll } = buildReleaseCustodyBlockers({
+    items,
+    removeAssetsFromList,
+    removeItemsFromList,
+  });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([...assetsNotInCustody, ...assetsArePartOfKit]);
-      removeItemsFromList([
-        ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfKitsNotInCustody,
-      ]);
-    },
+    onResolveAll,
   });
 
   // Render item row
@@ -251,6 +161,12 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   });
 
   const disabled = useDisabled();
+  // Per-row units for quantity-tracked scans, written by
+  // `ScannedAssetQuantityInput` and keyed by asset id.
+  const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
+  // The scanned rows themselves. The submit sends a quantity for every
+  // quantity-tracked row, not only the ones whose input was edited.
+  const items = useAtomValue(scannedItemsAtom);
 
   const zo = useZorm("BulkReleaseCustody", BulkReleaseCustodySchema, {
     onValidSubmit: (e) => {
@@ -260,9 +176,18 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
       // Handle asset request
       if (assetIds && assetIds.length > 0) {
+        const quantities = JSON.stringify(
+          buildQuantitiesPayload({
+            items,
+            assetIds,
+            assetQuantities,
+            unitsFor: releasableUnits,
+          })
+        );
         // Create object data structure for assets
         const assetData = {
           assetIds,
+          quantities,
         };
 
         // Convert to FormData
@@ -399,6 +324,16 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 
 // Implement item renderers if they're not already defined elsewhere
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
+  const qtyTracked = isQuantityTracked(asset);
+  const inCustody = releasableUnits(asset);
+  /**
+   * Badges that say the row cannot be used are suppressed while a quantity row
+   * still has releasable units. See `shouldShowStateBadges`. The "In custody
+   * of" badge below is NOT gated: on a release surface it names the person the
+   * units are coming back from, which is the row's most useful fact, not a
+   * claim that the row is unusable.
+   */
+  const showStateBadges = shouldShowStateBadges(asset, inCustody);
   // Use predefined presets to create label configurations with appropriate conditions for release custody
   const availabilityConfigs = [
     {
@@ -414,15 +349,21 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     },
     // For release custody, we highlight assets that are NOT in custody (opposite of assign custody)
     {
-      condition: asset.status !== AssetStatus.IN_CUSTODY,
+      // Whole-asset statement, so INDIVIDUAL only: a qty-tracked row can hold
+      // units for someone while its overall status reads otherwise.
+      condition:
+        asset.type === AssetType.INDIVIDUAL &&
+        asset.status !== AssetStatus.IN_CUSTODY,
       badgeText: "Not in custody",
       tooltipTitle: "Asset is not in custody",
       tooltipContent: "This asset is not in custody and cannot be released.",
       priority: 100,
     },
-    assetLabelPresets.checkedOut(asset.status === AssetStatus.CHECKED_OUT),
+    assetLabelPresets.checkedOut(
+      showStateBadges && asset.status === AssetStatus.CHECKED_OUT
+    ),
     assetLabelPresets.partOfKit(
-      asset.assetKits.length > 0,
+      showStateBadges && asset.assetKits.length > 0,
       isQuantityTracked(asset)
     ),
   ];
@@ -436,23 +377,35 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   );
 
   return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {asset.title}
-      </p>
+    <div className="flex w-full items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="word-break whitespace-break-spaces font-medium">
+          {asset.title}
+        </p>
 
-      <div className="flex flex-wrap items-center gap-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          asset
-        </span>
-        <AssetAvailabilityLabels />
+        <div className="flex flex-wrap items-center gap-1">
+          <span
+            className={tw(
+              "inline-block bg-gray-50 px-[6px] py-[2px]",
+              "rounded-md border border-gray-200",
+              "text-xs text-gray-700"
+            )}
+          >
+            asset
+          </span>
+          <AssetAvailabilityLabels />
+        </div>
       </div>
+
+      {/* Quantity-tracked rows hand back a number of units, not the whole
+          item. Hidden when nothing is held, since there is nothing to release. */}
+      {qtyTracked && inCustody > 0 ? (
+        <ScannedAssetQuantityInput
+          assetId={asset.id}
+          max={inCustody}
+          unit={asset.unitOfMeasure || "units"}
+        />
+      ) : null}
     </div>
   );
 }

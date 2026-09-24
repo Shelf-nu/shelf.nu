@@ -12,7 +12,12 @@ import { sendEmail } from "~/emails/mail.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { ADMIN_EMAIL } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
-import { isLikeShelfError, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
+import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { emailMatchesDomains } from "~/utils/misc";
 import {
   createStripeCustomer,
@@ -147,6 +152,31 @@ export async function getOrganizationsBySsoDomain(emailDomain: string) {
   }
 }
 
+/**
+ * Reads an uploaded workspace logo and pairs its bytes with the content type
+ * they prove.
+ *
+ * The type comes from the bytes, never from the caller's `File.type`: the row
+ * is served back inline by `api+/image.$imageId`, so the stored type decides
+ * how a browser renders it.
+ *
+ * @param image - The uploaded file
+ * @param userId - Acting user, for the error context
+ * @returns The bytes to persist and the content type to persist them under
+ * @throws {ShelfError} 400 when the bytes are not a supported image format
+ */
+async function readValidatedLogo(image: File, userId: User["id"]) {
+  const blob = new Uint8Array(await image.arrayBuffer());
+
+  return {
+    blob,
+    contentType: assertUploadedImageContentType(blob, {
+      userId,
+      field: "image",
+    }),
+  };
+}
+
 export async function createOrganization({
   name,
   userId,
@@ -166,6 +196,16 @@ export async function createOrganization({
         displayName: true,
       },
     });
+
+    /**
+     * Validated before anything is written. The workspace counts against the
+     * caller's plan limit from the moment it exists, and nothing cleans one up,
+     * so a logo this service is going to refuse must not cost the caller a slot.
+     */
+    const logo =
+      image?.size && image.size > 0
+        ? await readValidatedLogo(image, userId)
+        : null;
 
     const data = {
       name,
@@ -225,11 +265,11 @@ export async function createOrganization({
 
     const org = await db.organization.create({ data });
 
-    if (image?.size && image?.size > 0) {
+    if (logo) {
       await db.image.create({
         data: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
+          blob: logo.blob,
+          contentType: logo.contentType,
           ownerOrg: {
             connect: {
               id: org.id,
@@ -251,6 +291,11 @@ export async function createOrganization({
 
     return org;
   } catch (cause) {
+    // A refused logo is a deliberate 400 with a message written for the user;
+    // the generic wrapper below would tell them to retry a request that cannot
+    // succeed.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message:
@@ -324,9 +369,18 @@ export async function updateOrganization({
         });
       }
 
+      const blob = Buffer.from(await image.arrayBuffer());
+
       const imageData = {
-        blob: Buffer.from(await image.arrayBuffer()),
-        contentType: image.type,
+        blob,
+        // Derived from the bytes, never from the caller's `File.type`: this
+        // row is served back inline by `api+/image.$imageId`, so the stored
+        // content type decides how a browser renders it.
+        contentType: assertUploadedImageContentType(blob, {
+          userId,
+          organizationId: id,
+          field: "image",
+        }),
         ownerOrg: {
           connect: {
             id: id,
@@ -442,6 +496,37 @@ const ORGANIZATION_SELECT_FIELDS = {
 export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
   select: typeof ORGANIZATION_SELECT_FIELDS;
 }>;
+
+/**
+ * Whether a user signs in through SSO.
+ *
+ * Each membership carries its user's flag, so an already-fetched membership list
+ * answers without another query. A user with no memberships at all has nothing
+ * to read it from, and that is precisely the SSO user who belongs on the
+ * pending-assignment page — so the user row answers instead of defaulting to
+ * "not SSO".
+ *
+ * @param userId - The user in question
+ * @param userOrganizations - Their memberships, as `getUserOrganizations` returns them
+ * @returns `true` when the user is an SSO user
+ */
+export async function isSsoUser({
+  userId,
+  userOrganizations,
+}: {
+  userId: string;
+  userOrganizations: Array<{ user: { sso: boolean } }>;
+}): Promise<boolean> {
+  if (userOrganizations.length > 0) {
+    return userOrganizations[0].user.sso === true;
+  }
+
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { sso: true },
+  });
+  return user?.sso === true;
+}
 
 export async function getUserOrganizations({ userId }: { userId: string }) {
   try {

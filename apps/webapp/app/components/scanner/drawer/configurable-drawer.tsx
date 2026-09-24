@@ -56,8 +56,10 @@ type ConfigurableDrawerProps<T> = {
   // Form name (for the zorm)
   formName?: string;
 
-  // Optional form component to completely replace the default form
-  // Can be a ReactNode or a function that receives the expanded state
+  // Optional form component to completely replace the default form.
+  // Can be a ReactNode or a function that receives the expanded state.
+  // Rendered in the drawer's pinned footer, below the scrolling item list, so
+  // a long list can never scroll the submit button out of reach.
   form?: ReactNode | ((expanded: boolean) => ReactNode);
 
   // Optional header content to render above the item list
@@ -137,29 +139,8 @@ export default function ConfigurableDrawer<T>({
       emptyStateContent={emptyStateContent || defaultEmptyState}
       headerContent={headerContent}
       collapsedHeight={collapsedHeight}
-    >
-      {(expanded) => (
+      footer={(expanded) => (
         <>
-          {/* Item List */}
-          <Table className="overflow-y-auto">
-            <ListHeader hideFirstColumn className="border-none">
-              <Th className="p-0"> </Th>
-              <Th className="p-0"> </Th>
-            </ListHeader>
-
-            <tbody>
-              <AnimatePresence>
-                {customRenderAllItems
-                  ? customRenderAllItems()
-                  : renderItem
-                  ? Object.entries(items).map(([qrId, item]) =>
-                      renderItem(qrId, item)
-                    )
-                  : null}
-              </AnimatePresence>
-            </tbody>
-          </Table>
-
           {/* Blockers */}
           {Blockers && <Blockers />}
 
@@ -174,7 +155,7 @@ export default function ConfigurableDrawer<T>({
             <When truthy={hasItems}>
               <Form
                 ref={zo.ref}
-                className="mb-4 flex max-h-full w-full"
+                className="mb-4 flex w-full"
                 method={method}
                 action={actionUrl}
                 onSubmit={onSubmit}
@@ -221,6 +202,30 @@ export default function ConfigurableDrawer<T>({
               </Form>
             </When>
           ) : null}
+        </>
+      )}
+    >
+      {() => (
+        <>
+          {/* Item List */}
+          <Table className="overflow-y-auto">
+            <ListHeader hideFirstColumn className="border-none">
+              <Th className="p-0"> </Th>
+              <Th className="p-0"> </Th>
+            </ListHeader>
+
+            <tbody>
+              <AnimatePresence>
+                {customRenderAllItems
+                  ? customRenderAllItems()
+                  : renderItem
+                  ? Object.entries(items).map(([qrId, item]) =>
+                      renderItem(qrId, item)
+                    )
+                  : null}
+              </AnimatePresence>
+            </tbody>
+          </Table>
         </>
       )}
     </BaseDrawer>

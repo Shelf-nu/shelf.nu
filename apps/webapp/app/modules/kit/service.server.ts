@@ -80,6 +80,7 @@ import {
 } from "./types";
 import { getKitsWhereInput } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
+import type { ActivityEventInput } from "../activity-event/types";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
 import {
   releaseAssetsToAvailableUnlessCheckedOut,
@@ -328,15 +329,19 @@ export type RemovedPlanningBookingSlice = {
  *
  * Emits the audit trail for what it destroyed, inside the caller's transaction:
  * one `BOOKING_ASSETS_REMOVED` event per affected `(booking, asset)` and one
- * booking system note per `(booking, kit)` pair. Also re-opens any
- * `BookingModelRequest` the deleted rows were fulfilling.
+ * booking system note per `(booking, kit)` pair.
  *
- * Both of those aggregate PER ASSET, not per row, to stay symmetric with the
- * rest of the codebase: `removeAssets` emits one event per asset with the
- * summed quantity, and `materializeModelRequestForAsset` only ever increments
- * `fulfilledQuantity` by 1 per asset. A QUANTITY_TRACKED asset can hold a slice
- * in several kits on one booking, so counting rows would emit duplicate events
- * and decrement a request by more than was ever added to it.
+ * The events aggregate PER ASSET, not per row, to stay symmetric with the rest
+ * of the codebase: `removeAssets` emits one event per asset with the summed
+ * quantity. A QUANTITY_TRACKED asset can hold a slice in several kits on one
+ * booking, so counting rows would report the same removal twice.
+ *
+ * Reservation rollback is the exception and counts PER ROW. A deleted row that
+ * carries `bookingModelRequestId` discharged exactly one unit of that
+ * `BookingModelRequest`, so its removal gives exactly one unit back — and the
+ * request re-opens, `fulfilledAt` cleared, once units are outstanding again. A
+ * row without the stamp discharged nothing and leaves every reservation alone,
+ * whatever model its asset belongs to.
  *
  * Call BEFORE {@link fetchAssetKitDetachmentImpact} and
  * {@link mergeStandaloneCollisionsForKitDetachment}, so neither reports on nor
@@ -396,6 +401,9 @@ export async function removeKitSlicesFromPlanningBookings(
         assetId: true,
         quantity: true,
         assetKitId: true,
+        // The row's own record of which `BookingModelRequest` it discharged.
+        // Deleting a stamped row hands that unit back to the reservation.
+        bookingModelRequestId: true,
         booking: {
           select: { id: true, name: true, organizationId: true, status: true },
         },
@@ -405,8 +413,6 @@ export async function removeKitSlicesFromPlanningBookings(
             title: true,
             type: true,
             unitOfMeasure: true,
-            // Removing a materialised row re-opens its model request.
-            assetModelId: true,
           },
         },
       },
@@ -440,7 +446,6 @@ export async function removeKitSlicesFromPlanningBookings(
         title: string;
         type: AssetType;
         unitOfMeasure: string | null;
-        assetModelId: string | null;
       };
     }) => {
       const ak = akById.get(row.assetKitId);
@@ -466,19 +471,19 @@ export async function removeKitSlicesFromPlanningBookings(
     where: { id: { in: removed.map((r) => r.bookingAssetId) } },
   });
 
-  // Collapse to one entry per (booking, asset). A QUANTITY_TRACKED asset can
-  // hold a slice in several kits on the same booking, and BOTH consumers below
-  // are per-asset: `removeAssets` emits one event per asset carrying the summed
-  // quantity, and `materializeModelRequestForAsset` only ever incremented
-  // `fulfilledQuantity` by 1 for that asset. Counting rows here would duplicate
-  // the event and decrement a request by more than was ever added to it.
+  // Collapse to one entry per (booking, asset) for the removal events below. A
+  // QUANTITY_TRACKED asset can hold a slice in several kits on the same
+  // booking, and `removeAssets` emits one event per asset carrying the summed
+  // quantity — counting rows here would report the same removal twice.
+  //
+  // The reservation rollback further down deliberately does NOT come through
+  // here: it counts stamped ROWS, which is its own correct grain.
   type PerAsset = {
     bookingId: string;
     organizationId: string;
     assetId: string;
     assetType: AssetType;
     unitOfMeasure: string | null;
-    assetModelId: string | null;
     /** Sum of every deleted slice's booked units for this (booking, asset). */
     quantity: number;
     /** Distinct kits the deleted slices came from — one means we can name it. */
@@ -494,7 +499,6 @@ export async function removeKitSlicesFromPlanningBookings(
       id: string;
       type: AssetType;
       unitOfMeasure: string | null;
-      assetModelId: string | null;
     };
   }>) {
     const key = `${row.bookingId}::${row.asset.id}`;
@@ -511,53 +515,118 @@ export async function removeKitSlicesFromPlanningBookings(
       assetId: row.asset.id,
       assetType: row.asset.type,
       unitOfMeasure: row.asset.unitOfMeasure,
-      assetModelId: row.asset.assetModelId,
       quantity: row.quantity,
       kitIds: new Set(kitId ? [kitId] : []),
     });
   }
 
-  // Re-open any `BookingModelRequest` these assets were fulfilling. Same
-  // bookkeeping as `removeAssets`: one unit per ASSET that went away, floored at
-  // 0, and the completion stamp cleared once the request has outstanding units
-  // again. Keyed per (booking, model) because one call can span bookings.
-  const removalsByBookingModel = new Map<
+  /**
+   * Re-open the reservations the deleted rows had discharged.
+   *
+   * Counted from `bookingModelRequestId` — each row's own record of which
+   * promise it answered — NEVER from `assetModelId`. Grouping by model counts
+   * every removed asset that merely SHARES a model with a reservation,
+   * including ones that discharged nothing:
+   *
+   *   Reserve 2 x Dell and satisfy it with two Dells. A third Dell, added as an
+   *   ordinary kit member, is detached. The reservation must stay fulfilled —
+   *   both discharging rows are still on the booking.
+   *
+   * One unit per stamped ROW, which is why this does not go through `perAsset`
+   * above: a stamp lives on a single row, so per-row already is per-discharge,
+   * while the removal events stay per-asset for the multi-kit case.
+   *
+   * Keyed per request rather than per (booking, model) because one call can
+   * span bookings, and the request id names the booking by itself.
+   */
+  const removalsByRequest = new Map<
     string,
-    { bookingId: string; assetModelId: string; count: number }
+    { bookingId: string; count: number }
   >();
-  for (const entry of perAsset.values()) {
-    if (!entry.assetModelId) continue;
-    const key = `${entry.bookingId}::${entry.assetModelId}`;
-    const existing = removalsByBookingModel.get(key);
+  for (const row of rows as Array<{
+    bookingId: string;
+    bookingModelRequestId: string | null;
+  }>) {
+    if (!row.bookingModelRequestId) continue;
+    const existing = removalsByRequest.get(row.bookingModelRequestId);
     if (existing) {
       existing.count += 1;
-    } else {
-      removalsByBookingModel.set(key, {
-        bookingId: entry.bookingId,
-        assetModelId: entry.assetModelId,
-        count: 1,
-      });
+      continue;
     }
-  }
-  for (const {
-    bookingId,
-    assetModelId,
-    count,
-  } of removalsByBookingModel.values()) {
-    const request = await tx.bookingModelRequest.findUnique({
-      where: { bookingId_assetModelId: { bookingId, assetModelId } },
-      select: { quantity: true, fulfilledQuantity: true },
+    removalsByRequest.set(row.bookingModelRequestId, {
+      bookingId: row.bookingId,
+      count: 1,
     });
-    if (!request || request.fulfilledQuantity === 0) continue;
+  }
 
-    const nextFulfilled = Math.max(0, request.fulfilledQuantity - count);
-    await tx.bookingModelRequest.update({
-      where: { bookingId_assetModelId: { bookingId, assetModelId } },
-      data: {
-        fulfilledQuantity: nextFulfilled,
-        ...(nextFulfilled < request.quantity ? { fulfilledAt: null } : {}),
+  /**
+   * `fulfilledAt` reversals to report, one per request re-opened below.
+   * Batched and flushed once after the loop so N affected requests cost one
+   * insert rather than N.
+   */
+  const modelRequestReopenEvents: ActivityEventInput[] = [];
+
+  for (const [requestId, { bookingId, count }] of removalsByRequest) {
+    const request = await tx.bookingModelRequest.findUnique({
+      where: { id: requestId },
+      // `fulfilledAt`, the model id and its name are the before-state the
+      // reversal event reports; without them there is nothing to record.
+      select: {
+        quantity: true,
+        fulfilledQuantity: true,
+        bookingId: true,
+        fulfilledAt: true,
+        assetModelId: true,
+        assetModel: { select: { name: true } },
       },
     });
+    // Belt and braces: the FK guarantees it, but never touch a request
+    // belonging to another booking.
+    if (!request || request.bookingId !== bookingId) continue;
+    if (request.fulfilledQuantity === 0) continue;
+
+    const nextFulfilled = Math.max(0, request.fulfilledQuantity - count);
+    // Dropping below the reserved `quantity` means there is outstanding work
+    // again — clear the completion stamp so the reservations section and its
+    // CTAs come back.
+    const reopened = nextFulfilled < request.quantity;
+
+    await tx.bookingModelRequest.update({
+      where: { id: requestId },
+      data: {
+        fulfilledQuantity: nextFulfilled,
+        ...(reopened ? { fulfilledAt: null } : {}),
+      },
+    });
+
+    /**
+     * Report the reversal, but only on a genuine set → unset flip. A request
+     * that was never complete already has a null `fulfilledAt`, so gating on
+     * `reopened` alone would emit spurious null → null events on every removal
+     * from an outstanding request.
+     *
+     * This mirrors the null → timestamp events emitted in
+     * `booking-model-request/service.server.ts`. Without it the stream records
+     * reservations closing and never re-opening, and `fulfilledAt IS NULL`
+     * consumers reconstruct this one as still fulfilled.
+     */
+    if (request.fulfilledAt != null && reopened) {
+      modelRequestReopenEvents.push({
+        organizationId,
+        actorUserId,
+        action: "BOOKING_MODEL_REQUEST_CHANGED",
+        entityType: "BOOKING",
+        entityId: bookingId,
+        bookingId,
+        field: "fulfilledAt",
+        fromValue: request.fulfilledAt.toISOString(),
+        toValue: null,
+        meta: {
+          assetModelId: request.assetModelId,
+          assetModelName: request.assetModel.name,
+        },
+      });
+    }
   }
 
   // One event per (booking, asset) that lost booked units — the report would
@@ -589,6 +658,10 @@ export async function removeKitSlicesFromPlanningBookings(
     }),
     tx
   );
+
+  // Same tx as the decrement above — a rolled-back removal must not leave an
+  // event claiming a reservation re-opened.
+  await recordEvents(modelRequestReopenEvents, tx);
 
   // Actor for the note attribution, read on the CALLER'S transaction client. It
   // must not go through `getUserByID`, which is hardcoded to the global `db`
@@ -850,6 +923,20 @@ export async function getBookingImpactForAssetKits({
  * and says nothing about `BookingAsset` rows.) Since nothing at the DB level
  * stops the collision, the merge below handles INDIVIDUAL rows the same way
  * QUANTITY_TRACKED ones are handled.
+ *
+ * A merged-away row may carry `bookingModelRequestId` — the record of which
+ * `BookingModelRequest` unit it discharged. The units survive the merge, so the
+ * reservation stays satisfied and the survivor adopts the stamp. It can only do
+ * that while it answers no reservation itself: `BookingAsset` records one
+ * reservation per row, so a second stamped row folded into the same survivor
+ * has nowhere left to be recorded and its unit goes back to its request,
+ * `fulfilledAt` cleared once units are outstanding again. Both of those
+ * branches are defence — at most one row per `(booking, asset)` is stamped, so
+ * a collision between two stamped rows means that invariant has already
+ * slipped, and losing the unit silently would be worse than returning it.
+ *
+ * @param tx Active transaction — must be the one deleting the `AssetKit` rows
+ * @param assetKitIds `AssetKit` rows about to be deleted
  */
 export async function mergeStandaloneCollisionsForKitDetachment(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -857,23 +944,29 @@ export async function mergeStandaloneCollisionsForKitDetachment(
   assetKitIds: string[]
 ): Promise<void> {
   if (assetKitIds.length === 0) return;
-  const kitDrivenRows: Array<{
+  /** Both reads carry the reservation stamp — the merge has to place it. */
+  const collisionRowSelect = {
+    id: true,
+    bookingId: true,
+    assetId: true,
+    quantity: true,
+    bookingModelRequestId: true,
+  };
+  type CollisionRow = {
     id: string;
     bookingId: string;
     assetId: string;
     quantity: number;
-  }> = await tx.bookingAsset.findMany({
+    bookingModelRequestId: string | null;
+  };
+
+  const kitDrivenRows: CollisionRow[] = await tx.bookingAsset.findMany({
     where: { assetKitId: { in: assetKitIds } },
-    select: { id: true, bookingId: true, assetId: true, quantity: true },
+    select: collisionRowSelect,
   });
   if (kitDrivenRows.length === 0) return;
 
-  const standaloneMatches: Array<{
-    id: string;
-    bookingId: string;
-    assetId: string;
-    quantity: number;
-  }> = await tx.bookingAsset.findMany({
+  const standaloneMatches: CollisionRow[] = await tx.bookingAsset.findMany({
     where: {
       assetKitId: null,
       OR: kitDrivenRows.map((r) => ({
@@ -881,7 +974,7 @@ export async function mergeStandaloneCollisionsForKitDetachment(
         assetId: r.assetId,
       })),
     },
-    select: { id: true, bookingId: true, assetId: true, quantity: true },
+    select: collisionRowSelect,
   });
   if (standaloneMatches.length === 0) return;
 
@@ -897,6 +990,14 @@ export async function mergeStandaloneCollisionsForKitDetachment(
   // would let the second write overwrite the first, silently losing the first
   // slice's units.
   const mergedQtyByStandaloneId = new Map<string, number>();
+  /**
+   * The reservation stamp each survivor adopts, where it had none of its own.
+   * At most one per survivor: `BookingAsset.bookingModelRequestId` names the
+   * single promise that row answers, so a second stamp has nowhere to live.
+   */
+  const adoptedRequestIdByStandaloneId = new Map<string, string>();
+  /** Discharged units no surviving row can hold — one entry per lost unit. */
+  const requestIdsToDecrement: string[] = [];
   const kitDrivenIdsToDelete: string[] = [];
   for (const kdr of kitDrivenRows) {
     const standalone = standaloneByPair.get(`${kdr.bookingId}::${kdr.assetId}`);
@@ -906,18 +1007,68 @@ export async function mergeStandaloneCollisionsForKitDetachment(
       (mergedQtyByStandaloneId.get(standalone.id) ?? standalone.quantity) +
         kdr.quantity
     );
+    if (kdr.bookingModelRequestId) {
+      // The units stay on the booking, so the reservation stays satisfied —
+      // move the stamp to the row that now carries them. A survivor that
+      // already holds a stamp has no room for a second: that unit's record is
+      // gone, so the unit is owed back to its request.
+      if (
+        !standalone.bookingModelRequestId &&
+        !adoptedRequestIdByStandaloneId.has(standalone.id)
+      ) {
+        adoptedRequestIdByStandaloneId.set(
+          standalone.id,
+          kdr.bookingModelRequestId
+        );
+      } else {
+        requestIdsToDecrement.push(kdr.bookingModelRequestId);
+      }
+    }
     kitDrivenIdsToDelete.push(kdr.id);
   }
 
   for (const [standaloneId, quantity] of mergedQtyByStandaloneId) {
+    const adoptedRequestId = adoptedRequestIdByStandaloneId.get(standaloneId);
     await tx.bookingAsset.update({
       where: { id: standaloneId },
-      data: { quantity },
+      data: {
+        quantity,
+        ...(adoptedRequestId
+          ? { bookingModelRequestId: adoptedRequestId }
+          : {}),
+      },
     });
   }
   if (kitDrivenIdsToDelete.length > 0) {
     await tx.bookingAsset.deleteMany({
       where: { id: { in: kitDrivenIdsToDelete } },
+    });
+  }
+
+  // Hand back the discharged units the merge could not keep. One unit per
+  // stamped row that was folded away without its stamp surviving, floored at 0,
+  // with the completion stamp cleared once the request owes units again.
+  const decrementByRequestId = new Map<string, number>();
+  for (const requestId of requestIdsToDecrement) {
+    decrementByRequestId.set(
+      requestId,
+      (decrementByRequestId.get(requestId) ?? 0) + 1
+    );
+  }
+  for (const [requestId, decrementBy] of decrementByRequestId) {
+    const request = await tx.bookingModelRequest.findUnique({
+      where: { id: requestId },
+      select: { quantity: true, fulfilledQuantity: true },
+    });
+    if (!request || request.fulfilledQuantity === 0) continue;
+
+    const nextFulfilled = Math.max(0, request.fulfilledQuantity - decrementBy);
+    await tx.bookingModelRequest.update({
+      where: { id: requestId },
+      data: {
+        fulfilledQuantity: nextFulfilled,
+        ...(nextFulfilled < request.quantity ? { fulfilledAt: null } : {}),
+      },
     });
   }
 }
@@ -2610,68 +2761,202 @@ export async function releaseCustody({
   }
 }
 
+/**
+ * Whether a booked slice is out right now.
+ *
+ * Read from the slice's own markers rather than `Asset.status`, which says the
+ * asset is out SOMEWHERE — true of a `QUANTITY_TRACKED` asset whichever kit
+ * took it. A live booking is not enough either: one stays ONGOING while other
+ * assets are away, long after this slice came back.
+ *
+ * A returning slice is the only thing that clears it, so absence of
+ * `checkedOutAt` is not evidence of absence: rows written before the markers
+ * existed carry neither, and read as out — which is what they are, on a booking
+ * still ONGOING. When the departure IS recorded, the check-in has to be no
+ * older than the departure it answers: a slice that came back and then went out
+ * again carries both, and the refreshed `checkedOutAt` is what says it is out
+ * now.
+ */
+function isSliceStillOut(slice: {
+  checkedOutAt: Date | null;
+  checkedInAt: Date | null;
+}): boolean {
+  if (!slice.checkedInAt) return true;
+  return slice.checkedOutAt !== null && slice.checkedInAt < slice.checkedOutAt;
+}
+
+/** The custodian of a booking, projected for a kit row's custody cell. */
+type KitBookingCustodian = {
+  custodianUser: Pick<
+    User,
+    "firstName" | "lastName" | "displayName" | "profilePicture"
+  > | null;
+  custodianTeamMember: { name: string } | null;
+};
+
+/**
+ * Resolves, for each of `kitIds`, the booking that currently holds THAT kit.
+ *
+ * A booked slice belongs to a kit when it was booked under one of the kit's
+ * live membership rows (`BookingAsset.assetKitId` → `AssetKit.id`) or under the
+ * kit itself (`BookingAsset.sourceKitId`, which survives a detach). Both
+ * columns are NULL on a standalone free-pool slice.
+ *
+ * That scoping is what makes the answer correct for `QUANTITY_TRACKED` assets:
+ * one asset may sit in several kits at once, so "this asset is on an ongoing
+ * booking" says nothing about which kit that booking took.
+ *
+ * Costs two round-trips whatever the number of kits — the membership ids, then
+ * the slices — so a page of checked-out kits does not fan out per row.
+ *
+ * @param kitIds - The kits to resolve, typically one page's checked-out rows
+ * @returns Kit id → the holding booking's custodian, for kits that have one
+ */
+async function getBookingCustodiansHoldingKits(
+  kitIds: Kit["id"][],
+  organizationIds: Kit["organizationId"][]
+): Promise<Map<Kit["id"], KitBookingCustodian>> {
+  const membershipRows = await db.assetKit.findMany({
+    where: { kitId: { in: kitIds }, organizationId: { in: organizationIds } },
+    select: { id: true, kitId: true },
+  });
+  const kitIdByAssetKitId = new Map(
+    membershipRows.map((row) => [row.id, row.kitId])
+  );
+
+  const bookedSlices = await db.bookingAsset.findMany({
+    where: {
+      booking: {
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+        organizationId: { in: organizationIds },
+      },
+      OR: [
+        { sourceKitId: { in: kitIds } },
+        { assetKitId: { in: [...kitIdByAssetKitId.keys()] } },
+      ],
+    },
+    // Several live bookings can list one kit at once, and the first slice per
+    // kit names the custodian. Newest departure first makes that the booking
+    // the kit most recently left on, with ties broken on the booking id — the
+    // same order `getKitCurrentBooking` ranks by, so the index and the kit page
+    // name the same booking. Postgres sorts NULLs first on a descending sort,
+    // so a slice that never left is pushed to the end. The slice `id` only
+    // fixes row order within one booking, whose custodian is the same.
+    orderBy: [
+      { checkedOutAt: { sort: "desc", nulls: "last" } },
+      { bookingId: "asc" },
+      { id: "asc" },
+    ],
+    select: {
+      assetKitId: true,
+      sourceKitId: true,
+      // Departure markers. A booking stays ONGOING while other assets are
+      // away, so its status alone does not say this kit's units are still out.
+      // The comparison between the two is a column-to-column one that a Prisma
+      // `where` cannot express, so it is applied below.
+      checkedOutAt: true,
+      checkedInAt: true,
+      booking: {
+        select: {
+          custodianTeamMember: { select: { name: true } },
+          custodianUser: {
+            select: {
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              profilePicture: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const requestedKitIds = new Set(kitIds);
+  const custodianByKitId = new Map<Kit["id"], KitBookingCustodian>();
+
+  for (const slice of bookedSlices) {
+    if (!isSliceStillOut(slice)) continue;
+
+    // Live membership names the kit exactly; `sourceKitId` answers for slices
+    // whose membership row has since been removed.
+    const kitId =
+      (slice.assetKitId ? kitIdByAssetKitId.get(slice.assetKitId) : null) ??
+      slice.sourceKitId;
+
+    if (!kitId || !requestedKitIds.has(kitId) || custodianByKitId.has(kitId)) {
+      continue;
+    }
+
+    custodianByKitId.set(kitId, slice.booking);
+  }
+
+  return custodianByKitId;
+}
+
+/**
+ * Whether a kit row's projection already names a custodian of its own.
+ *
+ * `Kit` declares no `custody` field — it arrives through whatever `include` the
+ * caller asked for, so its presence is a fact about the projection rather than
+ * the model. Probing structurally reads it without widening the generic that
+ * every call site is bound to.
+ */
+function kitCarriesOwnCustodian(kit: Kit): boolean {
+  const custody = (kit as { custody?: { custodian?: unknown } | null }).custody;
+  return Boolean(custody?.custodian);
+}
+
+/**
+ * Fills a CHECKED_OUT kit's custody cell with the custodian of the booking
+ * holding it.
+ *
+ * A kit has no direct relation to a booking: it goes out through the slices its
+ * member assets contribute, so the custodian is read back from the booking
+ * those slices belong to — and only slices booked under this kit count, see
+ * {@link getBookingCustodiansHoldingKits}. A kit no booking holds keeps
+ * whatever custodian its own `custody` row names.
+ *
+ * Kits in any other status are returned untouched, by reference.
+ *
+ * @param kits - Kit rows to annotate; every other field is preserved as-is
+ * @returns The same rows, with booking custody filled in where one applies
+ * @throws {ShelfError} If the custodian lookup fails
+ */
 export async function updateKitsWithBookingCustodians<T extends Kit>(
   kits: T[]
 ): Promise<T[]> {
   try {
     /** When kits are checked out, we have to display the custodian from that booking */
-    const checkedOutKits = kits
-      .filter((kit) => kit.status === "CHECKED_OUT")
-      .map((k) => k.id);
+    const checkedOutKitIds = kits
+      .filter((kit) => kit.status === KitStatus.CHECKED_OUT)
+      .map((kit) => kit.id);
 
-    if (checkedOutKits.length === 0) {
+    if (checkedOutKitIds.length === 0) {
       return kits;
     }
 
-    const resolvedKits: T[] = [];
+    // Org scope comes off the rows themselves — every `Kit` carries it — so the
+    // lookup cannot reach another workspace without widening the signature
+    // every call site is bound to.
+    const organizationIds = [...new Set(kits.map((kit) => kit.organizationId))];
+    const custodianByKitId = await getBookingCustodiansHoldingKits(
+      checkedOutKitIds,
+      organizationIds
+    );
+    const checkedOutKitIdSet = new Set(checkedOutKitIds);
 
-    for (const kit of kits) {
-      if (!checkedOutKits.includes(kit.id)) {
-        resolvedKits.push(kit);
-        continue;
+    return kits.map((kit): T => {
+      if (!checkedOutKitIdSet.has(kit.id)) {
+        return kit;
       }
 
-      /** A kit is not directly associated with booking so have to make an extra query to get the booking for kit.
-       * We filter for assets that have an active booking to avoid picking
-       * an asset in the kit that is AVAILABLE and has no relevant booking.
-       * Kit membership is read through the `AssetKit` pivot. */
-      const kitAsset = await db.asset.findFirst({
-        where: {
-          assetKits: { some: { kitId: kit.id } },
-          bookingAssets: {
-            some: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
-          },
-        },
-        select: {
-          id: true,
-          bookingAssets: {
-            where: { booking: { status: { in: ["ONGOING", "OVERDUE"] } } },
-            include: {
-              booking: {
-                select: {
-                  id: true,
-                  custodianTeamMember: true,
-                  custodianUser: {
-                    select: {
-                      firstName: true,
-                      lastName: true,
-                      displayName: true,
-                      profilePicture: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      });
-
-      const booking = kitAsset?.bookingAssets[0]?.booking;
-      const custodianUser = booking?.custodianUser;
-      const custodianTeamMember = booking?.custodianTeamMember;
+      const holdingCustodian = custodianByKitId.get(kit.id);
+      const custodianUser = holdingCustodian?.custodianUser;
+      const custodianTeamMember = holdingCustodian?.custodianTeamMember;
 
       if (custodianUser) {
-        resolvedKits.push({
+        return {
           ...kit,
           custody: {
             custodian: {
@@ -2682,17 +2967,20 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
               user: custodianUser,
             },
           },
-        });
-      } else if (custodianTeamMember) {
-        resolvedKits.push({
+        };
+      }
+
+      if (custodianTeamMember) {
+        return {
           ...kit,
-          custody: {
-            custodian: { name: custodianTeamMember.name },
-          },
-        });
-      } else {
-        resolvedKits.push(kit);
-        /** This case should never happen because there must be a custodianUser or custodianTeamMember assigned to a booking */
+          custody: { custodian: { name: custodianTeamMember.name } },
+        };
+      }
+
+      // A booking always names a custodian, so reaching here means no booking
+      // holds this kit's slices. The kit's own custody row is then the only
+      // holder there is — and when that is empty too, nothing can name one.
+      if (!kitCarriesOwnCustodian(kit)) {
         Logger.error(
           new ShelfError({
             cause: null,
@@ -2702,9 +2990,9 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
           })
         );
       }
-    }
 
-    return resolvedKits;
+      return kit;
+    });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -2720,51 +3008,86 @@ type CurrentBookingType = {
   name: string;
   custodianUser: Pick<
     User,
-    "firstName" | "lastName" | "displayName" | "profilePicture" | "email"
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
   > | null;
-  custodianTeamMember: TeamMember | null;
+  custodianTeamMember: Pick<TeamMember, "name" | "userId"> | null;
   status: BookingStatus;
   from: Booking["from"];
 };
 
 /**
- * Determines if a kit has a current booking by checking its assets.
- * A kit is considered to have a current booking when at least one of its assets is:
- * 1. Currently checked out (status === CHECKED_OUT)
- * 2. Has an ongoing or overdue booking
+ * The ongoing or overdue booking that currently holds a kit, if any.
  *
- * This ensures the custody card only shows when assets are actually in custody,
- * not just when they have ongoing bookings but have been checked back in.
+ * A kit goes out through the booking slices its member assets contribute, and
+ * only slices booked under THIS kit count: `BookingAsset.assetKitId` names one
+ * of the kit's live membership rows, and `sourceKitId` names the kit itself and
+ * survives a detach. Both are NULL on a standalone free-pool slice.
  *
- * @returns The first ongoing/overdue booking found, or undefined if none exist
+ * The slice must also still be out — see {@link isSliceStillOut}.
+ *
+ * Several live bookings can list the kit at once (an overdue booking it is
+ * still out on, and a later one that has started), so every qualifying slice is
+ * ranked rather than taking the first one found: the newest departure wins, a
+ * slice that never left ranks below any that did, and the booking id breaks
+ * ties. The slices arrive in no particular order, and the answer must not
+ * depend on it.
+ *
+ * @param kit - The kit with its membership rows and their assets' active slices
+ * @returns The booking holding a slice of this kit that is still out, or
+ *   `undefined`
  */
 export function getKitCurrentBooking(kit: {
   id: string;
-  assets: {
-    status: AssetStatus;
-    bookingAssets: { booking: CurrentBookingType }[];
+  assetKits: {
+    id: string;
+    asset: {
+      bookingAssets: {
+        assetKitId: string | null;
+        sourceKitId: string | null;
+        checkedOutAt: Date | null;
+        checkedInAt: Date | null;
+        booking: CurrentBookingType;
+      }[];
+    };
   }[];
-}) {
-  const ongoingBookingAsset = kit.assets
-    // Filter each asset's bookingAssets to only ongoing or overdue ones
-    .map((a) => ({
-      ...a,
-      bookingAssets: a.bookingAssets.filter(
-        (ba) =>
-          ba.booking.status === BookingStatus.ONGOING ||
-          ba.booking.status === BookingStatus.OVERDUE
-      ),
-    }))
-    // Only consider assets that are actually checked out
-    .filter((a) => a.status === AssetStatus.CHECKED_OUT)
-    // Find the first asset that has any ongoing/overdue bookings
-    .find((a) => a.bookingAssets.length > 0);
+}): CurrentBookingType | undefined {
+  const ownAssetKitIds = new Set(
+    kit.assetKits.map((membership) => membership.id)
+  );
 
-  const ongoingBooking = ongoingBookingAsset
-    ? ongoingBookingAsset.bookingAssets[0].booking
-    : undefined;
+  /** Whether this slice was booked under the kit being asked about. */
+  const belongsToKit = (slice: {
+    assetKitId: string | null;
+    sourceKitId: string | null;
+  }) =>
+    slice.sourceKitId === kit.id ||
+    (slice.assetKitId !== null && ownAssetKitIds.has(slice.assetKitId));
 
-  return ongoingBooking;
+  const holdingSlices = kit.assetKits.flatMap((membership) =>
+    membership.asset.bookingAssets.filter(
+      (slice) =>
+        (slice.booking.status === BookingStatus.ONGOING ||
+          slice.booking.status === BookingStatus.OVERDUE) &&
+        belongsToKit(slice) &&
+        isSliceStillOut(slice)
+    )
+  );
+
+  const [newest] = holdingSlices.sort((a, b) => {
+    const aOut = a.checkedOutAt?.getTime() ?? null;
+    const bOut = b.checkedOutAt?.getTime() ?? null;
+    if (aOut !== bOut) {
+      if (aOut === null) return 1;
+      if (bOut === null) return -1;
+      return bOut - aOut;
+    }
+    // Plain code-unit order, as the database sorts these ids, never the
+    // runtime locale's.
+    if (a.booking.id === b.booking.id) return 0;
+    return a.booking.id < b.booking.id ? -1 : 1;
+  });
+
+  return newest?.booking;
 }
 
 export async function bulkDeleteKits({
@@ -3296,8 +3619,10 @@ export async function bulkReleaseKitCustody({
 
     /**
      * Nothing matched — a refused custodian filter, or a selection that no
-     * longer exists. Reading `kits[0]` below would throw a 500 and hand the
-     * caller a binary oracle for "does this custodian hold any kit".
+     * longer exists. Both refuse with the same generic 400: a release that
+     * quietly succeeded on zero kits, or that failed differently depending on
+     * why the match was empty, would hand the caller a binary oracle for
+     * "does this custodian hold any kit".
      */
     if (kits.length === 0) {
       throw new ShelfError({
@@ -3310,7 +3635,15 @@ export async function bulkReleaseKitCustody({
       });
     }
 
-    const custodian = kits[0].custody?.custodian;
+    /**
+     * Custodian per kit, not per call: a bulk selection may span kits held by
+     * different people, and both the audit events and the asset notes below
+     * name the custodian whose custody actually ended. One custodian taken
+     * from the selection would be right only when the selection is uniform.
+     */
+    const custodianByKitId = new Map(
+      kits.map((kit) => [kit.id, kit.custody?.custodian])
+    );
 
     /** Kits will be released only if all the selected kits are IN_CUSTODY */
     const allKitsInCustody = kits.every((kit) => kit.status === "IN_CUSTODY");
@@ -3375,6 +3708,9 @@ export async function bulkReleaseKitCustody({
         await recordEvents(
           releasedCustodyRows.map((row) => {
             const asset = assetById.get(row.assetId);
+            const kitId = row.kitCustodyId
+              ? kitIdByKitCustodyId.get(row.kitCustodyId)
+              : undefined;
             return {
               organizationId,
               actorUserId: userId,
@@ -3382,11 +3718,11 @@ export async function bulkReleaseKitCustody({
               entityType: "ASSET" as const,
               entityId: row.assetId,
               assetId: row.assetId,
-              kitId: row.kitCustodyId
-                ? kitIdByKitCustodyId.get(row.kitCustodyId)
-                : undefined,
+              kitId,
               teamMemberId: row.teamMemberId,
-              targetUserId: custodian?.user?.id ?? undefined,
+              targetUserId: kitId
+                ? custodianByKitId.get(kitId)?.user?.id ?? undefined
+                : undefined,
               meta: {
                 viaKit: true,
                 ...(asset ? assetQtyMeta(asset, row.quantity) : {}),
@@ -3439,14 +3775,19 @@ export async function bulkReleaseKitCustody({
 
       /** Creating notes for all the assets */
       const actor = wrapUserLinkForNote({ ...user, id: userId });
-      const custodianDisplay = custodian
-        ? wrapCustodianForNote({ teamMember: custodian })
-        : "**Unknown Custodian**";
       await tx.note.createMany({
         data: allAssetsOfAllKits.map((asset) => {
           const kitLink = asset.kit
             ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
             : "**Unknown Kit**";
+          // The custodian of the kit this asset came through — the note says
+          // whose custody ended, and a bulk selection may span several.
+          const custodian = asset.kit
+            ? custodianByKitId.get(asset.kit.id)
+            : undefined;
+          const custodianDisplay = custodian
+            ? wrapCustodianForNote({ teamMember: custodian })
+            : "**Unknown Custodian**";
           // qty-tracked assets name the units released ("custody of 50
           // units"); INDIVIDUAL phrasing is unchanged.
           const count = formatUnitCount(
@@ -3983,6 +4324,7 @@ export async function updateKitLocation({
         message: "Kit not found",
         label,
         shouldBeCaptured: false,
+        status: 404,
       });
     }
 
@@ -4908,15 +5250,16 @@ export async function updateKitAssets({
         : 1;
 
     /**
-     * Detect existing-in-kit assets whose submitted quantity differs from
-     * the current `AssetKit.quantity`. These trigger an `assetKit.update`
-     * + (if the kit is in custody) a cascade to the kit-allocated
-     * `Custody` row, with a paired `CUSTODY_ASSIGNED` (increase) or
-     * `CUSTODY_RELEASED` (decrease) event.
+     * Existing-in-kit assets whose submitted quantity differs from the current
+     * `AssetKit.quantity`. Each triggers an `assetKit.update` and, when the kit
+     * is in custody, a cascade to the kit-allocated `Custody` row with a paired
+     * `CUSTODY_ASSIGNED` (increase) or `CUSTODY_RELEASED` (decrease) event.
      *
-     * Today the picker doesn't yet expose a qty input, so the
-     * `assetQuantities` map is typically empty and this bucket stays
-     * empty too — keeps the new code path dormant until T5 wires the UI.
+     * Empty under `addOnly`, which means create what is missing and change
+     * nothing that exists. Callers in that mode submit a set they believe the
+     * kit does NOT already contain — the scanner decides that from the
+     * membership its page loaded with — so a row that turns out to exist is one
+     * they did not know about, and its quantity belongs to whoever set it.
      */
     type QtyChangedAsset = {
       id: string;
@@ -4924,39 +5267,39 @@ export async function updateKitAssets({
       previousQuantity: number;
       newQuantity: number;
     };
-    const qtyChangedAssets: QtyChangedAsset[] = allAssetsForKit.flatMap(
-      (asset) => {
-        // Only consider assets that are already in this kit AND have a
-        // submitted quantity that differs from the current pivot value.
-        const currentPivot = asset.assetKits.find((ak) => ak.kitId === kit.id);
-        if (!currentPivot) return [];
+    const qtyChangedAssets: QtyChangedAsset[] = (
+      addOnly ? [] : allAssetsForKit
+    ).flatMap((asset) => {
+      // Only consider assets that are already in this kit AND have a
+      // submitted quantity that differs from the current pivot value.
+      const currentPivot = asset.assetKits.find((ak) => ak.kitId === kit.id);
+      if (!currentPivot) return [];
 
-        const submitted = assetQuantities[asset.id];
-        if (submitted == null) return [];
+      const submitted = assetQuantities[asset.id];
+      if (submitted == null) return [];
 
-        // INDIVIDUAL is always 1 — picker shouldn't submit anything else,
-        // but defensively coerce.
-        const newQty =
-          asset.type === AssetType.INDIVIDUAL ? 1 : Math.max(0, submitted);
-        if (newQty === currentPivot.quantity) return [];
+      // INDIVIDUAL is always 1 — picker shouldn't submit anything else,
+      // but defensively coerce.
+      const newQty =
+        asset.type === AssetType.INDIVIDUAL ? 1 : Math.max(0, submitted);
+      if (newQty === currentPivot.quantity) return [];
 
-        // Submitting qty=0 for an existing-in-kit asset is treated as a
-        // no-op here. The picker contract is: to remove an asset from the
-        // kit, omit its id from `assetIds` — that routes through
-        // `removedAssets` (which deletes the pivot row + cascades to
-        // kit-allocated Custody).
-        if (newQty <= 0) return [];
+      // Submitting qty=0 for an existing-in-kit asset is treated as a
+      // no-op here. The picker contract is: to remove an asset from the
+      // kit, omit its id from `assetIds` — that routes through
+      // `removedAssets` (which deletes the pivot row + cascades to
+      // kit-allocated Custody).
+      if (newQty <= 0) return [];
 
-        return [
-          {
-            id: asset.id,
-            title: asset.title,
-            previousQuantity: currentPivot.quantity,
-            newQuantity: newQty,
-          },
-        ];
-      }
-    );
+      return [
+        {
+          id: asset.id,
+          title: asset.title,
+          previousQuantity: currentPivot.quantity,
+          newQuantity: newQty,
+        },
+      ];
+    });
 
     /**
      * Server-side strict-available validation. The picker enforces this
@@ -4990,7 +5333,20 @@ export async function updateKitAssets({
       tx: db,
     });
 
-    for (const asset of allAssetsForKit) {
+    /**
+     * Whose submitted quantity is worth measuring against the pool: only the
+     * rows this call will actually write.
+     *
+     * Under `addOnly` an existing membership's submitted quantity is ignored, so
+     * measuring it can only raise a 400 about a row that is not changing — and
+     * that 400 refuses the genuinely new assets in the same request. Derived
+     * from `newlyAddedAssets`, which is computed from the membership read inside
+     * this function, so an asset added concurrently counts as existing here
+     * even though the caller believed it was new.
+     */
+    const assetsToMeasure = addOnly ? newlyAddedAssets : allAssetsForKit;
+
+    for (const asset of assetsToMeasure) {
       if (asset.type !== AssetType.QUANTITY_TRACKED) continue;
       const submitted = assetQuantities[asset.id];
       if (submitted == null) continue;
@@ -5066,6 +5422,7 @@ export async function updateKitAssets({
         additionalData: { userId, kitId },
         label: "Kit",
         shouldBeCaptured: false,
+        status: 400,
       });
     }
 

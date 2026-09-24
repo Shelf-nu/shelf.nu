@@ -1,8 +1,12 @@
 import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { ShelfError } from "./error";
-import { ROLE_PRECEDENCE } from "./role-precedence";
-import { resolveUserDisplayName, type UserNameFields } from "./user";
+import { resolveMostPrivilegedRole } from "./role-precedence";
+import { resolveBookingHolderName, type UserNameFields } from "./user";
+
+// The resolver lives in role-precedence.ts so client gates can share it; server
+// callers keep importing it from here.
+export { resolveMostPrivilegedRole };
 
 /**
  * The minimal booking projection needed to decide whether a requester is the
@@ -148,29 +152,6 @@ interface ValidateBookingOwnershipParams {
  *
  * @throws {ShelfError} 403 if user is not authorized
  */
-/**
- * Picks the most privileged role from a membership's role array.
- *
- * `roles` is an array and the codebase conventionally reads `roles[0]`, which
- * is fine for display and wrong for authorization: a membership ordered
- * `[SELF_SERVICE, ADMIN]` resolves to SELF_SERVICE, so an actual admin is
- * treated as restricted and refused. {@link validateBookingOwnership} only
- * distinguishes privileged (ADMIN/OWNER, allowed through) from restricted
- * (SELF_SERVICE/BASE, owner-only), so it needs the privileged answer.
- *
- * @param roles - Every role on the membership
- * @returns OWNER or ADMIN when present, otherwise `roles[0]`, defaulting to BASE
- */
-export function resolveMostPrivilegedRole(
-  roles: OrganizationRoles[]
-): OrganizationRoles {
-  return (
-    ROLE_PRECEDENCE.find((candidate) => roles.includes(candidate)) ??
-    roles[0] ??
-    OrganizationRoles.BASE
-  );
-}
-
 export function validateBookingOwnership({
   booking,
   userId,
@@ -341,13 +322,12 @@ export function canSeeBookingCustodian({
  * for "this booking has no custodian", and {@link WITHHELD_CUSTODIAN_NAME} for
  * "it has one you may not see".
  *
- * The team-member link wins when both are set, matching the web bookings list
- * (`list-bookings-content.tsx`). `TeamMember.name` tracks `User.displayName`,
- * so the two normally agree — but when they do not, web's answer is the one
- * every surface must give.
+ * The name itself comes from {@link resolveBookingHolderName}, which the web
+ * asset and kit custody cards also use, so no surface names a holder
+ * differently.
  *
- * Shared by the mobile list, calendar and dashboard so the three lenses on the
- * same rows cannot disagree about who holds a booking.
+ * Shared by the mobile list, calendar, dashboard and asset detail so every
+ * lens on the same booking agrees about who holds it.
  *
  * @param params.canSeeAllCustody - Whether custody may be shown to this viewer.
  * @param params.booking - The booking's two custody links.
@@ -372,9 +352,5 @@ export function resolveBookingCustodianName({
     return WITHHELD_CUSTODIAN_NAME;
   }
 
-  return (
-    booking.custodianTeamMember?.name ||
-    resolveUserDisplayName(booking.custodianUser) ||
-    null
-  );
+  return resolveBookingHolderName(booking);
 }
