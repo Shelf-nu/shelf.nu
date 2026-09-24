@@ -17,6 +17,14 @@ describe("getUIFieldType", () => {
       "Date"
     );
   });
+
+  it("filters quantity as a number and unit of measure as single-line text", () => {
+    const column = (name: string) =>
+      ({ name, visible: true, position: 0 }) as unknown as Column;
+
+    expect(getUIFieldType({ column: column("quantity") })).toBe("number");
+    expect(getUIFieldType({ column: column("unitOfMeasure") })).toBe("string");
+  });
 });
 
 /**

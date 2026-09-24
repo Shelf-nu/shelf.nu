@@ -98,6 +98,7 @@ export const fixedFields = [
   "upcomingReminder",
   "actions",
   "quantity",
+  "unitOfMeasure",
   "minQuantity",
   "type",
   "upcomingBookings",
@@ -162,6 +163,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   barcode_ExternalQR: "External QR",
   barcode_EAN13: "EAN-13",
   quantity: "Quantity",
+  unitOfMeasure: "Unit of measure",
   minQuantity: "Min quantity",
   type: "Tracking method",
   upcomingBookings: "Upcoming Bookings",
@@ -187,10 +189,49 @@ export const defaultFields: Column[] = [
   { name: "actions", visible: true, position: 15 },
   { name: "upcomingBookings", visible: true, position: 16 },
   { name: "quantity", visible: false, position: 17 },
-  { name: "type", visible: false, position: 18 },
-  { name: "assetModel", visible: false, position: 19 },
-  { name: "minQuantity", visible: false, position: 20 },
+  { name: "unitOfMeasure", visible: false, position: 18 },
+  { name: "type", visible: false, position: 19 },
+  { name: "assetModel", visible: false, position: 20 },
+  { name: "minQuantity", visible: false, position: 21 },
 ];
+
+/**
+ * Adds default columns that a saved column set lacks, each at its default
+ * position.
+ *
+ * Settings rows are per user and outlive the default list, so a fixed column
+ * added to `defaultFields` is missing from every row saved before it existed.
+ * Each missing column goes in at the position a fresh row would give it, and
+ * every saved column at or after that position moves down by one, so the
+ * user's own order is kept and the new column sits next to its neighbours in
+ * the default layout (e.g. `unitOfMeasure` right after `quantity`).
+ *
+ * @param columns - The row's saved columns; not modified
+ * @param missing - Names of the default columns to add
+ * @returns A new column list with the missing default columns inserted
+ */
+export function insertMissingDefaultColumns(
+  columns: Column[],
+  missing: ColumnLabelKey[]
+): Column[] {
+  // Ascending order, so an earlier insert never pushes a later one off its
+  // default position.
+  const toInsert = defaultFields
+    .filter((field) => missing.includes(field.name))
+    .sort((a, b) => a.position - b.position);
+
+  return toInsert.reduce<Column[]>(
+    (acc, field) => [
+      ...acc.map((col) =>
+        col.position >= field.position
+          ? { ...col, position: col.position + 1 }
+          : col
+      ),
+      { ...field },
+    ],
+    [...columns]
+  );
+}
 
 // Generate barcode columns when barcodes are enabled
 export const generateBarcodeColumns = (): Column[] =>

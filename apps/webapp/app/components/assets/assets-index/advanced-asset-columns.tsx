@@ -340,12 +340,25 @@ export function AdvancedIndexColumn({
       );
 
     case "quantity":
+      // Bare number, so the column reads and sorts as a number. The unit has
+      // its own "unitOfMeasure" column below.
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
           {isQuantityTracked(item) && item.quantity != null ? (
-            `${item.quantity}${
-              item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
-            }`
+            item.quantity
+          ) : (
+            <EmptyTableValue />
+          )}
+        </Td>
+      );
+
+    case "unitOfMeasure":
+      // Free-text unit ("pcs", "kg") of a QUANTITY_TRACKED asset. Individual
+      // assets have no unit and show the empty-value dash.
+      return (
+        <Td className="w-full max-w-none whitespace-nowrap">
+          {isQuantityTracked(item) && item.unitOfMeasure ? (
+            item.unitOfMeasure
           ) : (
             <EmptyTableValue />
           )}
@@ -353,7 +366,7 @@ export function AdvancedIndexColumn({
       );
 
     case "minQuantity":
-      // Low-stock reorder threshold — only meaningful for QUANTITY_TRACKED
+      // Low-stock reorder threshold, only meaningful for QUANTITY_TRACKED
       // assets. Plain number, mirroring the "quantity" cell above.
       return (
         <Td className="w-full max-w-none whitespace-nowrap">

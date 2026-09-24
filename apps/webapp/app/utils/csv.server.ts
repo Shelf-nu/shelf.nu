@@ -474,33 +474,90 @@ export async function exportAssetsFromIndexToCsv({
     timeZone: prefs.timeZone,
   });
 
-  const baseColumns = settings.columns as Column[];
-  // "All columns" for the human export = every configured column, visible or
-  // not (actions is still dropped downstream in buildCsvExportDataFromAssets).
-  const scopedColumns =
-    columnScope === "all"
-      ? baseColumns.map((c) => ({ ...c, visible: true }))
-      : baseColumns;
-
   const csvData = buildCsvExportDataFromAssets({
     assets,
-    columns: [
-      { name: "name", visible: true, position: 0 },
-      ...scopedColumns,
-      // Synthetic export-only column: emits `valuation × quantity` so QT
-      // inventories report total worth without overwriting the per-unit
-      // `valuation` column (kept lossless for CSV → re-import round-trip).
-      // Always appended at the end so existing user column ordering is
-      // unaffected. Not in `defaultFields` / column-picker schema, so
-      // users can't toggle or reorder it via settings.
-      { name: "total_value", visible: true, position: Number.MAX_SAFE_INTEGER },
-    ],
+    columns: buildIndexExportColumns({
+      settingsColumns: settings.columns as Column[],
+      columnScope,
+    }),
     currentOrganization,
     prefs,
   });
 
   // Join rows with CRLF as per CSV spec
   return csvData.join("\r\n");
+}
+
+/**
+ * Assembles the column list for the standard (human/analytics) index export
+ * from a user's saved asset index columns.
+ *
+ * On top of the saved columns it adds:
+ * - `name` first, always exported.
+ * - `unitOfMeasure` right after `quantity` when Quantity is exported and Unit
+ *   of measure is not (see {@link withUnitOfMeasureBesideQuantity}).
+ * - the synthetic `total_value` column last.
+ *
+ * @param args.settingsColumns - The user's saved asset index columns
+ * @param args.columnScope - `"visible"` keeps the saved visibility; `"all"`
+ *   exports every configured column regardless of visibility
+ * @returns Columns for {@link buildCsvExportDataFromAssets}
+ */
+export function buildIndexExportColumns({
+  settingsColumns,
+  columnScope,
+}: {
+  settingsColumns: Column[];
+  columnScope: ColumnScope;
+}): Column[] {
+  // "All columns" for the human export = every configured column, visible or
+  // not (actions is still dropped downstream in buildCsvExportDataFromAssets).
+  const scopedColumns =
+    columnScope === "all"
+      ? settingsColumns.map((c) => ({ ...c, visible: true }))
+      : settingsColumns;
+
+  return [
+    { name: "name", visible: true, position: 0 },
+    ...withUnitOfMeasureBesideQuantity(scopedColumns),
+    // Synthetic export-only column: emits `valuation × quantity` so QT
+    // inventories report total worth without overwriting the per-unit
+    // `valuation` column (kept lossless for CSV → re-import round-trip).
+    // Always appended at the end so existing user column ordering is
+    // unaffected. Not in `defaultFields` / column-picker schema, so
+    // users can't toggle or reorder it via settings.
+    { name: "total_value", visible: true, position: Number.MAX_SAFE_INTEGER },
+  ];
+}
+
+/**
+ * Exports the unit of measure wherever the quantity is exported.
+ *
+ * The Quantity column holds the bare number and the unit has its own column,
+ * which a user can leave hidden in the index. When Quantity is exported and
+ * Unit of measure is not, this adds Unit of measure directly after Quantity,
+ * moving the columns after it down by one. When both are exported, or
+ * Quantity is not, the columns are returned as they are.
+ *
+ * @param columns - Export columns with their visibility; not modified
+ * @returns The columns, with Unit of measure visible next to Quantity when needed
+ */
+function withUnitOfMeasureBesideQuantity(columns: Column[]): Column[] {
+  const quantity = columns.find((col) => col.name === "quantity");
+  const unitOfMeasure = columns.find((col) => col.name === "unitOfMeasure");
+  if (!quantity?.visible || unitOfMeasure?.visible) return columns;
+
+  const unitPosition = quantity.position + 1;
+  return [
+    ...columns
+      .filter((col) => col.name !== "unitOfMeasure")
+      .map((col) =>
+        col.position >= unitPosition
+          ? { ...col, position: col.position + 1 }
+          : col
+      ),
+    { name: "unitOfMeasure", visible: true, position: unitPosition },
+  ];
 }
 
 /**
@@ -735,15 +792,21 @@ export const buildCsvExportDataFromAssets = ({
           }
 
           case "quantity":
+            // Bare number, so the column sums in a spreadsheet. The unit is
+            // exported in its own "unitOfMeasure" column.
             value =
               isQuantityTracked(asset) && asset.quantity != null
-                ? `${asset.quantity}${
-                    asset.unitOfMeasure ? ` ${asset.unitOfMeasure}` : ""
-                  }`
+                ? `${asset.quantity}`
+                : "";
+            break;
+          case "unitOfMeasure":
+            value =
+              isQuantityTracked(asset) && asset.unitOfMeasure
+                ? asset.unitOfMeasure
                 : "";
             break;
           case "minQuantity":
-            // Low-stock reorder threshold — plain number, mirrors "quantity" above.
+            // Low-stock reorder threshold: plain number, mirrors "quantity" above.
             value =
               isQuantityTracked(asset) && asset.minQuantity != null
                 ? `${asset.minQuantity}`
