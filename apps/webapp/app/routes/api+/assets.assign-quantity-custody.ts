@@ -107,6 +107,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       quantity,
       userId,
       organizationId,
+      role,
       note,
     });
 
