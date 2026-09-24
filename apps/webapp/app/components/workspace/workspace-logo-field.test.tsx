@@ -40,14 +40,22 @@ function renderField(props: Parameters<typeof WorkspaceLogoField>[0] = {}) {
   );
 }
 
+/** The logo picture shown next to the input (not the personal-workspace avatar). */
 function logo() {
   return screen.getByRole("img", { name: "Workspace logo" });
 }
 
+/** The "Main image" file input the workspace actions read as `image`. */
 function fileInput() {
   return screen.getByLabelText("Main image") as HTMLInputElement;
 }
 
+/**
+ * Builds a PNG `File` of a given byte size.
+ *
+ * @param name - File name (keep it clean so the validator does not rename it)
+ * @param size - Size in bytes; above the 4 MB limit the validator rejects it
+ */
 function pngFile(name: string, size = 1024) {
   return new File([new Uint8Array(size)], name, { type: "image/png" });
 }

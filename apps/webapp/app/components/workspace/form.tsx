@@ -39,6 +39,12 @@ interface Props {
   children?: string | ReactNode;
 }
 
+/**
+ * Form for creating a workspace: name, logo and currency.
+ *
+ * @param props - Default values for the fields; `children` is only used to
+ * decide whether the currency row keeps its bottom border.
+ */
 export const WorkspaceForm = ({ name, currency, children }: Props) => {
   const actionData = useActionData<{ error?: any }>();
   const [searchParams] = useSearchParams();

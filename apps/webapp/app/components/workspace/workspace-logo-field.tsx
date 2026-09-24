@@ -66,6 +66,12 @@ export function WorkspaceLogoField({
     return () => URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
+  /**
+   * Validates the picked file, then previews it, or falls back to the
+   * current logo when the input ends up empty (a rejected file is cleared).
+   *
+   * @param event - Change event of the file input
+   */
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     validateFile(event);
     // Read the file after validation: a rejected file has been cleared from
