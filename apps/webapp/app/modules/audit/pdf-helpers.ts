@@ -12,7 +12,7 @@ import type {
 import { db } from "~/database/db.server";
 import type { ResolvedDisplayCode } from "~/modules/barcode/display";
 import { resolveDisplayCode } from "~/modules/barcode/display";
-import { ShelfError } from "~/utils/error";
+import { rethrowIfClientError, ShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
 import { getPrimaryLocation } from "../asset/utils";
 import { getQrCodeMaps } from "../qr/service.server";
@@ -182,6 +182,7 @@ export async function fetchAllAuditPdfRelatedData(
         message: "Audit session not found",
         status: 404,
         label: "Audit",
+        shouldBeCaptured: false,
       });
     }
 
@@ -419,6 +420,9 @@ export async function fetchAllAuditPdfRelatedData(
       activityNotes,
     };
   } catch (cause) {
+    // A refusal raised above — not found, or not assigned — already carries
+    // the status the caller should see. Only a genuine fault becomes a 500.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Error fetching audit data for PDF",

@@ -1,3 +1,14 @@
+/**
+ * User Service
+ *
+ * Server-side user lifecycle: creating users (email, SSO, invite acceptance),
+ * attaching them to organizations, reading and updating profiles, and
+ * removing or soft-deleting accounts.
+ *
+ * @see {@link file://./fields.ts}
+ * @see {@link file://./utils.server.ts}
+ * @see {@link file://./../invite/service.server.ts}
+ */
 import type {
   Organization,
   TierId,
@@ -54,6 +65,10 @@ import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
+import {
+  caseInsensitiveEmailFilter,
+  normalizeInviteEmail,
+} from "../invite/helpers";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { USER_CONTACT_SELECT } from "../user-contact/constants";
 import {
@@ -266,6 +281,27 @@ async function createUserOrgAssociation(
   }
 }
 
+/**
+ * Gives an invitee access to an organization when they accept an invite.
+ *
+ * When a user with the email exists (matched without regard to letter case),
+ * the organization is attached to that user with the invite's roles. When no
+ * user exists, a Supabase auth account is created (or an existing auth
+ * account without a user row is confirmed) and a new user is created in the
+ * organization.
+ *
+ * @param args.email - The invitee email, normalised by the caller
+ * @param args.organizationId - The organization the invite is for
+ * @param args.roles - The roles the invite grants
+ * @param args.password - The password for a newly created auth account
+ * @param args.firstName - First name for a newly created user
+ * @param args.lastName - Last name for a newly created user
+ * @param args.createdWithInvite - Marks a newly created user as invited
+ * @param args.formatPrefs - Browser-detected date/time preferences for a new user
+ * @returns The existing or newly created user
+ * @throws {ShelfError} When no auth account can be created or confirmed, or
+ *   when the user or the organization association cannot be written
+ */
 export async function createUserOrAttachOrg({
   email,
   organizationId,
@@ -285,10 +321,23 @@ export async function createUserOrAttachOrg({
     formatPrefs?: DetectedFormatPrefs;
   }) {
   try {
-    const shelfUser = await db.user.findFirst({
-      where: { email },
+    /**
+     * `User.email` can contain capitals, so the existing account is matched
+     * without regard to letter case. When rows differ only by case, the
+     * lowercase row wins, because that is the form sign-in uses; where no row
+     * carries that form, the oldest one does. Order the query: without it the
+     * fallback returns whichever row Postgres happened to read first, so the
+     * same invite can attach to a different account on a later call.
+     */
+    const matchingUsers = await db.user.findMany({
+      where: { email: caseInsensitiveEmailFilter(email) },
       select: USER_WITH_SSO_DETAILS_SELECT,
+      orderBy: { createdAt: "asc" },
     });
+    const shelfUser =
+      matchingUsers.find(
+        (user) => user.email === normalizeInviteEmail(email)
+      ) ?? matchingUsers[0];
 
     // If no Prisma User exists, create one.
     // First try creating a fresh auth account. If that fails (email already
@@ -488,10 +537,44 @@ interface UserOrgTransition {
 }
 
 /**
- * Handles the transition of user access when org switches from invite-based to SCIM-based
- * @returns Object containing transition details for logging/notification
+ * Reconciles one workspace's membership against the SAML group claims presented
+ * at login.
+ *
+ * The only caller is {@link updateUserFromSSO}'s group-mapping loop. This is
+ * the SAML group-claim path, not SCIM, which has its own lifecycle in
+ * `~/modules/scim/service.server`. Runs on EVERY SSO login, once per workspace
+ * on the user's email domain.
+ *
+ * Revocation delegates to {@link revokeAccessToOrganization}, the same
+ * function behind the admin "revoke access" UI and `revokeScimMembership`, so
+ * it:
+ *   1. disconnects every `TeamMember` linked to the `User` in the workspace
+ *      (rows survive, so custody and booking history keep a name),
+ *   2. deletes the `UserOrganization`,
+ *   3. clears `User.lastSelectedOrganizationId` when it pointed at this org.
+ *
+ * Step 1 is the load-bearing one. A `TeamMember` with no linked user is how the
+ * rest of the codebase recognises revoked access: the booking notification
+ * resolver and the `usersOnly` custodian pickers read straight through
+ * `TeamMember.user` with no membership check, so a linked row keeps routing
+ * this workspace's booking emails and recipient pickers to the user.
+ *
+ * The workspace OWNER is never revoked here (see the branch below).
+ *
+ * ERROR SEMANTICS: deliberately fail closed. Any other failure aborts the
+ * whole login rather than being logged and skipped per workspace: swallowing it
+ * would leave the user signed in holding access this call exists to remove.
+ * `revokeAccessToOrganization` performs the disconnect and the membership delete
+ * in one transaction, so it cannot half-apply, and its
+ * `lastSelectedOrganizationId` cleanup is best-effort internally.
+ *
+ * @param userId - The Shelf user signing in
+ * @param organization - The workspace being reconciled
+ * @param currentRoles - Roles the user holds in it right now
+ * @param desiredRole - Role the group claims map to, or `null` to revoke
+ * @returns Transition details for logging/notification
  */
-async function handleSCIMTransition(
+async function reconcileSsoGroupMembership(
   userId: string,
   organization: Organization,
   currentRoles: OrganizationRoles[],
@@ -502,30 +585,23 @@ async function handleSCIMTransition(
     organizationId: organization.id,
     previousRoles: currentRoles,
     newRole: desiredRole,
-    transitionType:
-      currentRoles[0] !== desiredRole ? "ROLE_CHANGE" : "ACCESS_REVOKED",
+    transitionType: desiredRole ? "ROLE_CHANGE" : "ACCESS_REVOKED",
   };
 
   try {
     if (!desiredRole) {
-      // User has no valid SCIM groups, revoke access
-      const deleted = await deleteMembershipUnlessOwner({
-        userId,
-        organizationId: organization.id,
-      });
-
-      if (deleted === 0) {
-        /**
-         * The workspace owner lost their SCIM groups. Removing them would
-         * strand the workspace with no owner and no way back, and this runs
-         * during SSO login — throwing would lock the owner out of their own
-         * workspace on the way in. Keep the access and make the divergence
-         * loud instead; an operator must transfer ownership before the IdP
-         * can deprovision them.
-         */
+      /**
+       * The workspace owner lost their group claims. Removing them would
+       * strand the workspace with no owner and no way back, and this runs
+       * during SSO login, so throwing would lock the owner out of their own
+       * workspace on the way in. Keep the access and make the divergence loud
+       * instead; an operator must transfer ownership before the IdP can
+       * deprovision them.
+       */
+      const keepOwnerAccess = () => {
         Logger.warn({
           message:
-            "SCIM would have revoked the workspace owner's access; kept it and skipped the revocation",
+            "SSO group claims would have revoked the workspace owner's access; kept it and skipped the revocation",
           additionalData: { userId, organizationId: organization.id },
         });
 
@@ -533,12 +609,31 @@ async function handleSCIMTransition(
         transition.newRole = currentRoles[0];
 
         return transition;
+      };
+
+      if (currentRoles.includes(OrganizationRoles.OWNER)) {
+        return keepOwnerAccess();
+      }
+
+      try {
+        await revokeAccessToOrganization({
+          userId,
+          organizationId: organization.id,
+        });
+      } catch (cause) {
+        // The only 400 `revokeAccessToOrganization` raises is its owner guard:
+        // ownership was transferred to this user after `currentRoles` was read.
+        if (isLikeShelfError(cause) && cause.status === 400) {
+          return keepOwnerAccess();
+        }
+
+        throw cause;
       }
 
       transition.transitionType = "ACCESS_REVOKED";
 
       Logger.info({
-        message: "Revoked user access due to SCIM group changes",
+        message: "Revoked user access due to SSO group claim changes",
         additionalData: {
           userId,
           organizationId: organization.id,
@@ -564,7 +659,7 @@ async function handleSCIMTransition(
       transition.transitionType = "ROLE_CHANGE";
 
       Logger.info({
-        message: "Updated user role based on SCIM groups",
+        message: "Updated user role based on SSO group claims",
         additionalData: {
           userId,
           organizationId: organization.id,
@@ -578,7 +673,7 @@ async function handleSCIMTransition(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to handle SCIM transition",
+      message: "Failed to reconcile SSO group membership",
       additionalData: {
         userId,
         organizationId: organization.id,
@@ -702,7 +797,7 @@ export async function updateUserFromSSO(
         );
 
         if (existingOrgAccess) {
-          const transition = await handleSCIMTransition(
+          const transition = await reconcileSsoGroupMembership(
             userId,
             org,
             existingOrgAccess.roles,
@@ -710,10 +805,14 @@ export async function updateUserFromSSO(
           );
           transitions.push(transition);
 
-          // Repair an account whose team-member record never got written —
-          // only while a role still maps, since a revoked transition is
-          // removing this user's access rather than restoring it.
-          if (desiredRole) {
+          // Access survives unless the transition revoked it. A workspace
+          // owner keeps access even when no group claim maps to a role.
+          const keptAccess = transition.transitionType !== "ACCESS_REVOKED";
+
+          // Repair an account whose team-member record never got written.
+          // Only while access is kept: a revoked transition is removing this
+          // user's access rather than restoring it.
+          if (keptAccess) {
             await db.$transaction(async (tx) => {
               // `TeamMember` has no uniqueness on (userId, organizationId), so
               // two logins arriving together would both find nothing and both
@@ -743,10 +842,8 @@ export async function updateUserFromSSO(
             });
           }
 
-          // The user keeps access only when a role still maps; a null
-          // desiredRole makes handleSCIMTransition revoke it, so that org must
-          // not become the post-login landing org.
-          if (desiredRole) {
+          // A revoked org must not become the post-login landing org.
+          if (keptAccess) {
             firstMatchedOrg ??= org;
           }
         } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
@@ -968,28 +1065,24 @@ export async function createUser(
       cause instanceof PrismaClientKnownRequestError && cause.code === "P2002";
 
     /**
-     * Idempotency on `id` (SHELF-WEBAPP-1EA): a P2002 unique-constraint
-     * violation raised on the primary key means a `User` row already exists for
-     * this Supabase auth id — e.g. a re-signup, or a prior partial signup whose
-     * stored email differs from the OTP email, so the route's email-keyed race
-     * guard missed it. The `user.create` and ALL its side-effects (personal
-     * org, org association, team member, asset index settings) run inside one
-     * `$transaction`, so the P2002 rolled the whole thing back. Return the
-     * pre-existing row (using the exact same select shape the create returns)
-     * instead of failing the signup.
+     * Idempotency on `id`: a P2002 unique-constraint violation on the primary
+     * key means a `User` row already exists for this Supabase auth id, for
+     * example on a re-signup, or when the stored email differs from the
+     * sign-in email so the route's email-keyed guard does not see the row.
+     * The `user.create` and all its side-effects (personal org, org
+     * association, team member, asset index settings) run inside one
+     * `$transaction`, so the violation rolls all of them back. The existing
+     * row is returned, with the same select shape the create returns.
      *
-     * ONE piece of state still needs reconciling: for invite/SSO callers
-     * (`organizationId` present), the rolled-back transaction never created the
-     * requested org association, so a concurrent P2002 race would otherwise
-     * return the existing user un-attached to the org they were invited to. We
-     * re-attach that association idempotently below (only when they aren't
-     * already a member). The personal-org / OTP self-signup case has no
-     * `organizationId`, so there is nothing to reconcile there.
+     * For invite and SSO callers (`organizationId` present), the rolled-back
+     * transaction did not create the requested org association, so it is
+     * restored below. The personal-org / OTP self-signup case has no
+     * `organizationId` and needs nothing else.
      *
-     * We deliberately do NOT re-fire the `signup_completed` analytics event on
-     * this path: no new account was created. If the lookup unexpectedly finds
-     * no row (P2002 on some OTHER unique field, e.g. `email`, with no row for
-     * this `id`), that is a genuine conflict — fall through and throw.
+     * The `signup_completed` analytics event does not fire on this path,
+     * because no account was created. When the lookup finds no row (a P2002 on
+     * another unique field, such as `email`), it is a real conflict and the
+     * error is thrown.
      */
     if (isUniqueViolation) {
       const existingUser = await db.user.findUnique({
@@ -1005,12 +1098,10 @@ export async function createUser(
       });
 
       if (existingUser) {
-        // The rolled-back transaction never created the org association. For
-        // invite/SSO callers (organizationId present), a concurrent P2002 race
-        // would otherwise leave the existing user un-attached to the requested
-        // org. Reconcile idempotently — only attach when not already a member
-        // (the membership check avoids re-pushing roles via the upsert's
-        // `push` update branch). SHELF-WEBAPP-1EA follow-up.
+        // Restore the org association the rolled-back transaction did not
+        // write. Attach only when the user is not a member yet: the upsert's
+        // update branch pushes roles, so running it for a member would add
+        // the roles a second time.
         if (
           organizationId &&
           !existingUser.organizations.some((org) => org.id === organizationId)
@@ -1307,6 +1398,10 @@ async function getUsers({
                   id: true,
                   type: true,
                   userId: true,
+                  // The workspace's billing party. An invited member sits on
+                  // the free tier whatever their team pays for, so the admin
+                  // list's account status reads the owner's tier, not theirs.
+                  owner: { select: { tierId: true } },
                 },
               },
             },
@@ -1651,8 +1746,12 @@ export async function revokeAccessToOrganization({
      * 1. Remove relation between user and team member
      * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
      */
-    const teamMember = await db.teamMember.findFirst({
+    // Disconnect EVERY linked team member, not just the first. The schema does
+    // not enforce one per (user, org), and any row left linked keeps routing
+    // booking emails and recipient pickers to a user who no longer has access.
+    const teamMembers = await db.teamMember.findMany({
       where: { userId, organizationId },
+      select: { id: true },
     });
 
     const result = await db.$transaction(async (tx) => {
@@ -1690,11 +1789,9 @@ export async function revokeAccessToOrganization({
       return tx.user.update({
         where: { id: userId },
         data: {
-          ...(teamMember?.id && {
+          ...(teamMembers.length > 0 && {
             teamMembers: {
-              disconnect: {
-                id: teamMember.id,
-              },
+              disconnect: teamMembers.map(({ id }) => ({ id })),
             },
           }),
         },

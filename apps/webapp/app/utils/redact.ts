@@ -9,8 +9,8 @@
  * That matters most for `parseData`, which puts the ENTIRE submitted payload
  * into `additionalData` on a validation failure. On the password-reset form
  * that payload is `{ email, otp, password, confirmPassword }`, so the most
- * ordinary user mistake — mistyping the confirmation — logged a valid OTP and
- * the user's chosen password. No attacker required.
+ * ordinary user mistake — mistyping the confirmation — sends a valid OTP and
+ * the chosen password toward the log. No attacker is needed to reach this.
  *
  * Redaction is by KEY NAME rather than by value, because the sensitive thing is
  * identified by what the field is for, not by what it looks like.
@@ -26,9 +26,14 @@
  * `snake_case`, `kebab-case` or dotted prefix/suffix around the sensitive word
  * — so `newPassword`, `password_confirmation` and `x-api-key` all match, while
  * a merely adjacent field like `passwordUpdatedAt` does not need to.
+ *
+ * The preceding letter or digit is matched, not looked behind: this module
+ * ships in the client bundle, and a lookbehind throws on Safari below 16.4.
+ * Only ever call `.test()` on it, where consuming that character cannot change
+ * the answer.
  */
 const SENSITIVE_KEY =
-  /(?:^|[._-]|(?<=[a-z0-9]))(otp|passwd|password|pwd|secret|token|api[._-]?key|credential|authorization|cookie|session[._-]?id|private[._-]?key)(?:$|[._-]|(?=[A-Z]))/i;
+  /(?:^|[._-]|[a-z0-9])(otp|passwd|password|pwd|secret|token|api[._-]?key|credential|authorization|cookie|session[._-]?id|private[._-]?key)(?:$|[._-]|(?=[A-Z]))/i;
 
 /** Replacement written in place of a redacted value. */
 export const REDACTED = "[REDACTED]";
@@ -73,10 +78,10 @@ const SENSITIVE_URL_PARAM =
  * it can be inside the value, where key-based redaction cannot see it because
  * the key is just `url`.
  *
- * This is not hypothetical: asset CSV import accepts arbitrary image URLs and
- * `ssrf.server.ts` logs the URL on every failure path, so a row pointing at
- * `https://user:pass@host/img.jpg` or `https://host/img.jpg?token=...` wrote a
- * live credential to the platform logs (CWE-532).
+ * Asset CSV import accepts arbitrary image URLs and `ssrf.server.ts` logs the
+ * URL on every failure path, so a row pointing at
+ * `https://user:pass@host/img.jpg` or `https://host/img.jpg?token=...` carries a
+ * live credential into the log line unless it is stripped here (CWE-532).
  *
  * Both halves matter: basic-auth userinfo and signed-URL query parameters.
  *

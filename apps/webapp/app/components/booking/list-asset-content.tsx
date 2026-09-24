@@ -28,6 +28,7 @@ import {
   InsufficientStockBadge,
   PendingReturnBadge,
 } from "./availability-label";
+import { FulfilsModelBadge } from "./fulfils-model-badge";
 import { RemovedFromKitBadge } from "./removed-from-kit-badge";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
@@ -240,14 +241,18 @@ export default function ListAssetContent({
    *    or (partially) fulfilled (`contextStatus`, computed above) — at
    *    that point the stock signal has nothing left to warn about for it.
    *
-   * Each row evaluates independently against the SAME per-asset workspace
-   * headroom, so a multi-row asset can have several rows each light up.
+   * Each standalone row evaluates independently against the SAME per-asset
+   * workspace headroom, so a multi-row asset can have several rows each
+   * light up. A kit-driven row (`item.isKitDriven`) gets neither badge: its
+   * units are bounded by the kit's allocation, which that headroom already
+   * excludes.
    */
   const stockBadgeVariant = resolveQtyStockBadgeVariant({
     rowQty: qtyBooked,
     availability,
     contextStatus,
     bookingStatus: booking.status,
+    isKitDriven: Boolean(item.isKitDriven),
   });
 
   // Per-asset partial check-OUT record (if any). Presence of a record drives
@@ -356,6 +361,14 @@ export default function ListAssetContent({
                     once the booking is finished — exactly where these rows are
                     most common. Flag is resolved in the overview loader. */}
                 {item.isRemovedFromKit ? <RemovedFromKitBadge /> : null}
+                {/* Which reserved model this row answered, when it answered
+                    one. Without it the reservations section counts down with
+                    nothing on the row to connect it to — most confusing when
+                    the unit arrived inside a kit the operator added. Name is
+                    resolved in the overview loader. */}
+                {item.fulfilsModelName ? (
+                  <FulfilsModelBadge modelName={item.fulfilsModelName} />
+                ) : null}
               </div>
             </div>
           </div>

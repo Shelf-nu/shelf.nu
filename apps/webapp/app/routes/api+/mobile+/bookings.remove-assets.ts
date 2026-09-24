@@ -43,7 +43,8 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * booking; BASE stops at DRAFT on both. Matches the web booking-overview
  * remove actions.
  *
- * Body: { bookingId: string, assetIds?: string[], kitIds?: string[] }
+ * Body: { bookingId: string, assetIds?: string[], kitIds?: string[],
+ *   standaloneAssetIds?: string[] }
  * Query: ?orgId=...
  *
  * @see {@link file://./bookings.add-scanned-assets.ts} the add counterpart
@@ -55,6 +56,14 @@ const BodySchema = z
     bookingId: z.string().min(1),
     assetIds: z.array(z.string().min(1)).optional().default([]),
     kitIds: z.array(z.string().min(1)).optional().default([]),
+    /**
+     * The subset of `assetIds` the caller ticked as rows of their own.
+     *
+     * Left undefined (not defaulted) so an omitted field stays tellable from
+     * an explicitly empty one: absent means "infer the intent", empty means
+     * "none of these ids names a loose row".
+     */
+    standaloneAssetIds: z.array(z.string().min(1)).optional(),
   })
   .refine((body) => body.assetIds.length > 0 || body.kitIds.length > 0, {
     message: "Select at least one asset or kit to remove.",
@@ -79,11 +88,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, kitIds } = await parseMobileBody(
-      BodySchema,
-      request,
-      "Booking"
-    );
+    const {
+      bookingId,
+      assetIds,
+      kitIds,
+      standaloneAssetIds: requestedStandaloneAssetIds,
+    } = await parseMobileBody(BodySchema, request, "Booking");
 
     // Org-scoped booking lookup — a foreign-org booking id 404s here.
     const booking = await db.booking.findFirst({
@@ -212,25 +222,38 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     const attachedAssetIds = assets.map((asset) => asset.id);
 
-    // Whatever the caller put in `assetIds` is an explicit "remove this
-    // asset's own row" instruction — that is the endpoint's contract. So a
-    // directly-requested asset stays in the standalone bucket even when it
-    // ALSO belongs to a kit in `kitIds`: a qty-tracked asset can hold both a
-    // standalone row and a kit-driven row on one booking, and the caller
-    // asked for both. Narrowed to rows actually attached to this booking.
+    // The assets the caller named outright, narrowed to rows actually on this
+    // booking. `assertAssetsBelongToOrg` above has already org-scoped them.
     const requestedAssetIdSet = new Set(assetIds);
-    const standaloneAssetIds = attachedAssetIds.filter((assetId) =>
+    const requestedAttachedAssetIds = attachedAssetIds.filter((assetId) =>
       requestedAssetIdSet.has(assetId)
     );
 
+    // Which of those mean "delete this asset's kit-less row" rather than "every
+    // row it has here". A caller that can observe the distinction states it in
+    // `standaloneAssetIds`; one that cannot leaves the field off, and every id
+    // it named is read as that instruction — the endpoint's default contract.
+    //
+    // Either way a named id stays in this bucket even when it ALSO belongs to a
+    // kit in `kitIds`: a qty-tracked asset can hold both a standalone row and
+    // kit-driven rows on one booking, and a caller naming both wants both gone.
+    const explicitStandaloneIdSet = requestedStandaloneAssetIds
+      ? new Set(requestedStandaloneAssetIds)
+      : null;
+    const standaloneAssetIds = explicitStandaloneIdSet
+      ? requestedAttachedAssetIds.filter((assetId) =>
+          explicitStandaloneIdSet.has(assetId)
+        )
+      : requestedAttachedAssetIds;
+
     // `assets` drives the booking-note phrasing only ("… removed {kits} and
-    // {assets} from booking"), NOT what gets detached. Members pulled in by a
-    // kit are already covered by the kit half of the note, so listing them
-    // again duplicates them (and turns a kit-only removal into a note naming
-    // every member). Mirrors the web bulk-remove handler.
-    const standaloneAssetIdSet = new Set(standaloneAssetIds);
-    const standaloneAssets = assets.filter((asset) =>
-      standaloneAssetIdSet.has(asset.id)
+    // {assets} from booking"), NOT what gets detached — so it names everything
+    // the caller asked for, however the delete above is scoped. Members pulled
+    // in by a kit are already covered by the kit half of the note, so listing
+    // them again duplicates them (and turns a kit-only removal into a note
+    // naming every member). Mirrors the web bulk-remove handler.
+    const requestedAssets = assets.filter((asset) =>
+      requestedAssetIdSet.has(asset.id)
     );
 
     const updated = await removeAssets({
@@ -242,9 +265,29 @@ export async function action({ request }: ActionFunctionArgs) {
       lastName: user.lastName ?? "",
       displayName: user.displayName ?? null,
       userId: user.id,
-      assets: standaloneAssets,
+      assets: requestedAssets,
       organizationId,
     });
+
+    /**
+     * How many assets actually lost a row, which is not the same as how many
+     * the caller named: `standaloneAssetIds` can narrow the delete to a subset
+     * of them, and counting the request instead of the deletion reports
+     * removals that did not happen.
+     *
+     * The two cases mirror `removeAssets`'s own scoping. With kits named it
+     * deletes the named kits' membership rows plus the kit-less rows of the
+     * standalone bucket; with no kit named it deletes every row of every asset
+     * it was given. Change that scoping and this count has to move with it.
+     */
+    const kitAssetIdSet = new Set(kitAssetIds);
+    const removedAssetIds =
+      kitIds.length > 0
+        ? new Set([
+            ...attachedAssetIds.filter((assetId) => kitAssetIdSet.has(assetId)),
+            ...standaloneAssetIds,
+          ])
+        : new Set(attachedAssetIds);
 
     return data({
       booking: {
@@ -252,7 +295,7 @@ export async function action({ request }: ActionFunctionArgs) {
         name: updated.name,
         status: updated.status,
       },
-      removedCount: attachedAssetIds.length,
+      removedCount: removedAssetIds.size,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

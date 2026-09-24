@@ -285,12 +285,25 @@ function addCustomFieldOptionFilter(
         valuesArray = [];
       }
 
-      // Construct the PostgreSQL array literal
-      const arrayLiteral = `{${valuesArray
-        .map((val: string) => `"${val}"`)
-        .join(",")}}`;
+      // Nothing to match against. `Prisma.join` throws on an empty array, and
+      // a bare `ARRAY[]` has no inferable element type, so the empty case is
+      // spelled out: a typed empty array, which matches no row — the same
+      // answer the filter gave before.
+      if (valuesArray.length === 0) {
+        return Prisma.sql`${whereClause} AND ${subquery} = ANY(ARRAY[]::text[])`;
+      }
 
-      return Prisma.sql`${whereClause} AND ${subquery} = ANY(${arrayLiteral}::text[])`;
+      // Bind each value as its own parameter. An option's text is free-form —
+      // a quote, a backslash or a comma in it is ordinary — and assembling a
+      // `{"a","b"}` literal cannot carry those: the value's own quote closes
+      // the element and Postgres rejects the whole literal. Matches the
+      // `matchesAny` branch above.
+      const boundValues = Prisma.join(
+        valuesArray.map((val: string) => Prisma.sql`${val}`),
+        ", "
+      );
+
+      return Prisma.sql`${whereClause} AND ${subquery} = ANY(ARRAY[${boundValues}]::text[])`;
     }
     default:
       return whereClause;
@@ -2010,7 +2023,13 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             END,
             'assetKitId', atb."assetKitId",
             'quantity', atb."quantity",
-            'kitName', bk_kit.name
+            'kitName', bk_kit.name,
+            -- Slice markers the availability bar reads to end a returned
+            -- asset's bar at its check-in instead of the booking's end.
+            -- Unwrapped like from/to above: timestamptz serialises with its
+            -- offset and the hook parses it with new Date().
+            'checkedOutAt', atb."checkedOutAt",
+            'checkedInAt', atb."checkedInAt"
           )
         ),
         '[]'::jsonb

@@ -15,15 +15,19 @@ const {
 }));
 
 vi.mock("stripe", () => ({
-  default: vi.fn().mockImplementation(() => ({
-    customers: {
-      retrieve: mockCustomersRetrieve,
-    },
-    subscriptions: {
-      list: mockSubscriptionsList,
-      retrieve: mockSubscriptionsRetrieve,
-    },
-  })),
+  // A `function`, not an arrow: the module calls `new Stripe(...)`, and an
+  // arrow-function mock implementation cannot be called with `new`.
+  default: vi.fn().mockImplementation(function () {
+    return {
+      customers: {
+        retrieve: mockCustomersRetrieve,
+      },
+      subscriptions: {
+        list: mockSubscriptionsList,
+        retrieve: mockSubscriptionsRetrieve,
+      },
+    };
+  }),
 }));
 
 // why: Database module tries to connect to Prisma during import

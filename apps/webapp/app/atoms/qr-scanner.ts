@@ -734,6 +734,19 @@ export type FulfilSessionInfo = {
   bookingName: string;
   /** ISO string — drives `isBookingEarlyCheckout` in the submit path. */
   bookingFrom: string;
+  /**
+   * Booking status when the scanner opened. Only a RESERVED booking's first
+   * check-out can move its start date, so only then is the operator asked.
+   */
+  bookingStatus: BookingStatus;
+  /**
+   * Whether submit sends out only the scanned items. True under the explicit
+   * check-out requirement and on a booking that is no longer RESERVED;
+   * otherwise every item on the booking goes out. Decides what counts as
+   * "something to check out" and whether scanning an item already on the
+   * booking is a check-out of it.
+   */
+  checksOutScannedOnly: boolean;
   expectedModelRequests: ExpectedModelRequest[];
   /**
    * Concrete BookingAssets already on the booking before this

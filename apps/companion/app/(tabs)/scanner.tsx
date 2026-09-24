@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import {
-  useWindowDimensions,
   View,
   Text,
   TextInput,
@@ -13,6 +12,7 @@ import {
   Platform,
   Alert,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
@@ -27,6 +27,7 @@ import { LocationPicker } from "@/components/location-picker";
 import type { TeamMember, Location as LocationType } from "@/lib/api";
 import type {
   BookingAsset,
+  BookingDetailResponse,
   QrResolveFailureReason,
   ScannedKit,
 } from "@/lib/api/types";
@@ -46,7 +47,29 @@ import {
   type BatchScanAction,
   type BlockerGroup,
 } from "@/lib/batch-blockers";
-import { markBookingDirty } from "@/lib/booking-refresh";
+import { markBookingDirty, markBookingsListDirty } from "@/lib/booking-refresh";
+import {
+  countBookingBatch,
+  describeBatch,
+  describeBatchConfirm,
+  describeBatchResult,
+  describeSelection,
+  type SelectionCounts,
+} from "@/lib/booking-kit-rows";
+import {
+  checkoutBlocker,
+  eligibleKitMembers,
+} from "@/lib/booking-scan-eligibility";
+import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import {
+  canFulfilCheckOut,
+  describeFulfilCheckout,
+  hasAssetsLeftToCheckOut,
+  matchScansToReservations,
+  toOutstandingReservations,
+  unassignedCheckoutConfirm,
+  type OutstandingReservation,
+} from "@/lib/booking-reservation-checkout";
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
@@ -137,46 +160,6 @@ type ScannedItem = {
   hasAssetsInCustody?: boolean;
 };
 
-/**
- * Match scanned items against a booking's outstanding model reservations.
- *
- * Shared by the live progress readout and the pre-submit revalidation, so both
- * use identical rules. Each asset consumes one unit of an outstanding request
- * for its model; once a model's remaining count hits zero, further units of it
- * are unmatched — mirroring `materializeModelRequestForAsset`, which returns
- * `matched: false` once `fulfilledQuantity >= quantity`.
- */
-function matchScansToReservations(
-  items: ScannedItem[],
-  outstanding: { assetModelId: string; outstandingQuantity: number }[],
-  required: number
-) {
-  const remainingByModel = new Map(
-    outstanding.map((r) => [r.assetModelId, r.outstandingQuantity])
-  );
-  const unmatchedIds = new Set<string>();
-  let matched = 0;
-
-  for (const item of items) {
-    if (item.type !== "asset") continue;
-    const modelId = item.assetModelId ?? null;
-    const remaining = modelId ? remainingByModel.get(modelId) ?? 0 : 0;
-    if (remaining > 0) {
-      remainingByModel.set(modelId as string, remaining - 1);
-      matched += 1;
-    } else {
-      unmatchedIds.add(item.targetId);
-    }
-  }
-
-  return {
-    matched,
-    required,
-    unmatchedIds,
-    isComplete: required > 0 && matched >= required,
-  };
-}
-
 // ── Scanner Content ─────────────────────────────────────
 
 function ScannerContent() {
@@ -184,7 +167,10 @@ function ScannerContent() {
   const { bookingId, bookingName, bookingAction } = useLocalSearchParams<{
     bookingId?: string;
     bookingName?: string;
-    /** "checkin" (default) or "add" — which booking flow the scanner serves. */
+    /**
+     * Which booking flow the scanner serves: "checkin" (default), "add",
+     * "fulfil" or "checkout".
+     */
     bookingAction?: string;
   }>();
   const isFocused = useIsFocused();
@@ -220,6 +206,12 @@ function ScannerContent() {
   // all the add-mode scan capture / blockers / list rendering apply to both.
   const isBookingAddMode =
     isBookingMode && (bookingAction === "add" || bookingAction === "fulfil");
+  // Progressive check-out flow: the twin of check-in. Assets already on the
+  // booking are scanned one at a time to take them out, batched into the same
+  // list, and submitted to the partial-checkout endpoint. Available on
+  // RESERVED, ONGOING and OVERDUE bookings, so an operator can keep taking the
+  // rest after a first batch has flipped the booking to ONGOING.
+  const isBookingCheckoutMode = isBookingMode && bookingAction === "checkout";
 
   // Filter scanner actions based on the user's role in the current org
   const availableActions = useMemo(
@@ -309,30 +301,7 @@ function ScannerContent() {
     if (!anyDrawerVisible) setDrawerHeight(0);
   }, [anyDrawerVisible]);
 
-  /**
-   * Where the floating manual-entry control sits, or `null` when it cannot be
-   * placed without overlapping something.
-   *
-   * It is anchored inside the bottom strip, which is roughly half the space
-   * left over after the 240px frame. Lifting it by the full drawer height
-   * clears the drawer but can push it up INTO the frame and over the
-   * instruction text — the drawer grows to 280px (400px with blockers), so on
-   * a short viewport no offset clears both. In that case we render nothing
-   * rather than recreate the overlap this fix exists to remove: the camera and
-   * the drawer's own actions still work, and clearing an item restores the gap.
-   */
-  const { height: windowHeight } = useWindowDimensions();
-  const manualEntryBottom = useMemo(() => {
-    const DEFAULT_BOTTOM = 90;
-    const CONTROL_HEIGHT = 48;
-    if (drawerHeight <= DEFAULT_BOTTOM) return DEFAULT_BOTTOM;
-
-    // Space between the frame's bottom edge and the screen bottom.
-    const stripHeight = (windowHeight - FRAME_SIZE) / 2;
-    const desired = drawerHeight + spacing.md;
-    const maxBottom = stripHeight - CONTROL_HEIGHT - spacing.md;
-    return desired > maxBottom ? null : desired;
-  }, [drawerHeight, windowHeight]);
+  const insets = useSafeAreaInsets();
 
   // Booking context for both booking modes. Add mode uses bookedAssetIds +
   // bookingStatus for its blockers (web parity); check-in mode uses the
@@ -344,14 +313,12 @@ function ScannerContent() {
     bookedAssets: BookingAsset[];
     checkedInAssetIds: Set<string>;
     // Book-by-model reservations still awaiting concrete units, so fulfil mode
-    // can tell the operator exactly what (and how many) to scan.
-    outstandingModelRequests: {
-      /** Needed to match a scanned asset's model against this reservation. */
-      assetModelId: string;
-      assetModelName: string;
-      outstandingQuantity: number;
-    }[];
-    outstandingModelUnitCount: number;
+    // can tell the operator exactly what (and how many) to scan, and every
+    // check-out can name the units it leaves unassigned.
+    outstandingModelRequests: OutstandingReservation[];
+    // True when the workspace requires explicit check-out for this operator's
+    // role: only scanned units go out, so a check-out needs at least one scan.
+    requireExplicitCheckout: boolean;
   } | null>(null);
 
   // Also called from the scan paths when a code arrives before the first
@@ -359,29 +326,42 @@ function ScannerContent() {
   // cross-booking stale response can't land here because the whole component
   // remounts on a booking change (see the keyed default export), so this
   // closure and its state setter belong to a single booking's mount.
-  const fetchBookingCtx = useCallback(() => {
-    if (!isBookingMode || !bookingId || !currentOrg) return;
-    const originOrgId = currentOrg.id;
-    api.booking(bookingId, currentOrg.id).then(({ data }) => {
-      // A failed fetch leaves the previous context in place, so an answer that
-      // outlived its workspace must not be the one that replaces it.
-      if (!data || activeOrgIdRef.current !== originOrgId) return;
+  /**
+   * Store a booking payload as this screen's scan-time context.
+   *
+   * Shared by the mount fetch and by the read the fulfil submit makes, so one
+   * response both answers that submit and refreshes what is on screen.
+   *
+   * @param data A booking detail response for the booking this screen is on.
+   * @param originOrgId The workspace the request was made for: a response that
+   *   outlived its workspace must not replace the current context.
+   */
+  const applyBookingCtx = useCallback(
+    (data: BookingDetailResponse, originOrgId: string) => {
+      if (activeOrgIdRef.current !== originOrgId) return;
       setBookingCtx({
         bookedAssetIds: new Set(data.booking.assets.map((a) => a.id)),
         bookingStatus: data.booking.status,
         bookedAssets: data.booking.assets,
         checkedInAssetIds: new Set(data.checkedInAssetIds),
-        outstandingModelRequests: (data.booking.modelRequests ?? [])
-          .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
-          .map((r) => ({
-            assetModelId: r.assetModelId,
-            assetModelName: r.assetModelName,
-            outstandingQuantity: r.outstandingQuantity,
-          })),
-        outstandingModelUnitCount: data.booking.outstandingModelUnitCount ?? 0,
+        outstandingModelRequests: toOutstandingReservations(
+          data.booking.modelRequests
+        ),
+        requireExplicitCheckout: !canOfferQuickCheckout(data),
       });
+    },
+    []
+  );
+
+  const fetchBookingCtx = useCallback(() => {
+    if (!isBookingMode || !bookingId || !currentOrg) return;
+    const originOrgId = currentOrg.id;
+    api.booking(bookingId, currentOrg.id).then(({ data }) => {
+      // A failed fetch leaves the previous context in place.
+      if (!data) return;
+      applyBookingCtx(data, originOrgId);
     });
-  }, [isBookingMode, bookingId, currentOrg]);
+  }, [isBookingMode, bookingId, currentOrg, applyBookingCtx]);
 
   useEffect(() => {
     fetchBookingCtx();
@@ -415,6 +395,22 @@ function ScannerContent() {
   // Dev-mode scan injection (stripped from production builds)
   const [devScanInput, setDevScanInput] = useState("");
   const [devScanVisible, setDevScanVisible] = useState(false);
+
+  /**
+   * Absolute position of the manual-entry control.
+   *
+   * The open text field always lives in the top strip, just under the status
+   * bar: the keyboard rises from the bottom and would cover a field anchored
+   * there, and the top strip is free above the header and pills. The closed
+   * pill sits low in the bottom strip while nothing else is there, and moves
+   * to the top strip as soon as a drawer opens: the drawer shares the bottom
+   * strip with the hint text and the camera controls, and no offset keeps the
+   * pill clear of all three on a short screen.
+   */
+  const manualEntryPlacement =
+    devScanVisible || drawerHeight > 0
+      ? { top: insets.top + spacing.md }
+      : { bottom: MANUAL_ENTRY_BOTTOM };
 
   // Cooldown (shared hook)
   const {
@@ -1019,6 +1015,56 @@ function ScannerContent() {
               return;
             }
 
+            // BOOKING CHECK-OUT: a kit contributes the members of it that are
+            // on this booking and still takeable; the kit itself is never a
+            // list row (web parity).
+            if (isBookingCheckoutMode) {
+              const { eligible, reason } = eligibleKitMembers(
+                { id: kit.id, name: kit.name, assets: kit.assets },
+                bookingCtx,
+                new Set(bookingCheckinItems.map((item) => item.targetId))
+              );
+
+              if (reason) {
+                flashFrame("error");
+                Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Warning
+                );
+                setScanResult({ type: "error", ...reason });
+                finalizeScan();
+                return;
+              }
+
+              const kitMemberItems: ScannedItem[] = eligible.map((a) => ({
+                type: "asset",
+                qrId: `${codeId}:${a.id}`,
+                targetId: a.id,
+                title: a.title,
+                status: a.status,
+                mainImage: a.mainImage,
+                category: a.category?.name ?? null,
+                kitId: a.kitId,
+              }));
+
+              setBookingCheckinItems((prev) => [...kitMemberItems, ...prev]);
+              flashFrame("success");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Success
+              );
+              playScanSound();
+              setScanResult({
+                type: "success",
+                title: kit.name,
+                message: `Added ${eligible.length} kit asset${
+                  eligible.length === 1 ? "" : "s"
+                } (${bookingCheckinItems.length + eligible.length} items)`,
+              });
+
+              setTimeout(() => setScanResult(null), 1200);
+              finalizeScan();
+              return;
+            }
+
             const members = bookingCtx.bookedAssets.filter(
               (a) => a.kitId === kit!.id
             );
@@ -1378,6 +1424,8 @@ function ScannerContent() {
               title: "Already Scanned",
               message: isBookingAddMode
                 ? "This asset is already in your list."
+                : isBookingCheckoutMode
+                ? "This asset is already in your check-out list."
                 : "This asset is already in your check-in list.",
             });
             finalizeScan();
@@ -1433,6 +1481,49 @@ function ScannerContent() {
               title: "Booking Still Loading",
               message: "One moment — scan again.",
             });
+            finalizeScan();
+            return;
+          }
+
+          // CHECK-OUT mode has its own gates: the booking's own row carries
+          // the quantity counts a scanned QR does not, so eligibility is
+          // decided there rather than on the asset's global status alone.
+          if (isBookingCheckoutMode) {
+            const blocker = checkoutBlocker(asset, bookingCtx);
+            if (blocker) {
+              flashFrame("error");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({ type: "error", ...blocker });
+              finalizeScan();
+              return;
+            }
+
+            const row = bookingCtx.bookedAssets.find((a) => a.id === asset.id);
+            // Submitting a bare id takes every remaining unit, so name the
+            // count that implies.
+            const unitSuffix =
+              row?.type === "QUANTITY_TRACKED" &&
+              typeof row.remainingToCheckOut === "number"
+                ? ` — all ${row.remainingToCheckOut} ${
+                    row.unitOfMeasure ?? "units"
+                  }`
+                : "";
+
+            setBookingCheckinItems((prev) => [newItem, ...prev]);
+            flashFrame("success");
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            playScanSound();
+            setScanResult({
+              type: "success",
+              title: asset.title,
+              message: `Added to check-out (${
+                bookingCheckinItems.length + 1
+              } items)${unitSuffix}`,
+            });
+
+            setTimeout(() => setScanResult(null), 1200);
             finalizeScan();
             return;
           }
@@ -1925,12 +2016,85 @@ function ScannerContent() {
   };
 
   /**
-   * Submit the fulfil-and-check-out list: the scanned assets are matched
-   * against the booking's outstanding model reservations (materialising them)
-   * AND the booking is checked out (RESERVED -> ONGOING) in one atomic call.
-   * Mirrors the web `fulfil-and-checkout` scanner. The server rejects the
-   * submit if any reservation is still unassigned, so the operator gets a clear
-   * "still N to assign" error rather than a silent partial checkout.
+   * Send a confirmed fulfil-and-check-out, report what went out, and return to
+   * the booking.
+   *
+   * @param assetIds Scanned assets: units that assign a reservation, plus extras
+   *   that join the booking and go out alongside them.
+   * @param kitIds Scanned kits.
+   * @param assigned How many of `assetIds` assign a reserved unit, measured
+   *   against the reservations as they stood when the operator confirmed. The
+   *   rest are extras, and the report names the two separately.
+   */
+  const submitBookingFulfil = async (
+    assetIds: string[],
+    kitIds: string[],
+    assigned: number
+  ) => {
+    if (!bookingId || !currentOrg) return;
+
+    setIsBookingSubmitting(true);
+    const timeZone = (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      } catch {
+        return "UTC";
+      }
+    })();
+
+    const { data, error } = await api.fulfilAndCheckoutBooking(
+      currentOrg.id,
+      bookingId,
+      assetIds,
+      kitIds,
+      timeZone
+    );
+    setIsBookingSubmitting(false);
+
+    if (error) {
+      // A refusal after the assignment step leaves the scanned units on the
+      // booking. Re-reading the booking lets the add blockers flag them as
+      // already in this booking.
+      fetchBookingCtx();
+      Alert.alert("Couldn't check out", error);
+      return;
+    }
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    playScanSound();
+    // Under the explicit check-out requirement only the scanned units go out,
+    // and the server says how many booked assets remain. Asset rows only: a
+    // kit row is not a unit the server assigns.
+    const message = describeFulfilCheckout({
+      assigned,
+      extras: Math.max(0, assetIds.length - assigned),
+      remaining: data?.remainingCount ?? 0,
+      bookingName: bookingName || "",
+    });
+    Alert.alert("Checked out", message, [
+      {
+        text: "OK",
+        onPress: () => {
+          setBookingCheckinItems([]);
+          lastScanRef.current = "";
+          markBookingDirty(bookingId);
+          InteractionManager.runAfterInteractions(() => {
+            pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`);
+          });
+        },
+      },
+    ]);
+  };
+
+  /**
+   * Submit the fulfil-and-check-out list. The server assigns the scanned units
+   * to the booking's outstanding model reservations and checks out either the
+   * whole booking or, under the workspace's explicit check-out requirement,
+   * only the scanned units. Mirrors the web `fulfil-and-checkout` scanner.
+   *
+   * Reserved units the scan leaves unassigned never hold the check-out back:
+   * they stay open on the booking, to be scanned later or released. The
+   * operator confirms that first, against the reservations as they stand now.
    */
   const handleBookingFulfil = async () => {
     if (
@@ -1946,125 +2110,77 @@ function ScannerContent() {
       return;
     }
 
-    /**
-     * Refuse locally what the server would refuse anyway. Without this the
-     * operator taps a confident-looking CTA and only then learns their scans
-     * don't cover the reservation — the exact round trip this whole change
-     * exists to remove.
-     */
-    /**
-     * Refuse locally what the server would refuse anyway — but only after
-     * confirming against fresh data.
-     *
-     * `fulfilMatch` is computed from the booking context captured when this
-     * screen opened. If someone else fulfilled or shrank a reservation in the
-     * meantime, that snapshot is stale and a purely local block would strand
-     * the operator on a booking the server would happily check out. So on a
-     * local miss, re-read the booking and re-run the SAME matcher; only refuse
-     * if it is still short.
-     */
-    if (!fulfilMatch.isComplete) {
-      setIsBookingSubmitting(true);
-      const { data: fresh } = await api.booking(bookingId, currentOrg.id);
-      setIsBookingSubmitting(false);
-
-      const freshOutstanding = (fresh?.booking.modelRequests ?? [])
-        .filter((r) => r.fulfilledAt === null && r.outstandingQuantity > 0)
-        .map((r) => ({
-          assetModelId: r.assetModelId,
-          outstandingQuantity: r.outstandingQuantity,
-        }));
-      const revalidated = matchScansToReservations(
-        bookingCheckinItems,
-        freshOutstanding,
-        fresh?.booking.outstandingModelUnitCount ?? fulfilMatch.required
-      );
-
-      if (!revalidated.isComplete) {
-        const short = revalidated.required - revalidated.matched;
-        Alert.alert(
-          "Not ready to check out",
-          `${short} more reserved unit${
-            short === 1 ? "" : "s"
-          } still to assign. Scan units matching the reserved models — items that don't match a reservation don't count towards it.`
-        );
-        // Refresh the on-screen counter so it reflects what we just read.
-        fetchBookingCtx();
-        return;
-      }
-      // Reservations were satisfied server-side while we were open; fall
-      // through and let the submit proceed.
-      fetchBookingCtx();
-    }
-
     const assetIds = bookingCheckinItems
       .filter((i) => i.type === "asset")
       .map((i) => i.targetId);
     const kitIds = bookingCheckinItems
       .filter((i) => i.type === "kit")
       .map((i) => i.targetId);
-    const count = bookingCheckinItems.length;
+    const count = assetIds.length;
+
+    // The one condition on the check-out: something goes out.
+    if (
+      !canFulfilCheckOut({
+        scannedAssetCount: count,
+        hasBookedAssetsLeftToCheckOut: hasAssetsLeftToCheckOut(
+          bookingCtx.bookedAssets,
+          bookingCtx.checkedInAssetIds
+        ),
+        requireExplicitCheckout: bookingCtx.requireExplicitCheckout,
+      })
+    ) {
+      Alert.alert(
+        "Nothing to check out",
+        "Scan at least one unit to check out."
+      );
+      return;
+    }
+
+    /**
+     * `fulfilMatch` reads the booking context captured when this screen opened,
+     * and reservations can be added, raised or assigned by someone else while
+     * this operator scans. So the match is re-run against a read taken now: it
+     * decides which units the confirm names as staying unassigned, and how many
+     * of the scans the report counts as assigned. A failed read falls back to
+     * the snapshot, and the response also refreshes what is on screen.
+     */
+    setIsBookingSubmitting(true);
+    const { data: fresh } = await api.booking(bookingId, currentOrg.id);
+    setIsBookingSubmitting(false);
+
+    let match = fulfilMatch;
+    if (fresh) {
+      match = matchScansToReservations(
+        bookingCheckinItems,
+        toOutstandingReservations(fresh.booking.modelRequests)
+      );
+      applyBookingCtx(fresh, currentOrg.id);
+    }
+
+    const unassignedConfirm = unassignedCheckoutConfirm(match.unassigned);
+    if (unassignedConfirm) {
+      Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: unassignedConfirm.confirmLabel,
+          onPress: () =>
+            void submitBookingFulfil(assetIds, kitIds, match.matched),
+        },
+      ]);
+      return;
+    }
 
     Alert.alert(
       "Assign & check out",
-      `Assign ${count} scanned unit${count === 1 ? "" : "s"} and check out "${
-        bookingName || "this booking"
-      }"?`,
+      `Assign and check out the ${count} scanned unit${
+        count === 1 ? "" : "s"
+      } on "${bookingName || "this booking"}"?`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Check out",
-          onPress: async () => {
-            setIsBookingSubmitting(true);
-            const timeZone = (() => {
-              try {
-                return (
-                  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-                );
-              } catch {
-                return "UTC";
-              }
-            })();
-
-            const { error } = await api.fulfilAndCheckoutBooking(
-              currentOrg.id,
-              bookingId,
-              assetIds,
-              kitIds,
-              timeZone
-            );
-            setIsBookingSubmitting(false);
-
-            if (error) {
-              Alert.alert("Couldn't check out", error);
-              return;
-            }
-
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            playScanSound();
-            Alert.alert(
-              "Checked out",
-              `Assigned ${count} unit${
-                count === 1 ? "" : "s"
-              } and checked out "${bookingName || "the booking"}".`,
-              [
-                {
-                  text: "OK",
-                  onPress: () => {
-                    setBookingCheckinItems([]);
-                    lastScanRef.current = "";
-                    markBookingDirty(bookingId);
-                    InteractionManager.runAfterInteractions(() => {
-                      pushIntoTab(
-                        "/(tabs)/bookings",
-                        `/(tabs)/bookings/${bookingId}`
-                      );
-                    });
-                  },
-                },
-              ]
-            );
-          },
+          onPress: () =>
+            void submitBookingFulfil(assetIds, kitIds, match.matched),
         },
       ]
     );
@@ -2072,26 +2188,17 @@ function ScannerContent() {
 
   /**
    * Fulfil-mode progress, computed against the RESERVATIONS rather than by
-   * counting scans.
-   *
-   * The previous version divided `bookingCheckinItems.length` by the reserved
-   * unit count, which lied in both directions: scanning a camera against a
-   * "Tablecloth x2" reservation read "1/2 scanned" (it fulfils nothing), and
-   * scanning three tablecloths against x2 read "3/2". The server refuses both
-   * at submit, so the operator only discovered it at the very end.
-   *
-   * Each scanned asset is now matched to an outstanding request for its model
-   * and capped at that model's outstanding quantity, so extra units of a model
-   * that is already satisfied count as unmatched — exactly how the server
-   * treats them (`materializeModelRequestForAsset` returns `matched: false`
-   * once `fulfilledQuantity >= quantity`).
+   * counting scans. A scanned asset counts only when it assigns a unit of an
+   * outstanding reservation for its model, capped at that reservation's
+   * outstanding quantity, which is how the server assigns units: a camera
+   * scanned against a "Tablecloth ×2" reservation assigns nothing, and a third
+   * tablecloth is an extra.
    */
   const fulfilMatch = useMemo(
     () =>
       matchScansToReservations(
         bookingCheckinItems,
-        bookingCtx?.outstandingModelRequests ?? [],
-        bookingCtx?.outstandingModelUnitCount ?? 0
+        bookingCtx?.outstandingModelRequests ?? []
       ),
     [bookingCheckinItems, bookingCtx]
   );
@@ -2114,15 +2221,39 @@ function ScannerContent() {
       fulfilMatch.matched
   );
 
+  /**
+   * The check-out or check-in list, counted the way the booking screen counts
+   * the same selection: a kit is one thing once every member of it the batch
+   * can move is in the list. A scanned kit enters the list as its member
+   * assets, so a count of rows would name each member.
+   *
+   * Only the check-out and check-in modes read it. Their lists hold asset rows
+   * alone, and they are only filled once the booking context has loaded.
+   */
+  const bookingBatchCounts = useMemo(
+    () =>
+      countBookingBatch({
+        assets: bookingCtx?.bookedAssets ?? [],
+        assetIds: bookingCheckinItems.map((item) => item.targetId),
+        selectMode: isBookingCheckoutMode ? "checkout" : "checkin",
+        checkedInAssetIds: [...(bookingCtx?.checkedInAssetIds ?? [])],
+      }),
+    [bookingCtx, bookingCheckinItems, isBookingCheckoutMode]
+  );
+
   const handleBookingCheckin = () => {
     if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
 
-    const count = bookingCheckinItems.length;
+    // Counted now, from the list: the request carries member asset ids, so the
+    // server's reply cannot tell a scanned kit from its assets.
+    const batch = bookingBatchCounts;
     Alert.alert(
       "Check In Assets",
-      `Check in ${count} ${count === 1 ? "asset" : "assets"} for "${
-        bookingName || "this booking"
-      }"?`,
+      describeBatchConfirm({
+        direction: "checkin",
+        counts: batch,
+        bookingName,
+      }),
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -2169,13 +2300,12 @@ function ScannerContent() {
                   }
                 : prev
             );
-            const msg = result?.isComplete
-              ? `All assets checked in! "${
-                  bookingName || "Booking"
-                }" is now complete.`
-              : `${
-                  result?.checkedInCount ?? bookingCheckinItems.length
-                } checked in, ${result?.remainingCount ?? "some"} remaining.`;
+            const msg = describeBatchResult({
+              direction: "checkin",
+              counts: batch,
+              isComplete: result?.isComplete,
+              bookingName,
+            });
             Alert.alert("Checked In", msg, [
               {
                 text: "OK",
@@ -2201,6 +2331,164 @@ function ScannerContent() {
               },
             ]);
           },
+        },
+      ]
+    );
+  };
+
+  /**
+   * Send a confirmed scan-to-check-out batch and report what went out.
+   *
+   * @param batch What the drawer and its confirm named, counted from the list
+   *   before the submit: the request carries member asset ids, so the server's
+   *   reply cannot tell a scanned kit from its assets.
+   */
+  const submitBookingCheckout = async (batch: SelectionCounts) => {
+    if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
+
+    setIsBookingSubmitting(true);
+    const assetIds = bookingCheckinItems.map((i) => i.targetId);
+    const timeZone = (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      } catch {
+        return "UTC";
+      }
+    })();
+
+    // No per-asset quantities: a bare id checks out every remaining unit of a
+    // quantity-tracked asset, which is the default the scanner offers. Picking
+    // a smaller count is the booking screen's "Select to Check Out" flow.
+    const { data: result, error } = await api.partialCheckoutBooking(
+      currentOrg.id,
+      bookingId,
+      assetIds,
+      timeZone
+    );
+    setIsBookingSubmitting(false);
+
+    if (error) {
+      Alert.alert("Error", error);
+      return;
+    }
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    playScanSound();
+    // Keep the scan-time gates honest for follow-up scans: the assets just
+    // submitted are now out, and the booking may have left RESERVED, but the
+    // fetched context predates the submit.
+    const submittedIds = new Set(assetIds);
+    setBookingCtx((prev) =>
+      prev
+        ? {
+            ...prev,
+            bookingStatus: result?.booking.status ?? prev.bookingStatus,
+            bookedAssets: prev.bookedAssets.map((a) =>
+              submittedIds.has(a.id)
+                ? {
+                    ...a,
+                    status: "CHECKED_OUT",
+                    ...(a.type === "QUANTITY_TRACKED"
+                      ? { remainingToCheckOut: 0 }
+                      : {}),
+                  }
+                : a
+            ),
+          }
+        : prev
+    );
+    // The batch is named as the drawer and its confirm named it; only the
+    // server can say whether anything is left to check out, and whether it
+    // skipped an asset another check-out already took.
+    Alert.alert(
+      "Checked Out",
+      describeBatchResult({
+        direction: "checkout",
+        counts: batch,
+        isComplete: result?.isComplete,
+        bookingName,
+        assets:
+          result?.checkedOutCount === undefined
+            ? undefined
+            : { sent: submittedIds.size, moved: result.checkedOutCount },
+      }),
+      [
+        {
+          text: "OK",
+          onPress: () => {
+            setBookingCheckinItems([]);
+            lastScanRef.current = "";
+            markBookingDirty(bookingId);
+            // The first batch flips RESERVED → ONGOING, so the list's own
+            // freshness gate has to be bypassed too.
+            markBookingsListDirty();
+            if (result?.remainingCount === 0) {
+              // Nothing left to scan. Anchored navigation — router.back() from
+              // a tab screen falls through history and can land on Home.
+              // Deferred past the alert dismissal (same render-loop wedge as
+              // the add path — see handleBookingAdd).
+              InteractionManager.runAfterInteractions(() => {
+                pushIntoTab(
+                  "/(tabs)/bookings",
+                  `/(tabs)/bookings/${bookingId}`
+                );
+              });
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleBookingCheckout = async () => {
+    if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
+
+    // Counted now, from the list: the request carries member asset ids, so the
+    // server's reply cannot tell a scanned kit from its assets.
+    const batch = bookingBatchCounts;
+
+    // The batch that takes a RESERVED booking out is the one that leaves its
+    // unassigned reservations open, so that is where the operator confirms
+    // it. Later batches find the booking already out with them open.
+    //
+    // Named from a read taken now: the context was captured when this screen
+    // opened, and a scanning session runs for minutes. The response also
+    // refreshes the scan-time gates, the way the fulfil submit does.
+    let unassignedConfirm = null;
+    if (bookingCtx?.bookingStatus === "RESERVED") {
+      setIsBookingSubmitting(true);
+      const { data: fresh } = await api.booking(bookingId, currentOrg.id);
+      setIsBookingSubmitting(false);
+      if (fresh) applyBookingCtx(fresh, currentOrg.id);
+      unassignedConfirm = unassignedCheckoutConfirm(
+        fresh
+          ? toOutstandingReservations(fresh.booking.modelRequests)
+          : bookingCtx.outstandingModelRequests
+      );
+    }
+    if (unassignedConfirm) {
+      Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: unassignedConfirm.confirmLabel,
+          onPress: () => void submitBookingCheckout(batch),
+        },
+      ]);
+      return;
+    }
+
+    Alert.alert(
+      "Check Out Assets",
+      describeBatchConfirm({
+        direction: "checkout",
+        counts: batch,
+        bookingName,
+      }),
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Check Out",
+          onPress: () => void submitBookingCheckout(batch),
         },
       ]
     );
@@ -2312,30 +2600,51 @@ function ScannerContent() {
         </TouchableOpacity>
       )}
 
-      {/* Overlay with cutout */}
-      <View style={styles.overlay}>
+      {/* Overlay with cutout.
+          `box-none` on the overlay and its strips: only real controls inside
+          them are touch targets, so a tap on an empty area falls through to
+          the paused layer beneath, which is what "tap anywhere to resume"
+          relies on. */}
+      <View style={styles.overlay} pointerEvents="box-none">
         {/* Top - Action picker or Booking header */}
-        <View style={styles.overlaySection}>
+        <View style={styles.overlaySection} pointerEvents="box-none">
           {isBookingMode ? (
-            <View style={styles.actionPickerContainer}>
-              <View style={styles.bookingModeHeader}>
+            <View style={styles.actionPickerContainer} pointerEvents="box-none">
+              <View style={styles.bookingModeHeader} pointerEvents="box-none">
                 <TouchableOpacity
-                  onPress={() => router.back()}
+                  // Anchored navigation, like the submit handlers: the scanner
+                  // is a tab screen, so router.back() unwinds the tab's own
+                  // history and lands on the start page rather than on the
+                  // booking the operator came from.
+                  onPress={() =>
+                    bookingId
+                      ? pushIntoTab(
+                          "/(tabs)/bookings",
+                          `/(tabs)/bookings/${bookingId}`
+                        )
+                      : router.back()
+                  }
                   accessibilityLabel="Go back"
                   accessibilityRole="button"
                 >
                   <Ionicons name="arrow-back" size={22} color="#fff" />
                 </TouchableOpacity>
-                <View style={styles.bookingModeInfo}>
+                {/* Labels only: touches pass through to the paused layer. */}
+                <View style={styles.bookingModeInfo} pointerEvents="none">
                   <Text style={styles.bookingModeLabel}>
                     {isBookingFulfilMode
                       ? "Fulfil & Check Out"
                       : isBookingAddMode
                       ? "Add to Booking"
+                      : isBookingCheckoutMode
+                      ? "Booking Check-Out"
                       : "Booking Check-In"}
                   </Text>
                   <Text style={styles.bookingModeName} numberOfLines={1}>
-                    {bookingName || "Scan assets to check in"}
+                    {bookingName ||
+                      (isBookingCheckoutMode
+                        ? "Scan assets to check out"
+                        : "Scan assets to check in")}
                   </Text>
                   {isBookingFulfilMode &&
                     bookingCtx &&
@@ -2355,7 +2664,7 @@ function ScannerContent() {
               </View>
             </View>
           ) : (
-            <View style={styles.actionPickerContainer}>
+            <View style={styles.actionPickerContainer} pointerEvents="box-none">
               <ActionPills
                 actions={availableActions}
                 currentAction={action}
@@ -2369,8 +2678,13 @@ function ScannerContent() {
           )}
         </View>
 
-        {/* Middle row -- swipe gesture target */}
-        <View style={styles.middleRow} {...panResponder.panHandlers}>
+        {/* Middle row -- swipe gesture target. Switched off while paused so
+            the tap lands on the paused layer instead of the swipe surface. */}
+        <View
+          style={styles.middleRow}
+          pointerEvents={isPaused ? "none" : "auto"}
+          {...panResponder.panHandlers}
+        >
           <View style={styles.overlaySection} />
           <ScanFrame
             scanLineAnim={scanLineAnim}
@@ -2398,13 +2712,17 @@ function ScannerContent() {
            * it never needed the overlay to make room in the first place.
            */
           style={[styles.overlaySection, styles.bottomSection]}
+          pointerEvents="box-none"
         >
           {/* Mode indicator dots */}
           {!isBookingMode && (
-            <ModeDots actions={availableActions} currentAction={action} />
+            <View pointerEvents="none">
+              <ModeDots actions={availableActions} currentAction={action} />
+            </View>
           )}
 
-          {/* Status / instruction text -- animated for swipe transitions */}
+          {/* Status / instruction text -- animated for swipe transitions.
+              Only the result card takes touches; plain text lets them pass. */}
           <Animated.View
             style={[
               styles.instructionContainer,
@@ -2413,6 +2731,7 @@ function ScannerContent() {
                 opacity: swipeOpacity,
               },
             ]}
+            pointerEvents={scanResult ? "auto" : "none"}
           >
             {isProcessing && !scanResult ? (
               <View style={styles.statusRow}>
@@ -2428,6 +2747,8 @@ function ScannerContent() {
                     ? "Scan the reserved units to assign"
                     : isBookingAddMode
                     ? "Scan assets or kits to add"
+                    : isBookingCheckoutMode
+                    ? "Scan assets to check out"
                     : "Scan assets to check in"
                   : instructionMap[action]}
               </Text>
@@ -2435,7 +2756,7 @@ function ScannerContent() {
           </Animated.View>
 
           {/* Camera controls -- positioned in the thumb-friendly bottom zone */}
-          <View style={styles.controlButtons}>
+          <View style={styles.controlButtons} pointerEvents="box-none">
             {/* Pause/Resume toggle */}
             <TouchableOpacity
               style={[
@@ -2485,14 +2806,13 @@ function ScannerContent() {
             control's origin so the existing e2e flows stay stable. */}
         {/* Hidden while a result card is shown — the card's actions must never
             be occluded (the unclaimed card is tall enough to reach this pill). */}
-        {manualEntryBottom !== null && !scanResult && (
+        {!scanResult && (
           <View
-            style={[
-              styles.devScanContainer,
-              // Clamped so the lift never pushes the control into the scan
-              // frame; see `manualEntryBottom`.
-              { bottom: manualEntryBottom },
-            ]}
+            style={[styles.devScanContainer, manualEntryPlacement]}
+            // Full-width host: only the pill or the field inside it takes
+            // touches, so a tap beside them reaches the paused layer.
+            pointerEvents="box-none"
+            testID="manual-entry-container"
           >
             {devScanVisible ? (
               <View style={styles.devScanRow}>
@@ -2501,6 +2821,9 @@ function ScannerContent() {
                   style={styles.devScanInput}
                   value={devScanInput}
                   onChangeText={setDevScanInput}
+                  // Opens the keyboard as soon as the field appears, so one tap
+                  // on "Enter code" is enough to start typing.
+                  autoFocus
                   placeholder="Enter QR, barcode, or SAM ID"
                   placeholderTextColor="rgba(255,255,255,0.4)"
                   autoCapitalize="none"
@@ -2599,39 +2922,39 @@ function ScannerContent() {
                   ? `${bookingCheckinItems.length} unit${
                       bookingCheckinItems.length > 1 ? "s" : ""
                     } scanned`
-                  : `${bookingCheckinItems.length} asset${
-                      bookingCheckinItems.length > 1 ? "s" : ""
-                    } to check in`
+                  : isBookingCheckoutMode
+                  ? `${describeBatch(bookingBatchCounts)} to check out`
+                  : `${describeBatch(bookingBatchCounts)} to check in`
               }
               submitLabel={
                 isBookingFulfilMode
-                  ? fulfilMatch.isComplete
-                    ? // Name the two halves separately. The submit sends the
-                      // WHOLE list: matched units fulfil the reservation, and
-                      // anything else is added to the booking and checked out
-                      // alongside (deliberate, mirrors web). A single total
-                      // hid that, so "check out 3 units" could appear against
-                      // a 2-unit reservation with no hint that the third was
-                      // never reserved.
-                      fulfilExtras > 0
-                      ? `Assign ${fulfilMatch.required} · add ${fulfilExtras} · check out`
-                      : `Assign & check out ${fulfilMatch.required} unit${
-                          fulfilMatch.required === 1 ? "" : "s"
-                        }`
-                    : `${
-                        fulfilMatch.required - fulfilMatch.matched
-                      } more to assign`
+                  ? // Name the two halves separately. The submit sends the
+                    // WHOLE list: matched units assign a reservation, and
+                    // anything else is added to the booking and checked out
+                    // alongside (deliberate, mirrors web), so a single total
+                    // would hide that a unit was never reserved. Reserved
+                    // units still unassigned don't hold the check-out back:
+                    // the header counts them and the submit confirms them.
+                    fulfilMatch.matched === 0
+                    ? `Add ${fulfilExtras} · check out`
+                    : fulfilExtras > 0
+                    ? `Assign ${fulfilMatch.matched} · add ${fulfilExtras} · check out`
+                    : `Assign & check out ${fulfilMatch.matched} unit${
+                        fulfilMatch.matched === 1 ? "" : "s"
+                      }`
                   : isBookingAddMode
                   ? "Add to Booking"
-                  : `Check In ${bookingCheckinItems.length} ${
-                      bookingCheckinItems.length === 1 ? "Asset" : "Assets"
-                    }`
+                  : isBookingCheckoutMode
+                  ? `Check Out ${describeSelection(bookingBatchCounts)}`
+                  : `Check In ${describeSelection(bookingBatchCounts)}`
               }
               submitIcon={
                 isBookingFulfilMode
                   ? "log-out-outline"
                   : isBookingAddMode
                   ? "add-circle-outline"
+                  : isBookingCheckoutMode
+                  ? "log-out-outline"
                   : "log-in-outline"
               }
               isSubmitting={isBookingSubmitting}
@@ -2642,6 +2965,8 @@ function ScannerContent() {
                   ? handleBookingFulfil
                   : isBookingAddMode
                   ? handleBookingAdd
+                  : isBookingCheckoutMode
+                  ? () => void handleBookingCheckout()
                   : handleBookingCheckin
               }
               showStatus={isBookingAddMode}
@@ -2707,6 +3032,8 @@ export default function ScannerScreen() {
 // ── Styles ────────────────────────────────────────────────
 
 const FRAME_SIZE = 240;
+/** Distance of the closed "Enter code" pill from the bottom edge when no drawer is open. */
+const MANUAL_ENTRY_BOTTOM = 90;
 
 const useStyles = createStyles((colors) => ({
   container: {
@@ -2766,6 +3093,9 @@ const useStyles = createStyles((colors) => ({
     // why: no zIndex — the action pills / batch drawer (later siblings) must
     // win hit-testing, otherwise this full-screen touchable swallows the
     // first tap aimed at them while paused. It still covers the camera area.
+    // The overlay strips above it are `box-none` (and the swipe row `none`
+    // while paused), so a tap on anything that is not a control reaches this
+    // layer and resumes the camera.
   },
   pausedTitle: {
     color: "#fff",
@@ -2870,7 +3200,6 @@ const useStyles = createStyles((colors) => ({
   // ── Dev Scan Injection (DEV only) ───────────────
   devScanContainer: {
     position: "absolute" as const,
-    bottom: 90,
     left: spacing.md,
     right: spacing.md,
     zIndex: 999,

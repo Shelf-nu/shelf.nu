@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
@@ -11,10 +12,12 @@ import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
@@ -91,16 +94,16 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   } = useLoaderData<BookingPageLoaderData>();
 
   /**
-   * Bookings with outstanding `BookingModelRequest` rows must route through
-   * the fulfil-and-checkout scanner instead of the normal checkout alert —
-   * the server's `RESERVED → ONGOING` guard refuses transitions while any
-   * request still has `quantity > 0`. Derived inline from
-   * `booking.modelRequests` (already loaded via `BOOKING_WITH_ASSETS_INCLUDE`)
-   * to avoid a new loader field.
+   * Reserved model units no asset has been assigned to yet. A RESERVED booking
+   * with any routes "Check Out" through the fulfil-and-checkout scanner, which
+   * lists what is still to pull and confirms the unassigned units before the
+   * booking goes out without them. Derived inline from `booking.modelRequests`
+   * (already loaded via `BOOKING_WITH_ASSETS_INCLUDE`) to avoid a new loader
+   * field.
    */
-  const outstandingModelRequestCount =
-    loaderBooking.modelRequests?.filter((r) => r.fulfilledAt === null).length ??
-    0;
+  const outstandingModelRequestCount = getOutstandingModelRequests(
+    loaderBooking.modelRequests
+  ).length;
 
   // Progressive checkout is only offered while there are still items that
   // haven't been checked out yet (the Booked bucket). Once everything has been
@@ -164,9 +167,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     isBaseOrSelfService,
     isBase,
     isAdministratorOrOwner,
-    isAdministrator,
-    isOwner,
-    isSelfService,
+    effectiveRole,
   } = useUserRoleHelper();
 
   const zo = useZorm(
@@ -363,13 +364,14 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               (RESERVED/ONGOING/OVERDUE with still-Booked items) into a single
               dropdown — mirroring the check-in dropdown for a consistent header.
               CheckoutDropdown renders a single button when only one option
-              applies, and nothing when neither does.
+              applies, and only "Scan to check out" when the workspace requires
+              explicit check-out for the viewer's role.
 
-              When the booking has outstanding `BookingModelRequest` rows the
-              normal RESERVED → ONGOING transition is refused by the server
-              (qty > 0 model requests must be fulfilled first), so we bypass
-              the dropdown entirely and route through the fulfil-and-checkout
-              scanner — HEAD's qty-tracked behaviour.
+              A RESERVED booking with unassigned model units routes through the
+              fulfil-and-checkout scanner instead, which lists what is still to
+              pull. Once the booking is underway, its remaining items go out
+              through the dropdown's "Scan to check out", like any other
+              booking; unassigned units stay open for "Scan to assign".
             */}
             <When
               truthy={
@@ -398,11 +400,13 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                       }
                     : false;
 
-                // When requests are outstanding, the normal checkout would hit
-                // the guard — route through the fulfil scanner instead. This
-                // takes precedence over the progressive-checkout dropdown
-                // because the booking can't transition until requests are met.
-                if (outstandingModelRequestCount > 0) {
+                // A reserved booking's first check-out goes through the fulfil
+                // scanner while model units are unassigned, so the operator
+                // sees what is still to pull before it leaves.
+                if (
+                  outstandingModelRequestCount > 0 &&
+                  bookingStatus?.isReserved
+                ) {
                   return (
                     <Button
                       to="fulfil-and-checkout"
@@ -438,6 +442,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                       )
                     }
                     checkOutDisabled={checkoutDisabled}
+                    requireExplicitCheckout={isExplicitCheckoutRequired({
+                      role: effectiveRole,
+                      bookingSettings,
+                    })}
                   />
                 );
               })()}
@@ -460,11 +468,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 }}
                 disabled={disabled || isLoadingWorkingHours}
                 requireExplicitCheckin={
-                  !isOwner &&
-                  ((isAdministrator &&
+                  (effectiveRole === OrganizationRoles.ADMIN &&
                     bookingSettings.requireExplicitCheckinForAdmin) ||
-                    (isSelfService &&
-                      bookingSettings.requireExplicitCheckinForSelfService))
+                  (effectiveRole === OrganizationRoles.SELF_SERVICE &&
+                    bookingSettings.requireExplicitCheckinForSelfService)
                 }
               />
             </When>

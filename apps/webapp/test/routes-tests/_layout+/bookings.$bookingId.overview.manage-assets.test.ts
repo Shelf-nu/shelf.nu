@@ -36,6 +36,12 @@ vi.mock("~/database/db.server", () => ({
     consumptionLog: {
       groupBy: vi.fn(),
     },
+    // why: the loader counts the standalone units the booking already holds
+    // of each model on the page; they count on the booking's side of the
+    // pool. Tests stage held units per case.
+    bookingAsset: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -45,7 +51,7 @@ vi.mock("~/modules/booking/service.server", () => ({
   removeAssets: vi.fn(),
   // Loader-only — used by the F2 loader tests below.
   getBooking: vi.fn(),
-  getKitIdsByAssets: vi.fn(),
+  getKitIdsByBookingSlices: vi.fn(),
 }));
 
 // Loader-only — `getPaginatedAndFilterableAssets` backs the Assets tab list.
@@ -59,6 +65,17 @@ vi.mock("~/modules/asset/service.server", () => ({
 // `booking-model-request/service.server.test.ts`.
 vi.mock("~/modules/booking-model-request/service.server", () => ({
   getBookingModelTabData: vi.fn(),
+  // why: the loader flags picker rows whose model pool is exhausted through
+  // this primitive. Its pool math has its own unit test; here the tests
+  // control its answer per model and assert which rows the loader flags.
+  getAssetModelAvailability: vi.fn(),
+  // why: the loader only measures models another booking is owed units of.
+  // Which models those are is this primitive's own unit test; here the tests
+  // control the answer and assert what the loader does and does not read.
+  findModelsReservedByOtherBookings: vi.fn(),
+  // why: what the booking already holds comes from the same primitive the
+  // write guard uses, so the badge and the refusal cannot disagree.
+  readOwnNamedUnits: vi.fn(),
 }));
 
 vi.mock("~/modules/user/service.server", () => ({
@@ -1198,7 +1215,9 @@ describe("manage-assets loader — Models tab payload", () => {
       mockPaginatedAssets as any
     );
     vi.mocked(bookingService.getBooking).mockResolvedValue(mockLoaderBooking);
-    vi.mocked(bookingService.getKitIdsByAssets).mockReturnValue([]);
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue(
       mockModelTabData as any
     );
@@ -1295,5 +1314,343 @@ describe("manage-assets loader — Models tab payload", () => {
     // The custody row survives: the availability label tests it for presence,
     // so dropping it would change which assets read as available.
     expect(result.items[0].custody).toHaveLength(1);
+  });
+});
+
+/**
+ * The picker flags an INDIVIDUAL unit that this booking cannot take by name
+ * because other bookings' model reservations leave the pool no room for one
+ * more unit in the booking's window. The flag mirrors the write-time guard
+ * for a single added unit, so the row reads "Reserved by model" and cannot be
+ * selected wherever Confirm would be refused.
+ */
+describe("manage-assets loader — units reserved by model elsewhere", () => {
+  const mockContext = {
+    getSession: () => ({ userId: "user123" }),
+    appVersion: "1.0.0",
+    isAuthenticated: true,
+    setSession: vi.fn(),
+    destroySession: vi.fn(),
+    errorMessage: null,
+  } as any;
+
+  const mockParams = { bookingId: "booking123" };
+  const from = new Date("2027-03-01T09:00:00Z");
+  const to = new Date("2027-03-03T17:00:00Z");
+
+  /** A dated DRAFT with no rows and no requests unless a test adds them. */
+  function bookingFixture(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "booking123",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+      from,
+      to,
+      bookingAssets: [],
+      modelRequests: [],
+      ...overrides,
+    } as any;
+  }
+
+  /** An outstanding request of this booking for `model1`. */
+  function ownRequest(quantity: number, fulfilledQuantity = 0) {
+    return {
+      assetModelId: "model1",
+      quantity,
+      fulfilledQuantity,
+      fulfilledAt: null,
+      assetModel: { name: "Model" },
+    };
+  }
+
+  /** Two units of one model, plus a unit with no model. */
+  const pageAssets = [
+    {
+      id: "unit-1",
+      title: "Pad",
+      type: AssetType.INDIVIDUAL,
+      assetModelId: "model1",
+    },
+    {
+      id: "unit-2",
+      title: "Simulator",
+      type: AssetType.INDIVIDUAL,
+      assetModelId: "model1",
+    },
+    {
+      id: "loose",
+      title: "Tripod",
+      type: AssetType.INDIVIDUAL,
+      assetModelId: null,
+    },
+  ];
+
+  const paginated = {
+    search: null,
+    totalAssets: pageAssets.length,
+    perPage: 20,
+    page: 1,
+    categories: [],
+    tags: [],
+    assets: pageAssets,
+    totalPages: 1,
+    totalCategories: 0,
+    totalTags: 0,
+    locations: [],
+    totalLocations: 0,
+  };
+
+  /** `available` for the model reads the loader issues. */
+  function poolAvailability(available: number) {
+    vi.mocked(modelRequestService.getAssetModelAvailability).mockResolvedValue({
+      total: 3,
+      inCustody: 1,
+      reservedConcrete: 0,
+      reservedViaRequest: 3 - 1 - available,
+      reserved: 3 - 1 - available,
+      available,
+    });
+  }
+
+  /** The units of `model1` the booking already holds by name. */
+  function heldUnits(count: number, inCustody = 0) {
+    vi.mocked(modelRequestService.readOwnNamedUnits).mockResolvedValue(
+      count === 0
+        ? new Map()
+        : new Map([
+            [
+              "model1",
+              {
+                unitIds: new Set(
+                  Array.from({ length: count }, (_, i) => `held-${i}`)
+                ),
+                inCustody,
+              },
+            ],
+          ])
+    );
+  }
+
+  /** Which models another booking is still owed unnamed units of. */
+  function reservedElsewhere(modelIds: string[]) {
+    vi.mocked(
+      modelRequestService.findModelsReservedByOtherBookings
+    ).mockResolvedValue(new Set(modelIds));
+  }
+
+  /** The flag per row id in the returned payload. */
+  async function flagsByAssetId() {
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+    return Object.fromEntries(
+      result.items.map(
+        (item: { id: string; modelReservedElsewhere: boolean }) => [
+          item.id,
+          item.modelReservedElsewhere,
+        ]
+      )
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
+      organizationId: "org123",
+      userOrganizations: [],
+      isSelfServiceOrBase: false,
+      organizations: [],
+      currentOrganization: {} as any,
+      role: {} as any,
+      canSeeAllBookings: false,
+      canSeeAllCustody: false,
+      canUseBarcodes: false,
+      canUseAudits: false,
+    });
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "booking123",
+    });
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue(
+      paginated as any
+    );
+    vi.mocked(bookingService.getBooking).mockResolvedValue(bookingFixture());
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: true,
+      assetModels: [],
+      initialAssetModels: [],
+      totalAssetModels: 1,
+      matchedAssetModels: 1,
+      modelRequests: [],
+    });
+    poolAvailability(0);
+    heldUnits(0);
+    reservedElsewhere(["model1"]);
+  });
+
+  it("flags every unit of a model whose free pool is exhausted, reading each model once", async () => {
+    const flags = await flagsByAssetId();
+
+    expect(flags).toEqual({ "unit-1": true, "unit-2": true, loose: false });
+    expect(modelRequestService.getAssetModelAvailability).toHaveBeenCalledTimes(
+      1
+    );
+    expect(modelRequestService.getAssetModelAvailability).toHaveBeenCalledWith({
+      assetModelId: "model1",
+      organizationId: "org123",
+      bookingId: "booking123",
+      from,
+      to,
+    });
+  });
+
+  it("leaves units alone while the model still has a free unit", async () => {
+    poolAvailability(1);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+  });
+
+  it("counts the units the booking already holds against the free unit", async () => {
+    // One unit is on the booking already and one unit is free: a second
+    // named unit would not fit. The held unit itself claims nothing new.
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({
+        bookingAssets: [{ assetId: "unit-1", assetKitId: null, quantity: 1 }],
+      })
+    );
+    heldUnits(1);
+    poolAvailability(1);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": true,
+      loose: false,
+    });
+  });
+
+  it("never flags a model an active booking reserves itself", async () => {
+    // A unit of that model fulfils the booking's own request.
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({
+        status: BookingStatus.RESERVED,
+        modelRequests: [ownRequest(2)],
+      })
+    );
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+    expect(
+      modelRequestService.getAssetModelAvailability
+    ).not.toHaveBeenCalled();
+  });
+
+  it("flags a draft's units when its own request no longer fits the pool", async () => {
+    // The draft promises itself two units; naming one would still leave one
+    // to assign, and the pool has one free unit for the two of them.
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({ modelRequests: [ownRequest(2)] })
+    );
+    poolAvailability(1);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": true,
+      "unit-2": true,
+      loose: false,
+    });
+  });
+
+  it("leaves a draft's units alone while its own request still fits", async () => {
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({ modelRequests: [ownRequest(1)] })
+    );
+    poolAvailability(1);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+  });
+
+  it("skips the model reads on a draft without dates", async () => {
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingFixture({ from: null, to: null })
+    );
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+    expect(
+      modelRequestService.getAssetModelAvailability
+    ).not.toHaveBeenCalled();
+    expect(modelRequestService.readOwnNamedUnits).not.toHaveBeenCalled();
+  });
+
+  it("reads no pool at all when no other booking has reserved the model", async () => {
+    // The shape of every picker load in a workspace that does not reserve by
+    // model: one lookup, then nothing. Naming a unit cannot over-commit a
+    // model nobody is owed units of, so there is nothing to measure.
+    reservedElsewhere([]);
+
+    expect(await flagsByAssetId()).toEqual({
+      "unit-1": false,
+      "unit-2": false,
+      loose: false,
+    });
+    expect(
+      modelRequestService.getAssetModelAvailability
+    ).not.toHaveBeenCalled();
+    expect(modelRequestService.readOwnNamedUnits).not.toHaveBeenCalled();
+  });
+
+  it("asks about the models on the page, over the booking's own window", async () => {
+    await flagsByAssetId();
+
+    expect(
+      modelRequestService.findModelsReservedByOtherBookings
+    ).toHaveBeenCalledWith({
+      assetModelIds: ["model1"],
+      excludeBookingId: "booking123",
+      organizationId: "org123",
+      from,
+      to,
+    });
+  });
+
+  it("ships the headroom a contested model still has", async () => {
+    poolAvailability(2);
+    heldUnits(1);
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // Two free units, one of them already claimed by a unit on the booking.
+    expect(result.modelHeadroom).toEqual({ model1: 1 });
+  });
+
+  it("does not count a held unit a custodian has against the headroom", async () => {
+    poolAvailability(2);
+    heldUnits(1, 1);
+
+    const result: any = await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // The pool already deducted that unit; charging it again would understate
+    // what the booking may still take.
+    expect(result.modelHeadroom).toEqual({ model1: 2 });
   });
 });
