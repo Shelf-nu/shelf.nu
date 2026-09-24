@@ -17,8 +17,8 @@
  */
 import { OrganizationRoles } from "@prisma/client";
 import { getDefaultModeForRole } from "~/modules/asset-index-settings/service.server";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingOwnershipScope } from "~/modules/booking/utils.server";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { resolveCalendarVisibility } from "~/modules/calendar-subscription/service.server";
 import { INVITABLE_ROLES } from "~/modules/invite/roles";
 import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
