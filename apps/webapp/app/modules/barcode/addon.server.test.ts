@@ -656,6 +656,54 @@ describe("handleBarcodeAddonWebhook", () => {
     );
   });
 
+  it("subscription.updated (past_due) leaves the add-on as it is", async () => {
+    await handleBarcodeAddonWebhook({
+      eventType: "customer.subscription.updated",
+      subscription: {
+        id: "sub_1",
+        customer: "cus_xyz",
+        status: "past_due",
+      } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  it("invoice.overdue switches the add-on off", async () => {
+    await handleBarcodeAddonWebhook({
+      eventType: "invoice.overdue",
+      subscription: {
+        id: "sub_1",
+        customer: "cus_xyz",
+        status: "past_due",
+      } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockOrgUpdate).toHaveBeenCalledWith({
+      where: { id: "org_1" },
+      data: { barcodesEnabled: false },
+      select: { id: true },
+    });
+  });
+
+  it("invoice.overdue keeps the add-on on while another live subscription carries it", async () => {
+    mockHasOtherActiveAddonSubscription.mockResolvedValue(true);
+
+    await handleBarcodeAddonWebhook({
+      eventType: "invoice.overdue",
+      subscription: {
+        id: "sub_1",
+        customer: "cus_xyz",
+        status: "past_due",
+      } as any,
+      organizationId: "org_1",
+    });
+
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
   it("unknown event makes no database call", async () => {
     await handleBarcodeAddonWebhook({
       eventType: "some.unknown.event",

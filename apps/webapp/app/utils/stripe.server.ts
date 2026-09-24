@@ -67,7 +67,11 @@ export function getDomainUrl(request: Request) {
   return `${protocol}://${host}`;
 }
 
-/** Needed when user has no subscription and wants to buy their first one */
+/**
+ * Creates a Stripe Checkout session for a tier subscription, with any add-ons
+ * as extra line items. A Team subscription is linked to the workspace of the
+ * customer's previous Team subscription when there is one.
+ */
 export async function createStripeCheckoutSession({
   priceId,
   userId,
@@ -132,6 +136,21 @@ export async function createStripeCheckoutSession({
       hasBarcodeAddon: !!barcodePriceId,
     });
 
+    // A Team owner coming back (after a paused trial or a cancelled plan)
+    // gets a new subscription; it keeps the workspace link of the old one so
+    // its bundled add-ons still reach that workspace.
+    const organizationId =
+      shelfTier === "tier_2"
+        ? await findWorkspaceOfPreviousTierSubscription({ customerId, userId })
+        : null;
+
+    const metadata = {
+      ...(organizationId && { organizationId }),
+      ...(intent === "trial" && auditPriceId && { includesAuditAddon: "true" }),
+      ...(intent === "trial" &&
+        barcodePriceId && { includesBarcodeAddon: "true" }),
+    };
+
     const { url } = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
@@ -140,22 +159,21 @@ export async function createStripeCheckoutSession({
       cancel_url: `${domainUrl}/account-details/subscription?canceled=true`,
       client_reference_id: userId,
       customer: customerId,
-      ...(intent === "trial" && {
+      ...((intent === "trial" || Object.keys(metadata).length > 0) && {
         subscription_data: {
-          trial_settings: {
-            end_behavior: {
-              missing_payment_method: "pause",
+          ...(intent === "trial" && {
+            trial_settings: {
+              end_behavior: {
+                missing_payment_method: "pause" as const,
+              },
             },
-          },
-          trial_period_days: config.freeTrialDays,
-          ...((auditPriceId || barcodePriceId) && {
-            metadata: {
-              ...(auditPriceId && { includesAuditAddon: "true" }),
-              ...(barcodePriceId && { includesBarcodeAddon: "true" }),
-            },
+            trial_period_days: config.freeTrialDays,
           }),
+          ...(Object.keys(metadata).length > 0 && { metadata }),
         },
-        payment_method_collection: "if_required",
+      }),
+      ...(intent === "trial" && {
+        payment_method_collection: "if_required" as const,
       }),
     });
 
@@ -477,6 +495,82 @@ export async function customerHasOtherActiveAddonSubscription({
   );
 }
 
+/**
+ * Finds the Team workspace an earlier tier subscription of this customer was
+ * linked to, so a new tier subscription can carry the same link.
+ *
+ * Bundled add-ons reach their workspace only through the subscription's
+ * `metadata.organizationId`, which workspace creation writes once. A
+ * subscription bought later through Checkout (after a trial paused, or after
+ * the plan was cancelled) is a new subscription with no metadata, so every
+ * webhook about it would skip the add-ons. Copying the link keeps them tied to
+ * the workspace they belonged to.
+ *
+ * Only a workspace the user still owns counts: a transferred workspace keeps
+ * its old link on the previous owner's subscriptions.
+ *
+ * @param args.customerId - The Stripe customer about to subscribe
+ * @param args.userId - The user the customer belongs to
+ * @returns The organization id of the most recent linked tier subscription,
+ *   or `null` when there is none
+ */
+export async function findWorkspaceOfPreviousTierSubscription({
+  customerId,
+  userId,
+}: {
+  customerId: string;
+  userId: User["id"];
+}): Promise<string | null> {
+  const linked: Stripe.Subscription[] = [];
+  let startingAfter: string | undefined;
+  do {
+    const page = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+      limit: 100,
+      ...(startingAfter && { starting_after: startingAfter }),
+    });
+    linked.push(...page.data.filter((sub) => sub.metadata?.organizationId));
+    startingAfter = page.has_more
+      ? page.data[page.data.length - 1]?.id
+      : undefined;
+  } while (startingAfter);
+  if (linked.length === 0) return null;
+
+  const ownedTeamWorkspaces = await db.organization.findMany({
+    where: {
+      id: { in: linked.map((sub) => sub.metadata.organizationId) },
+      userId,
+      type: "TEAM",
+    },
+    select: { id: true },
+  });
+  const ownedIds = new Set(ownedTeamWorkspaces.map((org) => org.id));
+
+  // Newest first; standalone add-on subscriptions carry the link too, so each
+  // candidate has to hold a tier item to count.
+  const candidates = linked
+    .filter((sub) => ownedIds.has(sub.metadata.organizationId))
+    .sort((a, b) => b.created - a.created);
+  for (const sub of candidates) {
+    for (const item of sub.items.data) {
+      const productId =
+        typeof item.price.product === "string"
+          ? item.price.product
+          : item.price.product?.id;
+      if (!productId) continue;
+      const product = await stripe.products.retrieve(productId);
+      if (
+        product.metadata?.shelf_tier &&
+        product.metadata?.product_type !== "addon"
+      ) {
+        return sub.metadata.organizationId;
+      }
+    }
+  }
+  return null;
+}
+
 export async function createBillingPortalSession({
   customerId,
 }: {
@@ -781,20 +875,37 @@ export async function getCustomerOpenInvoices(customerId: string) {
 }
 
 /**
- * Validates if the user's subscription is active based on their current tier
- * and the provided subscription details. If the subscription is inactive
- * and the user is not on the "free" tier, their tier is downgraded to "free."
+ * Downgrades a user to Free when their Stripe customer holds no subscription
+ * that still grants access.
+ *
+ * Access lasts while a subscription is active or trialing, and also while it
+ * is `past_due`: a failed renewal opens a grace period in which Stripe keeps
+ * retrying the card and the app asks the user to update their payment method.
+ * The grace period ends when Stripe cancels the subscription or marks it
+ * unpaid after the last retry, or when `invoice.overdue` fires, whichever the
+ * Stripe settings reach first; the add-ons follow the same rule in their
+ * webhook handlers.
+ *
+ * @param args.user - The signed-in user; `skipSubscriptionCheck` exempts them
+ * @param args.customer - The user's Stripe customer with its subscriptions
  */
 export async function validateSubscriptionIsActive({
   user,
-  subscription,
+  customer,
 }: {
   user: Pick<User, "id" | "skipSubscriptionCheck" | "tierId">;
-  subscription: Stripe.Subscription | null;
+  customer: CustomerWithSubscriptions | null;
 }) {
   if (user.skipSubscriptionCheck) return;
 
-  if (!subscription && user.tierId !== "free") {
+  const hasAccess = customer?.subscriptions?.data.some(
+    (sub) =>
+      sub.status === "active" ||
+      sub.status === "trialing" ||
+      sub.status === "past_due"
+  );
+
+  if (!hasAccess && user.tierId !== "free") {
     await updateUserTierId(user.id, "free");
   }
 }

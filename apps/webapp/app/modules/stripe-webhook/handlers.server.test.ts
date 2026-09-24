@@ -5,8 +5,8 @@
  * line items on the tier subscription. Once workspace creation has linked that
  * subscription to an organization, the organization's add-on flags follow the
  * subscription's lifecycle exactly as they do for a standalone add-on
- * subscription: paused or cancelled means off, an item dropped from the
- * subscription means off, and the add-on handlers see every status change.
+ * subscription: paused, cancelled or overdue means off, an item dropped from
+ * the subscription means off, and the add-on handlers see every status change.
  *
  * The event parser runs for real. The Stripe SDK is replaced at the product
  * lookup, so each test states which products the subscription's line items
@@ -70,7 +70,11 @@ vi.mock("stripe", async (importOriginal) => {
   return {
     ...actual,
     default: Object.assign(
-      vi.fn().mockImplementation(() => client),
+      // A `function`, not an arrow: the module calls `new Stripe(...)`, and an
+      // arrow-function mock implementation cannot be called with `new`.
+      vi.fn().mockImplementation(function () {
+        return client;
+      }),
       { errors: actual.default.errors }
     ),
   };
@@ -145,6 +149,11 @@ vi.mock("~/utils/logger", () => ({
 }));
 
 import {
+  fetchStripeSubscription,
+  getInvoiceNotificationData,
+} from "~/utils/stripe.server";
+import {
+  handleInvoiceOverdue,
   handleSubscriptionDeleted,
   handleSubscriptionPaused,
   handleSubscriptionUpdated,
@@ -549,5 +558,94 @@ describe("handleSubscriptionUpdated", () => {
     ).rejects.toBeInstanceOf(Stripe.errors.StripeConnectionError);
 
     expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleInvoiceOverdue", () => {
+  /** The subscription as `fetchStripeSubscription` returns it: products expanded. */
+  function withExpandedProducts(subscription: Stripe.Subscription) {
+    return {
+      ...subscription,
+      items: {
+        data: subscription.items.data.map((item) => ({
+          ...item,
+          plan: { product: PRODUCTS[item.plan.product as string] },
+        })),
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchStripeSubscription>>;
+  }
+
+  function overdueInvoiceEvent() {
+    return {
+      id: "evt_1",
+      type: "invoice.overdue",
+      data: {
+        object: {
+          id: "in_1",
+          parent: { subscription_details: { subscription: "sub_1" } },
+        },
+      },
+    } as unknown as Stripe.Event;
+  }
+
+  beforeEach(() => {
+    vi.mocked(getInvoiceNotificationData).mockResolvedValue({
+      emailsToNotify: [],
+    } as unknown as Awaited<ReturnType<typeof getInvoiceNotificationData>>);
+  });
+
+  it("ends the add-ons bundled on the overdue tier subscription along with the tier", async () => {
+    const subscription = withExpandedProducts(
+      buildSubscription({
+        productIds: [TEAM_PRODUCT, AUDITS_PRODUCT, BARCODES_PRODUCT],
+        status: "past_due",
+      })
+    );
+    vi.mocked(fetchStripeSubscription).mockResolvedValue(subscription);
+
+    await handleInvoiceOverdue(overdueInvoiceEvent(), user, "cus_1");
+
+    for (const handler of [mockAuditAddonWebhook, mockBarcodeAddonWebhook]) {
+      expect(handler).toHaveBeenCalledWith({
+        eventType: "invoice.overdue",
+        subscription,
+        organizationId: "org-1",
+      });
+    }
+    expect(mockUserUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { tierId: TierId.free } })
+    );
+  });
+
+  it("ends an overdue standalone add-on without touching the tier", async () => {
+    const subscription = withExpandedProducts(
+      buildSubscription({ productIds: [AUDITS_PRODUCT], status: "past_due" })
+    );
+    vi.mocked(fetchStripeSubscription).mockResolvedValue(subscription);
+
+    await handleInvoiceOverdue(overdueInvoiceEvent(), user, "cus_1");
+
+    expect(mockAuditAddonWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "invoice.overdue" })
+    );
+    expect(mockBarcodeAddonWebhook).not.toHaveBeenCalled();
+    expect(mockUserUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { tierId: TierId.free } })
+    );
+  });
+
+  it("leaves add-ons that were never linked to a workspace alone", async () => {
+    const subscription = withExpandedProducts(
+      buildSubscription({
+        productIds: [TEAM_PRODUCT, BARCODES_PRODUCT],
+        status: "past_due",
+        metadata: {},
+      })
+    );
+    vi.mocked(fetchStripeSubscription).mockResolvedValue(subscription);
+
+    await handleInvoiceOverdue(overdueInvoiceEvent(), user, "cus_1");
+
+    expect(mockBarcodeAddonWebhook).not.toHaveBeenCalled();
   });
 });

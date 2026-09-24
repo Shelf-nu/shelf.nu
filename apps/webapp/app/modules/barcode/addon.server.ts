@@ -395,6 +395,11 @@ async function barcodesStillCoveredElsewhere(
  * Sets barcodesEnabled and usedBarcodeTrial flags on the Organization.
  * The add-on stays on while another live subscription of the customer still
  * carries it for this workspace.
+ *
+ * The add-on follows the same lapse rules as the tier: a `past_due` renewal
+ * leaves it on, and it is switched off by a pause, a cancellation or an
+ * `invoice.overdue` for the subscription carrying it. Paying that invoice
+ * switches it back on through the `invoice.paid` safety net.
  */
 export async function handleBarcodeAddonWebhook({
   eventType,
@@ -426,6 +431,10 @@ export async function handleBarcodeAddonWebhook({
       break;
     }
     case "customer.subscription.updated": {
+      // A failed renewal keeps the add-on, like it keeps the tier: it ends on
+      // `invoice.overdue` once the overdue window set in Stripe runs out, or
+      // on cancellation if dunning gives up first.
+      if (subscription?.status === "past_due") break;
       const isActive =
         subscription?.status === "active" ||
         subscription?.status === "trialing";
@@ -443,7 +452,8 @@ export async function handleBarcodeAddonWebhook({
       break;
     }
     case "customer.subscription.paused":
-    case "customer.subscription.deleted": {
+    case "customer.subscription.deleted":
+    case "invoice.overdue": {
       if (await barcodesStillCoveredElsewhere(subscription, organizationId)) {
         break;
       }

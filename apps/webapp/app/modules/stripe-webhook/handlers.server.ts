@@ -88,6 +88,50 @@ async function syncBundledAddons({
 }
 
 /**
+ * Switches off the add-ons carried by a subscription whose invoice went
+ * overdue.
+ *
+ * This is the add-on side of the overdue downgrade in `handleInvoiceOverdue`:
+ * a failed renewal (`past_due`) keeps both tier and add-ons, and the overdue
+ * invoice ends both. The add-on handlers still leave a flag on while another
+ * live subscription of the customer carries the add-on for the workspace.
+ *
+ * @param args.eventType - The Stripe event type being handled
+ * @param args.subscription - The subscription the overdue invoice belongs to,
+ *   with its line-item products expanded
+ */
+async function disableAddonsOnOverdueSubscription({
+  eventType,
+  subscription,
+}: {
+  eventType: string;
+  subscription: Stripe.Subscription;
+}) {
+  const organizationId = subscription.metadata?.organizationId;
+  if (!organizationId) return;
+
+  const addonTypes = new Set(
+    subscription.items.data.map((item) => {
+      const product = item.plan.product as Stripe.Product | null;
+      return product?.metadata?.product_type === "addon"
+        ? product.metadata.addon_type
+        : undefined;
+    })
+  );
+
+  if (addonTypes.has("audits")) {
+    await handleAuditAddonWebhook({ eventType, subscription, organizationId });
+  }
+  if (addonTypes.has("barcodes")) {
+    await handleBarcodeAddonWebhook({
+      eventType,
+      subscription,
+      organizationId,
+    });
+  }
+}
+
+/**
  * Switches off the add-ons an update removed from a tier subscription.
  *
  * Stripe lists the pre-update line items in `previous_attributes.items`. An
@@ -1017,7 +1061,7 @@ export async function handleInvoiceOverdue(
     });
   }
 
-  // Downgrade user tier if invoice is for a subscription with a tier
+  // End the tier and the add-ons of the subscription the invoice belongs to
   const subscriptionId =
     overdueInvoice.parent?.subscription_details?.subscription;
   if (subscriptionId) {
@@ -1027,6 +1071,13 @@ export async function handleInvoiceOverdue(
     const product = subscription.items.data[0].plan.product as Stripe.Product;
     const tierId = product?.metadata?.shelf_tier;
     const productType = product?.metadata?.product_type;
+
+    // Add-ons on the overdue subscription end with it, whether they are
+    // bundled on a tier subscription or bought standalone.
+    await disableAddonsOnOverdueSubscription({
+      eventType: event.type,
+      subscription,
+    });
 
     // Only downgrade for non-addon subscription products with a tier
     if (tierId && productType !== "addon") {
