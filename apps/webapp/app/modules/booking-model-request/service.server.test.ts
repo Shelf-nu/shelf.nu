@@ -179,12 +179,12 @@ function installClaimSimulator() {
       // `fulfilledQuantity` on every upsert the suite runs.
       if (sql.includes("FOR UPDATE") && sql.includes('"BookingModelRequest"')) {
         const locked = await (
-          db.bookingModelRequest.findUnique as FindUniqueRequestMock
+          db.bookingModelRequest.findUnique as unknown as FindUniqueRequestMock
         )();
         return locked ? [{ id: locked.id ?? "req-1" }] : [];
       }
       const row = await (
-        db.bookingModelRequest.findUnique as FindUniqueRequestMock
+        db.bookingModelRequest.findUnique as unknown as FindUniqueRequestMock
       )();
       if (!row) return [];
       if (row.fulfilledQuantity >= row.quantity) return [];
@@ -279,7 +279,8 @@ const to = new Date("2026-05-05T18:00:00Z");
 
 /**
  * The `findUnique` mock as this suite drives it: the `$queryRaw` stub calls it
- * with no arguments and mutates the reservation row it resolves to.
+ * with no arguments and mutates the reservation row it resolves to. Cast via
+ * `unknown`: Prisma's generic signature does not overlap this zero-arg shape.
  */
 type FindUniqueRequestMock = Mock<
   () => Promise<{
@@ -623,7 +624,7 @@ describe("upsertBookingModelRequest", () => {
     // `continue` in `assertModelUnitsNotReservedElsewhere`).
     const rowLock = lockOn("BookingModelRequest");
     const readOrder = (
-      db.bookingModelRequest.findUnique as FindUniqueRequestMock
+      db.bookingModelRequest.findUnique as unknown as FindUniqueRequestMock
     ).mock.invocationCallOrder[0];
 
     expect(rowLock).toBeDefined();
@@ -1436,7 +1437,7 @@ describe("removeBookingModelRequest", () => {
     // provenance this guard exists to keep.
     const rowLock = lockOn("BookingModelRequest");
     const readOrder = (
-      db.bookingModelRequest.findUnique as FindUniqueRequestMock
+      db.bookingModelRequest.findUnique as unknown as FindUniqueRequestMock
     ).mock.invocationCallOrder[0];
 
     expect(rowLock).toBeDefined();
