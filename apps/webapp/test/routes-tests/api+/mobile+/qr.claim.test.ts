@@ -133,7 +133,8 @@ describe("POST /api/mobile/qr/claim", () => {
     vi.mocked(claimQrCode).mockRejectedValue(
       new ShelfError({
         cause: null,
-        message: "Failed to claim qr code",
+        message:
+          "This QR code already belongs to an organization so you cannot claim it.",
         label: "QR",
         status: 403,
       })
@@ -142,7 +143,9 @@ describe("POST /api/mobile/qr/claim", () => {
     const { body, status } = await callAction({ qrId: "qr-1" });
 
     expect(status).toBe(403);
-    expect(body.error?.message).toBe("Failed to claim qr code");
+    expect(body.error?.message).toBe(
+      "This QR code already belongs to an organization so you cannot claim it."
+    );
   });
 
   it("returns 400 for a body without a qrId", async () => {

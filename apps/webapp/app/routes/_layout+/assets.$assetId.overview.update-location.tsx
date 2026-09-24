@@ -25,6 +25,7 @@ import {
   payload,
 } from "~/utils/http.server";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import {
   PermissionAction,
   PermissionEntity,
@@ -229,6 +230,7 @@ export default function Custody() {
                   id="newLocationQuantity"
                   name="newLocationQuantity"
                   type="number"
+                  {...numberInputWheelGuard}
                   min={1}
                   max={max}
                   value={quantity}

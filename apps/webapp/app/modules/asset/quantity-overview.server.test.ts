@@ -66,7 +66,11 @@ describe("buildQuantityData", () => {
       bookable: -4,
     });
 
-    const quantityData = buildQuantityData({ availability, inLocations: 0 });
+    const quantityData = buildQuantityData({
+      availability,
+      inLocations: 0,
+      inLocationsManual: 0,
+    });
 
     // The old inline formula (`total - inKits - custody - reserved -
     // checkedOut`) would have reported `10 - 0 - 0 - 14 - 0 = -4` here —
@@ -81,7 +85,11 @@ describe("buildQuantityData", () => {
   it("keeps `available` and `custodyAvailable` numerically converged (both source physicalAvailable)", () => {
     const availability = makeAvailability({ physicalAvailable: 7 });
 
-    const quantityData = buildQuantityData({ availability, inLocations: 0 });
+    const quantityData = buildQuantityData({
+      availability,
+      inLocations: 0,
+      inLocationsManual: 0,
+    });
 
     expect(quantityData.available).toBe(7);
     expect(quantityData.custodyAvailable).toBe(7);
@@ -96,7 +104,11 @@ describe("buildQuantityData", () => {
       physicalAvailable: 16,
     });
 
-    const quantityData = buildQuantityData({ availability, inLocations: 9 });
+    const quantityData = buildQuantityData({
+      availability,
+      inLocations: 9,
+      inLocationsManual: 9,
+    });
 
     expect(quantityData.total).toBe(25);
     expect(quantityData.inCustody).toBe(3);
@@ -109,7 +121,11 @@ describe("buildQuantityData", () => {
   it("reports zero reservations/count when nothing is reserved", () => {
     const availability = makeAvailability();
 
-    const quantityData = buildQuantityData({ availability, inLocations: 0 });
+    const quantityData = buildQuantityData({
+      availability,
+      inLocations: 0,
+      inLocationsManual: 0,
+    });
 
     expect(quantityData.reserved).toBe(0);
     expect(quantityData.reservingBookingCount).toBe(0);

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -21,10 +21,22 @@ import {
   type AuditExpectedAsset,
   type AuditScanData,
   type AuditAssetStatus,
+  type AuditEvidenceResponse,
+  type AuditEvidenceNote,
+  type AuditEvidenceImage,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import { EvidenceViewer } from "@/components/audit/evidence-viewer";
+import {
+  AUDIT_ASSET_STATUS_LABELS,
+  AUDIT_STATUS_LABELS,
+  AUDIT_UNASSIGNED_LABELS,
+  auditAssetStatusLabel,
+  auditDeletedAssetLabel,
+  isAuditCompleted,
+} from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -35,32 +47,59 @@ import { useReducedMotion, announce } from "@/lib/a11y";
 
 const ASSET_FILTERS = [
   { label: "All", value: "ALL" },
-  { label: "Pending", value: "PENDING" },
-  { label: "Found", value: "FOUND" },
-  { label: "Missing", value: "MISSING" },
-  { label: "Unexpected", value: "UNEXPECTED" },
+  { label: AUDIT_ASSET_STATUS_LABELS.PENDING, value: "PENDING" },
+  { label: AUDIT_ASSET_STATUS_LABELS.FOUND, value: "FOUND" },
+  { label: AUDIT_ASSET_STATUS_LABELS.MISSING, value: "MISSING" },
+  { label: AUDIT_ASSET_STATUS_LABELS.UNEXPECTED, value: "UNEXPECTED" },
 ] as const;
 
 type AssetFilterValue = (typeof ASSET_FILTERS)[number]["value"];
 
 /**
- * Whether an asset-status filter is meaningful for an audit in the given
- * session status. A live (PENDING/ACTIVE) audit has Pending items but no
- * Missing ones; a COMPLETED audit is the reverse. Shared by the filter pills
- * and the derived `effectiveFilter` (which clamps a now-hidden selection) so
- * the visible pills and the applied filter never drift.
+ * What the list says when a filter matches nothing.
+ *
+ * why a per-filter phrase and not `No ${label.toLowerCase()} assets`: that
+ * template read "No not scanned assets" for the PENDING pill — and PENDING is
+ * the pill a field worker lands on at the END of every audit, when everything
+ * has been scanned. The other filters happened to survive the template, which
+ * is exactly why it went unnoticed. Wording mirrors the web's
+ * `getAuditFilterMetadata` empty states.
+ */
+const ASSET_FILTER_EMPTY_TEXT: Record<AssetFilterValue, string> = {
+  ALL: "No assets in this audit",
+  PENDING: "Nothing left to scan",
+  FOUND: "No assets found yet",
+  MISSING: "No missing assets",
+  UNEXPECTED: "No unexpected assets",
+};
+
+/**
+ * Whether an asset-status filter is meaningful for the given audit. An audit
+ * that has not been CONCLUDED has "Not scanned" items but no Missing ones; a
+ * completed one is the reverse. Shared by the filter pills and the derived
+ * `effectiveFilter` (which clamps a now-hidden selection) so the visible pills
+ * and the applied filter never drift.
  *
  * @param value - the filter being considered
- * @param status - the audit session status
+ * @param audit - the audit session, read for its `completedAt` only
  * @returns true if the filter should be shown / is a valid selection
  */
 function isAssetFilterVisible(
   value: AssetFilterValue,
-  status: string
+  audit: { completedAt: string | null }
 ): boolean {
-  const active = status === "PENDING" || status === "ACTIVE";
-  const completed = status === "COMPLETED";
-  return value === "MISSING" ? completed : value === "PENDING" ? active : true;
+  // why: BOTH branches read `completedAt`, never the status, so the pills can
+  // never disagree with the rows. `displayAssets` classifies an unscanned asset
+  // as PENDING exactly when `completedAt` is null, so gating the pill on
+  // status PENDING/ACTIVE hid it on an archived-cancelled audit that was still
+  // showing "Not scanned" rows under All. Archiving a completed audit has the
+  // mirror problem: the status changes but those assets are still missing.
+  const isCompleted = isAuditCompleted(audit);
+  return value === "MISSING"
+    ? isCompleted
+    : value === "PENDING"
+    ? !isCompleted
+    : true;
 }
 
 // ── Combined asset type for display ─────────────────────
@@ -70,8 +109,13 @@ type DisplayAsset = {
   name: string;
   mainImage: string | null;
   status: AuditAssetStatus;
-  isExpected: boolean;
   scannedAt: string | null;
+  /**
+   * The code that was scanned. Kept for rows whose asset has been deleted:
+   * with the asset gone this and the snapshotted title are all that survive,
+   * and the code is what matches a physical label. Null for ordinary rows.
+   */
+  scannedCode: string | null;
   /**
    * Context the field worker needs DURING the audit. All nullable —
    * server may omit when unknown (e.g. asset has no location set, asset
@@ -80,6 +124,18 @@ type DisplayAsset = {
   locationName: string | null;
   categoryName: string | null;
   custodianName: string | null;
+  /**
+   * The audit-asset row id, which keys this asset's evidence in the
+   * `byAuditAsset` payload.
+   *
+   * Carried for every EXPECTED asset, scanned or not — evidence can be
+   * attached without a scan. Null only for an unexpected asset the payload has
+   * no expected row for.
+   */
+  auditAssetId: string | null;
+  /** Counts from the detail payload — what the row advertises before any fetch. */
+  notesCount: number;
+  imagesCount: number;
 };
 
 const auditAssetKeyExtractor = (item: DisplayAsset) => item.id;
@@ -98,6 +154,168 @@ function AuditDetailContent() {
   const { currentOrg } = useOrg();
   const { colors, auditStatusBadge, auditAssetStatusBadge } = useTheme();
   const { formatDateTime } = useDateFormatter();
+
+  // ── Evidence (notes + photos recorded on this audit) ──
+  //
+  // why a separate fetch: this is the heavy half (image URLs, note bodies,
+  // authors) and is only wanted once someone opens a row, so the detail
+  // payload stays cheap.
+  //
+  // Re-fetched on every open, NOT cached for the life of the screen. The
+  // first version cached it on the reasoning that "a completed audit's
+  // evidence cannot change" — true of a completed one, but this screen also
+  // serves ACTIVE audits, where the same person adds a photo and reopens the
+  // sheet seconds later. They would have been shown the set from before their
+  // own upload, with the row's count already disagreeing with it.
+  //
+  // Stale-while-revalidate: whatever was loaded stays on screen during the
+  // refetch, so reopening a sheet never flashes empty.
+  const [evidence, setEvidence] = useState<AuditEvidenceResponse | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [openEvidence, setOpenEvidence] = useState<{
+    auditAssetId: string | null;
+    name: string;
+  } | null>(null);
+
+  /**
+   * Which audit, in which workspace, the loaded evidence belongs to.
+   *
+   * why this is not optional: evidence is workspace data. Without it, cached
+   * notes and photos survive a switch to another audit or another
+   * organization and are shown under the new one — and a request started
+   * before the switch can land after it and overwrite the new context with
+   * the old one's rows. Both are cross-workspace disclosure, not just a
+   * stale-cache annoyance.
+   */
+  const evidenceContext =
+    currentOrg?.id && id ? `${currentOrg.id}:${id}` : null;
+
+  /**
+   * The evidence requests currently in the air, one entry per target.
+   *
+   * Does three jobs, which is why it is a map and not a flag:
+   *
+   * - **Dedupe.** A target already present is not fetched again.
+   * - **Staleness.** A reply is applied only if its own controller is still
+   *   the one registered for its target. Changing audit or workspace clears
+   *   the map, so every reply in the air at that moment is discarded.
+   * - **Cancellation.** Changing context or leaving the screen aborts the
+   *   requests themselves, not merely their results — this screen survives a
+   *   trip to the scanner, so an abandoned socket would otherwise stay open.
+   *
+   * Keyed by TARGET, never a single slot: concurrent fetches for different
+   * rows are deliberate, and a shared key makes the older reply look stale, so
+   * row A's evidence is thrown away whenever someone opens row B first.
+   *
+   * A ref, not state, so it cannot itself trigger a render or read stale
+   * inside the callback.
+   */
+  const evidenceAborts = useRef(new Map<string, AbortController>());
+
+  // Drop everything the moment the context changes, before any render can
+  // show it. Clearing on arrival would be too late: the sheet would paint the
+  // previous workspace's rows for a frame first.
+  useEffect(() => {
+    setEvidence(null);
+    setEvidenceError(null);
+    setEvidenceLoading(false);
+    evidenceAborts.current.forEach((controller) => controller.abort());
+    evidenceAborts.current.clear();
+  }, [evidenceContext]);
+
+  // Nothing in flight should outlive the screen.
+  useEffect(() => {
+    const inFlight = evidenceAborts.current;
+    return () => {
+      inFlight.forEach((controller) => controller.abort());
+      inFlight.clear();
+    };
+  }, []);
+
+  /**
+   * Loads the evidence for ONE target: a single audited asset, or the audit
+   * itself when `auditAssetId` is null.
+   *
+   * Scoped rather than audit-wide because the sheet shows one target at a
+   * time. An audit-wide fetch returns every note and photo in the audit, so a
+   * large audit would move thousands of rows on each open, over whatever
+   * connection a stockroom has.
+   *
+   * Results merge into what is already held rather than replacing it, so
+   * reopening a row keeps the rest of what has been loaded.
+   */
+  const loadEvidence = useCallback(
+    async (auditAssetId: string | null) => {
+      if (!currentOrg?.id || !id || !evidenceContext) return;
+      // One fetch per target at a time; a fetch for a DIFFERENT target is
+      // never blocked, nor discarded, by an older one still in flight.
+      const requestFor = `${evidenceContext}:${auditAssetId ?? "general"}`;
+      if (evidenceAborts.current.has(requestFor)) return;
+      const controller = new AbortController();
+      evidenceAborts.current.set(requestFor, controller);
+      // Only show the spinner when there is nothing to show yet — on a refetch
+      // the previous evidence stays put underneath.
+      setEvidence((current) => {
+        if (!current) setEvidenceLoading(true);
+        return current;
+      });
+      setEvidenceError(null);
+      const { data, error } = await api.auditEvidence(
+        id,
+        currentOrg.id,
+        controller.signal,
+        auditAssetId
+      );
+      // Still ours? Only a context change clears the map, so this is the
+      // staleness test. Read it BEFORE releasing the entry, and release
+      // unconditionally — a reply that returns early still has to drop its
+      // controller or the map grows by one per superseded request.
+      const isCurrent = evidenceAborts.current.get(requestFor) === controller;
+      if (isCurrent) evidenceAborts.current.delete(requestFor);
+      if (!isCurrent) return;
+      if (error) setEvidenceError(error);
+      else if (data) {
+        setEvidence((current) => ({
+          general:
+            auditAssetId === null
+              ? data.general
+              : current?.general ?? { notes: [], images: [] },
+          byAuditAsset: {
+            ...(current?.byAuditAsset ?? {}),
+            ...data.byAuditAsset,
+          },
+        }));
+      }
+      // Only when nothing else is still loading, or a fast reply for one row
+      // would clear the spinner another row is still waiting behind.
+      if (evidenceAborts.current.size === 0) setEvidenceLoading(false);
+    },
+    [currentOrg?.id, id, evidenceContext]
+  );
+
+  /** Opens the viewer for one asset, or for the audit itself (`null`). */
+  const onEvidencePress = useCallback(
+    (target: { auditAssetId: string | null; name: string }) => {
+      setOpenEvidence(target);
+      void loadEvidence(target.auditAssetId);
+    },
+    [loadEvidence]
+  );
+
+  const openEvidenceBucket: {
+    notes: AuditEvidenceNote[];
+    images: AuditEvidenceImage[];
+  } = (() => {
+    if (!evidence || !openEvidence) return { notes: [], images: [] };
+    if (openEvidence.auditAssetId === null) return evidence.general;
+    return (
+      evidence.byAuditAsset[openEvidence.auditAssetId] ?? {
+        notes: [],
+        images: [],
+      }
+    );
+  })();
   const styles = useStyles();
 
   // ── State ──────────────────────────────────────────────
@@ -126,9 +344,7 @@ function AuditDetailContent() {
   // the `audit` object identity). When the filter becomes valid again the
   // selection naturally reapplies. (Codex + DonKoko review, PR #2583.)
   const effectiveFilter: AssetFilterValue =
-    audit && isAssetFilterVisible(assetFilter, audit.status)
-      ? assetFilter
-      : "ALL";
+    audit && isAssetFilterVisible(assetFilter, audit) ? assetFilter : "ALL";
 
   // Progress bar animation
   const reduceMotion = useReducedMotion();
@@ -268,7 +484,10 @@ function AuditDetailContent() {
 
   // ── Build display assets list ─────────────────────────
 
-  const displayAssets = useCallback((): DisplayAsset[] => {
+  // Memoised rather than a callback: both the list and the header count read
+  // this every render, so a function would rebuild the whole expected+scan
+  // merge twice per keystroke, filter tap and refresh tick.
+  const displayAssets = useMemo((): DisplayAsset[] => {
     if (!audit) return [];
 
     // Build a map of scanned assets by assetId
@@ -277,13 +496,17 @@ function AuditDetailContent() {
       scanMap.set(scan.assetId, scan);
     }
 
-    // why: an expected asset that hasn't been scanned is "Pending" while the
+    // why: an expected asset that hasn't been scanned is "Not scanned" while the
     // audit is still active (the field worker may yet find it) but becomes
     // "Missing" once the audit is completed (it's a real discrepancy). This
-    // mirrors the unified web + companion vocabulary — "Missing" is reserved
-    // for completed audits, never shown mid-scan.
-    const notFoundStatus: AuditAssetStatus =
-      audit.status === "COMPLETED" ? "MISSING" : "PENDING";
+    // mirrors the unified web + companion vocabulary (@shelf/labels) — "Missing"
+    // is reserved for completed audits, never shown mid-scan.
+    // why: `completedAt`, not `status === "COMPLETED"` — archiving a completed
+    // audit switches the status to ARCHIVED while keeping the completion
+    // timestamp, and those assets are still genuinely missing.
+    const notFoundStatus: AuditAssetStatus = isAuditCompleted(audit)
+      ? "MISSING"
+      : "PENDING";
 
     const items: DisplayAsset[] = [];
 
@@ -295,11 +518,19 @@ function AuditDetailContent() {
         name: asset.name,
         mainImage: asset.thumbnailImage || asset.mainImage,
         status: scan ? "FOUND" : notFoundStatus,
-        isExpected: true,
         scannedAt: scan?.scannedAt || null,
+        scannedCode: null,
         locationName: asset.locationName ?? null,
         categoryName: asset.categoryName ?? null,
         custodianName: asset.custodianName ?? null,
+        // Read the EXPECTED asset first, the scan only as a fallback. Evidence
+        // does not require a scan — an auditor can photograph an empty shelf
+        // from the web — so sourcing these from the scan alone left a row with
+        // notes or photos looking empty and refusing to open. Both come from
+        // the same `AuditAsset._count`, so a scanned row is unchanged.
+        auditAssetId: asset.auditAssetId ?? scan?.auditAssetId ?? null,
+        notesCount: asset.auditNotesCount ?? scan?.auditNotesCount ?? 0,
+        imagesCount: asset.auditImagesCount ?? scan?.auditImagesCount ?? 0,
       });
     }
 
@@ -307,13 +538,42 @@ function AuditDetailContent() {
     const expectedIds = new Set(expectedAssets.map((a) => a.id));
     for (const scan of existingScans) {
       if (!expectedIds.has(scan.assetId)) {
+        /**
+         * A scan with no matching expected row: either an asset that is not
+         * part of the audit, or one that has since been DELETED.
+         *
+         * Deleting an asset cascades away its AuditAsset row and SetNulls the
+         * scan's asset, so the scan survives pointing at nothing and can never
+         * match the expected list. `assetDeleted` is what tells the two apart —
+         * an empty title cannot, because a scan recorded before the title was
+         * captured by value looks the same. Older servers omit the flag, so an
+         * empty `assetId` stands in for it.
+         */
+        const isDeletedAsset = scan.assetDeleted || !scan.assetId;
+        const snapshotTitle = scan.assetTitle?.trim();
         items.push({
-          id: scan.assetId,
-          name: scan.assetTitle,
+          // A deleted asset's `assetId` is empty, so every such row would share
+          // one key and collide in the list's keyExtractor. The scan ROW id is
+          // the identity that survives the asset; `code` is nullable and
+          // non-unique and `scannedAt` can collide, so they are a last resort
+          // for servers that do not send the id. `||`, not `??`: the server
+          // flattens a null code to "", which is not nullish and would swallow
+          // the remaining fallback.
+          id: isDeletedAsset
+            ? `deleted:${scan.id || scan.code || scan.scannedAt}`
+            : scan.assetId,
+          name: isDeletedAsset
+            ? auditDeletedAssetLabel(snapshotTitle)
+            : snapshotTitle || "Untitled asset",
           mainImage: null,
-          status: "UNEXPECTED",
-          isExpected: false,
+          // Expectedness comes from the server, never from membership of the
+          // expected list: a deleted asset always lands in this branch, and the
+          // server restores whether it belonged to the audit from the scan's
+          // own snapshot. Deciding it here would report every deleted asset as
+          // unexpected, contradicting the activity feed.
+          status: scan.isExpected ? "FOUND" : "UNEXPECTED",
           scannedAt: scan.scannedAt,
+          scannedCode: isDeletedAsset ? scan.code || null : null,
           // why: the scan payload carries the asset's location
           // (getAuditScans selects asset.location.name). Category and
           // custody are not fetched for scan records, so they stay null —
@@ -321,6 +581,9 @@ function AuditDetailContent() {
           locationName: scan.assetLocationName,
           categoryName: null,
           custodianName: null,
+          auditAssetId: scan.auditAssetId,
+          notesCount: scan.auditNotesCount,
+          imagesCount: scan.auditImagesCount,
         });
       }
     }
@@ -328,13 +591,11 @@ function AuditDetailContent() {
     return items;
   }, [audit, expectedAssets, existingScans]);
 
-  const filteredAssets = useCallback((): DisplayAsset[] => {
-    const all = displayAssets();
-    if (effectiveFilter === "ALL") return all;
-    // Statuses are now computed correctly per audit state (PENDING while
-    // active, MISSING once completed), so a direct match is unambiguous —
-    // no more Pending/Missing aliasing.
-    return all.filter((a) => a.status === effectiveFilter);
+  const filteredAssets = useMemo((): DisplayAsset[] => {
+    if (effectiveFilter === "ALL") return displayAssets;
+    // Status encodes the audit state (PENDING while active, MISSING once
+    // completed), so a direct match is unambiguous.
+    return displayAssets.filter((a) => a.status === effectiveFilter);
   }, [displayAssets, effectiveFilter]);
 
   // ── Render functions ──────────────────────────────────
@@ -346,14 +607,9 @@ function AuditDetailContent() {
         text: colors.muted,
       };
 
-      const statusLabel =
-        item.status === "FOUND"
-          ? "Found"
-          : item.status === "PENDING"
-          ? "Pending"
-          : item.status === "MISSING"
-          ? "Missing"
-          : "Unexpected";
+      // Status already encodes the audit state (PENDING while active, MISSING
+      // once completed), so the label map can be read directly.
+      const statusLabel = AUDIT_ASSET_STATUS_LABELS[item.status];
 
       // why: surfacing location / category / custodian inline removes
       // the field worker's reason to navigate away from the audit. Each
@@ -376,10 +632,49 @@ function AuditDetailContent() {
           text: `with ${item.custodianName}`,
         });
       }
+      // why: a deleted asset has no location, category or custodian left. The
+      // scanned code is what matches a physical label or finds the row in the
+      // activity feed, so it takes the meta line those would have used.
+      if (item.scannedCode) {
+        metaParts.push({ icon: "qr-code-outline", text: item.scannedCode });
+      }
+
+      // why: evidence is the ONE thing on this card worth opening. Everything
+      // else (image, name, location, category, custodian, status) is already
+      // shown, which is why the card is otherwise inert — see the note below.
+      // why two numbers and not their sum: see scanned-items-list.tsx. The
+      // sum changes for identical evidence depending on whether the auditor
+      // typed a caption, so it cannot be compared between rows.
+      const noteCount = item.notesCount;
+      const photoCount = item.imagesCount;
+      const hasEvidence =
+        (noteCount > 0 || photoCount > 0) && item.auditAssetId !== null;
+      const evidenceLabel = [
+        noteCount > 0
+          ? `${noteCount} ${noteCount === 1 ? "note" : "notes"}`
+          : null,
+        photoCount > 0
+          ? `${photoCount} ${photoCount === 1 ? "photo" : "photos"}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      const Card = hasEvidence ? TouchableOpacity : View;
 
       return (
-        <View
+        <Card
           style={styles.assetCard}
+          {...(hasEvidence
+            ? {
+                onPress: () =>
+                  onEvidencePress({
+                    auditAssetId: item.auditAssetId as string,
+                    name: item.name,
+                  }),
+                activeOpacity: 0.7,
+                accessibilityRole: "button" as const,
+              }
+            : { accessibilityRole: "summary" as const })}
           // why: React Native 0.81 treats a plain View as a container,
           // so VoiceOver/TalkBack would announce each child Text node
           // separately. `accessible` collapses the subtree into one
@@ -390,8 +685,10 @@ function AuditDetailContent() {
             item.name,
             statusLabel,
             ...metaParts.map((p) => p.text),
-          ].join(", ")}
-          accessibilityRole="summary"
+            hasEvidence ? `${evidenceLabel}, tap to view` : null,
+          ]
+            .filter(Boolean)
+            .join(", ")}
         >
           {/*
             why: the previous `router.push('/(tabs)/assets/...)' from
@@ -442,16 +739,44 @@ function AuditDetailContent() {
             )}
           </View>
 
-          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-            <View style={[styles.statusDot, { backgroundColor: badge.text }]} />
-            <Text style={[styles.statusText, { color: badge.text }]}>
-              {statusLabel}
-            </Text>
+          <View style={styles.assetRight}>
+            <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+              <View
+                style={[styles.statusDot, { backgroundColor: badge.text }]}
+              />
+              <Text style={[styles.statusText, { color: badge.text }]}>
+                {statusLabel}
+              </Text>
+            </View>
+            {hasEvidence ? (
+              <View style={styles.evidenceChip}>
+                {noteCount > 0 ? (
+                  <>
+                    <Ionicons
+                      name="chatbubble-outline"
+                      size={12}
+                      color={colors.primaryText}
+                    />
+                    <Text style={styles.evidenceChipText}>{noteCount}</Text>
+                  </>
+                ) : null}
+                {photoCount > 0 ? (
+                  <>
+                    <Ionicons
+                      name="image-outline"
+                      size={12}
+                      color={colors.primaryText}
+                    />
+                    <Text style={styles.evidenceChipText}>{photoCount}</Text>
+                  </>
+                ) : null}
+              </View>
+            ) : null}
           </View>
-        </View>
+        </Card>
       );
     },
-    [colors, auditAssetStatusBadge, styles, formatDateTime]
+    [colors, auditAssetStatusBadge, styles, formatDateTime, onEvidencePress]
   );
 
   // ── Loading / Error states ────────────────────────────
@@ -488,7 +813,9 @@ function AuditDetailContent() {
   };
 
   const isActive = audit.status === "PENDING" || audit.status === "ACTIVE";
-  const isCompleted = audit.status === "COMPLETED";
+  // Completion provenance survives archiving; the status does not. See
+  // `notFoundStatus` above.
+  const isCompleted = isAuditCompleted(audit);
   const progress =
     audit.expectedAssetCount > 0
       ? audit.foundAssetCount / audit.expectedAssetCount
@@ -504,7 +831,7 @@ function AuditDetailContent() {
   // Shares `isAssetFilterVisible` with the derived `effectiveFilter` above so
   // the visible pills and the applied selection can never disagree.
   const visibleFilters = ASSET_FILTERS.filter((f) =>
-    isAssetFilterVisible(f.value, audit.status)
+    isAssetFilterVisible(f.value, audit)
   );
 
   const isOverdue =
@@ -514,16 +841,13 @@ function AuditDetailContent() {
     .filter(Boolean)
     .join(" ");
 
+  // why: read from the shared map rather than a chain that fell through to
+  // "Cancelled" — an ARCHIVED audit was labelled Cancelled on this screen.
   const statusLabel =
-    audit.status === "PENDING"
-      ? "Pending"
-      : audit.status === "ACTIVE"
-      ? "Active"
-      : audit.status === "COMPLETED"
-      ? "Completed"
-      : "Cancelled";
+    AUDIT_STATUS_LABELS[audit.status as keyof typeof AUDIT_STATUS_LABELS] ??
+    audit.status;
 
-  const assets = filteredAssets();
+  const assets = filteredAssets;
 
   // ── Render ────────────────────────────────────────────
 
@@ -662,9 +986,14 @@ function AuditDetailContent() {
                         // The leading icon keeps the brighter `primary`.
                         { color: colors.primaryText, fontWeight: "600" },
                       ]}
-                      numberOfLines={1}
+                      // why: the ownership line is the one place that states
+                      // WHO may act on an unassigned audit, so let it wrap
+                      // rather than truncate — it names both permitted roles
+                      // (see AUDIT_UNASSIGNED_LABELS) and that does not fit on
+                      // one line on a narrow device.
+                      numberOfLines={2}
                     >
-                      Unassigned · anyone can scan
+                      {AUDIT_UNASSIGNED_LABELS.SHORT}
                     </Text>
                   )}
                 </View>
@@ -695,6 +1024,40 @@ function AuditDetailContent() {
                       {formatDateTime(audit.completedAt)}
                     </Text>
                   </View>
+                )}
+
+                {/*
+                  why: the completion note and any photos attached when the
+                  audit closed are about the audit as a whole, so they belong
+                  with its details rather than on any one asset row. Shown
+                  once completed — before that there is nothing to read.
+                */}
+                {isCompleted && (
+                  <TouchableOpacity
+                    style={styles.auditEvidenceRow}
+                    onPress={() =>
+                      onEvidencePress({
+                        auditAssetId: null,
+                        name: "Completion notes and photos",
+                      })
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel="View the completion notes and photos for this audit"
+                  >
+                    <Ionicons
+                      name="document-attach-outline"
+                      size={15}
+                      color={colors.primaryText}
+                    />
+                    <Text style={styles.auditEvidenceText}>
+                      Completion notes and photos
+                    </Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={15}
+                      color={colors.muted}
+                    />
+                  </TouchableOpacity>
                 )}
               </View>
             </View>
@@ -755,7 +1118,11 @@ function AuditDetailContent() {
                     ]}
                   />
                   <Text style={styles.heroStatText}>
-                    {notFoundCount} {isCompleted ? "missing" : "pending"}
+                    {notFoundCount}{" "}
+                    {auditAssetStatusLabel(
+                      "PENDING",
+                      isCompleted
+                    ).toLowerCase()}
                   </Text>
                 </View>
                 {audit.unexpectedAssetCount > 0 ? (
@@ -829,7 +1196,7 @@ function AuditDetailContent() {
             {/* Asset filter pills */}
             <View style={styles.assetFilterSection}>
               <Text style={styles.sectionTitle}>
-                Assets ({displayAssets().length})
+                Assets ({displayAssets.length})
               </Text>
               <View style={styles.filterRow} accessibilityRole="tablist">
                 {visibleFilters.map((f) => (
@@ -872,12 +1239,24 @@ function AuditDetailContent() {
               color={colors.border}
             />
             <Text style={styles.emptyListText}>
-              {effectiveFilter === "ALL"
-                ? "No assets in this audit"
-                : `No ${effectiveFilter.toLowerCase()} assets`}
+              {ASSET_FILTER_EMPTY_TEXT[effectiveFilter]}
             </Text>
           </View>
         }
+      />
+
+      <EvidenceViewer
+        visible={openEvidence !== null}
+        onClose={() => setOpenEvidence(null)}
+        title={openEvidence?.name ?? ""}
+        notes={openEvidenceBucket.notes}
+        images={openEvidenceBucket.images}
+        isLoading={evidenceLoading}
+        error={evidenceError}
+        onRetry={() => {
+          setEvidenceError(null);
+          void loadEvidence(openEvidence?.auditAssetId ?? null);
+        }}
       />
     </View>
   );
@@ -976,6 +1355,25 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.sm,
     fontWeight: "600",
   },
+  assetRight: {
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  auditEvidenceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
+    marginTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  auditEvidenceText: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.primaryText,
+  },
   statusBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -983,6 +1381,23 @@ const useStyles = createStyles((colors, shadows) => ({
     paddingVertical: 2,
     borderRadius: borderRadius.pill,
     gap: 4,
+  },
+  evidenceChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.primaryBg,
+  },
+  evidenceChipText: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    // why: `primaryText`, not `primary` — the brand orange is ~3.1:1 on
+    // white and fails the 4.5:1 text bar; `primaryText` is its accessible
+    // twin, the same pairing the rest of the app uses for orange labels.
+    color: colors.primaryText,
   },
   statusDot: {
     width: 6,

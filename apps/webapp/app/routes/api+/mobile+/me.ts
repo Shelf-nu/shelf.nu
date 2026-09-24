@@ -14,11 +14,13 @@ import { makeShelfError } from "~/utils/error";
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
-    const organizations = await getUserOrganizations(user.id);
+    const { organizations, lastSelectedOrganizationId } =
+      await getUserOrganizations(user.id);
 
     return data({
       user,
       organizations,
+      lastSelectedOrganizationId,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

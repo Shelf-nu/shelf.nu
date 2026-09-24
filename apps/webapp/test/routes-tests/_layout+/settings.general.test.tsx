@@ -5,6 +5,7 @@ import { createLoaderArgs, createActionArgs } from "@mocks/remix";
 import { db } from "~/database/db.server";
 import {
   getOrganizationAdmins,
+  transferOwnership,
   updateOrganization,
 } from "~/modules/organization/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
@@ -566,6 +567,92 @@ describe("settings.general action", () => {
     // Should allow hiding branding (Plus tier on personal workspace)
     expect(updateOrganizationMock).toHaveBeenCalledWith(
       expect.objectContaining({ showShelfBranding: false })
+    );
+  });
+});
+
+describe("settings.general transfer-ownership authorization", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    getOrganizationTierLimitMock.mockResolvedValue({
+      id: "tier_2",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      canImportAssets: true,
+      canExportAssets: true,
+      canImportNRM: true,
+      canHideShelfBranding: true,
+      maxCustomFields: 0,
+      maxOrganizations: 1,
+    } as any);
+    canHideShelfBrandingMock.mockReturnValue(true);
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
+  });
+
+  /** Builds the POST body an attacker would hand-craft */
+  function transferRequest() {
+    const body = new URLSearchParams();
+    body.append("intent", "transfer-ownership");
+    body.append("newOwner", "user-2");
+    body.append("agreeConditions", "on");
+
+    return new Request("http://localhost/settings/general", {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+  }
+
+  function mockRole(role: OrganizationRoles) {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: baseOrganization(),
+      role,
+      organizations: [baseOrganization()],
+      isSelfServiceOrBase: false,
+      userOrganizations: [],
+      canSeeAllBookings: true,
+      canSeeAllCustody: true,
+      canUseBarcodes: false,
+    } as any);
+  }
+
+  it("rejects a direct POST from a workspace ADMIN", async () => {
+    // ADMIN passes requirePermission — ADMIN and OWNER share every permission —
+    // so only the explicit role check in the action can stop this.
+    mockRole(OrganizationRoles.ADMIN);
+
+    const response = (await action(
+      createActionArgs({
+        context: mockContext,
+        request: transferRequest(),
+        params: {},
+      })
+      // The action funnels thrown ShelfErrors through `data(error(reason), {
+      // status })`, which returns a DataWithResponseInit rather than a Response.
+    )) as { init?: { status?: number } };
+
+    expect(response.init?.status).toBe(403);
+    expect(transferOwnership).not.toHaveBeenCalled();
+  });
+
+  it("allows the OWNER to transfer ownership", async () => {
+    mockRole(OrganizationRoles.OWNER);
+    vi.mocked(transferOwnership).mockResolvedValue({
+      newOwner: { id: "user-2", email: "new@example.com" },
+    } as any);
+
+    await action(
+      createActionArgs({
+        context: mockContext,
+        request: transferRequest(),
+        params: {},
+      })
+    );
+
+    expect(transferOwnership).toHaveBeenCalledWith(
+      expect.objectContaining({ newOwnerId: "user-2" })
     );
   });
 });

@@ -80,6 +80,43 @@ describe("AssetCodeBadge", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not tell a kit to add a SAM ID it cannot have", () => {
+    // why: `Kit` has no `sequentialId` column and no UI to set one, so the
+    // generic fallback body — "this item has no SAM ID. Add one … to fix" —
+    // is an instruction nobody can follow. An impossible instruction reads as
+    // the reader's fault rather than a product gap.
+    renderWithTooltip(
+      <AssetCodeBadge
+        value="kit-qr-1"
+        type="QR_ID"
+        isFallback={true}
+        workspacePreference="SAM_ID"
+        entityKind="kit"
+      />
+    );
+
+    expect(
+      screen.getByLabelText(/which kits do not have/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Add one/i)).toBeNull();
+  });
+
+  it("still tells an ASSET to add the missing code", () => {
+    // why: an asset genuinely can be given a SAM ID, so the actionable
+    // wording must survive for it. This is the pair that stops the kit
+    // branch swallowing the useful case.
+    renderWithTooltip(
+      <AssetCodeBadge
+        value="asset-qr-1"
+        type="QR_ID"
+        isFallback={true}
+        workspacePreference="SAM_ID"
+      />
+    );
+
+    expect(screen.getByLabelText(/Add one/i)).toBeInTheDocument();
+  });
+
   it("collapses tooltip to type:value form when explicit=true", () => {
     renderWithTooltip(
       <AssetCodeBadge

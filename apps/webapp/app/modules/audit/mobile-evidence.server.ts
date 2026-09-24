@@ -23,6 +23,7 @@
 import { db } from "~/database/db.server";
 import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
 import { requireAuditAssignee } from "~/modules/audit/service.server";
+import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { ShelfError } from "~/utils/error";
 
 /**
@@ -76,8 +77,14 @@ export async function requireAuditAssetInSession({
     });
   }
 
-  const { role } = await getMobileUserContext(userId, organizationId);
-  const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
+  // Resolved from ALL roles. `getMobileUserContext` sets `role = roles[0]`,
+  // and its own JSDoc warns that this is wrong for an authorization decision:
+  // a membership ordered `[SELF_SERVICE, ADMIN]` resolves to SELF_SERVICE, so
+  // a real admin who is not an assignee would be refused here.
+  const { roles } = await getMobileUserContext(userId, organizationId);
+  const effectiveRole = resolveMostPrivilegedRole(roles);
+  const isSelfServiceOrBase =
+    effectiveRole === "SELF_SERVICE" || effectiveRole === "BASE";
   await requireAuditAssignee({
     auditSessionId,
     organizationId,

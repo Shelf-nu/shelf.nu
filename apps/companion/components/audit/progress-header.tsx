@@ -70,7 +70,10 @@ const useStyles = createStyles((colors) => ({
   },
   progressUnexpected: {
     fontSize: fontSize.xs,
-    color: colors.warning,
+    // `warningText` is the foreground twin of the `warning` fill token: 7.09:1
+    // as text on this panel, against 2.29:1 for the fill. It aliases `warning`
+    // in dark mode, so only light mode changes.
+    color: colors.warningText,
     fontWeight: "500",
   },
   progressPercent: {

@@ -101,6 +101,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         await deleteLocationNote({
           id: noteId,
           userId,
+          organizationId,
         });
 
         sendNotification({

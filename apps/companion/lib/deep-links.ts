@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import * as Linking from "expo-linking";
-import { api } from "./api";
+import { api, getApiBaseUrl } from "./api";
 import { openShelfWebUrl, pushIntoTab } from "./navigation";
 import { getScanCoordinates } from "./scan-location";
+import { isSameOrigin } from "./server/contract";
 
 /**
  * Supported deep link patterns:
@@ -23,6 +24,11 @@ import { getScanCoordinates } from "./scan-location";
  *   https://app.shelf.nu/bookings/{id}
  *   https://app.shelf.nu/audits/{id}
  *
+ * The host above is illustrative, not exhaustive: the app can be connected to a
+ * self-hosted Shelf instance, and the parsing here is host-agnostic (it matches
+ * on path segments). Which hosts the OS actually delivers is decided by the
+ * native association, not by this file.
+ *
  * The claimed paths are kept in sync with the iOS AASA `components` list and
  * the Android `intentFilters` path prefixes. Paths outside the claimed prefixes
  * are never delivered to the app and keep opening the web.
@@ -41,7 +47,17 @@ type ParsedLink =
   | { type: "kit"; id: string }
   | { type: "booking"; id: string }
   | { type: "audit"; id: string }
-  | { type: "qr"; id: string }
+  | {
+      type: "qr";
+      id: string;
+      /**
+       * Origin the link came from, set only for http(s) links. A QR id is only
+       * meaningful on the instance that minted it, so a link from another
+       * origin must not be resolved against the active server. A custom-scheme
+       * link names no server, so it is left undefined and resolved here.
+       */
+      origin?: string;
+    }
   | { type: "scanner" }
   | { type: "unknown" };
 
@@ -76,8 +92,19 @@ function parseDeepLink(url: string): ParsedLink {
         return id ? { type: "booking", id } : { type: "unknown" };
       case "audits":
         return id ? { type: "audit", id } : { type: "unknown" };
-      case "qr":
-        return id ? { type: "qr", id } : { type: "unknown" };
+      case "qr": {
+        if (!id) return { type: "unknown" };
+        // Only an http(s) link names a server. `new URL()` reports the string
+        // "null" as the origin of a custom-scheme URL, and carrying that
+        // forward would mark the app's own `shelf://qr/<id>` links foreign and
+        // send them to "null/qr/<id>".
+        const parsed = new URL(url);
+        const origin =
+          parsed.protocol === "http:" || parsed.protocol === "https:"
+            ? parsed.origin
+            : undefined;
+        return { type: "qr", id, origin };
+      }
       case "scanner":
       case "scan":
         return { type: "scanner" };
@@ -101,9 +128,20 @@ function parseDeepLink(url: string): ParsedLink {
  * `Linking.openURL`, because `/qr/*` is now a verified Android App Link and
  * `Linking.openURL` would re-enter the app and loop back here.
  *
+ * A link from another origin is handed straight to the web without a lookup:
+ * the id belongs to the instance that minted it, so resolving it against the
+ * active server would report "not found" for a code that is perfectly valid
+ * where it came from.
+ *
  * @param qrId - the scanned or linked QR code id
+ * @param origin - origin the link carried, when it had one
  */
-async function resolveQrAndNavigate(qrId: string) {
+async function resolveQrAndNavigate(qrId: string, origin?: string) {
+  if (origin && !isSameOrigin(origin, getApiBaseUrl())) {
+    void openShelfWebUrl(`${origin}/qr/${qrId}`);
+    return;
+  }
+
   try {
     // Best-effort scan geolocation: a /qr deep link usually means the user
     // physically scanned the label with the OS camera, so the recorded scan
@@ -131,7 +169,7 @@ async function resolveQrAndNavigate(qrId: string) {
   // hand off to the web resolver. Loop-safe in-app browser via openShelfWebUrl,
   // NOT Linking.openURL, because /qr/* is a verified App Link and openURL would
   // re-enter the app and loop back here.
-  void openShelfWebUrl(`https://app.shelf.nu/qr/${qrId}`);
+  void openShelfWebUrl(`${getApiBaseUrl()}/qr/${qrId}`);
 }
 
 /**
@@ -172,7 +210,7 @@ export function useDeepLinkHandler() {
           break;
         case "qr":
           // Resolve the QR code to an asset and navigate directly
-          void resolveQrAndNavigate(link.id);
+          void resolveQrAndNavigate(link.id, link.origin);
           break;
         case "scanner":
           pushIntoTab("/(tabs)/scanner");

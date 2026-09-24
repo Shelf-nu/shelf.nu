@@ -8,6 +8,7 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { cancelBooking } from "~/modules/booking/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -66,8 +67,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, cancellationReason } = BodySchema.parse(
-      await request.json()
+    const { bookingId, cancellationReason } = await parseMobileBody(
+      BodySchema,
+      request,
+      "Booking"
     );
 
     const { role } = await getMobileUserContext(user.id, organizationId);

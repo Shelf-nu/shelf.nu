@@ -52,6 +52,7 @@ import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getClientHint } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
+import { quoteCsvCell } from "./csv-cells";
 import { formatCurrency } from "./currency";
 import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
@@ -64,14 +65,24 @@ import {
 import { ALL_SELECTED_KEY } from "./list";
 import { cleanMarkdownFormatting } from "./markdown-cleaner";
 import { sanitizeNoteContent } from "./note-sanitizer.server";
-import { resolveTeamMemberName } from "./user";
+import type { UserNameFields } from "./user";
+import { resolveTeamMemberName, resolveUserDisplayName } from "./user";
 
 export type CSVData = [string[], ...string[][]] | [];
 
-/** Guesses the delimiter of csv based on the most common delimiter found in the file */
+/**
+ * Guesses the delimiter of csv based on the most common delimiter found in the
+ * file.
+ *
+ * Only delimiters BETWEEN cells count. A quoted cell may hold any number of
+ * commas and semicolons — an exported note, a JSON relation, a tag named
+ * "Berlin, DE" — and counting those would let one verbose cell outvote the
+ * structure of every row.
+ */
 function guessDelimiters(csv: string, delimiters: string[]) {
+  const structure = csv.replace(/"(?:[^"]|"")*"/g, "");
   const delimiterCounts = delimiters.map(
-    (delimiter) => csv.split(delimiter).length
+    (delimiter) => structure.split(delimiter).length
   );
 
   const max = Math.max(...delimiterCounts);
@@ -173,11 +184,35 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
   }
 };
 
+/**
+ * One row of the backup export: an asset's own columns plus the relations the
+ * dump carries (`category`, `tags`, `notes`, `customFields`, …). The builder
+ * walks a row by key, so it is typed by what it reads — arbitrary entries —
+ * rather than by Prisma's `Asset`, which describes only the columns and would
+ * make every relation-bearing row a cast.
+ */
+export type BackupExportRow = Record<string, unknown>;
+
+/**
+ * Builds the rows of the workspace backup export — a full-fidelity dump whose
+ * one job is to re-import through `extractCSVDataFromBackupImport`.
+ *
+ * Relations are carried as JSON, and values are copied verbatim rather than
+ * formatted for reading: a boolean stays `true`, a timestamp keeps its time.
+ * Every cell is quoted, because both the JSON and ordinary asset text hold
+ * quotes, semicolons and commas, and an unquoted cell carrying one shifts the
+ * columns after it — silently, since the importer reads by position.
+ *
+ * @param args.assets - The rows to dump, as {@link BackupExportRow}.
+ * @param args.keysToSkip - Columns to leave out (foreign keys that only
+ *   resolve in the source workspace).
+ * @returns Rows of already-quoted cells, ready to join with a delimiter.
+ */
 export const buildCsvBackupDataFromAssets = ({
   assets,
   keysToSkip,
 }: {
-  assets: Asset[];
+  assets: BackupExportRow[];
   keysToSkip: string[];
 }) => {
   if (!assets.length) return [] as unknown as CSVData;
@@ -196,17 +231,21 @@ export const buildCsvBackupDataFromAssets = ({
        */
       if (value === null) {
         if (["custody", "location", "category", "assetModel"].includes(key)) {
-          return toExport.push("{}");
+          return toExport.push(quoteCsvCell("{}"));
         }
-        return toExport.push("");
+        return toExport.push(quoteCsvCell(""));
       }
 
-      /** Special handling for category and location.
+      /** Relations listed here travel as JSON rather than as an id, so a
+       * restore can resolve — or create — them by name; an id would only mean
+       * anything in the workspace the backup came from.
        *
-       * Phase A5: `assetModel` is included here — backup-export emits it
-       * as a JSON `{ name }` object so the backup-import path can resolve
-       * (or create) the model by name on restore (symmetric with the
-       * `category` / `location` handling above). */
+       * The list is not the same as the relations the query loads. `location`
+       * is a leftover: placements arrive as `assetLocations`, which is not
+       * listed, so it falls to the default branch and stringifies to
+       * `[object Object]` — locations do not survive a backup round trip. Any
+       * relation added to the query needs a case here and a matching one in
+       * `extractCSVDataFromBackupImport`, or its column is silently junk. */
       switch (key) {
         case "location":
         case "category":
@@ -218,22 +257,26 @@ export const buildCsvBackupDataFromAssets = ({
         case "customFields":
         case "assetModel":
           toExport.push(
-            JSON.stringify(value, (_key, value) => {
-              /** Custom replacer function.
-               * We do this to ensure that in the result we have emtpy strings instead of null values
-               */
-              if (value === null) {
-                return "";
-              }
-              return value;
-            })
+            quoteCsvCell(
+              JSON.stringify(value, (_key, value) => {
+                /** Custom replacer function.
+                 * We do this to ensure that in the result we have emtpy strings instead of null values
+                 */
+                if (value === null) {
+                  return "";
+                }
+                return value;
+              })
+            )
           );
           break;
         case "description":
-          toExport.push(`"${String(value).replace(/\n|\r/g, "")}"`);
+          // Line breaks are stripped rather than quoted: one asset stays one
+          // row, so the file keeps its shape in a spreadsheet.
+          toExport.push(quoteCsvCell(String(value).replace(/\n|\r/g, "")));
           break;
         default:
-          toExport.push(String(value));
+          toExport.push(quoteCsvCell(String(value)));
       }
     });
 
@@ -250,10 +293,9 @@ const keysToSkip = [
   "customFieldId",
   "mainImage",
   "mainImageExpiration",
-  // Phase A5: backup-export now emits the resolved `assetModel` object
-  // (`{ name }`) so cross-org restore can find / create the model by
-  // name. The opaque FK column would only resolve in the source org and
-  // can be safely dropped from the backup.
+  // The backup carries the resolved `assetModel` object instead, so a restore
+  // can find or create the model by name. This FK resolves only in the
+  // workspace the backup came from.
   "assetModelId",
 ];
 
@@ -282,9 +324,9 @@ export async function exportAssetsBackupToCsv({
     }
 
     /** Get the headers from the first row and filter out the keys to skip */
-    const headers = Object.keys(assets[0]).filter(
-      (header) => !keysToSkip.includes(header)
-    );
+    const headers = Object.keys(assets[0])
+      .filter((header) => !keysToSkip.includes(header))
+      .map(quoteCsvCell);
 
     /** Add the header column */
     csvData.unshift(headers);
@@ -1063,10 +1105,7 @@ export async function exportBookingsFromIndexToCsv({
 const ACTIVITY_HEADER = "Date,Author,Type,Content";
 
 type ActivityNote = Pick<Note, "content" | "createdAt" | "type"> & {
-  user: {
-    firstName: string | null;
-    lastName: string | null;
-  } | null;
+  user: UserNameFields | null;
 };
 
 const sanitizeCsvValue = (value: string | null | undefined) =>
@@ -1074,12 +1113,10 @@ const sanitizeCsvValue = (value: string | null | undefined) =>
 
 const notesToCsv = (notes: ActivityNote[], prefs: ResolvedFormatPrefs) => {
   const rows = notes.map((note) => {
-    const author = note.user
-      ? [note.user.firstName, note.user.lastName]
-          .filter(Boolean)
-          .join(" ")
-          .trim()
-      : "";
+    // Resolved, not joined: `displayName` replaces the legal name for the
+    // users who set one, and a hand-rolled join here is invisible to the
+    // compiler no matter what the row carries.
+    const author = resolveUserDisplayName(note.user);
 
     return [
       sanitizeCsvValue(
@@ -1095,10 +1132,7 @@ const notesToCsv = (notes: ActivityNote[], prefs: ResolvedFormatPrefs) => {
 };
 
 type ActivityNoteRecord = {
-  user: {
-    firstName: string | null;
-    lastName: string | null;
-  } | null;
+  user: UserNameFields | null;
   content: string | null;
   createdAt: Date;
   type: string;
@@ -1161,12 +1195,7 @@ async function exportNotesToCsv<Where>({
     content: note.content ?? "",
     createdAt: note.createdAt,
     type: note.type as ActivityNote["type"],
-    user: note.user
-      ? {
-          firstName: note.user.firstName,
-          lastName: note.user.lastName,
-        }
-      : null,
+    user: note.user,
   }));
 
   return notesToCsv(activityNotes, prefs);
@@ -1540,13 +1569,7 @@ export const buildCsvExportDataFromBookings = (
           case "custodian": {
             const teamMember = {
               name: booking.custodianTeamMember?.name ?? "",
-              user: booking?.custodianUser
-                ? {
-                    firstName: booking.custodianUser?.firstName,
-                    lastName: booking.custodianUser?.lastName,
-                    email: booking.custodianUser?.email,
-                  }
-                : null,
+              user: booking?.custodianUser ?? null,
             };
 
             value = resolveTeamMemberName(teamMember, true);

@@ -13,7 +13,10 @@ import {
   bulkReleaseKitCustody,
   bulkUpdateKitLocation,
 } from "~/modules/kit/service.server";
-import { getTeamMember } from "~/modules/team-member/service.server";
+import {
+  getTeamMember,
+  scopeCustodianFilterIds,
+} from "~/modules/team-member/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
@@ -57,13 +60,28 @@ export async function action({ request, context }: ActionFunctionArgs) {
       "bulk-update-location": PermissionAction.update,
     };
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, role, canSeeAllCustody } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: intent2ActionMap[intent],
     });
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
+    /**
+     * `?teamMember=` rides in on `currentSearchParams` and is applied to a
+     * custody clause when the caller selects all. Both custody intents above
+     * map to `PermissionAction.custody`, which SELF_SERVICE HOLDS — so this
+     * must be narrowed to the caller's own ids rather than trusted.
+     */
+    const allowedTeamMemberIds = await scopeCustodianFilterIds({
+      teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
+        "teamMember"
+      ),
+      canSeeAllCustody,
+      userId,
+      organizationId,
+    });
 
     switch (intent) {
       case "bulk-delete": {
@@ -133,6 +151,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           organizationId,
           userId,
           currentSearchParams,
+          allowedTeamMemberIds,
         });
 
         sendNotification({
@@ -149,32 +168,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
       case "bulk-release-custody": {
         const { kitIds } = parseData(formData, BulkReleaseKitCustodySchema);
 
-        if (isSelfService) {
-          const custodies = await db.kitCustody.findMany({
-            where: { kitId: { in: kitIds } },
-            select: { custodian: { select: { id: true, userId: true } } },
-          });
-
-          if (
-            custodies.some((custody) => custody.custodian.userId !== userId)
-          ) {
-            throw new ShelfError({
-              cause: null,
-              title: "Action not allowed",
-              message: "Self user can release custody of themselves only.",
-              additionalData: { userId, kitIds },
-              label: "Kit",
-              status: 403,
-              shouldBeCaptured: false,
-            });
-          }
-        }
-
+        // The SELF_SERVICE "release only your own custody" check now lives in
+        // `bulkReleaseKitCustody`, because it has to run on the RESOLVED kits.
+        // Here it queried `kitCustody` with the raw `kitIds` — which is
+        // `["all-selected"]` on a select-all, matching zero rows — so the
+        // guard passed and every matched kit was released. Same shape as
+        // `bulkCheckInAssets`, which already guards inside the service.
         await bulkReleaseKitCustody({
           userId,
+          role,
           kitIds,
           organizationId,
           currentSearchParams,
+          allowedTeamMemberIds,
         });
 
         sendNotification({

@@ -33,9 +33,18 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   // why: the route premium-gates with assertMobileCanUseBookings; mock it so
   // the gate is a no-op in these tests (mirrors the sibling booking tests).
   assertMobileCanUseBookings: vi.fn(),
+  // why: the cross-user ownership guard resolves the caller's role through
+  // this; mocking it is how each test picks SELF_SERVICE vs ADMIN.
+  getMobileUserContext: vi.fn(),
 }));
 
 // why: external service — we mock the partial checkout to avoid database calls
+// why: the route now loads creatorId/custodianUserId for the ownership guard;
+// mock the org-scoped lookup rather than hitting a database.
+vi.mock("~/database/db.server", () => ({
+  db: { booking: { findFirst: vi.fn() } },
+}));
+
 vi.mock("~/modules/booking/service.server", () => ({
   partialCheckoutBooking: vi.fn(),
 }));
@@ -56,7 +65,9 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
   requireMobilePermission,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { db } from "~/database/db.server";
 import { partialCheckoutBooking } from "~/modules/booking/service.server";
 import { makeShelfError } from "~/utils/error";
 
@@ -99,6 +110,16 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    // Default: the caller owns the booking, so the ownership guard is a
+    // no-op and the pre-existing cases still test what they were written for.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "SELF_SERVICE",
+      roles: ["SELF_SERVICE"],
+    });
+    (db.booking.findFirst as any).mockResolvedValue({
+      creatorId: "user-1",
+      custodianUserId: null,
+    });
   });
 
   it("accepts legacy { bookingId, assetIds } payload with INDIVIDUAL semantics", async () => {
@@ -227,5 +248,49 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
     expect((result as unknown as Response).status).toBe(404);
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("Booking not found");
+  });
+
+  it("refuses a SELF_SERVICE user checking out someone else's booking", async () => {
+    // SELF_SERVICE holds `booking:checkout`, so the role gate above passes for
+    // ANY booking id in the organization. Only the ownership guard stops this.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "SELF_SERVICE",
+      roles: ["SELF_SERVICE"],
+    });
+    (db.booking.findFirst as any).mockResolvedValue({
+      creatorId: "someone-else",
+      custodianUserId: "someone-else",
+    });
+
+    const request = createPartialCheckoutRequest({
+      bookingId: "booking-1",
+      // cuid: the schema validates assetIds with z.string().cuid()
+      assetIds: ["clx1a2b3c0000d4e5f6g7h8i9"],
+    });
+    await action(createActionArgs({ request }));
+
+    // The assertion that matters: the checkout never happens.
+    expect(partialCheckoutBooking).not.toHaveBeenCalled();
+  });
+
+  it("still lets ADMIN check out a booking they do not own", async () => {
+    // The guard is a no-op for ADMIN/OWNER — it must not break admin workflows.
+    (getMobileUserContext as any).mockResolvedValue({
+      role: "ADMIN",
+      roles: ["ADMIN"],
+    });
+    (db.booking.findFirst as any).mockResolvedValue({
+      creatorId: "someone-else",
+      custodianUserId: "someone-else",
+    });
+
+    const request = createPartialCheckoutRequest({
+      bookingId: "booking-1",
+      // cuid: the schema validates assetIds with z.string().cuid()
+      assetIds: ["clx1a2b3c0000d4e5f6g7h8i9"],
+    });
+    await action(createActionArgs({ request }));
+
+    expect(partialCheckoutBooking).toHaveBeenCalled();
   });
 });

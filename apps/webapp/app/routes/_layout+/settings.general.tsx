@@ -270,8 +270,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
           additionalData: { userId, organizationId },
         });
 
-        const { name, currency, id, qrIdDisplayPreference, showShelfBranding } =
-          payload;
+        const {
+          name,
+          currency,
+          id,
+          qrIdDisplayPreference,
+          showShelfBranding,
+          showQrCodesOnPdfs,
+        } = payload;
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -326,6 +332,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           currency,
           qrIdDisplayPreference,
           showShelfBranding: nextShowShelfBranding,
+          // No tier gate and no resolver: the zod transform yields `undefined`
+          // when the switch was not part of the submit, and `updateOrganization`
+          // writes the column only for a real boolean.
+          showQrCodesOnPdfs,
         });
 
         sendNotification({
@@ -439,6 +449,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/settings/general");
       }
       case "transfer-ownership": {
+        // Defense in depth: the transfer card is hidden from non-owners, but a
+        // hand-crafted POST must not be able to transfer the workspace either.
+        // `requirePermission` above cannot catch this — ADMIN and OWNER share
+        // every permission, so the role has to be checked explicitly.
+        if (role !== OrganizationRoles.OWNER) {
+          throw new ShelfError({
+            cause: null,
+            title: "Permission denied",
+            message: "Only the workspace owner can transfer ownership.",
+            label: "Settings",
+            status: 403,
+            // why: a blocked privilege escalation attempt is a client error, not
+            // a server fault — it should not page anyone via Sentry
+            shouldBeCaptured: false,
+          });
+        }
+
         const parsedData = parseData(formData, TransferOwnershipSchema, {
           additionalData: { userId, organizationId },
         });
@@ -579,6 +606,7 @@ export default function GeneralPage() {
     ownerSubscriptionInfo,
     ownerOtherTeamWorkspacesCount,
     premiumIsEnabled: premiumEnabled,
+    isPersonalWorkspace,
   } = useLoaderData<typeof loader>();
   return (
     <div className="mb-2.5 flex flex-col justify-between">
@@ -610,6 +638,7 @@ export default function GeneralPage() {
         ownerSubscriptionInfo={ownerSubscriptionInfo}
         ownerOtherTeamWorkspacesCount={ownerOtherTeamWorkspacesCount}
         premiumIsEnabled={premiumEnabled}
+        isPersonalWorkspace={isPersonalWorkspace}
       />
     </div>
   );

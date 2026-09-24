@@ -4,6 +4,7 @@ import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
 import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
+import type { AllowedCustodianFilterIds } from "./utils.server";
 import { getAssetsWhereInput } from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 
@@ -172,12 +173,20 @@ export async function resolveAssetIdsForBulkOperation({
   currentSearchParams,
   settings,
   timeZone = "UTC",
+  allowedTeamMemberIds,
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
   timeZone?: string;
+  /**
+   * Custodian ids the caller may filter by. Required, with no default, so
+   * every bulk operation states an answer — "select all" resolves through
+   * caller-supplied filters, and a custodian filter turns that into a way to
+   * read back exactly which assets a named colleague holds.
+   */
+  allowedTeamMemberIds: AllowedCustodianFilterIds;
 }): Promise<string[]> {
   // Case 1: Specific selection - return IDs as-is
   if (!assetIds.includes(ALL_SELECTED_KEY)) {
@@ -191,6 +200,24 @@ export async function resolveAssetIdsForBulkOperation({
   const isAdvancedMode = settings.mode === "ADVANCED";
 
   if (isAdvancedMode && currentSearchParams) {
+    /**
+     * The advanced syntax carries its own custodian filter (`custody:is:…`),
+     * which never passes through `getAssetsWhereInput` — so the allow-list has
+     * to be honoured separately here.
+     *
+     * `/assets` flips a restricted role's saved mode back to SIMPLE, but only
+     * when they actually visit it; a demoted user whose stored mode is still
+     * ADVANCED reaches this branch by calling a bulk endpoint directly. Refuse
+     * the whole selection rather than silently dropping the filter, which would
+     * widen it to every asset in the workspace.
+     */
+    if (
+      allowedTeamMemberIds !== "all" &&
+      new URLSearchParams(currentSearchParams).has("custody")
+    ) {
+      return [];
+    }
+
     // ADVANCED MODE: Use dedicated function for advanced filters
     return getAdvancedFilteredAssetIds({
       organizationId,
@@ -205,6 +232,7 @@ export async function resolveAssetIdsForBulkOperation({
     const where = getAssetsWhereInput({
       organizationId,
       currentSearchParams,
+      allowedTeamMemberIds,
     });
 
     const assets = await db.asset.findMany({

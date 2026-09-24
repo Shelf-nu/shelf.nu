@@ -1,16 +1,6 @@
 import type { AssetForPreview, AssetForThumbnail } from "./types";
 
 // Type guard functions to help with type checking
-export function hasMainImage(asset: {
-  mainImage?: unknown;
-}): asset is { mainImage: string } {
-  return (
-    typeof "mainImage" in asset &&
-    asset.mainImage === "string" &&
-    asset.mainImage.length > 0
-  );
-}
-
 export function hasPreviewData(asset: unknown): asset is AssetForPreview {
   return (
     typeof asset === "object" &&

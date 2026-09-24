@@ -21,6 +21,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
+import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
 import { hasCustody } from "~/modules/custody/utils";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
@@ -255,7 +256,74 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // Use transaction to ensure custody assignment and activity event are atomic
     const asset = await db
       .$transaction(async (tx) => {
-        await tx.custody.deleteMany({ where: { assetId } });
+        /**
+         * Refuse to take custody of an asset that is checked out on a booking.
+         *
+         * `Asset.status` is a single column, so an unguarded write would
+         * silently overwrite `CHECKED_OUT` and the asset would stop being
+         * counted as off the shelf. Precedence is
+         * `CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`, per
+         * `reconcileAssetStatusForBookingExit`.
+         *
+         * The predicate lives on the UPDATE itself, not in a preceding read.
+         * Postgres runs at READ COMMITTED here, where a plain `SELECT` takes no
+         * row lock, so a read-then-write leaves exactly the last-writer-wins
+         * window this PR exists to close: a checkout committing between the two
+         * statements would be overwritten. Constraining the UPDATE makes the
+         * check atomic — the same pattern as `checkOutQuantity`,
+         * `releaseQuantity` and every kit custody path.
+         *
+         * `count === 0` means the row was filtered out, so we read only on that
+         * failure path to tell "checked out" apart from "no such asset" and to
+         * name the asset in the message. Rejecting rather than skipping mirrors
+         * `bulkCheckOutAssets`: an INDIVIDUAL asset is one physical item, so a
+         * custody claim while it is out is a real conflict the operator must
+         * see.
+         */
+        const claimed = await tx.asset.updateMany({
+          where: {
+            id: assetId,
+            organizationId,
+            status: { not: AssetStatus.CHECKED_OUT },
+          },
+          data: { status: AssetStatus.IN_CUSTODY },
+        });
+
+        if (claimed.count === 0) {
+          const blocked = await tx.asset.findFirst({
+            where: { id: assetId, organizationId },
+            select: { title: true },
+          });
+
+          throw new ShelfError({
+            cause: null,
+            title: "Asset is checked out",
+            message: blocked
+              ? `"${blocked.title}" is currently checked out on a booking, so it cannot be given to a custodian. Check the booking in first.`
+              : "This asset could not be found in your workspace.",
+            additionalData: { userId, assetId, custodianId },
+            label: "Assets",
+            shouldBeCaptured: false,
+            status: blocked ? 400 : 404,
+          });
+        }
+
+        // `kitCustodyId: null` — this assign owns only operator-assigned rows.
+        // A row a kit put here belongs to the kit, and deleting it would leave
+        // the KitCustody naming a custodian for an asset that no longer has
+        // the matching row: the same "two answers to who has this?" state the
+        // release path refuses. Scoping the delete keeps the row alive so the
+        // assert below can see it and reject the whole assignment.
+        // why: these two must stay sequential — react-doctor/async-parallel
+        // flags them, and combining them into a `Promise.all` would be wrong
+        // twice: the delete-then-assert ORDER is the guarantee (the assert may
+        // only read once the operator rows are gone), and concurrent queries on
+        // one interactive-transaction client are not safe in Prisma.
+        await tx.custody.deleteMany({
+          where: { assetId, asset: { organizationId }, kitCustodyId: null },
+        });
+
+        await assertNoKitDerivedCustody(tx, [assetId], organizationId);
 
         const updated = await tx.asset.update({
           where: {
@@ -263,7 +331,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             organizationId,
           } as Prisma.AssetWhereUniqueInput,
           data: {
-            status: AssetStatus.IN_CUSTODY,
             custody: {
               create: {
                 custodian: { connect: { id: custodianId } },
@@ -294,6 +361,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return updated;
       })
       .catch((cause) => {
+        // Deliberate, user-facing failures (the CHECKED_OUT conflict above)
+        // must survive this wrapper. `ShelfError` inherits `title` and `status`
+        // from its cause but ALWAYS assigns its own `message`
+        // (`~/utils/error.ts`), and the form renders only
+        // `actionData.error.message` — so wrapping would swap the specific
+        // instruction for the generic one and the operator would never learn
+        // why the assignment failed.
+        if (cause instanceof ShelfError) {
+          throw cause;
+        }
+
         throw new ShelfError({
           cause,
           message:
@@ -304,22 +382,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
 
     /** Once the asset is updated, we create the note */
-    const actor = wrapUserLinkForNote({
-      id: userId,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    });
+    const actor = wrapUserLinkForNote(user);
 
     const custodianDisplay = wrapCustodianForNote({
       teamMember: {
         name: custodianDisplayName,
-        user: custodianTeamMember.user
-          ? {
-              id: custodianTeamMember.user.id,
-              firstName: custodianTeamMember.user.firstName,
-              lastName: custodianTeamMember.user.lastName,
-            }
-          : null,
+        user: custodianTeamMember.user,
       },
     });
 

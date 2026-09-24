@@ -6,6 +6,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { createNote } from "~/modules/note/service.server";
 import { NOTE_MAX_CONTENT_LENGTH } from "~/utils/constants";
 import { makeShelfError } from "~/utils/error";
@@ -32,13 +33,14 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const body = await request.json();
-    const { assetId, content } = z
-      .object({
+    const { assetId, content } = await parseMobileBody(
+      z.object({
         assetId: z.string().min(1),
         content: z.string().min(1).max(NOTE_MAX_CONTENT_LENGTH),
-      })
-      .parse(body);
+      }),
+      request,
+      "Assets"
+    );
 
     // Verify asset exists and belongs to the organization
     const asset = await db.asset.findUnique({

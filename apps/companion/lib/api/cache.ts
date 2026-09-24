@@ -1,3 +1,7 @@
+import {
+  getServerVersion,
+  subscribeToServerChange,
+} from "../server/active-server";
 import { apiFetch } from "./client";
 
 // ── Response cache for low-churn data ───────────────────
@@ -18,6 +22,12 @@ export function invalidateResponseCache(keyPrefix?: string) {
   }
 }
 
+// why: cached list responses (team members, locations, categories) belong to
+// the server they were fetched from, so a switch must flush them or the next
+// picker shows the previous server's data. Subscribing here rather than being
+// called from active-server.ts keeps the dependency one-way (api → server).
+subscribeToServerChange(() => invalidateResponseCache());
+
 /** Wraps apiFetch with in-memory caching for GET requests. */
 export async function cachedApiFetch<T>(
   path: string,
@@ -28,8 +38,12 @@ export async function cachedApiFetch<T>(
   if (cached && now - cached.cachedAt < ttl) {
     return { data: cached.data as T, error: null };
   }
+  const versionAtStart = getServerVersion();
   const result = await apiFetch<T>(path);
-  if (result.data && !result.error) {
+  // A switch during the request already flushed the cache, so writing this
+  // response now would hand the previous server's data to the new one — the
+  // exact leak the subscription above exists to prevent.
+  if (result.data && !result.error && getServerVersion() === versionAtStart) {
     responseCache.set(path, { data: result.data, cachedAt: Date.now() });
   }
   return result;

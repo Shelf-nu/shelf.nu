@@ -181,10 +181,12 @@ describe("location service activity logging", () => {
     dbMocks.user.findFirstOrThrow.mockResolvedValue({
       firstName: "Jane",
       lastName: "Doe",
+      displayName: null,
     });
     dbMocks.user.findFirst.mockResolvedValue({
       firstName: "Jane",
       lastName: "Doe",
+      displayName: null,
     });
     dbMocks.kit.findMany.mockResolvedValue([]);
     // why: assertion helpers count submitted IDs; default to "all authorized"
@@ -238,6 +240,7 @@ describe("location service activity logging", () => {
         newLocation: { id: "loc-2", name: "New" },
         firstName: "Ada",
         lastName: "Lovelace",
+        displayName: null,
         assetId: "asset-1",
         userId: "user-1",
         organizationId: "org-1",

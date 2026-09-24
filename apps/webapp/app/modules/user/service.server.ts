@@ -1,3 +1,14 @@
+/**
+ * User Service
+ *
+ * Server-side user lifecycle: creating users (email, SSO, invite acceptance),
+ * attaching them to organizations, reading and updating profiles, and
+ * removing or soft-deleting accounts.
+ *
+ * @see {@link file://./fields.ts}
+ * @see {@link file://./utils.server.ts}
+ * @see {@link file://./../invite/service.server.ts}
+ */
 import type {
   Organization,
   TierId,
@@ -54,8 +65,11 @@ import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
+import {
+  caseInsensitiveEmailFilter,
+  normalizeInviteEmail,
+} from "../invite/helpers";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
-import { createTeamMember } from "../team-member/service.server";
 import { USER_CONTACT_SELECT } from "../user-contact/constants";
 import {
   getUserContactById,
@@ -178,6 +192,52 @@ export async function findUserByEmail(email: User["email"]) {
   }
 }
 
+/**
+ * Makes sure an SSO user has a `TeamMember` in an organization they can access.
+ *
+ * Org access and the team-member record are two writes, and only the second one
+ * makes custody possible — a user holding the first without the second can sign
+ * in, see the workspace, and never be assignable as a custodian. Existing
+ * access alone is therefore not taken as proof the pair is intact: a login that
+ * still maps to a role re-checks, so an account left half-written can recover.
+ * A login that maps to no role does not, because that transition is removing
+ * the user's access rather than restoring it.
+ *
+ * Soft-deleted records do not count: a member removed from the workspace and
+ * then re-granted access needs a live record again.
+ *
+ * @param tx - Prisma client or active transaction
+ * @param params.userId - The signing-in user
+ * @param params.organizationId - Organization they hold access to
+ * @param params.name - Display name for a record that has to be created
+ */
+async function ensureUserTeamMember(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    userId,
+    organizationId,
+    name,
+  }: {
+    userId: User["id"];
+    organizationId: Organization["id"];
+    name: string;
+  }
+) {
+  const existing = await tx.teamMember.findFirst({
+    where: { userId, organizationId, deletedAt: null },
+    select: { id: true },
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  return tx.teamMember.create({
+    data: { name, organizationId, userId },
+    select: { id: true },
+  });
+}
+
 async function createUserOrgAssociation(
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
   payload: {
@@ -221,6 +281,27 @@ async function createUserOrgAssociation(
   }
 }
 
+/**
+ * Gives an invitee access to an organization when they accept an invite.
+ *
+ * When a user with the email exists (matched without regard to letter case),
+ * the organization is attached to that user with the invite's roles. When no
+ * user exists, a Supabase auth account is created (or an existing auth
+ * account without a user row is confirmed) and a new user is created in the
+ * organization.
+ *
+ * @param args.email - The invitee email, normalised by the caller
+ * @param args.organizationId - The organization the invite is for
+ * @param args.roles - The roles the invite grants
+ * @param args.password - The password for a newly created auth account
+ * @param args.firstName - First name for a newly created user
+ * @param args.lastName - Last name for a newly created user
+ * @param args.createdWithInvite - Marks a newly created user as invited
+ * @param args.formatPrefs - Browser-detected date/time preferences for a new user
+ * @returns The existing or newly created user
+ * @throws {ShelfError} When no auth account can be created or confirmed, or
+ *   when the user or the organization association cannot be written
+ */
 export async function createUserOrAttachOrg({
   email,
   organizationId,
@@ -240,10 +321,23 @@ export async function createUserOrAttachOrg({
     formatPrefs?: DetectedFormatPrefs;
   }) {
   try {
-    const shelfUser = await db.user.findFirst({
-      where: { email },
+    /**
+     * `User.email` can contain capitals, so the existing account is matched
+     * without regard to letter case. When rows differ only by case, the
+     * lowercase row wins, because that is the form sign-in uses; where no row
+     * carries that form, the oldest one does. Order the query: without it the
+     * fallback returns whichever row Postgres happened to read first, so the
+     * same invite can attach to a different account on a later call.
+     */
+    const matchingUsers = await db.user.findMany({
+      where: { email: caseInsensitiveEmailFilter(email) },
       select: USER_WITH_SSO_DETAILS_SELECT,
+      orderBy: { createdAt: "asc" },
     });
+    const shelfUser =
+      matchingUsers.find(
+        (user) => user.email === normalizeInviteEmail(email)
+      ) ?? matchingUsers[0];
 
     // If no Prisma User exists, create one.
     // First try creating a fresh auth account. If that fails (email already
@@ -396,16 +490,21 @@ export async function createUserFromSSO(
 
         if (role) {
           firstMatchedOrg ??= org;
-          await createUserOrgAssociation(db, {
-            userId: user.id,
-            organizationIds: [org.id],
-            roles: [role],
-          });
+          // Both writes or neither, for the same reason as the returning-user
+          // path: access without a team member is an account that can open the
+          // workspace but can never be assigned custody.
+          await db.$transaction(async (tx) => {
+            await createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [org.id],
+              roles: [role],
+            });
 
-          await createTeamMember({
-            name: `${firstName} ${lastName}`,
-            organizationId: org.id,
-            userId,
+            await ensureUserTeamMember(tx, {
+              userId,
+              organizationId: org.id,
+              name: `${firstName} ${lastName}`,
+            });
           });
         }
       }
@@ -441,39 +540,33 @@ interface UserOrgTransition {
  * Reconciles one workspace's membership against the SAML group claims presented
  * at login.
  *
- * Despite the old name (`handleSCIMTransition`), the only caller is
- * {@link updateUserFromSSO}'s group-mapping loop — this is the SAML
- * group-claim path, not SCIM. SCIM has its own lifecycle in
- * `~/modules/scim/service.server`. The misnomer is why the revocation branch
- * below sat out of step with every other revoke in the codebase for so long:
- * it read as SCIM-only code, so nobody compared it to the admin path.
+ * The only caller is {@link updateUserFromSSO}'s group-mapping loop. This is
+ * the SAML group-claim path, not SCIM, which has its own lifecycle in
+ * `~/modules/scim/service.server`. Runs on EVERY SSO login, once per workspace
+ * on the user's email domain.
  *
- * Runs on EVERY SSO login, once per workspace on the user's email domain.
- *
- * Revocation delegates to {@link revokeAccessToOrganization} — the same
- * function behind the admin "revoke access" UI and
- * `revokeScimMembership`. It does three things this branch used to skip two
- * of:
- *   1. disconnects the `TeamMember` from the `User` (row survives, so custody
- *      and booking history keeps a name),
+ * Revocation delegates to {@link revokeAccessToOrganization}, the same
+ * function behind the admin "revoke access" UI and `revokeScimMembership`, so
+ * it:
+ *   1. disconnects every `TeamMember` linked to the `User` in the workspace
+ *      (rows survive, so custody and booking history keep a name),
  *   2. deletes the `UserOrganization`,
  *   3. clears `User.lastSelectedOrganizationId` when it pointed at this org.
  *
  * Step 1 is the load-bearing one. A `TeamMember` with no linked user is how the
  * rest of the codebase recognises revoked access: the booking notification
  * resolver and the `usersOnly` custodian pickers read straight through
- * `TeamMember.user` with no membership check, so a revoked user who kept that
- * link carried on receiving this workspace's booking emails and stayed pickable
- * as a notification recipient.
+ * `TeamMember.user` with no membership check, so a linked row keeps routing
+ * this workspace's booking emails and recipient pickers to the user.
  *
- * ERROR SEMANTICS — deliberately fail closed. A failure here still aborts the
- * whole login rather than being logged and skipped per workspace. Swallowing it
- * would leave the user logged in holding access this call was meant to remove,
- * which is exactly the leak being fixed; aborting the login denies access
- * everywhere until the next attempt. `revokeAccessToOrganization` performs the
- * disconnect and the membership delete in a single `user.update`, so it cannot
- * half-apply, and its `lastSelectedOrganizationId` cleanup is already
- * best-effort internally.
+ * The workspace OWNER is never revoked here (see the branch below).
+ *
+ * ERROR SEMANTICS: deliberately fail closed. Any other failure aborts the
+ * whole login rather than being logged and skipped per workspace: swallowing it
+ * would leave the user signed in holding access this call exists to remove.
+ * `revokeAccessToOrganization` performs the disconnect and the membership delete
+ * in one transaction, so it cannot half-apply, and its
+ * `lastSelectedOrganizationId` cleanup is best-effort internally.
  *
  * @param userId - The Shelf user signing in
  * @param organization - The workspace being reconciled
@@ -497,12 +590,45 @@ async function reconcileSsoGroupMembership(
 
   try {
     if (!desiredRole) {
-      // No group claim maps to a role here, so access goes — through the same
-      // path as the admin revoke, not a narrower membership delete.
-      await revokeAccessToOrganization({
-        userId,
-        organizationId: organization.id,
-      });
+      /**
+       * The workspace owner lost their group claims. Removing them would
+       * strand the workspace with no owner and no way back, and this runs
+       * during SSO login, so throwing would lock the owner out of their own
+       * workspace on the way in. Keep the access and make the divergence loud
+       * instead; an operator must transfer ownership before the IdP can
+       * deprovision them.
+       */
+      const keepOwnerAccess = () => {
+        Logger.warn({
+          message:
+            "SSO group claims would have revoked the workspace owner's access; kept it and skipped the revocation",
+          additionalData: { userId, organizationId: organization.id },
+        });
+
+        transition.transitionType = "ROLE_CHANGE";
+        transition.newRole = currentRoles[0];
+
+        return transition;
+      };
+
+      if (currentRoles.includes(OrganizationRoles.OWNER)) {
+        return keepOwnerAccess();
+      }
+
+      try {
+        await revokeAccessToOrganization({
+          userId,
+          organizationId: organization.id,
+        });
+      } catch (cause) {
+        // The only 400 `revokeAccessToOrganization` raises is its owner guard:
+        // ownership was transferred to this user after `currentRoles` was read.
+        if (isLikeShelfError(cause) && cause.status === 400) {
+          return keepOwnerAccess();
+        }
+
+        throw cause;
+      }
 
       transition.transitionType = "ACCESS_REVOKED";
 
@@ -679,6 +805,39 @@ export async function updateUserFromSSO(
           );
           transitions.push(transition);
 
+          // Repair an account whose team-member record never got written —
+          // only while a role still maps, since a revoked transition is
+          // removing this user's access rather than restoring it.
+          if (desiredRole) {
+            await db.$transaction(async (tx) => {
+              // `TeamMember` has no uniqueness on (userId, organizationId), so
+              // two logins arriving together would both find nothing and both
+              // insert, leaving one user with two live custodian records. The
+              // membership row does have that uniqueness and always exists on
+              // this branch, so locking it serialises the pair of repairs.
+              const membership = await tx.$queryRaw<{ id: string }[]>`
+                SELECT id FROM "UserOrganization"
+                WHERE "userId" = ${userId} AND "organizationId" = ${org.id}
+                FOR UPDATE
+              `;
+
+              // The membership was read before the transition ran and can be
+              // gone by the time the lock resolves — a concurrent callback
+              // whose group claims revoke access deletes the row. Creating the
+              // record anyway would leave a custodian attached to a workspace
+              // its user is no longer in.
+              if (!membership || membership.length === 0) {
+                return;
+              }
+
+              await ensureUserTeamMember(tx, {
+                userId,
+                organizationId: org.id,
+                name: `${firstName} ${lastName}`,
+              });
+            });
+          }
+
           // The user keeps access only when a role still maps; a null
           // desiredRole makes reconcileSsoGroupMembership revoke it, so that
           // org must not become the post-login landing org.
@@ -686,27 +845,22 @@ export async function updateUserFromSSO(
             firstMatchedOrg ??= org;
           }
         } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
-          await createUserOrgAssociation(db, {
-            userId: user.id,
-            organizationIds: [org.id],
-            roles: [desiredRole],
-          });
-
-          // Re-granting access must not duplicate the team member. A revoke
-          // issued before revocation unlinked team members left the old row
-          // linked, so re-use it instead of creating a second one.
-          const linkedTeamMember = await db.teamMember.findFirst({
-            where: { userId, organizationId: org.id, deletedAt: null },
-            select: { id: true },
-          });
-
-          if (!linkedTeamMember) {
-            await createTeamMember({
-              name: `${firstName} ${lastName}`,
-              organizationId: org.id,
-              userId,
+          // Both writes or neither: access without a team member is a state
+          // this flow cannot reach again, because the next login would find
+          // the access and take the branch above.
+          await db.$transaction(async (tx) => {
+            await createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [org.id],
+              roles: [desiredRole],
             });
-          }
+
+            await ensureUserTeamMember(tx, {
+              userId,
+              organizationId: org.id,
+              name: `${firstName} ${lastName}`,
+            });
+          });
 
           transitions.push({
             userId,
@@ -909,28 +1063,24 @@ export async function createUser(
       cause instanceof PrismaClientKnownRequestError && cause.code === "P2002";
 
     /**
-     * Idempotency on `id` (SHELF-WEBAPP-1EA): a P2002 unique-constraint
-     * violation raised on the primary key means a `User` row already exists for
-     * this Supabase auth id — e.g. a re-signup, or a prior partial signup whose
-     * stored email differs from the OTP email, so the route's email-keyed race
-     * guard missed it. The `user.create` and ALL its side-effects (personal
-     * org, org association, team member, asset index settings) run inside one
-     * `$transaction`, so the P2002 rolled the whole thing back. Return the
-     * pre-existing row (using the exact same select shape the create returns)
-     * instead of failing the signup.
+     * Idempotency on `id`: a P2002 unique-constraint violation on the primary
+     * key means a `User` row already exists for this Supabase auth id, for
+     * example on a re-signup, or when the stored email differs from the
+     * sign-in email so the route's email-keyed guard does not see the row.
+     * The `user.create` and all its side-effects (personal org, org
+     * association, team member, asset index settings) run inside one
+     * `$transaction`, so the violation rolls all of them back. The existing
+     * row is returned, with the same select shape the create returns.
      *
-     * ONE piece of state still needs reconciling: for invite/SSO callers
-     * (`organizationId` present), the rolled-back transaction never created the
-     * requested org association, so a concurrent P2002 race would otherwise
-     * return the existing user un-attached to the org they were invited to. We
-     * re-attach that association idempotently below (only when they aren't
-     * already a member). The personal-org / OTP self-signup case has no
-     * `organizationId`, so there is nothing to reconcile there.
+     * For invite and SSO callers (`organizationId` present), the rolled-back
+     * transaction did not create the requested org association, so it is
+     * restored below. The personal-org / OTP self-signup case has no
+     * `organizationId` and needs nothing else.
      *
-     * We deliberately do NOT re-fire the `signup_completed` analytics event on
-     * this path: no new account was created. If the lookup unexpectedly finds
-     * no row (P2002 on some OTHER unique field, e.g. `email`, with no row for
-     * this `id`), that is a genuine conflict — fall through and throw.
+     * The `signup_completed` analytics event does not fire on this path,
+     * because no account was created. When the lookup finds no row (a P2002 on
+     * another unique field, such as `email`), it is a real conflict and the
+     * error is thrown.
      */
     if (isUniqueViolation) {
       const existingUser = await db.user.findUnique({
@@ -946,12 +1096,10 @@ export async function createUser(
       });
 
       if (existingUser) {
-        // The rolled-back transaction never created the org association. For
-        // invite/SSO callers (organizationId present), a concurrent P2002 race
-        // would otherwise leave the existing user un-attached to the requested
-        // org. Reconcile idempotently — only attach when not already a member
-        // (the membership check avoids re-pushing roles via the upsert's
-        // `push` update branch). SHELF-WEBAPP-1EA follow-up.
+        // Restore the org association the rolled-back transaction did not
+        // write. Attach only when the user is not a member yet: the upsert's
+        // update branch pushes roles, so running it for a member would add
+        // the roles a second time.
         if (
           organizationId &&
           !existingUser.organizations.some((org) => org.id === organizationId)
@@ -1091,11 +1239,38 @@ export async function updateUserEmail({
         where: { id: userId },
         data: { email: newEmail },
       })
-      .catch((cause) => {
-        // On failure, revert the change of the user update in auth
-        void getSupabaseAdmin().auth.admin.updateUserById(userId, {
-          email: currentEmail,
-        });
+      .catch(async (cause) => {
+        // Auth already holds the new address, so the revert is what keeps the
+        // two systems agreeing. It has to be awaited: sign-in resolves the
+        // account by its AUTH email and then looks the user up by that address
+        // in the database, so a divergence locks the account out of both apps
+        // with no way back in. A dropped promise would also reject unhandled.
+        const { error: revertError } = await getSupabaseAdmin()
+          .auth.admin.updateUserById(userId, { email: currentEmail })
+          .catch((revertCause: unknown) => ({ error: revertCause }));
+
+        if (revertError) {
+          // Nothing further can be done from here, so say plainly which
+          // address each system holds — repairing it means setting one of
+          // them by hand.
+          Logger.error(
+            new ShelfError({
+              cause: revertError,
+              message:
+                "Email change failed and could not be rolled back in auth. The auth account and the database now hold different addresses, which blocks sign-in until one is corrected.",
+              additionalData: { userId, newEmail, currentEmail },
+              label,
+            })
+          );
+
+          throw new ShelfError({
+            cause,
+            message:
+              "Failed to update your email, and we could not restore the previous one. Please contact support before signing out.",
+            additionalData: { userId, newEmail, currentEmail },
+            label,
+          });
+        }
 
         // Unique email constraint is being handled automatically by `getSupabaseAdmin().auth.admin.generateLink`
         throw new ShelfError({
@@ -1110,7 +1285,12 @@ export async function updateUserEmail({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to update email",
+      // The steps above already say which of the two systems refused, and
+      // whether the previous address was restored. Replacing that with one
+      // generic line would drop the only guidance the user gets.
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to update email",
       additionalData: { userId, currentEmail, newEmail },
       label,
     });
@@ -1216,6 +1396,10 @@ async function getUsers({
                   id: true,
                   type: true,
                   userId: true,
+                  // The workspace's billing party. An invited member sits on
+                  // the free tier whatever their team pays for, so the admin
+                  // list's account status reads the owner's tier, not theirs.
+                  owner: { select: { tierId: true } },
                 },
               },
             },
@@ -1481,6 +1665,46 @@ export async function createUserAccountForTesting(
   return authSession;
 }
 
+/**
+ * Deletes a user's membership row unless they own the workspace.
+ *
+ * A workspace must always have an owner, and deleting the owner's
+ * `UserOrganization` row is a one-way door: it is the record
+ * `transferOwnership` looks up to hand ownership on. Once gone,
+ * `Organization.userId` still names the ex-owner but they have no membership,
+ * so they get a 403 and no transfer path can run.
+ *
+ * The owner condition lives **in the DELETE itself** rather than in a preceding
+ * read. A check-then-delete loses to an ownership transfer that commits in
+ * between: the read sees ADMIN, the transfer promotes them to OWNER, and the
+ * unqualified delete removes the new owner anyway. As a conditional delete this
+ * is a compare-and-set — Postgres re-evaluates the qualification against the
+ * committed row version, so the race arm matches nothing.
+ *
+ * @param args - The membership to remove
+ * @param client - Transaction client, when the caller needs this to commit with
+ *   other writes
+ * @returns Number of rows deleted: 0 means the user owns the workspace or has
+ *   no membership — the caller must decide which and how to react
+ */
+async function deleteMembershipUnlessOwner(
+  {
+    userId,
+    organizationId,
+  }: { userId: User["id"]; organizationId: Organization["id"] },
+  client: Omit<ExtendedPrismaClient, ITXClientDenyList> = db
+) {
+  const { count } = await client.userOrganization.deleteMany({
+    where: {
+      userId,
+      organizationId,
+      NOT: { roles: { has: OrganizationRoles.OWNER } },
+    },
+  });
+
+  return count;
+}
+
 export async function revokeAccessToOrganization({
   userId,
   organizationId,
@@ -1490,36 +1714,86 @@ export async function revokeAccessToOrganization({
 }) {
   try {
     /**
+     * Read first purely so the common case gets an actionable message instead
+     * of a generic failure. {@link deleteMembershipUnlessOwner} is what
+     * actually enforces the rule — this read can go stale.
+     *
+     * This mirrors `changeUserRole`, which already refuses to touch the OWNER
+     * and points the caller at ownership transfer.
+     */
+    const targetUserOrg = await db.userOrganization.findFirst({
+      where: { userId, organizationId },
+      select: { roles: true },
+    });
+
+    if (targetUserOrg?.roles.includes(OrganizationRoles.OWNER)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Cannot revoke the owner's access",
+        message:
+          "This user owns the workspace. Transfer ownership to someone else first, then revoke their access.",
+        additionalData: { userId, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    /**
      * if I want to revokeAccess access, i simply need to:
      * 1. Remove relation between user and team member
      * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
      */
-    // Disconnect EVERY linked team member, not just the first. Nothing enforces
-    // one per (user, org): the old SSO revoke left the row linked, so a later
-    // re-grant created a second one. Unlinking only one would leave the other
-    // still routing booking emails and recipient pickers to this user.
+    // Disconnect EVERY linked team member, not just the first. The schema does
+    // not enforce one per (user, org), and any row left linked keeps routing
+    // booking emails and recipient pickers to a user who no longer has access.
     const teamMembers = await db.teamMember.findMany({
       where: { userId, organizationId },
       select: { id: true },
     });
 
-    const result = await db.user.update({
-      where: { id: userId },
-      data: {
-        ...(teamMembers.length > 0 && {
-          teamMembers: {
-            disconnect: teamMembers.map(({ id }) => ({ id })),
-          },
-        }),
-        userOrganizations: {
-          delete: {
-            userId_organizationId: {
-              userId,
-              organizationId,
+    const result = await db.$transaction(async (tx) => {
+      const deleted = await deleteMembershipUnlessOwner(
+        { userId, organizationId },
+        tx
+      );
+
+      if (deleted === 0) {
+        /**
+         * Either they became the owner since the read above (the race this
+         * conditional delete exists to catch) or they were never a member.
+         * Re-read inside the transaction to tell those apart, so a genuine
+         * ownership race is reported rather than passing silently.
+         */
+        const survivor = await tx.userOrganization.findFirst({
+          where: { userId, organizationId },
+          select: { roles: true },
+        });
+
+        if (survivor) {
+          throw new ShelfError({
+            cause: null,
+            title: "Cannot revoke the owner's access",
+            message:
+              "This user owns the workspace. Transfer ownership to someone else first, then revoke their access.",
+            additionalData: { userId, organizationId },
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      return tx.user.update({
+        where: { id: userId },
+        data: {
+          ...(teamMembers.length > 0 && {
+            teamMembers: {
+              disconnect: teamMembers.map(({ id }) => ({ id })),
             },
-          },
+          }),
         },
-      },
+      });
     });
 
     // Clear lastSelectedOrganizationId if it points to the revoked org.
@@ -1543,6 +1817,12 @@ export async function revokeAccessToOrganization({
 
     return result;
   } catch (cause) {
+    // Preserve our own errors — the owner guard above is a 400 the user needs
+    // to read, and rewrapping would turn it into a generic captured 500.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Failed to revoke user access to organization",

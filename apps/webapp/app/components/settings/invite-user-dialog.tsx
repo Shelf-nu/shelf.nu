@@ -6,6 +6,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { INVITABLE_ROLES } from "~/modules/invite/roles";
 import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -42,16 +43,11 @@ export const InviteUserFormSchema = z.object({
       message: "Please enter a valid email",
     })),
   teamMemberId: z.string().optional(),
+  // INVITABLE_ROLES is shared with the CSV import path so the two cannot drift.
+  // OWNER is excluded there, and that exclusion is a security control.
   role: z.preprocess(
     (value) => String(value).trim().toUpperCase(),
-    z.enum(
-      [
-        OrganizationRoles.ADMIN,
-        OrganizationRoles.BASE,
-        OrganizationRoles.SELF_SERVICE,
-      ],
-      { message: "Please select a role" }
-    )
+    z.enum(INVITABLE_ROLES, { message: "Please select a role" })
   ),
   inviteMessage: z.string().max(1000).optional(),
 });
@@ -171,6 +167,7 @@ export default function InviteUserDialog({
                             imageId={organization.imageId}
                             alt="img"
                             className="size-6 rounded-[2px] object-cover"
+                            updatedAt={organization.updatedAt}
                           />
 
                           <div className=" ml-px max-w-full truncate text-sm text-gray-900">

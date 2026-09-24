@@ -78,19 +78,24 @@ const SELECTION = [
 ] as unknown as ListItemData[];
 
 /**
+ * The `BulkUpdateDialogContent` props these tests drive. Kept as one alias so
+ * the render helper, the rerender helper and `open` cannot drift apart.
+ */
+type DialogTestProps = {
+  keepSelectionOnSuccess?: boolean;
+  skipCloseOnSuccess?: boolean;
+  allowBodyOverflow?: boolean;
+  className?: string;
+};
+
+/**
  * Renders the dialog for a given `type` under a dedicated jotai store, then
  * seeds the dialog-open + selection atoms. Seeding happens AFTER the first
  * render (inside `act`) on purpose: both atoms reset themselves via `onMount`
  * when first subscribed, so seeding before render would be clobbered. Returns
  * the store so tests can read the resulting atom state.
  */
-async function renderDialog(
-  type: BulkDialogType,
-  props: {
-    keepSelectionOnSuccess?: boolean;
-    skipCloseOnSuccess?: boolean;
-  } = {}
-) {
+async function renderDialog(type: BulkDialogType, props: DialogTestProps = {}) {
   const store = createStore();
 
   const utils = render(
@@ -136,16 +141,10 @@ async function resolveFetcher(
 
 // Remember the last render config so `resolveFetcher` can rerender identically.
 let lastType: BulkDialogType;
-let lastProps: {
-  keepSelectionOnSuccess?: boolean;
-  skipCloseOnSuccess?: boolean;
-};
+let lastProps: DialogTestProps;
 
 /** Wraps `renderDialog` capturing config for the rerender helper. */
-function open(
-  type: BulkDialogType,
-  props: { keepSelectionOnSuccess?: boolean; skipCloseOnSuccess?: boolean } = {}
-) {
+function open(type: BulkDialogType, props: DialogTestProps = {}) {
   lastType = type;
   lastProps = props;
   return renderDialog(type, props);
@@ -205,5 +204,60 @@ describe("BulkUpdateDialogContent — post-success selection handling", () => {
 
     expect(utils.store.get(selectedBulkItemsAtom)).toEqual(SELECTION);
     expect(utils.store.get(bulkDialogAtom).location).toBe(true);
+  });
+});
+
+/**
+ * `.dialog-allows-overflow` switches `.dialog-body` to `overflow: visible`,
+ * which removes the ONLY scroll container a dialog has. It used to be applied
+ * to every bulk dialog, so any dialog taller than the panel's
+ * `md:max-h-[calc(100vh-4rem)]` cap pushed its footer past the viewport with no
+ * way to reach it — the bulk "Create audit" dialog lost its submit button on
+ * short windows that way (#2894).
+ *
+ * happy-dom applies no real stylesheet, so these assert on the class contract
+ * rather than computed overflow: the class must be opt-in per dialog.
+ */
+describe("BulkUpdateDialogContent — body overflow opt-in", () => {
+  /** The portaled `<dialog>` element the Dialog renders into `document.body`. */
+  const dialogEl = () => document.querySelector("dialog.dialog");
+
+  it("does not make the body overflow-visible by default", async () => {
+    await open("start-audit");
+
+    expect(dialogEl()).not.toBeNull();
+    expect(dialogEl()?.classList.contains("dialog-allows-overflow")).toBe(
+      false
+    );
+  });
+
+  it("makes the body overflow-visible when allowBodyOverflow is set", async () => {
+    await open("tag-add", { allowBodyOverflow: true });
+
+    expect(dialogEl()?.classList.contains("dialog-allows-overflow")).toBe(true);
+  });
+
+  it("keeps the caller's own className alongside the opt-in", async () => {
+    // `test-caller-class` is a deliberate non-Tailwind sentinel: `tw()` is
+    // `twMerge`, which would collapse a second width utility into the first and
+    // hide a regression that dropped the caller's classes.
+    await open("tag-add", {
+      allowBodyOverflow: true,
+      className: "md:w-[600px] test-caller-class",
+    });
+
+    const el = dialogEl();
+    expect(el?.classList.contains("dialog-allows-overflow")).toBe(true);
+    expect(el?.classList.contains("test-caller-class")).toBe(true);
+    expect(el?.className).toContain("md:w-[600px]");
+    // The two width sources are `className || "lg:w-[400px]"` — mutually
+    // exclusive, so a caller class REPLACES the default rather than joining it.
+    expect(el?.className).not.toContain("lg:w-[400px]");
+  });
+
+  it("falls back to the default width when no className is passed", async () => {
+    await open("tag-add", { allowBodyOverflow: true });
+
+    expect(dialogEl()?.className).toContain("lg:w-[400px]");
   });
 });

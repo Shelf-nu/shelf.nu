@@ -16,6 +16,8 @@ yarn.lock
 .env.local
 .env.staging
 .env.production
+.env.*.backup
+.env.production-backup
 
 .cache
 

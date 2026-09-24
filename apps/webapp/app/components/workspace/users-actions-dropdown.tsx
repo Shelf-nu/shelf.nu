@@ -179,6 +179,14 @@ export function TeamUsersActionsDropdown({
                       ? {
                           reason: "You cannot revoke your own access",
                         }
+                      : // Mirrors the change-role control above, and the server
+                      // guard in `resolveUserAction`. Revoking is the stronger
+                      // action of the two, so it cannot be the looser one.
+                      isAdministrator && roleEnum === OrganizationRoles.ADMIN
+                      ? {
+                          reason:
+                            "Only the workspace owner can revoke an Administrator's access.",
+                        }
                       : disabled
                   }
                 >

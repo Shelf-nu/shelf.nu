@@ -1,3 +1,13 @@
+/**
+ * Team User Actions
+ *
+ * Server handlers for the actions on the team settings pages: delete a user,
+ * revoke access, change a role, and resend or cancel an invite.
+ *
+ * @see {@link file://./../../routes/_layout+/settings.team.users.tsx}
+ * @see {@link file://./../../routes/_layout+/settings.team.invites.tsx}
+ * @see {@link file://./../invite/service.server.ts}
+ */
 import type { OrganizationRoles } from "@prisma/client";
 import {
   InviteStatuses,
@@ -24,7 +34,12 @@ import {
   revokeAccessToOrganization,
   transferEntitiesToNewOwner,
 } from "./service.server";
-import { revokeAccessEmailText, roleChangeEmailText } from "../invite/helpers";
+import {
+  caseInsensitiveEmailFilter,
+  revokeAccessEmailText,
+  roleChangeEmailText,
+} from "../invite/helpers";
+import { isInvitableRole } from "../invite/roles";
 import { createInvite } from "../invite/service.server";
 
 /**
@@ -108,6 +123,36 @@ export async function resolveUserAction(
         }
       );
 
+      /**
+       * Parity with `changeUserRole`: only the OWNER may act on an ADMIN.
+       * Without this an ADMIN who is refused a role change ("Only the workspace
+       * owner can change an Administrator's role") can just revoke that
+       * ADMIN's access instead, which is the stronger action.
+       *
+       * Revoking the OWNER is refused by `revokeAccessToOrganization` itself,
+       * so it holds for every caller rather than only this one.
+       */
+      const targetUserOrg = await db.userOrganization.findFirst({
+        where: { userId: targetUserId, organizationId },
+        select: { roles: true },
+      });
+
+      if (
+        targetUserOrg?.roles.includes(OrgRolesEnum.ADMIN) &&
+        callerRole !== OrgRolesEnum.OWNER
+      ) {
+        throw new ShelfError({
+          cause: null,
+          title: "Insufficient permissions",
+          message:
+            "Only the workspace owner can revoke an Administrator's access.",
+          additionalData: { organizationId, targetUserId },
+          label: "Team",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+
       const user = await revokeAccessToOrganization({
         userId: targetUserId,
         organizationId,
@@ -167,7 +212,7 @@ export async function resolveUserAction(
       await db.invite
         .updateMany({
           where: {
-            inviteeEmail,
+            inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
             organizationId,
             status: InviteStatuses.PENDING,
           },
@@ -220,48 +265,60 @@ export async function resolveUserAction(
         (key) => organizationRolesMap[key] === userFriendlyRole
       ) as OrganizationRoles | undefined;
 
-      if (!role) {
+      /**
+       * `userFriendlyRole` is free text from the form and `organizationRolesMap`
+       * contains an OWNER entry (it doubles as the display map for the team
+       * list), so "Owner" would resolve here and mint an OWNER invite —
+       * the same escalation the invite dialog and CSV import both refuse.
+       * Ownership moves only through `transferOwnership`.
+       */
+      if (!role || !isInvitableRole(role)) {
         throw new ShelfError({
           cause: null,
           message: "Invalid role",
           additionalData: { userFriendlyRole },
           label: "Team",
+          status: 400,
+          shouldBeCaptured: false,
         });
       }
 
-      /** Invalidate all previous invites for current user for current organization */
+      /**
+       * Invalidate every earlier invite for this person in this organization
+       * before creating the new one. The two steps run in order: the new
+       * invite matches the same email, so an invalidation that finishes later
+       * would close it too, and `createInvite` refuses while another pending
+       * invite for the person exists.
+       */
+      await db.invite
+        .updateMany({
+          where: {
+            inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
+            organizationId,
+          },
+          data: {
+            status: InviteStatuses.INVALIDATED,
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "Failed to invalidate previous invites",
+            additionalData: { userId, organizationId, inviteeEmail },
+            label: "Team",
+          });
+        });
 
-      const [_invalidatedInvites, invite] = await Promise.all([
-        db.invite
-          .updateMany({
-            where: {
-              inviteeEmail,
-              organizationId,
-            },
-            data: {
-              status: InviteStatuses.INVALIDATED,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to invalidate previous invites",
-              additionalData: { userId, organizationId, inviteeEmail },
-              label: "Team",
-            });
-          }),
-
-        /** Create a new invite, based on the prev invite's role */
-        createInvite({
-          organizationId,
-          inviteeEmail,
-          teamMemberName,
-          teamMemberId,
-          inviterId: userId,
-          roles: [role],
-          userId,
-        }),
-      ]);
+      /** Create a new invite, based on the prev invite's role */
+      const invite = await createInvite({
+        organizationId,
+        inviteeEmail,
+        teamMemberName,
+        teamMemberId,
+        inviterId: userId,
+        roles: [role],
+        userId,
+      });
 
       if (invite) {
         sendNotification({

@@ -10,7 +10,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import type { BlockerGroup } from "@/lib/batch-blockers";
 import { createStyles } from "@/lib/create-styles";
-import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
+import {
+  fontSize,
+  spacing,
+  borderRadius,
+  hitSlop,
+  formatStatus,
+} from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { BatchBlockers } from "./batch-blockers";
 
@@ -54,12 +60,6 @@ type BatchDrawerProps = {
   /** Removes every blocked item from the scan list. */
   onResolveAllBlockers?: () => void;
 };
-
-function formatStatus(status: string) {
-  if (status === "IN_CUSTODY") return "In Custody";
-  if (status === "AVAILABLE") return "Available";
-  return status.replace(/_/g, " ");
-}
 
 /**
  * Bottom drawer showing a list of scanned items with submit and clear

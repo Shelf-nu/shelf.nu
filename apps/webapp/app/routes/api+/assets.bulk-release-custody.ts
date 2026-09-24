@@ -1,10 +1,11 @@
-import { OrganizationRoles } from "@prisma/client";
+import { AssetType, OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -23,12 +24,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.custody,
-    });
+    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.custody,
+      });
 
     // Fetch asset index settings to determine mode
     const settings = await getAssetIndexSettings({
@@ -57,7 +59,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       const custodies = await db.custody.findMany({
         where: {
           assetId: { in: assetIds },
-          asset: { organizationId },
+          asset: {
+            organizationId,
+            // Only the assets this release will actually touch.
+            // `bulkCheckInAssets` skips QUANTITY_TRACKED rows — they are
+            // released individually, with a quantity — and it reports the count
+            // it skipped. Judging them here refuses the whole request over
+            // custody nobody was going to release: a self-service user
+            // selecting their own individual asset alongside a qty-tracked one
+            // that a colleague holds units of got a 403 for the lot.
+            type: { not: AssetType.QUANTITY_TRACKED },
+          },
         },
         select: { custodian: { select: { id: true, userId: true } } },
       });
@@ -92,6 +104,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       currentSearchParams,
       settings,
       timeZone,
+      // `asset: custody` is a SELF_SERVICE permission, so narrow the
+      // select-all custodian filter to the caller's own custody — otherwise a
+      // self-service user could act on exactly the set a colleague holds.
+      allowedTeamMemberIds: await scopeCustodianFilterIds({
+        teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
+          "teamMember"
+        ),
+        canSeeAllCustody,
+        userId,
+        organizationId,
+      }),
     });
 
     const skippedNote =

@@ -1,3 +1,16 @@
+/**
+ * Audit note builders.
+ *
+ * Every note in this module is assembled server-side from a mix of trusted
+ * text and user-supplied values, then rendered through Markdoc by the audit
+ * feed. These tests pin both halves: the stats and wording each builder
+ * produces, and the sanitisation that keeps a user value from becoming a live
+ * Markdoc tag.
+ *
+ * @see {@link file://./helpers.server.ts}
+ * @see {@link file://./note-content.server.ts}
+ */
+import Markdoc from "@markdoc/markdoc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -781,6 +794,101 @@ describe("audit helpers", () => {
         '{% audit_images count=5 ids="abc-123,def-456,ghi-789,jkl-012,mno-345" /%}'
       );
     });
+
+    it("cannot be Markdoc-injected through the completion note", async () => {
+      // why: the completion note is free text with no character restrictions
+      // and the audit feed renders note content as Markdoc, so a raw splice
+      // lets the completer forge an `audit_images` tag naming evidence from
+      // an audit they are not on. Assert on the PARSE, not the string.
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-13",
+        firstName: "Mallory",
+        lastName: "Attacker",
+      });
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-13",
+        userId: "user-13",
+        expectedCount: 10,
+        foundCount: 10,
+        missingCount: 0,
+        unexpectedCount: 0,
+        completionNote:
+          'All good {% audit_images count=1 ids="other-audits-image" /%}',
+        tx: mockTx,
+      });
+
+      const { content } = mockTx.auditNote.create.mock.calls[0][0].data;
+      const tags = [...Markdoc.parse(content).walk()].filter(
+        (node) => node.type === "tag"
+      );
+
+      expect(tags).toHaveLength(0);
+    });
+
+    it("strips nested delimiters that a single pass would re-form", async () => {
+      // why: one `.replace()` splices the remainder into a NEW delimiter, so
+      // `{{% … /%}}` would come back out as a working tag.
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-14",
+        firstName: "Mallory",
+        lastName: "Attacker",
+      });
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-14",
+        userId: "user-14",
+        expectedCount: 1,
+        foundCount: 1,
+        missingCount: 0,
+        unexpectedCount: 0,
+        completionNote: '{{% audit_images count=1 ids="sneaky" /%}}',
+        tx: mockTx,
+      });
+
+      const { content } = mockTx.auditNote.create.mock.calls[0][0].data;
+      const tags = [...Markdoc.parse(content).walk()].filter(
+        (node) => node.type === "tag"
+      );
+
+      expect(tags).toHaveLength(0);
+    });
+
+    it("keeps the trusted image tag when the completion note is injected", async () => {
+      // why: sanitising the user text must not disarm the tag the helper
+      // itself appends — the note still has to render its own evidence.
+      mockTx.user.findUnique.mockResolvedValue({
+        id: "user-15",
+        firstName: "Nina",
+        lastName: "Auditor",
+      });
+      mockTx.auditImage.findMany.mockResolvedValue([{ id: "img-1" }]);
+
+      await createAuditCompletedNote({
+        auditSessionId: "audit-15",
+        userId: "user-15",
+        expectedCount: 1,
+        foundCount: 1,
+        missingCount: 0,
+        unexpectedCount: 0,
+        completionNote: '{% audit_images count=1 ids="other-audits-image" /%}',
+        tx: mockTx,
+      });
+
+      const { content } = mockTx.auditNote.create.mock.calls[0][0].data;
+      const tags = [...Markdoc.parse(content).walk()].filter(
+        (node) => node.type === "tag"
+      );
+
+      expect(tags).toHaveLength(1);
+      expect(
+        (tags[0] as unknown as { attributes: { ids: string } }).attributes.ids
+      ).toBe("img-1");
+      // The injected ids survive as inert text, stripped of their delimiters.
+      expect(content).toContain(
+        'audit_images count=1 ids="other-audits-image"'
+      );
+    });
   });
 
   describe("createAuditAssetImagesAddedNote", () => {
@@ -792,7 +900,7 @@ describe("audit helpers", () => {
           findUnique: vi.fn(),
         },
         auditAsset: {
-          findUnique: vi.fn(),
+          findFirst: vi.fn(),
         },
         auditNote: {
           create: vi.fn(),
@@ -807,7 +915,7 @@ describe("audit helpers", () => {
         lastName: "Doe",
       });
 
-      mockTx.auditAsset.findUnique.mockResolvedValue({
+      mockTx.auditAsset.findFirst.mockResolvedValue({
         id: "audit-asset-1",
         asset: {
           id: "asset-1",
@@ -833,8 +941,10 @@ describe("audit helpers", () => {
         },
       });
 
-      expect(mockTx.auditAsset.findUnique).toHaveBeenCalledWith({
-        where: { id: "audit-asset-1" },
+      // `auditSessionId` is the whole tenant boundary here: AuditAsset has no
+      // organizationId column, so an id-only lookup reaches every workspace.
+      expect(mockTx.auditAsset.findFirst).toHaveBeenCalledWith({
+        where: { id: "audit-asset-1", auditSessionId: "audit-1" },
         include: {
           asset: {
             select: { id: true, title: true },
@@ -866,7 +976,7 @@ describe("audit helpers", () => {
         lastName: "Smith",
       });
 
-      mockTx.auditAsset.findUnique.mockResolvedValue({
+      mockTx.auditAsset.findFirst.mockResolvedValue({
         id: "audit-asset-2",
         asset: {
           id: "asset-2",
@@ -906,7 +1016,7 @@ describe("audit helpers", () => {
         lastName: "Johnson",
       });
 
-      mockTx.auditAsset.findUnique.mockResolvedValue({
+      mockTx.auditAsset.findFirst.mockResolvedValue({
         id: "audit-asset-3",
         asset: {
           id: "asset-3",
@@ -929,7 +1039,7 @@ describe("audit helpers", () => {
 
     it("skips note creation when user not found", async () => {
       mockTx.user.findUnique.mockResolvedValue(null);
-      mockTx.auditAsset.findUnique.mockResolvedValue({
+      mockTx.auditAsset.findFirst.mockResolvedValue({
         id: "audit-asset-4",
         asset: { id: "asset-4", title: "Test Asset" },
       });
@@ -951,7 +1061,7 @@ describe("audit helpers", () => {
         firstName: "Bob",
         lastName: "Williams",
       });
-      mockTx.auditAsset.findUnique.mockResolvedValue(null);
+      mockTx.auditAsset.findFirst.mockResolvedValue(null);
 
       await createAuditAssetImagesAddedNote({
         auditSessionId: "audit-5",
@@ -1499,7 +1609,7 @@ describe("audit helpers", () => {
           }),
         },
         auditAsset: {
-          findUnique: vi.fn().mockResolvedValue({
+          findFirst: vi.fn().mockResolvedValue({
             id: "audit-asset-1",
             asset: { id: "asset-1", title: "Drill" },
           }),

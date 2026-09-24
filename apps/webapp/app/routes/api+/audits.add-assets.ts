@@ -5,7 +5,11 @@ import { z } from "zod";
 import { resolveAssetIdsForBulkOperation } from "~/modules/asset/bulk-operations-helper.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
-import { addAssetsToAudit } from "~/modules/audit/service.server";
+import {
+  addAssetsToAudit,
+  requireAuditAssignee,
+} from "~/modules/audit/service.server";
+import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { badRequest, makeShelfError } from "~/utils/error";
@@ -28,7 +32,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, canUseBarcodes, role } = await requirePermission({
+    const {
+      organizationId,
+      canUseBarcodes,
+      role,
+      canSeeAllCustody,
+      isSelfServiceOrBase,
+    } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -48,6 +58,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
         additionalData: { organizationId, userId },
       }
     );
+
+    // `audit: update` authorizes updating audits in general, never THIS audit.
+    // Without this a BASE or SELF_SERVICE member could widen the scope of any
+    // pending audit in the workspace — adding assets to one they were never
+    // assigned to. ADMIN/OWNER are unrestricted. (detail.dev D043)
+    await requireAuditAssignee({
+      auditSessionId: auditId,
+      organizationId,
+      userId,
+      isSelfServiceOrBase,
+    });
 
     // Determine if we're selecting all items across multiple pages
     const isSelectingAll =
@@ -78,6 +99,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
         currentSearchParams,
         settings,
         timeZone,
+        // `audit: update` is held by BASE and SELF_SERVICE, and the resulting
+        // audit lists the assets it resolved — so a custodian filter here has
+        // to be narrowed to the caller's own custody.
+        allowedTeamMemberIds: await scopeCustodianFilterIds({
+          teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
+            "teamMember"
+          ),
+          canSeeAllCustody,
+          userId,
+          organizationId,
+        }),
       });
     } else {
       assetIds = directAssetIds;

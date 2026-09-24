@@ -1,5 +1,4 @@
 import { OrganizationRoles } from "@prisma/client";
-import { DateTime } from "luxon";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
@@ -10,12 +9,14 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { createBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
-import { DATE_TIME_FORMAT } from "~/utils/constants";
+import { isValidTimeZone } from "~/utils/date-format";
+import { prefsForDeclaredZone } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -66,7 +67,14 @@ const BodySchema = z.object({
   custodianTeamMemberId: z.string().min(1, "Please select a custodian"),
   startDate: z.string().min(1, "Start date is required"),
   endDate: z.string().min(1, "End date is required"),
-  timeZone: z.string().min(1, "Time zone is required"),
+  // Must be a real IANA zone. The declared zone is what every date on this
+  // request is decoded in, so an unrecognised one makes Luxon yield an invalid
+  // DateTime and surfaces as a vague "Invalid date format" against the date
+  // fields. Reject it here instead, naming the field that is actually wrong.
+  timeZone: z
+    .string()
+    .min(1, "Time zone is required")
+    .refine(isValidTimeZone, "Time zone must be a valid IANA zone"),
   tags: z.array(z.string()).optional().default([]),
   assetIds: z.array(z.string()).optional().default([]),
 });
@@ -92,7 +100,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // of the web route-layer gate).
     await assertMobileCanUseBookings(organizationId);
 
-    const body = BodySchema.parse(await request.json());
+    const body = await parseMobileBody(BodySchema, request);
 
     // Resolve the caller's role to branch self-service rules + admin bypass.
     const { role } = await getMobileUserContext(user.id, organizationId);
@@ -139,6 +147,12 @@ export async function action({ request }: ActionFunctionArgs) {
       timeZone: body.timeZone,
     };
 
+    // Decode the wall-clock in the zone the client DECLARED it in, not the
+    // user's preference zone: the companion builds `startDate`/`endDate` from
+    // device-local components and sends the matching zone, so any other zone
+    // yields a different instant than the picker showed.
+    const prefs = prefsForDeclaredZone(body.timeZone);
+
     // Business-rule validation via the shared web schema. We shape the JSON body
     // into the form-data shape the schema expects (custodian as a JSON string,
     // tags as a comma-separated string) so the rules stay byte-identical to web.
@@ -146,9 +160,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
 
+    let parsedBooking;
     try {
-      BookingFormSchema({
-        hints,
+      parsedBooking = BookingFormSchema({
+        prefs,
         action: "new",
         workingHours,
         bookingSettings,
@@ -181,17 +196,14 @@ export async function action({ request }: ActionFunctionArgs) {
       throw cause;
     }
 
-    // BookingFormSchema validates the dates with the broader `coerceLocalDate`,
-    // so a value can pass validation yet not match DATE_TIME_FORMAT here and
-    // become an Invalid Date. Guard explicitly before handing dates to the
-    // service (otherwise `Invalid Date` would silently flow into createBooking).
-    const fromDt = DateTime.fromFormat(body.startDate, DATE_TIME_FORMAT, {
-      zone: body.timeZone,
-    });
-    const toDt = DateTime.fromFormat(body.endDate, DATE_TIME_FORMAT, {
-      zone: body.timeZone,
-    });
-    if (!fromDt.isValid || !toDt.isValid) {
+    // Use the instants the schema already produced rather than re-parsing the
+    // raw body: `coerceLocalDate` accepts second precision via `fromISO`, while
+    // DATE_TIME_FORMAT is minute-only, so re-parsing could reject a payload the
+    // schema had just accepted. Reusing the result also guarantees the stored
+    // instant is the one that was validated, in the same declared zone.
+    const from = parsedBooking.startDate;
+    const to = parsedBooking.endDate;
+    if (!from || !to) {
       throw new ShelfError({
         cause: null,
         message: "Invalid booking start or end date.",
@@ -200,8 +212,6 @@ export async function action({ request }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-    const from = fromDt.toJSDate();
-    const to = toDt.toJSDate();
 
     const booking = await createBooking({
       booking: {

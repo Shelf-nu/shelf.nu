@@ -16,6 +16,7 @@ import When from "~/components/when/when";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { isDirectBookingBlockedByKit } from "~/modules/asset/utils";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -70,8 +71,14 @@ function ConditionalActionsDropdown() {
       (asset) => asset.id !== ALL_SELECTED_KEY
     );
 
-    /** If any asset is part of a kit. */
-    const someAssetsPartOfKit = realAssets.some((asset) => !!asset.kit);
+    /**
+     * If any asset can't be booked outside of its kit.
+     *
+     * Only INDIVIDUAL assets qualify — a QUANTITY_TRACKED asset allocates a
+     * slice of its pool per kit and keeps the remainder free for direct
+     * bookings. See `isDirectBookingBlockedByKit`.
+     */
+    const someAssetsPartOfKit = realAssets.some(isDirectBookingBlockedByKit);
     if (someAssetsPartOfKit) {
       return {
         reason:

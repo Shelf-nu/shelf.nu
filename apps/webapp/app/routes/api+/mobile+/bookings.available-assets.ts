@@ -1,3 +1,20 @@
+/**
+ * Mobile booking asset picker endpoint.
+ *
+ * Serves the companion's "add assets to booking" screen: an availability-aware
+ * asset list for a specific date window, plus the display code and resolved
+ * image each row renders. It owns no query or availability logic of its own —
+ * `getPaginatedAndFilterableAssets` decides what is bookable, and this route
+ * shapes that result for a native client that cannot re-resolve relations.
+ *
+ * Shaping is the part worth knowing: the response carries FLAT, already-resolved
+ * image fields rather than the nested `assetModel` relation, because the
+ * companion ships as a native binary and must inherit a model's cover image
+ * without a client release. See the loader docblock for the request contract.
+ *
+ * @see {@link file://./../../../modules/asset/image-resolution.ts}
+ * @see {@link file://./../../../modules/asset/service.server.ts} getPaginatedAndFilterableAssets
+ */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -5,8 +22,15 @@ import {
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
-import { resolveAssetImage } from "~/modules/asset/image-resolution";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import {
+  resolveAssetImage,
+  serializeImageExpiration,
+} from "~/modules/asset/image-resolution";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  getPaginatedAndFilterableAssets,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import {
   resolveDisplayCode,
   labelForPreference,
@@ -79,12 +103,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       pickerParams.set("per_page", String(MOBILE_PICKER_MAX_PAGE_SIZE));
     }
 
-    const { assets, page, perPage, totalAssets, totalPages } =
-      await getPaginatedAndFilterableAssets({
-        request,
-        organizationId,
-        filters: pickerParams.toString(),
-      });
+    const {
+      assets: storedAssets,
+      page,
+      perPage,
+      totalAssets,
+      totalPages,
+    } = await getPaginatedAndFilterableAssets({
+      request,
+      organizationId,
+      // Mobile asset picker: ignores the custodian-filter seed, so scope it
+      // rather than fetch a roster the response never returns.
+      canSeeAllCustody: false,
+      filters: pickerParams.toString(),
+    });
+
+    const assets = await refreshExpiredAssetImages(storedAssets, {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
 
     // Resolve the workspace's display code (QR Code ID by default, or a SAM ID
     // / barcode per the org's preference) for each asset so the mobile picker
@@ -120,7 +157,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       assets: assets.map((asset) => {
         const codeEntity = codeByAssetId.get(asset.id);
         const resolved = codeEntity
-          ? resolveDisplayCode({ entity: codeEntity, organization: org })
+          ? resolveDisplayCode({
+              entity: codeEntity,
+              organization: org,
+              entityKind: "asset",
+            })
           : null;
         return {
           id: asset.id,
@@ -140,9 +181,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
               mainImage: isPlaceholder ? null : image.fullUrl,
               thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
               imageSource: image.source,
+              mainImageExpiration: serializeImageExpiration(
+                image.source,
+                asset.mainImageExpiration
+              ),
             };
           })(),
-          mainImageExpiration: asset.mainImageExpiration,
           // Kit linkage moved to the AssetKit pivot (quantities restructure);
           // the pivot row's `kitId` FK is the legacy single-kit id the companion
           // contract expects.

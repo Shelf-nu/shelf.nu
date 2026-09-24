@@ -263,25 +263,53 @@ async function validateImageLimits({
 export async function deleteAuditImage({
   imageId,
   organizationId,
+  auditSessionId,
+  auditAssetId,
 }: {
   imageId: AuditImage["id"];
   organizationId: Organization["id"];
+  /**
+   * The audit the caller is acting on, taken from the route. REQUIRED, and
+   * deliberately not optional: `imageId` comes from the request body, and
+   * without this the org filter was the only constraint — so an image could be
+   * deleted through a URL naming a completely different audit.
+   */
+  auditSessionId: AuditSession["id"];
+  /**
+   * The audit asset the caller is acting on, when the route names one. Binds
+   * the image to its specific parent row rather than merely to the audit.
+   * Omitted by callers that legitimately act on audit-level (general) images.
+   */
+  auditAssetId?: AuditAsset["id"];
 }): Promise<boolean> {
   try {
-    // Get the image record to retrieve URLs
+    // Get the image record to retrieve URLs.
+    //
+    // SECURITY: scoped to the audit (and, when the route names one, the audit
+    // asset) the caller is acting on — not to the organization alone. The
+    // `imageId` is caller-supplied, so an org-only filter let any member
+    // delete any image in the workspace, including evidence attached to an
+    // audit they are not assigned to and did not name in the URL.
     const image = await db.auditImage.findFirst({
       where: {
         id: imageId,
         organizationId,
+        auditSessionId,
+        ...(auditAssetId ? { auditAssetId } : {}),
       },
     });
 
     if (!image) {
       throw new ShelfError({
         cause: null,
+        // Deliberately uniform: a real image belonging to another audit and a
+        // wholly unknown id return the same message, so this cannot be used to
+        // probe which image ids exist.
         message: "Image not found or you don't have permission to delete it",
-        additionalData: { imageId, organizationId },
+        additionalData: { imageId, organizationId, auditSessionId },
         label,
+        status: 404,
+        shouldBeCaptured: false,
       });
     }
 

@@ -21,7 +21,6 @@
 import { useMemo, useState } from "react";
 import type { Booking } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
-import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import useApiQuery from "~/hooks/use-api-query";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { ExtendedAssetStatus } from "~/utils/booking-assets";
@@ -198,14 +197,12 @@ export function AssetStatusBadge({
               `suppressQtyAware`, or no data yet), the chip is plain and
               the breakdown popover would be misleading — hide it. */}
           {!useCallerStatus && (
-            <HoverCardPortal>
-              <HoverCardContent
-                side="bottom"
-                className="w-[26rem] max-w-[calc(100vw-2rem)]"
-              >
-                <QuantityTooltipContent data={quantityData} />
-              </HoverCardContent>
-            </HoverCardPortal>
+            <HoverCardContent
+              side="bottom"
+              className="w-[26rem] max-w-[calc(100vw-2rem)]"
+            >
+              <QuantityTooltipContent data={quantityData} />
+            </HoverCardContent>
           )}
         </HoverCard>
         {!availableToBook && (
@@ -232,17 +229,15 @@ export function AssetStatusBadge({
       </HoverCardTrigger>
 
       <When truthy={!!bookingToShow}>
-        <HoverCardPortal>
-          <HoverCardContent side="top" className="w-max min-w-36 max-w-72">
-            <Button
-              variant="link-gray"
-              to={`/bookings/${bookingToShow?.id}`}
-              target="_blank"
-            >
-              {bookingToShow?.name}
-            </Button>
-          </HoverCardContent>
-        </HoverCardPortal>
+        <HoverCardContent side="top" className="w-max min-w-36 max-w-72">
+          <Button
+            variant="link-gray"
+            to={`/bookings/${bookingToShow?.id}`}
+            target="_blank"
+          >
+            {bookingToShow?.name}
+          </Button>
+        </HoverCardContent>
       </When>
     </HoverCard>
   );

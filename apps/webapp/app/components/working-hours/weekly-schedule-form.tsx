@@ -168,8 +168,10 @@ export const WeeklyScheduleForm = ({
         <div className="mb-4 border-b pb-4">
           <h3 className="text-text-lg font-semibold">Weekly Schedule</h3>
           <p className="text-sm text-gray-600">
-            Set your working hours for each day of the week. Times will be
-            displayed in your local format.
+            Set your working hours for each day of the week. These are the{" "}
+            <strong>local hours of your physical location</strong> — they are
+            not converted to anyone&apos;s timezone, so 9:00 means 9:00 on site
+            for everyone.
           </p>
 
           {validationErrors.general && (

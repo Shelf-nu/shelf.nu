@@ -44,6 +44,7 @@ const dbMocks = vi.hoisted(() => ({
     findUniqueOrThrow: vi.fn(),
   },
   assetLocation: {
+    findMany: vi.fn(),
     create: vi.fn(),
     deleteMany: vi.fn(),
   },
@@ -62,6 +63,14 @@ vi.mock("~/database/db.server", () => ({
 // `activityEvent` table.
 vi.mock("~/modules/activity-event/service.server", () => ({
   recordEvent: vi.fn(),
+}));
+
+// why: the route row-locks the asset before the pivot write so a concurrent
+// stock decrease cannot interleave. The lock issues a raw
+// `SELECT ... FOR UPDATE`, which a mocked tx client cannot execute — stub it
+// to return the row the write should be based on.
+vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
+  lockAssetForQuantityUpdate: vi.fn(),
 }));
 
 // why: external service — we don't want to create real notes in the database
@@ -98,6 +107,7 @@ import {
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
+import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createNote } from "~/modules/note/service.server";
 
 const mockUser = {
@@ -123,6 +133,14 @@ function createRequest(body: Record<string, unknown>) {
 
 describe("POST /api/mobile/asset/update-location", () => {
   beforeEach(() => {
+    // The route reads the manual placements under the asset lock, and derives
+    // the collapse events, the primary event and the note from THAT read rather
+    // than the pre-transaction one. Default to the single old placement these
+    // tests set up; a test seeding more overrides it.
+    (dbMocks.assetLocation.findMany as any).mockResolvedValue([
+      { quantity: 1, location: { id: "loc-old", name: "Old Office" } },
+    ]);
+
     vi.clearAllMocks();
 
     (requireMobileAuth as any).mockResolvedValue({
@@ -136,6 +154,16 @@ describe("POST /api/mobile/asset/update-location", () => {
     // route's tx.assetLocation.{deleteMany,create} + tx.asset.findUniqueOrThrow
     // chain resolves against the same vi.fn() spies we assert against.
     dbMocks.$transaction.mockImplementation((cb: any) => cb(dbMocks));
+
+    // Default locked row. Individual assets place a single unit; the
+    // quantity-tracked case overrides this to assert the placed quantity
+    // comes from the LOCKED row rather than the pre-transaction read.
+    (lockAssetForQuantityUpdate as any).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "INDIVIDUAL",
+      quantity: 1,
+    });
   });
 
   it("should update asset location and create a note", async () => {
@@ -178,9 +206,15 @@ describe("POST /api/mobile/asset/update-location", () => {
     // `getPrimaryLocation`, so the API surface stays stable for mobile.
     expect(body.asset.location.name).toBe("New Office");
 
-    // Phase 4b: assert the pivot writes happened inside the tx.
+    // Assert the pivot writes happened inside the tx.
+    //
+    // The clear is scoped to MANUAL placements. A kit owns its members'
+    // kit-driven rows (`assetKitId IS NOT NULL`) and the two axes are bounded
+    // by separate triggers, so clearing both here would delete placement the
+    // kit flow is responsible for. Every web-side `assetLocation.deleteMany`
+    // carries the same filter.
     expect(dbMocks.assetLocation.deleteMany).toHaveBeenCalledWith({
-      where: { assetId: "asset-1" },
+      where: { assetId: "asset-1", assetKitId: null },
     });
     expect(dbMocks.assetLocation.create).toHaveBeenCalledWith({
       data: {
@@ -198,6 +232,54 @@ describe("POST /api/mobile/asset/update-location", () => {
         assetId: "asset-1",
       })
     );
+  });
+
+  it("places the quantity from the locked row, not the pre-transaction read", async () => {
+    // A concurrent consume can commit between the route's first read and the
+    // pivot write. Placing the stale figure would record more units at the
+    // location than the asset owns — a breach the location trigger only
+    // catches as a raw check_violation, and one the reconcile on the consume
+    // side has already run past.
+    (db.asset.findUnique as any).mockResolvedValue({
+      id: "asset-1",
+      title: "Pens",
+      type: "QUANTITY_TRACKED",
+      quantity: 100, // stale
+      assetLocations: [{ location: { id: "loc-old", name: "Old Office" } }],
+      assetKits: [],
+    });
+    (lockAssetForQuantityUpdate as any).mockResolvedValue({
+      id: "asset-1",
+      organizationId: "org-1",
+      type: "QUANTITY_TRACKED",
+      quantity: 60, // what is actually committed by the time we hold the lock
+    });
+    (db.location.findFirst as any).mockResolvedValue({
+      id: "loc-new",
+      name: "New Office",
+    });
+    (dbMocks.assetLocation.deleteMany as any).mockResolvedValue({ count: 1 });
+    (dbMocks.assetLocation.create as any).mockResolvedValue({});
+    (dbMocks.asset.findUniqueOrThrow as any).mockResolvedValue({
+      id: "asset-1",
+      title: "Pens",
+      assetLocations: [{ location: { id: "loc-new", name: "New Office" } }],
+    });
+
+    await action(
+      createActionArgs({
+        request: createRequest({ assetId: "asset-1", locationId: "loc-new" }),
+      })
+    );
+
+    expect(lockAssetForQuantityUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      "asset-1",
+      "org-1"
+    );
+    expect(dbMocks.assetLocation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ quantity: 60 }),
+    });
   });
 
   it("should short-circuit (no update, no event, no note) when location is unchanged", async () => {

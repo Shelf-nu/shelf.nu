@@ -13,7 +13,10 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { signInWithEmail } from "~/modules/auth/service.server";
-import { generateRandomCode } from "~/modules/invite/helpers";
+import {
+  generateRandomCode,
+  normalizeInviteEmail,
+} from "~/modules/invite/helpers";
 import {
   checkUserAndInviteMatch,
   updateInviteStatus,
@@ -98,8 +101,12 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
 
 export const meta = () => [{ title: appendToMetaTitle("Accept team invite") }];
 
-export async function action({ context, request }: LoaderFunctionArgs) {
+export async function action({ context, params, request }: LoaderFunctionArgs) {
   try {
+    const { inviteId } = getParams(params, z.object({ inviteId: z.string() }), {
+      additionalData: { inviteId: params.inviteId },
+    });
+
     const { token } = parseData(
       await request.formData(),
       z.object({ token: z.string() }),
@@ -112,6 +119,34 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET) as {
       id: string;
     };
+
+    /**
+     * The loader renders the organization name from the URL's `inviteId`, but
+     * acceptance acts on the invite named by the TOKEN. Nothing tied the two
+     * together, so a crafted link could display one workspace and join another
+     * — and because `updateInviteStatus` performs no session check and the
+     * route then signs the browser in as the accepted invite's `inviteeEmail`,
+     * an unauthenticated victim could land in the ATTACKER's account rather
+     * than merely the wrong organization.
+     *
+     * Requiring the two to agree cannot break a real invite: `inviteUser`
+     * signs `{ id: invite.id }` and both link builders put that same
+     * `invite.id` in the path.
+     */
+    if (decodedInvite.id !== inviteId) {
+      throw new ShelfError({
+        cause: null,
+        title: "Invalid invite token",
+        // Deliberately does not name the invite the token pointed at — the
+        // value is attacker-chosen and echoing it confirms what was rejected.
+        message:
+          "This invitation link is invalid. Please click the link in your email again or request a new invite. If the issue persists, feel free to contact support",
+        additionalData: { inviteId },
+        label: "Invite",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
     const password = generateRandomCode(10);
     // Detect the accepter's prefs from browser hints so their brand-new user
     // row is stamped at creation. timeZone is left null when the CH-time-zone
@@ -145,9 +180,15 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    /** Sign in the user */
+    /**
+     * Sign in the user.
+     *
+     * `updateInviteStatus` keys the account on the normalised address, so the
+     * sign-in has to use the same form: a stored invite can still hold the
+     * capitals of the CSV row it came from.
+     */
     const authSession = await signInWithEmail(
-      updatedInvite.inviteeEmail,
+      normalizeInviteEmail(updatedInvite.inviteeEmail),
       password
     ).catch(
       // We don't care about the error here, let the user login if he's already registered

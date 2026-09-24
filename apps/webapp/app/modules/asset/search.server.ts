@@ -1,5 +1,7 @@
 import { AssetStatus, type Prisma } from "@prisma/client";
 
+import { ShelfError } from "~/utils/error";
+
 /**
  * JSON paths inside `AssetCustomFieldValue.value` that hold searchable text.
  * Owned here (not `query.server.ts`) so this module stays standalone — it
@@ -18,25 +20,26 @@ export const CUSTOM_FIELD_SEARCH_PATHS = [
 ] as const;
 
 /**
- * Single source of truth for the simple-mode asset search clauses.
+ * Shared asset-search helpers used across every search surface: the web
+ * `getAssets` fetcher (`service.server.ts`), the mobile assets endpoint
+ * (`modules/api/mobile-asset-search.server.ts`), and the advanced-index
+ * `generateWhereClause` (`query.server.ts`). Holds the term parser
+ * (`splitAssetSearchTerms`), the QT-aware status fragment
+ * (`buildAssetStatusWhere`), and the searchable custom-field JSON paths
+ * (`CUSTOM_FIELD_SEARCH_PATHS`).
  *
- * Consumed by BOTH:
- * - the web `getAssets` fetcher (assets index simple mode + every picker that
- *   goes through it) — see `service.server.ts`, and
- * - the mobile assets endpoint (`routes/api+/mobile+/assets.ts` via
- *   `modules/api/mobile-asset-search.server.ts`).
- *
- * Change a field here and BOTH surfaces change together — that is the point:
- * web and mobile search can no longer drift apart field-by-field. The
- * advanced-mode index searches via raw SQL instead (`query.server.ts`,
- * `generateWhereClause`) and is deliberately not covered by this module.
+ * The actual matching is one org-scoped `UNION` of ids (`buildAssetSearchUnion`
+ * in `search-union.server.ts`), shared by all three surfaces. The old
+ * per-surface Prisma OR clause builders that lived here — buildFullAssetSearchOr
+ * / buildNarrowAssetSearchOr / isIdShapedSearch / looksLikeAssetId — were
+ * removed once every surface moved to the UNION.
  */
 
 /**
  * Upper bound on comma-separated terms honored per search. Each term adds a
- * full 10-branch OR group (including the unindexed custom-fields JSON ILIKE),
- * so an unbounded paste could fan a single request into an arbitrarily
- * expensive query. Ten is far beyond any real search-box usage.
+ * full 10-source group to the search UNION, so an unbounded paste could fan a
+ * single request into an arbitrarily expensive query. Ten is far beyond any
+ * real search-box usage.
  */
 export const MAX_ASSET_SEARCH_TERMS = 10;
 
@@ -58,20 +61,6 @@ export function splitAssetSearchTerms(search: string): string[] {
     .map((term) => term.trim())
     .filter(Boolean)
     .slice(0, MAX_ASSET_SEARCH_TERMS);
-}
-
-/**
- * The shared narrow-vs-full policy: a search takes the narrow indexed fast
- * path only when every term is ID-shaped. Both `getAssets` and the mobile
- * assets endpoint make this decision through here so the policy cannot
- * drift between surfaces.
- *
- * @param searchTerms - Normalized terms from {@link splitAssetSearchTerms}
- * @returns true when the caller should query the narrow clause first and
- *   fall back to the full clause on zero rows
- */
-export function isIdShapedSearch(searchTerms: string[]): boolean {
-  return searchTerms.length > 0 && searchTerms.every(looksLikeAssetId);
 }
 
 /**
@@ -106,184 +95,65 @@ export function buildAssetStatusWhere(
 }
 
 /**
- * Matches the shape of an asset identifier or barcode / QR id. Two forms:
- *   - bare numeric ("21035", or a 12-digit UPC) — users commonly drop the
- *     prefix when scanning or typing an ID
- *   - canonical sequential ID ("SAM-0001") — letter prefix + dash + 4+
- *     digits, matching the format produced by getNextSequentialId
- *
- * Used to run ID-shaped queries against the narrow OR clause
- * ({@link buildNarrowAssetSearchOr}) first, instead of the full 10-branch
- * chain. The narrow clause skips the slow paths — custodian name traversal
- * and the unindexed customFields JSON ILIKE — while still covering every
- * place an ID-shaped value is *most likely* to live.
- *
- * Because a bare number can equally be a real barcode OR a value embedded in
- * a title / description / custom field (indistinguishable by shape), callers
- * fall back to the full search when the narrow clause returns zero rows — so
- * nothing is ever silently missed. See the fallback re-query in `getAssets`
- * and the mobile route's mirror of it.
- *
- * Loose terms like "lab-12" or "AS1000" don't match here and go straight to
- * the full search, since they're more likely substrings of titles, custom
- * fields, etc.
- *
- * @param term - A single normalized search term
- * @returns true when the term should take the narrow indexed fast path
+ * User-facing message for the bind-param ceiling 400. Exported so callers and
+ * tests assert the exact contract (that this actionable message — not a generic
+ * wrapper — reaches the user) rather than a fragile substring match.
  */
-export function looksLikeAssetId(term: string): boolean {
-  return /^\d+$/.test(term) || /^[a-z]+-\d{4,}$/i.test(term);
-}
+export const ASSET_SEARCH_CEILING_MESSAGE =
+  "Your search matched too many assets to process at once. Please refine it with more specific terms.";
 
 /**
- * Full multi-column search clause: matches a term anywhere it can
- * legitimately live — title, sequentialId, description, category, location,
- * tags, custodian names, QR/barcode, and custom fields.
+ * Safe upper bound on the number of matching asset ids that the id-materializing
+ * search surfaces (the simple `getAssets` fetcher and the mobile endpoint) may
+ * feed into a Prisma `id: { in: [...] }` clause.
  *
- * This is the slow path (custodian relation traversal + an unindexed
- * customFields JSON ILIKE), so for ID-shaped searches callers run
- * {@link buildNarrowAssetSearchOr} first and only use this when it finds
- * nothing.
+ * Prisma serializes `{ id: { in: [...] } }` for Postgres as `IN ($1,…,$n)` — one
+ * bind parameter per id (measured on Prisma 6.19; it does NOT use `= ANY($1)`).
+ * Postgres caps a single prepared statement at **65,535** bind parameters, so a
+ * search matching more ids than that makes the `count`/`findMany` queries
+ * hard-fail with a raw error (a 500).
  *
- * Returns one `{ OR: [...] }` entry per term; assigning the array to a
- * where's `OR` makes the terms match-any (comma semantics).
+ * We stop at 50,000, reserving ~15,500 params of headroom for the query's OTHER
+ * bound params — which matters because several filters are themselves unbounded,
+ * URL-repeated arrays: `getAssets` binds `teamMemberIds` into four separate
+ * `{ in }` clauses, so a large custodian filter alone can add thousands of
+ * params on top of the search ids. This headroom is a pragmatic margin, not a
+ * formal guarantee: the pure-filter vector is bounded in practice by request URL
+ * length, and a formal bound would instead clamp the `getAll` filter arrays in
+ * `getParamsValues` (`~/utils/list`) — a noted follow-up, not needed for a case
+ * that already requires a 100k+ asset org.
  *
- * @param searchTerms - Normalized terms from {@link splitAssetSearchTerms}
- * @returns One OR-group per term, ready to assign to `where.OR`
+ * Only a ~100k+ asset organization searching a very broad term can reach this;
+ * the largest org today holds ~14k assets, so in practice it never trips. It
+ * exists to turn a latent hard-500 into graceful degradation for a future
+ * mega-org. The advanced index is unaffected — it inlines the UNION as a raw
+ * `id IN (subquery)` and never materializes an id list.
  */
-export function buildFullAssetSearchOr(
-  searchTerms: string[]
-): Prisma.AssetWhereInput[] {
-  return searchTerms.map((term) => ({
-    OR: [
-      // Search in asset fields
-      { title: { contains: term, mode: "insensitive" } },
-      // Search in asset sequential id
-      { sequentialId: { contains: term, mode: "insensitive" } },
-      // Search in asset description
-      { description: { contains: term, mode: "insensitive" } },
-      // Search in related category
-      { category: { name: { contains: term, mode: "insensitive" } } },
-      // Search in related location — traverses the AssetLocation pivot
-      // since an asset can be placed at multiple locations.
-      {
-        assetLocations: {
-          some: {
-            location: {
-              name: { contains: term, mode: "insensitive" },
-            },
-          },
-        },
-      },
-      // Search in related tags
-      {
-        tags: {
-          some: { name: { contains: term, mode: "insensitive" } },
-        },
-      },
-      // Search in custodian names — custody is a list relation, so
-      // traverse it with `some`.
-      {
-        custody: {
-          some: {
-            custodian: {
-              OR: [
-                { name: { contains: term, mode: "insensitive" } },
-                {
-                  user: {
-                    OR: [
-                      {
-                        firstName: {
-                          contains: term,
-                          mode: "insensitive",
-                        },
-                      },
-                      {
-                        lastName: {
-                          contains: term,
-                          mode: "insensitive",
-                        },
-                      },
-                    ],
-                  },
-                },
-              ],
-            },
-          },
-        },
-      },
-      // Search qr code id
-      {
-        qrCodes: {
-          some: { id: { contains: term, mode: "insensitive" } },
-        },
-      },
-      // Search barcode values
-      {
-        barcodes: {
-          some: { value: { contains: term, mode: "insensitive" } },
-        },
-      },
-      // Search in custom fields
-      {
-        customFields: {
-          some: {
-            OR: CUSTOM_FIELD_SEARCH_PATHS.map((jsonPath) => ({
-              value: {
-                path: [jsonPath],
-                string_contains: term,
-                mode: "insensitive",
-              },
-            })),
-          },
-        },
-      },
-    ],
-  }));
-}
+export const MAX_MATCHED_ASSET_SEARCH_IDS = 50_000;
 
 /**
- * Narrow indexed fast path for ID-shaped searches: the columns where an
- * ID-shaped value can legitimately live — sequentialId, barcode value, QR id,
- * plus title and description. The ID columns are covered by trigram GIN
- * indexes added in migration 20260525110348, and title/description are
- * covered by the composite trigram GIN index Asset_title_description_idx —
- * so the planner stays on indexed scans and a real ID lookup (the common
- * case) returns immediately.
+ * Throws a friendly 400 when a search matched more asset ids than we can safely
+ * feed into a Prisma `id: { in }` clause (see {@link MAX_MATCHED_ASSET_SEARCH_IDS}).
  *
- * title + description are included here (not deferred to the fallback)
- * because a bare-numeric term often lives ONLY inside a title — e.g.
- * searching "451" must match "KCI-451 Kids Resources Box". Without these
- * branches the narrow query can still return rows (some OTHER asset matches
- * "451" in an ID column), which suppresses the zero-row fallback and
- * silently drops the title-only match.
+ * Pure (no I/O) so it can be unit-tested without a database. The error is a
+ * user-input 400 with `shouldBeCaptured: false` — an over-broad search is not a
+ * server fault and should not page anyone.
  *
- * Callers must still fall back to {@link buildFullAssetSearchOr} on zero
- * rows so the remaining slow-path columns (custodian names,
- * category/location/tags, custom-field JSON ILIKE) stay covered.
- *
- * @param searchTerms - Normalized terms from {@link splitAssetSearchTerms}
- * @returns A flat OR list covering every term, ready to assign to `where.OR`
+ * @param count - The number of matching asset ids the search resolved to.
+ * @throws {ShelfError} 400 when `count` exceeds {@link MAX_MATCHED_ASSET_SEARCH_IDS}.
  */
-export function buildNarrowAssetSearchOr(
-  searchTerms: string[]
-): Prisma.AssetWhereInput[] {
-  return searchTerms.flatMap((term) => [
-    { sequentialId: { contains: term, mode: "insensitive" } },
-    {
-      barcodes: {
-        some: { value: { contains: term, mode: "insensitive" } },
+export function assertAssetSearchIdCeiling(count: number): void {
+  if (count > MAX_MATCHED_ASSET_SEARCH_IDS) {
+    throw new ShelfError({
+      cause: null,
+      message: ASSET_SEARCH_CEILING_MESSAGE,
+      label: "Assets",
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: {
+        matchedCount: count,
+        ceiling: MAX_MATCHED_ASSET_SEARCH_IDS,
       },
-    },
-    {
-      qrCodes: {
-        some: { id: { contains: term, mode: "insensitive" } },
-      },
-    },
-    // Trigram-indexed (Asset_title_description_idx) — matches a
-    // bare-numeric substring embedded in a title/description directly
-    // in the fast path, without relying on the zero-row fallback.
-    { title: { contains: term, mode: "insensitive" } },
-    { description: { contains: term, mode: "insensitive" } },
-  ]);
+    });
+  }
 }

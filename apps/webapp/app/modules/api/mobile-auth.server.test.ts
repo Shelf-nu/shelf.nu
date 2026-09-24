@@ -3,9 +3,13 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
+  getMobileAssetForViewer,
   requireMobileAuth,
+  resignAndShapeMobileAsset,
   shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
+import type * as StorageServer from "~/utils/storage.server";
+import { createSignedUrl } from "~/utils/storage.server";
 
 // why: importing the module transitively loads `~/database/db.server`, which
 // instantiates a real Prisma client and tries to connect at module load — under
@@ -14,8 +18,22 @@ import {
 // Mocking the db module short-circuits the connection; `user.findUnique` is a
 // spy so the `requireMobileAuth` test can assert the select shape.
 vi.mock("~/database/db.server", () => ({
-  db: { user: { findUnique: vi.fn() } },
+  db: {
+    user: { findUnique: vi.fn() },
+    // why: `getMobileAssetForViewer` reads the asset row, and a re-signed photo
+    // is written back with a guarded `updateMany`; both are asserted below.
+    asset: { findUnique: vi.fn(), updateMany: vi.fn() },
+  },
 }));
+
+// why: re-signing a photo is a Supabase Storage network call. Only
+// `createSignedUrl` is replaced; the rest of the module stays real.
+vi.mock("~/utils/storage.server", async () => {
+  const actual = await vi.importActual<typeof StorageServer>(
+    "~/utils/storage.server"
+  );
+  return { ...actual, createSignedUrl: vi.fn() };
+});
 
 // why: `requireMobileAuth` validates the Bearer JWT via Supabase Admin — an
 // external network call with no service available under `pnpm test:run`.
@@ -51,6 +69,7 @@ const baseAsset = {
   id: "asset-123",
   title: "Test Asset",
   status: "AVAILABLE",
+  sequentialId: "SAM-0123" as string | null,
   mainImage: null,
   thumbnailImage: null,
   assetModel: null as {
@@ -387,5 +406,72 @@ describe("requireMobileAuth", () => {
     // Internal-only fields are stripped by the `safeUser` destructure.
     expect(user).not.toHaveProperty("deletedAt");
     expect(user).not.toHaveProperty("lastMobileActiveAt");
+  });
+});
+
+/**
+ * The shared step every `MOBILE_ASSET_SELECT` path goes through: a lapsed photo
+ * URL is re-signed before the row is shaped, and the write-back is scoped to
+ * the workspace that owns the asset.
+ */
+describe("resignAndShapeMobileAsset", () => {
+  const LAPSED_PHOTO =
+    "https://storage.test/storage/v1/object/sign/assets/org-owner/asset-123/photo.png?token=old";
+  const FRESH_PHOTO =
+    "https://storage.test/storage/v1/object/sign/assets/org-owner/asset-123/photo.png?token=new";
+  const lapsedRow = {
+    ...baseAsset,
+    mainImage: LAPSED_PHOTO,
+    mainImageExpiration: new Date("2020-01-01T00:00:00.000Z"),
+  };
+
+  beforeEach(() => {
+    vi.mocked(createSignedUrl).mockReset().mockResolvedValue(FRESH_PHOTO);
+    vi.mocked(db.asset.updateMany)
+      .mockReset()
+      .mockResolvedValue({ count: 1 } as never);
+  });
+
+  it("re-signs a lapsed photo before shaping, scoped to the owning workspace", async () => {
+    const shaped = await resignAndShapeMobileAsset(lapsedRow, "org-owner");
+
+    expect(shaped.mainImage).toBe(FRESH_PHOTO);
+    // The expiry only steers the repair; the response keeps its shape.
+    expect(shaped).not.toHaveProperty("mainImageExpiration");
+    await vi.waitFor(() =>
+      expect(db.asset.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: "asset-123",
+            organizationId: "org-owner",
+          }),
+        })
+      )
+    );
+  });
+
+  it("sends a photo that has not lapsed as stored", async () => {
+    const live = {
+      ...lapsedRow,
+      mainImageExpiration: new Date(Date.now() + 60 * 60 * 1000),
+    };
+
+    const shaped = await resignAndShapeMobileAsset(live, "org-owner");
+
+    expect(shaped.mainImage).toBe(LAPSED_PHOTO);
+    expect(createSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("re-signs the photo on the asset returned after a quantity or custody change", async () => {
+    vi.mocked(db.asset.findUnique).mockResolvedValue(lapsedRow as never);
+
+    const asset = await getMobileAssetForViewer({
+      assetId: "asset-123",
+      organizationId: "org-owner",
+      viewerUserId: "user-1",
+      canSeeAllCustody: true,
+    });
+
+    expect(asset?.mainImage).toBe(FRESH_PHOTO);
   });
 });

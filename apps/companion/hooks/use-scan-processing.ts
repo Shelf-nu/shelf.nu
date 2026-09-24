@@ -4,7 +4,7 @@ import type { ScanResult as ScanResultType } from "@/components/scanner/scan-res
 
 type ScanResult = ScanResultType | null;
 
-type FrameHighlight = "success" | "error" | null;
+type FrameHighlight = "success" | "error" | "duplicate" | "advisory" | null;
 
 type UseScanProcessingParams = {
   resetTimer: () => void;
@@ -43,7 +43,7 @@ export function useScanProcessing({ resetTimer }: UseScanProcessingParams) {
   }, []);
 
   /** Flash frame corners on scan result (Scandit/Scanbot pattern) */
-  const flashFrame = useCallback((type: "success" | "error") => {
+  const flashFrame = useCallback((type: NonNullable<FrameHighlight>) => {
     if (frameHighlightTimer.current) clearTimeout(frameHighlightTimer.current);
     setFrameHighlight(type);
     frameHighlightTimer.current = setTimeout(() => {

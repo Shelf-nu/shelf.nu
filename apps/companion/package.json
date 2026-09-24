@@ -2,10 +2,12 @@
   "name": "@shelf/companion",
   "version": "0.1.0",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "main": "expo-router/entry",
   "scripts": {
     "dev": "expo start --dev-client",
     "dev:clear": "expo start --dev-client --clear",
+    "sim:env": "node scripts/setup-sim-env.mjs",
     "dev:tunnel": "expo start --dev-client --tunnel",
     "build:ios": "expo run:ios",
     "build:ios:device": "expo run:ios --device",
@@ -14,6 +16,7 @@
     "prebuild:clean": "expo prebuild --clean --platform ios",
     "lint": "expo lint && node scripts/check-version-sync.mjs",
     "doctor": "react-doctor .",
+    "test": "node --import tsx --test 'lib/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "test:e2e": "cd .maestro/scripts && bash run-all.sh",
     "test:e2e:suite": "cd .maestro/scripts && bash run-suite.sh",
@@ -21,6 +24,7 @@
     "ios": "expo run:ios"
   },
   "dependencies": {
+    "@bwip-js/react-native": "^4.11.4",
     "@expo/metro-runtime": "~6.1.2",
     "@expo/ngrok": "^4.1.3",
     "@expo/vector-icons": "^15.1.1",
@@ -59,6 +63,7 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-calendars": "^1.1314.0",
     "react-native-qrcode-svg": "^6.3.21",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.16.0",
@@ -67,10 +72,12 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@types/node": "^22.19.17",
     "@types/react": "^19.2.14",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~10.0.0",
     "react-doctor": "0.0.39",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3"
   }
 }

@@ -1,15 +1,45 @@
+/**
+ * Mobile API route: asset list.
+ *
+ * Serves the companion's Assets tab and its My Custody view: a paginated,
+ * searchable, status-filterable asset list in the flat legacy shape the app
+ * reads. Org-scoped behind the mobile bearer auth, with custody holders
+ * filtered per viewer the same way the asset detail route filters them. Lapsed
+ * asset photo URLs are re-signed before the page is sent. See the loader
+ * docblock for the request contract.
+ *
+ * @see {@link file://./assets.$assetId.ts} the detail twin of this route
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ */
 import { AssetStatus, type Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
-import { buildMobileAssetSearchWhere } from "~/modules/api/mobile-asset-search.server";
+import { resolveMobileAssetSearchWhere } from "~/modules/api/mobile-asset-search.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
   shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
+import {
+  filterMobileCustodyListForViewer,
+  viewerCanSeeLegacyCustody,
+} from "~/modules/api/mobile-custody-visibility.server";
+import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
+  BARCODE_CODES_ORDER_BY,
+  QR_CODES_ORDER_BY,
+  resolveDisplayCode,
+  serializeDisplayCode,
+} from "~/modules/barcode/display";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 /**
  * GET /api/mobile/assets?orgId=xxx&search=xxx&page=1&perPage=20&myCustody=true&status=IN_CUSTODY
@@ -19,20 +49,24 @@ import { makeShelfError, ShelfError } from "~/utils/error";
  *   - myCustody=true  → only assets in the current user's custody
  *   - status=X         → filter by asset status (e.g. AVAILABLE, IN_CUSTODY, CHECKED_OUT)
  *
- * Search matches the same fields as the web asset search — the clause comes
- * from the shared builder (modules/asset/search.server.ts via
- * modules/api/mobile-asset-search.server.ts), including web's ID-shaped
- * fast path + zero-row full-clause fallback.
+ * Search matches the same fields as the web asset search — resolved via the
+ * shared org-scoped UNION (modules/asset/search-union.server.ts through
+ * modules/api/mobile-asset-search.server.ts), the same index-driven path the
+ * web indexes use, in a single query.
  *
- * Image URLs are returned as-stored along with `mainImageExpiration`. Mobile
- * clients should call `/api/mobile/asset/refresh-image/:assetId` lazily when
- * they detect an expired URL — keeps this loader read-only and avoids fanning
- * out N writes per paginated read.
+ * Image URLs are returned with the model-image cascade already resolved
+ * (`shapeMobileAssetResponse`), after lapsed ones are re-signed.
+ * `mainImageExpiration` is only sent when the asset's OWN signed URL won the
+ * cascade — model cover images are public and never expire.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
+    const { canSeeAllCustody } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const url = new URL(request.url);
 
@@ -106,7 +140,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : {}),
     };
 
-    const { primary, fallback } = buildMobileAssetSearchWhere(search);
+    const searchWhere = await resolveMobileAssetSearchWhere({
+      organizationId,
+      search,
+    });
 
     /** Fetches one page + total count for the given where clause. */
     const fetchPage = (where: Prisma.AssetWhereInput) =>
@@ -125,6 +162,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
             title: true,
             status: true,
             mainImage: true,
+            // The scanner invites you to "Enter QR, barcode, or SAM ID", and
+            // this list is where that search lands — so each row has to be able
+            // to show WHICH SAM ID matched. Without it the user gets hits
+            // identified by title only and has to open each one to find out.
+            sequentialId: true,
+            // Code-resolution inputs — resolved into `displayCode` below so a
+            // workspace that labels its assets with Code 128 can match a
+            // physical label against this list.
+            preferredBarcodeId: true,
+            qrCodes: {
+              take: 1,
+              orderBy: QR_CODES_ORDER_BY,
+              select: { id: true },
+            },
+            barcodes: {
+              orderBy: BARCODE_CODES_ORDER_BY,
+              select: { id: true, type: true, value: true },
+            },
             // Model cover image; `shapeMobileAssetResponse` resolves the cascade
             // into the flat image fields the companion already reads.
             ...ASSET_MODEL_IMAGE_SELECT,
@@ -147,8 +202,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
             // structurally accepts the wider shape.
             category: { select: { id: true, name: true } },
             // Kit linkage via the AssetKit pivot — flattened to top-level
-            // `kit` + `kitId` by `shapeMobileAssetResponse`.
+            // `kit` + `kitId` by `shapeMobileAssetResponse`, which takes the
+            // FIRST row. The order is therefore load-bearing, not decoration:
+            // only INDIVIDUAL assets are capped at one membership (the
+            // `enforce_individual_asset_single_kit` trigger), so a
+            // QUANTITY_TRACKED asset in several kits would name a different
+            // one on each refresh without it. Oldest membership first is the
+            // kit the web asset index calls primary (`assetQueryJoins` orders
+            // its LATERAL pick on the same two columns) — keep them equal, or
+            // the two surfaces name different kits for the same asset. `id`
+            // breaks ties between memberships written in one transaction.
             assetKits: {
+              orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
               select: { kit: { select: { id: true, name: true } } },
             },
             // Location via the AssetLocation pivot — flattened to top-level
@@ -185,29 +250,103 @@ export async function loader({ request }: LoaderFunctionArgs) {
         db.asset.count({ where }),
       ]);
 
-    let [assets, totalCount] = await fetchPage({ ...baseWhere, ...primary });
+    // Single query: the UNION already searches all 10 sources in one shot,
+    // so there is no narrow/fallback two-query dance to run any more.
+    const [storedAssets, totalCount] = await fetchPage({
+      ...baseWhere,
+      ...searchWhere,
+    });
 
-    // An ID-shaped search ran the narrow clause but matched no assets. The
-    // term may be embedded in a title, description, or custom field rather
-    // than being a real identifier, so re-run with the full search clause
-    // before giving up — mirrors the fallback re-query in `getAssets`.
-    if (totalCount === 0 && fallback) {
-      [assets, totalCount] = await fetchPage({ ...baseWhere, ...fallback });
-    }
+    const assets = await refreshExpiredAssetImages(storedAssets, {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
+
+    // One workspace read for the whole page — the preference is per-workspace,
+    // so resolving it per row would fetch the same answer `perPage` times.
+    const organization = await db.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { qrIdDisplayPreference: true, barcodesEnabled: true },
+    });
+    // Effective entitlement, not the raw column — see `assets.$assetId.ts`.
+    const barcodesAllowed = canUseBarcodes(organization);
 
     // Flatten kit/location/custody pivots into the legacy flat shape via the
-    // shared helper, then re-attach `mainImageExpiration` — a list-only extra
-    // the helper's return type doesn't carry but the companion consumes to
-    // drive its lazy refresh-image flow.
+    // shared helper, then re-attach `mainImageExpiration`, which the list
+    // response carries but the helper's return type does not. The URL it
+    // describes has already been re-signed above if it had lapsed.
     //
     // `thumbnailImage` is deliberately NOT stripped and re-attached any more:
     // the helper resolves the model-image cascade, so the raw column would
     // overwrite an inherited thumbnail with null.
     const shapedAssets = assets.map((asset) => {
-      const { mainImageExpiration, ...assetForHelper } = asset;
-      return {
-        ...shapeMobileAssetResponse(assetForHelper),
+      const {
         mainImageExpiration,
+        qrCodes,
+        barcodes,
+        preferredBarcodeId,
+        ...assetForHelper
+      } = asset;
+      const shaped = shapeMobileAssetResponse(assetForHelper);
+
+      // Which identifier to show for this row. Same resolver and precedence as
+      // every web asset row and the mobile detail screen.
+      const resolvedCode = resolveDisplayCode({
+        entity: {
+          sequentialId: asset.sequentialId,
+          preferredBarcodeId,
+          qrCodes,
+          barcodes,
+        },
+        organization: {
+          qrIdDisplayPreference: organization.qrIdDisplayPreference,
+          barcodesEnabled: barcodesAllowed,
+        },
+        entityKind: "asset",
+      });
+
+      /**
+       * Same custody gate the mobile asset DETAIL route applies
+       * (`assets.$assetId.ts`) — this list had none, so a restricted viewer
+       * read every holder's name straight out of the list response while the
+       * detail page for the same asset withheld it.
+       */
+      const { custodyList, custodyListOthersCount } =
+        filterMobileCustodyListForViewer({
+          custodyList: shaped.custodyList,
+          custodyRows: asset.custody,
+          viewerUserId: user.id,
+          canSeeAllCustody,
+        });
+
+      const primaryCustody = asset.custody[0] ?? null;
+      const visibleCustody =
+        primaryCustody &&
+        viewerCanSeeLegacyCustody({
+          custodianUserId: primaryCustody.custodian.userId,
+          viewerUserId: user.id,
+          canSeeAllCustody,
+        })
+          ? shaped.custody
+          : null;
+
+      return {
+        ...shaped,
+        custody: visibleCustody,
+        custodyList,
+        custodyListOthersCount,
+        // How many kits this asset belongs to. `shaped.kit` names only the
+        // first, so a row holding several memberships needs this to say the
+        // named kit is one of many rather than the only one — the mobile
+        // counterpart of the web asset index's primary + "+N" kit column.
+        kitCount: asset.assetKits.length,
+        mainImageExpiration: serializeImageExpiration(
+          shaped.imageSource,
+          mainImageExpiration
+        ),
+        // The label the operator reads off the physical tag, in the same
+        // shape the detail endpoints send.
+        displayCode: serializeDisplayCode(resolvedCode),
       };
     });
 

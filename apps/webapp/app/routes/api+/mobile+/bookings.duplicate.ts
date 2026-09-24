@@ -9,6 +9,7 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { duplicateBooking } from "~/modules/booking/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -63,7 +64,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId } = BodySchema.parse(await request.json());
+    const { bookingId } = await parseMobileBody(BodySchema, request, "Booking");
 
     const { role } = await getMobileUserContext(user.id, organizationId);
 

@@ -29,6 +29,7 @@ import { geolocate } from "~/utils/geolocate.server";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
+import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
@@ -47,6 +48,10 @@ import {
   buildKitListMarkup,
   LOCATION_SORTING_OPTIONS,
 } from "./utils";
+import {
+  getLocationKitsWhereInput,
+  getLocationsWhereInput,
+} from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
@@ -343,6 +348,12 @@ export async function getLocation(
               qrCodes: { take: 1, select: { id: true } },
               barcodes: { select: { id: true, type: true, value: true } },
               custody: {
+                // The list column shows ONE custodian, chosen as `custody[0]`
+                // by `getPrimaryCustody`. Without an order the database is
+                // free to return the rows differently between requests, so a
+                // multi-custodian asset would show a different holder on
+                // refresh. `id` breaks ties on identical timestamps.
+                orderBy: [{ createdAt: "asc" }, { id: "asc" }],
                 select: {
                   quantity: true,
                   custodian: {
@@ -611,17 +622,12 @@ export async function getLocations(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the items belonging to current org */
-    const where: Prisma.LocationWhereInput = { organizationId };
-
-    /** If the search string exists, match it across the text fields */
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { description: { contains: search, mode: "insensitive" } },
-        { address: { contains: search, mode: "insensitive" } },
-      ];
-    }
+    /**
+     * Org scope plus the search predicate, from the builder a bulk "select all"
+     * also uses — so the set this list shows and the set a bulk action resolves
+     * cannot search different fields.
+     */
+    const where = getLocationsWhereInput({ organizationId, search });
 
     /**
      * orderBy is user-supplied via the URL. Guard against arbitrary values
@@ -1110,9 +1116,8 @@ async function createLocationEditNotes({
     select: { firstName: true, lastName: true, displayName: true },
   });
   const userLink = wrapUserLinkForNote({
+    ...(user ?? { displayName: null }),
     id: userId,
-    firstName: user?.firstName,
-    lastName: user?.lastName,
   });
 
   const content = `${userLink} updated the location:\n\n${changes.join("\n")}`;
@@ -1341,11 +1346,23 @@ export async function generateLocationWithImages({
   image: File;
 }) {
   try {
+    // Every generated location shares the one uploaded file, so the bytes are
+    // read and validated once rather than per iteration.
+    const blob = Buffer.from(await image.arrayBuffer());
+    // Derived from the bytes, never from the caller's `File.type`: these rows
+    // are served back inline by `api+/image.$imageId`, so the stored content
+    // type decides how a browser renders them.
+    const contentType = assertUploadedImageContentType(blob, {
+      userId,
+      organizationId,
+      field: "image",
+    });
+
     for (let i = 1; i <= numberOfLocations; i++) {
       const imageCreated = await db.image.create({
         data: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
+          blob,
+          contentType,
           ownerOrg: { connect: { id: organizationId } },
           user: { connect: { id: userId } },
         },
@@ -1417,74 +1434,27 @@ export async function getLocationKits(
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    const kitWhere: Prisma.KitWhereInput = {
+    // Shared with `resolveLocationKitIds` so a "select all" removal resolves
+    // exactly the rows this list renders.
+    const kitWhere = getLocationKitsWhereInput({
       organizationId,
       locationId: id,
-    };
-
-    if (teamMemberIds && teamMemberIds.length) {
-      kitWhere.OR = [
-        ...(kitWhere.OR ?? []),
-        {
-          custody: { custodianId: { in: teamMemberIds } },
-        },
-        {
-          custody: { custodian: { userId: { in: teamMemberIds } } },
-        },
-        {
-          assetKits: {
-            some: {
-              asset: {
-                bookingAssets: {
-                  some: {
-                    booking: {
-                      custodianTeamMemberId: { in: teamMemberIds },
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        {
-          assetKits: {
-            some: {
-              asset: {
-                bookingAssets: {
-                  some: {
-                    booking: {
-                      custodianUserId: { in: teamMemberIds },
-                      status: {
-                        in: [BookingStatus.ONGOING, BookingStatus.OVERDUE],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: null }]
-          : []),
-      ];
-    }
-
-    if (search) {
-      kitWhere.name = {
-        contains: search,
-        mode: "insensitive",
-      };
-    }
+      search,
+      teamMemberIds,
+    });
 
     const [kits, totalKits] = await Promise.all([
       db.kit.findMany({
         where: kitWhere,
         include: {
           category: true,
+          // Code-resolution relations for AssetCodeBadge / resolveDisplayCode.
+          // Kits are code-bearing entities (Qr.kitId and Barcode.kitId exist),
+          // so a kit-listing surface that omits these can never render the
+          // chip — see `.claude/rules/code-bearing-entity-list-consistency.md`.
+          // Same tight shape as KITS_INCLUDE_FIELDS in `~/modules/kit/types`.
+          qrCodes: { take: 1, select: { id: true } },
+          barcodes: { select: { id: true, type: true, value: true } },
           custody: {
             select: {
               custodian: {
@@ -1536,6 +1506,10 @@ export async function getLocationKits(
  * @param params.newLocation - The asset's location after the change
  * @param params.firstName - Acting user's first name (for the note link)
  * @param params.lastName - Acting user's last name (for the note link)
+ * @param params.displayName - Acting user's display name, or `null` when they
+ *   have none. Required, not optional: when set it REPLACES first + last as the
+ *   name the note shows, and an omitted one is indistinguishable at runtime
+ *   from a user who simply has none.
  * @param params.assetId - The asset the note is written against
  * @param params.userId - The acting user's ID
  * @param params.isRemoving - Whether the location is being removed
@@ -1547,6 +1521,7 @@ export async function createLocationChangeNote({
   newLocation,
   firstName,
   lastName,
+  displayName,
   assetId,
   userId,
   isRemoving,
@@ -1559,6 +1534,8 @@ export async function createLocationChangeNote({
   newLocation: Pick<Location, "id" | "name"> | null;
   firstName: string;
   lastName: string;
+  /** The user's display name, or `null`. Replaces first + last when set. */
+  displayName: string | null;
   assetId: Asset["id"];
   userId: User["id"];
   isRemoving: boolean;
@@ -1580,6 +1557,7 @@ export async function createLocationChangeNote({
       userId,
       firstName,
       lastName,
+      displayName,
       isRemoving,
       type,
       unitOfMeasure,
@@ -1745,6 +1723,7 @@ async function createBulkLocationChangeNotes({
           newLocation,
           firstName: user.firstName || "",
           lastName: user.lastName || "",
+          displayName: user.displayName,
           assetId: asset.id,
           userId,
           isRemoving,
@@ -1772,11 +1751,7 @@ async function createBulkLocationChangeNotes({
     // interactive chip; inlining per-asset unit counts here is the same
     // limitation as the assets_list popover. Per-asset counts land on the
     // individual asset notes above.
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName: user.firstName,
-      lastName: user.lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
     if (addedAssets.length > 0) {
       // Group added assets by their previous location for "Moved from" context
@@ -1948,6 +1923,9 @@ export async function updateLocationAssets({
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Location writes are ADMIN/OWNER-only, so the custodian filter
+        // here can never come from a restricted viewer.
+        allowedTeamMemberIds: "all",
       });
 
       const allAssets = await db.asset.findMany({
@@ -2471,6 +2449,9 @@ export async function updateLocationKits({
       const kitWhere = getKitsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Location writes are ADMIN/OWNER-only, so the custodian filter
+        // here can never come from a restricted viewer.
+        allowedTeamMemberIds: "all",
       });
 
       const allKits = await db.kit.findMany({
@@ -2654,11 +2635,7 @@ export async function updateLocationKits({
         }));
 
       if (kitsSummary.length > 0) {
-        const userLink = wrapUserLinkForNote({
-          id: userId,
-          firstName: user?.firstName,
-          lastName: user?.lastName,
-        });
+        const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
         // Build "Moved from" context for kits coming from other locations
         const actuallyNewKits = kitsToAdd.filter((kit) =>
@@ -2833,11 +2810,7 @@ export async function updateLocationKits({
         }));
 
         if (removedKitsSummary.length > 0) {
-          const userLink = wrapUserLinkForNote({
-            id: userId,
-            firstName: user?.firstName,
-            lastName: user?.lastName,
-          });
+          const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
           await createSystemLocationActivityNote({
             locationId,

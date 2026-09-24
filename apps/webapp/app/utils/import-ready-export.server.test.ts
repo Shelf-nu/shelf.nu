@@ -386,6 +386,52 @@ describe("barcode encoding", () => {
     const idx = columns.findIndex((c) => c.header === "barcode_Code128");
     expect(buildImportReadyRows(args)[1][idx]).toBe("MBP001,MBP002");
   });
+
+  it("quotes a barcode value that contains the separator", () => {
+    // Comma is ASCII 44, inside the printable range Code128 accepts, so a
+    // value carrying one is legal and must not be read back as two barcodes.
+    const args = {
+      columnScope: "all" as const,
+      settingsColumns: [],
+      activeCustomFields: [],
+      barcodesEnabled: true,
+      assets: [
+        makeAsset({
+          barcodes: [
+            { id: "b1", type: "Code128", value: "SN-2024,001" },
+            { id: "b2", type: "Code128", value: "MBP002" },
+          ] as never,
+        }),
+      ],
+    };
+    const columns = buildImportReadyColumns(args);
+    const idx = columns.findIndex((c) => c.header === "barcode_Code128");
+    expect(buildImportReadyRows(args)[1][idx]).toBe('"SN-2024,001",MBP002');
+  });
+});
+
+describe("tag encoding", () => {
+  it("quotes a tag name that contains the separator", () => {
+    const rows = buildImportReadyRows({
+      columnScope: "all",
+      settingsColumns: [],
+      activeCustomFields: [],
+      barcodesEnabled: false,
+      assets: [
+        makeAsset({
+          tags: [{ name: "Berlin, DE" }, { name: "small" }] as never,
+        }),
+      ],
+    });
+    const columns = buildImportReadyColumns({
+      columnScope: "all",
+      settingsColumns: [],
+      activeCustomFields: [],
+      barcodesEnabled: false,
+    });
+    const idx = columns.findIndex((c) => c.header === "tags");
+    expect(rows[1][idx]).toBe('"Berlin, DE",small');
+  });
 });
 
 describe("buildImportReadyCsvFromAssets (round-trip)", () => {

@@ -26,7 +26,7 @@ import {
   selectedBulkItemsCountAtom,
   setDisabledBulkItemsAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
+  seedFormSelectionAtom,
 } from "~/atoms/list";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import {
@@ -64,7 +64,7 @@ import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
   getBooking,
   getDetailedPartialCheckinData,
-  getKitIdsByAssets,
+  getKitIdsByBookingSlices,
   removeAssets,
   updateBookingAssets,
   createKitBookingNote,
@@ -76,6 +76,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { getClientHint } from "~/utils/client-hints";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -113,6 +114,10 @@ export type KitForBooking = Prisma.KitGetPayload<{
     barcodes: { select: { id: true; type: true; value: true } };
     assetKits: {
       select: {
+        // The membership row's own id — `BookingAsset.assetKitId` points at
+        // this, not at `Kit.id`, so `getKitAvailabilityStatus` needs it to
+        // scope a kit-driven slice to the membership that produced it.
+        id: true;
         asset: {
           select: {
             id: true;
@@ -152,13 +157,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const {
+      organizationId,
+      userOrganizations,
+      isSelfServiceOrBase,
+      canSeeAllCustody,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     const modelName = {
       singular: "kit",
@@ -194,9 +203,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const bookingKitIds = getKitIdsByAssets(
-      booking.bookingAssets.map((ba) => ba.asset)
-    );
+    /**
+     * The kits this booking holds, from the slices booked under them.
+     *
+     * Not from member assets' kit memberships: a `QUANTITY_TRACKED` asset can
+     * belong to several kits, so a standalone slice of one would pre-select a
+     * kit nobody added — and saving would then add it for real. The booking's
+     * own rows name the kit they were booked under, which is the same source
+     * `BOOKING_WITH_ASSETS_INCLUDE` groups the overview by.
+     */
+    const bookingKitIds = [
+      ...(
+        await getKitIdsByBookingSlices({
+          slices: booking.bookingAssets,
+          organizationId,
+        })
+      ).keys(),
+    ];
 
     /**
      * Book-by-Model — Models tab payload. Shared with the manage-assets
@@ -214,10 +237,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         currentBookingId: bookingId,
+        // Only reaches `?teamMember=` here; pass the resolved rule so an
+        // admin's custodian filter still works on this dialog.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
           assetKits: {
             select: {
+              // The membership row's own id — `BookingAsset.assetKitId`
+              // points at this, not at `Kit.id`, so `getKitAvailabilityStatus`
+              // needs it to scope a kit-driven slice to the membership that
+              // produced it.
+              id: true,
               asset: {
                 select: {
                   id: true,
@@ -227,7 +259,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                   custody: true,
                   bookingAssets: {
                     /**
-                     * Important to make sure the bookings are overlapping the period of the current booking
+                     * Only bookings whose period overlaps this one make a kit
+                     * unavailable, so the picker's rows are filtered to those.
+                     *
+                     * Two intervals overlap when each starts before the other
+                     * ends: the other booking's `from` must not fall after this
+                     * booking's `to`, and its `to` must not fall before this
+                     * booking's `from`. Both comparisons cross between the two
+                     * bookings — a clause comparing a candidate's `from` and
+                     * `to` against the SAME endpoint of this booking narrows to
+                     * containment or, if the endpoints are the wrong way round,
+                     * to nothing at all.
+                     *
+                     * The second clause is containment, which the first already
+                     * covers. It is kept so this predicate stays identical to
+                     * the three siblings that answer the same question — the
+                     * booking overview, `getKitAvailability` and the scanner's
+                     * picker metadata — since a picker that disagrees with them
+                     * offers kits the save then refuses.
                      */
                     where: {
                       booking: {
@@ -242,12 +291,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                           booking.to && {
                             OR: [
                               {
-                                from: { lte: booking.from },
-                                to: { gte: booking.to },
+                                from: { lte: booking.to },
+                                to: { gte: booking.from },
                               },
                               {
                                 from: { gte: booking.from },
-                                to: { lte: booking.from },
+                                to: { lte: booking.to },
                               },
                             ],
                           }),
@@ -290,7 +339,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       perPage,
       totalPages,
       search,
-      items: kits,
+      // `KITS_INCLUDE_FIELDS` selects the whole `custody.custodian.user`,
+      // `email` included, and this picker is reachable with `booking: update`
+      // — which BASE and SELF_SERVICE both hold on their own DRAFT booking.
+      // Scoping the custodian FILTER (above) does not shape the rows, so the
+      // identity has to be redacted here too. Not the literal `false` passed to
+      // the filter: that argument is deliberately fixed for a seed nothing
+      // renders, and reusing it would redact for ADMIN/OWNER as well.
+      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
       totalItems: totalKits,
       bookingKitIds,
       ...modelTabData,
@@ -572,11 +628,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        * slice loop the BookingAsset insert uses, so the per-row
        * AssetKit.quantity is naturally what we name in the note.
        */
-      const actor = wrapUserLinkForNote({
-        id: userId,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      });
+      const actor = wrapUserLinkForNote({ ...user, id: userId });
       const bookingLink = wrapLinkForNote(`/bookings/${b.id}`, booking.name);
       const assetKitToKit = new Map<string, { id: string; name: string }>();
       for (const kit of newlyAddedKits) {
@@ -630,6 +682,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         booking: { id: bookingId, assetIds: allRemovedAssetIds },
         firstName: user?.firstName || "",
         lastName: user?.lastName || "",
+        displayName: user?.displayName ?? null,
         userId,
         kitIds: removedKitIds,
         kits: removedKits.map((kit) => ({ id: kit.id, name: kit.name })),
@@ -701,7 +754,7 @@ export default function AddKitsToBooking() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const seedFormSelection = useSetAtom(seedFormSelectionAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
 
@@ -751,7 +804,7 @@ export default function AddKitsToBooking() {
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
-    setSelectedBulkItems(bookingKitIds.map((kitId) => ({ id: kitId })));
+    seedFormSelection(bookingKitIds.map((kitId) => ({ id: kitId })));
   }
 
   /**
@@ -980,7 +1033,11 @@ function Row({ item: kit }: { item: KitForBooking }) {
   const { isCheckedOut } = getKitAvailabilityStatus(kit, booking.id);
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: kit, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: kit,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
     : null;
 
   // For Case 1: Check if kit is checked out in current booking

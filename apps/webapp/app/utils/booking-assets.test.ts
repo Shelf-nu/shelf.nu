@@ -6,8 +6,8 @@ import {
   flattenSelectedBookingItems,
   getBookingAssetCheckinLabel,
   getBookingContextAssetStatus,
+  getRemainingCheckedOutAssetIds,
   isAssetCheckableIn,
-  isAssetCheckableOut,
   isQtyRowCheckedOutOrFulfilled,
   resolveQtyStockBadgeVariant,
   type AssetWithStatus,
@@ -24,6 +24,7 @@ const partialCheckinStub = {
     id: "user-1",
     firstName: "Test",
     lastName: "User",
+    displayName: null,
     profilePicture: null,
   },
 };
@@ -204,92 +205,6 @@ describe("isAssetCheckableIn", () => {
   });
 });
 
-describe("isAssetCheckableOut", () => {
-  it("is checkable-out when still booked (available, not in records)", () => {
-    const asset = { id: "asset-1", status: "AVAILABLE" };
-    expect(isAssetCheckableOut(asset, new Set())).toBe(true);
-  });
-
-  it("is NOT checkable-out when the asset status is CHECKED_OUT", () => {
-    const asset = { id: "asset-1", status: "CHECKED_OUT" };
-    expect(isAssetCheckableOut(asset, new Set())).toBe(false);
-  });
-
-  it("is NOT checkable-out when the id is in the per-booking checkout records", () => {
-    const asset = { id: "asset-1", status: "AVAILABLE" };
-    expect(isAssetCheckableOut(asset, new Set(["asset-1"]))).toBe(false);
-  });
-
-  // why: the qty-aware top-off UX hinges on `remainingByAssetId` taking
-  // precedence over the binary "already checked out?" signal for
-  // QUANTITY_TRACKED rows. These four cases pin down the contract — drop one
-  // branch and the bulk dropdown / partial-checkout dialog silently disagree
-  // with each other again, which is exactly the bug the option exists to
-  // prevent.
-  describe("with remainingByAssetId (qty-aware top-off)", () => {
-    it("is checkable-out for QT asset with remaining > 0 even when id is in checkedOutAssetIds", () => {
-      // Top-off case: the row is "partially checked out" — its id is recorded
-      // in the booking's checked-out set — but units remain for this booking,
-      // so the user must still be able to check the rest out.
-      const asset = {
-        id: "asset-1",
-        status: "CHECKED_OUT",
-        type: "QUANTITY_TRACKED",
-      };
-      expect(
-        isAssetCheckableOut(asset, new Set(["asset-1"]), {
-          remainingByAssetId: { "asset-1": 5 },
-        })
-      ).toBe(true);
-    });
-
-    it("is NOT checkable-out for QT asset with remaining = 0", () => {
-      // Map present and authoritative: zero remaining means every booked unit
-      // is dispositioned, so no further check-out is possible — even if the
-      // binary fallback would have said otherwise.
-      const asset = {
-        id: "asset-1",
-        status: "AVAILABLE",
-        type: "QUANTITY_TRACKED",
-      };
-      expect(
-        isAssetCheckableOut(asset, new Set(), {
-          remainingByAssetId: { "asset-1": 0 },
-        })
-      ).toBe(false);
-    });
-
-    it("falls back to the binary check for QT asset when no map is provided (legacy loaders)", () => {
-      // Legacy call sites that haven't been updated to plumb the remaining map
-      // through must keep their pre-existing behaviour — the QT branch is
-      // strictly opt-in via the options arg.
-      const asset = {
-        id: "asset-1",
-        status: "CHECKED_OUT",
-        type: "QUANTITY_TRACKED",
-      };
-      expect(isAssetCheckableOut(asset, new Set())).toBe(false);
-    });
-
-    it("ignores remainingByAssetId for INDIVIDUAL assets (binary check only)", () => {
-      // The QT branch is gated on `type === "QUANTITY_TRACKED"`. An INDIVIDUAL
-      // asset whose id happens to appear in the map must still resolve via the
-      // binary fallback — anything else would let a top-off bug leak into
-      // single-unit assets.
-      const asset = {
-        id: "asset-1",
-        status: "CHECKED_OUT",
-        type: "INDIVIDUAL",
-      };
-      expect(
-        isAssetCheckableOut(asset, new Set(), {
-          remainingByAssetId: { "asset-1": 5 },
-        })
-      ).toBe(false);
-    });
-  });
-});
-
 describe("flattenSelectedBookingItems", () => {
   const bookingAssets = [
     { id: "asset-1", status: "CHECKED_OUT", kitId: null },
@@ -450,6 +365,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
       })
     ).toBe("insufficient");
   });
@@ -462,6 +378,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
       })
     ).toBe("pending-return");
 
@@ -472,6 +389,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.DRAFT,
+        isKitDriven: false,
       })
     ).toBe("pending-return");
   });
@@ -486,6 +404,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
       })
     ).toBeNull();
   });
@@ -498,8 +417,55 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.CHECKED_OUT,
         bookingStatus: BookingStatus.ONGOING,
+        isKitDriven: false,
       })
     ).toBeNull();
+  });
+
+  it("(e) returns null for a kit-driven row even when rowQty exceeds both figures, while the same standalone row warns", () => {
+    expect.assertions(2);
+    // A kit holding the asset's last units: the loose pool reads 0/0 because
+    // the kit's allocation is already subtracted from both figures.
+    const kitAvailability = { bookable: 0, physicalNow: 0 };
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 1,
+        availability: kitAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: true,
+      })
+    ).toBeNull();
+    expect(
+      resolveQtyStockBadgeVariant({
+        rowQty: 1,
+        availability: kitAvailability,
+        contextStatus: AssetStatus.AVAILABLE,
+        bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
+      })
+    ).toBe("insufficient");
+  });
+
+  it("(f) requires every caller to say whether the row is kit-driven", () => {
+    // Forgetting the flag on a surface that renders kit members is silent: the
+    // row still renders, and still gets a badge, measured against the wrong
+    // pool. Nothing observable breaks, so the compiler has to be the guard.
+    //
+    // The directive below IS that guard: make `isKitDriven` optional again and
+    // it stops suppressing anything, so `tsc` fails the build on an unused
+    // directive. (Keep any mention of the directive off the start of a comment
+    // line — TypeScript reads one there as real, wherever it appears.)
+    // @ts-expect-error - isKitDriven is deliberately required
+    const variant = resolveQtyStockBadgeVariant({
+      rowQty: 1,
+      availability: { bookable: 0, physicalNow: 0 },
+      contextStatus: AssetStatus.AVAILABLE,
+      bookingStatus: BookingStatus.RESERVED,
+    });
+
+    // Resolves at runtime without it — which is exactly why the type must object.
+    expect(variant).toBe("insufficient");
   });
 
   it("does not warn amber once the booking has started (ONGOING/OVERDUE) even if rowQty exceeds physicalNow", () => {
@@ -513,6 +479,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.ONGOING,
+        isKitDriven: false,
       })
     ).toBeNull();
     expect(
@@ -521,6 +488,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.OVERDUE,
+        isKitDriven: false,
       })
     ).toBeNull();
   });
@@ -533,6 +501,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: undefined,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
       })
     ).toBeNull();
   });
@@ -545,6 +514,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.COMPLETE,
+        isKitDriven: false,
       })
     ).toBeNull();
     expect(
@@ -553,6 +523,7 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: boardsAvailability,
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.ARCHIVED,
+        isKitDriven: false,
       })
     ).toBeNull();
   });
@@ -567,7 +538,58 @@ describe("resolveQtyStockBadgeVariant", () => {
         availability: { bookable: 10, physicalNow: 10 },
         contextStatus: AssetStatus.AVAILABLE,
         bookingStatus: BookingStatus.RESERVED,
+        isKitDriven: false,
       })
     ).toBeNull();
+  });
+});
+
+describe("getRemainingCheckedOutAssetIds", () => {
+  it("counts a multi-slice asset once even though it is several booking rows", () => {
+    expect.assertions(2);
+    // One QUANTITY_TRACKED asset booked twice: a standalone slice and a
+    // kit-driven one. Three rows, two distinct assets.
+    const bookingAssets = [
+      { id: "asset-qt", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-qt", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-individual", status: AssetStatus.CHECKED_OUT },
+    ];
+
+    const remaining = getRemainingCheckedOutAssetIds(bookingAssets, []);
+
+    expect(remaining.size).toBe(2);
+    expect([...remaining]).toEqual(["asset-qt", "asset-individual"]);
+  });
+
+  it("excludes assets already reconciled by a partial check-in", () => {
+    expect.assertions(1);
+    const bookingAssets = [
+      { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+    ];
+
+    const remaining = getRemainingCheckedOutAssetIds(bookingAssets, [
+      "asset-1",
+    ]);
+
+    expect([...remaining]).toEqual(["asset-2"]);
+  });
+
+  it("excludes assets that are not checked out at all", () => {
+    expect.assertions(1);
+    const bookingAssets = [
+      { id: "asset-available", status: AssetStatus.AVAILABLE },
+      { id: "asset-custody", status: AssetStatus.IN_CUSTODY },
+      { id: "asset-out", status: AssetStatus.CHECKED_OUT },
+    ];
+
+    expect([...getRemainingCheckedOutAssetIds(bookingAssets, [])]).toEqual([
+      "asset-out",
+    ]);
+  });
+
+  it("returns an empty set when nothing is out", () => {
+    expect.assertions(1);
+    expect(getRemainingCheckedOutAssetIds([], []).size).toBe(0);
   });
 });

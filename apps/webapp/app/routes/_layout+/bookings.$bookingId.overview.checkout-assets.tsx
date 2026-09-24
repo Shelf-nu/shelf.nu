@@ -19,6 +19,7 @@ import { db } from "~/database/db.server";
 import { useBookingCheckinSessionInitialization } from "~/hooks/use-booking-checkin-session-initialization";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import {
   checkoutAssets,
   computeBookingAssetRemainingToCheckOut,
@@ -56,7 +57,7 @@ export const links: LinksFunction = () => [
  * self-service user could check out assets in another user's booking in the
  * same organization.
  *
- * @throws {ShelfError} when the caller may not check out this booking
+ * @throws {ShelfError} 403 when the caller may not check out this booking
  * @returns the loaded booking (so the loader can reuse it without re-fetching)
  */
 async function assertUserCanCheckoutBooking({
@@ -105,6 +106,7 @@ async function assertUserCanCheckoutBooking({
       message:
         "You cannot check out assets for this booking at the moment. The booking may not be reservable/ongoing or you may not have permission to manage its assets.",
       label: "Booking",
+      status: 403,
       shouldBeCaptured: false,
     });
   }
@@ -262,8 +264,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           id: asset.id,
           bookingAssetId: ba.id,
           title: asset.title,
-          mainImage: asset.mainImage ?? null,
-          thumbnailImage: asset.thumbnailImage ?? null,
+          // Collapse the model-image cascade into the flat fields the
+          // scanner drawer reads (`thumbnailImage || mainImage`), so an
+          // asset with no image of its own renders its model's cover.
+          // `null` stays `null` for the true no-image case — the drawer's
+          // own placeholder branch handles it.
+          ...(() => {
+            const image = resolveAssetImage({
+              mainImage: asset.mainImage ?? null,
+              thumbnailImage: asset.thumbnailImage ?? null,
+              assetModel: asset.assetModel ?? null,
+            });
+            const isPlaceholder = image.source === "placeholder";
+            return {
+              mainImage: isPlaceholder ? null : image.fullUrl,
+              thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+            };
+          })(),
           kitId: sourceKit?.id ?? null,
           kitName: sourceKit?.name ?? null,
         };

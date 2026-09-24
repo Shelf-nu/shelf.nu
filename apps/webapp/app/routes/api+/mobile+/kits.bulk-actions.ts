@@ -8,6 +8,7 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { mobileBulkIdsSchema } from "~/modules/api/mobile-bulk-ids.server";
 import {
   bulkAssignKitCustody,
   bulkReleaseKitCustody,
@@ -39,16 +40,16 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 const BodySchema = z.discriminatedUnion("intent", [
   z.object({
     intent: z.literal("assign-custody"),
-    kitIds: z.array(z.string().min(1)).min(1),
+    kitIds: mobileBulkIdsSchema("kitIds"),
     custodianId: z.string().min(1),
   }),
   z.object({
     intent: z.literal("release-custody"),
-    kitIds: z.array(z.string().min(1)).min(1),
+    kitIds: mobileBulkIdsSchema("kitIds"),
   }),
   z.object({
     intent: z.literal("update-location"),
-    kitIds: z.array(z.string().min(1)).min(1),
+    kitIds: mobileBulkIdsSchema("kitIds"),
     newLocationId: z.string().min(1),
   }),
 ]);
@@ -69,7 +70,25 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const organizationId = await requireOrganizationAccess(request, user.id);
 
-    const body = BodySchema.parse(await request.json());
+    // safeParse, not parse — see the asset bulk endpoints: a raw ZodError
+    // becomes a captured 500, and the select-all rejection is an expected
+    // client error.
+    const parsedBody = BodySchema.safeParse(
+      await request.json().catch(() => null)
+    );
+
+    if (!parsedBody.success) {
+      throw new ShelfError({
+        cause: parsedBody.error,
+        message: "Invalid request body",
+        additionalData: { validationErrors: parsedBody.error.flatten() },
+        label: "Kit",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const body = parsedBody.data;
 
     await requireMobilePermission({
       userId: user.id,
@@ -115,41 +134,33 @@ export async function action({ request }: ActionFunctionArgs) {
           custodianId: teamMember.id,
           custodianName: teamMember.name,
           userId: user.id,
+          // Mobile passes no `currentSearchParams`, so `getKitsWhereInput`
+          // returns before any custodian clause is built and this is inert.
+          // It is stated rather than defaulted so a future mobile select-all
+          // that DOES forward filters has to make the choice explicitly.
+          allowedTeamMemberIds: "all",
         });
         break;
       }
 
       case "release-custody": {
-        // Self-service users may only release kits they hold themselves
-        // (web parity — enforced in the route, the service takes no role).
-        if (isSelfService) {
-          const custodies = await db.kitCustody.findMany({
-            where: {
-              kitId: { in: body.kitIds },
-              kit: { organizationId },
-            },
-            select: { custodian: { select: { userId: true } } },
-          });
-
-          if (
-            custodies.some((custody) => custody.custodian.userId !== user.id)
-          ) {
-            throw new ShelfError({
-              cause: null,
-              title: "Action not allowed",
-              message: "Self user can release custody of themselves only.",
-              additionalData: { userId, kitIds: body.kitIds },
-              label: "Kit",
-              status: 403,
-              shouldBeCaptured: false,
-            });
-          }
-        }
-
+        // Self-service users may only release kits they hold themselves. The
+        // check now lives in `bulkReleaseKitCustody` so it runs on the RESOLVED
+        // kits: the version here queried `kitCustody` with the raw
+        // `body.kitIds`, so `["all-selected"]` matched zero rows and the guard
+        // passed. That mattered more on mobile than on web — no
+        // `currentSearchParams` is sent, so the resolved set is every kit in
+        // the organization.
         await bulkReleaseKitCustody({
           kitIds: body.kitIds,
           organizationId,
           userId: user.id,
+          role,
+          // Mobile passes no `currentSearchParams`, so `getKitsWhereInput`
+          // returns before any custodian clause is built and this is inert.
+          // It is stated rather than defaulted so a future mobile select-all
+          // that DOES forward filters has to make the choice explicitly.
+          allowedTeamMemberIds: "all",
         });
         break;
       }

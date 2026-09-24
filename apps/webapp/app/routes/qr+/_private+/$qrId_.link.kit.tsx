@@ -38,7 +38,7 @@ import { db } from "~/database/db.server";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getPaginatedAndFilterableKits,
-  updateKitQrCode,
+  relinkKitQrCode,
 } from "~/modules/kit/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import css from "~/styles/link-existing-asset.css?url";
@@ -84,7 +84,7 @@ export const loader = async ({
       });
     }
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllCustody } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.qr,
@@ -116,6 +116,11 @@ export const loader = async ({
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        // This picker renders the custodian filter, so pass the resolved rule
+        // rather than a fixed answer — hardcoding `false` would refuse an
+        // admin's own filter.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           assetKits: {
             select: {
@@ -205,10 +210,18 @@ export const action = async ({
       z.object({ kitId: z.string() })
     );
 
-    await updateKitQrCode({
-      newQrId: qrId,
+    /**
+     * Goes through `relinkKitQrCode`, the same service the kit detail page
+     * uses, rather than writing the link directly. The QR id arrives in the
+     * URL and nothing upstream vouches for it — this route tree has no layout
+     * loader — so the code's organization, its existing links, and the
+     * check-then-act window all have to be settled here.
+     */
+    await relinkKitQrCode({
+      qrId,
       kitId,
       organizationId,
+      userId: authSession.userId,
     });
 
     return redirect(`/qr/${qrId}/successful-link?type=kit`);

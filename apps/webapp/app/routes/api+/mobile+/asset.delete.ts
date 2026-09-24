@@ -5,6 +5,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { deleteAsset } from "~/modules/asset/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -33,12 +34,13 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.delete,
     });
 
-    const body = await request.json();
-    const { assetId } = z
-      .object({
+    const { assetId } = await parseMobileBody(
+      z.object({
         assetId: z.string().min(1, "Asset ID is required"),
-      })
-      .parse(body);
+      }),
+      request,
+      "Assets"
+    );
 
     // why: passing actorUserId so the ASSET_DELETED event is attributed to
     // the mobile user instead of recording as a system-initiated delete.

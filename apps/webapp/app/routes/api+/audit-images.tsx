@@ -1,3 +1,13 @@
+/**
+ * Audit Images API
+ *
+ * Resolves `AuditImage` ids to renderable thumbnails for the `{% audit_images %}`
+ * Markdoc tag used inside audit notes.
+ *
+ * @see {@link file://./../../components/markdown/audit-images-component.tsx}
+ * @see {@link file://./../../modules/audit/note-content.server.ts}
+ */
+
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { makeShelfError } from "~/utils/error";
@@ -9,14 +19,24 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 /**
- * API route to fetch audit images by IDs for display in completion notes
- * Used by AuditImagesComponent to show image thumbnails with preview
+ * Returns the images whose ids are listed in the `ids` query parameter.
+ *
+ * The ids arrive from note content, which is user-authored: a caller can ask
+ * for any id at all. Access therefore has to be re-derived here rather than
+ * inherited from whichever note did the asking — the same audit-scoped rule
+ * the audit pages enforce. ADMIN/OWNER see every image in the workspace;
+ * BASE and SELF_SERVICE see only images belonging to audits they are
+ * assigned to.
+ *
+ * Ids the caller may not see are dropped from the result instead of failing
+ * the request, so one unreachable image cannot blank out a note that also
+ * embeds legitimate ones.
  */
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.audit,
@@ -39,7 +59,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     const images = await db.auditImage.findMany({
       where: {
         id: { in: imageIds },
-        organizationId, // Ensure user can only see images from their organization
+        organizationId,
+        ...(isSelfServiceOrBase
+          ? {
+              auditSession: { assignments: { some: { userId } } },
+            }
+          : {}),
       },
       select: {
         id: true,

@@ -15,6 +15,7 @@ import {
   parseCsv,
 } from "~/utils/csv.server";
 import { ShelfError } from "~/utils/error";
+import { extractCSVDataFromBackupImport } from "~/utils/import.server";
 
 import { HARDCODED_DEFAULT_PREFS } from "./date-format";
 
@@ -49,6 +50,45 @@ describe("parseCsv", () => {
     expect(result).toEqual([
       ["name", "description"],
       ['MacBook "Pro" 16', "16-inch laptop"],
+    ]);
+  });
+
+  it("strips the UTF-8 BOM so an exported file re-imports cleanly", async () => {
+    // Every CSV Shelf serves opens with a BOM (see `~/utils/csv-utf8`), and
+    // files coming back from Excel carry one too. The mark has to be consumed
+    // here, or the mark stays glued to the first header and every column
+    // mapped by name silently misses — a round trip the import-ready export
+    // invites users to perform.
+    //
+    // Two layers strip it independently: a UTF-8 decode drops a leading mark
+    // by spec, and `bom: true` catches one that reaches the parser anyway.
+    // `bom: true` therefore looks redundant and is not — this asserts the
+    // outcome rather than either mechanism, so removing one net keeps the
+    // suite green and removing both does not.
+    const withBom = `\uFEFFtitle,category\nحاسوب محمول,أجهزة`;
+    const bytes = new TextEncoder().encode(withBom);
+
+    const result = await parseCsv(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    );
+
+    expect(result).toEqual([
+      ["title", "category"],
+      ["حاسوب محمول", "أجهزة"],
+    ]);
+  });
+
+  it("picks the delimiter from the structure, not from inside quoted cells", async () => {
+    // One verbose cell can hold more of the other candidate delimiter than the
+    // whole file holds of the real one. Notes and JSON relations do exactly
+    // that, so the guess has to look between cells only.
+    const csvContent =
+      'title,description\n"Laptop","checked out; returned; checked out; returned"';
+    const csvData = new TextEncoder().encode(csvContent).buffer;
+
+    expect(await parseCsv(csvData)).toEqual([
+      ["title", "description"],
+      ["Laptop", "checked out; returned; checked out; returned"],
     ]);
   });
 });
@@ -245,23 +285,85 @@ describe("buildCsvBackupDataFromAssets", () => {
     ];
 
     const result = buildCsvBackupDataFromAssets({
-      assets: assets as any,
+      assets,
       keysToSkip: ["skipMe"],
     });
 
     expect(result).toEqual([
       [
-        "asset-1",
+        '"asset-1"',
         '"Line 1Line 2"',
-        "{}",
-        "{}",
-        "{}",
-        '[{"content":""}]',
-        '[{"name":"tag-1"}]',
-        '{"foo":""}',
-        "",
+        '"{}"',
+        '"{}"',
+        '"{}"',
+        '"[{""content"":""""}]"',
+        '"[{""name"":""tag-1""}]"',
+        '"{""foo"":""""}"',
+        '""',
       ],
     ]);
+  });
+
+  it("quotes a value carrying the delimiter or a quote", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "MacBook Pro; 16-inch",
+        description: 'He said "hello" to me',
+      },
+    ];
+
+    expect(buildCsvBackupDataFromAssets({ assets, keysToSkip: [] })).toEqual([
+      ['"asset-1"', '"MacBook Pro; 16-inch"', '"He said ""hello"" to me"'],
+    ]);
+  });
+});
+
+describe("backup export -> backup import round trip", () => {
+  // why: the real parser and the real extractor, so the assertion covers the
+  // whole restore path rather than the writer's own idea of its output.
+  const roundTrip = async (asset: Record<string, unknown>) => {
+    const rows = buildCsvBackupDataFromAssets({
+      assets: [asset],
+      keysToSkip: [],
+    });
+    const headers = Object.keys(asset).map((h) => `"${h}"`);
+    const csv = [headers, ...rows].map((row) => row.join(";")).join("\n");
+
+    const parsed = await parseCsv(new TextEncoder().encode(csv).buffer);
+    return extractCSVDataFromBackupImport(parsed as string[][])[0];
+  };
+
+  it("restores an asset whose relations are serialized as JSON", async () => {
+    expect(
+      await roundTrip({
+        id: "asset-1",
+        title: "AMD Ryzen",
+        category: { name: "CPU" },
+        tags: [{ name: "tag-1" }],
+      })
+    ).toEqual({
+      id: "asset-1",
+      title: "AMD Ryzen",
+      category: { name: "CPU" },
+      tags: [{ name: "tag-1" }],
+    });
+  });
+
+  it("restores text carrying the delimiter, a quote, or both", async () => {
+    expect(
+      await roundTrip({
+        id: "asset-1",
+        title: 'Monitor "27-inch"; refurbished',
+        description: "Battery at 30% capacity; sold as-is",
+        category: { name: "Displays, external" },
+      })
+    ).toEqual({
+      id: "asset-1",
+      title: 'Monitor "27-inch"; refurbished',
+      description: "Battery at 30% capacity; sold as-is",
+      category: { name: "Displays, external" },
+    });
   });
 });
 

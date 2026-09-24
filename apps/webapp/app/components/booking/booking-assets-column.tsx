@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
+import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { AssetWithResolvableImage } from "~/modules/asset/image-resolution";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
@@ -28,16 +30,38 @@ import { Table, Th } from "../table";
 import When from "../when/when";
 
 /**
- * Type assertion helper for booking assets.
- * The loader enriches partial booking assets with full asset details via assetDetailsMap,
- * but TypeScript can't infer this enrichment. This helper documents the intentional
- * assertion and provides a single point of type conversion.
+ * Type assertion helpers for booking asset rows.
+ *
+ * The loader enriches the pivot's asset rows with full details from
+ * `assetDetailsMap`, and the client receives that payload serialized (Dates
+ * arrive as strings), so the runtime shape cannot satisfy `AssetWithBooking`
+ * structurally. These helpers are the single documented point where that gap
+ * is asserted away.
+ *
+ * `T extends AssetWithResolvableImage` is the part that must not be relaxed.
+ * Everything downstream renders `<AssetImage>`, which resolves
+ * `own image → model cover → placeholder`, and a loader that ships the image
+ * SCALARS but omits the `assetModel` relation silently drops every inheriting
+ * asset to the placeholder. Nothing about that is observable in types once a
+ * row has been cast, and nothing fails at runtime either — the page just shows
+ * the wrong picture. The constraint is what forces each loader to prove it
+ * carries all three fields before its rows may enter this path.
+ *
+ * Do not relax the constraint to a bare `<T>`: that accepts a row of any shape,
+ * so a loader missing the relation reaches the render path with nothing to stop
+ * it.
+ *
+ * @see {@link file://./../../modules/asset/image-resolution.ts}
  */
-function asEnrichedAssets<T>(assets: T[]): AssetWithBooking[] {
+function asEnrichedAssets<T extends AssetWithResolvableImage>(
+  assets: T[]
+): AssetWithBooking[] {
   return assets as unknown as AssetWithBooking[];
 }
 
-function asEnrichedAsset<T>(asset: T): AssetWithBooking {
+function asEnrichedAsset<T extends AssetWithResolvableImage>(
+  asset: T
+): AssetWithBooking {
   return asset as unknown as AssetWithBooking;
 }
 
@@ -164,6 +188,13 @@ export function BookingAssetsColumn() {
     !isBaseOrSelfService ||
     (isBaseOrSelfService && booking?.custodianUser?.id === userId);
 
+  /**
+   * Custody alone decides whether this column offers actions at all; which of
+   * them the role may actually take is the hook's question, and it is what
+   * decides whether selecting rows leads anywhere.
+   */
+  const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
+
   function itemsGetter(data: LoaderData) {
     return data.items
       .map((item) => {
@@ -285,7 +316,16 @@ export function BookingAssetsColumn() {
               <>
                 <Table className="border-collapse">
                   <ListHeader hideFirstColumn>
-                    <BulkListHeader itemsGetter={itemsGetter} />
+                    {/* Select-all is offered only when there is a bulk action
+                        to feed, matching the per-row checkboxes. The empty
+                        header cell mirrors their `<Td> </Td>` fallback, so the
+                        column stays aligned either way. */}
+                    <When
+                      truthy={hasAnyBulkAction}
+                      fallback={<Th className="md:pl-4 md:pr-3"> </Th>}
+                    >
+                      <BulkListHeader itemsGetter={itemsGetter} />
+                    </When>
                     <Th>Name</Th>
                     <Th>Qty</Th>
                     <Th> </Th>

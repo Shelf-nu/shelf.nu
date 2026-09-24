@@ -36,15 +36,22 @@ interface Asset {
   };
 }
 
+/**
+ * One kit as `/api/kits` serialises it.
+ *
+ * `useApiQuery` casts the response to this type without validating it, so the
+ * compiler cannot tell a drifting payload from a matching one — a field the
+ * route stops sending arrives as `undefined` and only crashes at render. Change
+ * this shape and `app/routes/api+/kits.tsx` together, and keep
+ * `kits-list-component.test.tsx` fed with the route's real payload.
+ */
 interface Kit {
   id: string;
   name: string;
   image?: string;
   imageExpiration?: string;
+  /** Member assets, flattened out of the `AssetKit` pivot by the route. */
   assets: Asset[];
-  _count: {
-    assets: number;
-  };
 }
 
 export function KitsListComponent({

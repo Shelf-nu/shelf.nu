@@ -25,6 +25,7 @@ import {
   type Column,
 } from "~/modules/asset-index-settings/helpers";
 import { getPrimaryCustody } from "~/modules/custody/utils";
+import { encodeCsvListCell, quoteCsvCell } from "~/utils/csv-cells";
 import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
 import { resolveTeamMemberName } from "~/utils/user";
 
@@ -230,10 +231,11 @@ export function resolveImportReadyCell(
     case "core":
       return resolveCoreField(col.field, asset);
     case "barcode":
-      return (asset.barcodes ?? [])
-        .filter((b) => b.type === col.barcodeType)
-        .map((b) => b.value)
-        .join(",");
+      return encodeCsvListCell(
+        (asset.barcodes ?? [])
+          .filter((b) => b.type === col.barcodeType)
+          .map((b) => b.value)
+      );
     case "cf": {
       const entry = asset.customFields?.find(
         (e) => e.customField.name === col.name
@@ -267,7 +269,7 @@ function resolveCoreField(
     case "kit":
       return asset.kit?.name ?? "";
     case "tags":
-      return (asset.tags ?? []).map((t) => t.name).join(",");
+      return encodeCsvListCell((asset.tags ?? []).map((t) => t.name));
     case "location":
       return asset.location?.name ?? "";
     case "custodian": {
@@ -321,11 +323,6 @@ export function buildImportReadyRows(
     columns.map((col) => resolveImportReadyCell(col, asset))
   );
   return [headerRow, ...dataRows];
-}
-
-/** Wraps a cell in double quotes, escaping embedded quotes (RFC 4180). */
-function quoteCsvCell(value: string): string {
-  return `"${(value ?? "").replace(/"/g, '""')}"`;
 }
 
 /**

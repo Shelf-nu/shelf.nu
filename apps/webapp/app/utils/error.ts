@@ -95,6 +95,7 @@ export type FailureReason = {
     | "DB"
     | "Request validation"
     | "Request aborted"
+    | "Rate limit" // A server-side rate limiter rejected the request (429)
     | "DB constrain violation"
     | "Dev error" // Error that should never happen in production because it's a developer mistake
     | "Environment" // Related to the environment setup
@@ -200,6 +201,26 @@ export class ShelfError extends Error {
       ? 404
       : status || 500;
     this.traceId = traceId || createId();
+  }
+}
+
+/**
+ * Re-throws `cause` unchanged when it is a deliberate CLIENT-error ShelfError.
+ *
+ * Service wrappers typically catch everything and re-throw with a friendly
+ * "something went wrong, try again later" message. That is right for an
+ * internal fault, and wrong for a 4xx someone chose deliberately: it hands the
+ * user a 400 telling them to retry a request that can never succeed.
+ *
+ * 4xx means a human wrote that message for a user; 5xx means something broke.
+ * `status` is optional on ShelfError, so an unset status is treated as 500.
+ *
+ * @param cause - The caught value
+ * @throws The original error when it is a client-error ShelfError
+ */
+export function rethrowIfClientError(cause: unknown): void {
+  if (cause instanceof ShelfError && (cause.status ?? 500) < 500) {
+    throw cause;
   }
 }
 

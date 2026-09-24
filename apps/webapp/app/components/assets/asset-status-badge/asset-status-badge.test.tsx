@@ -67,10 +67,6 @@ vi.mock("../../shared/hover-card", () => ({
   HoverCardContent: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("@radix-ui/react-hover-card", () => ({
-  HoverCardPortal: ({ children }: { children: ReactNode }) => <>{children}</>,
-}));
-
 beforeEach(() => {
   apiQueryCalls.length = 0;
 });

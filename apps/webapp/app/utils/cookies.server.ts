@@ -95,15 +95,28 @@ export const userPrefs = createCookie("user-prefs", {
 });
 
 /**
- * Expires the old host-only `user-prefs` cookie that was set before the
- * `domain` attribute was added. Without this, browsers carry two cookies
- * with the same name (one host-only, one domain-scoped) for up to 7 days.
+ * Expires the old host-only `user-prefs` cookie left over from before the
+ * `domain` attribute was added, so a browser does not carry two cookies of the
+ * same name for up to 7 days.
  *
- * Safe to call on every request — it's a no-op once the old cookie is gone.
- * @TODO Can be removed after rollout (≥ 1 week post-deploy).
+ * Only emitted when {@link COOKIE_DOMAIN} is set. Without a domain the real
+ * cookie IS host-only, so this would delete the very cookie the same response
+ * is writing — which is every deployment that leaves `COOKIE_DOMAIN` unset,
+ * local development included, where it silently discards every user preference
+ * on each page load.
+ *
+ * Returns a list so a caller can spread it and emit nothing at all.
+ *
+ * @returns The expiry header, or an empty list when there is nothing to expire
+ * @TODO Can be removed once every session predating the domain attribute has
+ * aged out (the cookie's own lifetime is a week).
  */
-export function expireHostOnlyUserPrefsCookie(): [string, string] {
-  return ["Set-Cookie", "user-prefs=; Path=/; Max-Age=0; SameSite=Lax"];
+export function expireHostOnlyUserPrefsCookie(): Array<[string, string]> {
+  if (!COOKIE_DOMAIN) {
+    return [];
+  }
+
+  return [["Set-Cookie", "user-prefs=; Path=/; Max-Age=0; SameSite=Lax"]];
 }
 
 export async function updateCookieWithPerPage(

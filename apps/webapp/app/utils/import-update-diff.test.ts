@@ -5,6 +5,7 @@
  * @see {@link file://./import-update-diff.ts}
  */
 import { describe, expect, it } from "vitest";
+import { decodeCsvListCell } from "~/utils/csv-cells";
 import { ShelfError } from "~/utils/error";
 import {
   analyzeUpdateHeaders,
@@ -429,6 +430,40 @@ describe("compareCoreField", () => {
       const asset = makeAsset({ tags: [] });
       const result = compareCoreField("tags", "NewTag", asset, "Tags");
       expect(result?.currentValue).toBe("(none)");
+    });
+
+    it("keeps a quoted tag name intact in the value the apply flow re-reads", () => {
+      // `newValue` is not only display: import-update.server.ts and
+      // import-update-entities.server.ts decode it again to resolve and
+      // connect the tags, so it has to survive that second read.
+      const asset = makeAsset({ tags: [{ id: "t1", name: "small" }] });
+      const result = compareCoreField(
+        "tags",
+        '"Berlin, DE",small',
+        asset,
+        "Tags"
+      );
+
+      expect(result).not.toBeNull();
+      expect(decodeCsvListCell(result!.newValue)).toEqual([
+        "Berlin, DE",
+        "small",
+      ]);
+    });
+
+    it("reads a quoted tag name carrying a comma as one tag", () => {
+      // The import-ready export is this importer's input and quotes a tag name
+      // containing the separator, so a bare split would report a spurious
+      // change here and write the wrong tags on apply.
+      const asset = makeAsset({
+        tags: [
+          { id: "t1", name: "Berlin, DE" },
+          { id: "t2", name: "small" },
+        ],
+      });
+      expect(
+        compareCoreField("tags", '"Berlin, DE",small', asset, "Tags")
+      ).toBeNull();
     });
   });
 

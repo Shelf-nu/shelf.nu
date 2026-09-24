@@ -189,10 +189,18 @@ describe("audit image service", () => {
       await deleteAuditImage({
         imageId: "img-1",
         organizationId: "org-1",
+        auditSessionId: "audit-1",
       });
 
+      // The `auditSessionId` predicate is the point: `imageId` is
+      // caller-supplied, so an org-only filter let any member delete any
+      // image in the workspace through a URL naming a different audit.
       expect(db.auditImage.findFirst).toHaveBeenCalledWith({
-        where: { id: "img-1", organizationId: "org-1" },
+        where: {
+          id: "img-1",
+          organizationId: "org-1",
+          auditSessionId: "audit-1",
+        },
       });
 
       expect(removePublicFile).toHaveBeenCalledWith({
@@ -215,10 +223,60 @@ describe("audit image service", () => {
         deleteAuditImage({
           imageId: "nonexistent",
           organizationId: "org-1",
+          auditSessionId: "audit-1",
         })
       ).rejects.toThrow();
 
       expect(db.auditImage.delete).not.toHaveBeenCalled();
+    });
+
+    it("refuses an image that belongs to a different audit", async () => {
+      // The reported vector: a real image id, submitted through a URL naming
+      // an audit it does not belong to. The scoped lookup matches nothing.
+      vi.mocked(db.auditImage.findFirst).mockResolvedValue(null);
+
+      await expect(
+        deleteAuditImage({
+          imageId: "img-from-another-audit",
+          organizationId: "org-1",
+          auditSessionId: "audit-the-caller-named",
+        })
+      ).rejects.toThrow();
+
+      expect(db.auditImage.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: "img-from-another-audit",
+          organizationId: "org-1",
+          auditSessionId: "audit-the-caller-named",
+        },
+      });
+      // Nothing deleted, and crucially no storage object removed — the files
+      // go before the row, so an unscoped lookup destroys the evidence even
+      // if the DB delete were to fail afterwards.
+      expect(db.auditImage.delete).not.toHaveBeenCalled();
+      expect(removePublicFile).not.toHaveBeenCalled();
+    });
+
+    it("binds to the audit ASSET too when the route names one", async () => {
+      vi.mocked(db.auditImage.findFirst).mockResolvedValue(null);
+
+      await expect(
+        deleteAuditImage({
+          imageId: "img-1",
+          organizationId: "org-1",
+          auditSessionId: "audit-1",
+          auditAssetId: "auditasset-1",
+        })
+      ).rejects.toThrow();
+
+      expect(db.auditImage.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: "img-1",
+          organizationId: "org-1",
+          auditSessionId: "audit-1",
+          auditAssetId: "auditasset-1",
+        },
+      });
     });
   });
 

@@ -103,15 +103,49 @@ function sleep(ms: number): Promise<void> {
  * @param cause - The error thrown by a Supabase admin call
  * @returns true if the failure is a rate-limit
  */
+/**
+ * Reads Supabase's machine-readable error code off a thrown value.
+ *
+ * @param cause - Anything caught from the auth client.
+ * @returns The `code` when present, otherwise `undefined`.
+ */
+function errorCode(cause: unknown): unknown {
+  return typeof cause === "object" && cause !== null && "code" in cause
+    ? (cause as { code: unknown }).code
+    : undefined;
+}
+
 function isRateLimitError(cause: unknown): boolean {
-  const code =
-    typeof cause === "object" && cause !== null && "code" in cause
-      ? (cause as { code: unknown }).code
-      : undefined;
   return (
-    code === "over_email_send_rate_limit" ||
+    errorCode(cause) === "over_email_send_rate_limit" ||
     (isAuthApiError(cause) && cause.status === 429)
   );
+}
+
+/**
+ * Whether a just-minted magic-link token was rejected as no longer valid.
+ *
+ * `mintMobileSessionOnce` generates a link and verifies it microseconds later,
+ * so "expired" never means elapsed time here. Supabase answers `otp_expired`
+ * for an INVALID token too, and the way a token that new becomes invalid is
+ * being superseded — generating another link for the same user voids the
+ * previous one. Two overlapping sign-ins for one account do exactly that, and
+ * the first one to verify loses.
+ *
+ * This is the one 4xx worth retrying: each attempt calls `generateLink` again
+ * and gets a brand-new token, so the very thing that failed the attempt is what
+ * the retry replaces. Treating it as deterministic — which the shape of the
+ * error invites — turns a recoverable collision into a hard sign-in failure.
+ *
+ * @param cause - Anything caught from the mint.
+ * @returns `true` when a fresh token would plausibly succeed.
+ */
+function isSupersededTokenError(cause: unknown): boolean {
+  if (!isAuthApiError(cause)) return false;
+  if (errorCode(cause) === "otp_expired") return true;
+  // Not every response carries a `code`; the message is the only signal when
+  // it does not.
+  return /invalid or has expired/i.test(cause.message);
 }
 
 /**
@@ -172,11 +206,14 @@ async function mintMobileSessionOnce(email: string): Promise<AuthSession> {
  * pattern. The resulting session is a brand-new token family, decoupled from
  * the user's web session.
  *
- * Resilience: only transient Supabase failures (504s / network, surfaced as
- * `AuthRetryableFetchError`) are retried — up to {@link MINT_MAX_ATTEMPTS} times
- * with a short backoff. Rate-limits surface as a clear 429 (not retried — the
- * window won't clear in time). Deterministic failures (4xx, or our own
- * no-token/no-session errors) fail fast, since retrying can't change the result.
+ * Resilience: retried up to {@link MINT_MAX_ATTEMPTS} times with a short
+ * backoff, for the two failures a retry can actually fix — transient Supabase
+ * errors (504s / network, surfaced as `AuthRetryableFetchError`) and a
+ * superseded magic-link token (see {@link isSupersededTokenError}, which
+ * explains why that 4xx is the exception). Rate-limits surface as a clear 429,
+ * not retried, because the window will not clear in time. Everything else —
+ * other 4xx, or our own no-token/no-session errors — fails fast, since
+ * retrying cannot change the result.
  *
  * SECURITY: this hands out a full session for `email` with no further checks —
  * it must ONLY be called after the caller has independently authorized the
@@ -206,10 +243,12 @@ async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
         });
       }
 
-      // Only transient Supabase failures (504s / network) are worth retrying;
-      // deterministic 4xx errors and our own ShelfErrors won't change on retry.
+      // A retry helps in exactly two cases: the failure was transient, or the
+      // token was superseded and a new one will be minted on the next attempt.
+      // Every other 4xx, and our own ShelfErrors, would fail identically.
       const canRetry =
-        attempt < MINT_MAX_ATTEMPTS && isAuthRetryableFetchError(cause);
+        attempt < MINT_MAX_ATTEMPTS &&
+        (isAuthRetryableFetchError(cause) || isSupersededTokenError(cause));
       if (canRetry) {
         await sleep(attempt * MINT_RETRY_BASE_MS);
         continue;
@@ -239,7 +278,9 @@ async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
  * @param userId - The authenticated user the code authorizes a session for
  * @param codeChallenge - Optional PKCE (S256) challenge. When present, the code
  *   can only be redeemed with a matching verifier (see
- *   {@link redeemMobileAuthCode}). Omitted by legacy (pre-PKCE) app builds.
+ *   {@link redeemMobileAuthCode}). Always present in practice: `/sso-login`
+ *   refuses to start a mobile flow without one, and a code carrying none is
+ *   unredeemable — see the poison note on the guard below.
  * @returns The plaintext authorization code to embed in the deeplink
  * @throws {ShelfError} If the row cannot be created
  */
@@ -280,17 +321,20 @@ export async function createMobileAuthCode(
  * already-consumed code yields a uniform 400 (no oracle about which check
  * failed).
  *
- * PKCE: if the code was minted with an S256 `codeChallenge` (a PKCE-capable
- * app), the caller MUST present a `codeVerifier` that hashes to it — otherwise
- * the (now-consumed) code is rejected with the SAME uniform 400, so an
- * intercepted code is useless without the verifier. Codes minted WITHOUT a
- * challenge (legacy, pre-PKCE builds) redeem with no verifier — backward
- * compatible. Verification runs AFTER the atomic consume, so a wrong verifier
- * burns the single-use code; acceptable, since the legitimate app always
- * presents the matching verifier.
+ * PKCE is mandatory and unconditional. The caller MUST present a
+ * `codeVerifier` that hashes to the code's stored S256 `codeChallenge`;
+ * anything else — a missing verifier, a wrong one, or a code carrying no
+ * challenge at all — is rejected with the SAME uniform 400, so an intercepted
+ * code is useless without the verifier. A NULL `codeChallenge` is treated as
+ * poison rather than as a legacy opt-out: an unbound code is a bearer token,
+ * which is precisely what PKCE exists to prevent on a custom-scheme callback
+ * any app can claim. Verification runs AFTER the atomic consume, so a wrong
+ * verifier burns the single-use code; acceptable, since the legitimate app
+ * always presents the matching verifier.
  *
  * @param code - The plaintext authorization code from the deeplink
- * @param codeVerifier - PKCE verifier; required iff the code carries a challenge
+ * @param codeVerifier - PKCE verifier. Optional in the signature only so the
+ *   refusal path stays reachable; a redemption without one always fails.
  * @returns A freshly minted, mapped auth session for the device
  * @throws {ShelfError} 400 if the code is missing/invalid/expired/used, or if a
  *   PKCE-bound code is presented without a matching verifier
@@ -333,12 +377,20 @@ export async function redeemMobileAuthCode(
       select: { codeChallenge: true, user: { select: { email: true } } },
     });
 
-    // PKCE check — only for codes minted with a challenge. Same uniform 400 as
-    // an invalid code (no oracle about why redemption failed). The code is
-    // already consumed above, so a wrong/absent verifier burns it.
+    // PKCE is MANDATORY. A code minted without a challenge is a bearer token —
+    // whoever holds the plaintext from the `shelf://` deeplink gets a session —
+    // and the custom-scheme callback is exactly the channel PKCE exists to
+    // protect (RFC 8252 §8.1). So a NULL challenge is unredeemable rather than
+    // a check to skip: refusing here means a code that somehow reached the
+    // database unbound can never be spent.
+    //
+    // Same uniform 400 as an invalid code, so redemption failures give no
+    // oracle about why. The code is already consumed above, so a wrong or
+    // absent verifier burns it.
     if (
-      codeChallenge &&
-      (!codeVerifier || !verifyPkceChallenge(codeVerifier, codeChallenge))
+      !codeChallenge ||
+      !codeVerifier ||
+      !verifyPkceChallenge(codeVerifier, codeChallenge)
     ) {
       throw new ShelfError({
         cause: null,

@@ -1,3 +1,4 @@
+import { ASSET_STATUS_LABELS } from "@shelf/labels";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
@@ -19,10 +20,10 @@ import { api, type AssetListItem } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { userHasPermission } from "@/lib/permissions";
 import {
+  formatStatus,
   fontSize,
   spacing,
   borderRadius,
-  formatStatus,
   hitSlop,
 } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -42,10 +43,16 @@ const keyExtractor = (item: AssetListItem) => item.id;
 type FilterConfig = { label: string; status: string; myCustody?: boolean };
 const FILTERS: FilterConfig[] = [
   { label: "All", status: "" },
-  { label: "My Custody", status: "", myCustody: true },
-  { label: "Available", status: "AVAILABLE" },
-  { label: "In Custody", status: "IN_CUSTODY" },
-  { label: "Checked Out", status: "CHECKED_OUT" },
+  // why: sentence case ("My custody", not "My Custody") to sit consistently
+  // beside the @shelf/labels chips below, which are sentence case. This one has
+  // no package entry — it is not a status, it is a custodian filter.
+  { label: "My custody", status: "", myCustody: true },
+  // why: read from @shelf/labels, not hand-typed. The chips said "In Custody"
+  // and "Checked Out" while the badge on the very same row said "In custody"
+  // and "Checked out", because badges go through formatStatus and these did not.
+  { label: ASSET_STATUS_LABELS.AVAILABLE, status: "AVAILABLE" },
+  { label: ASSET_STATUS_LABELS.IN_CUSTODY, status: "IN_CUSTODY" },
+  { label: ASSET_STATUS_LABELS.CHECKED_OUT, status: "CHECKED_OUT" },
 ];
 const MY_CUSTODY_INDEX = 1;
 
@@ -247,16 +254,41 @@ function AssetsListContent() {
         ? formatQuantity(item.quantity, item.unitOfMeasure)
         : null;
 
+      // Memberships beyond the one the row names. `item.kit` is the primary
+      // kit of possibly several — a quantity-tracked asset can sit in more
+      // than one — so without this the row passes it off as the only one. A
+      // server that sends no `kitCount` knows of no others, hence the 1.
+      const knownKitCount = item.kitCount ?? (item.kit ? 1 : 0);
+      const extraKitCount = Math.max(0, knownKitCount - 1);
+      // The count reaches a screen reader as words, so it carries the same
+      // fact the "+N" beside the name gives a sighted user.
+      const kitSuffix =
+        extraKitCount > 0
+          ? ` and ${extraKitCount} more kit${extraKitCount === 1 ? "" : "s"}`
+          : "";
+      const kitAccessibilityLabel = item.kit
+        ? `, kit ${item.kit.name}${kitSuffix}`
+        : "";
+      // The server resolves WHICH identifier this workspace shows; the SAM id
+      // is the fallback for servers that predate that.
+      const rowCode = item.displayCode?.value
+        ? item.displayCode
+        : item.sequentialId
+        ? { value: item.sequentialId, label: "SAM ID" }
+        : null;
+
       return (
         <TouchableOpacity
           style={styles.assetCard}
           onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
           activeOpacity={0.6}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
-            quantityLabel ? `, quantity ${quantityLabel}` : ""
-          }${item.category ? `, ${item.category.name}` : ""}${
+            rowCode ? `, ${rowCode.label} ${rowCode.value}` : ""
+          }${quantityLabel ? `, quantity ${quantityLabel}` : ""}${
+            item.category ? `, ${item.category.name}` : ""
+          }${
             item.location ? `, ${item.location.name}` : ""
-          }`}
+          }${kitAccessibilityLabel}`}
           accessibilityRole="button"
         >
           {item.thumbnailImage || item.mainImage ? (
@@ -276,6 +308,15 @@ function AssetsListContent() {
               {item.title}
             </Text>
             <View style={styles.assetMeta}>
+              {/* The identifier the workspace labels its assets with, so a row
+                  can be matched against a physical label without opening it.
+                  Falls back to the SAM ID on older servers that send no
+                  resolved code. */}
+              {rowCode ? (
+                <Text style={styles.assetSequentialId} numberOfLines={1}>
+                  {rowCode.value}
+                </Text>
+              ) : null}
               {item.category && (
                 <Text style={styles.assetCategory} numberOfLines={1}>
                   {item.category.name}
@@ -291,6 +332,30 @@ function AssetsListContent() {
                   <Text style={styles.assetLocation} numberOfLines={1}>
                     {item.location.name}
                   </Text>
+                </View>
+              )}
+              {/* Which kit to look in. A quantity-tracked asset can belong
+                  to several kits at once, so the row names the primary one —
+                  the same one the website names — and counts the rest rather
+                  than passing it off as the only kit. */}
+              {item.kit && (
+                <View style={styles.locationRow}>
+                  <Ionicons
+                    name="albums-outline"
+                    size={11}
+                    color={colors.mutedLight}
+                  />
+                  <Text
+                    style={[styles.assetLocation, styles.assetKitName]}
+                    numberOfLines={1}
+                  >
+                    {item.kit.name}
+                  </Text>
+                  {extraKitCount > 0 && (
+                    <Text style={styles.assetKitOverflow}>
+                      +{extraKitCount}
+                    </Text>
+                  )}
                 </View>
               )}
               {/* Quantity chip — shared QuantityBadge (QUANTITY_TRACKED only).
@@ -452,6 +517,11 @@ function AssetsListContent() {
               <Text style={styles.emptyTitle}>
                 {debouncedSearch
                   ? "No results found"
+                  : // why: the custodian filter needs its own sentence — running
+                  // its label through the status template yields "No my custody
+                  // assets". The kits list already branches this way.
+                  FILTERS[activeFilter].myCustody
+                  ? "No assets in your custody"
                   : activeFilter > 0
                   ? `No ${FILTERS[activeFilter].label.toLowerCase()} assets`
                   : "No assets yet"}
@@ -653,6 +723,22 @@ const useStyles = createStyles((colors, shadows) => ({
   assetLocation: {
     fontSize: fontSize.xs,
     color: colors.mutedLight,
+  },
+  // Only the kit name shrinks: it shares its row with the "+N" count, which
+  // must stay legible even when the name is long enough to truncate.
+  assetKitName: {
+    flexShrink: 1,
+  },
+  assetKitOverflow: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+    flexShrink: 0,
+  },
+  assetSequentialId: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+    // Tabular so a column of SAM ids lines up while scanning the list.
+    fontVariant: ["tabular-nums"],
   },
 
   // Status badge — pill shape like webapp

@@ -2,14 +2,22 @@ import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireMobilePermission,
   requireOrganizationAccess,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
+import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import {
+  resolveMostPrivilegedRole,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -25,6 +33,9 @@ import {
  *
  * For mobile, we always do "without-adjusted-date" to keep things simple.
  * The mobile user just taps "Check Out" and it happens.
+ *
+ * Refused with a 403 when the workspace requires explicit check-out for the
+ * caller's role: they scan or select the assets instead (partial check-out).
  */
 export async function action({ request }: ActionFunctionArgs) {
   try {
@@ -40,13 +51,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const body = await request.json();
-    const { bookingId, timeZone } = z
-      .object({
+    const { bookingId, timeZone } = await parseMobileBody(
+      z.object({
         bookingId: z.string().min(1),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Booking"
+    );
 
     // Load the booking's reservation window so checkoutBooking can run its
     // asset-conflict guard. That guard is gated on `from && to`; without these
@@ -56,7 +68,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // foreign-org id 404s.
     const existingBooking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { from: true, to: true },
+      // creatorId/custodianUserId feed the ownership guard below.
+      select: {
+        from: true,
+        to: true,
+        creatorId: true,
+        custodianUserId: true,
+      },
     });
 
     if (!existingBooking) {
@@ -64,6 +82,44 @@ export async function action({ request }: ActionFunctionArgs) {
         { error: { message: "Booking not found in this workspace." } },
         { status: 404 }
       );
+    }
+
+    // Cross-user IDOR guard: SELF_SERVICE holds `booking:checkout` in the
+    // permission map, so the role gate above passes for ANY booking id in the
+    // organization — they may only check out bookings they created or are
+    // custodian of. No-op for ADMIN/OWNER. `checkoutBooking` does not check
+    // ownership itself, so without this the route is more permissive than web.
+    // Mirrors the guard on bookings.fulfil-and-checkout.ts.
+    const { roles, effectiveRole } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+    validateBookingOwnership({
+      booking: existingBooking,
+      userId: user.id,
+      role: resolveMostPrivilegedRole(roles),
+      action: "check out",
+    });
+
+    // PARITY with the web booking action: when the workspace requires EXPLICIT
+    // check-out for the caller's role, the one-tap check-out is forbidden and
+    // they must scan or select the assets (the partial-checkout path). Judged by
+    // the most privileged role, as the loader's `canQuickCheckout` is, so the
+    // app never offers a button this route refuses. Decided after the booking
+    // and ownership checks, so a missing or foreign booking answers 404 as
+    // before and the settings are only read for a booking the caller may act on.
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    if (isExplicitCheckoutRequired({ role: effectiveRole, bookingSettings })) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed to quick check-out",
+        message:
+          "This workspace requires explicit check-out. Scan or select the assets to check them out.",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
     }
 
     // Derive hints the standard way: locale from the request's Accept-Language

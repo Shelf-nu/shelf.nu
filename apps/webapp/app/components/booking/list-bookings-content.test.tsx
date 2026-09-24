@@ -1,14 +1,16 @@
 /**
  * Render tests for `ListBookingsContent` (the bookings-list row component),
- * focused on the amber "Stock conflict" pill in the Assets column.
+ * focused on the two pills in the Assets column: amber "Stock conflict" and
+ * "Includes unavailable assets".
  *
- * `ListBookingsContent` is shared by both the main bookings index
- * (`bookings._index.tsx`) and the asset's Bookings tab
- * (`assets.$assetId.bookings.tsx`, which renders `<BookingsIndexPage />`) —
- * both loaders attach `hasStockConflict` to each row via
- * `getStockConflictedBookingIds` (`~/modules/booking/stock-conflicts.server`).
- * This test exercises the render logic directly, so it covers both surfaces
- * at once.
+ * `ListBookingsContent` is shared by all five bookings-list surfaces, each of
+ * which renders `<BookingsIndexPage />` and attaches both flags to every row
+ * via `decorateBookingsForList` (`~/modules/booking/list-flags.server`). This
+ * test exercises the render logic directly, so it covers all of them at once.
+ *
+ * The RULE behind `hasUnavailableAssets` — which assets count as unavailable,
+ * and the quantity-tracked custody exemption — is a Prisma `where` now, and is
+ * covered in `list-flags.server.test.ts`. What is left here is the wiring.
  *
  * Heavy/unrelated children (`BookingAssetsSidebar`, `TeamMemberBadge`,
  * `Button`, `DateS`) are mocked out — mirrors the isolation pattern in
@@ -18,21 +20,7 @@
  */
 import type { ComponentProps, ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const mockUseLoaderData = vi.fn();
-
-// why: `ListBookingsContent` reads `dispositionedByBooking` /
-// `dispositionBreakdownByBooking` / `checkedOutByBooking` off
-// `useLoaderData()` for the sidebar's qty-progress display — irrelevant to
-// the stock-conflict pill under test, so an empty object is sufficient.
-vi.mock("react-router", async () => {
-  const actual = await vi.importActual<Record<string, unknown>>("react-router");
-  return {
-    ...actual,
-    useLoaderData: () => mockUseLoaderData(),
-  };
-});
+import { describe, expect, it, vi } from "vitest";
 
 // why: `to`-style Button renders react-router's `Link`, which needs a
 // router context this render test doesn't set up. A plain anchor is enough
@@ -102,42 +90,14 @@ function buildItem(overrides: Partial<BookingItem> = {}): BookingItem {
     },
     tags: [],
     modelRequests: [],
-    bookingAssets: [
-      {
-        id: "ba-1",
-        quantity: 5,
-        assetKitId: null,
-        asset: {
-          id: "asset-1",
-          title: "Widget",
-          type: "QUANTITY_TRACKED",
-          consumptionType: "STANDARD",
-          availableToBook: true,
-          custody: [],
-          status: "AVAILABLE",
-          mainImage: null,
-          thumbnailImage: null,
-          mainImageExpiration: null,
-          sequentialId: null,
-          preferredBarcodeId: null,
-          qrCodes: [],
-          barcodes: [],
-          category: null,
-          assetKits: [],
-        },
-      },
-    ],
+    _count: { bookingAssets: 5 },
     hasStockConflict: false,
+    hasUnavailableAssets: false,
     ...overrides,
   } as unknown as BookingItem;
 }
 
 describe("ListBookingsContent — Stock conflict pill", () => {
-  beforeEach(() => {
-    // Reset the loader-data mock's return value for each test in this file.
-    mockUseLoaderData.mockReturnValue({});
-  });
-
   it('renders the amber "Stock conflict" pill when item.hasStockConflict is true', () => {
     render(
       <table>
@@ -198,5 +158,52 @@ describe("ListBookingsContent — Stock conflict pill", () => {
 
     expect(screen.getByText("assets sidebar")).toBeInTheDocument();
     expect(screen.getByText("Stock conflict")).toBeInTheDocument();
+  });
+});
+
+/**
+ * The row used to decide this badge itself, by walking `item.bookingAssets`.
+ * That array is no longer shipped with the list, so the decision moved to
+ * `getBookingIdsWithUnavailableAssets` and the row just renders the flag.
+ *
+ * The rule it encodes — `availableToBook === false` counts for any asset,
+ * while custody counts only for INDIVIDUAL assets, because a quantity-tracked
+ * asset is a pool and 20 of 29 units on loan still leaves 9 bookable — is
+ * covered in `list-flags.server.test.ts`. Getting that wrong flagged perfectly
+ * valid quantity-tracked bookings, including one that had already checked out
+ * successfully, which is why it has its own tests wherever it lives.
+ */
+describe("ListBookingsContent — 'Includes unavailable assets' badge", () => {
+  const BADGE_TEXT = "Includes unavailable assets";
+
+  /** Renders one row with the given flag value. */
+  function renderRow(overrides: Partial<BookingItem> = {}) {
+    render(
+      <table>
+        <tbody>
+          <tr>
+            <ListBookingsContent item={buildItem(overrides)} />
+          </tr>
+        </tbody>
+      </table>
+    );
+  }
+
+  it("renders the badge when the loader flagged the row", () => {
+    renderRow({ hasUnavailableAssets: true } as Partial<BookingItem>);
+
+    expect(screen.getByText(BADGE_TEXT)).toBeInTheDocument();
+  });
+
+  it("does NOT render the badge when the row is not flagged", () => {
+    renderRow({ hasUnavailableAssets: false } as Partial<BookingItem>);
+
+    expect(screen.queryByText(BADGE_TEXT)).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the badge for a loader that hasn't wired the flag", () => {
+    renderRow({ hasUnavailableAssets: undefined } as Partial<BookingItem>);
+
+    expect(screen.queryByText(BADGE_TEXT)).not.toBeInTheDocument();
   });
 });

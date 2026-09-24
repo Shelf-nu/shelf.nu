@@ -130,9 +130,11 @@ export const assetsApi = {
    * deliberately offers no org picker (web does).
    *
    * Admin/owner only: the server gates on `qr:update`, which no role below
-   * ADMIN holds. A 403 also covers the already-claimed race (the server wraps
-   * it with a generic "Failed to claim qr code"), so callers should re-resolve
-   * the code on failure instead of trusting the message text.
+   * ADMIN holds. A 403 also covers the already-claimed race. The server now
+   * rethrows its own guard errors instead of re-wrapping them, so that 403
+   * carries a specific message ("already belongs to an organization") rather
+   * than the old generic "Failed to claim qr code" — but still branch on
+   * status, not message text.
    *
    * @param orgId - Caller's current workspace id (the claim target).
    * @param qrId - The unclaimed QR id (echoed by the resolve error payload).
@@ -149,17 +151,22 @@ export const assetsApi = {
     }),
 
   /**
-   * Link a claimed-but-unlinked QR code to an existing asset
-   * (`POST /api/mobile/qr/link-asset`). Replaces the asset's current QR codes
-   * (web parity — the web confirm dialog carries the same warning), so the
-   * picker's confirm step must warn about that. A 400 whose
-   * `errorDetails.reason === "unclaimed"` means the claim didn't stick —
-   * re-run {@link claimQr} and retry.
+   * Link a QR code to an existing asset (`POST /api/mobile/qr/link-asset`).
+   * Replaces the asset's current QR codes (web parity — the web confirm dialog
+   * carries the same warning), so the picker's confirm step must warn about
+   * that.
+   *
+   * The code does NOT need to be claimed first: the route delegates to
+   * `relinkAssetQrCode`, which claims an UNCLAIMED code into the caller's org
+   * inline as part of the link. There is consequently no
+   * `errorDetails.reason === "unclaimed"` response from this endpoint any more
+   * — do not write recovery paths against one.
    *
    * Admin/owner only (server gates on `qr:update`, same as the web link flow).
    *
-   * @param orgId - Caller's current workspace id (must own the QR).
-   * @param qrId - The claimed, unlinked QR id.
+   * @param orgId - Caller's current workspace id (must own the QR, or the
+   *   code must be unclaimed — it is then claimed into this org).
+   * @param qrId - The QR id to link; claimed by this org, or unclaimed.
    * @param assetId - The asset (in the caller's org) to link the code to.
    * @returns `{ qr }` summary on success (assetId set) or `{ error }`.
    */
@@ -167,8 +174,12 @@ export const assetsApi = {
     apiFetch<QrMutationResponse>(`/api/mobile/qr/link-asset?orgId=${orgId}`, {
       method: "POST",
       body: JSON.stringify({ qrId, assetId }),
-      // why: not retried — a timed-out-but-landed link would 403 on the
-      // retry ("already linked"), reporting failure for a landed success.
+      // why: not retried. The 403-on-retry rationale no longer applies —
+      // relinking the same {qrId, assetId} is idempotent, since the service
+      // only rejects `qr.assetId && qr.assetId !== assetId`. But a retry can
+      // still LOSE a concurrent race and 403, and it would write a second
+      // "changed QR code" note; the caller's re-resolve fallback is the
+      // honest recovery.
       retry: false,
     }),
 

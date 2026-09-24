@@ -211,22 +211,12 @@ export const action = async ({
         ? wrapCustodianForNote({
             teamMember: {
               name: custodianDisplayName,
-              user: custodyRecord.custodian.user
-                ? {
-                    id: custodyRecord.custodian.user.id,
-                    firstName: custodyRecord.custodian.user.firstName,
-                    lastName: custodyRecord.custodian.user.lastName,
-                  }
-                : null,
+              user: custodyRecord.custodian.user,
             },
           })
         : // Free-form fallback name, rendered as literal bold text.
           `**${stripMarkdocDelimiters(custodianDisplayName)}**`;
-      const actor = wrapUserLinkForNote({
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
+      const actor = wrapUserLinkForNote(user);
       const content = isSelfService
         ? `${actor} released their custody.`
         : `${actor} released ${custodianDisplay}'s custody.`;

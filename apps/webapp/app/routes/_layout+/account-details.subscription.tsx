@@ -22,6 +22,10 @@ import { SubscriptionsOverview } from "~/components/subscription/subscriptions-o
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
 import { db } from "~/database/db.server";
 import { useUserData } from "~/hooks/use-user-data";
+import {
+  assertPriceIsForAddon,
+  assertPriceMatchesTier,
+} from "~/modules/billing/price-validation.server";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 
 import { getUserByID } from "~/modules/user/service.server";
@@ -185,6 +189,26 @@ export async function action({ context, request }: ActionFunctionArgs) {
           barcodePriceId: z.string().optional(),
         })
       );
+
+    // `shelfTier` and every price id here come from the form. The tier is
+    // written straight to `user.tierId` below and the add-on ids become raw
+    // Stripe line items, so without resolving each price server-side a caller
+    // could pair tier_2 with any cheaper active price -- and if that price is
+    // an add-on price, `isAddonSubscription` makes the webhook early-return and
+    // the tier is never corrected. See ~/modules/billing/price-validation.server.
+    await assertPriceMatchesTier({ priceId, shelfTier });
+    if (auditPriceId) {
+      await assertPriceIsForAddon({
+        priceId: auditPriceId,
+        addonType: "audits",
+      });
+    }
+    if (barcodePriceId) {
+      await assertPriceIsForAddon({
+        priceId: barcodePriceId,
+        addonType: "barcodes",
+      });
+    }
 
     const user = await getUserByID(userId, {
       select: {

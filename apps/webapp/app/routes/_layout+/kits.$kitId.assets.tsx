@@ -268,7 +268,11 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
   const { roles } = useUserRoleHelper();
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "asset",
+      })
     : null;
   return (
     <>

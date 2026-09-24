@@ -96,8 +96,25 @@ assert_eq "bot" "$r" "codex is a bot"
 is_bot "copilot-pull-request-reviewer[bot]" && r=bot || r=human
 assert_eq "bot" "$r" "copilot is a bot"
 
+is_bot "parameterai[bot]"           && r=bot || r=human
+assert_eq "bot" "$r" "parameterai is a bot (REST spelling)"
+
+is_bot "parameterai"                && r=bot || r=human
+assert_eq "bot" "$r" "parameterai is a bot (GraphQL spelling)"
+
 is_bot "DonKoko"                    && r=bot || r=human
 assert_eq "human" "$r" "DonKoko is not a bot"
+
+# why: parameterai is a BOT for classification but is deliberately not awaited
+# for quiescence — see the note at REVIEW_BOT_LOGINS. Pinned so the split is a
+# recorded decision rather than something that reads like an omission (which is
+# exactly how the BOT_LOGINS gap went unnoticed).
+case " $REVIEW_BOT_LOGINS " in
+  *" parameterai "*) r=present ;;
+  *) r=missing ;;
+esac
+assert_eq "missing" "$r" \
+  "parameterai is classified as a bot but not yet awaited for quiescence"
 
 describe "pr-review-watch: fingerprinting"
 

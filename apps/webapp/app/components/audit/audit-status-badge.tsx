@@ -1,36 +1,28 @@
 import type { AuditStatus } from "@prisma/client";
-import { BADGE_COLORS, type BadgeColorScheme } from "~/utils/badge-colors";
+import { AUDIT_STATUS_LABELS, AUDIT_STATUS_TONES } from "@shelf/labels";
+import { toneBadgeColors } from "~/utils/status-tone-colors";
 import { Badge } from "../shared/badge";
 
-const auditStatusColorMap: Record<AuditStatus, BadgeColorScheme> = {
-  PENDING: BADGE_COLORS.gray,
-  ACTIVE: BADGE_COLORS.violet,
-  COMPLETED: BADGE_COLORS.green,
-  CANCELLED: BADGE_COLORS.gray,
-  ARCHIVED: BADGE_COLORS.gray,
-};
-
-const auditStatusLabels: Record<AuditStatus, string> = {
-  PENDING: "Pending",
-  ACTIVE: "Active",
-  COMPLETED: "Completed",
-  CANCELLED: "Cancelled",
-  ARCHIVED: "Archived",
-};
-
 /**
- * Badge component for displaying audit status with appropriate colors.
- * Colors are sourced from the platform's consistent BADGE_COLORS palette.
+ * Badge showing an audit session's status.
+ *
+ * Both halves come from `@shelf/labels`: the words from `AUDIT_STATUS_LABELS`
+ * and the semantic weight from `AUDIT_STATUS_TONES`, so the companion app's
+ * audit cards read the same. `toneBadgeColors` turns that tone into this app's
+ * `BADGE_COLORS` hexes.
  *
  * @param status - The audit status from Prisma enum
  */
 export function AuditStatusBadge({ status }: { status: AuditStatus }) {
-  const colors = auditStatusColorMap[status];
+  const colors = toneBadgeColors(AUDIT_STATUS_TONES[status]);
 
   return (
     <Badge color={colors.bg} textColor={colors.text} withDot={false}>
-      <span className="block whitespace-nowrap lowercase first-letter:uppercase">
-        {auditStatusLabels[status]}
+      {/* why: no `lowercase first-letter:uppercase` — AUDIT_STATUS_LABELS is
+          already sentence-cased display text, and the transform would mangle
+          any future label with an internal capital. */}
+      <span className="block whitespace-nowrap">
+        {AUDIT_STATUS_LABELS[status]}
       </span>
     </Badge>
   );

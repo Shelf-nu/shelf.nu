@@ -12,7 +12,12 @@ import { sendEmail } from "~/emails/mail.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { ADMIN_EMAIL } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
-import { isLikeShelfError, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
+import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { emailMatchesDomains } from "~/utils/misc";
 import {
   createStripeCustomer,
@@ -28,6 +33,7 @@ import { recordEvent } from "../activity-event/service.server";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
 const label: ErrorLabel = "Organization";
@@ -116,6 +122,10 @@ export async function getOrganizationsBySsoDomain(emailDomain: string) {
             ssoDetails: {
               domain: {
                 contains: emailDomain,
+                // Stored casing is unconstrained, so a case-sensitive filter
+                // would drop "ACME.com" here and the exact-match filter below
+                // would never see it.
+                mode: "insensitive" as const,
               },
             },
           },
@@ -142,6 +152,31 @@ export async function getOrganizationsBySsoDomain(emailDomain: string) {
   }
 }
 
+/**
+ * Reads an uploaded workspace logo and pairs its bytes with the content type
+ * they prove.
+ *
+ * The type comes from the bytes, never from the caller's `File.type`: the row
+ * is served back inline by `api+/image.$imageId`, so the stored type decides
+ * how a browser renders it.
+ *
+ * @param image - The uploaded file
+ * @param userId - Acting user, for the error context
+ * @returns The bytes to persist and the content type to persist them under
+ * @throws {ShelfError} 400 when the bytes are not a supported image format
+ */
+async function readValidatedLogo(image: File, userId: User["id"]) {
+  const blob = new Uint8Array(await image.arrayBuffer());
+
+  return {
+    blob,
+    contentType: assertUploadedImageContentType(blob, {
+      userId,
+      field: "image",
+    }),
+  };
+}
+
 export async function createOrganization({
   name,
   userId,
@@ -161,6 +196,16 @@ export async function createOrganization({
         displayName: true,
       },
     });
+
+    /**
+     * Validated before anything is written. The workspace counts against the
+     * caller's plan limit from the moment it exists, and nothing cleans one up,
+     * so a logo this service is going to refuse must not cost the caller a slot.
+     */
+    const logo =
+      image?.size && image.size > 0
+        ? await readValidatedLogo(image, userId)
+        : null;
 
     const data = {
       name,
@@ -220,11 +265,11 @@ export async function createOrganization({
 
     const org = await db.organization.create({ data });
 
-    if (image?.size && image?.size > 0) {
+    if (logo) {
       await db.image.create({
         data: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
+          blob: logo.blob,
+          contentType: logo.contentType,
           ownerOrg: {
             connect: {
               id: org.id,
@@ -246,6 +291,11 @@ export async function createOrganization({
 
     return org;
   } catch (cause) {
+    // A refused logo is a deliberate 400 with a message written for the user;
+    // the generic wrapper below would tell them to retry a request that cannot
+    // succeed.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message:
@@ -265,6 +315,7 @@ export async function updateOrganization({
   hasSequentialIdsMigrated,
   qrIdDisplayPreference,
   showShelfBranding,
+  showQrCodesOnPdfs,
   customEmailFooter,
 }: Pick<Organization, "id"> & {
   currency?: Organization["currency"];
@@ -279,6 +330,7 @@ export async function updateOrganization({
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];
   showShelfBranding?: Organization["showShelfBranding"];
+  showQrCodesOnPdfs?: Organization["showQrCodesOnPdfs"];
   customEmailFooter?: string | null;
 }) {
   try {
@@ -291,6 +343,9 @@ export async function updateOrganization({
       }),
       ...(typeof showShelfBranding === "boolean" && {
         showShelfBranding,
+      }),
+      ...(typeof showQrCodesOnPdfs === "boolean" && {
+        showQrCodesOnPdfs,
       }),
       ...(customEmailFooter !== undefined && { customEmailFooter }),
       ...(ssoDetails && {
@@ -314,9 +369,18 @@ export async function updateOrganization({
         });
       }
 
+      const blob = Buffer.from(await image.arrayBuffer());
+
       const imageData = {
-        blob: Buffer.from(await image.arrayBuffer()),
-        contentType: image.type,
+        blob,
+        // Derived from the bytes, never from the caller's `File.type`: this
+        // row is served back inline by `api+/image.$imageId`, so the stored
+        // content type decides how a browser renders it.
+        contentType: assertUploadedImageContentType(blob, {
+          userId,
+          organizationId: id,
+          field: "image",
+        }),
         ownerOrg: {
           connect: {
             id: id,
@@ -425,12 +489,44 @@ const ORGANIZATION_SELECT_FIELDS = {
   hasSequentialIdsMigrated: true,
   qrIdDisplayPreference: true,
   showShelfBranding: true,
+  showQrCodesOnPdfs: true,
   customEmailFooter: true,
 };
 
 export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
   select: typeof ORGANIZATION_SELECT_FIELDS;
 }>;
+
+/**
+ * Whether a user signs in through SSO.
+ *
+ * Each membership carries its user's flag, so an already-fetched membership list
+ * answers without another query. A user with no memberships at all has nothing
+ * to read it from, and that is precisely the SSO user who belongs on the
+ * pending-assignment page — so the user row answers instead of defaulting to
+ * "not SSO".
+ *
+ * @param userId - The user in question
+ * @param userOrganizations - Their memberships, as `getUserOrganizations` returns them
+ * @returns `true` when the user is an SSO user
+ */
+export async function isSsoUser({
+  userId,
+  userOrganizations,
+}: {
+  userId: string;
+  userOrganizations: Array<{ user: { sso: boolean } }>;
+}): Promise<boolean> {
+  if (userOrganizations.length > 0) {
+    return userOrganizations[0].user.sso === true;
+  }
+
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { sso: true },
+  });
+  return user?.sso === true;
+}
 
 export async function getUserOrganizations({ userId }: { userId: string }) {
   try {
@@ -527,8 +623,7 @@ export async function getOrganizationAdminsForNotification({
           select: {
             id: true,
             email: true,
-            firstName: true,
-            lastName: true,
+            ...USER_NAME_SELECT,
             // Format-preference columns so the booking notification resolver
             // can carry them onto each recipient and resolve recipient-specific
             // email date/time formatting from the loaded row (no per-recipient
@@ -810,26 +905,37 @@ export async function transferOwnership({
       },
     });
 
+    /**
+     * The organization's CURRENT owner — i.e. the user losing ownership.
+     *
+     * This is deliberately NOT the requesting user: it is the record that gets
+     * demoted to ADMIN below, whose subscription is optionally transferred, and
+     * who receives the "you are no longer the owner" email. A Shelf platform
+     * admin can drive this flow without being a member of the organization at
+     * all, so the two identities must stay separate.
+     */
     const currentOwnerUserOrg = userOrganization.find((userOrg) =>
       userOrg.roles.includes(OrganizationRoles.OWNER)
     );
-    /** Validate if the current user is a member of the organization */
     if (!currentOwnerUserOrg) {
       throw new ShelfError({
         cause: null,
-        message: "Current user is not a member of the organization.",
+        message: "Organization does not have an owner.",
         label,
       });
     }
 
     /**
-     * Validate if the current user is the owner of organization
-     * or is a Shelf admin
+     * Validate that the REQUESTING user may transfer ownership: either they are
+     * the current owner, or they are a Shelf platform admin.
+     *
+     * Comparing identities is the entire check. A workspace ADMIN passes
+     * `requirePermission` on the settings route because ADMIN and OWNER share
+     * every permission, so this is the only place the two are distinguished —
+     * previously this compared the owner's role against itself, which is always
+     * true, and let any ADMIN take over the workspace.
      */
-    if (
-      !currentOwnerUserOrg.roles.includes(OrganizationRoles.OWNER) &&
-      !isCurrentUserShelfAdmin
-    ) {
+    if (currentOwnerUserOrg.user.id !== userId && !isCurrentUserShelfAdmin) {
       throw new ShelfError({
         cause: null,
         message: "Current user is not the owner of the organization.",

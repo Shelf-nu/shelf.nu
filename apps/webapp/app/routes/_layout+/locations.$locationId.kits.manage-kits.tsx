@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -21,8 +21,8 @@ import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
 } from "~/atoms/list";
+import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { Form } from "~/components/custom-form";
@@ -51,10 +51,14 @@ import {
 import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
+import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useSeedFormSelection } from "~/hooks/use-seed-form-selection";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
+import { resolveDisplayCode } from "~/modules/barcode/display";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { updateLocationKits } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -72,7 +76,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, canSeeAllCustody } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.location,
@@ -108,6 +112,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       await getPaginatedAndFilterableKits({
         request,
         organizationId,
+        // Only reaches `?teamMember=` here; pass the resolved rule so an
+        // admin's custodian filter still works on this dialog.
+        canSeeAllCustody,
+        userId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
         },
@@ -126,7 +134,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
       showSidebar: true,
       noScroll: true,
-      items: kits,
+      // The custodian's name and user.email are on every row regardless of
+      // whether the UI draws them, so a viewer without custody visibility can
+      // read them straight out of the route's data payload. Redact here, not
+      // in the component.
+      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
       page,
       search,
       totalItems: totalKits,
@@ -204,7 +216,6 @@ export default function ManageLocationKits() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
@@ -224,11 +235,11 @@ export default function ManageLocationKits() {
   );
 
   /**
-   * Set selected items for kit based on the route data
+   * Pre-tick the kits already at this location, once per location. The loader
+   * revalidates on every filter change and returns the same kits again, so
+   * re-seeding from it would re-tick kits the user has unticked.
    */
-  useEffect(() => {
-    setSelectedBulkItems(location.kits);
-  }, [location.kits, setSelectedBulkItems]);
+  useSeedFormSelection(location.id, location.kits);
 
   return (
     <Tabs
@@ -416,11 +427,28 @@ export default function ManageLocationKits() {
 const RowComponent = ({
   item,
 }: {
+  // why the code relations are declared here: the loader calls
+  // `getPaginatedAndFilterableKits`, which merges KITS_INCLUDE_FIELDS, so
+  // every row already carries them at runtime — this type simply had not
+  // said so, which is why the chip could not be rendered without a cast.
   item: Prisma.KitGetPayload<{
-    include: { category: true; location: typeof LOCATION_WITH_HIERARCHY };
+    include: {
+      category: true;
+      location: typeof LOCATION_WITH_HIERARCHY;
+      qrCodes: { take: 1; select: { id: true } };
+      barcodes: { select: { id: true; type: true; value: true } };
+    };
   }>;
 }) => {
   const { category } = item;
+  const currentOrganization = useCurrentOrganization();
+  const displayCode = currentOrganization
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
+    : null;
 
   return (
     <>
@@ -444,7 +472,15 @@ const RowComponent = ({
               <p className="word-break whitespace-break-spaces font-medium">
                 {item.name}
               </p>
-              <KitStatusBadge status={item.status} availableToBook />
+              <div className="flex flex-wrap items-center gap-2">
+                <KitStatusBadge status={item.status} availableToBook />
+                {/* why: this modal is where someone matches a physical label
+                    to a row, which is exactly when the code matters most. The
+                    data was already on every row (getPaginatedAndFilterableKits
+                    merges KITS_INCLUDE_FIELDS); only the chip was missing. The
+                    equivalent booking modal has rendered it all along. */}
+                {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
+              </div>
             </div>
           </div>
         </div>

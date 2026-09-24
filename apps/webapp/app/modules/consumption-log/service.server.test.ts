@@ -72,6 +72,12 @@ vitest.mock("~/database/db.server", () => ({
     user: {
       findUnique: vitest.fn().mockResolvedValue(null),
     },
+    // why: a subtract also runs `assertStockNotBelowManualPlacements`, which
+    // reads the asset's manual placement rows. Default to none so the existing
+    // subtract scenarios stay about the reservations guard.
+    assetLocation: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
   },
 }));
 
@@ -105,6 +111,8 @@ function resetMocks() {
   db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
   // @ts-expect-error mocked
   db.asset.update.mockResolvedValue({ id: ASSET_ID, quantity: 7 });
+  // @ts-expect-error mocked
+  db.assetLocation.findMany.mockResolvedValue([]);
 }
 
 describe("adjustQuantity — stock-lowering guard wiring", () => {
@@ -168,6 +176,54 @@ describe("adjustQuantity — stock-lowering guard wiring", () => {
 
     expect(db.asset.update).not.toHaveBeenCalled();
     expect(db.consumptionLog.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a subtraction that would strand units already placed at locations", async () => {
+    // The location axis has its own `sum <= Asset.quantity` invariant and no
+    // trigger fires on an `Asset` write, so this is the only thing standing
+    // between a typed-down total and a silently over-allocated location.
+    resetMocks();
+    // @ts-expect-error mocked
+    db.assetLocation.findMany.mockResolvedValue([
+      { id: "al-1", locationId: "loc-1", quantity: 9 },
+    ]);
+
+    await expect(
+      adjustQuantity({
+        assetId: ASSET_ID,
+        quantity: 3,
+        category: ConsumptionCategory.ADJUSTMENT,
+        direction: "subtract",
+        userId: USER_ID,
+        organizationId: ORG_ID,
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("assigned to locations"),
+    });
+
+    expect(db.asset.update).not.toHaveBeenCalled();
+    expect(db.consumptionLog.create).not.toHaveBeenCalled();
+  });
+
+  it("allows a subtraction the unplaced residual covers", async () => {
+    resetMocks();
+    // 10 owned, 5 placed, subtract 3 → 7 total still covers the 5 placed.
+    // @ts-expect-error mocked
+    db.assetLocation.findMany.mockResolvedValue([
+      { id: "al-1", locationId: "loc-1", quantity: 5 },
+    ]);
+
+    await expect(
+      adjustQuantity({
+        assetId: ASSET_ID,
+        quantity: 3,
+        category: ConsumptionCategory.ADJUSTMENT,
+        direction: "subtract",
+        userId: USER_ID,
+        organizationId: ORG_ID,
+      })
+    ).resolves.toMatchObject({ id: ASSET_ID });
   });
 
   it("allows a safe subtraction that stays at or above what's committed", async () => {

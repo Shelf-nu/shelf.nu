@@ -190,18 +190,36 @@ describe("location note service", () => {
   });
 
   describe("deleteLocationNote", () => {
-    it("only deletes notes authored by the user", async () => {
+    it("scopes the delete to the caller's organization, via the location", async () => {
       locationNoteDeleteManyMock.mockResolvedValue({ count: 1 });
 
-      const result = await deleteLocationNote({
+      await deleteLocationNote({
         id: "lnote-1",
         userId: "user-1",
+        organizationId: "org-1",
       });
 
+      // LocationNote has no organizationId column, so the scope comes through
+      // the parent location.
       expect(locationNoteDeleteManyMock).toHaveBeenCalledWith({
-        where: { id: "lnote-1", userId: "user-1" },
+        where: {
+          id: "lnote-1",
+          userId: "user-1",
+          location: { organizationId: "org-1" },
+        },
       });
-      expect(result).toEqual({ count: 1 });
+    });
+
+    it("throws 403 rather than silently reporting nothing deleted", async () => {
+      locationNoteDeleteManyMock.mockResolvedValue({ count: 0 });
+
+      await expect(
+        deleteLocationNote({
+          id: "someone-elses-note",
+          userId: "user-1",
+          organizationId: "org-1",
+        })
+      ).rejects.toMatchObject({ status: 403 });
     });
   });
 });

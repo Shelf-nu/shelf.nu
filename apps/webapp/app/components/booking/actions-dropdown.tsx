@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
@@ -19,6 +20,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { BookingCheckinReceiptPDF } from "./booking-checkin-receipt-pdf";
 import { BookingOverviewPDF } from "./booking-overview-pdf";
 import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
@@ -35,7 +37,11 @@ interface Props {
 }
 
 export const ActionsDropdown = ({ fullWidth }: Props) => {
-  const { booking } = useLoaderData<typeof loader>();
+  const { booking, hasDispositionedUnits } = useLoaderData<typeof loader>();
+  // Seed the extend dialog in the RESOLVED preference zone — the same zone this
+  // page displays the booking in and the extend action parses the submission in.
+  // Seeding from the device clock showed a different end date than the page.
+  const prefs = useFormatPrefs();
   const {
     isCompleted,
     isOngoing,
@@ -100,7 +106,10 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           </When>
           <When truthy={canExtendBooking}>
             <ExtendBookingDialog
-              currentEndDate={dateForDateTimeInputValue(new Date(booking.to))}
+              currentEndDate={dateForDateTimeInputValue(
+                new Date(booking.to),
+                prefs.timeZone
+              )}
             />
           </When>
           <When
@@ -171,6 +180,11 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
                 (ba: { asset: { id: string } }) => ba.asset
               ),
             }}
+            timeStamp={new Date().getTime()}
+          />
+          <BookingCheckinReceiptPDF
+            booking={booking}
+            hasDispositionedUnits={hasDispositionedUnits}
             timeStamp={new Date().getTime()}
           />
         </DropdownMenuContent>

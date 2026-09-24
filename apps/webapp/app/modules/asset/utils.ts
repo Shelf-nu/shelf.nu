@@ -47,6 +47,48 @@ export function getPrimaryKit<TKit>(
 }
 
 /**
+ * Returns true when the asset's kit membership should block booking it
+ * directly (outside of its kit).
+ *
+ * Only `INDIVIDUAL` assets are blocked. An INDIVIDUAL asset lives entirely
+ * inside its kit — the `enforce_individual_asset_single_kit` trigger caps it
+ * at one membership — so booking it standalone would double-book the very
+ * same physical unit.
+ *
+ * `QUANTITY_TRACKED` assets are NOT blocked: each `AssetKit` row claims only a
+ * *slice* of the pool (`AssetKit.quantity`), and a QT asset may belong to
+ * several kits at once while still keeping free-pool units. Those free units
+ * are legitimately bookable on their own — which is exactly what the booking
+ * page's asset picker already allows. Over-allocation is caught server-side by
+ * the windowed availability guards in `createBooking` / `updateBookingAssets`,
+ * so this client-side check stays purely advisory.
+ *
+ * Accepts either projection of kit membership we load today: the `assetKits`
+ * pivot rows (asset detail, scanner drawers) or the flattened `kit` scalar
+ * (assets index rows).
+ *
+ * @param asset - An asset-like object carrying `type` plus `assetKits` and/or `kit`
+ * @returns true when direct booking must be disabled because of a kit
+ */
+export function isDirectBookingBlockedByKit(
+  asset?: {
+    type?: AssetType | string | null;
+    assetKits?: Array<unknown> | null;
+    kit?: unknown;
+    // Index signature so loosely-typed list rows (`ListItemData`, which is
+    // `{ id: string; [x: string]: any }`) are assignable — without it TS's
+    // weak-type check rejects them for having "no properties in common".
+    [key: string]: unknown;
+  } | null
+): boolean {
+  if (!asset) return false;
+
+  const isPartOfKit = (asset.assetKits?.length ?? 0) > 0 || !!asset.kit;
+
+  return isPartOfKit && !isQuantityTracked(asset);
+}
+
+/**
  * Returns the asset's primary location (or null) from the
  * `AssetLocation` pivot.
  *
@@ -70,4 +112,57 @@ export function getPrimaryLocation<TLoc>(
     | undefined
 ): TLoc | null {
   return asset?.assetLocations?.[0]?.location ?? null;
+}
+
+/**
+ * One placement row in the mobile JSON contract: where units of an asset
+ * sit, and whether the row is owned by a kit.
+ *
+ * `quantity` is the per-row `AssetLocation.quantity` (units placed at the
+ * location — NOT `Asset.quantity`, the workspace stock). `viaKit` is set for
+ * kit-driven rows, which the mobile placements editor renders read-only:
+ * they change through the kit (membership qty or kit location), never
+ * through the asset's own placement flows.
+ */
+export type MobileAssetPlacement = {
+  locationId: string;
+  locationName: string;
+  quantity: number;
+  viaKit: { id: string; name: string } | null;
+};
+
+/**
+ * Flattens `AssetLocation` pivot rows into the mobile `placements` array.
+ *
+ * Manual rows come first (they are the editable set), kit-driven rows after
+ * (read-only context). Rows whose location relation failed to load are
+ * dropped rather than shipped nameless.
+ *
+ * @param rows - Pivot rows selected with `quantity`, `assetKitId`, the
+ *   `location` (id + name) and, for kit-driven rows, `assetKit.kit`.
+ * @returns The flattened, ordered placement list for mobile payloads.
+ */
+export function shapeMobileAssetPlacements(
+  rows: Array<{
+    quantity: number;
+    assetKitId?: string | null;
+    location?: { id: string; name: string } | null;
+    assetKit?: { kit: { id: string; name: string } | null } | null;
+  }>
+): MobileAssetPlacement[] {
+  const shaped = rows.flatMap((row) => {
+    if (!row.location) return [];
+    return [
+      {
+        locationId: row.location.id,
+        locationName: row.location.name,
+        quantity: row.quantity,
+        viaKit: row.assetKitId ? row.assetKit?.kit ?? null : null,
+      },
+    ];
+  });
+  return [
+    ...shaped.filter((p) => p.viaKit === null),
+    ...shaped.filter((p) => p.viaKit !== null),
+  ];
 }

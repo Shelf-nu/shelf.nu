@@ -1,16 +1,15 @@
 import { useState } from "react";
-import { Roles } from "@prisma/client";
-import { Form, useActionData } from "react-router";
+import { Form, Link, useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { useCanTransferOwnership } from "~/hooks/use-can-transfer-ownership";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import type { OwnerSubscriptionInfo } from "~/utils/stripe.server";
 import { tw } from "~/utils/tw";
+import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
@@ -37,12 +36,14 @@ import {
 import { WarningBox } from "../shared/warning-box";
 import When from "../when/when";
 
-type Admin = {
+type Admin = UserNameFields & {
   id: string;
-  firstName: string | null;
-  lastName: string | null;
   email: string;
 };
+
+/** Knowledge-base walkthrough linked from every state of the transfer card */
+export const TRANSFER_OWNERSHIP_KB_URL =
+  "https://www.shelf.nu/knowledge-base/transfer-workspace-ownership";
 
 type TransferOwnershipCardProps = {
   className?: string;
@@ -58,7 +59,27 @@ type TransferOwnershipCardProps = {
   ownerOtherTeamWorkspacesCount: number;
   /** Whether premium/subscription features are enabled */
   premiumIsEnabled: boolean;
+  /**
+   * Whether the workspace shown is a PERSONAL workspace. Personal workspaces
+   * cannot be transferred, so the card explains the account-email alternative
+   * instead of rendering the transfer flow. The admin-dashboard usage always
+   * targets TEAM workspaces and omits this.
+   */
+  isPersonalWorkspace?: boolean;
 };
+
+function LearnMoreLink() {
+  return (
+    <Link
+      to={TRANSFER_OWNERSHIP_KB_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline"
+    >
+      Learn more
+    </Link>
+  );
+}
 
 export const TransferOwnershipSchema = z.object({
   newOwner: z.string().min(1, "New owner is required"),
@@ -87,9 +108,9 @@ export default function TransferOwnershipCard({
   ownerSubscriptionInfo,
   ownerOtherTeamWorkspacesCount,
   premiumIsEnabled,
+  isPersonalWorkspace = false,
 }: TransferOwnershipCardProps) {
-  const { isOwner } = useUserRoleHelper();
-  const user = useUserData();
+  const canTransferOwnership = useCanTransferOwnership();
   const [confirmationInput, setConfirmationInput] = useState("");
   const [selectedOwner, setSelectedOwner] = useState<Admin | null>(null);
   const [transferSubscription, setTransferSubscription] = useState(false);
@@ -99,6 +120,13 @@ export default function TransferOwnershipCard({
   // Use provided organizationName or fall back to currentOrganization
   const confirmationOrgName = organizationName ?? currentOrganization?.name;
 
+  /**
+   * Shown to non-owner members so they know who to ask. Safe to read from
+   * context here: the non-owner branch only renders on the settings page,
+   * where currentOrganization is the workspace being viewed.
+   */
+  const ownerEmail = currentOrganization?.owner?.email;
+
   const zo = useZorm("TransferOwnership", TransferOwnershipSchema);
   const actionData = useActionData<DataOrErrorResponse>();
 
@@ -106,8 +134,6 @@ export default function TransferOwnershipCard({
   const validationErrors = getValidationErrors<typeof TransferOwnershipSchema>(
     actionData?.error
   );
-
-  const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
 
   // Check if current owner has subscriptions that could be transferred
   const ownerHasSubscription =
@@ -121,18 +147,50 @@ export default function TransferOwnershipCard({
       ? actionData.error.message
       : null;
 
-  if (!isOwner && !isShelfAdmin) {
-    return null;
+  /** Personal workspaces cannot be transferred — the server rejects them too */
+  if (isPersonalWorkspace) {
+    return (
+      <Card className={tw(className)} id="transfer-ownership">
+        <h4 className="mb-1 text-text-lg font-semibold">
+          Transfer workspace ownership
+        </h4>
+        <p className="mb-2 text-sm text-gray-600">
+          Personal workspaces cannot be transferred. To hand over this account
+          to someone else, change the email address on your account instead.{" "}
+          <LearnMoreLink />
+        </p>
+        <Button to="/account-details/general" variant="secondary">
+          Go to account settings
+        </Button>
+      </Card>
+    );
+  }
+
+  /** Non-owners cannot transfer, but must still be able to discover who can */
+  if (!canTransferOwnership) {
+    return (
+      <Card className={tw(className)} id="transfer-ownership">
+        <h4 className="mb-1 text-text-lg font-semibold">
+          Transfer workspace ownership
+        </h4>
+        <p className="text-sm text-gray-600">
+          Only the workspace owner
+          {ownerEmail ? ` (${ownerEmail})` : ""} can transfer ownership of this
+          workspace. <LearnMoreLink />
+        </p>
+      </Card>
+    );
   }
 
   return (
-    <Card className={tw(className)}>
+    <Card className={tw(className)} id="transfer-ownership">
       <h4 className="mb-1 text-text-lg font-semibold">
         Transfer workspace ownership
       </h4>
       <p className="mb-2 text-sm text-gray-600">
         Transfer workspace to another user. To transfer the workspace, the new
-        owner must be already be part of the workspace as an admin.
+        owner must already be part of the workspace as an admin.{" "}
+        <LearnMoreLink />
       </p>
 
       <When
@@ -142,7 +200,7 @@ export default function TransferOwnershipCard({
             type="button"
             disabled={{
               reason:
-                "No admins found in this workspace. Please add an admin before transferring ownership.",
+                "No admins found in this workspace. Change a team member's role to Administrator first, then transfer ownership.",
             }}
           >
             Transfer Ownership
@@ -161,8 +219,7 @@ export default function TransferOwnershipCard({
               <AlertDialogTitle>Transfer Workspace Ownership</AlertDialogTitle>
               <AlertDialogDescription>
                 Transfer workspace to another user. To transfer the workspace,
-                the new owner must be already be part of the workspace as an
-                admin.
+                the new owner must already be part of the workspace as an admin.
               </AlertDialogDescription>
             </AlertDialogHeader>
 

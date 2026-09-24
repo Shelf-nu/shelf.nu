@@ -47,10 +47,22 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+/**
+ * A valid PKCE pair: `TEST_CHALLENGE` is the S256 hash of `TEST_VERIFIER`.
+ *
+ * Redemption requires a bound challenge, so every test that expects to reach
+ * the mint must present one. A challenge-less redemption is pinned as refused
+ * below — that is the property this suite exists to protect.
+ */
+const TEST_VERIFIER = "t".repeat(64);
+const TEST_CHALLENGE = createHash("sha256")
+  .update(TEST_VERIFIER)
+  .digest("base64url");
+
 /** Wires the happy-path mocks for a successful redeem + fresh-session mint. */
 function mockSuccessfulMint(
   email = "sso@acme.com",
-  codeChallenge: string | null = null
+  codeChallenge: string | null = TEST_CHALLENGE
 ) {
   dbMocks.updateMany.mockResolvedValue({ count: 1 });
   dbMocks.findUniqueOrThrow.mockResolvedValue({
@@ -124,7 +136,7 @@ describe("redeemMobileAuthCode", () => {
   it("consumes the code atomically (single-use guard) before minting", async () => {
     mockSuccessfulMint();
 
-    await redeemMobileAuthCode("good-code");
+    await redeemMobileAuthCode("good-code", TEST_VERIFIER);
 
     const { where, data } = dbMocks.updateMany.mock.calls[0][0];
     expect(where.consumedAt).toBeNull(); // only unconsumed rows
@@ -135,7 +147,7 @@ describe("redeemMobileAuthCode", () => {
   it("mints a fresh, independent session via generateLink → verifyOtp", async () => {
     mockSuccessfulMint("sso@acme.com");
 
-    const session = await redeemMobileAuthCode("good-code");
+    const session = await redeemMobileAuthCode("good-code", TEST_VERIFIER);
 
     expect(supabaseMocks.generateLink).toHaveBeenCalledWith({
       type: "magiclink",
@@ -157,22 +169,125 @@ describe("redeemMobileAuthCode", () => {
     dbMocks.updateMany.mockResolvedValue({ count: 1 });
     dbMocks.findUniqueOrThrow.mockResolvedValue({
       user: { email: "sso@acme.com" },
+      codeChallenge: TEST_CHALLENGE,
     });
     supabaseMocks.generateLink.mockResolvedValue({
       data: { properties: {} }, // no hashed_token
       error: null,
     });
 
-    await expect(redeemMobileAuthCode("good-code")).rejects.toBeInstanceOf(
-      ShelfError
-    );
+    await expect(
+      redeemMobileAuthCode("good-code", TEST_VERIFIER)
+    ).rejects.toBeInstanceOf(ShelfError);
     expect(supabaseMocks.verifyOtp).not.toHaveBeenCalled();
+  });
+
+  it("retries a superseded magic-link token, then succeeds", async () => {
+    // Two overlapping sign-ins for one account: the second generateLink voids
+    // the first's token, and the first verifyOtp loses. A retry mints a NEW
+    // token, so the very thing that failed is what the retry replaces.
+    mockSuccessfulMint("sso@acme.com", TEST_CHALLENGE);
+    // why: Supabase is the boundary this test exists to characterise — a real
+    // generateLink/verifyOtp round trip would need a live project, and the
+    // collision being reproduced is a timing race we could not stage there.
+    supabaseMocks.generateLink.mockResolvedValue({
+      data: { properties: { hashed_token: "hash_123" } },
+      error: null,
+    });
+    supabaseMocks.verifyOtp
+      .mockResolvedValueOnce({
+        data: null,
+        error: {
+          __authApiError: true,
+          code: "otp_expired",
+          status: 403,
+          message: "Email link is invalid or has expired",
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          session: {
+            access_token: "at",
+            refresh_token: "rt",
+            user: { id: "user_1", email: "sso@acme.com" },
+            expires_in: 3600,
+            expires_at: 9_999_999_999,
+          },
+        },
+        error: null,
+      });
+
+    const session = await redeemMobileAuthCode("good-code", TEST_VERIFIER);
+
+    expect(session).toMatchObject({ accessToken: "at", refreshToken: "rt" });
+    // A fresh link per attempt is the whole reason the retry can work.
+    expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(2);
+  });
+
+  it("recognises a superseded token from its message alone", async () => {
+    // Supabase releases predating the error-code vocabulary send no `code`.
+    mockSuccessfulMint("sso@acme.com", TEST_CHALLENGE);
+    // why: same boundary as above, with the `code` omitted — that is what
+    // Supabase releases predating the error-code vocabulary actually send, and
+    // it is the only way to exercise the message fallback.
+    supabaseMocks.generateLink.mockResolvedValue({
+      data: { properties: { hashed_token: "hash_123" } },
+      error: null,
+    });
+    supabaseMocks.verifyOtp
+      .mockResolvedValueOnce({
+        data: null,
+        error: {
+          __authApiError: true,
+          status: 403,
+          message: "Email link is invalid or has expired",
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          session: {
+            access_token: "at",
+            refresh_token: "rt",
+            user: { id: "user_1", email: "sso@acme.com" },
+            expires_in: 3600,
+            expires_at: 9_999_999_999,
+          },
+        },
+        error: null,
+      });
+
+    const session = await redeemMobileAuthCode("good-code", TEST_VERIFIER);
+    expect(session).toMatchObject({ accessToken: "at" });
+  });
+
+  it("does not retry an unrelated 4xx from the mint", async () => {
+    // The exception is narrow on purpose: a retry cannot change a user that
+    // does not exist, and hammering the endpoint would only add latency.
+    mockSuccessfulMint("sso@acme.com", TEST_CHALLENGE);
+    // why: a deterministic 4xx from Supabase, staged to prove the retry
+    // exception stays narrow — no live project can be made to answer
+    // `user_not_found` on demand for a user we control.
+    supabaseMocks.generateLink.mockResolvedValue({
+      data: null,
+      error: {
+        __authApiError: true,
+        code: "user_not_found",
+        status: 404,
+        message: "User not found",
+      },
+    });
+
+    await expect(
+      redeemMobileAuthCode("good-code", TEST_VERIFIER)
+    ).rejects.toMatchObject({ status: 500 });
+    expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(1);
   });
 
   it("retries a transient mint failure, then succeeds", async () => {
     dbMocks.updateMany.mockResolvedValue({ count: 1 });
     dbMocks.findUniqueOrThrow.mockResolvedValue({
       user: { email: "sso@acme.com" },
+      codeChallenge: TEST_CHALLENGE,
     });
     // First generateLink fails transiently (503); the retry succeeds.
     supabaseMocks.generateLink
@@ -198,7 +313,7 @@ describe("redeemMobileAuthCode", () => {
       error: null,
     });
 
-    const session = await redeemMobileAuthCode("good-code");
+    const session = await redeemMobileAuthCode("good-code", TEST_VERIFIER);
 
     expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(2); // retried once
     expect(session).toMatchObject({ accessToken: "at", refreshToken: "rt" });
@@ -208,13 +323,16 @@ describe("redeemMobileAuthCode", () => {
     dbMocks.updateMany.mockResolvedValue({ count: 1 });
     dbMocks.findUniqueOrThrow.mockResolvedValue({
       user: { email: "sso@acme.com" },
+      codeChallenge: TEST_CHALLENGE,
     });
     supabaseMocks.generateLink.mockResolvedValue({
       data: null,
       error: { code: "over_email_send_rate_limit", message: "rate limited" },
     });
 
-    await expect(redeemMobileAuthCode("good-code")).rejects.toMatchObject({
+    await expect(
+      redeemMobileAuthCode("good-code", TEST_VERIFIER)
+    ).rejects.toMatchObject({
       status: 429,
     });
     expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(1); // no retry
@@ -224,6 +342,7 @@ describe("redeemMobileAuthCode", () => {
     dbMocks.updateMany.mockResolvedValue({ count: 1 });
     dbMocks.findUniqueOrThrow.mockResolvedValue({
       user: { email: "sso@acme.com" },
+      codeChallenge: TEST_CHALLENGE,
     });
     // AuthApiError 4xx (not retryable, not rate-limit) — must fail fast.
     supabaseMocks.generateLink.mockResolvedValue({
@@ -231,19 +350,28 @@ describe("redeemMobileAuthCode", () => {
       error: { __authApiError: true, status: 422, message: "invalid" },
     });
 
-    await expect(redeemMobileAuthCode("good-code")).rejects.toMatchObject({
+    await expect(
+      redeemMobileAuthCode("good-code", TEST_VERIFIER)
+    ).rejects.toMatchObject({
       status: 500,
     });
     expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(1); // no retry
   });
 
-  it("redeems a legacy (no-challenge) code without a verifier", async () => {
-    mockSuccessfulMint("sso@acme.com", null); // pre-PKCE app: codeChallenge null
+  it("refuses a code carrying no PKCE challenge, with or without a verifier", async () => {
+    // A challenge-less code is a bearer token: whoever holds the plaintext gets
+    // a session. PKCE is the only control standing between an intercepted
+    // `shelf://` deeplink and account takeover, so it is mandatory — a code that
+    // was minted without a binding can never be redeemed, and presenting a
+    // verifier against a NULL challenge does not rescue it either.
+    for (const verifier of [undefined, TEST_VERIFIER]) {
+      mockSuccessfulMint("sso@acme.com", null);
 
-    const session = await redeemMobileAuthCode("good-code"); // no verifier
-
-    expect(session).toMatchObject({ accessToken: "at", refreshToken: "rt" });
-    expect(supabaseMocks.generateLink).toHaveBeenCalledTimes(1); // minted
+      await expect(
+        redeemMobileAuthCode("good-code", verifier)
+      ).rejects.toMatchObject({ status: 400 });
+      expect(supabaseMocks.generateLink).not.toHaveBeenCalled();
+    }
   });
 
   it("redeems a PKCE code when the verifier matches the challenge", async () => {
@@ -258,22 +386,19 @@ describe("redeemMobileAuthCode", () => {
 
   it("rejects a PKCE code with a wrong verifier (400, no mint) but consumes it", async () => {
     const challenge = createHash("sha256")
-      .update("the-real-verifier")
+      .update("r".repeat(64))
       .digest("base64url");
     mockSuccessfulMint("sso@acme.com", challenge);
 
     await expect(
-      redeemMobileAuthCode("good-code", "a-different-verifier")
+      redeemMobileAuthCode("good-code", "w".repeat(64))
     ).rejects.toMatchObject({ status: 400 });
     expect(dbMocks.updateMany).toHaveBeenCalledTimes(1); // single-use consume ran
     expect(supabaseMocks.generateLink).not.toHaveBeenCalled(); // never minted
   });
 
   it("rejects a PKCE code when no verifier is supplied", async () => {
-    const challenge = createHash("sha256")
-      .update("verifier")
-      .digest("base64url");
-    mockSuccessfulMint("sso@acme.com", challenge);
+    mockSuccessfulMint("sso@acme.com", TEST_CHALLENGE);
 
     await expect(redeemMobileAuthCode("good-code")).rejects.toMatchObject({
       status: 400,

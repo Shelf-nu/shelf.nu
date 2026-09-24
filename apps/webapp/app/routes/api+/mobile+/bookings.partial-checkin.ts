@@ -9,6 +9,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { partialCheckinBooking } from "~/modules/booking/service.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -50,9 +51,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const body = await request.json();
-    const { bookingId, assetIds, checkins, timeZone } = z
-      .object({
+    const { bookingId, assetIds, checkins, timeZone } = await parseMobileBody(
+      z.object({
         bookingId: z.string().min(1),
         // Legacy / INDIVIDUAL: bare asset ids. For a QUANTITY_TRACKED asset a
         // bare id still means "check in all remaining" (simple case); explicit
@@ -76,8 +76,10 @@ export async function action({ request }: ActionFunctionArgs) {
           )
           .optional(),
         timeZone: z.string().optional(),
-      })
-      .parse(body);
+      }),
+      request,
+      "Booking"
+    );
 
     // Org-scoped booking lookup — a foreign-org booking id 404s here.
     const booking = await db.booking.findFirst({

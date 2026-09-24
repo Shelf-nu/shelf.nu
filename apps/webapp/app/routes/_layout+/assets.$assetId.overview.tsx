@@ -79,7 +79,7 @@ import {
   isQuantityTracked,
 } from "~/modules/asset/utils";
 import { getRemindersForOverviewPage } from "~/modules/asset-reminder/service.server";
-import { getPrimaryCustody } from "~/modules/custody/utils";
+import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { moveAssetKitUnits } from "~/modules/kit/service.server";
 import { generateQrObj } from "~/modules/qr/utils.server";
@@ -90,6 +90,7 @@ import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import {
   buildAssetOverviewCustomFields,
@@ -150,6 +151,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       currentOrganization,
       canUseBarcodes,
       role,
+      canSeeAllCustody,
     } = await requirePermission({
       userId,
       request,
@@ -174,7 +176,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
-      include: getAssetOverviewFields(id, canUseBarcodes),
+      include: getAssetOverviewFields(canUseBarcodes),
     });
 
     /**
@@ -244,12 +246,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         0
       );
 
+      // Manual rows only (`assetKitId === null`). This is the sum
+      // `enforce_asset_location_sum_within_total` actually bounds — since
+      // `20260602100000_assetlocation_sum_exclude_kit_driven` the trigger
+      // ignores kit-driven rows, which are bounded on their own axis by
+      // `enforce_asset_kit_sum_within_total`. Deriving "over-placed" from the
+      // combined `inLocations` would flag a perfectly valid asset (80 manual +
+      // 50 kit-driven of 100) as over-allocated.
+      const inLocationsManual = (asset.assetLocations ?? []).reduce(
+        (sum: number, al) =>
+          sum + (al.assetKitId === null ? al.quantity ?? 0 : 0),
+        0
+      );
+
       const availability = await getAssetAvailability({
         assetId: asset.id,
         organizationId,
       });
 
-      quantityData = buildQuantityData({ availability, inLocations });
+      quantityData = buildQuantityData({
+        availability,
+        inLocations,
+        inLocationsManual,
+      });
     }
 
     /**
@@ -261,17 +280,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           organizationId,
           request,
           userId,
-          isSelfService: role === OrganizationRoles.SELF_SERVICE,
+          // The rule, not a role check: `isSelfService` was false for BASE, so
+          // the seed shipped the whole roster — with every user's email and
+          // Stripe id — to a role that cannot assign custody at all.
+          role,
+          canSeeAllCustody,
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
-    const bookingAsset =
-      asset.bookingAssets.length > 0 ? asset.bookingAssets[0] : undefined;
-    const currentBooking: any = null;
-
-    if (bookingAsset && bookingAsset.booking.from) {
-      asset.bookingAssets = [currentBooking];
-    }
+    // `bookingAssets` is already the asset's current booking: the query keeps
+    // only the slice that is out (`CURRENT_BOOKING_SLICE_FILTER`), so the first
+    // row is the one the page shows. Nothing further is derived from it here.
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
       ? asset.customFields.filter(
@@ -369,10 +388,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       : 0;
 
     return payload({
-      asset: {
-        ...asset,
-        customFields,
-      },
+      // Same reasoning as the parent detail route: this payload carries
+      // `custody[].custodian` and is reachable with `asset: read`.
+      asset: redactCustodianForViewer([{ ...asset, customFields }], {
+        canSeeAllCustody,
+        userId,
+      })[0],
       currentOrganization,
       userId,
       lastScan,
@@ -1738,8 +1759,13 @@ export default function AssetOverview() {
               custody={asset?.custody || null}
               hasPermission={userCanViewSpecificCustody({
                 roles,
-                custodianUserId: getPrimaryCustody(asset?.custody)?.custodian
-                  ?.user?.id,
+                // The holder the card shows, so a viewer always sees custody
+                // that is their own — including a booking they hold.
+                custodianUserId: getCustodyCardHolderUserId({
+                  custody: asset?.custody,
+                  booking,
+                  viewerUserId: userId,
+                }),
                 organization: currentOrganization,
                 currentUserId: userId,
               })}
@@ -1758,6 +1784,7 @@ export default function AssetOverview() {
               inCustodyQuantity={quantityData?.inCustody}
               inKitsQuantity={quantityData?.inKits}
               inLocationsQuantity={quantityData?.inLocations}
+              inLocationsManualQuantity={quantityData?.inLocationsManual}
               reservedQuantity={quantityData?.reserved}
               reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}

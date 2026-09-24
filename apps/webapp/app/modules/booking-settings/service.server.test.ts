@@ -60,9 +60,8 @@ describe("getBookingSettingsForOrganization", () => {
       // drift from what `getBookingSettingsForOrganization` actually selects.
       select: BOOKING_SETTINGS_SELECT,
     });
-    // why: the whole point of the read-first change is that an existing row
-    // never triggers a write — this is the regression guard for the
-    // connection-pool-exhaustion incident this task fixes.
+    // why: this read runs on every authenticated page load, so an existing
+    // row must never trigger a write (an upsert takes a row lock per request).
     expect(db.bookingSettings.upsert).not.toHaveBeenCalled();
     expect(result).toEqual(mockBookingSettingsData);
   });
@@ -99,6 +98,8 @@ describe("getBookingSettingsForOrganization", () => {
         autoArchiveExpiredReservations: false,
         requireExplicitCheckinForAdmin: false,
         requireExplicitCheckinForSelfService: false,
+        requireExplicitCheckoutForAdmin: false,
+        requireExplicitCheckoutForSelfService: false,
         countKitsAsSingleUnit: false,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
@@ -221,6 +222,8 @@ describe("updateBookingSettings", () => {
         autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        requireExplicitCheckoutForAdmin: true,
+        requireExplicitCheckoutForSelfService: true,
         countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
@@ -234,6 +237,7 @@ describe("updateBookingSettings", () => {
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
@@ -272,6 +276,8 @@ describe("updateBookingSettings", () => {
         autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        requireExplicitCheckoutForAdmin: true,
+        requireExplicitCheckoutForSelfService: true,
         countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
@@ -285,6 +291,7 @@ describe("updateBookingSettings", () => {
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
@@ -343,6 +350,36 @@ describe("updateBookingSettings", () => {
     expect(result).toEqual(updatedSettings);
   });
 
+  it("should update the explicit check-out switches without touching check-in", async () => {
+    expect.assertions(2);
+    const updatedSettings = {
+      ...mockBookingSettingsData,
+      requireExplicitCheckoutForAdmin: true,
+      requireExplicitCheckoutForSelfService: false,
+    };
+    //@ts-expect-error missing vitest type
+    db.bookingSettings.update.mockResolvedValue(updatedSettings);
+
+    const result = await updateBookingSettings({
+      organizationId: mockOrganizationId,
+      requireExplicitCheckoutForAdmin: true,
+      requireExplicitCheckoutForSelfService: false,
+    });
+
+    // `false` is a value to write, not an omission, and the check-in pair is
+    // not part of this card's form, so it must stay out of the update.
+    expect(db.bookingSettings.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: mockOrganizationId },
+        data: {
+          requireExplicitCheckoutForAdmin: true,
+          requireExplicitCheckoutForSelfService: false,
+        },
+      })
+    );
+    expect(result).toEqual(updatedSettings);
+  });
+
   it("should update maxBookingLength only", async () => {
     expect.assertions(2);
     const updatedSettings = {
@@ -371,6 +408,8 @@ describe("updateBookingSettings", () => {
         autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        requireExplicitCheckoutForAdmin: true,
+        requireExplicitCheckoutForSelfService: true,
         countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
@@ -384,6 +423,7 @@ describe("updateBookingSettings", () => {
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
@@ -422,6 +462,8 @@ describe("updateBookingSettings", () => {
         autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        requireExplicitCheckoutForAdmin: true,
+        requireExplicitCheckoutForSelfService: true,
         countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
@@ -435,6 +477,7 @@ describe("updateBookingSettings", () => {
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
@@ -481,6 +524,8 @@ describe("updateBookingSettings", () => {
         autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        requireExplicitCheckoutForAdmin: true,
+        requireExplicitCheckoutForSelfService: true,
         countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
@@ -494,6 +539,7 @@ describe("updateBookingSettings", () => {
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
@@ -534,6 +580,8 @@ describe("updateBookingSettings", () => {
         autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        requireExplicitCheckoutForAdmin: true,
+        requireExplicitCheckoutForSelfService: true,
         countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
@@ -547,6 +595,7 @@ describe("updateBookingSettings", () => {
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
@@ -590,6 +639,8 @@ describe("updateBookingSettings", () => {
         autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        requireExplicitCheckoutForAdmin: true,
+        requireExplicitCheckoutForSelfService: true,
         countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
@@ -603,6 +654,7 @@ describe("updateBookingSettings", () => {
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
@@ -641,6 +693,8 @@ describe("updateBookingSettings", () => {
         autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        requireExplicitCheckoutForAdmin: true,
+        requireExplicitCheckoutForSelfService: true,
         countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
@@ -654,6 +708,7 @@ describe("updateBookingSettings", () => {
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },
@@ -765,6 +820,8 @@ describe("updateBookingSettings", () => {
         autoArchiveExpiredReservations: true,
         requireExplicitCheckinForAdmin: true,
         requireExplicitCheckinForSelfService: true,
+        requireExplicitCheckoutForAdmin: true,
+        requireExplicitCheckoutForSelfService: true,
         countKitsAsSingleUnit: true,
         notifyBookingCreator: true,
         notifyAdminsOnNewBooking: true,
@@ -778,6 +835,7 @@ describe("updateBookingSettings", () => {
                 email: true,
                 firstName: true,
                 lastName: true,
+                displayName: true,
                 profilePicture: true,
               },
             },

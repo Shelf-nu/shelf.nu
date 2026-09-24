@@ -1,6 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -8,8 +9,13 @@ import {
   assertMobileCanUseBookings,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import {
+  resolveMostPrivilegedRole,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -39,19 +45,68 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    // PARITY with the web check-in action (bookings.$bookingId.overview.tsx
-    // :1034-1054): when the workspace requires EXPLICIT check-in for the
-    // caller's role, the quick "check in all" path is forbidden — they must
-    // scan / select the assets (the partial-checkin path). The mobile app must
-    // NEVER be more permissive than the web / a workspace's settings, so we
-    // enforce the same policy server-side here.
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { bookingId, timeZone } = await parseMobileBody(
+      z.object({
+        bookingId: z.string().min(1),
+        timeZone: z.string().optional(),
+      }),
+      request,
+      "Booking"
+    );
+
+    // Derive hints the standard way: locale from the request's Accept-Language
+    // header and timeZone from the CH-time-zone cookie (UTC fallback). Native
+    // clients can't set that cookie, so they pass their device timeZone in the
+    // body — prefer it when present.
+    const hints: ClientHint = {
+      ...getClientHint(request),
+      ...(timeZone ? { timeZone } : {}),
+    };
+
+    // Org-scoped, so a foreign-org id 404s before ownership is evaluated.
+    const existingBooking = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { creatorId: true, custodianUserId: true },
+    });
+
+    if (!existingBooking) {
+      return data(
+        { error: { message: "Booking not found in this workspace." } },
+        { status: 404 }
+      );
+    }
+
+    // Cross-user IDOR guard, mirroring the checkout routes: SELF_SERVICE holds
+    // `booking:checkin`, so the role gate above passes for ANY booking id in
+    // the organization, and `checkinBooking` does not check ownership itself.
+    // No-op for ADMIN/OWNER.
+    const { roles, effectiveRole } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
+    validateBookingOwnership({
+      booking: existingBooking,
+      userId: user.id,
+      role: resolveMostPrivilegedRole(roles),
+      action: "check in",
+    });
+
+    // PARITY with the web booking action's `checkIn` guard: when the workspace
+    // requires EXPLICIT check-in for the caller's role, the quick "check in
+    // all" path is forbidden — they must scan / select the assets (the
+    // partial-checkin path). The mobile app must NEVER be more permissive than
+    // the web / a workspace's settings, so we enforce the same policy
+    // server-side here. Judged by the most privileged role, as the loader's
+    // `canQuickCheckin` is, so the app never offers a button this refuses.
+    // Decided after the booking and ownership checks, so a missing or foreign
+    // booking answers 404 as before and the settings are only read for a
+    // booking the caller may act on.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const explicitCheckinRequired =
-      (role === OrganizationRoles.ADMIN &&
+      (effectiveRole === OrganizationRoles.ADMIN &&
         bookingSettings.requireExplicitCheckinForAdmin) ||
-      (role === OrganizationRoles.SELF_SERVICE &&
+      (effectiveRole === OrganizationRoles.SELF_SERVICE &&
         bookingSettings.requireExplicitCheckinForSelfService);
     if (explicitCheckinRequired) {
       throw new ShelfError({
@@ -64,23 +119,6 @@ export async function action({ request }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-
-    const body = await request.json();
-    const { bookingId, timeZone } = z
-      .object({
-        bookingId: z.string().min(1),
-        timeZone: z.string().optional(),
-      })
-      .parse(body);
-
-    // Derive hints the standard way: locale from the request's Accept-Language
-    // header and timeZone from the CH-time-zone cookie (UTC fallback). Native
-    // clients can't set that cookie, so they pass their device timeZone in the
-    // body — prefer it when present.
-    const hints: ClientHint = {
-      ...getClientHint(request),
-      ...(timeZone ? { timeZone } : {}),
-    };
 
     const booking = await checkinBooking({
       id: bookingId,

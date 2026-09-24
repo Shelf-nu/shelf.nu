@@ -29,7 +29,8 @@ import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
-import { extractQrId } from "@/lib/qr-utils";
+import { classifyScannedCode, extractQrId } from "@/lib/qr-utils";
+import { getActiveServer } from "@/lib/server";
 import { parseSequentialId } from "@/lib/sequential-id";
 import { announce } from "@/lib/a11y";
 import { maybeAskForReview } from "@/lib/review-prompt";
@@ -56,6 +57,7 @@ import {
   type ListTab,
 } from "@/components/audit/segmented-control";
 import { EvidenceModal } from "@/components/audit/evidence-modal";
+import { EvidenceCoachmark } from "@/components/audit/evidence-coachmark";
 import type { ScannedItem } from "@/hooks/use-audit-init";
 
 // ── Main Export ──────────────────────────────────────────
@@ -242,12 +244,16 @@ function AuditScannerContent() {
 
   const [evidenceModalVisible, setEvidenceModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ScannedItem | null>(null);
+  // Opening the sheet once proves the user found evidence capture, which
+  // retires the coachmark for good.
+  const [hasOpenedEvidence, setHasOpenedEvidence] = useState(false);
   // Wire up setSelectedItem for the scan sync callback
   setSelectedItemRef.current = setSelectedItem;
 
   const handleItemPress = useCallback((item: ScannedItem) => {
     setSelectedItem(item);
     setEvidenceModalVisible(true);
+    setHasOpenedEvidence(true);
   }, []);
 
   const handleCloseEvidenceModal = useCallback(() => {
@@ -255,21 +261,215 @@ function AuditScannerContent() {
     setSelectedItem(null);
   }, []);
 
+  /**
+   * Undo a scan: the asset returns to whatever it was before, which for an
+   * expected asset means "not scanned yet" and for an unexpected one means
+   * leaving the audit entirely.
+   *
+   * The server recomputes the session counts inside the same transaction as
+   * the removal, so those are adopted wholesale rather than decremented here
+   * — the two statuses move different counters and only the server knows
+   * which one this scan was.
+   *
+   * Idempotent, like the endpoint: a scan that was already gone leaves the same
+   * screen behind as one removed here, because the person asked for the same
+   * end state either way.
+   */
+  const handleRemoveScan = useCallback(
+    async (item: ScannedItem) => {
+      if (!currentOrg || !auditId) return;
+
+      const { data, error } = await api.removeAuditScan(currentOrg.id, {
+        auditSessionId: auditId,
+        assetId: item.assetId,
+      });
+
+      if (error || !data) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert("Could not remove scan", error || "Something went wrong.");
+        return;
+      }
+
+      // `removed: false` means the server holds no scan for this asset, which
+      // is a different thing from "nothing happened". The sheet offers the undo
+      // only once a scan has synced, so the scan did reach the server and has
+      // since gone: removed from the web or another device, or by this call's
+      // own retry — a lost response on a weak signal re-sends the request, and
+      // the second one finds the row the first already deleted.
+      //
+      // Either way the end state is the one the person asked for, and the row
+      // on screen asserts a scan that no longer exists. So it is cleaned up
+      // exactly as a fresh removal; only the wording differs. Keeping it would
+      // strand the asset: it would still hold its place in the dedup set, so it
+      // could not even be scanned again.
+
+      // Drop the row and let the asset be scannable again. The dedup set is
+      // what makes a re-scan register rather than reading as a duplicate.
+      //
+      // The ref moves with the list, and the snapshot on disk with both: every
+      // persistence path reads the ref, and recovery on next launch trusts
+      // what it finds there. Leaving either behind would offer the removed
+      // scan back as an unsynced one, and its asset would then read as
+      // already scanned.
+      const remaining = scannedItemsRef.current.filter(
+        (scanned) => scanned.assetId !== item.assetId
+      );
+      scannedItemsRef.current = remaining;
+      setScannedItems(remaining);
+      scannedAssetIdsRef.current.delete(item.assetId);
+
+      // Splice rather than reassign: the debounced saver holds these array
+      // references. A queued entry for this asset would re-record the scan
+      // that was just undone.
+      for (const queue of [scanQueueRef.current, failedQueueRef.current]) {
+        for (let i = queue.length - 1; i >= 0; i--) {
+          if (queue[i].assetId === item.assetId) queue.splice(i, 1);
+        }
+      }
+
+      // Same policy the exit path uses: keep a snapshot while anything is
+      // still unsynced, otherwise there is nothing worth recovering.
+      const hasUnsyncedScans =
+        scanQueueRef.current.length > 0 || failedQueueRef.current.length > 0;
+      if (hasUnsyncedScans) {
+        debouncedSaverRef.current?.flush(
+          remaining,
+          scanQueueRef.current,
+          failedQueueRef.current
+        );
+      } else {
+        debouncedSaverRef.current?.cancel();
+        void clearAuditScanState(auditId);
+      }
+      // The totals describe rows the server holds — recomputed when it deleted
+      // a scan, the session's own counters when it had none left to delete —
+      // and scans still waiting in the queue are among neither. Adopting them
+      // raw would erase the progress those scans already earned on screen, and
+      // understate the walk until the audit is reopened. Add them back, deduped
+      // by asset so a requeued entry counts once.
+      const outstanding = new Map<string, boolean>();
+      for (const queued of [
+        ...scanQueueRef.current,
+        ...failedQueueRef.current,
+      ]) {
+        outstanding.set(queued.assetId, queued.isExpected);
+      }
+      let pendingFound = 0;
+      let pendingUnexpected = 0;
+      for (const isExpected of outstanding.values()) {
+        if (isExpected) pendingFound += 1;
+        else pendingUnexpected += 1;
+      }
+
+      setFoundCount(data.foundAssetCount + pendingFound);
+      setUnexpectedCount(data.unexpectedAssetCount + pendingUnexpected);
+      animateProgress(data.foundAssetCount + pendingFound);
+
+      handleCloseEvidenceModal();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      showToast(
+        "duplicate",
+        data.removed ? "Scan removed" : "Scan already removed",
+        item.name?.trim() || "The asset can be scanned again."
+      );
+    },
+    [
+      currentOrg,
+      auditId,
+      setScannedItems,
+      scannedItemsRef,
+      scannedAssetIdsRef,
+      scanQueueRef,
+      failedQueueRef,
+      debouncedSaverRef,
+      setFoundCount,
+      setUnexpectedCount,
+      animateProgress,
+      handleCloseEvidenceModal,
+      showToast,
+    ]
+  );
+
+  /**
+   * Adopt the evidence counts the sheet read from the server.
+   *
+   * A row starts with the counts its scan reported, which are zero — but
+   * evidence belongs to the audit's row for the asset, so an asset scanned
+   * again after an undo still carries what was recorded before, and the row
+   * would otherwise offer "Add photo/note" over evidence that exists.
+   */
+  const handleEvidenceCounts = useCallback(
+    (assetId: string, counts: { notes: number; images: number }) => {
+      // Computed from the ref, then written to both: the ref is what every
+      // persistence path saves and what recovery reads back, so leaving it
+      // behind would restore a row asserting evidence counts the audit no
+      // longer has. Returning the same objects when nothing moved keeps the
+      // list from re-rendering every time the sheet opens.
+      let changed = false;
+      const next = scannedItemsRef.current.map((scanned) => {
+        if (scanned.assetId !== assetId) return scanned;
+        if (
+          (scanned.notesCount ?? 0) === counts.notes &&
+          (scanned.imagesCount ?? 0) === counts.images
+        ) {
+          return scanned;
+        }
+        changed = true;
+        return {
+          ...scanned,
+          notesCount: counts.notes,
+          imagesCount: counts.images,
+        };
+      });
+      if (changed) {
+        scannedItemsRef.current = next;
+        setScannedItems(next);
+      }
+      // The open sheet renders from its own snapshot of the row, so correcting
+      // only the list would leave the badges above the very notes and photos
+      // they are miscounting — and hide the line that says they survive an
+      // undo, which is the case this exists for.
+      setSelectedItem((prev) => {
+        if (!prev || prev.assetId !== assetId) return prev;
+        if (
+          (prev.notesCount ?? 0) === counts.notes &&
+          (prev.imagesCount ?? 0) === counts.images
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          notesCount: counts.notes,
+          imagesCount: counts.images,
+        };
+      });
+    },
+    [setScannedItems, scannedItemsRef]
+  );
+
   const handleEvidenceAdded = useCallback(
     (assetId: string, type: "note" | "image") => {
-      // Optimistically update the local evidence count
-      setScannedItems((prev) =>
-        prev.map((item) => {
-          if (item.assetId !== assetId) return item;
-          return {
-            ...item,
-            notesCount:
-              type === "note" ? (item.notesCount ?? 0) + 1 : item.notesCount,
-            imagesCount:
-              type === "image" ? (item.imagesCount ?? 0) + 1 : item.imagesCount,
-          };
-        })
-      );
+      // Optimistically update the local evidence count, computed from the ref
+      // and written to both. The list and the ref are two stores of one thing,
+      // and the ref is the one a removal rebuilds the list from and every
+      // persistence path saves — an increment that lands only in React state
+      // is reverted the moment any other row is undone.
+      let changed = false;
+      const next = scannedItemsRef.current.map((item) => {
+        if (item.assetId !== assetId) return item;
+        changed = true;
+        return {
+          ...item,
+          notesCount:
+            type === "note" ? (item.notesCount ?? 0) + 1 : item.notesCount,
+          imagesCount:
+            type === "image" ? (item.imagesCount ?? 0) + 1 : item.imagesCount,
+        };
+      });
+      if (changed) {
+        scannedItemsRef.current = next;
+        setScannedItems(next);
+      }
       // Also update the selected item in the modal
       setSelectedItem((prev) => {
         if (!prev || prev.assetId !== assetId) return prev;
@@ -282,7 +482,7 @@ function AuditScannerContent() {
         };
       });
     },
-    [setScannedItems]
+    [setScannedItems, scannedItemsRef]
   );
 
   // ── Inactivity timer (shared hook) ──────────────────
@@ -407,6 +607,32 @@ function AuditScannerContent() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       try {
+        // A Shelf URL from ANOTHER server would otherwise be resolved against
+        // this one and reported as "not found" — a baffling error for a code
+        // that is perfectly valid on the instance that minted it.
+        if (
+          classifyScannedCode(data, getActiveServer().baseUrl).kind ===
+          "foreign"
+        ) {
+          // Same feedback shape as every other rejected scan in this handler:
+          // a silent return would look like the camera simply ignored a code
+          // the user can see is valid.
+          flashFrame("error");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          showToast(
+            "error",
+            "Different Shelf Server",
+            "Sign in to that server to use this code."
+          );
+          announce("Different Shelf Server. Sign in to that server to use it.");
+          // finalizeScan() BEFORE returning: this handler has no `finally`, and
+          // a bare return would leave isProcessingRef.current true forever —
+          // the guard above would then reject every later scan and the camera
+          // would stop delivering codes entirely.
+          finalizeScan();
+          return;
+        }
+
         // 1. Resolve code -> asset (QR, SAM id, or barcode)
         const qrId = extractQrId(data);
         // SAM / sequential ids (e.g. SAM-0001) resolve via the QR route's
@@ -509,11 +735,18 @@ function AuditScannerContent() {
         // 4. Optimistic update — instant feedback
         scannedAssetIdsRef.current.add(asset.id);
 
+        // why: an expected asset's full record is already in memory, so the
+        // row can show WHERE it belongs immediately. An unexpected asset has
+        // no such record — its location fills in on the next audit load.
+        const expectedRecord = expectedAssetMapRef.current.get(asset.id);
         const newItem = {
           assetId: asset.id,
           name: asset.title,
           isExpected,
           scannedAt: new Date().toISOString(),
+          locationName: expectedRecord?.locationName ?? null,
+          thumbnailImage:
+            expectedRecord?.thumbnailImage ?? expectedRecord?.mainImage ?? null,
         };
         setScannedItems((prev) => {
           const next = [newItem, ...prev];
@@ -573,6 +806,8 @@ function AuditScannerContent() {
       currentOrg,
       foundCount,
       expectedTotal,
+      // stable ref object; listed to satisfy exhaustive-deps, never changes
+      expectedAssetMapRef,
       flashFrame,
       showToast,
       resetInactivityTimer,
@@ -761,6 +996,38 @@ function AuditScannerContent() {
   // ── Remaining assets (expected but not yet scanned) ──
 
   const remainingCount = expectedTotal - foundCount;
+
+  /**
+   * Opt-in filter for the Scanned tab, toggled by the unexpected count badge.
+   *
+   * why NOT a sort: pinning unexpected items to the top permanently was tried
+   * and broke the scan feedback loop. The list is newest-first so the row you
+   * just scanned confirms the scan; with exceptions pinned above it, a fresh
+   * scan lands below them, and since the panel shows only a couple of rows,
+   * three exceptions would push it off-screen entirely. During rapid scanning
+   * that reads as "it didn't register" and people rescan.
+   *
+   * So scan order is left alone and the exception count becomes a filter the
+   * user asks for, at the moment they want it, instead of a reordering imposed
+   * on every scan.
+   */
+  const [showUnexpectedOnly, setShowUnexpectedOnly] = useState(false);
+
+  const visibleScannedItems = useMemo(
+    () =>
+      showUnexpectedOnly
+        ? scannedItems.filter((i) => !i.isExpected)
+        : scannedItems,
+    [scannedItems, showUnexpectedOnly]
+  );
+
+  // why: the filter must not strand the user on an empty list if the only
+  // unexpected item is removed or the audit reloads without one.
+  useEffect(() => {
+    if (showUnexpectedOnly && unexpectedCount === 0) {
+      setShowUnexpectedOnly(false);
+    }
+  }, [showUnexpectedOnly, unexpectedCount]);
 
   const remainingAssets = useMemo<RemainingAsset[]>(() => {
     if (activeTab !== "remaining") return []; // skip when hidden
@@ -1145,12 +1412,31 @@ function AuditScannerContent() {
             onTabChange={setActiveTab}
             scannedCount={scannedItems.length}
             remainingCount={remainingCount}
+            unexpectedCount={unexpectedCount}
+            unexpectedFilterActive={showUnexpectedOnly}
+            onUnexpectedPress={() => {
+              // The badge sits inside the Scanned tab button, and React Native
+              // gives the press to the inner touchable only, so the parent tab
+              // never fires. Switch the tab here: without it a press from the
+              // Not-scanned tab flips the filter while that list stays on screen.
+              setActiveTab("scanned");
+              setShowUnexpectedOnly((v) => !v);
+            }}
           />
+
+          {/* why: the evidence sheet lives behind a row tap, so name it once
+              the first row exists — on the Scanned tab, where the rows are. */}
+          {activeTab === "scanned" && (
+            <EvidenceCoachmark
+              enabled={scannedItems.length > 0}
+              hasOpenedEvidence={hasOpenedEvidence}
+            />
+          )}
 
           {/* List content */}
           {activeTab === "scanned" ? (
             <ScannedItemsList
-              items={scannedItems}
+              items={visibleScannedItems}
               onItemPress={handleItemPress}
             />
           ) : (
@@ -1183,6 +1469,8 @@ function AuditScannerContent() {
         item={selectedItem}
         auditSessionId={auditId ?? ""}
         onEvidenceAdded={handleEvidenceAdded}
+        onRemoveScan={handleRemoveScan}
+        onEvidenceCounts={handleEvidenceCounts}
       />
     </View>
   );
@@ -1412,9 +1700,10 @@ const useStyles = createStyles((colors, shadows) => ({
     color: "rgba(255,255,255,0.8)",
   },
 
-  // Bottom panel (40%)
+  // Bottom panel (~45%) — the scanned list needs to show more than a row and
+  // a half, otherwise a fresh scan can land below the fold.
   bottomPanel: {
-    flex: 4,
+    flex: 5,
     backgroundColor: colors.backgroundSecondary,
     borderTopLeftRadius: borderRadius.xl,
     borderTopRightRadius: borderRadius.xl,

@@ -32,6 +32,7 @@ import {
   validateBarcodeValue,
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
+import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import {
   deleteKit,
   deleteKitImage,
@@ -47,14 +48,14 @@ import {
 import { createNote } from "~/modules/note/service.server";
 
 import { generateQrObj } from "~/modules/qr/utils.server";
-import { getScanByQrId } from "~/modules/scan/service.server";
-import { parseScanData } from "~/modules/scan/utils.server";
+import { getLastScanForViewer } from "~/modules/scan/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { getUserByID } from "~/modules/user/service.server";
 import dropdownCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -96,6 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
+      canSeeAllCustody,
     } = await requirePermission({
       userId,
       request,
@@ -110,6 +112,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         extraInclude: {
           assetKits: {
             select: {
+              // The membership id is the kit-slice discriminator booked rows
+              // point at (`BookingAsset.assetKitId`). `getKitCurrentBooking`
+              // needs it to tell a booking that took THIS kit from one that
+              // took the same pooled asset through another kit.
+              id: true,
               asset: {
                 select: {
                   id: true,
@@ -126,20 +133,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                       },
                     },
                     select: {
+                      // Kit provenance of the booked slice: `assetKitId` is
+                      // the live membership row it was booked under,
+                      // `sourceKitId` the kit itself, which outlives a detach.
+                      // Both NULL = a standalone free-pool slice that belongs
+                      // to no kit.
+                      assetKitId: true,
+                      sourceKitId: true,
+                      // Per-slice departure markers — the record of whether
+                      // these units are out right now. A booking stays ONGOING
+                      // while other assets are away, so its status alone does
+                      // not say this kit is still gone.
+                      checkedOutAt: true,
+                      checkedInAt: true,
                       booking: {
                         select: {
                           id: true,
                           name: true,
                           from: true,
                           status: true,
-                          custodianTeamMember: true,
+                          // Only what the custody card and the redaction read:
+                          // the names shown, and the ids that recognise a
+                          // booking the viewer holds.
+                          custodianTeamMember: {
+                            select: { name: true, userId: true },
+                          },
                           custodianUser: {
                             select: {
+                              id: true,
                               firstName: true,
                               lastName: true,
                               displayName: true,
                               profilePicture: true,
-                              email: true,
                             },
                           },
                         },
@@ -174,17 +199,42 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * We get the first QR code(for now we can only have 1)
-     * And using the ID of tha qr code, we find the latest scan
+     * And using the ID of tha qr code, we find the latest scan.
+     *
+     * `getLastScanForViewer` applies the `scan:read` gate SERVER-SIDE and
+     * returns null without it. The parsed scan carries the scanner's name and
+     * email, GPS coordinates and user-agent; the component renders
+     * `<ScanDetails>` behind the same check, but a client-side check only
+     * hides the data — BASE and SELF_SERVICE hold `scan: []` and were still
+     * receiving all of it in the page payload.
+     *
+     * The asset route was moved onto this helper in `109d02857`; the kit route
+     * was not, and kept calling `parseScanData` directly.
      */
-    const lastScan = kit.qrCodes[0]?.id
-      ? parseScanData({
-          scan: (await getScanByQrId({ qrId: kit.qrCodes[0].id })) || null,
-          userId,
-        })
-      : null;
+    const lastScan = await getLastScanForViewer({
+      qrId: kit.qrCodes[0]?.id,
+      userId,
+      organizationId,
+      // The caller's FULL role list, mirroring the asset route. Not the single
+      // resolved `role` from requirePermission: passing one role would hand
+      // `hasPermission` a narrower view of the membership than it has, which
+      // is the `roles[0]` trap that bit the mobile audit guards.
+      roles: userOrganizations.find((o) => o.organization.id === organizationId)
+        ?.roles,
+    });
+    // `GET_KIT_STATIC_INCLUDES` selects `custody.custodian.user` down to
+    // `email`, and this route is gated on `kit: read` — held by BASE and
+    // SELF_SERVICE. A kit has ONE custody row, so the helper's object branch
+    // applies here (assets carry an array). The current booking is derived
+    // from the REDACTED kit: it is returned beside the kit, so reading the raw
+    // one would ship the holders the redaction just emptied.
+    const [redactedKit] = redactCustodianForViewer([kit], {
+      canSeeAllCustody,
+      userId,
+    });
     const currentBooking = getKitCurrentBooking({
-      id: kit.id,
-      assets: kit.assetKits.map((ak) => ak.asset),
+      id: redactedKit.id,
+      assetKits: redactedKit.assetKits,
     });
 
     const header: HeaderData = {
@@ -197,7 +247,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return payload({
-      kit,
+      kit: redactedKit,
       currentBooking,
       header,
       modelName,
@@ -389,8 +439,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               });
 
               if (remainingCustody === 0) {
-                await tx.asset.update({
-                  where: { id: assetId, organizationId },
+                // `status: { not: CHECKED_OUT }` — removing an asset from a
+                // custodied kit must not put it back on the shelf while it is
+                // still out on a booking. `Asset.status` is a single column, so
+                // the unguarded write erased `CHECKED_OUT` and the asset stopped
+                // counting as off the shelf. Precedence
+                // (`CHECKED_OUT` > `IN_CUSTODY` > `AVAILABLE`) matches
+                // `reconcileAssetStatusForBookingExit`.
+                await tx.asset.updateMany({
+                  where: {
+                    id: assetId,
+                    organizationId,
+                    status: { not: AssetStatus.CHECKED_OUT },
+                  },
                   data: { status: AssetStatus.AVAILABLE },
                 });
               }
@@ -411,17 +472,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         await emitAssetKitDetachmentNotes({
           impact: detachmentImpact,
-          actorUserId: userId,
-          actorFirstName: user.firstName,
-          actorLastName: user.lastName,
+          actor: { ...user, id: userId },
           organizationId,
         });
 
-        const actor = wrapUserLinkForNote({
-          id: userId,
-          firstName: user.firstName,
-          lastName: user.lastName,
-        });
+        const actor = wrapUserLinkForNote({ ...user, id: userId });
         const kitLink = wrapLinkForNote(`/kits/${kitId}`, kit.name.trim());
 
         // Qty-tracked: name the per-row AssetKit.quantity actually
@@ -629,7 +684,13 @@ export default function KitDetails() {
               booking={currentBooking || undefined}
               hasPermission={userCanViewSpecificCustody({
                 roles,
-                custodianUserId: kit?.custody?.custodian?.user?.id,
+                // The holder the card shows, so a viewer always sees custody
+                // that is their own — including a booking they hold.
+                custodianUserId: getCustodyCardHolderUserId({
+                  custody: kit.custody ? [kit.custody] : null,
+                  booking: currentBooking,
+                  viewerUserId: userId,
+                }),
                 organization: currentOrganization,
                 currentUserId: userId,
               })}

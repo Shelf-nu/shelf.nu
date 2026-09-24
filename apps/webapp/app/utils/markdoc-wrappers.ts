@@ -9,6 +9,7 @@
 import type { AssetType, Category } from "@prisma/client";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
 /**
@@ -176,12 +177,9 @@ export function wrapKitsWithDataForNote(
  * Example: wrapUserLinkForNote({id: "123", firstName: "John", lastName: "Doe"})
  * -> "{% link to=\"/settings/team/users/123\" text=\"John Doe\" /%}"
  */
-export function wrapUserLinkForNote(user: {
-  id: string;
-  displayName?: string | null;
-  firstName?: string | null;
-  lastName?: string | null;
-}): string {
+export function wrapUserLinkForNote(
+  user: UserNameFields & { id: string }
+): string {
   const name = resolveUserDisplayName(user) || "Unknown User";
   return `{% link to="/settings/team/users/${user.id}" text="${name.replace(
     /"/g,
@@ -291,12 +289,7 @@ export function extractAssetsListTags(content: string): Array<{
 export function wrapCustodianForNote(custodian: {
   teamMember: {
     name: string;
-    user?: {
-      id: string;
-      displayName?: string | null;
-      firstName?: string | null;
-      lastName?: string | null;
-    } | null;
+    user?: (UserNameFields & { id: string }) | null;
   };
 }): string {
   const { teamMember } = custodian;

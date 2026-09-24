@@ -39,6 +39,7 @@ import { getParams, payload, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { validateDomains } from "~/utils/sso.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [
   { title: appendToMetaTitle("Organization details") },
@@ -288,7 +289,7 @@ export default function OrgPage() {
         </Button>
         <h3>
           {" "}
-          Owner: {organization.owner.firstName} {organization.owner.lastName} -{" "}
+          Owner: {resolveUserDisplayName(organization.owner)} -{" "}
           {organization.owner.email}
         </h3>
       </div>

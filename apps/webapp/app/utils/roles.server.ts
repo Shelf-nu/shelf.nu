@@ -3,12 +3,20 @@ import { OrganizationRoles, Roles } from "@prisma/client";
 import * as Sentry from "@sentry/react-router";
 import { db } from "~/database/db.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
+import {
+  isSelfServiceOrBaseRole,
+  resolveCanSeeAllBookings,
+} from "./booking-authorization.server";
 import { ShelfError } from "./error";
 import type {
   PermissionAction,
   PermissionEntity,
 } from "./permissions/permission.data";
 import { validatePermission } from "./permissions/permission.validator.server";
+import {
+  ROLE_PRECEDENCE,
+  SSO_ASSIGNABLE_ROLE_PRECEDENCE,
+} from "./role-precedence";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
   try {
@@ -69,62 +77,34 @@ export function resolveEffectiveRole({
   }>;
   organizationId: string;
 }): OrganizationRoles {
-  const roles = userOrganizations.find(
-    (o) => o.organization.id === organizationId
-  )?.roles;
+  const roles =
+    userOrganizations.find((o) => o.organization.id === organizationId)
+      ?.roles ?? [];
 
-  return roles?.[0] ?? OrganizationRoles.BASE;
-}
-
-/**
- * Whether a role is one of the two restricted, "own records only" roles.
- *
- * @param role - Effective role from {@link resolveEffectiveRole}.
- * @returns `true` for SELF_SERVICE and BASE.
- */
-export function isSelfServiceOrBaseRole(role: OrganizationRoles): boolean {
+  // Most privileged, not roles[0]. Both callers use this to decide how much a
+  // user may see — the custodian picker's scope and booking visibility — so a
+  // membership ordered [SELF_SERVICE, ADMIN] would otherwise hand an actual
+  // admin the restricted view. Shares its ordering with SSO group resolution.
   return (
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE
+    ROLE_PRECEDENCE.find((candidate) => roles.includes(candidate)) ??
+    OrganizationRoles.BASE
   );
 }
 
 /**
- * Whether the caller may see bookings they are not the custodian of.
+ * `isSelfServiceOrBaseRole` and `resolveCanSeeAllBookings` are defined in
+ * `booking-authorization.server.ts` and re-exported here for the modules that
+ * import them from this path.
  *
- * ADMIN / OWNER always can. SELF_SERVICE and BASE only can when the workspace
- * has switched the corresponding setting on. This is the standard visibility
- * rule for bookings; every read path that can surface someone else's booking
- * gates on it (`/bookings`, the command palette, CSV export).
- *
- * Exported so callers outside {@link requirePermission} resolve it identically.
- * A surface that invents its own rule ends up disagreeing with the loader that
- * seeded it, which is how a picker's list changes the moment a user types.
- *
- * @param args.role - Effective role from {@link resolveEffectiveRole}.
- * @param args.currentOrganization - Workspace whose override settings apply.
- * @returns `true` when bookings should NOT be restricted to the caller's own.
+ * They live there because the mobile API needs the same rule and cannot import
+ * this module: it pulls in Sentry and the organization service, and through it
+ * Stripe and the mailer. Import them from `booking-authorization.server` in
+ * new code.
  */
-export function resolveCanSeeAllBookings({
-  role,
-  currentOrganization,
-}: {
-  role: OrganizationRoles;
-  currentOrganization: {
-    selfServiceCanSeeBookings: boolean;
-    baseUserCanSeeBookings: boolean;
-  };
-}): boolean {
-  return (
-    // Admin/Owner always can see all
-    !isSelfServiceOrBaseRole(role) ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
-      currentOrganization.selfServiceCanSeeBookings) ||
-    // BASE can see all if org setting allows
-    (role === OrganizationRoles.BASE &&
-      currentOrganization.baseUserCanSeeBookings)
-  );
-}
+export {
+  isSelfServiceOrBaseRole,
+  resolveCanSeeAllBookings,
+} from "./booking-authorization.server";
 
 /**
  * Whether the caller may see custody information for people other than
@@ -251,6 +231,129 @@ export async function requirePermission({
 }
 
 /**
+ * Checks a permission against the organization a route is about, rather than
+ * the one the user currently has selected.
+ *
+ * `requirePermission` judges the caller by their role in the SELECTED
+ * workspace, which is right for routes that act on the workspace the user is
+ * in. A route that names an organization in its params can act on a different
+ * one, and a user's roles differ between workspaces: the owner of the workspace
+ * being edited can be a BASE member of the one they are sitting in. Such a route
+ * must be judged by the role held in the organization it names.
+ *
+ * @param userId - The caller
+ * @param request - The incoming request, used to resolve the caller's memberships
+ * @param organizationId - The organization named by the route, not the selected one
+ * @param entity - The entity the route acts on
+ * @param action - The action the route performs
+ * @returns The caller's memberships and the organizations visible to them
+ * @throws {ShelfError} 403 when the caller is not a member of `organizationId`, or
+ *   their role there does not grant the permission
+ */
+export async function requirePermissionInOrganization({
+  userId,
+  request,
+  organizationId,
+  entity,
+  action,
+}: {
+  userId: string;
+  request: Request;
+  organizationId: string;
+  entity: PermissionEntity;
+  action: PermissionAction;
+}) {
+  const { organizations, userOrganizations } = await getSelectedOrganization({
+    userId,
+    request,
+  });
+
+  // A non-member holds no roles there, which grants nothing. Passing an empty
+  // array rather than `undefined` keeps the check from falling back to a
+  // database lookup that would reach the same answer.
+  const roles =
+    userOrganizations.find((o) => o.organization.id === organizationId)
+      ?.roles ?? [];
+
+  await validatePermission({ roles, action, entity, organizationId, userId });
+
+  Sentry.setUser({ id: userId });
+  Sentry.setTag("organizationId", organizationId);
+
+  return { organizations, userOrganizations };
+}
+
+/**
+ * Whether the user holds OWNER in the given organization.
+ *
+ * Checks membership of the roles ARRAY rather than `resolveEffectiveRole`,
+ * which returns `roles[0]` — a user carrying more than one role could be the
+ * owner without OWNER being first. This mirrors the check the loaders already
+ * use to decide whether to render the purchase UI, so the server gate and the
+ * UI gate cannot disagree.
+ *
+ * @param userOrganizations - The caller's memberships, as returned by `requirePermission`
+ * @param organizationId - The active organization
+ * @returns `true` if the caller owns this workspace
+ */
+export function isOrganizationOwner({
+  userOrganizations,
+  organizationId,
+}: {
+  userOrganizations: Array<{
+    organization: { id: string };
+    roles: OrganizationRoles[];
+  }>;
+  organizationId: string;
+}): boolean {
+  return (
+    userOrganizations
+      .find((o) => o.organization.id === organizationId)
+      ?.roles.includes(OrganizationRoles.OWNER) ?? false
+  );
+}
+
+/**
+ * Asserts the caller owns the workspace.
+ *
+ * `requirePermission(subscription, update)` is NOT sufficient for anything that
+ * spends money or burns a one-time entitlement: ADMIN short-circuits to
+ * allow-all in `hasPermission`, so it passes that gate. The add-on purchase UI
+ * is owner-only, but the actions behind it were not — letting an ADMIN burn the
+ * workspace's single free trial (an irreversible flag) and commit the workspace
+ * to a charge on the owner's card.
+ *
+ * @param userOrganizations - The caller's memberships, as returned by `requirePermission`
+ * @param organizationId - The active organization
+ * @param action - Verb phrase completing "Only the workspace owner can …"
+ * @throws {ShelfError} 403 if the caller is not the owner
+ */
+export function assertIsOrganizationOwner({
+  userOrganizations,
+  organizationId,
+  action,
+}: {
+  userOrganizations: Array<{
+    organization: { id: string };
+    roles: OrganizationRoles[];
+  }>;
+  organizationId: string;
+  action: string;
+}): void {
+  if (!isOrganizationOwner({ userOrganizations, organizationId })) {
+    throw new ShelfError({
+      cause: null,
+      title: "Owner only",
+      message: `Only the workspace owner can ${action}.`,
+      additionalData: { organizationId },
+      label: "Subscription",
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Splits a comma-separated `SsoDetails` group-id field into a normalized list of
  * lower-cased, trimmed, non-empty ids. Mirrors the comma-separated convention
  * already used by `SsoDetails.domain`, so one role can map to several IdP groups
@@ -318,14 +421,22 @@ export function getRoleFromGroupId(
   ssoDetails: SsoDetails,
   groupIds: string[]
 ): OrganizationRoles | null {
-  // We prioritize the admin group. If the user is in several, the highest role wins.
-  if (groupClaimMatches(ssoDetails.adminGroupId, groupIds)) {
-    return OrganizationRoles.ADMIN;
-  } else if (groupClaimMatches(ssoDetails.selfServiceGroupId, groupIds)) {
-    return OrganizationRoles.SELF_SERVICE;
-  } else if (groupClaimMatches(ssoDetails.baseUserGroupId, groupIds)) {
-    return OrganizationRoles.BASE;
-  } else {
-    return null;
-  }
+  // Which SsoDetails field configures the group for each role.
+  const groupField: Record<
+    (typeof SSO_ASSIGNABLE_ROLE_PRECEDENCE)[number],
+    string | null
+  > = {
+    [OrganizationRoles.ADMIN]: ssoDetails.adminGroupId,
+    [OrganizationRoles.SELF_SERVICE]: ssoDetails.selfServiceGroupId,
+    [OrganizationRoles.BASE]: ssoDetails.baseUserGroupId,
+  };
+
+  // Walk in precedence order so the highest matching role wins. The order is
+  // shared with the booking ownership guard (see role-precedence.ts) rather
+  // than restated here, so the two cannot drift.
+  return (
+    SSO_ASSIGNABLE_ROLE_PRECEDENCE.find((role) =>
+      groupClaimMatches(groupField[role], groupIds)
+    ) ?? null
+  );
 }

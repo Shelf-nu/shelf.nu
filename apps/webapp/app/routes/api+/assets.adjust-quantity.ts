@@ -105,6 +105,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           id: true,
           firstName: true,
           lastName: true,
+          displayName: true,
         } satisfies Prisma.UserSelect,
       });
 

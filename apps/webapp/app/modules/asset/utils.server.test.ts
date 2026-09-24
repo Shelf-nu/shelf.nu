@@ -4,6 +4,7 @@ import {
   detectPotentialChanges,
   detectCustomFieldChanges,
   getCustomFieldUpdateNoteContent,
+  getInitialPlacementNoteContent,
   getKitLocationUpdateNoteContent,
   getLocationUpdateNoteContent,
 } from "./utils.server";
@@ -837,5 +838,86 @@ describe("getKitLocationUpdateNoteContent", () => {
     expect(result).toContain("removed 50 units from");
     expect(result).toContain("Office A");
     expect(result.endsWith("via parent kit removal.")).toBe(true);
+  });
+});
+
+describe("getInitialPlacementNoteContent", () => {
+  /** The name-bearing subset both create routes pass through from `asset.user`. */
+  const user = {
+    id: "u1",
+    firstName: "Alex",
+    lastName: "Doe",
+    displayName: null as string | null,
+  };
+
+  it("returns null when the asset was created without a location", () => {
+    // Both routes branch on this, so a wrong answer here means either a missing
+    // placement note or a note about a location the asset does not have.
+    expect(
+      getInitialPlacementNoteContent({
+        user,
+        type: AssetType.INDIVIDUAL,
+        unitOfMeasure: null,
+        assetLocations: [],
+      })
+    ).toBeNull();
+  });
+
+  it("returns null when the pivot row carries no location", () => {
+    expect(
+      getInitialPlacementNoteContent({
+        user,
+        type: AssetType.INDIVIDUAL,
+        unitOfMeasure: null,
+        assetLocations: [{ quantity: 1, location: null }],
+      })
+    ).toBeNull();
+  });
+
+  it("names the primary location for an INDIVIDUAL asset, without a count", () => {
+    const result = getInitialPlacementNoteContent({
+      user,
+      type: AssetType.INDIVIDUAL,
+      unitOfMeasure: null,
+      assetLocations: [
+        { quantity: 1, location: { id: "loc-a", name: "Office A" } },
+      ],
+    });
+
+    expect(result).toContain("set the location to");
+    expect(result).toContain("Office A");
+  });
+
+  it("counts the pivot row's units for a QUANTITY_TRACKED asset", () => {
+    // The multiplier is `AssetLocation.quantity` (units placed here), NOT
+    // `Asset.quantity` — the surface-specific quantity this helper must use.
+    const result = getInitialPlacementNoteContent({
+      user,
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: "boxes",
+      assetLocations: [
+        { quantity: 50, location: { id: "loc-a", name: "Office A" } },
+      ],
+    });
+
+    expect(result).toContain("placed 50 boxes at");
+    expect(result).toContain("Office A");
+  });
+
+  it("names the actor by displayName when they have one", () => {
+    // The drift this extraction exists to prevent: the `displayName` argument is
+    // optional, so a duplicated mapping could silently fall back to first+last
+    // on one route and rename the user relative to every other surface.
+    const result = getInitialPlacementNoteContent({
+      user: { ...user, displayName: "Dr. Smith" },
+      type: AssetType.INDIVIDUAL,
+      unitOfMeasure: null,
+      assetLocations: [
+        { quantity: 1, location: { id: "loc-a", name: "Office A" } },
+      ],
+    });
+
+    expect(result).toContain('text="Dr. Smith"');
+    expect(result).not.toContain("Alex Doe");
   });
 });

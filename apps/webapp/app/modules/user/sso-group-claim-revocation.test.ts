@@ -1,19 +1,18 @@
 /**
- * Regression: an SSO login that drops a workspace's group claim must revoke
- * access the same way the admin "revoke access" UI does.
+ * SSO group-claim reconciliation: an SSO login whose group claims no longer map
+ * to a role in a workspace revokes access the same way the admin "revoke
+ * access" UI does, through `revokeAccessToOrganization`.
  *
- * `reconcileSsoGroupMembership` (formerly `handleSCIMTransition`) used to
- * open-code a bare `userOrganization.delete`. That removed the membership but
- * left the `TeamMember` still linked to the `User`, and left
- * `User.lastSelectedOrganizationId` pointing at a workspace the user could no
- * longer open.
+ * That means the `TeamMember` is disconnected from the `User`, not just the
+ * membership deleted. A linked `TeamMember.user` is what the booking
+ * notification resolver and the `usersOnly` custodian pickers read through
+ * with no membership check, so a revoked person whose row stays linked keeps
+ * receiving that workspace's booking emails and stays pickable as a recipient.
+ * See `~/modules/booking/notification-recipients.server.test.ts` ("revoked SSO
+ * member") for the downstream half.
  *
- * The surviving `TeamMember.user` link is the part that leaks: the booking
- * notification resolver and the `usersOnly` custodian pickers read straight
- * through it with no membership check, so the revoked person kept receiving
- * that workspace's booking emails and stayed pickable as a recipient. See
- * `~/modules/booking/notification-recipients.server.test.ts` ("revoked SSO
- * member") for the downstream half of this regression.
+ * The workspace owner is the exception: a login never revokes the owner, since
+ * that would strand the workspace and lock the owner out on the way in.
  *
  * @see {@link file://./service.server.ts}
  */
@@ -23,31 +22,44 @@ const dbMocks = vi.hoisted(() => ({
   userUpdate: vi.fn(),
   teamMemberFindMany: vi.fn(),
   teamMemberFindFirst: vi.fn(),
-  userOrganizationDelete: vi.fn(),
+  teamMemberCreate: vi.fn(),
+  userOrganizationFindFirst: vi.fn(),
+  userOrganizationDeleteMany: vi.fn(),
   userOrganizationUpdate: vi.fn(),
   userOrganizationUpsert: vi.fn(),
   executeRaw: vi.fn(),
+  queryRaw: vi.fn(),
+  transaction: vi.fn(),
   scimFindUnique: vi.fn(),
 }));
 
-// why: the subject is the set of writes the revocation issues, not what a
+// why: the subject is the set of writes the reconciliation issues, not what a
 // database returns
-vi.mock("~/database/db.server", () => ({
-  db: {
+vi.mock("~/database/db.server", () => {
+  const db = {
     user: { update: dbMocks.userUpdate },
     teamMember: {
       findMany: dbMocks.teamMemberFindMany,
       findFirst: dbMocks.teamMemberFindFirst,
+      create: dbMocks.teamMemberCreate,
     },
     userOrganization: {
-      delete: dbMocks.userOrganizationDelete,
+      findFirst: dbMocks.userOrganizationFindFirst,
+      deleteMany: dbMocks.userOrganizationDeleteMany,
       update: dbMocks.userOrganizationUpdate,
       upsert: dbMocks.userOrganizationUpsert,
     },
     userScimExternalId: { findUnique: dbMocks.scimFindUnique },
     $executeRaw: dbMocks.executeRaw,
-  },
-}));
+    $queryRaw: dbMocks.queryRaw,
+    $transaction: dbMocks.transaction,
+  };
+  // Transaction callbacks run against the same mock client
+  dbMocks.transaction.mockImplementation(
+    (callback: (tx: typeof db) => unknown) => callback(db)
+  );
+  return { db };
+});
 
 // why: the SSO org set is a DB read; the test controls which workspaces (and
 // group mappings) the login reconciles against
@@ -55,13 +67,7 @@ vi.mock("../organization/service.server", () => ({
   getOrganizationsBySsoDomain: vi.fn(),
 }));
 
-// why: the grant branch creates a team member; isolate that side effect
-vi.mock("../team-member/service.server", () => ({
-  createTeamMember: vi.fn(),
-}));
-
 const mockOrg = await import("../organization/service.server");
-const mockTeamMember = await import("../team-member/service.server");
 
 import { updateUserFromSSO } from "./service.server";
 
@@ -83,11 +89,12 @@ function domainOrg() {
 }
 
 /**
- * Signs the user in with `groups`, against a workspace they already belong to.
- * Passing groups that map to no role is the revocation case: the annual IdP
- * cohort rollover that drops someone out of `g-staff`.
+ * Signs the user in with `groups`. `roles` are the ones they hold in the
+ * workspace, or `null` for no membership at all. Groups that map to no role
+ * are the revocation case: the annual IdP cohort rollover that drops someone
+ * out of `g-staff`.
  */
-function login(groups: string[]) {
+function login(groups: string[], roles: string[] | null = ["BASE"]) {
   return updateUserFromSSO(
     { email: EMAIL, userId: USER_ID } as Parameters<
       typeof updateUserFromSSO
@@ -98,7 +105,7 @@ function login(groups: string[]) {
       // every `user.update` call below belongs to the revocation.
       firstName: "Jane",
       lastName: "Doe",
-      userOrganizations: [{ organization: { id: ORG_ID }, roles: ["BASE"] }],
+      userOrganizations: roles ? [{ organization: { id: ORG_ID }, roles }] : [],
     } as unknown as Parameters<typeof updateUserFromSSO>[1],
     { firstName: "Jane", lastName: "Doe", groups }
   );
@@ -114,6 +121,8 @@ describe("SSO group-claim revocation", () => {
     vi.clearAllMocks();
     // @ts-expect-error - vitest mock type
     mockOrg.getOrganizationsBySsoDomain.mockResolvedValue([domainOrg()]);
+    dbMocks.userOrganizationFindFirst.mockResolvedValue({ roles: ["BASE"] });
+    dbMocks.userOrganizationDeleteMany.mockResolvedValue({ count: 1 });
     dbMocks.teamMemberFindMany.mockResolvedValue([{ id: TEAM_MEMBER_ID }]);
     dbMocks.userUpdate.mockResolvedValue({ id: USER_ID });
     dbMocks.userOrganizationUpdate.mockResolvedValue({});
@@ -123,23 +132,23 @@ describe("SSO group-claim revocation", () => {
   it("unlinks the team member as well as deleting the membership", async () => {
     await login(["g-alumni"]);
 
-    // The leak: without the disconnect, `TeamMember.user` still resolves, and
-    // every notification path reads through it with no membership check.
+    // Without the disconnect, `TeamMember.user` still resolves, and every
+    // notification path reads through it with no membership check.
     expect(revokeData().teamMembers).toEqual({
       disconnect: [{ id: TEAM_MEMBER_ID }],
     });
-    expect(revokeData().userOrganizations).toEqual({
-      delete: {
-        userId_organizationId: { userId: USER_ID, organizationId: ORG_ID },
+    expect(dbMocks.userOrganizationDeleteMany).toHaveBeenCalledWith({
+      where: {
+        userId: USER_ID,
+        organizationId: ORG_ID,
+        NOT: { roles: { has: "OWNER" } },
       },
     });
-    // The narrow open-coded delete this path used to take must be gone.
-    expect(dbMocks.userOrganizationDelete).not.toHaveBeenCalled();
   });
 
   it("unlinks every team member linked to the user in the workspace", async () => {
-    // The pre-fix revoke left the row linked, so a later re-grant created a
-    // second one. Unlinking only the first would keep the other leaking.
+    // The schema allows several linked rows per (user, org); unlinking only
+    // one would leave the rest routing notifications to the revoked user.
     dbMocks.teamMemberFindMany.mockResolvedValue([
       { id: TEAM_MEMBER_ID },
       { id: "tm-2" },
@@ -178,32 +187,58 @@ describe("SSO group-claim revocation", () => {
   });
 
   it("still revokes when no team member row is linked", async () => {
-    // NRM-less membership (invite accepted, team member already detached).
-    // The disconnect is skipped; the membership delete must still happen.
+    // Membership with no linked team member: the disconnect is skipped, the
+    // membership delete still happens.
     dbMocks.teamMemberFindMany.mockResolvedValue([]);
 
     await login(["g-alumni"]);
 
     expect(revokeData().teamMembers).toBeUndefined();
-    expect(revokeData().userOrganizations).toEqual({
-      delete: {
-        userId_organizationId: { userId: USER_ID, organizationId: ORG_ID },
-      },
-    });
+    expect(dbMocks.userOrganizationDeleteMany).toHaveBeenCalledTimes(1);
   });
 
   it("fails the login closed when the revocation cannot be applied", async () => {
-    // Deliberate: swallowing this per workspace would leave the user signed in
-    // still holding the access this call exists to remove.
+    // Swallowing this per workspace would leave the user signed in still
+    // holding the access this call exists to remove.
     dbMocks.userUpdate.mockRejectedValue(new Error("connection lost"));
 
     await expect(login(["g-alumni"])).rejects.toThrow();
   });
 
+  it("keeps the workspace owner's access", async () => {
+    const result = await login(["g-alumni"], ["OWNER"]);
+
+    expect(dbMocks.userOrganizationDeleteMany).not.toHaveBeenCalled();
+    expect(dbMocks.userUpdate).not.toHaveBeenCalled();
+    expect(result.transitions[0]).toMatchObject({
+      transitionType: "ROLE_CHANGE",
+      newRole: "OWNER",
+    });
+  });
+
+  it("keeps access when ownership was transferred to the user mid-login", async () => {
+    // `currentRoles` still says BASE, but the owner guard inside
+    // `revokeAccessToOrganization` sees OWNER and refuses. That refusal must
+    // not fail the owner's login.
+    dbMocks.userOrganizationFindFirst.mockResolvedValue({ roles: ["OWNER"] });
+
+    const result = await login(["g-alumni"]);
+
+    expect(dbMocks.userOrganizationDeleteMany).not.toHaveBeenCalled();
+    expect(result.transitions[0]).toMatchObject({
+      transitionType: "ROLE_CHANGE",
+      newRole: "BASE",
+    });
+  });
+
   it("leaves a still-claimed workspace on the role-update path", async () => {
+    dbMocks.queryRaw.mockResolvedValue([{ id: "uo-1" }]);
+    dbMocks.teamMemberFindFirst.mockResolvedValue({ id: TEAM_MEMBER_ID });
+
     await login(["g-staff"]);
 
     expect(dbMocks.userUpdate).not.toHaveBeenCalled();
+    expect(dbMocks.userOrganizationDeleteMany).not.toHaveBeenCalled();
     expect(dbMocks.userOrganizationUpdate).toHaveBeenCalledWith({
       where: {
         userId_organizationId: { userId: USER_ID, organizationId: ORG_ID },
@@ -212,40 +247,25 @@ describe("SSO group-claim revocation", () => {
     });
   });
 
-  describe("re-granting a workspace the user has no membership in", () => {
-    /** Same login, but the user holds no membership in the workspace yet. */
-    function loginWithoutMembership(groups: string[]) {
-      return updateUserFromSSO(
-        { email: EMAIL, userId: USER_ID } as Parameters<
-          typeof updateUserFromSSO
-        >[0],
-        {
-          id: USER_ID,
-          firstName: "Jane",
-          lastName: "Doe",
-          userOrganizations: [],
-        } as unknown as Parameters<typeof updateUserFromSSO>[1],
-        { firstName: "Jane", lastName: "Doe", groups }
-      );
-    }
-
+  describe("granting a workspace the user has no membership in", () => {
     beforeEach(() => {
       dbMocks.scimFindUnique.mockResolvedValue(null);
       dbMocks.userOrganizationUpsert.mockResolvedValue({});
     });
 
-    it("re-uses a team member still linked from an earlier revoke", async () => {
-      // Pre-fix revokes left the team member linked; creating another here is
-      // how one user ended up with four in the same workspace.
+    it("re-uses a team member that is still linked", async () => {
+      // A linked row can outlive the membership (created by another path, or
+      // left by a revoke that did not unlink it); a second one would duplicate
+      // the user as a custodian.
       dbMocks.teamMemberFindFirst.mockResolvedValue({ id: TEAM_MEMBER_ID });
 
-      const result = await loginWithoutMembership(["g-staff"]);
+      const result = await login(["g-staff"], null);
 
       expect(dbMocks.teamMemberFindFirst).toHaveBeenCalledWith({
         where: { userId: USER_ID, organizationId: ORG_ID, deletedAt: null },
         select: { id: true },
       });
-      expect(mockTeamMember.createTeamMember).not.toHaveBeenCalled();
+      expect(dbMocks.teamMemberCreate).not.toHaveBeenCalled();
       expect(dbMocks.userOrganizationUpsert).toHaveBeenCalledTimes(1);
       expect(result.transitions[0]?.transitionType).toBe("ACCESS_GRANTED");
     });
@@ -253,12 +273,11 @@ describe("SSO group-claim revocation", () => {
     it("creates a team member when none is linked", async () => {
       dbMocks.teamMemberFindFirst.mockResolvedValue(null);
 
-      await loginWithoutMembership(["g-staff"]);
+      await login(["g-staff"], null);
 
-      expect(mockTeamMember.createTeamMember).toHaveBeenCalledWith({
-        name: "Jane Doe",
-        organizationId: ORG_ID,
-        userId: USER_ID,
+      expect(dbMocks.teamMemberCreate).toHaveBeenCalledWith({
+        data: { name: "Jane Doe", organizationId: ORG_ID, userId: USER_ID },
+        select: { id: true },
       });
     });
   });
