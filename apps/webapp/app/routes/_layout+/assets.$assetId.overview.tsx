@@ -89,6 +89,7 @@ import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
@@ -154,6 +155,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       canUseBarcodes,
       role,
       canSeeAllCustody,
+      canSeeAllBookings,
     } = await requirePermission({
       userId,
       request,
@@ -335,14 +337,30 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         )[0] ?? null
       : null;
 
-    const topReservedBookingName = topReservedBooking
-      ? (
-          await db.booking.findFirst({
-            where: { id: topReservedBooking.bookingId, organizationId },
-            select: { name: true },
-          })
-        )?.name ?? null
+    /**
+     * The booking is named and linked only for a viewer who may open it, by
+     * the same `canSeeBooking` rule the booking page enforces. Anyone else
+     * still reads the shortfall, without a name or a link that would 403.
+     */
+    const topReservedBookingRow = topReservedBooking
+      ? await db.booking.findFirst({
+          where: { id: topReservedBooking.bookingId, organizationId },
+          select: {
+            name: true,
+            custodianUserId: true,
+            custodianTeamMember: { select: { userId: true } },
+          },
+        })
       : null;
+    const topReservedBookingName =
+      topReservedBookingRow &&
+      canSeeBooking({
+        canSeeAllBookings,
+        booking: topReservedBookingRow,
+        userId,
+      })
+        ? topReservedBookingRow.name
+        : null;
 
     const overCommitment = availabilityAhead
       ? resolveOverCommitment({
@@ -350,13 +368,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           inCustody: availabilityAhead.inCustody,
           inKits: availabilityAhead.inKits,
           peakBooked: availabilityAhead.reserved,
-          topBooking: topReservedBooking
-            ? {
-                id: topReservedBooking.bookingId,
-                name: topReservedBookingName ?? "Untitled booking",
-                units: topReservedBooking._sum.quantity ?? 0,
-              }
-            : null,
+          topBooking:
+            topReservedBooking && topReservedBookingName !== null
+              ? {
+                  id: topReservedBooking.bookingId,
+                  name: topReservedBookingName,
+                  units: topReservedBooking._sum.quantity ?? 0,
+                }
+              : null,
         })
       : null;
 
