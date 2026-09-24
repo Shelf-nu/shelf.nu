@@ -48,6 +48,7 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
     },
     consumptionLog: {
+      findMany: vitest.fn().mockResolvedValue([]),
       groupBy: vitest.fn().mockResolvedValue([]),
     },
   },
@@ -100,6 +101,7 @@ function createMockTx() {
       findMany: vitest.fn().mockResolvedValue([]),
     },
     consumptionLog: {
+      findMany: vitest.fn().mockResolvedValue([]),
       groupBy: vitest.fn().mockResolvedValue([]),
     },
   };
@@ -792,7 +794,10 @@ describe("getAssetAvailabilityBatch", () => {
       assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
       bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
       partialBookingCheckout: { findMany: vitest.fn().mockResolvedValue([]) },
-      consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
+      consumptionLog: {
+        findMany: vitest.fn().mockResolvedValue([]),
+        groupBy: vitest.fn().mockResolvedValue([]),
+      },
     };
   }
 
@@ -1547,7 +1552,10 @@ describe("assertAssetQuantitiesAvailable", () => {
       assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
       bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
       partialBookingCheckout: { findMany: vitest.fn().mockResolvedValue([]) },
-      consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
+      consumptionLog: {
+        findMany: vitest.fn().mockResolvedValue([]),
+        groupBy: vitest.fn().mockResolvedValue([]),
+      },
     };
   }
 
@@ -1753,7 +1761,10 @@ describe("assertAssetQuantityNotBelowReservations", () => {
       custody: { groupBy: vitest.fn().mockResolvedValue([]) },
       assetKit: { groupBy: vitest.fn().mockResolvedValue([]) },
       bookingAsset: { findMany: vitest.fn().mockResolvedValue([]) },
-      consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
+      consumptionLog: {
+        findMany: vitest.fn().mockResolvedValue([]),
+        groupBy: vitest.fn().mockResolvedValue([]),
+      },
     };
   }
 

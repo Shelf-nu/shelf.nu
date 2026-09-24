@@ -476,3 +476,92 @@ export function computeDispatchedUnitsTotalByAsset(args: {
     }),
   });
 }
+
+/**
+ * Units of one asset's slices on ONE active booking that are still off the
+ * shelf: what left, minus what came back or was used up.
+ *
+ * What left, per slice:
+ * - the whole slice when the asset went out with the all-at-once checkout
+ *   (`assetIsCheckedOut` and no session claim names it on this booking), the
+ *   same legacy reading every checked-out reader applies;
+ * - otherwise the larger of the slice's session claims (tagged exactly, untagged
+ *   spread by {@link attributeDispositionsByBookingAsset}, capped at the booked
+ *   quantity) and its stored `checkedOutQuantity`. The stored counter is
+ *   cumulative, so it is the one that still counts a slice sent out a second
+ *   time.
+ *
+ * What came back: the booking's RETURN / CONSUME / LOSS / DAMAGE logs for the
+ * asset. A tagged log lands on its slice. An untagged one is spread standalone
+ * first, each slice taking up to what it still has out. Capping by what left
+ * rather than by the booked quantity is what lets a cumulative departure count
+ * pair with a cumulative return count: a slice sent out twice and returned twice
+ * reads zero, not one trip's worth.
+ *
+ * The result is clamped to `[0, quantity]` per slice.
+ *
+ * @param args.slices - The asset's slices on the booking.
+ * @param args.checkoutClaims - This asset's session claims on the booking, as
+ *   parsed by {@link checkoutSessionsToLogsByAsset}.
+ * @param args.dispositions - This asset's RETURN / CONSUME / LOSS / DAMAGE logs
+ *   on the booking.
+ * @param args.assetIsCheckedOut - Whether `Asset.status` is CHECKED_OUT.
+ * @returns Map keyed by every slice id to the units it still has out.
+ */
+export function computeUnitsStillOutBySlice(args: {
+  slices: Array<{
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutQuantity: number | null;
+  }>;
+  checkoutClaims: CheckoutAttributionLog[];
+  dispositions: CheckoutAttributionLog[];
+  assetIsCheckedOut: boolean;
+}): Map<string, number> {
+  const { slices, checkoutClaims, dispositions, assetIsCheckedOut } = args;
+
+  const claimedBySlice = attributeDispositionsByBookingAsset({
+    bookingAssetRows: slices,
+    consumptionLogs: checkoutClaims,
+  });
+  const assetHasClaims = slices.some(
+    (slice) => (claimedBySlice.get(slice.id) ?? 0) > 0
+  );
+  const isAllAtOnce = assetIsCheckedOut && !assetHasClaims;
+
+  const departedBySlice = new Map<string, number>();
+  for (const slice of slices) {
+    departedBySlice.set(
+      slice.id,
+      isAllAtOnce
+        ? slice.quantity
+        : Math.max(
+            Math.min(slice.quantity, claimedBySlice.get(slice.id) ?? 0),
+            slice.checkedOutQuantity ?? 0
+          )
+    );
+  }
+
+  // Each slice's capacity for untagged returns is what it has out, so the
+  // attributor is handed the departed count in place of the booked quantity.
+  const disposedBySlice = attributeDispositionsByBookingAsset({
+    bookingAssetRows: slices.map((slice) => ({
+      id: slice.id,
+      assetKitId: slice.assetKitId,
+      quantity: departedBySlice.get(slice.id) ?? 0,
+    })),
+    consumptionLogs: dispositions,
+  });
+
+  const stillOut = new Map<string, number>();
+  for (const slice of slices) {
+    const departed = departedBySlice.get(slice.id) ?? 0;
+    const disposed = disposedBySlice.get(slice.id) ?? 0;
+    stillOut.set(
+      slice.id,
+      Math.min(slice.quantity, Math.max(0, departed - disposed))
+    );
+  }
+  return stillOut;
+}
