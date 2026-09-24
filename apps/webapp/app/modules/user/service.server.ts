@@ -805,10 +805,14 @@ export async function updateUserFromSSO(
           );
           transitions.push(transition);
 
-          // Repair an account whose team-member record never got written —
-          // only while a role still maps, since a revoked transition is
-          // removing this user's access rather than restoring it.
-          if (desiredRole) {
+          // Access survives unless the transition revoked it. A workspace
+          // owner keeps access even when no group claim maps to a role.
+          const keptAccess = transition.transitionType !== "ACCESS_REVOKED";
+
+          // Repair an account whose team-member record never got written.
+          // Only while access is kept: a revoked transition is removing this
+          // user's access rather than restoring it.
+          if (keptAccess) {
             await db.$transaction(async (tx) => {
               // `TeamMember` has no uniqueness on (userId, organizationId), so
               // two logins arriving together would both find nothing and both
@@ -838,10 +842,8 @@ export async function updateUserFromSSO(
             });
           }
 
-          // The user keeps access only when a role still maps; a null
-          // desiredRole makes reconcileSsoGroupMembership revoke it, so that
-          // org must not become the post-login landing org.
-          if (desiredRole) {
+          // A revoked org must not become the post-login landing org.
+          if (keptAccess) {
             firstMatchedOrg ??= org;
           }
         } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {

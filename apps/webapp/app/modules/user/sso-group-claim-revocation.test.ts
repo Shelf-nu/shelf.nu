@@ -216,6 +216,17 @@ describe("SSO group-claim revocation", () => {
     });
   });
 
+  it("lands the owner in the workspace they kept", async () => {
+    // The owner keeps access although no group claim maps, so this workspace
+    // is still a valid landing org.
+    dbMocks.queryRaw.mockResolvedValue([{ id: "uo-1" }]);
+    dbMocks.teamMemberFindFirst.mockResolvedValue({ id: TEAM_MEMBER_ID });
+
+    const result = await login(["g-alumni"], ["OWNER"]);
+
+    expect(result.org).toMatchObject({ id: ORG_ID });
+  });
+
   it("keeps access when ownership was transferred to the user mid-login", async () => {
     // `currentRoles` still says BASE, but the owner guard inside
     // `revokeAccessToOrganization` sees OWNER and refuses. That refusal must
