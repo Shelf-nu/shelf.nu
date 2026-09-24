@@ -1,23 +1,23 @@
 /**
  * <WorkspaceLogoField> - unit tests
  *
- * Covers what the user sees next to the "Main image" input:
+ * Covers which picture the workspace forms show next to the "Main image"
+ * input:
  *  - the stored logo, on the versioned `/api/image/<id>?v=<updatedAt ms>` URL
  *    (an unversioned URL would keep serving a replaced logo from cache),
  *  - the placeholder when the workspace has no logo,
  *  - the owner's profile picture on a PERSONAL workspace,
- *  - a local preview of a picked file before it is uploaded, and the current
- *    logo again when the picked file fails validation,
- *  - object URLs released when replaced and on unmount.
+ *  - a picked file's preview, at the logo's size, on both kinds of workspace.
+ * Validation and object URL cleanup are covered by the shared field's tests.
  *
  * @see {@link file://./workspace-logo-field.tsx}
+ * @see {@link file://../forms/image-file-field.test.tsx}
  */
 
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore, Provider } from "jotai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { WorkspaceLogoField } from "./workspace-logo-field";
 
 // why: ProfilePicture reads the signed-in user from the _layout route loader,
@@ -51,13 +51,12 @@ function fileInput() {
 }
 
 /**
- * Builds a PNG `File` of a given byte size.
+ * Builds a small PNG `File` the shared validator accepts.
  *
  * @param name - File name (keep it clean so the validator does not rename it)
- * @param size - Size in bytes; above the 4 MB limit the validator rejects it
  */
-function pngFile(name: string, size = 1024) {
-  return new File([new Uint8Array(size)], name, { type: "image/png" });
+function pngFile(name: string) {
+  return new File([new Uint8Array(1024)], name, { type: "image/png" });
 }
 
 let objectUrlCount = 0;
@@ -117,6 +116,7 @@ describe("WorkspaceLogoField", () => {
 
     expect(URL.createObjectURL).toHaveBeenCalledWith(file);
     expect(logo()).toHaveAttribute("src", "blob:mock-1");
+    expect(logo()).toHaveClass("size-12", "rounded-[4px]", "object-cover");
     // The picked file stays in the input, under the field name the action reads.
     expect(fileInput().name).toBe("image");
     expect(fileInput().files?.[0]).toBe(file);
@@ -129,56 +129,5 @@ describe("WorkspaceLogoField", () => {
     await user.upload(fileInput(), pngFile("new-logo.png"));
 
     expect(logo()).toHaveAttribute("src", "blob:mock-1");
-  });
-
-  it("keeps the current logo when the picked file is rejected", async () => {
-    const user = userEvent.setup();
-    renderField({ imageId: "img_logo", updatedAt: UPDATED_AT });
-
-    await user.upload(
-      fileInput(),
-      pngFile("too-big.png", DEFAULT_MAX_IMAGE_UPLOAD_SIZE + 1)
-    );
-
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
-    expect(fileInput().files).toHaveLength(0);
-    expect(logo()).toHaveAttribute(
-      "src",
-      `/api/image/img_logo?v=${UPDATED_AT.getTime()}`
-    );
-  });
-
-  it("drops an earlier preview when a later pick is rejected", async () => {
-    const user = userEvent.setup();
-    renderField({ imageId: "img_logo", updatedAt: UPDATED_AT });
-
-    await user.upload(fileInput(), pngFile("good.png"));
-    await user.upload(
-      fileInput(),
-      pngFile("too-big.png", DEFAULT_MAX_IMAGE_UPLOAD_SIZE + 1)
-    );
-
-    // Nothing will be uploaded, so the picture is the current logo again.
-    expect(logo()).toHaveAttribute(
-      "src",
-      `/api/image/img_logo?v=${UPDATED_AT.getTime()}`
-    );
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-1");
-  });
-
-  it("releases each object URL when replaced and on unmount", async () => {
-    const user = userEvent.setup();
-    const { unmount } = renderField();
-
-    await user.upload(fileInput(), pngFile("first.png"));
-    await user.upload(fileInput(), pngFile("second.png"));
-
-    expect(logo()).toHaveAttribute("src", "blob:mock-2");
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-1");
-    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:mock-2");
-
-    unmount();
-
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-2");
   });
 });
