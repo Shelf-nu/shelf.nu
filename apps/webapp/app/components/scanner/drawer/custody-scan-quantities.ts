@@ -64,6 +64,17 @@ export function operatorHolderCount(asset: AssetFromQr): number {
   return operatorCustodyRows(asset).length;
 }
 
+/**
+ * Whether any of this asset's units are held because its KIT is in custody.
+ *
+ * Distinguishes "there is nothing to release" from "what is held belongs to
+ * the kit" — two situations that both leave nothing for an asset-level
+ * release, and which need different advice.
+ */
+export function hasKitInheritedCustody(asset: AssetFromQr): boolean {
+  return (asset.custody ?? []).some((row) => row.kitCustodyId != null);
+}
+
 /** Custody rows on the operator axis — see {@link releasableUnits}. */
 function operatorCustodyRows(asset: AssetFromQr) {
   return (asset.custody ?? []).filter((row) => row.kitCustodyId == null);

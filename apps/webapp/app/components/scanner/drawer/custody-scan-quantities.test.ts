@@ -18,6 +18,7 @@ import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import {
   assignableUnits,
   buildQuantitiesPayload,
+  hasKitInheritedCustody,
   operatorHolderCount,
   releasableUnits,
 } from "./custody-scan-quantities";
@@ -119,6 +120,27 @@ describe("operatorHolderCount", () => {
         assetWithCustody([{ quantity: 30, kitCustodyId: "kit-custody-1" }])
       )
     ).toBe(0);
+  });
+});
+
+describe("hasKitInheritedCustody", () => {
+  it("separates units held by the kit from nothing being held", () => {
+    // The two look identical to a release — both leave zero operator units —
+    // but only one should send the operator to the kit's QR.
+    expect(
+      hasKitInheritedCustody(
+        assetWithCustody([{ quantity: 30, kitCustodyId: "kit-custody-1" }])
+      )
+    ).toBe(true);
+    expect(hasKitInheritedCustody(assetWithCustody([]))).toBe(false);
+  });
+
+  it("is false when every row is operator-assigned", () => {
+    expect(
+      hasKitInheritedCustody(
+        assetWithCustody([{ quantity: 8, kitCustodyId: null }])
+      )
+    ).toBe(false);
   });
 });
 

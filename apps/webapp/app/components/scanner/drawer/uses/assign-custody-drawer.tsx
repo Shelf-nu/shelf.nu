@@ -593,22 +593,24 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     }
   );
   return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {asset.title}
-      </p>
+    <div className="flex w-full items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="word-break whitespace-break-spaces font-medium">
+          {asset.title}
+        </p>
 
-      <div className="flex flex-wrap items-center gap-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          asset
-        </span>
-        <AssetAvailabilityLabels />
+        <div className="flex flex-wrap items-center gap-1">
+          <span
+            className={tw(
+              "inline-block bg-gray-50 px-[6px] py-[2px]",
+              "rounded-md border border-gray-200",
+              "text-xs text-gray-700"
+            )}
+          >
+            asset
+          </span>
+          <AssetAvailabilityLabels />
+        </div>
       </div>
 
       {/* Quantity-tracked rows hand over a number of units, not the whole

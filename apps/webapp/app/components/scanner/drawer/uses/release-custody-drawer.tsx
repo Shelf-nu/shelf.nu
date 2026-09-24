@@ -18,6 +18,7 @@ import { Form } from "~/components/custom-form";
 import { CheckmarkIcon } from "~/components/icons/library";
 import {
   buildQuantitiesPayload,
+  hasKitInheritedCustody,
   operatorHolderCount,
   releasableUnits,
 } from "~/components/scanner/drawer/custody-scan-quantities";
@@ -132,18 +133,34 @@ export default function ReleaseCustodyDrawer({
    * Quantity-tracked rows a release can never act on, split by why.
    *
    * A release scan names no custodian, so the route resolves the single
-   * operator holder and refuses anything else. Both of these reach that
-   * refusal, and one of them reaches it silently: a row with nothing
+   * operator holder and refuses anything else. All of these reach that
+   * refusal, and the first two reach it silently: a row with nothing
    * operator-held renders no quantity input, so it is submitted as a whole
    * asset and skipped with the rest of the quantity-tracked batch, reporting
    * success while doing nothing.
    *
-   * Units held through a kit are not counted — they go back with the kit.
+   * "Held by the kit" and "held by nobody" are separated because the advice
+   * differs — one is redirected to the kit's QR, the other has nothing to
+   * release at all — and telling an operator to scan a kit for an asset that
+   * simply is not in custody sends them looking for a kit that has it.
    */
+  const qtyAssetsHeldViaKitOnly = assets
+    .filter(
+      (asset) =>
+        !!asset &&
+        isQuantityTracked(asset) &&
+        operatorHolderCount(asset) === 0 &&
+        hasKitInheritedCustody(asset)
+    )
+    .map((asset) => asset.id);
+
   const qtyAssetsWithNothingHeld = assets
     .filter(
       (asset) =>
-        !!asset && isQuantityTracked(asset) && operatorHolderCount(asset) === 0
+        !!asset &&
+        isQuantityTracked(asset) &&
+        operatorHolderCount(asset) === 0 &&
+        !hasKitInheritedCustody(asset)
     )
     .map((asset) => asset.id);
 
@@ -190,16 +207,27 @@ export default function ReleaseCustodyDrawer({
   // Create blockers configuration
   const blockerConfigs = [
     {
+      condition: qtyAssetsHeldViaKitOnly.length > 0,
+      count: qtyAssetsHeldViaKitOnly.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> held
+          through a kit.
+        </>
+      ),
+      description: "Scan the kit's QR to release the whole kit from custody.",
+      onResolve: () => removeAssetsFromList(qtyAssetsHeldViaKitOnly),
+    },
+    {
       condition: qtyAssetsWithNothingHeld.length > 0,
       count: qtyAssetsWithNothingHeld.length,
       message: (count: number) => (
         <>
           <strong>{`${count} asset${count > 1 ? "s have" : " has"}`}</strong> no
-          units in anyone's custody.
+          units in custody.
         </>
       ),
-      description:
-        "Units held through a kit are released by scanning the kit's QR.",
+      description: "There is nothing to release for them.",
       onResolve: () => removeAssetsFromList(qtyAssetsWithNothingHeld),
     },
     {
@@ -268,6 +296,7 @@ export default function ReleaseCustodyDrawer({
     blockerConfigs,
     onResolveAll: () => {
       removeAssetsFromList([
+        ...qtyAssetsHeldViaKitOnly,
         ...qtyAssetsWithNothingHeld,
         ...qtyAssetsWithSeveralHolders,
         ...assetsNotInCustody,
@@ -533,22 +562,24 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   );
 
   return (
-    <div className="flex flex-col gap-1">
-      <p className="word-break whitespace-break-spaces font-medium">
-        {asset.title}
-      </p>
+    <div className="flex w-full items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="word-break whitespace-break-spaces font-medium">
+          {asset.title}
+        </p>
 
-      <div className="flex flex-wrap items-center gap-1">
-        <span
-          className={tw(
-            "inline-block bg-gray-50 px-[6px] py-[2px]",
-            "rounded-md border border-gray-200",
-            "text-xs text-gray-700"
-          )}
-        >
-          asset
-        </span>
-        <AssetAvailabilityLabels />
+        <div className="flex flex-wrap items-center gap-1">
+          <span
+            className={tw(
+              "inline-block bg-gray-50 px-[6px] py-[2px]",
+              "rounded-md border border-gray-200",
+              "text-xs text-gray-700"
+            )}
+          >
+            asset
+          </span>
+          <AssetAvailabilityLabels />
+        </div>
       </div>
 
       {/* Quantity-tracked rows hand back a number of units, not the whole
