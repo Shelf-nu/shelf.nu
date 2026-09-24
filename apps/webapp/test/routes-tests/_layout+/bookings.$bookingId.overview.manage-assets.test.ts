@@ -191,6 +191,7 @@ describe("manage-assets route validation", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      access: {} as any,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -1205,6 +1206,7 @@ describe("manage-assets loader — Models tab payload", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      access: {} as any,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -1467,6 +1469,7 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
+      access: {} as any,
     });
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "booking123",

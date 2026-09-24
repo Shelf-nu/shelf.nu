@@ -25,6 +25,8 @@ import {
   type PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
+import { resolveRoleAccess } from "~/utils/permissions/role-access";
 import {
   assertCanUseBookings,
   canUseAudits,
@@ -152,6 +154,12 @@ export async function requireMobileAuth(request: Request) {
  * no longer valid) so the app can distinguish "the server picked for me" from
  * "I chose this workspace" without re-deriving the hierarchy.
  *
+ * Each organization also carries the four workspace visibility toggles
+ * (`selfServiceCanSeeBookings`, `baseUserCanSeeBookings`,
+ * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`), so the companion can
+ * resolve the same `RoleAccess` the server does for that workspace via
+ * `resolveRoleAccess`.
+ *
  * @param userId - the authenticated user
  * @returns organizations in landing order, plus the explicit last-selected id
  */
@@ -175,6 +183,13 @@ export async function getUserOrganizations(userId: string) {
           imageId: true,
           barcodesEnabled: true,
           auditsEnabled: true,
+          // why: the four workspace visibility toggles a RoleAccess resolves
+          // against. Without them here the companion has no way to widen a
+          // restricted role's own-scope for a given workspace.
+          selfServiceCanSeeBookings: true,
+          baseUserCanSeeBookings: true,
+          selfServiceCanSeeCustody: true,
+          baseUserCanSeeCustody: true,
         },
       },
     },
@@ -339,6 +354,12 @@ export async function getMobileUserContext(
    * the role's permission grant.
    */
   canSeeAllBookings: boolean;
+  /**
+   * The caller's reach, folding this membership's policy with the
+   * workspace's visibility toggles. Every mobile loader and action reads
+   * this instead of re-deriving the same decision from `effectiveRole`.
+   */
+  access: RoleAccess;
 }> {
   const userOrg = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
@@ -398,6 +419,10 @@ export async function getMobileUserContext(
     canSeeAllBookings: resolveCanSeeAllBookings({
       role: effectiveRole,
       currentOrganization: userOrg.organization,
+    }),
+    access: resolveRoleAccess({
+      roles: userOrg.roles,
+      workspace: userOrg.organization,
     }),
   };
 }

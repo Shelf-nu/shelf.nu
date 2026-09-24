@@ -61,6 +61,7 @@ import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
 import { payload, error } from "~/utils/http.server";
 import { skipRevalidationOnClientViewChange } from "~/utils/list-view-params";
+import { resolveRoleAccess } from "~/utils/permissions/role-access";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {
@@ -212,6 +213,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    // The caller's reach in the current organization: the one object every
+    // client component reads (via useRoleAccess), instead of re-deriving a
+    // role decision the server already resolved.
+    const roleAccess = resolveRoleAccess({
+      roles: currentOrganizationUserRoles,
+      workspace: currentOrganization,
+    });
+
     // Run booking settings, working hours, and unread count in parallel —
     // all only depend on organizationId/userId which are available now.
     const [bookingSettings, workingHours, unreadUpdatesCount] =
@@ -235,6 +244,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         workingHours,
         currentOrganization,
         currentOrganizationUserRoles,
+        roleAccess,
         subscription,
         enablePremium: config.enablePremiumFeatures,
         hideNoticeCard: userPrefsCookie.hideNoticeCard,

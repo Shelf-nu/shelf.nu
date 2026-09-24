@@ -7,13 +7,24 @@
  * comma-separated multi-value fields, whitespace trimming, and case-insensitive
  * matching — while preserving ADMIN > SELF_SERVICE > BASE precedence.
  *
+ * Also covers `requirePermission`'s `access` field: the `RoleAccess` object
+ * folds the membership's policy with the workspace's visibility toggles, so
+ * every loader and action asks one object instead of re-deriving the same
+ * decision per call site.
+ *
  * @see {@link file://./roles.server.ts}
  */
 import type { SsoDetails } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getSelectedOrganization } from "~/modules/organization/context.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 import {
   getRoleFromGroupId,
+  requirePermission,
   resolveCanSeeAllCustody,
   resolveEffectiveRole,
 } from "./roles.server";
@@ -24,6 +35,24 @@ import {
 // run. getRoleFromGroupId never touches the db, so we stub the module out entirely
 // (same pattern as modules/auth/mobile-sso.server.test.ts).
 vi.mock("~/database/db.server", () => ({ db: {} }));
+
+// why: requirePermission resolves the caller's memberships and the active
+// workspace through getSelectedOrganization (cookie + db lookups); mocking it
+// lets these tests hand it a membership shape directly.
+vi.mock("~/modules/organization/context.server", () => ({
+  getSelectedOrganization: vi.fn(),
+}));
+
+// why: validatePermission is the matrix gate that runs before access is
+// resolved. These tests exercise the access computation that follows it, so
+// the gate is stubbed to always permit.
+vi.mock("~/utils/permissions/permission.validator.server", () => ({
+  validatePermission: vi.fn().mockResolvedValue(true),
+}));
+
+// why: requirePermission tags the Sentry scope with the caller and the
+// organization; no Sentry client exists under `pnpm test:run`.
+vi.mock("@sentry/react-router", () => ({ setUser: vi.fn(), setTag: vi.fn() }));
 
 /** Builds a minimal SsoDetails; only the three group-id fields are read by the resolver. */
 function makeSso(overrides: Partial<SsoDetails>): SsoDetails {
@@ -236,5 +265,69 @@ describe("resolveEffectiveRole", () => {
         organizationId: "another-org",
       })
     ).toBe(OrganizationRoles.BASE);
+  });
+});
+
+describe("requirePermission: access", () => {
+  const ORG_ID = "org-1";
+  const getSelectedOrganizationMock = vi.mocked(getSelectedOrganization);
+
+  /** Workspace with every visibility toggle off unless stated. */
+  function workspace(overrides: Partial<Record<string, boolean>> = {}) {
+    return {
+      id: ORG_ID,
+      barcodesEnabled: false,
+      auditsEnabled: false,
+      selfServiceCanSeeCustody: false,
+      baseUserCanSeeCustody: false,
+      selfServiceCanSeeBookings: false,
+      baseUserCanSeeBookings: false,
+      ...overrides,
+    };
+  }
+
+  /** Points getSelectedOrganization at a caller holding `roles` in ORG_ID. */
+  function actAs(
+    roles: OrganizationRoles[],
+    workspaceOverrides: Partial<Record<string, boolean>> = {}
+  ) {
+    const currentOrganization = workspace(workspaceOverrides);
+    getSelectedOrganizationMock.mockResolvedValue({
+      organizationId: ORG_ID,
+      organizations: [currentOrganization],
+      userOrganizations: [{ organization: { id: ORG_ID }, roles }],
+      currentOrganization,
+      cookieRefreshNeeded: false,
+    } as never);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("resolves access from the membership's highest role, not roles[0]", async () => {
+    actAs([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]);
+
+    const result = await requirePermission({
+      userId: "user-1",
+      request: new Request("http://localhost/test"),
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
+
+    expect(result.access.role).toBe("ADMIN");
+  });
+
+  it("widens access.custody.seeAll when the matching workspace override is on", async () => {
+    actAs([OrganizationRoles.BASE], { baseUserCanSeeCustody: true });
+
+    const result = await requirePermission({
+      userId: "user-1",
+      request: new Request("http://localhost/test"),
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
+
+    expect(result.access.custody.seeAll).toBe(true);
   });
 });

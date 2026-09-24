@@ -12,6 +12,12 @@
  * override passes it explicitly:
  *
  *     mobileUserContext({ roles: ["BASE"], canSeeAllBookings: true })
+ *
+ * `access` is folded from `roles` with every workspace toggle off, since this
+ * helper's `overrides` carry pre-resolved outcomes (`canSeeAllCustody`,
+ * `canSeeAllBookings`), not raw per-role toggle inputs. A test asserting on
+ * `access.bookings.seeAll` / `access.custody.seeAll` under a widened override
+ * builds that `RoleAccess` itself via `resolveRoleAccess`.
  */
 
 import { OrganizationRoles } from "@prisma/client";
@@ -19,6 +25,7 @@ import {
   isSelfServiceOrBaseRole,
   resolveMostPrivilegedRole,
 } from "~/utils/booking-authorization.server";
+import { resolveRoleAccess } from "~/utils/permissions/role-access";
 
 export function mobileUserContext(
   overrides: {
@@ -42,5 +49,17 @@ export function mobileUserContext(
     canUseAudits: overrides.canUseAudits ?? true,
     canSeeAllCustody: overrides.canSeeAllCustody ?? !restricted,
     canSeeAllBookings: overrides.canSeeAllBookings ?? !restricted,
+    // The membership's resolved reach, with every workspace toggle off (see
+    // the file-level doc for why this default cannot read the overrides
+    // above).
+    access: resolveRoleAccess({
+      roles,
+      workspace: {
+        selfServiceCanSeeBookings: false,
+        baseUserCanSeeBookings: false,
+        selfServiceCanSeeCustody: false,
+        baseUserCanSeeCustody: false,
+      },
+    }),
   };
 }

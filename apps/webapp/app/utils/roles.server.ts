@@ -13,6 +13,7 @@ import type {
   PermissionEntity,
 } from "./permissions/permission.data";
 import { validatePermission } from "./permissions/permission.validator.server";
+import { resolveRoleAccess } from "./permissions/role-access";
 import {
   ROLE_PRECEDENCE,
   SSO_ASSIGNABLE_ROLE_PRECEDENCE,
@@ -216,6 +217,15 @@ export async function requirePermission({
   // Determine if user can use audits based on organization settings
   const canUseAudits = currentOrganization.auditsEnabled ?? false;
 
+  // The caller's reach: one object every loader and action reads, instead of
+  // re-deriving it from the role. Folds this membership's policy with the
+  // workspace's visibility toggles.
+  const access = resolveRoleAccess({
+    roles: userOrganizations.find((o) => o.organization.id === organizationId)
+      ?.roles,
+    workspace: currentOrganization,
+  });
+
   return {
     organizations,
     organizationId,
@@ -227,6 +237,7 @@ export async function requirePermission({
     canSeeAllCustody,
     canUseBarcodes,
     canUseAudits,
+    access,
   };
 }
 

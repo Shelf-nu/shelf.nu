@@ -165,4 +165,24 @@ describe("getMobileUserContext — booking visibility", () => {
     // The legacy field is deliberately left alone; callers still read it.
     expect(ctx.role).toBe(OrganizationRoles.SELF_SERVICE);
   });
+
+  it("returns access resolved from the membership's highest role and the toggles", async () => {
+    membership([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]);
+
+    const ctx = await getMobileUserContext("user-1", "org-1");
+
+    expect(ctx.access.role).toBe("ADMIN");
+    expect(ctx.access.bookings.writeAll).toBe(true);
+  });
+
+  it("a restricted membership's see-toggle widens access.bookings.seeAll only", async () => {
+    membership([OrganizationRoles.SELF_SERVICE], {
+      selfServiceCanSeeBookings: true,
+    });
+
+    const ctx = await getMobileUserContext("user-1", "org-1");
+
+    expect(ctx.access.bookings.seeAll).toBe(true);
+    expect(ctx.access.bookings.writeAll).toBe(false);
+  });
 });
