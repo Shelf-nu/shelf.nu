@@ -19,10 +19,13 @@ import {
 import { getOrganizationById } from "../organization/service.server";
 
 /**
- * Derive the default asset index mode for a given organization role.
- * BASE and SELF_SERVICE should remain in simple mode; elevated roles default to advanced.
+ * The asset index mode a user gets before saving a preference of their own.
+ * Exported for the effective-access characterization fixture.
+ *
+ * @param role - The membership's effective role
+ * @returns SIMPLE for restricted roles, ADVANCED otherwise
  */
-function getDefaultModeForRole(
+export function getDefaultModeForRole(
   role?: OrganizationRoles | null
 ): AssetIndexMode {
   if (
