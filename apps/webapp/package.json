@@ -170,7 +170,7 @@
     "@typescript-eslint/eslint-plugin": "^8.58.1",
     "@typescript-eslint/parser": "^8.58.1",
     "@vitejs/plugin-react": "^5.2.0",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "^5.0.1",
     "autoprefixer": "^10.4.27",
     "cross-env": "^10.1.0",
     "dotenv-cli": "^11.0.0",
@@ -202,7 +202,7 @@
     "vite": "^7.3.5",
     "vite-plugin-cjs-interop": "^2.4.4",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^2.1.9"
+    "vitest": "^5.0.1"
   },
   "engines": {
     "node": ">=22.20.0"

@@ -6,6 +6,7 @@ import {
   KitStatus,
 } from "@prisma/client";
 import { onTestFinished } from "vitest";
+import type { Mock } from "vitest";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
@@ -2341,8 +2342,10 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         const assetKitFindMany = db.assetKit.findMany as ReturnType<
           typeof vitest.fn
         >;
-        const bookingAssetFindMany = db.bookingAsset.findMany as ReturnType<
-          typeof vitest.fn
+        const bookingAssetFindMany = db.bookingAsset.findMany as Mock<
+          (args?: {
+            where?: { assetKitId?: { in?: string[] } | null };
+          }) => Promise<unknown[]>
         >;
         const priorAssetKit = assetKitFindMany.getMockImplementation();
         const priorBookingAsset = bookingAssetFindMany.getMockImplementation();

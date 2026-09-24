@@ -25,6 +25,9 @@ export default defineConfig({
     // default. Tests keep the default `testTimeout`, so a slow test body still
     // fails fast.
     hookTimeout: 30_000,
+    // Persists transformed modules under node_modules so later runs and
+    // other Vitest processes reuse them instead of re-transforming.
+    fsModuleCache: true,
     // `vitest --changed` (behind `test:changed` and `validate`) picks tests
     // through the import graph. The CSV and mobile-auth contract tests find
     // their routes with `readdirSync` instead of importing them, so no graph
@@ -59,8 +62,8 @@ export default defineConfig({
     ],
     coverage: {
       reporter: ["text", "json", "html"],
+      // Also reports files no test imports, so untested modules show as 0%.
       include: ["app/**/*.{js,ts}"],
-      all: true,
     },
   },
 } as UserConfig);
