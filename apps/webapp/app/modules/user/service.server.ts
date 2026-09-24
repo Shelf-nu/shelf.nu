@@ -692,11 +692,21 @@ export async function updateUserFromSSO(
             roles: [desiredRole],
           });
 
-          await createTeamMember({
-            name: `${firstName} ${lastName}`,
-            organizationId: org.id,
-            userId,
+          // Re-granting access must not duplicate the team member. A revoke
+          // issued before revocation unlinked team members left the old row
+          // linked, so re-use it instead of creating a second one.
+          const linkedTeamMember = await db.teamMember.findFirst({
+            where: { userId, organizationId: org.id, deletedAt: null },
+            select: { id: true },
           });
+
+          if (!linkedTeamMember) {
+            await createTeamMember({
+              name: `${firstName} ${lastName}`,
+              organizationId: org.id,
+              userId,
+            });
+          }
 
           transitions.push({
             userId,
@@ -1484,18 +1494,21 @@ export async function revokeAccessToOrganization({
      * 1. Remove relation between user and team member
      * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
      */
-    const teamMember = await db.teamMember.findFirst({
+    // Disconnect EVERY linked team member, not just the first. Nothing enforces
+    // one per (user, org): the old SSO revoke left the row linked, so a later
+    // re-grant created a second one. Unlinking only one would leave the other
+    // still routing booking emails and recipient pickers to this user.
+    const teamMembers = await db.teamMember.findMany({
       where: { userId, organizationId },
+      select: { id: true },
     });
 
     const result = await db.user.update({
       where: { id: userId },
       data: {
-        ...(teamMember?.id && {
+        ...(teamMembers.length > 0 && {
           teamMembers: {
-            disconnect: {
-              id: teamMember.id,
-            },
+            disconnect: teamMembers.map(({ id }) => ({ id })),
           },
         }),
         userOrganizations: {
