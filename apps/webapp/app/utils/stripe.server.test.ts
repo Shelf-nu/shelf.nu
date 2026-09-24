@@ -621,7 +621,44 @@ describe("customerHasOtherActiveAddonSubscription", () => {
     await expect(customerHasOtherActiveAddonSubscription(args)).resolves.toBe(
       true
     );
-    expect(mockSubscriptionsList).toHaveBeenCalledWith({ customer: "cus_1" });
+    expect(mockSubscriptionsList).toHaveBeenCalledWith({
+      customer: "cus_1",
+      limit: 100,
+    });
+  });
+
+  it("finds a covering subscription on a later page of the list", async () => {
+    const pageOne = Array.from({ length: 10 }, (_, index) => ({
+      id: `sub_${index}`,
+      status: "active",
+      metadata: { organizationId: "org_1" },
+      items: { data: [teamItem] },
+    }));
+    const covering = {
+      id: "sub_addon",
+      status: "active",
+      metadata: { organizationId: "org_1" },
+      items: { data: [barcodesItem] },
+    };
+    mockSubscriptionsList
+      .mockResolvedValueOnce({
+        data: pageOne.map(({ id }) => ({ id })),
+        has_more: true,
+      })
+      .mockResolvedValueOnce({ data: [{ id: covering.id }], has_more: false });
+    const all = [...pageOne, covering];
+    mockSubscriptionsRetrieve.mockImplementation((id: string) =>
+      Promise.resolve(all.find((sub) => sub.id === id))
+    );
+
+    await expect(customerHasOtherActiveAddonSubscription(args)).resolves.toBe(
+      true
+    );
+    expect(mockSubscriptionsList).toHaveBeenNthCalledWith(2, {
+      customer: "cus_1",
+      limit: 100,
+      starting_after: "sub_9",
+    });
   });
 
   it("ignores the subscription that raised the event", async () => {

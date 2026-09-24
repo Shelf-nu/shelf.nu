@@ -385,15 +385,27 @@ export const getCustomerSubscriptionsWithProducts = async (
   try {
     if (!stripe) return [];
 
-    // First, get the list of subscription IDs
-    const subscriptionsList = await stripe.subscriptions.list({
-      customer: customerId,
-    });
+    // First, get the list of subscription IDs, page by page: Stripe hands out
+    // 10 per page by default, and a customer with several workspaces can hold
+    // more subscriptions than one page.
+    const listed: Stripe.Subscription[] = [];
+    let startingAfter: string | undefined;
+    do {
+      const page = await stripe.subscriptions.list({
+        customer: customerId,
+        limit: 100,
+        ...(startingAfter && { starting_after: startingAfter }),
+      });
+      listed.push(...page.data);
+      startingAfter = page.has_more
+        ? page.data[page.data.length - 1]?.id
+        : undefined;
+    } while (startingAfter);
 
     // Then fetch each subscription individually with product expansion
     // (Stripe limits list expansion to 4 levels, but retrieve allows it)
     const subscriptions = await Promise.all(
-      subscriptionsList.data.map((sub) =>
+      listed.map((sub) =>
         stripe.subscriptions.retrieve(sub.id, {
           expand: ["items.data.price.product"],
         })

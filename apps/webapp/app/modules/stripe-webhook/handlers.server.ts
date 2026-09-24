@@ -17,6 +17,7 @@ import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import {
+  customerHasOtherActiveAddonSubscription,
   customerHasPaymentMethod,
   fetchStripeSubscription,
   getCustomerActiveSubscription,
@@ -91,7 +92,8 @@ async function syncBundledAddons({
  *
  * Stripe lists the pre-update line items in `previous_attributes.items`. An
  * add-on item that was there and is gone now has been dropped from the
- * subscription, which for the workspace is the same as cancelling it.
+ * subscription, which for the workspace is the same as cancelling it, unless
+ * another live subscription of the customer still carries the add-on.
  *
  * @param args.event - The `customer.subscription.updated` event
  * @param args.subscription - The subscription as it is after the update
@@ -140,10 +142,25 @@ async function disableAddonsRemovedFromSubscription({
       continue;
     }
     if (product.metadata?.product_type !== "addon") continue;
-    if (product.metadata.addon_type === "audits") removed.auditsEnabled = false;
-    if (product.metadata.addon_type === "barcodes") {
-      removed.barcodesEnabled = false;
-    }
+    const addonType = product.metadata.addon_type;
+    if (addonType !== "audits" && addonType !== "barcodes") continue;
+
+    // A standalone add-on subscription bought next to the bundled one, for
+    // instance, may still pay for the add-on.
+    const customerId =
+      typeof subscription.customer === "string"
+        ? subscription.customer
+        : subscription.customer.id;
+    const coveredElsewhere = await customerHasOtherActiveAddonSubscription({
+      customerId,
+      organizationId,
+      addonType,
+      exceptSubscriptionId: subscription.id,
+    });
+    if (coveredElsewhere) continue;
+
+    if (addonType === "audits") removed.auditsEnabled = false;
+    if (addonType === "barcodes") removed.barcodesEnabled = false;
   }
 
   if (Object.keys(removed).length === 0) return;

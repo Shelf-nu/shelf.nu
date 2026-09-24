@@ -44,17 +44,28 @@ vi.mock("~/database/db.server", () => ({
 
 // why: the Stripe SDK makes external API calls. Only the client is replaced:
 // `~/utils/stripe.server` stays real, so its event parser resolves line items
-// to tier and add-on products through this product lookup. The SDK's error
-// classes are kept so the handlers can tell a missing product from a
-// transient failure.
-const { mockProductsRetrieve } = vi.hoisted(() => ({
+// to tier and add-on products through this product lookup, and the check for
+// the customer's other subscriptions runs through this subscription list. The
+// SDK's error classes are kept so the handlers can tell a missing product
+// from a transient failure.
+const {
+  mockProductsRetrieve,
+  mockSubscriptionsList,
+  mockSubscriptionsRetrieve,
+} = vi.hoisted(() => ({
   mockProductsRetrieve: vi.fn(),
+  mockSubscriptionsList: vi.fn(),
+  mockSubscriptionsRetrieve: vi.fn(),
 }));
 vi.mock("stripe", async (importOriginal) => {
   const actual = await importOriginal<{ default: typeof Stripe }>();
   const client = {
     products: { retrieve: mockProductsRetrieve },
-    subscriptions: { update: vi.fn() },
+    subscriptions: {
+      list: mockSubscriptionsList,
+      retrieve: mockSubscriptionsRetrieve,
+      update: vi.fn(),
+    },
   };
   return {
     ...actual,
@@ -224,6 +235,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockUserUpdate.mockResolvedValue({ id: "user-1" });
   mockOrgUpdate.mockResolvedValue({ id: "org-1" });
+  // The customer holds no other subscription unless a test says otherwise.
+  mockSubscriptionsList.mockResolvedValue({ data: [], has_more: false });
   mockProductsRetrieve.mockImplementation((productId: string) => {
     const product = PRODUCTS[productId];
     return product
@@ -409,6 +422,37 @@ describe("handleSubscriptionUpdated", () => {
     });
     // The add-on is no longer on the subscription, so its handler is not run.
     expect(mockBarcodeAddonWebhook).not.toHaveBeenCalled();
+  });
+
+  it("keeps a removed add-on on while another live subscription still carries it", async () => {
+    const subscription = buildSubscription({ productIds: [TEAM_PRODUCT] });
+    const standalone = {
+      id: "sub_standalone",
+      status: "active",
+      metadata: { organizationId: "org-1" },
+      items: { data: [{ price: { product: PRODUCTS[BARCODES_PRODUCT] } }] },
+    };
+    mockSubscriptionsList.mockResolvedValue({
+      data: [{ id: standalone.id }],
+      has_more: false,
+    });
+    mockSubscriptionsRetrieve.mockResolvedValue(standalone);
+
+    await handleSubscriptionUpdated(
+      buildEvent("customer.subscription.updated", subscription, {
+        items: {
+          data: buildSubscription({
+            productIds: [TEAM_PRODUCT, BARCODES_PRODUCT],
+          }).items.data,
+        },
+      }),
+      user
+    );
+
+    expect(mockSubscriptionsList).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: "cus_1" })
+    );
+    expect(mockOrgUpdate).not.toHaveBeenCalled();
   });
 
   it("ignores item updates that keep the same products", async () => {
