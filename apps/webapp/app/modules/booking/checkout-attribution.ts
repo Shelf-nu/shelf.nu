@@ -481,15 +481,14 @@ export function computeDispatchedUnitsTotalByAsset(args: {
  * Units of one asset's slices on ONE active booking that are still off the
  * shelf: what left, minus what came back or was used up.
  *
- * What left, per slice:
- * - the whole slice when the asset went out with the all-at-once checkout
- *   (`assetIsCheckedOut` and no session claim names it on this booking), the
- *   same legacy reading every checked-out reader applies;
- * - otherwise the larger of the slice's session claims (tagged exactly, untagged
- *   spread by {@link attributeDispositionsByBookingAsset}, capped at the booked
- *   quantity) and its stored `checkedOutQuantity`. The stored counter is
- *   cumulative, so it is the one that still counts a slice sent out a second
- *   time.
+ * What left, per slice, is the larger of two records:
+ * - one trip's worth: the whole slice when the asset went out with the
+ *   all-at-once checkout (`assetIsCheckedOut` and no session claim names it on
+ *   this booking), the same legacy reading every checked-out reader applies;
+ *   otherwise the slice's session claims (tagged exactly, untagged spread by
+ *   {@link attributeDispositionsByBookingAsset}), capped at the booked quantity;
+ * - the stored `checkedOutQuantity`. It is cumulative, so it is the one that
+ *   still counts a slice sent out a second time, by either checkout.
  *
  * What came back: the booking's RETURN / CONSUME / LOSS / DAMAGE logs for the
  * asset. A tagged log lands on its slice. An untagged one is spread standalone
@@ -532,14 +531,12 @@ export function computeUnitsStillOutBySlice(args: {
 
   const departedBySlice = new Map<string, number>();
   for (const slice of slices) {
+    const recorded = isAllAtOnce
+      ? slice.quantity
+      : Math.min(slice.quantity, claimedBySlice.get(slice.id) ?? 0);
     departedBySlice.set(
       slice.id,
-      isAllAtOnce
-        ? slice.quantity
-        : Math.max(
-            Math.min(slice.quantity, claimedBySlice.get(slice.id) ?? 0),
-            slice.checkedOutQuantity ?? 0
-          )
+      Math.max(recorded, slice.checkedOutQuantity ?? 0)
     );
   }
 

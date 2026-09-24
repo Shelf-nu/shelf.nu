@@ -777,6 +777,34 @@ describe("units that came back or were used up are no longer checked out", () =>
     expect(batch?.checkedOut).toBe(real);
   });
 
+  it("keeps a slice re-sent with the all-at-once checkout counted as out", async () => {
+    // No session ever names the asset, so both trips went out with the button;
+    // the stored counter reads 20 and one trip's worth has come back.
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 10,
+          checkedOutQuantity: 20,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [],
+      dispositions: [
+        { assetId: "a1", bookingId: "b1", category: "RETURN", quantity: 10 },
+      ],
+    });
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    expect(real).toBe(10);
+    expect(batch?.checkedOut).toBe(real);
+  });
+
   it("takes an untagged return off the standalone slice first, then the kit slice", async () => {
     // Standalone 5 out + kit 5 out; 7 came back without naming a slice. The
     // standalone slice absorbs 5, the kit slice the other 2.
