@@ -13,7 +13,10 @@
  * will not be uploaded.
  *
  * Layout: picture on the left; hint + input on the right. The hint sits above
- * the input on large screens and below it on small ones.
+ * the input on large screens and below it on small ones. It is one element
+ * moved with CSS `order`, not two copies: `aria-describedby` reads a
+ * referenced element even when it is `display: none`, so a second copy would
+ * be announced twice.
  *
  * @see {@link file://./input.tsx} The underlying input
  * @see {@link file://../../atoms/file.ts} Validation rules
@@ -103,8 +106,8 @@ export function ImageFileField({
           currentImage
         )}
       </div>
-      <div className="min-w-0">
-        <p id={`${hintId}-lg`} className="hidden lg:block">
+      <div className="flex min-w-0 flex-col">
+        <p id={hintId} className="order-last mt-2 lg:order-first lg:mt-0">
           {HINT}
         </p>
         <Input
@@ -114,18 +117,12 @@ export function ImageFileField({
           onChange={handleChange}
           label={label}
           hideLabel
-          // The hint is rendered twice, one copy per breakpoint. Both ids are
-          // referenced; the copy that is display:none is left out of the
-          // accessibility tree, so exactly one description is read.
-          aria-describedby={`${hintId}-lg ${hintId}-sm`}
+          aria-describedby={hintId}
           error={error}
           disabled={disabled}
           className="mt-2"
           inputClassName="border-0 shadow-none p-0 rounded-none"
         />
-        <p id={`${hintId}-sm`} className="mt-2 lg:hidden">
-          {HINT}
-        </p>
       </div>
     </div>
   );

@@ -7,6 +7,7 @@
  *  - the saved image again when the picked file fails validation (the
  *    validator clears the input, so nothing would be uploaded),
  *  - object URLs released when replaced and on unmount,
+ *  - the format hint describing the input once,
  *  - the field name, error and disabled state reaching the input.
  *
  * @see {@link file://./image-file-field.tsx}
@@ -142,17 +143,17 @@ describe("ImageFileField", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-2");
   });
 
-  it("links the format hint to the input for assistive tech", () => {
+  it("describes the input with the format hint exactly once", () => {
     renderField();
 
-    const describedBy = fileInput().getAttribute("aria-describedby") ?? "";
-    const hints = describedBy
-      .split(" ")
-      .map((id) => document.getElementById(id)?.textContent);
-    expect(hints).toEqual([
-      "Accepts PNG, JPG, JPEG, or WebP (max.4 MB)",
-      "Accepts PNG, JPG, JPEG, or WebP (max.4 MB)",
-    ]);
+    // One hint element, referenced once: a second copy would be read twice,
+    // even while hidden.
+    expect(
+      screen.getAllByText("Accepts PNG, JPG, JPEG, or WebP (max.4 MB)")
+    ).toHaveLength(1);
+    expect(fileInput()).toHaveAccessibleDescription(
+      "Accepts PNG, JPG, JPEG, or WebP (max.4 MB)"
+    );
   });
 
   it("shows the error and passes the disabled state to the input", () => {
