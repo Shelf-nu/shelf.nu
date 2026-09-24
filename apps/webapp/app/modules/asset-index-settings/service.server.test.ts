@@ -169,6 +169,32 @@ describe("getAssetIndexSettings with a column set saved before the unit column",
     });
   });
 
+  it("puts Unit of measure right after Quantity when the user moved Quantity", async () => {
+    // Quantity dragged to just after the Asset ID column.
+    const quantityMoved = SAVED_DEFAULTS.map((col) => {
+      if (col.name === "quantity") return { ...col, position: 2 };
+      if (col.position >= 2 && col.position < 17) {
+        return { ...col, position: col.position + 1 };
+      }
+      return col;
+    });
+
+    const settings = await loadSavedColumns(quantityMoved, false);
+    const columns = settings.columns as Column[];
+
+    const savedOrder = inOrder(quantityMoved);
+    expect(inOrder(columns)).toEqual([
+      ...savedOrder.slice(0, 3),
+      "unitOfMeasure",
+      ...savedOrder.slice(3),
+    ]);
+    expect(columns.find((col) => col.name === "unitOfMeasure")).toEqual({
+      name: "unitOfMeasure",
+      visible: true,
+      position: 3,
+    });
+  });
+
   it("keeps a user's own column order around the new column", async () => {
     // The user swapped Min quantity (to the front) and ID (to the back).
     const reordered = SAVED_DEFAULTS.map((col) => {

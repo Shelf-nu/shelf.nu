@@ -196,29 +196,29 @@ export const defaultFields: Column[] = [
 ];
 
 /**
- * Default columns that carry part of what another column shows, keyed by the
- * column they belong with. The Quantity cell holds only the number and the
- * unit lives in `unitOfMeasure`, so a user who shows Quantity needs the unit
- * column shown too.
+ * Default columns that belong right after another column, keyed by the column
+ * they follow. The Quantity cell holds only the number and the unit lives in
+ * `unitOfMeasure`, so the unit column sits next to Quantity and is shown
+ * whenever Quantity is.
  */
-const visibleWithColumn: Partial<Record<ColumnLabelKey, ColumnLabelKey>> = {
+const followsColumn: Partial<Record<ColumnLabelKey, ColumnLabelKey>> = {
   unitOfMeasure: "quantity",
 };
 
 /**
- * Adds default columns that a saved column set lacks, each at its default
- * position.
+ * Adds default columns that a saved column set lacks.
  *
  * Settings rows are per user and outlive the default list, so a fixed column
  * added to `defaultFields` is missing from every row saved before it existed.
- * Each missing column goes in at the position a fresh row would give it, and
- * every saved column at or after that position moves down by one, so the
- * user's own order is kept and the new column sits next to its neighbours in
- * the default layout (e.g. `unitOfMeasure` right after `quantity`).
+ * Each missing column is inserted and every saved column at or after its
+ * position moves down by one, so the user's own order is kept.
  *
- * A missing column takes its default visibility, except that a column listed
- * in {@link visibleWithColumn} is shown when the saved column it belongs with
- * is shown, so adding it never hides information the user already saw.
+ * - A column listed in {@link followsColumn} goes right after the column it
+ *   follows, wherever the saved set has that column, and is shown when that
+ *   column is shown. Adding it never separates it from its partner or hides
+ *   what the user already saw.
+ * - Any other column goes in at the position a fresh row would give it, with
+ *   its default visibility.
  *
  * @param columns - The row's saved columns; not modified
  * @param missing - Names of the default columns to add
@@ -228,28 +228,33 @@ export function insertMissingDefaultColumns(
   columns: Column[],
   missing: ColumnLabelKey[]
 ): Column[] {
-  // Ascending order, so an earlier insert never pushes a later one off its
-  // default position.
+  // Ascending default order, so a column that follows another is inserted
+  // after it when both are missing.
   const toInsert = defaultFields
     .filter((field) => missing.includes(field.name))
     .sort((a, b) => a.position - b.position);
 
-  const isShownInSavedSet = (name?: ColumnLabelKey) =>
-    Boolean(name && columns.some((col) => col.name === name && col.visible));
-
   return toInsert.reduce<Column[]>(
-    (acc, field) => [
-      ...acc.map((col) =>
-        col.position >= field.position
-          ? { ...col, position: col.position + 1 }
-          : col
-      ),
-      {
-        ...field,
-        visible:
-          field.visible || isShownInSavedSet(visibleWithColumn[field.name]),
-      },
-    ],
+    (acc, field) => {
+      const partnerName = followsColumn[field.name];
+      const partner = partnerName
+        ? acc.find((col) => col.name === partnerName)
+        : undefined;
+      const position = partner ? partner.position + 1 : field.position;
+
+      return [
+        ...acc.map((col) =>
+          col.position >= position
+            ? { ...col, position: col.position + 1 }
+            : col
+        ),
+        {
+          ...field,
+          position,
+          visible: field.visible || Boolean(partner?.visible),
+        },
+      ];
+    },
     [...columns]
   );
 }
