@@ -6,13 +6,13 @@ import { useActionData, useNavigation } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { defaultValidateFileAtom, fileErrorAtom } from "~/atoms/file";
+import { fileErrorAtom } from "~/atoms/file";
 import { useSearchParams } from "~/hooks/search-params";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { ISO_4217_CURRENCIES } from "~/utils/currency";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
+import { WorkspaceLogoField } from "./workspace-logo-field";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
@@ -46,7 +46,6 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
   const zo = useZorm("NewQuestionWizardScreen", NewWorkspaceFormSchema);
   const disabled = isFormProcessing(navigation.state);
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
   const nameFieldRef = useRef<HTMLInputElement>(null);
 
@@ -100,26 +99,7 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
             "Used to place your organization's logo or symbol. For best results, use a square image."
           }
         >
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-            </p>
-            <Input
-              // disabled={disabled}
-              accept={ACCEPT_SUPPORTED_IMAGES}
-              name="image"
-              type="file"
-              onChange={validateFile}
-              label={"Main image"}
-              hideLabel
-              error={imageError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-            </p>
-          </div>
+          <WorkspaceLogoField error={imageError} />
         </FormRow>
 
         <div>
