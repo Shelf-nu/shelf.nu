@@ -1282,6 +1282,15 @@ describe("manage-assets loader — Models tab payload", () => {
   });
 
   it("redacts custodian identity from picker rows for a restricted viewer", async () => {
+    // A real SELF_SERVICE membership with every workspace toggle off: it may
+    // manage items on its own DRAFT booking but may not see others' custody.
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.SELF_SERVICE],
+      }) as unknown as Awaited<ReturnType<typeof rolesServer.requirePermission>>
+    );
+
     // why: this fixture mirrors what `assetIndexFields()` actually selects —
     // the full `custody.custodian.user` including `email` — so the assertion
     // measures redaction rather than the shape of a real query. The picker is

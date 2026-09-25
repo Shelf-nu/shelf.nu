@@ -45,6 +45,7 @@ import {
   resolveCanSeeAllCustody,
   resolveEffectiveRole,
 } from "~/utils/roles.server";
+import { userHasCustodyViewPermission } from "./custody-and-bookings-permissions.validator.client";
 import { PermissionAction, PermissionEntity } from "./permission.data";
 import { userHasPermission } from "./permission.validator.client";
 import {
@@ -1533,6 +1534,68 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   snapshot["B8:D-42:companion-audit-scope"] = perRoleSet(
     (roles) =>
       roles.length > 0 && roles.some((r) => r === R.OWNER || r === R.ADMIN)
+  );
+
+  // ===================== Custody and asset list =====================
+
+  // D-28:client: the CLIENT's custody visibility (custody filters,
+  // availability columns, custody chips), every role set x toggles. Reads
+  // `userHasCustodyViewPermission`
+  // (custody-and-bookings-permissions.validator.client.ts:39-80): the matrix
+  // grant, else a restricted role held ANYWHERE in the membership whose toggle
+  // is on.
+  snapshot["D-28:client"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      Object.fromEntries(
+        TOGGLE_COMBOS.map((t) => [
+          toggleKey(t),
+          userHasCustodyViewPermission({
+            roles: roles as OrganizationRoles[],
+            organization: t,
+          }),
+        ])
+      ),
+    ])
+  );
+
+  // D-29:assign: the WEB custody-assignment scope, every role set. Services,
+  // routes and the assignment picker all pass the effective role to
+  // `resolveCustodianPickerScope` (modules/team-member/service.server.ts:408-417).
+  snapshot["D-29:assign"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      resolveCustodianPickerScope({
+        purpose: "custody-assignment",
+        role: webRole(roles),
+        canSeeAllCustody: false,
+        userId: "caller",
+      }).mode,
+    ])
+  );
+
+  // D-31: the web asset index lists only bookable assets. Both index loaders
+  // compare the effective role from `requirePermission` with SELF_SERVICE:
+  // simple (modules/asset/data.server.ts:170,299 into
+  // modules/asset/service.server.ts:4406) and advanced
+  // (modules/asset/data.server.ts:610).
+  snapshot["D-31"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      webRole(roles) === R.SELF_SERVICE ? "bookable" : "all",
+    ])
+  );
+
+  // D-32: the advanced asset index is available. The index loader refuses
+  // ADVANCED mode for an effective role of BASE or SELF_SERVICE
+  // (routes/_layout+/assets._index.tsx:118).
+  snapshot["D-32"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      !([R.BASE, R.SELF_SERVICE] as OrganizationRoles[]).includes(
+        webRole(roles)
+      ),
+    ])
   );
 
   return snapshot;
