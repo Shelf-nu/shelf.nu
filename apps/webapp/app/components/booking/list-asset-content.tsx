@@ -369,12 +369,14 @@ export default function ListAssetContent({
                 {item.fulfilsModelName ? (
                   <FulfilsModelBadge modelName={item.fulfilsModelName} />
                 ) : null}
-                {/* Where this pool slice's units left from, recorded at
-                    check-out. Resolved in the overview loader, only for
-                    pools at two or more placements. It is also what check-in
-                    takes used-up units off, so a picked-by-default location
-                    is never a silent guess. */}
-                {item.sourceLocation && qtyCheckedOut > 0 ? (
+                {/* Where this pool slice's units left from. Recorded only when
+                    the slice goes out, so its presence alone means it went
+                    out (the row's unit counter is session-derived and reads 0
+                    after a one-click check-out). Resolved in the overview
+                    loader, only for pools at two or more placements. It is
+                    also what check-in takes used-up units off, so a location
+                    picked by default is never a silent guess. */}
+                {item.sourceLocation ? (
                   <span className="text-xs text-gray-500">
                     from {item.sourceLocation.name}
                   </span>
