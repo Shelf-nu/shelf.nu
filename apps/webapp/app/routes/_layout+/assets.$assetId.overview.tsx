@@ -48,6 +48,7 @@ import {
 } from "~/components/shared/tooltip";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useAssetCustodySources } from "~/hooks/use-asset-custody-sources";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -387,6 +388,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         )
       : 0;
 
+    /**
+     * How many OTHER people hold custody, counted by person before the
+     * custodians are redacted below. One person can hold several rows (one
+     * per source location, plus kit-inherited ones), and once redacted those
+     * rows no longer say whose they are. Only read when the viewer cannot see
+     * everyone's custody.
+     */
+    const otherCustodyHolders = canSeeAllCustody
+      ? 0
+      : new Set(
+          (asset.custody ?? [])
+            .filter(
+              (c) => c.custodian?.userId !== userId && c.custodian?.id != null
+            )
+            .map((c) => c.custodian.id)
+        ).size;
+
     return payload({
       // Same reasoning as the parent detail route: this payload carries
       // `custody[].custodian` and is reachable with `asset: read`.
@@ -412,6 +430,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       allCustomFieldDefs,
       moveDestinations,
       unplacedQuantity,
+      otherCustodyHolders,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -768,8 +787,14 @@ export default function AssetOverview() {
     allCustomFieldDefs,
     moveDestinations,
     unplacedQuantity,
+    otherCustodyHolders,
   } = useLoaderData<typeof loader>();
   const { prefs } = useDateFormatter();
+  /**
+   * The pool's sources from the asset detail loader, shared with the header
+   * actions menu so every Assign / Adjust dialog shows the same numbers.
+   */
+  const custodySources = useAssetCustodySources();
 
   /** Route URL used by all three `MoveUnitsDialog` form submissions. */
   const moveUnitsActionUrl = `/assets/${asset.id}/overview`;
@@ -1706,9 +1731,21 @@ export default function AssetOverview() {
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
                             {isQty ? (
-                              <span className="text-xs tabular-nums text-gray-500">
-                                {p.quantity} {unit}
-                              </span>
+                              <PlacementCount
+                                quantity={p.quantity}
+                                unit={unit}
+                                inCustody={
+                                  // For a pool with two or more sources, how
+                                  // many of this location's units are out with
+                                  // people. Manual rows only: kit-held units
+                                  // follow the kit. Never names anyone.
+                                  custodySources?.multiSource && !p.viaKit
+                                    ? custodySources.options.find(
+                                        (o) => o.locationId === p.locationId
+                                      )?.inCustody ?? 0
+                                    : 0
+                                }
+                              />
                             ) : null}
                             {/*
                              * Move-units affordance — manual rows only. Kit-driven
@@ -1789,6 +1826,7 @@ export default function AssetOverview() {
               reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}
+              custodySources={custodySources}
             />
           ) : null}
 
@@ -1841,6 +1879,8 @@ export default function AssetOverview() {
               canViewAllCustody={canViewAllCustody}
               canCustody={canCustody}
               inKit={getPrimaryKit<{ id: string; name: string }>(asset)}
+              sources={custodySources}
+              otherHoldersCount={otherCustodyHolders}
             />
           ) : null}
 
@@ -1882,6 +1922,38 @@ export default function AssetOverview() {
  * `buildCustomFieldValue` treats as undefined (no value stored).
  * This prevents "Not set" booleans from being forced to "no" on save.
  */
+/**
+ * The unit count on a "Placed at locations" row, with "N in custody" on a
+ * second, smaller line when some of the location's units are out with
+ * people. Stacked rather than inline so a long location name keeps its room
+ * in the narrow sidebar.
+ */
+function PlacementCount({
+  quantity,
+  unit,
+  inCustody,
+}: {
+  quantity: number;
+  unit: string;
+  inCustody: number;
+}) {
+  if (inCustody <= 0) {
+    return (
+      <span className="text-xs tabular-nums text-gray-500">
+        {quantity} {unit}
+      </span>
+    );
+  }
+  return (
+    <span className="flex flex-col items-end text-xs tabular-nums text-gray-500">
+      <span>
+        {quantity} {unit}
+      </span>
+      <span className="text-gray-400">{inCustody} in custody</span>
+    </span>
+  );
+}
+
 function BooleanCustomFieldEditor({
   name,
   label,

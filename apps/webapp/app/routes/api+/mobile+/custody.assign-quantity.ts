@@ -31,6 +31,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { assignSourceNoteSuffix } from "~/modules/asset/custody-source.server";
 import { checkOutQuantity } from "~/modules/asset/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { createNote } from "~/modules/note/service.server";
@@ -64,6 +65,13 @@ const AssignQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Where the units come from: a location id, or `null` / `""` for the
+   * unplaced units. Optional and additive: an app build that does not send
+   * it gets the server-side default (the only placement of a pool at one
+   * location, otherwise no recorded source), never a refusal.
+   */
+  locationId: z.string().nullable().optional(),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -113,7 +121,7 @@ export async function action({ request }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-    const { assetId, teamMemberId, quantity, note } = parsed.data;
+    const { assetId, teamMemberId, quantity, note, locationId } = parsed.data;
 
     /** Validate that the team member belongs to the same organization */
     const teamMember = await getTeamMember({
@@ -149,7 +157,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // All quantity validation (type gate, org mismatch, row-locked
     // availability check) lives inside the service — no duplication here.
-    await checkOutQuantity({
+    const { source } = await checkOutQuantity({
       assetId,
       teamMemberId,
       quantity,
@@ -157,6 +165,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       role,
       note,
+      locationId,
     });
 
     /** Best-effort audit note — don't fail the action if note creation fails */
@@ -186,9 +195,10 @@ export async function action({ request }: ActionFunctionArgs) {
       });
 
       const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+      const fromSource = assignSourceNoteSuffix(source);
       const baseLine = isSelfService
-        ? `${actor} took custody of **${quantity}** unit(s).`
-        : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}.`;
+        ? `${actor} took custody of **${quantity}** unit(s)${fromSource}.`
+        : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}${fromSource}.`;
       const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({

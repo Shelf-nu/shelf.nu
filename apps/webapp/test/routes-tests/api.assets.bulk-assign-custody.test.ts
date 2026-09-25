@@ -114,7 +114,17 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
       // parse never yields `undefined` here. Mirror that: a mock that omits
       // the field tests a shape the route can't actually receive.
       const quantities = JSON.parse(formData.get("quantities") || "{}");
-      return { assetIds, custodian, currentSearchParams, quantities };
+      // Same for `AssetSourceLocationsSchema`: an absent field parses to {}.
+      const sourceLocations = JSON.parse(
+        formData.get("sourceLocations") || "{}"
+      );
+      return {
+        assetIds,
+        custodian,
+        currentSearchParams,
+        quantities,
+        sourceLocations,
+      };
     }),
   };
 });

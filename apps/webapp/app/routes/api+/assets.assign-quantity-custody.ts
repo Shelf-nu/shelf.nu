@@ -14,6 +14,7 @@ import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { assignSourceNoteSuffix } from "~/modules/asset/custody-source.server";
 import { checkOutQuantity } from "~/modules/asset/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { createNote } from "~/modules/note/service.server";
@@ -46,6 +47,12 @@ export const AssignQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Where the units come from: a location id, or `"unplaced"` for the
+   * unplaced units. Only sent by the dialog for a pool with two or more sources;
+   * absent means the service decides (see `resolveCustodySource`).
+   */
+  locationId: z.string().optional(),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
@@ -64,7 +71,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetId, teamMemberId, quantity, note } = parseData(
+    const { assetId, teamMemberId, quantity, note, locationId } = parseData(
       formData,
       AssignQuantityCustodySchema
     );
@@ -101,7 +108,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    await checkOutQuantity({
+    const { source } = await checkOutQuantity({
       assetId,
       teamMemberId,
       quantity,
@@ -109,6 +116,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       role,
       note,
+      locationId,
     });
 
     /** Best-effort audit note — don't fail the action if note creation fails */
@@ -126,9 +134,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       const custodianDisplay = wrapCustodianForNote({ teamMember });
 
       const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+      const fromSource = assignSourceNoteSuffix(source);
       const baseLine = isSelfService
-        ? `${actor} took custody of **${quantity}** unit(s).`
-        : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}.`;
+        ? `${actor} took custody of **${quantity}** unit(s)${fromSource}.`
+        : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}${fromSource}.`;
       const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({

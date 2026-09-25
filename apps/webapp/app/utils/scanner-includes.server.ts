@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
+import type { CustodySourceSummary } from "~/modules/asset/custody-source";
 import type { AssetImageSource } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 
@@ -38,6 +39,10 @@ export const ASSET_CUSTODY_INCLUDE = {
       // it. Only the operator axis can be handed back asset-by-asset, so the
       // release scanner needs to tell them apart before offering a ceiling.
       kitCustodyId: true,
+      // One person can hold several operator rows on a quantity-tracked
+      // asset (one per location the units came from), so the release
+      // scanner counts holders by this id, not by rows.
+      teamMemberId: true,
       custodian: { select: CUSTODIAN_SELECT },
     },
   },
@@ -181,6 +186,11 @@ export type ScannerAssetPickerMeta = {
   maxAllowed: number;
   assetQuantity: number;
   unitOfMeasure: string | null;
+  /**
+   * Custody context only: where a pool's units can come from, when it is
+   * placed at two or more locations (or one plus unplaced units).
+   */
+  sources?: CustodySourceSummary | null;
 } | null;
 
 /**

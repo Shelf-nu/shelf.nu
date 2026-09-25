@@ -106,24 +106,37 @@ export type PlacementReconcileResult =
  * fractional units the column cannot hold.
  *
  * Returning `ambiguous` keeps that decision with the caller, which can surface
- * it honestly rather than fabricate provenance. Resolving it properly means
- * capturing the source at assignment time, which is a separate change.
+ * it honestly rather than fabricate provenance.
+ *
+ * ## A recorded source goes first
+ *
+ * When the caller knows where the destroyed units came from (custody records
+ * its source location in `Custody.locationId`), `sources` names those
+ * locations and they lose the units before anything else is considered, even
+ * when unplaced units could have absorbed the drop: the units physically left
+ * that location. Units with no recorded source are not listed and fall to
+ * the rules above, so the unplaced remainder absorbs them first.
  *
  * @param assetId - Asset whose placements to reconcile
  * @param newTotal - `Asset.quantity` as it will be AFTER the decrease
  * @param tx - Active transaction client; the reconcile must commit atomically
  *   with the stock decrease that motivated it
+ * @param sources - Destroyed units per recorded source location
  * @returns What was done, for the caller to record
  */
 export async function reconcileManualPlacementsForStockDecrease({
   assetId,
   newTotal,
   tx,
+  sources = [],
 }: {
   assetId: string;
   newTotal: number;
   tx: PlacementReconcileTxClient;
+  sources?: Array<{ locationId: string; quantity: number }>;
 }): Promise<PlacementReconcileResult> {
+  const sourceReduced = await reduceSourcePlacements({ assetId, sources, tx });
+
   const placements = await tx.assetLocation.findMany({
     where: { assetId, assetKitId: null },
     select: { id: true, locationId: true, quantity: true },
@@ -146,7 +159,7 @@ export async function reconcileManualPlacementsForStockDecrease({
    * combination too.
    */
   if (placements.length === 0 || placedSum <= newTotal) {
-    return { outcome: "within_total" };
+    return sourceReduced ?? { outcome: "within_total" };
   }
 
   const deficit = placedSum - newTotal;
@@ -190,6 +203,54 @@ export async function reconcileManualPlacementsForStockDecrease({
   }
 
   return { outcome: "reduced", locationId: only.locationId, reducedBy };
+}
+
+/**
+ * Lowers each named source placement by the units that left it, deleting a
+ * row that reaches zero. Clamped to what the row holds: a source that was
+ * already emptied (moved away after the custody was recorded) takes no more
+ * than it has, and the rest falls to the generic reconcile.
+ *
+ * @returns The last reduction made, or null when nothing was written
+ */
+async function reduceSourcePlacements({
+  assetId,
+  sources,
+  tx,
+}: {
+  assetId: string;
+  sources: Array<{ locationId: string; quantity: number }>;
+  tx: PlacementReconcileTxClient;
+}): Promise<PlacementReconcileResult | null> {
+  let last: PlacementReconcileResult | null = null;
+
+  for (const source of sources) {
+    if (source.quantity <= 0) continue;
+
+    const [row] = await tx.assetLocation.findMany({
+      where: { assetId, locationId: source.locationId, assetKitId: null },
+      select: { id: true, locationId: true, quantity: true },
+    });
+    if (!row) continue;
+
+    const reducedBy = Math.min(source.quantity, row.quantity);
+    const remaining = row.quantity - reducedBy;
+
+    if (remaining === 0) {
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `row.id` comes from the asset-scoped findMany above, and every caller holds the org-verified `lockAssetForQuantityUpdate` lock on that asset
+      await tx.assetLocation.delete({ where: { id: row.id } });
+    } else {
+      await tx.assetLocation.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: same provenance as the delete above
+        where: { id: row.id },
+        data: { quantity: remaining },
+      });
+    }
+
+    last = { outcome: "reduced", locationId: row.locationId, reducedBy };
+  }
+
+  return last;
 }
 
 /**

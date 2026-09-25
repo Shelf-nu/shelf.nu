@@ -42,6 +42,25 @@ export const scannedItemsAtom = atom<ScanListItems>({});
 export const scannedAssetQuantitiesAtom = atom<Record<string, number>>({});
 
 /**
+ * The "From location" a scanned pool's units come from, keyed by `assetId`:
+ * a location id or `"unplaced"`. Set only when the operator picks one; the
+ * assign drawer falls back to the pre-selected source (the one with the most
+ * units left) for rows without an entry. Cleared with the quantities.
+ */
+export const scannedAssetSourcesAtom = atom<Record<string, string>>({});
+
+/** Writer for {@link scannedAssetSourcesAtom}: one asset's picked source. */
+export const setScannedAssetSourceAtom = atom(
+  null,
+  (get, set, payload: { assetId: string; source: string }) => {
+    set(scannedAssetSourcesAtom, {
+      ...get(scannedAssetSourcesAtom),
+      [payload.assetId]: payload.source,
+    });
+  }
+);
+
+/**
  * Writer atom that updates a single asset's scanned quantity. Drawer
  * qty inputs dispatch this on every change. Pass `qty = undefined` (or
  * the asset's id only) to drop the entry entirely; missing entries
@@ -253,6 +272,7 @@ export const removeScannedItemsByAssetIdAtom = atom(
 export const clearScannedItemsAtom = atom(null, (_get, set) => {
   set(scannedItemsAtom, {}); // Resets the atom to an empty object
   set(scannedAssetQuantitiesAtom, {}); // Drop any qty entries too.
+  set(scannedAssetSourcesAtom, {}); // And any picked source locations.
 });
 
 /*******************************/

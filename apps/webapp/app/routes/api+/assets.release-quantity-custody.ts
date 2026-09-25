@@ -28,6 +28,7 @@ import type { Prisma } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { releaseSourceNoteSuffix } from "~/modules/asset/custody-source.server";
 import { releaseQuantity } from "~/modules/asset/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { createNote } from "~/modules/note/service.server";
@@ -48,6 +49,16 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+/**
+ * One source line of a per-location release, as the dialog posts it inside
+ * the `sources` JSON field. `locationId` null is the unplaced units.
+ */
+const ReleaseSourceLineSchema = z.object({
+  locationId: z.string().nullable(),
+  quantity: z.number().int().nonnegative(),
+  consumed: z.number().int().nonnegative().optional(),
+});
+
 /** Zod schema for validating the release-quantity-custody form data */
 export const ReleaseQuantityCustodySchema = z.object({
   assetId: z.string().min(1, "Asset ID is required"),
@@ -66,6 +77,32 @@ export const ReleaseQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Release only the units taken from this source: a location id, or
+   * `"unplaced"` for the unplaced units. Absent: the holder's rows are drawn in the
+   * service's fixed order.
+   */
+  locationId: z.string().optional(),
+  /**
+   * Per-location lines, JSON-encoded, when the holder took units from
+   * several locations and releases them per location. `quantity` must
+   * equal their sum.
+   */
+  sources: z
+    .string()
+    .optional()
+    .transform((val, ctx) => {
+      if (!val) return undefined;
+      try {
+        return z.array(ReleaseSourceLineSchema).parse(JSON.parse(val));
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "The quantities per location could not be read.",
+        });
+        return z.NEVER;
+      }
+    }),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
@@ -84,10 +121,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetId, teamMemberId, quantity, consumed, note } = parseData(
-      formData,
-      ReleaseQuantityCustodySchema
-    );
+    const {
+      assetId,
+      teamMemberId,
+      quantity,
+      consumed,
+      note,
+      locationId,
+      sources,
+    } = parseData(formData, ReleaseQuantityCustodySchema);
 
     /** Fetch team member with user info for the audit note */
     const teamMember = await getTeamMember({
@@ -118,17 +160,23 @@ export async function action({ context, request }: ActionFunctionArgs) {
      * audit note and the toast below describe reality instead of re-deriving
      * the branch here.
      */
-    const { consumed: consumedUnits, returned: returnedUnits } =
-      await releaseQuantity({
-        assetId,
-        teamMemberId,
-        quantity,
-        consumed,
-        userId,
-        organizationId,
-        role,
-        note,
-      });
+    const {
+      consumed: consumedUnits,
+      returned: returnedUnits,
+      lines,
+      multiSource,
+    } = await releaseQuantity({
+      assetId,
+      teamMemberId,
+      quantity,
+      consumed,
+      userId,
+      organizationId,
+      role,
+      note,
+      locationId,
+      sources,
+    });
 
     /** Best-effort audit note — don't fail the action if note creation fails */
     try {
@@ -145,16 +193,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
       const custodianDisplay = wrapCustodianForNote({ teamMember });
 
       /**
-       * Three shapes, worded from what was actually persisted. The
-       * return-only line is unchanged from before consumables were handled,
-       * so a returnable asset's audit trail reads exactly as it always has.
+       * Three shapes, worded from what was actually persisted. For a pool
+       * with two or more sources the lines say which locations the units
+       * came from; otherwise the wording carries no location at all.
        */
+      const fromSources = releaseSourceNoteSuffix({ lines, multiSource });
       const baseLine =
         consumedUnits > 0 && returnedUnits > 0
-          ? `${actor} ended ${custodianDisplay}'s hold on **${quantity}** unit(s): **${consumedUnits}** consumed and **${returnedUnits}** returned to stock.`
+          ? `${actor} ended ${custodianDisplay}'s hold on **${quantity}** unit(s)${fromSources}: **${consumedUnits}** consumed and **${returnedUnits}** returned to stock.`
           : consumedUnits > 0
-          ? `${actor} marked **${consumedUnits}** unit(s) held by ${custodianDisplay} as consumed. Stock reduced permanently.`
-          : `${actor} released **${returnedUnits}** unit(s) from ${custodianDisplay}'s custody.`;
+          ? `${actor} marked **${consumedUnits}** unit(s) held by ${custodianDisplay} as consumed${fromSources}. Stock reduced permanently.`
+          : `${actor} released **${returnedUnits}** unit(s) from ${custodianDisplay}'s custody${fromSources}.`;
       const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({

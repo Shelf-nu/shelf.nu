@@ -8,6 +8,11 @@
  * Designed to be triggered from the QuantityOverviewCard on the asset detail
  * page. Supports an optional `autoOpen` prop for QR-scan-triggered flows.
  *
+ * For a pool with two or more sources an "At location" field says where the
+ * units arrived or were lost, pre-selected with the source that has the most
+ * units left. The location's placement moves with the total. Every other
+ * asset gets the dialog without it.
+ *
  * @see {@link file://../../routes/api+/assets.adjust-quantity.ts} - API endpoint
  * @see {@link file://./quantity-overview-card.tsx} - Trigger location
  */
@@ -29,7 +34,10 @@ import {
 } from "~/components/shared/modal";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import type { CustodySourceSummary } from "~/modules/asset/custody-source";
+import { defaultSourceOption } from "~/modules/asset/custody-source";
 import { isFormProcessing } from "~/utils/form";
+import { CustodySourceSelect } from "./custody-source-select";
 
 /** Props for the QuickAdjustDialog component */
 export interface QuickAdjustDialogProps {
@@ -45,6 +53,11 @@ export interface QuickAdjustDialogProps {
   open?: boolean;
   /** Callback when the dialog open state changes (controlled mode) */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * The pool's sources, from the asset detail loader. The "At location"
+   * field renders only when `multiSource` is true.
+   */
+  sources?: CustodySourceSummary | null;
 }
 
 /**
@@ -69,6 +82,7 @@ export function QuickAdjustDialog({
   availableQuantity,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
+  sources,
 }: QuickAdjustDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
@@ -98,6 +112,19 @@ export function QuickAdjustDialog({
   const unitLabel = unitOfMeasure || "units";
   const isSubmitting = isFormProcessing(fetcher.state);
 
+  /**
+   * The "At location" choice: the operator's pick, else the source with the
+   * most units left (also when a revalidation removed the picked one).
+   */
+  const locationOptions = sources?.multiSource ? sources.options : [];
+  const showLocation = locationOptions.length > 0;
+  const [pickedLocation, setPickedLocation] = useState<string | null>(null);
+  const locationValue =
+    pickedLocation !== null &&
+    locationOptions.some((option) => option.value === pickedLocation)
+      ? pickedLocation
+      : defaultSourceOption(locationOptions)?.value ?? "";
+
   /** Server-side error message from the action response */
   const serverError =
     fetcher.data?.error != null
@@ -109,6 +136,7 @@ export function QuickAdjustDialog({
     if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
       setOpen(false);
       setQuantityError(null);
+      setPickedLocation(null);
       formRef.current?.reset();
     }
   }, [fetcher.state, fetcher.data, setOpen]);
@@ -186,6 +214,18 @@ export function QuickAdjustDialog({
               error={quantityError || serverError || undefined}
               onChange={() => setQuantityError(null)}
             />
+
+            {showLocation ? (
+              <CustodySourceSelect
+                id={`adjust-quantity-location-${assetId}`}
+                label="At location"
+                options={locationOptions}
+                value={locationValue}
+                onChange={setPickedLocation}
+                unitLabel={unitLabel}
+                disabled={disabled}
+              />
+            ) : null}
 
             <Input
               name="note"

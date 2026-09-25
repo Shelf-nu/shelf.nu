@@ -88,3 +88,49 @@ export const AssetQuantitiesSchema = z
       return z.NEVER;
     }
   });
+
+/**
+ * Parses the JSON blob the custody scanner submits under `sourceLocations`:
+ * `Record<assetId, source>`, where a source is a location id or `"unplaced"`
+ * (see `isUnplacedSource`). Only pools placed at two or more locations (or at
+ * one plus unplaced units) carry an entry; an asset without one lets the
+ * service resolve its source as for any caller that does not ask.
+ *
+ * Like {@link AssetQuantitiesSchema} this guards the shape only: whether the
+ * location is one of the asset's placements, and how many units it has left,
+ * is checked by the route's pre-flight and by `checkOutQuantity`.
+ */
+export const AssetSourceLocationsSchema = z
+  .string()
+  .optional()
+  .default("{}")
+  .transform((raw, ctx): Record<string, string> => {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+      ) {
+        throw new Error("expected object");
+      }
+      const result: Record<string, string> = {};
+      for (const [assetId, value] of Object.entries(
+        parsed as Record<string, unknown>
+      )) {
+        if (typeof value !== "string" || value.length === 0) {
+          throw new Error(`invalid location for ${assetId}`);
+        }
+        result[assetId] = value;
+      }
+      return result;
+    } catch (e) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Invalid source locations payload: ${
+          e instanceof Error ? e.message : "parse error"
+        }`,
+      });
+      return z.NEVER;
+    }
+  });

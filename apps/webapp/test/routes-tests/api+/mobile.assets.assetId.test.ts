@@ -185,6 +185,8 @@ function buildAsset() {
       {
         createdAt: new Date("2026-01-01T10:00:00Z"),
         quantity: 5,
+        kitCustodyId: null,
+        location: null as { id: string; name: string } | null,
         custodian: {
           id: "tm-alice",
           name: "Alice Holder",
@@ -200,6 +202,8 @@ function buildAsset() {
       {
         createdAt: new Date("2026-01-01T11:00:00Z"),
         quantity: 3,
+        kitCustodyId: null,
+        location: null as { id: string; name: string } | null,
         custodian: {
           id: "tm-me",
           name: "Test User",
@@ -215,6 +219,8 @@ function buildAsset() {
       {
         createdAt: new Date("2026-01-01T12:00:00Z"),
         quantity: 1,
+        kitCustodyId: null,
+        location: null as { id: string; name: string } | null,
         custodian: {
           id: "tm-nrm",
           name: "Bob NonRegistered",
@@ -418,7 +424,11 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
 
     // Only the caller's own entry survives the filter
     expect(body.asset.custodyList).toEqual([
-      { custodian: { id: "tm-me", name: "Test User" }, quantity: 3 },
+      {
+        custodian: { id: "tm-me", name: "Test User" },
+        quantity: 3,
+        sources: [{ locationId: null, name: null, quantity: 3 }],
+      },
     ]);
     // Two other holders were hidden
     expect(body.asset.custodyListOthersCount).toBe(2);
@@ -462,9 +472,37 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
     expect(body.asset.custody.custodian.id).toBe("tm-me");
 
     expect(body.asset.custodyList).toEqual([
-      { custodian: { id: "tm-me", name: "Test User" }, quantity: 3 },
+      {
+        custodian: { id: "tm-me", name: "Test User" },
+        quantity: 3,
+        sources: [{ locationId: null, name: null, quantity: 3 }],
+      },
     ]);
     expect(body.asset.custodyListOthersCount).toBe(2);
+  });
+
+  it("lists where each holder's operator units came from", async () => {
+    const asset = buildAsset();
+    asset.custody[1] = {
+      ...asset.custody[1],
+      location: { id: "loc-studio", name: "Studio" },
+    };
+    assetFindUniqueMock.mockResolvedValue(asset);
+
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    const body = await (result as unknown as Response).json();
+
+    const mine = body.asset.custodyList.find(
+      (entry: { custodian: { id: string } }) => entry.custodian.id === "tm-me"
+    );
+    expect(mine.sources).toEqual([
+      { locationId: "loc-studio", name: "Studio", quantity: 3 },
+    ]);
   });
 
   it("returns the full custody list to callers who can see all custody", async () => {

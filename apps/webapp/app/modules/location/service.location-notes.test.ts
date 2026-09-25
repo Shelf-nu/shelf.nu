@@ -47,6 +47,12 @@ const dbMocks = vi.hoisted(() => ({
   assetKit: {
     findMany: vi.fn().mockResolvedValue([]),
   },
+  // why: updateLocationAssets reads each quantity-tracked asset's operator
+  // custody before and after its placement writes, to re-home custody taken
+  // from a placement it shrinks or removes; no custody is out in these tests.
+  custody: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
   // why: user model stubs for resolving actor info in activity events
   user: {
     findUniqueOrThrow: vi.fn(),
@@ -63,6 +69,7 @@ const dbMocks = vi.hoisted(() => ({
       assetKit: dbMocks.assetKit,
       kit: dbMocks.kit,
       user: dbMocks.user,
+      custody: dbMocks.custody,
     };
     return cb(txClient);
   }),
@@ -74,6 +81,18 @@ const getUserByIDMock = vi.hoisted(() => vi.fn());
 
 vi.mock("~/database/db.server", () => ({
   db: dbMocks,
+}));
+
+// why: updateLocationAssets row-locks every quantity-tracked asset it touches
+// with a raw `SELECT ... FOR UPDATE`, which a mocked tx cannot run.
+vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
+  lockAssetsForQuantityUpdate: vi
+    .fn()
+    .mockImplementation((_tx: unknown, ids: string[]) =>
+      Promise.resolve(
+        ids.map((id) => ({ id, type: "QUANTITY_TRACKED", quantity: 80 }))
+      )
+    ),
 }));
 
 vi.mock("~/utils/geolocate.server", () => ({

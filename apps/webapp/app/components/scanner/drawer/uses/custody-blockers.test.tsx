@@ -71,7 +71,11 @@ function qtyItem(
     quantity = 100,
   }: {
     available?: number;
-    custody?: { quantity: number; kitCustodyId: string | null }[];
+    custody?: {
+      quantity: number;
+      kitCustodyId: string | null;
+      teamMemberId?: string;
+    }[];
     quantity?: number;
   }
 ) {
@@ -284,12 +288,25 @@ describe("buildReleaseCustodyBlockers", () => {
     const built = build("release", {
       qr1: qtyItem("a1", {
         custody: [
-          { quantity: 5, kitCustodyId: null },
-          { quantity: 3, kitCustodyId: null },
+          { quantity: 5, kitCustodyId: null, teamMemberId: "tm-1" },
+          { quantity: 3, kitCustodyId: null, teamMemberId: "tm-2" },
         ],
       }),
     });
     expect(activeIds(built)).toEqual(["qty-several-holders"]);
+  });
+
+  it("one person holding units from two locations is one holder", () => {
+    // One operator row per source location: the same person, not two.
+    const built = build("release", {
+      qr1: qtyItem("a1", {
+        custody: [
+          { quantity: 2, kitCustodyId: null, teamMemberId: "tm-1" },
+          { quantity: 1, kitCustodyId: null, teamMemberId: "tm-1" },
+        ],
+      }),
+    });
+    expect(activeIds(built)).toEqual([]);
   });
 
   it("a kit holder does not make a single-holder asset look shared", () => {

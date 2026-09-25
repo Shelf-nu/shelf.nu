@@ -61,6 +61,7 @@ import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getCustodyFromLocationByPool } from "~/modules/asset/custody-source.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
@@ -163,6 +164,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const totalItems = totalAssetsWithinLocation;
     const totalPages = Math.ceil(totalAssetsWithinLocation / perPage);
 
+    /**
+     * For pools with two or more sources, how many of this location's units
+     * are out with people ("· 2 in custody"). Counts only, never a name.
+     */
+    const custodyFromHere = await getCustodyFromLocationByPool({
+      locationId,
+      organizationId,
+      pools: assets
+        .filter((asset) => isQuantityTracked(asset))
+        .map((asset) => ({ id: asset.id, total: asset.quantity ?? 0 })),
+    });
+    const items = assets.map((asset) => ({
+      ...asset,
+      inCustodyHere: custodyFromHere[asset.id] ?? 0,
+    }));
+
     const header: HeaderData = {
       title: `${location.name} - Assets`,
       subHeading: location.id,
@@ -172,7 +189,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       location,
       header,
       modelName,
-      items: assets,
+      items,
       page,
       totalItems,
       perPage,
@@ -451,6 +468,11 @@ const ListAssetContent = ({
      * compiler checks it against nothing — keep it in step with the `custody`
      * select in `getLocation`.
      */
+    /**
+     * Units in custody taken from THIS location, for pools with two or more
+     * sources; 0 otherwise. Set by the loader.
+     */
+    inCustodyHere?: number;
     custody: Array<{
       quantity: number;
       custodian: {
@@ -566,6 +588,9 @@ const ListAssetContent = ({
                       return (
                         <span className="ml-2 inline-flex items-center gap-2 text-xs font-normal text-gray-500">
                           · {atLocation} {unit} at this location
+                          {item.inCustodyHere
+                            ? ` · ${item.inCustodyHere} in custody`
+                            : null}
                           {kitEntries.length > 0 ? (
                             <TooltipProvider delayDuration={150}>
                               <Tooltip>
