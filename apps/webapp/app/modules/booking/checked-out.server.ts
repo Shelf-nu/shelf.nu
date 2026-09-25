@@ -102,6 +102,41 @@ export async function computeCheckedOutBreakdownForAsset(
   assetId: Asset["id"],
   organizationId: string
 ): Promise<{ total: number; standalone: number }> {
+  let total = 0;
+  let standalone = 0;
+  for (const booking of (
+    await computeCheckedOutByBookingForAsset(tx, assetId, organizationId)
+  ).values()) {
+    total += booking.total;
+    standalone += booking.standalone;
+  }
+  return { total, standalone };
+}
+
+/**
+ * {@link computeCheckedOutBreakdownForAsset}, kept per booking: for each
+ * ONGOING / OVERDUE booking the asset is on, the units of it still off the
+ * shelf on that booking, split into the full count and its standalone part.
+ *
+ * Surfaces that list the asset's bookings one line each (the status-badge
+ * tooltip, the mobile asset detail) read this, so every line and the overview
+ * total are the same numbers.
+ *
+ * @param tx - Prisma transaction client (or the default `db` client)
+ * @param assetId - Asset whose checked-out units we want
+ * @param organizationId - Caller's organization. Scopes the active-booking
+ *                        lookup and prevents cross-org leaks
+ * @returns Map keyed by every active booking holding a slice of the asset,
+ *          including bookings with nothing out (both counts 0)
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- `tx` stays `any` for the same reason as computeCheckedOutForAsset above
+export async function computeCheckedOutByBookingForAsset(
+  tx: any,
+  assetId: Asset["id"],
+  organizationId: string
+): Promise<Map<string, { total: number; standalone: number }>> {
+  const byBooking = new Map<string, { total: number; standalone: number }>();
+
   const slices = (await tx.bookingAsset.findMany({
     where: {
       assetId,
@@ -129,7 +164,7 @@ export async function computeCheckedOutBreakdownForAsset(
     asset?: { status: AssetStatus } | null;
   }>;
 
-  if (slices.length === 0) return { total: 0, standalone: 0 };
+  if (slices.length === 0) return byBooking;
 
   /**
    * Whether the asset itself is flagged off the shelf. The all-at-once
@@ -225,9 +260,6 @@ export async function computeCheckedOutBreakdownForAsset(
     dispositionsByBooking.set(log.bookingId, list);
   }
 
-  let total = 0;
-  let standalone = 0;
-
   for (const [bookingId, bookingSlices] of slicesByBooking) {
     const stillOutBySlice = computeUnitsStillOutBySlice({
       slices: bookingSlices,
@@ -240,6 +272,8 @@ export async function computeCheckedOutBreakdownForAsset(
       assetIsCheckedOut,
     });
 
+    let total = 0;
+    let standalone = 0;
     for (const slice of bookingSlices) {
       const out = stillOutBySlice.get(slice.id) ?? 0;
       total += out;
@@ -249,7 +283,8 @@ export async function computeCheckedOutBreakdownForAsset(
         standalone += out;
       }
     }
+    byBooking.set(bookingId, { total, standalone });
   }
 
-  return { total, standalone };
+  return byBooking;
 }

@@ -38,9 +38,12 @@
  */
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { describe, expect, it, vitest } from "vitest";
+import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { computeCheckedOutForAsset } from "~/modules/booking/checked-out.server";
 import type { AvailabilityBatchClient } from "./availability.server";
 import { getAssetAvailabilityBatch } from "./availability.server";
+import { getAssetQuantityRows } from "./quantity-breakdown.server";
 
 // why: see the module doc above — importing the real `booking/service.server`
 // module (for the real `computeCheckedOutForAsset`) transitively imports
@@ -172,6 +175,41 @@ function createFakeClient(fixture: {
           .filter((a) => !where.id || where.id.in.includes(a.id))
           .map((a) => ({ id: a.id, quantity: a.quantity }))
       ),
+      // `getAssetQuantityRows` reads the asset with its RESERVED / ONGOING /
+      // OVERDUE slices nested, each carrying its booking.
+      findFirst: vitest.fn(({ where }: { where: { id: string } }) => {
+        const asset = assets.find((a) => a.id === where.id);
+        if (!asset) return null;
+        return {
+          id: asset.id,
+          type: "QUANTITY_TRACKED",
+          quantity: asset.quantity,
+          custody: [],
+          assetKits: [],
+          bookingAssets: bookingAssetRows
+            .filter((row) => row.assetId === asset.id)
+            .flatMap((row) => {
+              const booking = bookingById.get(row.bookingId);
+              if (
+                !booking ||
+                !["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status)
+              ) {
+                return [];
+              }
+              return [
+                {
+                  quantity: row.quantity,
+                  assetKitId: row.assetKitId,
+                  booking: {
+                    id: booking.id,
+                    name: booking.id,
+                    status: booking.status,
+                  },
+                },
+              ];
+            }),
+        };
+      }),
     },
     custody: { groupBy: vitest.fn().mockResolvedValue([]) },
     assetKit: {
@@ -894,5 +932,116 @@ describe("units that came back or were used up are no longer checked out", () =>
 
     expect(real).toBe(3);
     expect(batch?.checkedOut).toBe(real);
+  });
+});
+
+describe("the status-badge tooltip and mobile detail agree with the overview", () => {
+  /**
+   * Runs the rows the tooltip and the mobile asset detail read through
+   * `getQuantityData`, next to the overview's own checked-out figure.
+   */
+  async function tooltipAndOverviewFor(
+    client: ReturnType<typeof createFakeClient>,
+    assetId: string
+  ) {
+    const rows = await getAssetQuantityRows(
+      client as unknown as ExtendedPrismaClient,
+      { assetId, organizationId: ORG_ID }
+    );
+    const overview = await computeCheckedOutForAsset(client, assetId, ORG_ID);
+    return { rows, breakdown: getQuantityData(rows), overview };
+  }
+
+  it("counts a partial check-in's returned units as back on the shelf", async () => {
+    // All 10 went out on an ONGOING booking and 7 came back: 3 are out, 7 free.
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 10,
+          checkedOutQuantity: 10,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1"],
+          quantities: [10],
+          bookingAssetIds: ["s1"],
+        },
+      ],
+      dispositions: [
+        {
+          assetId: "a1",
+          bookingId: "b1",
+          bookingAssetId: "s1",
+          category: "RETURN",
+          quantity: 7,
+        },
+      ],
+      assets: [{ id: "a1", quantity: 10 }],
+    });
+
+    const { rows, breakdown, overview } = await tooltipAndOverviewFor(
+      client,
+      "a1"
+    );
+
+    expect(overview).toBe(3);
+    expect(rows.bookingAssets).toEqual([
+      expect.objectContaining({ quantity: 3, booking: expect.anything() }),
+    ]);
+    expect(breakdown?.checkedOut).toBe(overview);
+    expect(breakdown?.available).toBe(7);
+  });
+
+  it("drops a booking whose units have all come back, and keeps RESERVED rows", async () => {
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 4,
+          checkedOutQuantity: 4,
+        },
+        { id: "s2", assetId: "a1", bookingId: "b2", quantity: 5 },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.OVERDUE, organizationId: ORG_ID },
+        { id: "b2", status: BookingStatus.RESERVED, organizationId: ORG_ID },
+      ],
+      sessions: [],
+      dispositions: [
+        {
+          assetId: "a1",
+          bookingId: "b1",
+          bookingAssetId: "s1",
+          category: "RETURN",
+          quantity: 4,
+        },
+      ],
+      assets: [{ id: "a1", quantity: 10 }],
+    });
+
+    const { rows, breakdown, overview } = await tooltipAndOverviewFor(
+      client,
+      "a1"
+    );
+
+    expect(overview).toBe(0);
+    expect(rows.bookingAssets).toEqual([
+      expect.objectContaining({
+        quantity: 5,
+        booking: expect.objectContaining({ id: "b2", status: "RESERVED" }),
+      }),
+    ]);
+    expect(breakdown?.checkedOut).toBe(0);
+    expect(breakdown?.reserved).toBe(5);
   });
 });
