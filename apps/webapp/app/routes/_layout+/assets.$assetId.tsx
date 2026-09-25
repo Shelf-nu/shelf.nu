@@ -1,4 +1,4 @@
-import { BarcodeType, OrganizationRoles } from "@prisma/client";
+import { BarcodeType } from "@prisma/client";
 import { DateTime } from "luxon";
 import type {
   ActionFunctionArgs,
@@ -307,8 +307,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
 /**
  * Handles the asset page's own intents: delete, relink QR code, set reminder and
- * add barcode. Each intent is permission-checked against the action it maps to,
- * so deleting needs `asset: delete` while the other three need `asset: update`.
+ * add barcode. Each intent is permission-checked against the permission it maps
+ * to: deleting needs `asset: delete`, setting a reminder `assetReminders: create`,
+ * and relinking a QR code or adding a barcode `asset: update`.
  *
  * @returns A redirect after deletion, or the intent's result or failure with its status
  */
@@ -334,18 +335,36 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       })
     );
 
-    const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
-      delete: PermissionAction.delete,
-      "relink-qr-code": PermissionAction.update,
-      "set-reminder": PermissionAction.update,
-      "add-barcode": PermissionAction.update,
+    // Setting a reminder has its own permission; the other intents act on
+    // the asset itself.
+    const intent2Permission: {
+      [K in typeof intent]: {
+        entity: PermissionEntity;
+        action: PermissionAction;
+      };
+    } = {
+      delete: {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.delete,
+      },
+      "relink-qr-code": {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      },
+      "set-reminder": {
+        entity: PermissionEntity.assetReminders,
+        action: PermissionAction.create,
+      },
+      "add-barcode": {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      },
     };
 
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
-      action: intent2ActionMap[intent],
+      ...intent2Permission[intent],
     });
 
     switch (intent) {

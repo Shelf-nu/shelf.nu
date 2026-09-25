@@ -36,11 +36,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
+    const method = getActionMethod(request);
+
+    // Adding and deleting notes have their own permissions; deleting only ever
+    // removes the caller's own note (`deleteNote` scopes to the author).
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      entity: PermissionEntity.note,
+      action:
+        method === "DELETE" ? PermissionAction.delete : PermissionAction.create,
     });
 
     // Validate that the asset belongs to the user's organization
@@ -59,8 +64,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-
-    const method = getActionMethod(request);
 
     switch (method) {
       case "POST": {
