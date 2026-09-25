@@ -38,6 +38,7 @@ type MockDb = {
     findUniqueOrThrow: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
     findFirstOrThrow: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
   };
   userOrganization: {
     findMany: ReturnType<typeof vi.fn>;
@@ -62,6 +63,9 @@ const dbMock = vi.hoisted<MockDb>(() => ({
     // display name — not the behaviour under test, so it is stubbed to let the
     // logo path be reached.
     findFirstOrThrow: vi.fn(),
+    // why: the only write that carries the spent free trial to the new owner,
+    // so whether it ran is the assertion target of the free-trial tests.
+    update: vi.fn(),
   },
   userOrganization: { findMany: vi.fn(), update: vi.fn() },
   organization: {
@@ -103,7 +107,11 @@ const currentOrganization = {
 };
 
 /** Builds a UserOrganization row shaped like the service's `select` clause */
-function userOrg(userId: string, roles: OrganizationRoles[]) {
+function userOrg(
+  userId: string,
+  roles: OrganizationRoles[],
+  usedFreeTrial = false
+) {
   return {
     id: `uo-${userId}`,
     user: {
@@ -115,7 +123,7 @@ function userOrg(userId: string, roles: OrganizationRoles[]) {
       roles: [],
       customerId: null,
       tierId: "free",
-      usedFreeTrial: false,
+      usedFreeTrial,
     },
     roles,
   };
@@ -212,6 +220,86 @@ describe("transferOwnership authorization", () => {
       where: { id: `uo-${OWNER_ID}` },
       data: { roles: { set: [OrganizationRoles.ADMIN] } },
     });
+  });
+});
+
+/**
+ * Ownership transfer carries the spent free trial to the new owner.
+ *
+ * A workspace whose plan has ended transfers no subscription, so a rule tied to
+ * the subscription transfer never fires and leaves the new owner able to start
+ * a second 7-day trial on a workspace that is already full of assets.
+ *
+ * These tests run with `premiumIsEnabled: false` (see the module mock above) to
+ * pin that the flag is carried regardless of whether billing is switched on.
+ */
+describe("transferOwnership free trial flag", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    (dbMock.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
+      <T>(callback: (tx: MockDb) => Promise<T>): Promise<T> => callback(dbMock)
+    );
+
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      id: OWNER_ID,
+      roles: [],
+    });
+    dbMock.user.update.mockResolvedValue({ id: NEW_OWNER_ID });
+    dbMock.userOrganization.update.mockResolvedValue({});
+    dbMock.organization.update.mockResolvedValue({});
+  });
+
+  it("marks the new owner when no subscription moves with the workspace", async () => {
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      userOrg(OWNER_ID, [OrganizationRoles.OWNER], true),
+      userOrg(NEW_OWNER_ID, [OrganizationRoles.ADMIN], false),
+    ]);
+
+    await transferOwnership({
+      currentOrganization,
+      newOwnerId: NEW_OWNER_ID,
+      userId: OWNER_ID,
+      // The cancelled-plan case: the caller asks for no subscription transfer
+      // because there is no live subscription left to carry.
+      transferSubscription: false,
+    });
+
+    expect(dbMock.user.update).toHaveBeenCalledWith({
+      where: { id: NEW_OWNER_ID },
+      data: { usedFreeTrial: true },
+      select: { id: true },
+    });
+  });
+
+  it("leaves the new owner's trial alone when the outgoing owner never used one", async () => {
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      userOrg(OWNER_ID, [OrganizationRoles.OWNER], false),
+      userOrg(NEW_OWNER_ID, [OrganizationRoles.ADMIN], false),
+    ]);
+
+    await transferOwnership({
+      currentOrganization,
+      newOwnerId: NEW_OWNER_ID,
+      userId: OWNER_ID,
+    });
+
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+
+  it("does not write again when the new owner has already used their trial", async () => {
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      userOrg(OWNER_ID, [OrganizationRoles.OWNER], true),
+      userOrg(NEW_OWNER_ID, [OrganizationRoles.ADMIN], true),
+    ]);
+
+    await transferOwnership({
+      currentOrganization,
+      newOwnerId: NEW_OWNER_ID,
+      userId: OWNER_ID,
+    });
+
+    expect(dbMock.user.update).not.toHaveBeenCalled();
   });
 });
 
