@@ -313,9 +313,7 @@ describe("buildCsvBackupDataFromAssets", () => {
       },
     ];
 
-    expect(
-      buildCsvBackupDataFromAssets({ assets, keysToSkip: [] })
-    ).toEqual([
+    expect(buildCsvBackupDataFromAssets({ assets, keysToSkip: [] })).toEqual([
       ['"asset-1"', '"MacBook Pro; 16-inch"', '"He said ""hello"" to me"'],
     ]);
   });

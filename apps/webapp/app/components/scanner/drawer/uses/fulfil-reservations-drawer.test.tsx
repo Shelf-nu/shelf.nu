@@ -33,7 +33,10 @@ import {
   fulfilSessionAtom,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
-import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 
 import FulfilReservationsDrawer from "./fulfil-reservations-drawer";
 
@@ -137,12 +140,52 @@ const ALREADY_ON_BOOKING: Exclude<
   type: "INDIVIDUAL",
 };
 
+/** One member of a scanned kit, as `KIT_INCLUDE` selects it. */
+type KitMember = KitFromQr["assetKits"][number]["asset"];
+
+/**
+ * A resolved kit payload, as the scanned-item endpoint responds with it.
+ *
+ * @param id - Kit id; what the form submits.
+ * @param name - Rendered in the kit row.
+ * @param members - Its assets. `assetModelId` is what decides whether a
+ *   member assigns an outstanding reservation.
+ */
+function makeKit({
+  id,
+  name,
+  members,
+}: {
+  id: string;
+  name: string;
+  members: Array<Pick<KitMember, "id" | "type" | "assetModelId">>;
+}): Partial<KitFromQr> {
+  return {
+    id,
+    name,
+    _count: { assetKits: members.length },
+    assetKits: members.map((member, index) => ({
+      id: `${id}-membership-${index}`,
+      quantity: 1,
+      asset: {
+        status: "AVAILABLE",
+        availableToBook: true,
+        // `KIT_INCLUDE` selects custody as a relation list, so an unheld
+        // member is an empty array rather than null.
+        custody: [],
+        ...member,
+      },
+    })) as KitFromQr["assetKits"],
+  };
+}
+
 /**
  * Mounts the drawer with a seeded fulfil session for `modelCount` models.
  *
  * @param options.alreadyIncluded - Items already on the booking.
  * @param options.checksOutScannedOnly - Whether submit sends out scans only.
- * @param options.scannedAssets - Resolved scans, keyed by their QR id.
+ * @param options.scannedAssets - Resolved asset scans, keyed by their QR id.
+ * @param options.scannedKits - Resolved kit scans, keyed by their QR id.
  */
 function renderDrawer(
   modelCount: number,
@@ -150,6 +193,7 @@ function renderDrawer(
     alreadyIncluded?: Exclude<FulfilSessionInfo, null>["alreadyIncluded"];
     checksOutScannedOnly?: boolean;
     scannedAssets?: Record<string, Partial<AssetFromQr>>;
+    scannedKits?: Record<string, Partial<KitFromQr>>;
   } = {}
 ) {
   const store = createStore();
@@ -165,15 +209,20 @@ function renderDrawer(
     alreadyIncluded: options.alreadyIncluded ?? [],
   });
   store.set(expectedModelRequestsAtom, expectedModelRequests);
-  store.set(
-    scannedItemsAtom,
-    Object.fromEntries(
+  store.set(scannedItemsAtom, {
+    ...Object.fromEntries(
       Object.entries(options.scannedAssets ?? {}).map(([qrId, asset]) => [
         qrId,
         { type: "asset" as const, data: asset as AssetFromQr },
       ])
-    )
-  );
+    ),
+    ...Object.fromEntries(
+      Object.entries(options.scannedKits ?? {}).map(([qrId, kit]) => [
+        qrId,
+        { type: "kit" as const, data: kit as KitFromQr },
+      ])
+    ),
+  });
 
   return render(
     <Provider store={store}>
@@ -385,5 +434,172 @@ describe("FulfilReservationsDrawer check-out rule", () => {
       "value",
       "asset-tripod"
     );
+  });
+});
+
+/** Values of the hidden inputs the form would submit under `field`. */
+function submittedValues(field: "assetIds" | "kitIds"): string[] {
+  return Array.from(
+    document.querySelectorAll<HTMLInputElement>(`input[name^="${field}["]`)
+  ).map((input) => input.value);
+}
+
+/**
+ * A scanned kit goes on the booking whole, and its INDIVIDUAL members assign
+ * outstanding reserved units on the way. The kit id is what the form sends —
+ * members are never submitted as loose asset ids.
+ */
+describe("FulfilReservationsDrawer kit scans", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // why: the drawer renders inside the app shell, which reads the layout
+    // route's loader for the sidebar state. Nothing here exercises that, but
+    // without it the shell throws before any row is rendered.
+    useRouteLoaderDataMock.mockReturnValue({
+      minimizedSidebar: false,
+    } as never);
+  });
+
+  it("assigns a reserved unit from a scanned kit's member", () => {
+    renderDrawer(1, {
+      scannedKits: {
+        "qr-grip-kit": makeKit({
+          id: "kit-grip",
+          name: "Grip Kit",
+          members: [
+            { id: "asset-flag", type: "INDIVIDUAL", assetModelId: "model-0" },
+          ],
+        }),
+      },
+    });
+
+    expect(screen.getByText("Grip Kit")).toBeTruthy();
+    expect(screen.getByText("Assigns 1 reserved unit")).toBeTruthy();
+    // The member advances the very strip a loose scan of it would.
+    expect(getModelsToggle()).toHaveTextContent("1 / 4");
+    expect(screen.getByText("3 reserved units still unassigned")).toBeTruthy();
+
+    expect(screen.getByRole("button", { name: "Check out" })).toBeEnabled();
+    expect(submittedValues("kitIds")).toEqual(["kit-grip"]);
+    // The server resolves the kit into kit-driven rows. A member sent as a
+    // loose id as well would land on the booking twice.
+    expect(submittedValues("assetIds")).toEqual([]);
+  });
+
+  it("blocks a loose scan of a unit that belongs to a kit", () => {
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-member": {
+          id: "asset-member",
+          title: "Camera A",
+          type: "INDIVIDUAL",
+          assetModelId: "model-0",
+          // Committed to a kit that this scan does not name.
+          assetKits: [{ id: "ak-1", kitId: "kit-9" }],
+        } as never,
+      },
+    });
+
+    expect(screen.getByText(/belongs to a kit/i)).toBeInTheDocument();
+    // Sending one member out alone would answer the reservation and check the
+    // booking out with the kit split, so submit is refused until it is removed.
+    expect(screen.getByRole("button", { name: /check out/i })).toBeDisabled();
+  });
+
+  it("does not block the member when its kit is scanned too", () => {
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-member": {
+          id: "asset-member",
+          title: "Camera A",
+          type: "INDIVIDUAL",
+          assetModelId: "model-0",
+          assetKits: [{ id: "ak-1", kitId: "kit-9" }],
+        } as never,
+      },
+      scannedKits: {
+        "qr-kit": makeKit({
+          id: "kit-9",
+          name: "Kit Nine",
+          members: [
+            {
+              id: "asset-member",
+              type: "INDIVIDUAL",
+              assetModelId: "model-0",
+            } as never,
+          ],
+        }),
+      },
+    });
+
+    expect(screen.queryByText(/belongs to a kit/i)).not.toBeInTheDocument();
+  });
+
+  it("renders and submits a kit whose members assign nothing", () => {
+    renderDrawer(1, {
+      scannedKits: {
+        "qr-cable-kit": makeKit({
+          id: "kit-cable",
+          name: "Cable Kit",
+          members: [
+            // Off-model, and a quantity-tracked member of a reserved model:
+            // a slice of a pool is not the whole unit a reservation books.
+            { id: "asset-cable", type: "INDIVIDUAL", assetModelId: null },
+            {
+              id: "asset-sandbags",
+              type: "QUANTITY_TRACKED",
+              assetModelId: "model-0",
+            },
+          ],
+        }),
+      },
+    });
+
+    expect(screen.getByText("Cable Kit")).toBeTruthy();
+    expect(
+      screen.getByText("Will be added to booking and checked out")
+    ).toBeTruthy();
+    expect(getModelsToggle()).toHaveTextContent("0 / 4");
+
+    // Matching nothing is not an error — the kit still goes out.
+    expect(screen.getByRole("button", { name: "Check out" })).toBeEnabled();
+    expect(submittedValues("kitIds")).toEqual(["kit-cable"]);
+  });
+
+  it("lets one asset assign one unit, however many ways it was scanned", () => {
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-flag": {
+          id: "asset-flag",
+          title: "Black Flag",
+          type: "INDIVIDUAL",
+          assetModelId: "model-0",
+          mainImage: null,
+          thumbnailImage: null,
+        },
+      },
+      scannedKits: {
+        "qr-grip-kit": makeKit({
+          id: "kit-grip",
+          name: "Grip Kit",
+          members: [
+            { id: "asset-flag", type: "INDIVIDUAL", assetModelId: "model-0" },
+          ],
+        }),
+      },
+    });
+
+    expect(getModelsToggle()).toHaveTextContent("1 / 4");
+    // The kit owns the assignment, matching the server: it drops the loose
+    // scan and books the unit through the kit slice, because both rows would
+    // book one physical camera twice.
+    expect(screen.getByText("Assigns 1 reserved unit")).toBeTruthy();
+    // So the asset's own row reports where it arrives from rather than
+    // claiming a unit of its own — one camera, one reserved unit.
+    expect(screen.getByText("Arrives with Grip Kit")).toBeTruthy();
+    expect(screen.queryByText("Ready")).toBeNull();
+    // Both still submit: the server decides which row carries it.
+    expect(submittedValues("assetIds")).toEqual(["asset-flag"]);
+    expect(submittedValues("kitIds")).toEqual(["kit-grip"]);
   });
 });

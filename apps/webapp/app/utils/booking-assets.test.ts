@@ -6,6 +6,7 @@ import {
   flattenSelectedBookingItems,
   getBookingAssetCheckinLabel,
   getBookingContextAssetStatus,
+  getRemainingCheckedOutAssetIds,
   isAssetCheckableIn,
   isQtyRowCheckedOutOrFulfilled,
   resolveQtyStockBadgeVariant,
@@ -540,5 +541,55 @@ describe("resolveQtyStockBadgeVariant", () => {
         isKitDriven: false,
       })
     ).toBeNull();
+  });
+});
+
+describe("getRemainingCheckedOutAssetIds", () => {
+  it("counts a multi-slice asset once even though it is several booking rows", () => {
+    expect.assertions(2);
+    // One QUANTITY_TRACKED asset booked twice: a standalone slice and a
+    // kit-driven one. Three rows, two distinct assets.
+    const bookingAssets = [
+      { id: "asset-qt", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-qt", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-individual", status: AssetStatus.CHECKED_OUT },
+    ];
+
+    const remaining = getRemainingCheckedOutAssetIds(bookingAssets, []);
+
+    expect(remaining.size).toBe(2);
+    expect([...remaining]).toEqual(["asset-qt", "asset-individual"]);
+  });
+
+  it("excludes assets already reconciled by a partial check-in", () => {
+    expect.assertions(1);
+    const bookingAssets = [
+      { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", status: AssetStatus.CHECKED_OUT },
+    ];
+
+    const remaining = getRemainingCheckedOutAssetIds(bookingAssets, [
+      "asset-1",
+    ]);
+
+    expect([...remaining]).toEqual(["asset-2"]);
+  });
+
+  it("excludes assets that are not checked out at all", () => {
+    expect.assertions(1);
+    const bookingAssets = [
+      { id: "asset-available", status: AssetStatus.AVAILABLE },
+      { id: "asset-custody", status: AssetStatus.IN_CUSTODY },
+      { id: "asset-out", status: AssetStatus.CHECKED_OUT },
+    ];
+
+    expect([...getRemainingCheckedOutAssetIds(bookingAssets, [])]).toEqual([
+      "asset-out",
+    ]);
+  });
+
+  it("returns an empty set when nothing is out", () => {
+    expect.assertions(1);
+    expect(getRemainingCheckedOutAssetIds([], []).size).toBe(0);
   });
 });

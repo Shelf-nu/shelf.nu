@@ -13,6 +13,7 @@
 import Markdoc from "@markdoc/markdoc";
 import { AssetType, BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
+import type { Mock } from "vitest";
 import { db } from "~/database/db.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { ShelfError } from "~/utils/error";
@@ -178,12 +179,12 @@ function installClaimSimulator() {
       // `fulfilledQuantity` on every upsert the suite runs.
       if (sql.includes("FOR UPDATE") && sql.includes('"BookingModelRequest"')) {
         const locked = await (
-          db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+          db.bookingModelRequest.findUnique as unknown as FindUniqueRequestMock
         )();
         return locked ? [{ id: locked.id ?? "req-1" }] : [];
       }
       const row = await (
-        db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+        db.bookingModelRequest.findUnique as unknown as FindUniqueRequestMock
       )();
       if (!row) return [];
       if (row.fulfilledQuantity >= row.quantity) return [];
@@ -275,6 +276,20 @@ function markdocTagsIn(content: string) {
 
 const from = new Date("2026-05-01T09:00:00Z");
 const to = new Date("2026-05-05T18:00:00Z");
+
+/**
+ * The `findUnique` mock as this suite drives it: the `$queryRaw` stub calls it
+ * with no arguments and mutates the reservation row it resolves to. Cast via
+ * `unknown`: Prisma's generic signature does not overlap this zero-arg shape.
+ */
+type FindUniqueRequestMock = Mock<
+  () => Promise<{
+    id?: string;
+    fulfilledQuantity: number;
+    quantity: number;
+    fulfilledAt?: Date | null;
+  } | null>
+>;
 
 describe("getAssetModelAvailability", () => {
   beforeEach(() => {
@@ -609,7 +624,7 @@ describe("upsertBookingModelRequest", () => {
     // `continue` in `assertModelUnitsNotReservedElsewhere`).
     const rowLock = lockOn("BookingModelRequest");
     const readOrder = (
-      db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+      db.bookingModelRequest.findUnique as unknown as FindUniqueRequestMock
     ).mock.invocationCallOrder[0];
 
     expect(rowLock).toBeDefined();
@@ -1422,7 +1437,7 @@ describe("removeBookingModelRequest", () => {
     // provenance this guard exists to keep.
     const rowLock = lockOn("BookingModelRequest");
     const readOrder = (
-      db.bookingModelRequest.findUnique as ReturnType<typeof vitest.fn>
+      db.bookingModelRequest.findUnique as unknown as FindUniqueRequestMock
     ).mock.invocationCallOrder[0];
 
     expect(rowLock).toBeDefined();
@@ -2352,6 +2367,90 @@ describe("fulfilModelRequestsForAssets", () => {
     // The map IS the provenance the caller persists. An empty map here means
     // `BookingAsset.bookingModelRequestId` never gets stamped.
     expect(result).toEqual(new Map([["asset-1", "req-1"]]));
+  });
+
+  it("refuses a second claim from an asset that already answered on this booking", async () => {
+    expect.assertions(2);
+    // why: the asset holds a row carrying a stamp, which is the record that it
+    // has already discharged a unit here — however it arrived, loose or in a
+    // kit.
+    // @ts-expect-error mocked
+    db.bookingAsset.findMany.mockResolvedValue([{ assetId: "asset-1" }]);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 5,
+      fulfilledQuantity: 1,
+      fulfilledAt: null,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    const result = await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: [asset("asset-1")],
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    // One physical unit, one reserved unit. Claiming again would report a
+    // 2-unit reservation as satisfied with one camera behind it.
+    expect(result).toEqual(new Map());
+    expect(db.bookingModelRequest.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("still claims for an asset already on the booking whose row carries no stamp", async () => {
+    expect.assertions(1);
+    // why: the read is scoped to stamped rows, so an unstamped row simply does
+    // not come back — the asset is present but has discharged nothing.
+    // @ts-expect-error mocked
+    db.bookingAsset.findMany.mockResolvedValue([]);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity: 5,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+      assetModel: { name: "Dell Latitude 5550" },
+    });
+
+    const result = await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: [asset("asset-1")],
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    expect(result).toEqual(new Map([["asset-1", "req-1"]]));
+  });
+
+  it("reads the already-claimed assets once for the whole call", async () => {
+    expect.assertions(2);
+
+    await fulfilModelRequestsForAssets({
+      bookingId: BOOKING_ID,
+      assets: [asset("asset-1"), asset("asset-2"), asset("asset-3")],
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      tx,
+    });
+
+    // One indexed read, not one per asset: this runs inside the caller's
+    // interactive transaction, where a bulk add can carry hundreds of assets.
+    expect(db.bookingAsset.findMany).toHaveBeenCalledTimes(1);
+    expect(db.bookingAsset.findMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: BOOKING_ID,
+        assetId: { in: ["asset-1", "asset-2", "asset-3"] },
+        bookingModelRequestId: { not: null },
+      },
+      select: { assetId: true },
+    });
   });
 
   it("omits assets that matched no outstanding reservation", async () => {

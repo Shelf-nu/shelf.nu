@@ -126,6 +126,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         consumed,
         userId,
         organizationId,
+        role,
         note,
       });
 

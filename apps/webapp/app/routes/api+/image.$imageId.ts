@@ -82,7 +82,8 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
         // a unique opaque origin and no script execution, so a format that
         // turns out to be scriptable still cannot reach the session. CSP is
         // ignored on subresources, so this cannot affect `<img>` rendering.
-        "Content-Security-Policy": "script-src 'none'; object-src 'none'; sandbox",
+        "Content-Security-Policy":
+          "script-src 'none'; object-src 'none'; sandbox",
         "X-Content-Type-Options": "nosniff",
         // Stored images are replaced in place (same id, same URL), so renderers
         // version the URL with `?v=<updatedAt>` (see ~/components/shared/image.tsx)
