@@ -5,11 +5,12 @@
  * to. This module turns those two into the rows the screen renders — one
  * header per kit followed by its members when expanded — and answers the
  * questions that grouping raises: what the kit's badge says, which members a
- * header may select, how a selection reads on the action button, and whether a
- * removal may name the kit instead of its assets.
+ * header may select, how a selection reads on the action button and in the
+ * check-out and check-in alerts, and whether a removal may name the kit
+ * instead of its assets.
  *
  * Everything here is pure and free of React Native so the rules can be tested
- * under Node. The screen owns the pixels; this owns the decisions.
+ * under Node. The screens own the pixels; this owns the decisions.
  *
  * `describeBookingRows` is a MIRROR of the webapp helper of the same name and
  * is never a source of truth; its own JSDoc carries the provenance and the
@@ -18,11 +19,17 @@
  * asset rather than per row — but each must reach the same outcome as the web
  * surface its `@see` names.
  *
- * @see ../app/(tabs)/bookings/[id].tsx — the only consumer
+ * @see ../app/(tabs)/bookings/[id].tsx — the booking detail list
+ * @see ../app/(tabs)/scanner.tsx — counts a scanned check-out or check-in batch
+ *   with the same rules, through `countBookingBatch`
  * @see ../../../apps/webapp/app/modules/booking/shape-booking-assets.ts — the
  *   web grouping this mirrors
  */
-import { KIT_STATUS_LABELS } from "@shelf/labels";
+import {
+  ASSET_STATUS_LABELS,
+  BOOKING_STATUS_LABELS,
+  KIT_STATUS_LABELS,
+} from "@shelf/labels";
 
 import type { BookingAsset, BookingKit } from "./api/types";
 
@@ -208,13 +215,152 @@ export type BookingKitBadge = {
 };
 
 /**
+ * Units of a quantity-tracked asset that are out on this booking and not yet
+ * back: what it sent out, less what has been returned, consumed, lost or
+ * damaged.
+ *
+ * THE check-in test, and `remainingToCheckIn` is not. That counter is booked
+ * minus dispositioned, so it counts units that never left: on a row nothing
+ * was ever checked out for it equals the whole booked quantity, while
+ * `partialCheckinBooking` refuses any row no slice of which carries a
+ * departure marker. Offer check-in on it and the server declines the submit.
+ *
+ * Bounded by `remainingToCheckIn`, because that is the cap the endpoint
+ * applies to every claim it accepts. The two agree on every single-trip
+ * booking. They part on a row that went out, came back and went out again
+ * inside one booking: the departure count keeps climbing while the cap —
+ * booked minus everything dispositioned — has already reached zero. Those
+ * units are physically out and still cannot be checked in, so they must not be
+ * offered.
+ *
+ * Falls back to `remainingToCheckIn` against a server that sends no unit
+ * totals. That server cannot tell dispatched units from booked ones, so there
+ * is nothing better to answer with, bug included.
+ *
+ * INDIVIDUAL rows are not measured in units and are judged by status; they
+ * carry no counters at all, so this returns 0 for them.
+ *
+ * @param item - the asset row from the booking detail response
+ * @returns units still out and acceptable to the endpoint, never negative
+ * @see ../../../apps/webapp/app/modules/booking/service.server.ts — `partialCheckinBooking`,
+ *   the guard this keeps the screen on the right side of
+ */
+export function unitsStillOut(item: BookingAsset): number {
+  const { dispatchedUnitsTotal, dispositionedUnitsTotal, remainingToCheckIn } =
+    item;
+  // The route attaches all four counters to a quantity row or none of them,
+  // so one total missing means the whole set is.
+  if (
+    dispatchedUnitsTotal === undefined ||
+    dispositionedUnitsTotal === undefined
+  ) {
+    return remainingToCheckIn ?? 0;
+  }
+  const stillOut = Math.max(0, dispatchedUnitsTotal - dispositionedUnitsTotal);
+  return Math.min(stillOut, remainingToCheckIn ?? 0);
+}
+
+/**
+ * Booking-scoped lifecycle state for a QUANTITY_TRACKED asset row. The asset's
+ * GLOBAL status ("Available") is meaningless on a booking — what matters is how
+ * many of the booked units are reserved / checked out / returned. `key` indexes
+ * the shared `bookingStatusBadge` colours so the row reuses the booking colour
+ * vocabulary (blue reserved, orange in-progress, green complete).
+ *
+ * Reads the unit totals when the server sends them, because they are what the
+ * kit header above this row is judged by (`isMemberBackIn`). Deriving "done"
+ * from `remainingToCheckIn` instead makes the two disagree on a row that went
+ * out, came back and went out again: the endpoint's cap reaches zero while the
+ * second trip is still in the field, so the row would read "Returned" under a
+ * header that still reads Available.
+ *
+ * @param args - booked units, the remaining counts, the booking-lifetime unit
+ *   totals when present, and the parent booking's status (to tell a DRAFT line
+ *   apart from a reserved one).
+ * @returns The badge `{ key, label }` for this asset on this booking.
+ */
+export function getBookingAssetState({
+  booked,
+  remOut,
+  remIn,
+  dispatched,
+  dispositioned,
+  bookingStatus,
+}: {
+  booked: number;
+  remOut?: number;
+  remIn?: number;
+  dispatched?: number;
+  dispositioned?: number;
+  bookingStatus: string;
+}): { key: string; label: string } {
+  const reserved =
+    bookingStatus === "DRAFT"
+      ? { key: "DRAFT", label: BOOKING_STATUS_LABELS.DRAFT }
+      : { key: "RESERVED", label: BOOKING_STATUS_LABELS.RESERVED };
+
+  if (booked <= 0) return reserved;
+
+  // why: the labels that name a real status read from @shelf/labels. The
+  // fraction forms and "Returned" stay bespoke — they are booking-scoped
+  // progress, not statuses, so the package has no entry for them.
+  if (dispatched !== undefined && dispositioned !== undefined) {
+    // Done when every unit this booking sent out is accounted for — the same
+    // threshold the kit header applies, so the two always agree.
+    if (dispositioned >= Math.max(booked, dispatched))
+      return { key: "COMPLETE", label: "Returned" };
+    if (dispatched <= 0) return reserved;
+
+    const stillOut = Math.max(0, dispatched - dispositioned);
+    if (stillOut >= booked)
+      return { key: "ONGOING", label: ASSET_STATUS_LABELS.CHECKED_OUT };
+    if (stillOut > 0)
+      return { key: "ONGOING", label: `${stillOut}/${booked} out` };
+    return {
+      key: "ONGOING",
+      label: `${Math.min(dispositioned, booked)}/${booked} returned`,
+    };
+  }
+
+  // An older server sends no totals; judge by the remaining counts alone.
+  const clampedOut = Math.min(Math.max(remOut ?? booked, 0), booked);
+  const clampedIn = Math.min(Math.max(remIn ?? booked, 0), booked);
+  const checkedOut = booked - clampedOut; // units taken from the workspace
+  const checkedIn = booked - clampedIn; // units reconciled back in
+
+  if (checkedOut <= 0) return reserved;
+  if (checkedIn >= booked) return { key: "COMPLETE", label: "Returned" };
+  if (checkedIn > 0)
+    return { key: "ONGOING", label: `${checkedIn}/${booked} returned` };
+  if (checkedOut >= booked)
+    return { key: "ONGOING", label: ASSET_STATUS_LABELS.CHECKED_OUT };
+  return { key: "ONGOING", label: `${checkedOut}/${booked} out` };
+}
+
+/**
  * Whether a member has been fully checked back in on this booking.
  *
- * A quantity-tracked member is judged by units — booked, and none left to
- * reconcile — because its global status returns to AVAILABLE while units are
- * still out. `remainingToCheckIn` is the counter to read: `remainingToCheckOut`
- * returns to the booked figure once everything is back, which would report a
- * fully-returned member as never having left.
+ * A quantity-tracked member is judged by units — booked, and every one of them
+ * accounted for — because its global status returns to AVAILABLE while units
+ * are still out. `dispositioned >= booked` is the web's own rule for the same
+ * question (`getBookingContextKitStatus`), so a kit reads the same on both
+ * surfaces.
+ *
+ * The threshold is the LARGER of the booked quantity and what the booking has
+ * actually sent out, so a member on a second trip is not called done while
+ * that trip is in the field. The two are the same number on every single-trip
+ * booking, so this only extends the web's rule to a case the web cannot reach.
+ *
+ * Deliberately a threshold against the booked quantity rather than
+ * `unitsStillOut`: the badge answers whether this booking is FINISHED with the
+ * member, not whether anything is out right now. A member booked 4 with 2 sent
+ * out and 2 returned still reads Available on both surfaces — the other 2
+ * never left.
+ *
+ * Falls back to `remainingToCheckIn === 0` against a server that sends no unit
+ * totals, which is the same statement in the arithmetic that server offers.
+ *
+ * @see ../../../apps/webapp/app/utils/booking-assets.ts — `getBookingContextKitStatus`
  */
 function isMemberBackIn(
   member: BookingAsset,
@@ -222,7 +368,11 @@ function isMemberBackIn(
 ): boolean {
   if (member.type === "QUANTITY_TRACKED") {
     const booked = member.quantity ?? 0;
-    return booked > 0 && (member.remainingToCheckIn ?? booked) === 0;
+    if (booked <= 0) return false;
+    return member.dispositionedUnitsTotal === undefined
+      ? (member.remainingToCheckIn ?? booked) === 0
+      : member.dispositionedUnitsTotal >=
+          Math.max(booked, member.dispatchedUnitsTotal ?? 0);
   }
   return checkedInAssetIds.includes(member.id);
 }
@@ -312,6 +462,12 @@ export type BookingSelectMode = "checkin" | "checkout" | "remove" | null;
  * individual asset is AVAILABLE again too, so check-out excludes the ones
  * already checked in rather than re-offering them.
  *
+ * The two directions read different counters, and swapping them is the bug
+ * this comment exists to prevent. Check-out asks what is still reserved and has
+ * not gone out ({@link BookingAsset.remainingToCheckOut}); check-in asks what
+ * went out and is not back ({@link unitsStillOut}). Booked-but-never-dispatched
+ * units belong to the first question and not the second.
+ *
  * @param item - the asset
  * @param selectMode - the active mode, or null when not selecting
  * @param checkedInAssetIds - assets already checked back in
@@ -331,7 +487,7 @@ export function isBookingAssetSelectable(
 
   if (selectMode === "checkin") {
     return isQuantityTracked
-      ? (item.remainingToCheckIn ?? 0) > 0
+      ? unitsStillOut(item) > 0
       : isCheckedOut && !isCheckedIn;
   }
   return isQuantityTracked
@@ -380,11 +536,14 @@ export type SelectionCounts = { kitCount: number; assetCount: number };
  * Counts a selection the way the list offers it: a kit is one thing, and every
  * other pick is an asset.
  *
- * `kitCount` is the kit headers that read "all" — every member the mode can act
- * on is picked. `assetCount` is every selected id those kits do not account
- * for. A member is only ever picked through its header, so these are normally
- * the standalone rows; an id outside every wholly picked kit still counts, so
- * the label covers everything the submit will send.
+ * `kitCount` is the kits picked whole: at least one member is picked, and no
+ * member the mode can act on is left out — what a header reading "all" shows.
+ * A picked member counts toward its kit whatever its status now says, so the
+ * count of a batch holds while a screen marks that batch as moved.
+ * `assetCount` is every selected id those kits do not account for. A member is
+ * only ever picked through its header, so these are normally the standalone
+ * rows; an id outside every wholly picked kit still counts, so the label covers
+ * everything the submit will send.
  *
  * @param args.rows - the rendered rows; a kit header carries every member
  *   whether or not the kit is open
@@ -409,13 +568,15 @@ export function countSelection({
 
   for (const row of rows) {
     if (row.type !== "kit") continue;
-    const state = resolveKitSelectionState({
-      members: row.members,
-      selectMode,
-      selectedAssetIds,
-      checkedInAssetIds,
-    });
-    if (state !== "all") continue;
+    const somePicked = row.members.some((member) =>
+      selectedAssetIds.has(member.id)
+    );
+    const noneLeftOut = row.members.every(
+      (member) =>
+        selectedAssetIds.has(member.id) ||
+        !isBookingAssetSelectable(member, selectMode, checkedInAssetIds)
+    );
+    if (!somePicked || !noneLeftOut) continue;
     kitCount += 1;
     for (const member of row.members) coveredByKit.add(member.id);
   }
@@ -426,6 +587,41 @@ export function countSelection({
   }
 
   return { kitCount, assetCount };
+}
+
+/**
+ * Counts a flat batch of asset ids against a booking's own assets, by the same
+ * rules as `countSelection`: a kit is one thing once no member of it the mode
+ * can act on is left out of the batch.
+ *
+ * For a caller that holds ids rather than rendered rows. The scanner adds a
+ * scanned kit as its member assets, so this is what lets its batch read the
+ * way the booking screen reads the same kit.
+ *
+ * @param args.assets - the booking's assets, which carry the kit groupings
+ * @param args.assetIds - the asset ids in the batch
+ * @param args.selectMode - "checkout" or "checkin"
+ * @param args.checkedInAssetIds - assets already checked back in
+ * @returns the counts `describeBatch` and the alert helpers below it name
+ */
+export function countBookingBatch({
+  assets,
+  assetIds,
+  selectMode,
+  checkedInAssetIds,
+}: {
+  assets: BookingAsset[];
+  assetIds: readonly string[];
+  selectMode: BookingSelectMode;
+  checkedInAssetIds: readonly string[];
+}): SelectionCounts {
+  return countSelection({
+    // Collapsed or open makes no difference: a kit row carries every member.
+    rows: buildBookingRows({ assets, expandedKitIds: new Set() }),
+    selectedAssetIds: new Set(assetIds),
+    selectMode,
+    checkedInAssetIds,
+  });
 }
 
 /**
@@ -548,21 +744,18 @@ function describeKitsThenAssets(
 }
 
 /**
- * Names what a removal will take, leading with the kits because a kit is the
- * larger thing leaving the booking. Reads inside a sentence, so it is lower
- * case.
+ * Names a batch inside a sentence, leading with the kits because a kit is the
+ * larger thing: what a removal takes off the booking, or what a check-out or
+ * check-in moves. Reads mid-sentence, so it is lower case.
  *
- * @param args.assetCount - assets removed by id
- * @param args.kitCount - kits removed as a whole
- * @returns e.g. `"1 kit and 2 assets"`, `"3 assets"`
+ * @param args.kitCount - kits taken as a whole
+ * @param args.assetCount - every asset outside those kits
+ * @returns e.g. `"1 kit and 2 assets"`, `"3 assets"`, `"2 kits"`
  */
-export function describeRemoval({
-  assetCount,
+export function describeBatch({
   kitCount,
-}: {
-  assetCount: number;
-  kitCount: number;
-}): string {
+  assetCount,
+}: SelectionCounts): string {
   return describeKitsThenAssets(
     { kitCount, assetCount },
     {
@@ -597,4 +790,106 @@ export function describeSelection({
       joiner: " & ",
     }
   );
+}
+
+/** Which way a booking batch moves: out, or back in. */
+type BookingBatchDirection = "checkout" | "checkin";
+
+/**
+ * The question asked before a check-out or check-in batch is sent.
+ *
+ * It names the batch in the words of the action button that opened it, a
+ * wholly picked kit being one thing. Count the batch from the selection before
+ * the submit: the request carries member asset ids, so nothing the server
+ * sends back can tell a kit from the assets in it.
+ *
+ * @param args.direction - which way the batch moves
+ * @param args.counts - the batch, from `countSelection` or `countBookingBatch`
+ * @param args.bookingName - names the booking, for a screen that does not
+ *   show it; a blank name is left out
+ * @returns e.g. `"Check out 1 kit and 1 asset?"`,
+ *   `"Check in 3 assets for "Film shoot"?"`
+ */
+export function describeBatchConfirm({
+  direction,
+  counts,
+  bookingName,
+}: {
+  direction: BookingBatchDirection;
+  counts: SelectionCounts;
+  bookingName?: string | null;
+}): string {
+  const verb = direction === "checkout" ? "Check out" : "Check in";
+  const forBooking = bookingName?.trim() ? ` for "${bookingName}"` : "";
+  return `${verb} ${describeBatch(counts)}${forBooking}?`;
+}
+
+/**
+ * What the success alert says once the server accepts a check-out or check-in
+ * batch.
+ *
+ * A batch that leaves nothing to move speaks for the whole booking. Any other
+ * batch names what it moved, in the words its confirm used, and says where the
+ * rest of the booking stands without a number: the server counts what remains
+ * in assets, one per kit member, which would contradict a batch counted in
+ * kits.
+ *
+ * `isComplete` is the server's answer to "is anything left?". Without one the
+ * message names the batch alone rather than guess.
+ *
+ * The server's check-out skips an asset that is already out, so it can move
+ * fewer assets than the batch sent — another check-out took them in the
+ * meantime. When `assets` shows that, the batch as counted did not all move,
+ * so the message names what moved in the server's own units instead. The
+ * server's check-in refuses such an asset rather than skipping it, so only a
+ * check-out caller has a reason to pass `assets`.
+ *
+ * @param args.direction - which way the batch moved
+ * @param args.counts - the batch, counted before the submit
+ * @param args.isComplete - true when nothing is left to move, per the server
+ * @param args.bookingName - the booking's name, for the completed forms
+ * @param args.assets - how many distinct assets the request sent, and how many
+ *   the server says it moved
+ * @returns e.g. `"1 kit and 1 asset checked out. The rest is still reserved."`
+ */
+export function describeBatchResult({
+  direction,
+  counts,
+  isComplete,
+  bookingName,
+  assets,
+}: {
+  direction: BookingBatchDirection;
+  counts: SelectionCounts;
+  isComplete: boolean | undefined;
+  bookingName?: string | null;
+  assets?: { sent: number; moved: number };
+}): string {
+  const quotedName = bookingName?.trim() ? `"${bookingName}"` : null;
+  if (isComplete) {
+    return direction === "checkout"
+      ? `All assets are now checked out for ${quotedName ?? "this booking"}.`
+      : `All assets checked in. ${
+          quotedName ?? "The booking"
+        } is now complete.`;
+  }
+
+  const moved = direction === "checkout" ? "checked out" : "checked in";
+  const skipped = assets ? assets.sent - assets.moved : 0;
+  const summary =
+    assets && skipped > 0
+      ? `${describeBatch({
+          kitCount: 0,
+          assetCount: assets.moved,
+        })} ${moved}. ${skipped} ${
+          skipped === 1 ? "was" : "were"
+        } already ${moved}.`
+      : `${describeBatch(counts)} ${moved}.`;
+  if (isComplete === undefined) return summary;
+
+  const rest =
+    direction === "checkout"
+      ? "The rest is still reserved."
+      : "The rest is still checked out.";
+  return `${summary} ${rest}`;
 }

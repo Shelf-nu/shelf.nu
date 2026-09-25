@@ -8,10 +8,10 @@
  * `getQuantityData` (the pure reducer in
  * `~/components/assets/asset-status-badge/quantity-data.ts`).
  *
- * Extracted from the inline logic that previously lived in the web
- * `/api/assets/$assetId/quantity-breakdown` loader so the web tooltip path
- * and the mobile asset detail endpoint share ONE implementation and can't
- * drift on the effective-checked-out math (regression #96).
+ * The web `/api/assets/$assetId/quantity-breakdown` loader and the mobile
+ * asset detail endpoint both read it, and it takes its checked-out figures
+ * from `booking/checked-out.server`, so those surfaces and the asset overview
+ * report the same units as still out.
  *
  * @see {@link file://./../../routes/api+/assets.$assetId.quantity-breakdown.ts}
  * @see {@link file://./../../routes/api+/mobile+/assets.$assetId.ts}
@@ -19,7 +19,7 @@
  */
 
 import type { ExtendedPrismaClient } from "~/database/db.server";
-import { computeBookingAssetRemainingToCheckOut } from "~/modules/booking/service.server";
+import { computeCheckedOutByBookingForAsset } from "~/modules/booking/checked-out.server";
 import { ShelfError } from "~/utils/error";
 
 /** Arguments for {@link getAssetQuantityRows}. */
@@ -34,25 +34,22 @@ type GetAssetQuantityRowsArgs = {
  * Fetches the quantity-breakdown slices for a single asset and applies the
  * effective-quantity post-processing for ONGOING/OVERDUE bookings.
  *
- * The raw `BookingAsset.quantity` is the BOOKED quantity (the snapshot the
- * user reserved at booking time). On the OUT-flow, units can be scanned out
- * progressively via `PartialBookingCheckout`, so the BOOKED total may overstate
- * what's actually checked out at any given moment. Per the `getQuantityData`
- * contract, ONGOING/OVERDUE rows MUST ship the server-computed EFFECTIVE count
- * (booked − remaining-to-check-out); RESERVED rows pass through unchanged.
+ * The raw `BookingAsset.quantity` is the BOOKED quantity. On an ONGOING /
+ * OVERDUE booking that overstates what is off the shelf: units may not have
+ * gone out yet, and units may have come back or been used up. Per the
+ * `getQuantityData` contract, active rows MUST ship the units still out, which
+ * come from {@link computeCheckedOutByBookingForAsset}, the same figures the
+ * asset overview's "Checked out" tile sums. RESERVED rows pass through
+ * unchanged.
  *
- * We aggregate active rows per `bookingId` (one row per booking) — the tooltip
- * groups by booking and `computeBookingAssetRemainingToCheckOut` operates per
- * (bookingId, assetId), so per-booking is the correct grain. The per-slice
- * `assetKitId` discriminator is intentionally dropped (set to `null`) on the
- * aggregated active rows; the per-booking summation doesn't need it. Active
- * rows with zero effective quantity are dropped (nothing scanned out yet).
+ * Active rows are collapsed to one per booking, because the tooltip groups by
+ * booking. The per-slice `assetKitId` is set to `null` on them. Active bookings
+ * with nothing still out are dropped.
  *
  * @param db - Prisma client (or transaction) to read through.
  * @param args - The org-scoped asset to fetch (see {@link GetAssetQuantityRowsArgs}).
  * @returns The asset row with `bookingAssets` rewritten to
- *   `[...reservedRows, ...effectiveActiveRows]` — the same shape the web
- *   quantity-breakdown loader previously emitted.
+ *   `[...reservedRows, ...effectiveActiveRows]`.
  * @throws {ShelfError} 404 when the asset is not found in the caller's org.
  */
 export async function getAssetQuantityRows(
@@ -99,7 +96,7 @@ export async function getAssetQuantityRows(
   type BookingAssetRow = (typeof asset.bookingAssets)[number];
 
   // Split the booking slices into RESERVED (pass-through) and active
-  // (ONGOING/OVERDUE, which need the effective-checked-out subtraction).
+  // (ONGOING/OVERDUE, which carry the units still out instead).
   const reservedRows: BookingAssetRow[] = [];
   const activeRows: BookingAssetRow[] = [];
   for (const ba of asset.bookingAssets) {
@@ -111,51 +108,31 @@ export async function getAssetQuantityRows(
     }
   }
 
-  // Aggregate active rows by bookingId so we call the canonical reducer once
-  // per booking — multiple slices of the same asset on the same booking
-  // (kit-driven + standalone) share a booking-level claim pool.
-  type ActiveBookingAggregate = {
-    booking: NonNullable<BookingAssetRow["booking"]>;
-    bookedQuantity: number;
-  };
-  const activeByBooking = new Map<string, ActiveBookingAggregate>();
-  for (const ba of activeRows) {
-    const bookingId = ba.booking?.id;
-    if (!bookingId) continue;
-    const existing = activeByBooking.get(bookingId);
-    if (existing) {
-      existing.bookedQuantity += ba.quantity ?? 0;
-    } else {
-      activeByBooking.set(bookingId, {
-        booking: ba.booking,
-        bookedQuantity: ba.quantity ?? 0,
-      });
-    }
-  }
-
-  // Run each booking through `computeBookingAssetRemainingToCheckOut` in
-  // parallel — independent reads, no shared state.
-  const effectiveActiveRows: BookingAssetRow[] = await Promise.all(
-    Array.from(activeByBooking.entries()).map(async ([bookingId, agg]) => {
-      const remaining = await computeBookingAssetRemainingToCheckOut(
-        db,
-        bookingId,
-        asset.id
-      );
-      // effective claimed = booked − remaining-to-check-out, floored at 0
-      const effectiveQuantity = Math.max(0, agg.bookedQuantity - remaining);
-      return {
-        quantity: effectiveQuantity,
-        // Per-slice attribution collapses at the aggregate grain — surface as
-        // standalone (`null`) so the tooltip renders one line per booking.
-        assetKitId: null,
-        booking: agg.booking,
-      };
-    })
+  // One row per active booking, carrying the units still out on it.
+  const stillOutByBooking = await computeCheckedOutByBookingForAsset(
+    db,
+    asset.id,
+    organizationId
   );
+  const activeBookings = new Map<
+    string,
+    NonNullable<BookingAssetRow["booking"]>
+  >();
+  for (const ba of activeRows) {
+    if (ba.booking) activeBookings.set(ba.booking.id, ba.booking);
+  }
+  const effectiveActiveRows: BookingAssetRow[] = Array.from(
+    activeBookings.values()
+  ).map((booking) => ({
+    quantity: stillOutByBooking.get(booking.id)?.total ?? 0,
+    // Per-slice attribution collapses at the booking grain: surface as
+    // standalone (`null`) so the tooltip renders one line per booking.
+    assetKitId: null,
+    booking,
+  }));
 
-  // Drop ONGOING/OVERDUE rows with zero effective quantity — they represent
-  // bookings where nothing has been scanned out yet.
+  // Drop active bookings with nothing still out: nothing went out yet, or
+  // everything that did has come back.
   const cleanedActiveRows = effectiveActiveRows.filter(
     (row) => (row.quantity ?? 0) > 0
   );

@@ -1,3 +1,15 @@
+/**
+ * Mobile API route: asset detail.
+ *
+ * Serves the companion's asset screen: status, category, location, custody and
+ * kit memberships, plus the detail-only fields that screen renders. Org-scoped
+ * behind the mobile bearer auth, with custody holders filtered per viewer. A
+ * lapsed asset photo URL is re-signed before the response is shaped.
+ *
+ * @see {@link file://./assets.ts} the list twin of this route
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ */
+import { AssetStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
@@ -12,24 +24,44 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { CURRENT_BOOKING_SLICE_FILTER } from "~/modules/asset/fields";
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssetQuantityRows } from "~/modules/asset/quantity-breakdown.server";
 import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
   isQuantityTracked,
   shapeMobileAssetPlacements,
 } from "~/modules/asset/utils";
+import {
+  BARCODE_CODES_ORDER_BY,
+  QR_CODES_ORDER_BY,
+  resolveDisplayCode,
+  serializeDisplayCode,
+} from "~/modules/barcode/display";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
+import {
+  canSeeBooking,
+  canSeeBookingCustodian,
+  resolveBookingCustodianName,
+} from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
 
 /**
  * GET /api/mobile/assets/:assetId
  *
  * Returns full asset details including category, location, custody, and kit.
+ * For an INDIVIDUAL asset checked out on a booking, `activeBooking` names that
+ * booking and who holds the asset through it.
  *
- * Image URLs are returned as-stored along with `mainImageExpiration`. Mobile
- * clients should call `/api/mobile/asset/refresh-image/:assetId` lazily when
- * they detect a near-expired URL — keeps this loader read-only.
+ * A lapsed asset photo URL is re-signed, and the new URL written back to the
+ * asset, before the response is shaped. `mainImageExpiration` is still sent
+ * alongside it.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
@@ -39,14 +71,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Custody visibility is permission-gated (web parity): viewers without
     // custody-view permission (SELF_SERVICE/BASE, unless the org overrides
-    // allow) must not receive other holders' custody. Resolve the flag once
-    // here; the filtering happens below, after shaping.
-    const { canSeeAllCustody } = await getMobileUserContext(
+    // allow) must not receive other holders' custody. Resolve the flags once
+    // here; the filtering happens below, after shaping. `canSeeAllBookings`
+    // is the booking screen's own read gate, which `activeBooking.canOpen`
+    // answers in advance.
+    const { canSeeAllCustody, canSeeAllBookings } = await getMobileUserContext(
       user.id,
       organizationId
     );
 
-    const asset = await db.asset.findUnique({
+    const storedAsset = await db.asset.findUnique({
       where: {
         // why: inline-scope to org so cross-org probes 404 — matches the
         // pattern used by every other mobile route.
@@ -59,15 +93,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         description: true,
         status: true,
         mainImage: true,
-        // The web asset overview shows "Asset ID SAM-0017"; the companion
-        // scanner even invites you to type a SAM ID ("Enter QR, barcode, or
-        // SAM ID"), but no mobile screen could show you one because this
-        // payload never carried it.
+        // The workspace-scoped "SAM-0017" ID. The detail screen shows it, as
+        // the web asset overview does, because the scanner's manual entry
+        // accepts it ("Enter QR, barcode, or SAM ID").
         sequentialId: true,
         /**
-         * `name` drives the detail screen's Model row, which web has always
-         * shown and mobile never did; the image columns feed the shaper's
-         * cover-image cascade.
+         * `name` drives the detail screen's Model row, as on the web asset
+         * overview; the image columns feed the shaper's cover-image cascade.
          *
          * Merged into ONE key with a spread of the shared constant rather than
          * re-listing the image columns — same reasoning as
@@ -132,7 +164,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 // why: powers the server-side custody-visibility filter below
                 // ("is this row the caller's own?"). Also web parity: the web
                 // asset page ships custodian.userId to the client
-                // (asset-custody-card.tsx:87 reads it) — additive here.
+                // (`CustodyCard` links the custodian's profile with it).
                 userId: true,
                 user: {
                   select: {
@@ -152,9 +184,48 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             kit: { select: { id: true, name: true, status: true } },
           },
         },
+        // The booking slice the asset is out on, read with the web asset
+        // overview's filter so both name the same booking. Read only to build
+        // `activeBooking` below; the rows themselves never reach the client.
+        bookingAssets: {
+          ...CURRENT_BOOKING_SLICE_FILTER,
+          select: {
+            booking: {
+              select: {
+                id: true,
+                name: true,
+                from: true,
+                custodianTeamMember: {
+                  select: { id: true, name: true, userId: true },
+                },
+                custodianUser: { select: { id: true, ...USER_NAME_SELECT } },
+              },
+            },
+          },
+        },
         tags: { select: { id: true, name: true } },
-        qrCodes: { select: { id: true } },
-        organization: { select: { currency: true } },
+        // Ordered so the resolver below and the app, which both read the
+        // first entry, settle on the same code on every load.
+        qrCodes: { orderBy: QR_CODES_ORDER_BY, select: { id: true } },
+        // The asset's alternative codes, and the per-asset override that can
+        // outrank the workspace preference. Both feed `resolveDisplayCode`
+        // below so the detail screen shows the identifier this workspace
+        // actually labels its assets with, not always the Shelf QR.
+        preferredBarcodeId: true,
+        barcodes: {
+          orderBy: BARCODE_CODES_ORDER_BY,
+          select: { id: true, type: true, value: true },
+        },
+        organization: {
+          select: {
+            currency: true,
+            // Drive the display-code resolution below. Both are destructured
+            // out of the response, so `asset.organization` keeps the
+            // `{ currency }` shape the companion already reads.
+            qrIdDisplayPreference: true,
+            barcodesEnabled: true,
+          },
+        },
         notes: {
           select: {
             id: true,
@@ -186,9 +257,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       },
     });
 
-    if (!asset) {
+    if (!storedAsset) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
+
+    const [asset] = await refreshExpiredAssetImages([storedAsset], {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
 
     // Flatten kit / location / custody via the shared mobile shaper so the
     // legacy companion contract (`asset.kit`, `asset.kitId`, `asset.location`,
@@ -219,7 +295,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       availableToBook: asset.availableToBook,
       // Helper's `category` type is `{ name } | null`; widen-then-narrow.
       category: asset.category ? { name: asset.category.name } : null,
-      // Quantity scalars the helper now requires (this route only consumes
+      // Quantity scalars the helper requires (this route only consumes
       // the helper's flattened kit/location below, but the param type must
       // be satisfied).
       type: asset.type,
@@ -298,8 +374,41 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       assetModel: detailAssetModel,
       custody: detailCustody,
       category: detailCategory,
+      // Held back so the response can carry the RESOLVED code instead of the
+      // raw inputs: `organization` is reshaped to `{ currency }`, `barcodes`
+      // is add-on gated, and the override id is server-side only.
+      organization: detailOrganization,
+      barcodes: detailBarcodes,
+      preferredBarcodeId: _preferredBarcodeId,
+      // Read into `activeBooking` below; the raw rows stay on the server.
+      bookingAssets: _bookingAssets,
       ...assetData
     } = asset;
+
+    // Which identifier this workspace labels its assets with. Same resolver
+    // and precedence the web asset rows use — a per-asset override first, then
+    // the workspace's `qrIdDisplayPreference`, then the Shelf QR — so a
+    // workspace that prints Code 128 labels sees Code 128 here rather than a
+    // QR it never uses.
+    //
+    // The entitlement passed in is the EFFECTIVE one from `canUseBarcodes`,
+    // not the raw column: a self-hosted deployment has no billing to gate on
+    // and holds every add-on, and would otherwise be pushed back to QR despite
+    // having set a barcode preference. Every mobile route gates this way.
+    const barcodesAllowed = canUseBarcodes(detailOrganization);
+    const resolvedCode = resolveDisplayCode({
+      entity: {
+        sequentialId: asset.sequentialId,
+        preferredBarcodeId: asset.preferredBarcodeId,
+        qrCodes: asset.qrCodes,
+        barcodes: detailBarcodes,
+      },
+      organization: {
+        qrIdDisplayPreference: detailOrganization.qrIdDisplayPreference,
+        barcodesEnabled: barcodesAllowed,
+      },
+      entityKind: "asset",
+    });
 
     // The model's name only. The detail screen renders it as read-only text —
     // unlike web, mobile has no asset-model screen to link to — so shipping an
@@ -312,8 +421,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Custody visibility parity (server-side, since mobile clients are
     // untrusted): when the caller lacks custody-view permission, filter
     // `custodyList` to their OWN entries and report how many holders were
-    // hidden — mirroring the web's QuantityCustodyList filter + hidden-count
-    // (quantity-custody-list.tsx:121-126).
+    // hidden — mirroring the web's `QuantityCustodyList` filter and hidden
+    // count (its `canViewAllCustody` prop).
     const { custodyList, custodyListOthersCount } =
       filterMobileCustodyListForViewer({
         custodyList: flattened.custodyList,
@@ -324,9 +433,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Legacy single `custody`: the web HIDES its single-custodian card from
     // viewers without custody-view permission unless they ARE the custodian —
-    // assets.$assetId.overview.tsx:1826-1836 passes
+    // assets.$assetId.overview.tsx:1757-1769 passes
     // hasPermission={userCanViewSpecificCustody(...)} and CustodyCard renders
-    // nothing when !hasPermission (asset-custody-card.tsx:63). Mirror that
+    // nothing when !hasPermission (asset-custody-card.tsx:66-68). Mirror that
     // exactly: null the field when the caller may not see it.
     const primaryCustody = detailCustody[0] ?? null;
     const visibleCustody =
@@ -337,6 +446,55 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         canSeeAllCustody,
       })
         ? primaryCustody
+        : null;
+
+    // Custody held through a booking, for an asset checked out on one. A
+    // booking checkout writes no Custody row, so this is the only way the
+    // detail screen can say who has the asset. It matches the web asset
+    // overview's CustodyCard:
+    // - the asset must be CHECKED_OUT. Assets added to an ONGOING booking stay
+    //   AVAILABLE until they are checked out, and the web shows no card then;
+    // - the `bookingAssets` select above keeps only the slice that is out, and
+    //   the first row is the booking, as on the web;
+    // - INDIVIDUAL assets only. A quantity-tracked asset's custody is its
+    //   quantity breakdown;
+    // - only viewers who may see who holds it: everyone's custody, or a
+    //   booking they hold themselves, through either custody link.
+    const checkedOutOn =
+      !isQuantityTracked(asset) && asset.status === AssetStatus.CHECKED_OUT
+        ? asset.bookingAssets[0]?.booking ?? null
+        : null;
+
+    const activeBooking =
+      checkedOutOn &&
+      canSeeBookingCustodian({
+        canSeeAllCustody,
+        booking: checkedOutOn,
+        userId: user.id,
+      })
+        ? {
+            id: checkedOutOn.id,
+            name: checkedOutOn.name,
+            from: checkedOutOn.from,
+            // The resolver every mobile booking surface names a holder with.
+            custodianName: resolveBookingCustodianName({
+              canSeeAllCustody,
+              booking: checkedOutOn,
+              userId: user.id,
+            }),
+            // Seeing custody and seeing bookings are separate workspace
+            // overrides, so a viewer shown this booking may still be refused by
+            // the booking screen. This is that screen's own gate, answered here
+            // so the app only offers a tap that will open.
+            canOpen: canSeeBooking({
+              canSeeAllBookings,
+              booking: {
+                custodianUserId: checkedOutOn.custodianUser?.id ?? null,
+                custodianTeamMember: checkedOutOn.custodianTeamMember,
+              },
+              userId: user.id,
+            }),
+          }
         : null;
 
     return data({
@@ -381,6 +539,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // Additive: number of holders hidden from this caller (0 when the
         // caller can see all custody) so the app can render "+N others".
         custodyListOthersCount,
+        // Additive: the booking an INDIVIDUAL asset is checked out on and who
+        // holds it through that booking; null otherwise (see above).
+        activeBooking,
         // why: re-attach the wider category shape (id + color) the detail
         // endpoint loads — the helper only types {name}.
         category: detailCategory,
@@ -388,6 +549,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // assets and for QUANTITY_TRACKED assets with no custody/booking
         // activity (see getQuantityData's null contract).
         quantityBreakdown,
+        // Reshaped from the widened select above so the companion keeps
+        // reading `asset.organization.currency` and nothing else.
+        organization: { currency: detailOrganization.currency },
+        // The identifier to SHOW for this asset, already resolved. Shipping
+        // the decision rather than its inputs is what lets an installed build
+        // inherit a workspace's preference with no app release — the same
+        // reason the image cascade is resolved server-side.
+        //
+        // `label` names the code that is shown ("Code 128"), never the
+        // preference, and `type` lets the client pick a renderer. On a
+        // preference that could not be honoured (workspace wants Code 128, this
+        // asset has none) `isFallback` is set and `fallbackNote` says why, so
+        // the screen can explain itself instead of silently showing something
+        // else. Null only when the asset has no resolvable code at all.
+        displayCode: serializeDisplayCode(resolvedCode),
+        // Every alternative code on the asset, so the detail screen can offer
+        // the same code switcher the web preview does. Add-on gated: a
+        // workspace without alternative barcodes must not receive barcode
+        // rows, matching every other mobile barcode surface.
+        barcodes: barcodesAllowed ? detailBarcodes : [],
       },
     });
   } catch (cause) {

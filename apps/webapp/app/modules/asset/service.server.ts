@@ -43,7 +43,10 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 // pulls canvas/lottie UI deps and crashes happy-dom at collection time — e.g.
 // the reports `*.server.test.ts` files import this module via
 // `refreshExpiredAssetImages`). See the leaf's header doc.
-import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import {
+  assertAssetQuantityNotBelowReservations,
+  computeCustodyAvailability,
+} from "~/modules/asset/availability-primitives.server";
 import {
   assertStockNotBelowManualPlacements,
   reconcileManualPlacementsForStockDecrease,
@@ -153,6 +156,7 @@ import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
+import { validateContentImportRows } from "./import-preflight.server";
 import type {
   MoveAssetLocationUnitsArgs,
   MoveUnitsResult,
@@ -4638,6 +4642,44 @@ export async function createAssetsFromContentImport({
   canUseBarcodes?: boolean;
 }) {
   try {
+    /**
+     * Nothing below this point may run against a file with invalid rows. The
+     * taxonomy helpers and the row loop each write as they go, outside any
+     * transaction, so a row rejected part way through would leave everything
+     * before it committed — and a retry would create those rows a second time.
+     */
+    // Mirrors `upsertCustomField`'s own lookup, which matches on name and
+    // `deletedAt` and ignores `active` — filtering on active here would miss a
+    // conflict it goes on to reject.
+    const existingCustomFields = await db.customField.findMany({
+      where: { organizationId, deletedAt: null },
+      select: { name: true, type: true },
+    });
+
+    const { errors: rowErrors, totalErrors } = validateContentImportRows({
+      data,
+      existingCustomFields,
+    });
+
+    if (rowErrors.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Import file has errors",
+        message: `Found ${totalErrors} problem${
+          totalErrors === 1 ? "" : "s"
+        } in your file. Nothing was imported. Fix the rows below and upload again.`,
+        additionalData: {
+          userId,
+          organizationId,
+          rowErrors,
+          totalErrors,
+        },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     // Create cache instance for this import operation
     const imageCache = new LRUCache<string, CachedImage>({
       maxSize: importImageCacheServer.MAX_CACHE_SIZE,
@@ -4953,22 +4995,10 @@ export async function createAssetsFromContentImport({
       const { type, quantity, minQuantity, unitOfMeasure, consumptionType } =
         parseQtyTrackedCsvRow(asset);
 
-      // AssetModel is INDIVIDUAL-only — a model represents N
-      // distinguishable units of the same template, whereas a
-      // QUANTITY_TRACKED asset is a stock pool. Reject the row up-front
-      // with a row-friendly message rather than silently dropping the
-      // model link or relying on createAsset's downstream guard.
-      if (type === AssetType.QUANTITY_TRACKED && assetModelId) {
-        throw new ShelfError({
-          cause: null,
-          title: "Asset model not allowed",
-          message: `Asset "${asset.title}": models can only be linked to INDIVIDUAL assets. Remove the assetModel cell or change type to INDIVIDUAL.`,
-          label: "Assets",
-          status: 400,
-          shouldBeCaptured: false,
-          additionalData: { assetKey: asset.key, assetTitle: asset.title },
-        });
-      }
+      // AssetModel is INDIVIDUAL-only, and the qty-tracked columns must parse:
+      // both are settled by `validateContentImportRows` before this loop starts,
+      // so neither can fail here. `createAsset` keeps its own guards for the
+      // callers that do not come through the importer.
 
       await createAsset({
         id: assetId, // Pass the pre-generated ID
@@ -5570,29 +5600,105 @@ export function isStorageObjectNotFound(error: unknown): boolean {
 }
 
 /**
- * Refreshes expired signed URLs for asset images server-side.
- * Prevents N+1 client-side calls to /api/asset/refresh-main-image.
+ * Bounds for one {@link refreshExpiredAssetImages} call on a read path.
  *
- * Only refreshes existing thumbnail URLs — does not generate missing
- * thumbnails, as that requires downloading + re-uploading images
- * which is too expensive for a batch operation.
+ * Signing runs on the request path, one storage call per image, and
+ * `createSignedUrl` retries with backoff when storage is slow or rate-limited.
+ * A list without pagination (a booking, a kit, an audit) can hold hundreds of
+ * lapsed photos, so an unbounded pass could outlast a client's request timeout.
+ * With these bounds a call re-signs at most `maxRefreshes` rows and starts no
+ * new batch once `timeBudgetMs` has passed, so the worst case is one batch past
+ * the budget. Rows it does not reach keep their stored URL for that response;
+ * the rows it re-signs are written back, so each later load repairs the next
+ * slice.
+ */
+export const ASSET_IMAGE_RESIGN_LIMITS = {
+  maxRefreshes: 100,
+  timeBudgetMs: 2_500,
+} as const;
+
+/** The image columns a row needs for its lapsed photo to be re-signed. */
+type ResignableAssetImageRow = {
+  id: string;
+  mainImage: string | null;
+  mainImageExpiration: Date | null;
+  thumbnailImage?: string | null;
+};
+
+/** Optional bounds for one re-sign pass; see {@link ASSET_IMAGE_RESIGN_LIMITS}. */
+type AssetImageResignBounds = {
+  /** Re-sign at most this many lapsed rows, taken in input order. */
+  maxRefreshes?: number;
+  /** Start no new batch once this many milliseconds have passed. */
+  timeBudgetMs?: number;
+};
+
+/**
+ * Re-signs lapsed asset photo URLs server-side.
+ *
+ * `Asset.mainImage` and `Asset.thumbnailImage` are signed storage URLs that stop
+ * loading once `mainImageExpiration` passes. The web can repair one from the
+ * browser, but the companion app draws the URL it receives and has no repair
+ * flow, so every read path that sends asset photos to it re-signs them here
+ * first. On web lists it also saves N+1 calls to /api/asset/refresh-main-image.
+ *
+ * Only existing thumbnail URLs are re-signed. A missing thumbnail is not
+ * generated, which would mean downloading and re-uploading the image.
+ *
+ * Each re-signed URL is written back to its asset in a deferred `updateMany`,
+ * guarded on the URL that was read. That write also bumps `Asset.updatedAt`, so
+ * opening a large booking, kit or audit refreshes "updated at" on every asset it
+ * re-signs.
+ *
+ * The write-back is scoped to a workspace: a row that carries `organizationId`
+ * uses its own, and rows selected without it take `options.organizationId`,
+ * which the overloads require in that case.
+ *
+ * @param assets - Rows carrying the image columns.
+ * @param options - The owning workspace for rows without one, and the bounds
+ *   from {@link ASSET_IMAGE_RESIGN_LIMITS}. Unbounded when omitted.
+ * @returns The rows in input order, index for index, with re-signed URLs merged
+ *   in. A row that was not re-signed is returned as it came in.
  */
 export async function refreshExpiredAssetImages<
-  T extends {
-    id: string;
-    organizationId: string;
-    mainImage: string | null;
-    mainImageExpiration: Date | null;
-    thumbnailImage?: string | null;
-  },
->(assets: T[]): Promise<T[]> {
+  T extends ResignableAssetImageRow & { organizationId: string },
+>(
+  assets: T[],
+  options?: AssetImageResignBounds & { organizationId?: string }
+): Promise<T[]>;
+export async function refreshExpiredAssetImages<
+  T extends ResignableAssetImageRow,
+>(
+  assets: T[],
+  options: AssetImageResignBounds & { organizationId: string }
+): Promise<T[]>;
+export async function refreshExpiredAssetImages(
+  assets: Array<ResignableAssetImageRow & { organizationId?: string }>,
+  options: AssetImageResignBounds & { organizationId?: string } = {}
+): Promise<Array<ResignableAssetImageRow & { organizationId?: string }>> {
   const now = new Date();
-  const expiredAssets = assets.filter(
-    (a) =>
-      a.mainImage &&
-      a.mainImageExpiration &&
-      new Date(a.mainImageExpiration) < now
-  );
+  // A repeated id is the same asset: it is signed once, and that result applies
+  // to every row carrying the id.
+  const seenIds = new Set<string>();
+  const expiredAssets = assets
+    .filter(
+      (a) =>
+        a.mainImage &&
+        a.mainImageExpiration &&
+        new Date(a.mainImageExpiration) < now
+    )
+    .filter((a) => {
+      if (seenIds.has(a.id)) return false;
+      seenIds.add(a.id);
+      return true;
+    })
+    .slice(0, options.maxRefreshes)
+    .flatMap((a) => {
+      const ownerOrganizationId = a.organizationId ?? options.organizationId;
+      // The overloads guarantee a workspace; a row without one is never signed,
+      // so a write-back can never run unscoped.
+      return ownerOrganizationId ? [{ ...a, ownerOrganizationId }] : [];
+    });
 
   if (expiredAssets.length === 0) return assets;
 
@@ -5628,7 +5734,7 @@ export async function refreshExpiredAssetImages<
       args: {
         where: {
           id: asset.id,
-          organizationId: asset.organizationId,
+          organizationId: asset.ownerOrganizationId,
           mainImage: asset.mainImage,
         },
         data: { mainImageExpiration: backoffExpiration },
@@ -5702,7 +5808,7 @@ export async function refreshExpiredAssetImages<
         args: {
           where: {
             id: asset.id,
-            organizationId: asset.organizationId,
+            organizationId: asset.ownerOrganizationId,
             mainImage: asset.mainImage,
             ...(updateData.thumbnailImage !== undefined
               ? { thumbnailImage: asset.thumbnailImage }
@@ -5764,7 +5870,17 @@ export async function refreshExpiredAssetImages<
     thumbnailImage?: string;
   } | null>[] = [];
 
+  const startedAt = Date.now();
   for (let i = 0; i < expiredAssets.length; i += BATCH_SIZE) {
+    // Start no new batch once the time budget is spent. Rows not reached keep
+    // their stored URL and get no backoff, so the next load picks them up.
+    if (
+      i > 0 &&
+      options.timeBudgetMs !== undefined &&
+      Date.now() - startedAt >= options.timeBudgetMs
+    ) {
+      break;
+    }
     const batch = expiredAssets.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.allSettled(
       batch.map((asset) => refreshAsset(asset))
@@ -5846,64 +5962,6 @@ export async function refreshExpiredAssetImages<
     }
     return a;
   });
-}
-
-export async function updateAssetQrCode({
-  assetId,
-  newQrId,
-  organizationId,
-}: {
-  organizationId: string;
-  assetId: string;
-  newQrId: string;
-}) {
-  // Disconnect all existing QR codes
-  try {
-    // Disconnect all existing QR codes
-    await db.asset
-      .update({
-        where: { id: assetId, organizationId },
-        data: {
-          qrCodes: {
-            set: [],
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Couldn't disconnect existing codes",
-          label,
-          additionalData: { assetId, organizationId, newQrId },
-        });
-      });
-
-    // Connect the new QR code
-    return await db.asset
-      .update({
-        where: { id: assetId, organizationId },
-        data: {
-          qrCodes: {
-            connect: { id: newQrId },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Couldn't connect the new QR code",
-          label,
-          additionalData: { assetId, organizationId, newQrId },
-        });
-      });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while updating asset QR code",
-      label,
-      additionalData: { assetId, organizationId, newQrId },
-    });
-  }
 }
 
 export async function bulkDeleteAssets({
@@ -6821,11 +6879,14 @@ export async function bulkUpdateAssetLocation({
 
     // Create location activity notes
     const userLink = wrapUserLinkForNote({ ...user, id: userId });
-    // Filter out assets already at the target location
-    const actuallyChanged = assets.filter(
-      (a) => getPrimaryLocation(a)?.id !== newLocation?.id
-    );
-    const assetData = actuallyChanged.map((a) => ({
+    /**
+     * The rows the transaction above actually wrote — quantity-tracked assets
+     * are filtered out of this path entirely, and an asset already at the
+     * target moves nowhere. A location's timeline must not claim either of
+     * them arrived, so these notes read the set the transaction wrote rather
+     * than re-deriving one from every selected asset.
+     */
+    const assetData = assetsToUpdate.map((a) => ({
       id: a.id,
       title: a.title,
     }));
@@ -6835,7 +6896,7 @@ export async function bulkUpdateAssetLocation({
       string,
       { name: string; assets: typeof assetData }
     >();
-    for (const asset of actuallyChanged) {
+    for (const asset of assetsToUpdate) {
       const prev = getPrimaryLocation(asset);
       if (!prev) continue;
       const existing = byPrevLocation.get(prev.id);
@@ -8189,6 +8250,15 @@ type CheckOutQuantityArgs = {
   userId: string;
   /** The organization owning the asset (used for validation) */
   organizationId: string;
+  /**
+   * The acting user's role in this organization.
+   *
+   * Required, not optional: a SELF_SERVICE caller may only assign custody to
+   * themselves, and a missing role would silently fall open. Making the
+   * compiler demand it is what stops a new call site from reaching the write
+   * without the policy being considered.
+   */
+  role: OrganizationRoles;
   /** Optional note explaining the checkout */
   note?: string;
 };
@@ -8214,6 +8284,7 @@ export async function checkOutQuantity({
   quantity,
   userId,
   organizationId,
+  role,
   note,
 }: CheckOutQuantityArgs) {
   try {
@@ -8258,7 +8329,53 @@ export async function checkOutQuantity({
       }
 
       /**
-       * Step 4: Compute available quantity within the transaction.
+       * Step 4: Resolve the custodian, and refuse a self-service caller
+       * handing units to anyone but themselves.
+       *
+       * `teamMemberId` is request input, so the lookup is org-scoped: a team
+       * member from another workspace resolves to nothing and is refused here
+       * rather than being written into a custody row.
+       *
+       * The check lives in this primitive rather than at its routes so that
+       * every caller inherits it: the web bulk, web single-asset and mobile
+       * quantity-custody routes all reach custody through this one function,
+       * and a guard at any one of them leaves the others to remember. The row
+       * is resolved before any write so a refusal commits nothing, and reused
+       * for the activity event below rather than read twice.
+       */
+      const custodianTeamMember = await tx.teamMember.findFirst({
+        where: { id: teamMemberId, organizationId },
+        select: { user: { select: { id: true } } },
+      });
+
+      if (!custodianTeamMember) {
+        throw new ShelfError({
+          cause: null,
+          message: "The selected custodian does not belong to this workspace.",
+          label,
+          status: 403,
+          additionalData: { teamMemberId, organizationId },
+          shouldBeCaptured: false,
+        });
+      }
+
+      if (
+        role === OrganizationRoles.SELF_SERVICE &&
+        custodianTeamMember.user?.id !== userId
+      ) {
+        throw new ShelfError({
+          cause: null,
+          title: "Action not allowed",
+          message: "Self service users can only assign custody to themselves.",
+          label,
+          status: 403,
+          additionalData: { userId, teamMemberId },
+          shouldBeCaptured: false,
+        });
+      }
+
+      /**
+       * Step 5: Compute available quantity within the transaction.
        *
        * `available = total − inCustody − checkedOutViaBooking`
        *
@@ -8276,30 +8393,18 @@ export async function checkOutQuantity({
        * checkout time.
        */
       const totalQuantity = asset.quantity ?? 0;
-      const [custodySum, bookingCheckedOutSum] = await Promise.all([
-        tx.custody.aggregate({
-          where: { assetId },
-          _sum: { quantity: true },
-        }),
-        tx.bookingAsset.aggregate({
-          where: {
-            assetId,
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-          _sum: { quantity: true },
-        }),
-      ]);
-      const inCustody = custodySum._sum.quantity ?? 0;
-      const checkedOut = bookingCheckedOutSum._sum.quantity ?? 0;
-      const available = totalQuantity - inCustody - checkedOut;
+      const { inCustody, inKits, checkedOut, available } =
+        await computeCustodyAvailability(tx, {
+          assetId,
+          organizationId,
+          totalQuantity,
+        });
 
-      /** Step 5: Validate sufficient availability */
+      /** Step 6: Validate sufficient availability */
       if (quantity > available) {
         throw new ShelfError({
           cause: null,
-          message: `Cannot check out ${quantity} units. Only ${available} units are available (${inCustody} in custody, ${checkedOut} checked out on active bookings).`,
+          message: `Cannot check out ${quantity} units. Only ${available} units are available (${inCustody} in custody, ${inKits} allocated to kits, ${checkedOut} checked out on active bookings).`,
           label,
           status: 400,
           additionalData: {
@@ -8307,13 +8412,14 @@ export async function checkOutQuantity({
             quantity,
             available,
             inCustody,
+            inKits,
             checkedOut,
           },
         });
       }
 
       /**
-       * Step 6: Upsert the OPERATOR-allocated custody row (kitCustodyId
+       * Step 7: Upsert the OPERATOR-allocated custody row (kitCustodyId
        * IS NULL). Find-then-branch instead of `prisma.upsert` because
        * the composite (assetId, teamMemberId) uniqueness is now split
        * into two partial uniques (operator + kit-allocated) — Prisma's
@@ -8372,7 +8478,7 @@ export async function checkOutQuantity({
         data: { status: AssetStatus.IN_CUSTODY },
       });
 
-      /** Step 7: Create an immutable audit log entry */
+      /** Step 8: Create an immutable audit log entry */
       await createConsumptionLog({
         assetId,
         category: "CHECKOUT",
@@ -8384,17 +8490,11 @@ export async function checkOutQuantity({
       });
 
       /**
-       * Step 8: Activity event — emit `CUSTODY_ASSIGNED` inside the tx so
+       * Step 9: Activity event. Emit `CUSTODY_ASSIGNED` inside the tx so
        * it commits atomically with the custody upsert. The `viaQuantity`
        * meta flag distinguishes qty-tracked custody slices from
        * INDIVIDUAL-asset custody assignments.
        */
-      const custodianTeamMember = await tx.teamMember.findFirst({
-        // org-scoped: teamMemberId is request input, so scope the lookup to
-        // the caller's org (cross-org IDOR guard).
-        where: { id: teamMemberId, organizationId },
-        select: { user: { select: { id: true } } },
-      });
       await recordEvent(
         {
           organizationId,
@@ -8404,13 +8504,13 @@ export async function checkOutQuantity({
           entityId: assetId,
           assetId,
           teamMemberId,
-          targetUserId: custodianTeamMember?.user?.id ?? undefined,
+          targetUserId: custodianTeamMember.user?.id ?? undefined,
           meta: { quantity, viaQuantity: true },
         },
         tx
       );
 
-      /** Step 9: Return the refreshed asset */
+      /** Step 10: Return the refreshed asset */
       return tx.asset.findUniqueOrThrow({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
         where: { id: assetId },
@@ -8443,6 +8543,17 @@ type ReleaseQuantityArgs = {
   userId: string;
   /** The organization owning the asset (used for validation) */
   organizationId: string;
+  /**
+   * The acting user's role in this organization.
+   *
+   * Required, not optional: a SELF_SERVICE caller may only release custody
+   * they hold themselves, and a missing role would silently fall open. The
+   * bulk route deliberately does NOT judge quantity-tracked rows in its own
+   * guard: they are released per asset, so refusing the whole selection over
+   * one would reject work nobody asked for, which leaves this the only place
+   * the restriction can be applied to them.
+   */
+  role: OrganizationRoles;
   /** Optional note explaining the release */
   note?: string;
   /**
@@ -8493,6 +8604,7 @@ export async function releaseQuantity({
   quantity,
   userId,
   organizationId,
+  role,
   note,
   consumed,
 }: ReleaseQuantityArgs) {
@@ -8535,6 +8647,35 @@ export async function releaseQuantity({
           status: 400,
           additionalData: { assetId, assetType: asset.type },
         });
+      }
+
+      /**
+       * Step 3a: Refuse a self-service caller releasing someone else's hold.
+       *
+       * `teamMemberId` is resolved by the caller from the asset's custody
+       * rows, so it names whoever currently holds the units, which for a
+       * self-service user is exactly what must be checked before those units
+       * are taken off them. The lookup is org-scoped, so a team member from
+       * another workspace is refused here rather than written into a log.
+       */
+      if (role === OrganizationRoles.SELF_SERVICE) {
+        const holder = await tx.teamMember.findFirst({
+          where: { id: teamMemberId, organizationId },
+          select: { user: { select: { id: true } } },
+        });
+
+        if (holder?.user?.id !== userId) {
+          throw new ShelfError({
+            cause: null,
+            title: "Action not allowed",
+            message:
+              "Self service users can only release custody they hold themselves.",
+            label,
+            status: 403,
+            additionalData: { userId, teamMemberId, assetId },
+            shouldBeCaptured: false,
+          });
+        }
       }
 
       /**

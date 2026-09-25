@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import type { z } from "zod";
-import { organizationRolesMap } from "~/routes/_layout+/settings.team";
+import { organizationRolesMap } from "~/utils/organization-roles";
 import { tw } from "~/utils/tw";
 import type { InviteUserFormSchema } from "../invite-user-dialog";
 

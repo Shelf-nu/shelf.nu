@@ -388,8 +388,11 @@ export async function parseFileFormData({
       const originalName =
         upload?.name ?? upload?.filename ?? file?.name ?? undefined;
 
-      // Only process image files
-      if (mimeType && !mimeType.includes("image")) {
+      // Only process image files. Matched as a prefix rather than a substring:
+      // `.includes("image")` also accepts a parameterised type such as
+      // `text/html; x=image`, which would then be handed to `uploadFile` as the
+      // content type the object is stored and served with.
+      if (mimeType && !String(mimeType).startsWith("image/")) {
         return undefined;
       }
 
@@ -897,6 +900,69 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
       label,
     });
   }
+}
+
+/**
+ * Most objects Supabase Storage deletes in one `remove()` request. The API
+ * rejects a larger list, so callers with more files must split them.
+ */
+export const MAX_PUBLIC_FILES_PER_REMOVE = 1000;
+
+/**
+ * Removes many files from the public `files` bucket in a single storage
+ * request, using their public URLs.
+ *
+ * A URL that does not point into the public bucket is skipped rather than
+ * failing the rest, and counted in the result so the caller can log it.
+ * Objects that no longer exist are not an error.
+ *
+ * @param publicUrls - Public URLs of the files, at most
+ *   {@link MAX_PUBLIC_FILES_PER_REMOVE}
+ * @returns How many URLs were skipped because they are not public bucket URLs
+ * @throws {ShelfError} When the list is too long or the storage request fails
+ */
+export async function removePublicFiles({
+  publicUrls,
+}: {
+  publicUrls: string[];
+}): Promise<{ invalidUrlCount: number }> {
+  if (publicUrls.length > MAX_PUBLIC_FILES_PER_REMOVE) {
+    throw new ShelfError({
+      cause: null,
+      message: `Cannot remove more than ${MAX_PUBLIC_FILES_PER_REMOVE} files in one request`,
+      additionalData: { count: publicUrls.length },
+      label,
+    });
+  }
+
+  const bucketPrefix = `${SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/`;
+  const paths = publicUrls
+    .filter((publicUrl) => publicUrl.startsWith(bucketPrefix))
+    .map((publicUrl) => publicUrl.slice(bucketPrefix.length));
+  const invalidUrlCount = publicUrls.length - paths.length;
+
+  if (paths.length === 0) {
+    return { invalidUrlCount };
+  }
+
+  try {
+    const { error } = await getSupabaseAdmin()
+      .storage.from(PUBLIC_BUCKET)
+      .remove(paths);
+
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to remove files. Please try again.",
+      additionalData: { count: paths.length },
+      label,
+    });
+  }
+
+  return { invalidUrlCount };
 }
 
 /**

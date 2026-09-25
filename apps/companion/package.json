@@ -2,6 +2,7 @@
   "name": "@shelf/companion",
   "version": "0.1.0",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "main": "expo-router/entry",
   "scripts": {
     "dev": "expo start --dev-client",
@@ -23,6 +24,7 @@
     "ios": "expo run:ios"
   },
   "dependencies": {
+    "@bwip-js/react-native": "^4.11.4",
     "@expo/metro-runtime": "~6.1.2",
     "@expo/ngrok": "^4.1.3",
     "@expo/vector-icons": "^15.1.1",
@@ -39,6 +41,7 @@
     "@supabase/supabase-js": "^2.49.1",
     "expo": "~54.0.33",
     "expo-av": "^16.0.8",
+    "expo-build-properties": "~1.0.10",
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
     "expo-crypto": "~15.0.9",

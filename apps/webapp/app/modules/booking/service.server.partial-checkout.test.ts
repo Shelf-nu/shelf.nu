@@ -6,6 +6,7 @@ import {
   KitStatus,
 } from "@prisma/client";
 import { onTestFinished } from "vitest";
+import type { Mock } from "vitest";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
@@ -164,9 +165,8 @@ vitest.mock("~/database/db.server", () => {
         updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
         deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       },
-      // why: checkoutBooking's defence-in-depth guard reads
-      // `bookingModelRequest` for outstanding model-request rows that would
-      // block checkout. Default to none so the delegate path proceeds.
+      // why: the add-assets and remove-assets flows this suite reaches read
+      // and drain model reservations. Default to none.
       bookingModelRequest: {
         findMany: vitest.fn().mockResolvedValue([]),
         findUnique: vitest.fn().mockResolvedValue(null),
@@ -1180,6 +1180,54 @@ describe("partialCheckoutBooking", () => {
       })
     ).rejects.toThrow("already checked out for this booking");
 
+    expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses to check out again an INDIVIDUAL asset already checked in on this booking", async () => {
+    expect.assertions(3);
+
+    // why: an ONGOING booking checked out with the button, so no session names
+    // either asset. asset-1 has since been checked back in, so its slice
+    // carries `checkedInAt` and the asset reads AVAILABLE again.
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      ...reservedBooking,
+      status: BookingStatus.ONGOING,
+      _count: { bookingAssets: 2 },
+      bookingAssets: [
+        {
+          checkedInAt: new Date("2026-01-01T12:00:00.000Z"),
+          asset: {
+            id: "asset-1",
+            title: "Asset asset-1",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+        {
+          checkedInAt: null,
+          asset: {
+            id: "asset-2",
+            title: "Asset asset-2",
+            status: AssetStatus.CHECKED_OUT,
+            type: AssetType.INDIVIDUAL,
+            assetKits: [],
+          },
+        },
+      ],
+    });
+
+    const attempt = partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1"],
+    });
+
+    await expect(attempt).rejects.toThrow(
+      "already checked in for this booking"
+    );
+    await expect(attempt).rejects.toMatchObject({ status: 400 });
     expect(db.partialBookingCheckout.create).not.toHaveBeenCalled();
   });
 
@@ -2294,8 +2342,10 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         const assetKitFindMany = db.assetKit.findMany as ReturnType<
           typeof vitest.fn
         >;
-        const bookingAssetFindMany = db.bookingAsset.findMany as ReturnType<
-          typeof vitest.fn
+        const bookingAssetFindMany = db.bookingAsset.findMany as Mock<
+          (args?: {
+            where?: { assetKitId?: { in?: string[] } | null };
+          }) => Promise<unknown[]>
         >;
         const priorAssetKit = assetKitFindMany.getMockImplementation();
         const priorBookingAsset = bookingAssetFindMany.getMockImplementation();

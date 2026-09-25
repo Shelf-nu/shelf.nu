@@ -5,6 +5,7 @@ import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { createSignedUrl } from "~/utils/storage.server";
 import { sendAuditCancelledEmails } from "./email-helpers";
 import {
   createAuditResumedNote,
@@ -16,6 +17,7 @@ import {
   removeAssetFromAudit,
   removeAssetsFromAudit,
   getAuditsForOrganization,
+  getAuditSessionDetails,
   getPendingAuditsForOrganization,
   getAuditWhereInput,
   bulkArchiveAudits,
@@ -33,6 +35,9 @@ import {
 // why: storage.server calls Supabase over HTTP; mock so delete tests stay offline
 vi.mock("~/utils/storage.server", () => ({
   removePublicFile: vi.fn(),
+  // why: the expected-asset photo re-sign signs through Supabase Storage; the
+  // getAuditSessionDetails tests count these calls.
+  createSignedUrl: vi.fn(),
 }));
 
 // why: Mock the helper functions that create automatic notes to avoid database dependencies in unit tests
@@ -144,6 +149,8 @@ vi.mock("~/database/db.server", () => {
     asset: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      // why: a re-signed photo is written back with a guarded updateMany.
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     $transaction: vi.fn(),
     // why: comment writes lock the audit row with a raw SELECT ... FOR UPDATE.
@@ -3068,5 +3075,76 @@ describe("createWhileAuditAcceptsComments", () => {
 
     await expect(run(write)).rejects.toMatchObject({ status: 404 });
     expect(write).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `getAuditSessionDetails` serves five loaders, and only the web scan tab and
+ * the mobile audit screen render the expected-asset photos. Signing is opt-in so
+ * the other callers make no storage calls, and it covers expected rows only.
+ */
+describe("getAuditSessionDetails photo re-sign", () => {
+  const lapsedAsset = (id: string) => ({
+    id,
+    title: `Asset ${id}`,
+    mainImage: `https://storage.test/storage/v1/object/sign/assets/org-owner/${id}/photo.png?token=old`,
+    thumbnailImage: null,
+    mainImageExpiration: new Date("2020-01-01T00:00:00.000Z"),
+    assetModel: null,
+    category: null,
+    custody: [],
+    assetLocations: [],
+  });
+  const sessionRow = {
+    id: "audit-1",
+    organizationId: "org-owner",
+    assets: [
+      {
+        id: "audit-asset-1",
+        assetId: "asset-expected",
+        expected: true,
+        asset: lapsedAsset("asset-expected"),
+        _count: { notes: 0, images: 0 },
+      },
+      {
+        id: "audit-asset-2",
+        assetId: "asset-unexpected",
+        expected: false,
+        asset: lapsedAsset("asset-unexpected"),
+        _count: { notes: 0, images: 0 },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    mockDb.auditSession.findFirst.mockResolvedValue(sessionRow);
+    vi.mocked(createSignedUrl)
+      .mockReset()
+      .mockResolvedValue("https://storage.test/fresh.png?token=new");
+  });
+
+  it("signs nothing for a caller that reads the session only", async () => {
+    await getAuditSessionDetails({
+      id: "audit-1",
+      organizationId: "org-owner",
+      refreshExpectedAssetImages: false,
+    });
+
+    expect(createSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("re-signs the expected rows only, for a caller that renders them", async () => {
+    const { expectedAssets } = await getAuditSessionDetails({
+      id: "audit-1",
+      organizationId: "org-owner",
+      refreshExpectedAssetImages: true,
+    });
+
+    expect(expectedAssets).toHaveLength(1);
+    expect(expectedAssets[0].mainImage).toBe(
+      "https://storage.test/fresh.png?token=new"
+    );
+    // One call, for the expected row's photo; the unexpected row is not signed.
+    expect(createSignedUrl).toHaveBeenCalledTimes(1);
   });
 });
