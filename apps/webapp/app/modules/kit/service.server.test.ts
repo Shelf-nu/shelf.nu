@@ -7119,7 +7119,7 @@ describe("removeDestroyedUnitsFromKits", () => {
     });
     // A booking that has not started tracks the kit, so it cannot keep more
     // of it than the kit now holds.
-    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
+    expect(db.bookingAsset.findMany).toHaveBeenCalledWith({
       where: {
         assetKitId: "ak-1",
         quantity: { gt: 2 },
@@ -7128,9 +7128,58 @@ describe("removeDestroyedUnitsFromKits", () => {
           status: { in: [BookingStatus.DRAFT, BookingStatus.RESERVED] },
         },
       },
-      data: { quantity: 2 },
+      select: { id: true, bookingId: true, quantity: true },
     });
     expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("caps a planning booking's kit slice and records why", async () => {
+    expect.assertions(3);
+
+    membershipReads().mockResolvedValueOnce([membership({ stock: 7 })]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+    // A reserved booking next week holds all 5 of the kit's batteries.
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      { id: "ba-next-week", bookingId: "booking-next-week", quantity: 5 },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(3));
+
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ba-next-week"] } },
+      data: { quantity: 2 },
+    });
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "BOOKING_ASSETS_REMOVED",
+          bookingId: "booking-next-week",
+          assetId: "asset-pool",
+          kitId: "kit-1",
+          meta: { viaKitRemoval: true, quantity: 3 },
+        }),
+      ],
+      db
+    );
+    expect(createSystemBookingNotes).toHaveBeenCalledWith(
+      {
+        organizationId: "org-1",
+        notes: [
+          {
+            bookingId: "booking-next-week",
+            content: expect.stringContaining(
+              "where **3 units** of **Batteries** in kit **Kit A** were not returned, so this booking now holds **2 units** of it."
+            ),
+          },
+        ],
+      },
+      db
+    );
   });
 
   it("removes a membership whose units are all gone, the way the kit service removes a member", async () => {
@@ -7185,6 +7234,61 @@ describe("removeDestroyedUnitsFromKits", () => {
         quantity: 5,
       },
     ]);
+  });
+
+  it("tells a planning booking the kit's last units were not returned", async () => {
+    expect.assertions(1);
+
+    membershipReads().mockResolvedValueOnce([membership()]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+    // The planning-slice read inside the kit service's removal sequence.
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        id: "ba-next-week",
+        bookingId: "booking-next-week",
+        assetId: "asset-pool",
+        quantity: 5,
+        assetKitId: "ak-1",
+        bookingModelRequestId: null,
+        booking: {
+          id: "booking-next-week",
+          name: "Next week",
+          organizationId: "org-1",
+          status: BookingStatus.RESERVED,
+        },
+        asset: {
+          id: "asset-pool",
+          title: "Batteries",
+          type: AssetType.QUANTITY_TRACKED,
+          unitOfMeasure: null,
+        },
+      },
+    ]);
+    // The same sequence resolves the kit's name from the membership.
+    membershipReads().mockResolvedValueOnce([
+      { id: "ak-1", kitId: "kit-1", kit: { name: "Kit A" } },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(5));
+
+    expect(createSystemBookingNotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notes: [
+          expect.objectContaining({
+            bookingId: "booking-next-week",
+            content: expect.stringContaining(
+              "checked in another booking where the last units of **Batteries** in kit **Kit A** were not returned, so it was removed from this booking."
+            ),
+          }),
+        ],
+      }),
+      db
+    );
   });
 
   it("never takes more than the membership holds", async () => {
