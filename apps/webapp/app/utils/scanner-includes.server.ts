@@ -3,25 +3,72 @@ import type { Prisma } from "@prisma/client";
 import type { AssetImageSource } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 
-export const CUSTODY_INCLUDE = {
-  custody: {
+/**
+ * The custodian fields every scanner row renders a holder with.
+ *
+ * Shared by the asset and kit custody selections below, which select it off
+ * two different relations.
+ */
+const CUSTODIAN_SELECT = {
+  name: true,
+  user: {
     select: {
-      custodian: {
-        select: {
-          name: true,
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-              displayName: true,
-              profilePicture: true,
-            },
-          },
-        },
-      },
+      firstName: true,
+      lastName: true,
+      displayName: true,
+      profilePicture: true,
     },
   },
-};
+} satisfies Prisma.TeamMemberSelect;
+
+/**
+ * Custody selection for a scanned ASSET.
+ *
+ * `Asset.custody` is a list of `Custody` rows, one per holder, each carrying
+ * the units that holder has.
+ */
+export const ASSET_CUSTODY_INCLUDE = {
+  custody: {
+    select: {
+      // Units this row holds. The release scanner bounds its quantity input by
+      // the operator-assigned rows. See `kitCustodyId` below.
+      quantity: true,
+      // Which axis this row belongs to: null is operator-assigned, non-null
+      // means the row was inherited from the kit's custody and cascades with
+      // it. Only the operator axis can be handed back asset-by-asset, so the
+      // release scanner needs to tell them apart before offering a ceiling.
+      kitCustodyId: true,
+      custodian: { select: CUSTODIAN_SELECT },
+    },
+  },
+} satisfies Prisma.AssetInclude;
+
+/**
+ * Custody selection for a scanned KIT.
+ *
+ * `Kit.custody` is a single `KitCustody` row. Despite the matching field name
+ * it is a different model from the asset-side `Custody`: it records who holds
+ * the kit and carries no `quantity`, because units live on the `Custody` rows
+ * it cascades to. So the two selections above and below cannot be merged into
+ * one shared constant, however alike they look, and a field only `Custody`
+ * has must never be added here.
+ *
+ * Getting that wrong takes down far more than kit scans: both scanned-item
+ * endpoints resolve the asset and kit branches in a SINGLE query, so an
+ * invalid kit selection fails every lookup, for every code. `getQr` reports
+ * the Prisma error as "This code doesn't exist or it doesn't belong to your
+ * current organization", which reads as a workspace problem and sends you
+ * looking in the wrong place. The `satisfies` clause is what keeps this a
+ * build error instead: it only checks a literal written here, so keep the
+ * shape inline rather than spreading it in from elsewhere.
+ */
+export const KIT_CUSTODY_INCLUDE = {
+  custody: {
+    select: {
+      custodian: { select: CUSTODIAN_SELECT },
+    },
+  },
+} satisfies Prisma.KitInclude;
 
 /**
  * Scanner-facing Asset include.
@@ -53,7 +100,7 @@ export const ASSET_INCLUDE = {
       kit: { select: { id: true, name: true } },
     },
   },
-  ...CUSTODY_INCLUDE,
+  ...ASSET_CUSTODY_INCLUDE,
 };
 
 export const KIT_INCLUDE = {
@@ -94,7 +141,7 @@ export const KIT_INCLUDE = {
       },
     },
   },
-  ...CUSTODY_INCLUDE,
+  ...KIT_CUSTODY_INCLUDE,
 };
 
 export const QR_INCLUDE = {

@@ -72,6 +72,17 @@ const SENSITIVE_URL_PARAM =
   /^(?:sig|signature|x-(?:amz|goog)-(?:signature|credential|security-token)|access[._-]?token|auth)$/i;
 
 /**
+ * Whether a URL query or fragment parameter carries a credential and so must
+ * have its value redacted before the URL is logged.
+ *
+ * @param name - The parameter name, e.g. `token` or `X-Amz-Signature`
+ * @returns `true` when the parameter's value must not be logged
+ */
+export function isSensitiveUrlParam(name: string): boolean {
+  return SENSITIVE_KEY.test(name) || SENSITIVE_URL_PARAM.test(name);
+}
+
+/**
  * Removes credentials embedded in a URL string.
  *
  * A secret does not have to sit under a sensitive key to end up in a log line —
@@ -130,7 +141,7 @@ export function redactUrlCredentials(value: string): string {
   }
 
   for (const param of Array.from(url.searchParams.keys())) {
-    if (SENSITIVE_KEY.test(param) || SENSITIVE_URL_PARAM.test(param)) {
+    if (isSensitiveUrlParam(param)) {
       url.searchParams.set(param, REDACTED_URL_PART);
       redacted = true;
     }
@@ -145,7 +156,7 @@ export function redactUrlCredentials(value: string): string {
     let fragmentRedacted = false;
 
     for (const param of Array.from(fragment.keys())) {
-      if (SENSITIVE_KEY.test(param) || SENSITIVE_URL_PARAM.test(param)) {
+      if (isSensitiveUrlParam(param)) {
         fragment.set(param, REDACTED_URL_PART);
         fragmentRedacted = true;
       }

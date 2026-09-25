@@ -22,6 +22,7 @@ import { getUserContactById } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
+import { organizationRolesMap } from "~/utils/organization-roles";
 import {
   PermissionAction,
   PermissionEntity,
@@ -29,7 +30,6 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveUserDisplayName } from "~/utils/user";
-import { organizationRolesMap } from "./settings.team";
 
 export const loader = async ({
   request,
