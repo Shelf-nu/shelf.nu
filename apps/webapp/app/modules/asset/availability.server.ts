@@ -88,6 +88,7 @@ import {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantityNotBelowReservations,
   buildActiveBookingWhere,
+  computeCustodyAvailability,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
   resolveIntervalTo,
@@ -95,6 +96,8 @@ import {
 import type {
   AssertAssetQuantityNotBelowReservationsTxClient,
   AvailabilityInterval,
+  CustodyAvailability,
+  CustodyAvailabilityClient,
 } from "./availability-primitives.server";
 
 const label: ErrorLabel = "Assets";
@@ -107,6 +110,7 @@ export {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantityNotBelowReservations,
   buildActiveBookingWhere,
+  computeCustodyAvailability,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
   resolveIntervalTo,
@@ -114,6 +118,8 @@ export {
 export type {
   AssertAssetQuantityNotBelowReservationsTxClient,
   AvailabilityInterval,
+  CustodyAvailability,
+  CustodyAvailabilityClient,
 };
 
 /**

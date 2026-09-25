@@ -537,10 +537,44 @@ interface UserOrgTransition {
 }
 
 /**
- * Handles the transition of user access when org switches from invite-based to SCIM-based
- * @returns Object containing transition details for logging/notification
+ * Reconciles one workspace's membership against the SAML group claims presented
+ * at login.
+ *
+ * The only caller is {@link updateUserFromSSO}'s group-mapping loop. This is
+ * the SAML group-claim path, not SCIM, which has its own lifecycle in
+ * `~/modules/scim/service.server`. Runs on EVERY SSO login, once per workspace
+ * on the user's email domain.
+ *
+ * Revocation delegates to {@link revokeAccessToOrganization}, the same
+ * function behind the admin "revoke access" UI and `revokeScimMembership`, so
+ * it:
+ *   1. disconnects every `TeamMember` linked to the `User` in the workspace
+ *      (rows survive, so custody and booking history keep a name),
+ *   2. deletes the `UserOrganization`,
+ *   3. clears `User.lastSelectedOrganizationId` when it pointed at this org.
+ *
+ * Step 1 is the load-bearing one. A `TeamMember` with no linked user is how the
+ * rest of the codebase recognises revoked access: the booking notification
+ * resolver and the `usersOnly` custodian pickers read straight through
+ * `TeamMember.user` with no membership check, so a linked row keeps routing
+ * this workspace's booking emails and recipient pickers to the user.
+ *
+ * The workspace OWNER is never revoked here (see the branch below).
+ *
+ * ERROR SEMANTICS: deliberately fail closed. Any other failure aborts the
+ * whole login rather than being logged and skipped per workspace: swallowing it
+ * would leave the user signed in holding access this call exists to remove.
+ * `revokeAccessToOrganization` performs the disconnect and the membership delete
+ * in one transaction, so it cannot half-apply, and its
+ * `lastSelectedOrganizationId` cleanup is best-effort internally.
+ *
+ * @param userId - The Shelf user signing in
+ * @param organization - The workspace being reconciled
+ * @param currentRoles - Roles the user holds in it right now
+ * @param desiredRole - Role the group claims map to, or `null` to revoke
+ * @returns Transition details for logging/notification
  */
-async function handleSCIMTransition(
+async function reconcileSsoGroupMembership(
   userId: string,
   organization: Organization,
   currentRoles: OrganizationRoles[],
@@ -551,30 +585,23 @@ async function handleSCIMTransition(
     organizationId: organization.id,
     previousRoles: currentRoles,
     newRole: desiredRole,
-    transitionType:
-      currentRoles[0] !== desiredRole ? "ROLE_CHANGE" : "ACCESS_REVOKED",
+    transitionType: desiredRole ? "ROLE_CHANGE" : "ACCESS_REVOKED",
   };
 
   try {
     if (!desiredRole) {
-      // User has no valid SCIM groups, revoke access
-      const deleted = await deleteMembershipUnlessOwner({
-        userId,
-        organizationId: organization.id,
-      });
-
-      if (deleted === 0) {
-        /**
-         * The workspace owner lost their SCIM groups. Removing them would
-         * strand the workspace with no owner and no way back, and this runs
-         * during SSO login — throwing would lock the owner out of their own
-         * workspace on the way in. Keep the access and make the divergence
-         * loud instead; an operator must transfer ownership before the IdP
-         * can deprovision them.
-         */
+      /**
+       * The workspace owner lost their group claims. Removing them would
+       * strand the workspace with no owner and no way back, and this runs
+       * during SSO login, so throwing would lock the owner out of their own
+       * workspace on the way in. Keep the access and make the divergence loud
+       * instead; an operator must transfer ownership before the IdP can
+       * deprovision them.
+       */
+      const keepOwnerAccess = () => {
         Logger.warn({
           message:
-            "SCIM would have revoked the workspace owner's access; kept it and skipped the revocation",
+            "SSO group claims would have revoked the workspace owner's access; kept it and skipped the revocation",
           additionalData: { userId, organizationId: organization.id },
         });
 
@@ -582,12 +609,31 @@ async function handleSCIMTransition(
         transition.newRole = currentRoles[0];
 
         return transition;
+      };
+
+      if (currentRoles.includes(OrganizationRoles.OWNER)) {
+        return keepOwnerAccess();
+      }
+
+      try {
+        await revokeAccessToOrganization({
+          userId,
+          organizationId: organization.id,
+        });
+      } catch (cause) {
+        // The only 400 `revokeAccessToOrganization` raises is its owner guard:
+        // ownership was transferred to this user after `currentRoles` was read.
+        if (isLikeShelfError(cause) && cause.status === 400) {
+          return keepOwnerAccess();
+        }
+
+        throw cause;
       }
 
       transition.transitionType = "ACCESS_REVOKED";
 
       Logger.info({
-        message: "Revoked user access due to SCIM group changes",
+        message: "Revoked user access due to SSO group claim changes",
         additionalData: {
           userId,
           organizationId: organization.id,
@@ -613,7 +659,7 @@ async function handleSCIMTransition(
       transition.transitionType = "ROLE_CHANGE";
 
       Logger.info({
-        message: "Updated user role based on SCIM groups",
+        message: "Updated user role based on SSO group claims",
         additionalData: {
           userId,
           organizationId: organization.id,
@@ -627,7 +673,7 @@ async function handleSCIMTransition(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to handle SCIM transition",
+      message: "Failed to reconcile SSO group membership",
       additionalData: {
         userId,
         organizationId: organization.id,
@@ -751,7 +797,7 @@ export async function updateUserFromSSO(
         );
 
         if (existingOrgAccess) {
-          const transition = await handleSCIMTransition(
+          const transition = await reconcileSsoGroupMembership(
             userId,
             org,
             existingOrgAccess.roles,
@@ -759,10 +805,14 @@ export async function updateUserFromSSO(
           );
           transitions.push(transition);
 
-          // Repair an account whose team-member record never got written —
-          // only while a role still maps, since a revoked transition is
-          // removing this user's access rather than restoring it.
-          if (desiredRole) {
+          // Access survives unless the transition revoked it. A workspace
+          // owner keeps access even when no group claim maps to a role.
+          const keptAccess = transition.transitionType !== "ACCESS_REVOKED";
+
+          // Repair an account whose team-member record never got written.
+          // Only while access is kept: a revoked transition is removing this
+          // user's access rather than restoring it.
+          if (keptAccess) {
             await db.$transaction(async (tx) => {
               // `TeamMember` has no uniqueness on (userId, organizationId), so
               // two logins arriving together would both find nothing and both
@@ -792,10 +842,8 @@ export async function updateUserFromSSO(
             });
           }
 
-          // The user keeps access only when a role still maps; a null
-          // desiredRole makes handleSCIMTransition revoke it, so that org must
-          // not become the post-login landing org.
-          if (desiredRole) {
+          // A revoked org must not become the post-login landing org.
+          if (keptAccess) {
             firstMatchedOrg ??= org;
           }
         } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
@@ -1698,8 +1746,12 @@ export async function revokeAccessToOrganization({
      * 1. Remove relation between user and team member
      * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
      */
-    const teamMember = await db.teamMember.findFirst({
+    // Disconnect EVERY linked team member, not just the first. The schema does
+    // not enforce one per (user, org), and any row left linked keeps routing
+    // booking emails and recipient pickers to a user who no longer has access.
+    const teamMembers = await db.teamMember.findMany({
       where: { userId, organizationId },
+      select: { id: true },
     });
 
     const result = await db.$transaction(async (tx) => {
@@ -1737,11 +1789,9 @@ export async function revokeAccessToOrganization({
       return tx.user.update({
         where: { id: userId },
         data: {
-          ...(teamMember?.id && {
+          ...(teamMembers.length > 0 && {
             teamMembers: {
-              disconnect: {
-                id: teamMember.id,
-              },
+              disconnect: teamMembers.map(({ id }) => ({ id })),
             },
           }),
         },
