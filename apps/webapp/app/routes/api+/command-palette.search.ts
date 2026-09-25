@@ -22,6 +22,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
@@ -36,11 +37,13 @@ const querySchema = z.object({
  * Queries assets, audits, kits, bookings, locations and team members in one
  * round trip, each scoped to the active organization.
  *
- * Bookings carry an extra restriction: unless the role (or the workspace
- * setting) allows seeing every booking, results are limited to the caller's
- * own — across both custody links, since a booking may name them through the
- * user link or through any team-member row they hold. That restriction is
- * AND-ed, never folded into the search `OR`, so a search term cannot widen it.
+ * Each entity type is searched only for members whose matrix grant covers
+ * reading it. Bookings carry an extra restriction: unless the member's access
+ * (role policy and workspace setting) covers every booking, results are
+ * limited to the caller's own, across both custody links, since a booking may
+ * name them through the user link or through any team-member row they hold.
+ * That restriction is AND-ed, never folded into the search `OR`, so a search
+ * term cannot widen it.
  *
  * @param args.context - Carries the auth session
  * @param args.request - Read for the query string and active organization
@@ -71,19 +74,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       );
     }
 
-    const {
-      organizationId,
-      role,
-      canSeeAllCustody,
-      isSelfServiceOrBase,
-      currentOrganization,
-      access,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.commandPaletteSearch,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, currentOrganization, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.commandPaletteSearch,
+        action: PermissionAction.read,
+      });
 
     const terms = query
       .split(/[\s,]+/)
@@ -185,14 +182,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // Check if this is a personal workspace - they don't have bookings or team members
     const isPersonalWorkspace = isPersonalOrg(currentOrganization);
 
-    // Check permissions for different entity types based on actual roles
-    const hasKitPermission = ["OWNER", "ADMIN"].includes(role);
-    const hasBookingPermission =
-      !isPersonalWorkspace &&
-      ["OWNER", "ADMIN", "SELF_SERVICE", "BASE"].includes(role);
-    const hasLocationPermission = ["OWNER", "ADMIN"].includes(role);
-    const hasTeamMemberPermission =
-      !isPersonalWorkspace && ["OWNER", "ADMIN"].includes(role);
+    // Each entity type follows the matrix grant for reading it.
+    const roles =
+      userOrganizations.find((o) => o.organization.id === organizationId)
+        ?.roles ?? [];
+    const canRead = (entity: PermissionEntity) =>
+      hasPermission({
+        organizationId,
+        userId,
+        roles,
+        entity,
+        action: PermissionAction.read,
+      });
+    const [canReadKits, canReadBookings, canReadLocations, canReadTeam] =
+      await Promise.all([
+        canRead(PermissionEntity.kit),
+        canRead(PermissionEntity.booking),
+        canRead(PermissionEntity.location),
+        canRead(PermissionEntity.teamMember),
+      ]);
+    const hasKitPermission = canReadKits;
+    const hasBookingPermission = !isPersonalWorkspace && canReadBookings;
+    const hasLocationPermission = canReadLocations;
+    const hasTeamMemberPermission = !isPersonalWorkspace && canReadTeam;
     const hasAuditPermission = true;
 
     // Prepare where clauses for other entities
@@ -207,10 +219,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ...(bookingSearchConditions.length
         ? { OR: bookingSearchConditions }
         : {}),
-      // BASE and SELF_SERVICE users can only see their own bookings unless org
-      // settings allow otherwise. AND-ed rather than merged in beside the
-      // search `OR` above: custody is itself an OR across the user link and any
-      // team-member link, and a search term must not be able to widen it away.
+      // Members who cannot see every booking see only their own. AND-ed
+      // rather than merged in beside the search `OR` above: custody is itself
+      // an OR across the user link and any team-member link, and a search
+      // term must not be able to widen it away.
       ...(access.bookings.seeAll
         ? {}
         : {
@@ -235,8 +247,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ...(teamMemberSearchConditions.length
         ? { OR: teamMemberSearchConditions }
         : {}),
-      // BASE and SELF_SERVICE users can only see team members they have custody access to
-      ...(canSeeAllCustody
+      // Members who cannot see all custody see only team members they share
+      // custody with, and themselves
+      ...(access.custody.seeAll
         ? {}
         : {
             OR: [
@@ -265,7 +278,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const auditWhere: Prisma.AuditSessionWhereInput = {
       organizationId,
       ...(auditSearchConditions.length ? { OR: auditSearchConditions } : {}),
-      ...(isSelfServiceOrBase && userId
+      // Members who cannot see every audit see only those assigned to them
+      ...(!access.audits.seeAll && userId
         ? {
             assignments: {
               some: {

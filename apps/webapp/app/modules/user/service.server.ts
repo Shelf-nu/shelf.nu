@@ -60,9 +60,8 @@ import {
   parseFileFormData,
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
-import type { MergeInclude } from "~/utils/utils";
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
-import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
+import type { UpdateUserPayload } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
@@ -2201,85 +2200,87 @@ export async function transferEntitiesToNewOwner({
   });
 }
 
-type UserWithExtraInclude<T extends Prisma.UserInclude | undefined> =
-  T extends Prisma.UserInclude
-    ? Prisma.UserGetPayload<{
-        include: MergeInclude<typeof USER_STATIC_INCLUDE, T>;
-      }>
-    : Prisma.UserGetPayload<{ include: typeof USER_STATIC_INCLUDE }>;
-
-export async function getUserFromOrg<T extends Prisma.UserInclude | undefined>({
+/**
+ * Loads the user shown on a team profile page, with only what the page
+ * renders. Memberships are limited to workspaces the VIEWER also belongs to
+ * (used to offer a workspace switch when the user is not in the current one);
+ * invites are limited to the current workspace and to their status.
+ *
+ * @param args.id - The viewed user
+ * @param args.organizationId - The viewer's current workspace
+ * @param args.userOrganizations - The viewer's memberships
+ * @param args.request - For the switch-workspace redirect
+ * @returns The profile fields
+ * @throws {ShelfError} 404 when the user is not in the workspace (with the
+ *   viewer's other workspaces that do contain them, for the switch prompt)
+ */
+export async function getUserProfileForOrg({
   id,
   organizationId,
   userOrganizations,
   request,
-  extraInclude,
-}: Pick<User, "id"> & {
+}: {
+  id: User["id"];
   organizationId: Organization["id"];
   userOrganizations?: Pick<UserOrganization, "organizationId">[];
   request?: Request;
-  extraInclude?: T;
 }) {
+  const viewerOrgIds = [
+    organizationId,
+    ...(userOrganizations?.map((o) => o.organizationId) ?? []),
+  ];
+  const uniqueViewerOrgIds = [...new Set(viewerOrgIds)];
   try {
-    const otherOrganizationIds = userOrganizations?.map(
-      (org) => org.organizationId
-    );
-
-    const mergedInclude = {
-      ...USER_STATIC_INCLUDE,
-      ...extraInclude,
-    } as MergeInclude<typeof USER_STATIC_INCLUDE, T>;
-
-    const user = (await db.user.findFirstOrThrow({
+    const user = await db.user.findFirstOrThrow({
       where: {
-        OR: [
-          { id, userOrganizations: { some: { organizationId } } },
-          ...(userOrganizations?.length
-            ? [
-                {
-                  id,
-                  userOrganizations: {
-                    some: { organizationId: { in: otherOrganizationIds } },
-                  },
-                },
-              ]
-            : []),
-        ],
+        id,
+        userOrganizations: {
+          some: { organizationId: { in: uniqueViewerOrgIds } },
+        },
       },
-      include: mergedInclude,
-    })) as UserWithExtraInclude<T>;
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+        profilePicture: true,
+        sso: true,
+        userOrganizations: {
+          where: { organizationId: { in: uniqueViewerOrgIds } },
+          select: { organizationId: true, roles: true },
+        },
+        teamMembers: {
+          where: { organizationId },
+          select: {
+            id: true,
+            receivedInvites: {
+              where: { organizationId },
+              select: { status: true },
+            },
+          },
+        },
+      },
+    });
 
-    /* User is accessing the User in the wrong organization */
-    const isUserInCurrentOrg = !!user.userOrganizations.find(
-      (userOrg) => userOrg.organizationId === organizationId
+    const isUserInCurrentOrg = user.userOrganizations.some(
+      (uo) => uo.organizationId === organizationId
     );
-
-    const otherOrgsForUser =
-      userOrganizations?.filter(
-        (org) =>
-          !!user.userOrganizations.find(
-            (userOrg) => userOrg.organizationId === org.organizationId
-          )
-      ) ?? [];
-
-    if (
-      userOrganizations?.length &&
-      !isUserInCurrentOrg &&
-      otherOrgsForUser?.length
-    ) {
-      const redirectTo =
-        typeof request !== "undefined"
-          ? getRedirectUrlFromRequest(request)
-          : undefined;
-
+    if (!isUserInCurrentOrg) {
+      /* The user is in another of the viewer's workspaces: offer a switch. */
       throw new ShelfError({
         cause: null,
         title: "User not found",
         message: "",
         additionalData: {
           model: "teamMember",
-          organizations: otherOrgsForUser,
-          redirectTo,
+          organizations:
+            userOrganizations?.filter((org) =>
+              user.userOrganizations.some(
+                (uo) => uo.organizationId === org.organizationId
+              )
+            ) ?? [],
+          redirectTo: request ? getRedirectUrlFromRequest(request) : undefined,
         },
         label,
         status: 404,

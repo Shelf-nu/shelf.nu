@@ -33,6 +33,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -98,7 +99,19 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function LocationsIndexPage() {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
+  // The bulk menu offers Delete and Create audit.
+  const showBulkActions =
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.delete,
+    }) ||
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.create,
+    });
 
   return (
     <>
@@ -125,9 +138,7 @@ export default function LocationsIndexPage() {
           }}
         />
         <List
-          bulkActions={
-            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
-          }
+          bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
           customEmptyStateContent={{
             title: "No locations yet",
             text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",

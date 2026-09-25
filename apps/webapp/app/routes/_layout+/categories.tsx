@@ -43,6 +43,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -149,7 +150,13 @@ export const handle = {
 export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
+  // The bulk menu offers Delete only.
+  const showBulkActions = userHasPermission({
+    roles,
+    entity: PermissionEntity.category,
+    action: PermissionAction.delete,
+  });
 
   return (
     <>
@@ -167,9 +174,7 @@ export default function CategoriesPage() {
         <Filters />
         <Outlet />
         <List
-          bulkActions={
-            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
-          }
+          bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
           customEmptyStateContent={{
             title: "No categories yet",
             text: "Categories help you organize assets by type. Create categories to group and filter your inventory.",

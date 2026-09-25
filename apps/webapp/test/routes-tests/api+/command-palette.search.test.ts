@@ -1,0 +1,113 @@
+/**
+ * Command-palette search returns each entity type to members whose matrix
+ * grant covers reading it: kits to anyone with kit:read, locations and team
+ * members to OWNER and ADMIN only, and audits limited to assigned ones for
+ * members who cannot see every audit.
+ *
+ * @see {@link file://../../../app/routes/api+/command-palette.search.ts}
+ */
+// @vitest-environment node
+import type { OrganizationRoles } from "@prisma/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createLoaderArgs } from "@mocks/remix";
+import { db } from "~/database/db.server";
+
+const state = vi.hoisted(() => ({ roles: ["SELF_SERVICE"] as string[] }));
+
+// why: the membership under test is supplied here; the route's own decisions run for real
+vi.mock("~/utils/roles.server", async () => {
+  const { permissionContext } = await import("@helpers/role-access");
+  return {
+    requirePermission: vi.fn(async () =>
+      permissionContext({ roles: state.roles as OrganizationRoles[] })
+    ),
+  };
+});
+
+// why: every search is a database query; the test observes which ones run
+vi.mock("~/database/db.server", () => ({
+  db: {
+    kit: {
+      findMany: vi.fn(async () => [
+        {
+          id: "kit-1",
+          name: "Kit",
+          description: null,
+          status: "AVAILABLE",
+          _count: { assetKits: 0 },
+        },
+      ]),
+    },
+    booking: { findMany: vi.fn(async () => []) },
+    location: { findMany: vi.fn(async () => []) },
+    teamMember: { findMany: vi.fn(async () => []) },
+    auditSession: { findMany: vi.fn(async () => []) },
+  },
+}));
+
+// why: asset search has its own service tests
+vi.mock("~/modules/asset/service.server", () => ({
+  getAssets: vi.fn(async () => ({ assets: [] })),
+}));
+
+// why: booking scope needs team-member lookups; this test is about kits,
+// locations, team members and audits
+vi.mock("~/modules/booking/service.server", () => ({
+  resolveCustodianScope: vi.fn(async () => ({})),
+  custodianScopeClause: vi.fn(() => ({})),
+}));
+
+const { loader } = await import("~/routes/api+/command-palette.search");
+
+async function search(roles: string[]) {
+  state.roles = roles;
+  return loader(
+    createLoaderArgs({
+      request: new Request("http://localhost/api/command-palette/search?q=kit"),
+      context: { getSession: () => ({ userId: "caller" }) } as never,
+    })
+  );
+}
+
+describe("command-palette search", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([["SELF_SERVICE"], ["BASE"], ["ADMIN"]])(
+    "%s gets kits (kit:read)",
+    async (role) => {
+      await search([role]);
+      expect(db.kit.findMany).toHaveBeenCalled();
+    }
+  );
+
+  it.each([["SELF_SERVICE"], ["BASE"]])(
+    "%s gets no locations or team members",
+    async (role) => {
+      await search([role]);
+      expect(db.location.findMany).not.toHaveBeenCalled();
+      expect(db.teamMember.findMany).not.toHaveBeenCalled();
+    }
+  );
+
+  it("ADMIN beside SELF_SERVICE gets locations and team members", async () => {
+    await search(["SELF_SERVICE", "ADMIN"]);
+    expect(db.location.findMany).toHaveBeenCalled();
+    expect(db.teamMember.findMany).toHaveBeenCalled();
+  });
+
+  it("a restricted member's audit search is limited to assigned audits", async () => {
+    await search(["BASE"]);
+    const [{ where }] = vi.mocked(db.auditSession.findMany).mock
+      .calls[0] as unknown as [{ where: Record<string, unknown> }];
+    expect(where.assignments).toEqual({ some: { userId: "caller" } });
+  });
+
+  it("an ADMIN's audit search is not limited to assignments", async () => {
+    await search(["ADMIN"]);
+    const [{ where }] = vi.mocked(db.auditSession.findMany).mock
+      .calls[0] as unknown as [{ where: Record<string, unknown> }];
+    expect(where).not.toHaveProperty("assignments");
+  });
+});

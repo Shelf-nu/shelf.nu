@@ -16,9 +16,9 @@ import { UserSubheading } from "~/components/user/user-subheading";
 import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getUserFromOrg } from "~/modules/user/service.server";
+import { getUserProfileForOrg } from "~/modules/user/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
-import { getUserContactById } from "~/modules/user-contact/service.server";
+import { getUserContactForDisplay } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
@@ -55,24 +55,14 @@ export const loader = async ({
       }
     );
 
-    const user = await getUserFromOrg({
+    const user = await getUserProfileForOrg({
       id: selectedUserId,
       organizationId,
       userOrganizations,
       request,
-      extraInclude: {
-        teamMembers: {
-          where: { organizationId },
-          include: {
-            receivedInvites: {
-              where: { organizationId },
-            },
-          },
-        },
-      },
     });
 
-    const userContact = await getUserContactById(user.id);
+    const userContact = await getUserContactForDisplay(user.id);
 
     const userName = resolveUserDisplayName(user);
     const header = {
@@ -135,6 +125,13 @@ export default function UserPage() {
     action: PermissionAction.read,
   });
 
+  /* Changing, revoking or re-inviting this member is a team-member update. */
+  const canUpdateTeamMembers = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.update,
+  });
+
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
@@ -177,7 +174,7 @@ export default function UserPage() {
         subHeading={<UserSubheading user={user} />}
       />
 
-      <When truthy={userOrgRole !== "Owner"}>
+      <When truthy={canUpdateTeamMembers && userOrgRole !== "Owner"}>
         <AbsolutePositionedHeaderActions className="hidden w-full md:flex">
           <TeamUsersActionsDropdown
             userId={user.id}

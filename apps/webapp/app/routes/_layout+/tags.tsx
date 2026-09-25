@@ -45,6 +45,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -153,7 +154,13 @@ export const handle = {
 export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
+  // The bulk menu offers Delete only.
+  const showBulkActions = userHasPermission({
+    roles,
+    entity: PermissionEntity.tag,
+    action: PermissionAction.delete,
+  });
 
   return (
     <>
@@ -175,9 +182,7 @@ export default function CategoriesPage() {
         />
         <Outlet />
         <List
-          bulkActions={
-            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
-          }
+          bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
           customEmptyStateContent={{
             title: "No tags yet",
             text: "Tags let you label assets with flexible keywords. Create tags to add custom metadata to your inventory.",

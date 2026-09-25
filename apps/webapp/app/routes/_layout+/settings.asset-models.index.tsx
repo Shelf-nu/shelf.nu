@@ -32,6 +32,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -95,7 +96,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AssetModelsIndexPage() {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
+  // The bulk menu offers Delete only.
+  const showBulkActions = userHasPermission({
+    roles,
+    entity: PermissionEntity.assetModel,
+    action: PermissionAction.delete,
+  });
 
   return (
     <>
@@ -118,7 +125,7 @@ export default function AssetModelsIndexPage() {
       </div>
       <List
         bulkActions={
-          isBaseOrSelfService ? undefined : <AssetModelBulkActionsDropdown />
+          showBulkActions ? <AssetModelBulkActionsDropdown /> : undefined
         }
         ItemComponent={AssetModelItem}
         headerChildren={

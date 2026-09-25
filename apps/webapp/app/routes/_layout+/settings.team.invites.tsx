@@ -44,17 +44,23 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
+    // Listing pending invites is part of inviting people.
     const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
-      action: PermissionAction.read,
+      action: PermissionAction.create,
     });
 
-    /** Get the organization */
+    /** Only the organization fields the page and its layout read. */
     const organization = await db.organization.findFirst({
       where: { id: organizationId },
-      include: { owner: true },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        owner: { select: { email: true } },
+      },
     });
 
     if (!organization) {

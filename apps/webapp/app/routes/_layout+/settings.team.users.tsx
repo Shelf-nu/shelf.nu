@@ -20,6 +20,7 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -32,6 +33,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -147,6 +149,14 @@ export default function UserTeamSetting() {
 
   const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);
 
+  const { roles } = useUserRoleHelper();
+  /* Importing users sends invites too, so both buttons need the invite grant. */
+  const canInviteUsers = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.create,
+  });
+
   return shouldRenderIndex ? (
     <div>
       <ContextualModal />
@@ -175,14 +185,18 @@ export default function UserTeamSetting() {
           or `w-full`, or the gaps stop being uniform. */}
           <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:flex-wrap md:items-center md:justify-end">
             <TransferOwnershipButton />
-            <ImportUsersDialog />
-            <InviteUserDialog
-              trigger={
-                <Button type="button" variant="primary">
-                  <span className="whitespace-nowrap">Invite a user</span>
-                </Button>
-              }
-            />
+            {canInviteUsers ? (
+              <>
+                <ImportUsersDialog />
+                <InviteUserDialog
+                  trigger={
+                    <Button type="button" variant="primary">
+                      <span className="whitespace-nowrap">Invite a user</span>
+                    </Button>
+                  }
+                />
+              </>
+            ) : null}
           </div>
         </Filters>
 
@@ -215,6 +229,14 @@ export default function UserTeamSetting() {
 }
 
 function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
+  const { roles } = useUserRoleHelper();
+  /* Row actions (change role, revoke, resend) are team-member updates. */
+  const canUpdateTeamMembers = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.update,
+  });
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -232,7 +254,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
         <InviteStatusBadge status={item.status} />
       </Td>
       <Td className="text-right">
-        {item.role !== "Owner" ? (
+        {canUpdateTeamMembers && item.role !== "Owner" ? (
           <TeamUsersActionsDropdown
             inviteStatus={item.status}
             userId={item.userId}

@@ -44,6 +44,8 @@ import {
   isOrganizationOwner,
   resolveEffectiveRole,
 } from "~/utils/roles.server";
+import type { AdminArea } from "./admin-areas";
+import { canSeeAdminArea } from "./admin-areas";
 import { userHasCustodyViewPermission } from "./custody-and-bookings-permissions.validator.client";
 import { PermissionAction, PermissionEntity } from "./permission.data";
 import { userHasPermission } from "./permission.validator.client";
@@ -54,7 +56,7 @@ import {
   resolveRole,
   resolveRoleAccess,
 } from "./role-access";
-import { visibleSettingsTabs } from "./settings-tabs";
+import { visibleSettingsTabs, visibleTeamTabs } from "./settings-tabs";
 
 const R = OrganizationRoles;
 const SINGLE_ROLES = [R.OWNER, R.ADMIN, R.SELF_SERVICE, R.BASE] as const;
@@ -1254,57 +1256,66 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     visibleSettingsTabs({ roles, isPersonalOrg: false }).map((t) => t.to)
   );
 
-  // B9:D-38: sidebar (hooks/use-sidebar-nav-items.tsx:71; `hidden:
-  // isBaseOrSelfService` at :126,145,152,159,189,196,202,208,230; Audits has no gate).
+  // B9:D-38: sidebar (hooks/use-sidebar-nav-items.tsx): each admin area shows
+  // with the matrix grant of the page it opens (`canSeeAdminArea`); Team with
+  // any visible Team tab in a team workspace; Workspace settings with any
+  // visible settings tab other than Team; the Organization label with either.
   snapshot["B9:D-38:sidebar"] = perRoleSet((roles) => {
-    const shown = !hookFlags(roles).isBaseOrSelfService;
+    const area = (a: AdminArea) => canSeeAdminArea({ roles, area: a });
+    const team = visibleTeamTabs({ roles, isPersonalOrg: false }).length > 0;
+    const workspaceSettings = visibleSettingsTabs({
+      roles,
+      isPersonalOrg: false,
+    }).some((t) => t.to !== "team");
     return {
-      home: shown,
-      categories: shown,
-      tags: shown,
-      locations: shown,
-      audits: true,
-      reminders: shown,
-      reports: shown,
-      organization: shown,
-      team: shown,
-      workspaceSettings: shown,
+      home: area("home"),
+      categories: area("categories"),
+      tags: area("tags"),
+      locations: area("locations"),
+      audits: area("audits"),
+      reminders: area("reminders"),
+      reports: area("reports"),
+      organization: team || workspaceSettings,
+      team,
+      workspaceSettings,
     };
   });
 
   // B9:D-38/D-34: command-palette quick-nav (components/layout/command-palette/
-  // command-palette.tsx:160-219 `isVisible`, context :510-532); inviteUser is
-  // `roles.includes("ADMIN") || roles.includes("OWNER")` (:511-513). Role part
-  // only: team also needs a non-personal workspace.
+  // command-palette.tsx, `isVisible` over `CommandContext`), for a team
+  // workspace: admin areas and Create asset/kit follow `canSeeAdminArea`,
+  // Settings any visible settings tab, Team the Users tab, Invite user
+  // `teamMember:create`.
   snapshot["B9:D-38:palette"] = perRoleSet((roles) => {
-    const shown = !hookFlags(roles).isBaseOrSelfService;
+    const area = (a: AdminArea) => canSeeAdminArea({ roles, area: a });
     return {
-      audits: shown,
-      team: shown,
-      settings: shown,
-      home: shown,
-      createAsset: shown,
-      createKit: shown,
-      inviteUser: roles.includes(R.ADMIN) || roles.includes(R.OWNER),
+      audits: area("audits"),
+      team: visibleTeamTabs({ roles, isPersonalOrg: false }).some(
+        (t) => t.to === "users"
+      ),
+      settings: visibleSettingsTabs({ roles, isPersonalOrg: false }).length > 0,
+      home: area("home"),
+      createAsset: area("createAsset"),
+      createKit: area("createKit"),
+      inviteUser: can(roles, E.teamMember, A.create),
     };
   });
 
-  // B9:D-39: admin list bulk menus. `!isBaseOrSelfService`:
-  // categories.tsx:152,171; tags.tsx:156,179; locations._index.tsx:101,129;
-  // settings.custom-fields.index.tsx:129,154; settings.asset-models.index.tsx:98,121.
-  // The NRM list (settings.team.nrm.tsx) shows its bulk menu with
+  // B9:D-39: admin list bulk menus, each shown with the grant of the actions it
+  // offers: categories.tsx, tags.tsx and settings.asset-models.index.tsx
+  // (Delete); locations._index.tsx (Delete, Create audit);
+  // settings.custom-fields.index.tsx (Activate/Deactivate). The NRM list
+  // (settings.team.nrm.tsx) shows its bulk menu with
   // `nonRegisteredMember:delete`, the only bulk action it offers.
-  snapshot["B9:D-39:admin-bulk-menus"] = perRoleSet((roles) => {
-    const shown = !hookFlags(roles).isBaseOrSelfService;
-    return {
-      categories: shown,
-      tags: shown,
-      locations: shown,
-      customFields: shown,
-      assetModels: shown,
-      nonRegisteredMembers: can(roles, E.nonRegisteredMember, A.delete),
-    };
-  });
+  snapshot["B9:D-39:admin-bulk-menus"] = perRoleSet((roles) => ({
+    categories: can(roles, E.category, A.delete),
+    tags: can(roles, E.tag, A.delete),
+    locations:
+      can(roles, E.location, A.delete) || can(roles, E.audit, A.create),
+    customFields: can(roles, E.customField, A.update),
+    assetModels: can(roles, E.assetModel, A.delete),
+    nonRegisteredMembers: can(roles, E.nonRegisteredMember, A.delete),
+  }));
 
   // ===================== Membership: Tasks 8a-8f =====================
 
