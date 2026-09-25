@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Asset, Prisma } from "@prisma/client";
 import { AssetStatus, BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -20,6 +20,7 @@ import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
 import { hasCustody } from "~/modules/custody/utils";
@@ -30,6 +31,7 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import type { AdditionalData } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   payload,
@@ -50,6 +52,40 @@ import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export const meta = () => [{ title: appendToMetaTitle("Assign custody") }];
+
+/**
+ * Refuses quantity-tracked assets on this route.
+ *
+ * This route gives the whole asset to one custodian: the action replaces the
+ * asset's operator-assigned custody rows with a single row. A quantity-tracked
+ * asset is held per unit, possibly by several custodians at once, so its
+ * custody goes through the quantity custody dialog
+ * (`/api/assets/assign-quantity-custody`), which takes a unit count.
+ *
+ * Checked in the loader and again in the action, before any write, because a
+ * POST does not have to come from the rendered page. `Asset.type` never
+ * changes after creation, so reading it ahead of the transaction leaves no
+ * window for it to change.
+ *
+ * @throws {ShelfError} 400 when the asset is quantity-tracked
+ */
+function assertNotQuantityTracked(
+  asset: Pick<Asset, "type"> | null | undefined,
+  additionalData: AdditionalData
+) {
+  if (!isQuantityTracked(asset)) return;
+
+  throw new ShelfError({
+    cause: null,
+    title: "Action not allowed",
+    message:
+      "Quantity-tracked assets use the quantity custody dialog, which asks how many units to assign. Open it from the asset's actions menu.",
+    additionalData,
+    label: "Assets",
+    status: 400,
+    shouldBeCaptured: false,
+  });
+}
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -97,6 +133,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
       },
     });
+
+    assertNotQuantityTracked(asset, { userId, assetId });
 
     /** If the asset already has a custody, this page should not be visible */
     if (asset && hasCustody(asset.custody)) {
@@ -170,12 +208,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, role } = await requirePermission({
-      userId,
+    const { organizationId, role, userOrganizations } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.custody,
+      }
+    );
+
+    const targetAsset = await getAsset({
+      id: assetId,
+      organizationId,
+      userOrganizations,
       request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.custody,
     });
+
+    assertNotQuantityTracked(targetAsset, { userId, assetId });
 
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
