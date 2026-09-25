@@ -1,4 +1,5 @@
 import { AssetStatus } from "@prisma/client";
+import { TriangleAlertIcon } from "lucide-react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -65,10 +66,16 @@ export function AssetIndexFilters({
                 defaultSortingBy="createdAt"
                 className="flex-1"
               />
+              {/* Icon with the label only on wide screens: the toolbar shares
+                  one row with the search box, which must keep its width on a
+                  laptop. The aria-label carries the name while the text is hidden. */}
               <Button
                 type="button"
                 variant={lowStockActive ? "primary" : "secondary"}
                 aria-pressed={lowStockActive}
+                aria-label="Low stock only"
+                title="Low stock only"
+                className="shrink-0 whitespace-nowrap"
                 onClick={() =>
                   setSearchParams((prev) => {
                     if (lowStockActive) prev.delete("lowStockOnly");
@@ -78,7 +85,10 @@ export function AssetIndexFilters({
                   })
                 }
               >
-                Low stock only
+                <span className="flex items-center gap-1.5">
+                  <TriangleAlertIcon className="size-4" aria-hidden="true" />
+                  <span className="hidden 2xl:inline">Low stock only</span>
+                </span>
               </Button>
 
               <AvailabilityViewToggle />
