@@ -11,7 +11,6 @@ import { renderHook } from "@testing-library/react";
 import { useRouteLoaderData } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { createLayoutLoaderData } from "@factories";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { useUserRoleHelper } from "./user-user-role-helper";
 
 // why: the hook reads the `_layout` route's loader data, which needs a data
@@ -41,24 +40,5 @@ describe("useUserRoleHelper — effectiveRole", () => {
 
   it("reads as BASE before the layout data exists, so no role rule applies", () => {
     expect(helperFor(undefined).effectiveRole).toBe(OrganizationRoles.BASE);
-  });
-
-  it("gives a [SELF_SERVICE, ADMIN] membership the admin's check-out rule", () => {
-    // The booking page gates the one-click check-out on this role; the server
-    // judges the same membership as an admin, so only the Admin switch counts.
-    const { effectiveRole } = helperFor([
-      OrganizationRoles.SELF_SERVICE,
-      OrganizationRoles.ADMIN,
-    ]);
-
-    expect(
-      isExplicitCheckoutRequired({
-        role: effectiveRole,
-        bookingSettings: {
-          requireExplicitCheckoutForAdmin: false,
-          requireExplicitCheckoutForSelfService: true,
-        },
-      })
-    ).toBe(false);
   });
 });

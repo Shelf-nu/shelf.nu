@@ -10,7 +10,6 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -19,6 +18,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 
 /**
  * POST /api/mobile/bookings/fulfil-and-checkout
@@ -110,10 +110,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // loader and action, and `fulfilAndCheckOut` does NOT check ownership
     // itself (unlike the scan-add path, whose guard lives in `processBooking`),
     // so without this the mobile route would be more permissive than web.
-    const { access, effectiveRole } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
@@ -122,14 +119,15 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     // Decided after the booking and ownership checks, so a missing or foreign
-    // booking answers 404. Judged by the most privileged role, like
-    // the loader's `canQuickCheckout`. Under the requirement only the scanned
+    // booking answers 404. Judged by the caller's access (its effective role),
+    // like the loader's `canQuickCheckout`. Under the requirement only the scanned
     // units are checked out.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
-    const requireExplicitCheckout = isExplicitCheckoutRequired({
-      role: effectiveRole,
-      bookingSettings,
+    const requireExplicitCheckout = isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkout",
     });
 
     // Same hint derivation as the plain checkout endpoint: native clients can't

@@ -51,7 +51,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
       action: "new",
       workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 
@@ -59,7 +59,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
     getBookingDefaultStartEndTimes(
       workingHours,
       bookingSettings.bufferStartTime,
-      isAdministratorOrOwner,
+      roleAccess.policy.bookings.bypassTimeLimits,
       prefs
     );
   const [startDate, setStartDate] = useState(defaultStartDate);

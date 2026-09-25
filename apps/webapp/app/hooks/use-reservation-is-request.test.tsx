@@ -38,6 +38,15 @@ describe("useReservationIsRequest", () => {
     }
   });
 
+  it("is false for a mixed [BASE, SELF_SERVICE] membership, which can check out", () => {
+    // The matrix grant is the union over every held role, so the
+    // SELF_SERVICE role's booking:checkout covers the whole membership.
+    withRoles(["BASE", "SELF_SERVICE"]);
+    expect(renderHook(() => useReservationIsRequest()).result.current).toBe(
+      false
+    );
+  });
+
   it("is false while the roles are still loading", () => {
     withRoles(undefined);
     expect(renderHook(() => useReservationIsRequest()).result.current).toBe(

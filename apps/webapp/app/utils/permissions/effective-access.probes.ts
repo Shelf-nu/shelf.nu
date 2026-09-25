@@ -18,7 +18,6 @@
 import { OrganizationRoles } from "@prisma/client";
 import { getDefaultModeForRole } from "~/modules/asset-index-settings/service.server";
 import { getBookingOwnershipScope } from "~/modules/booking/utils.server";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { resolveCalendarVisibility } from "~/modules/calendar-subscription/service.server";
 import { INVITABLE_ROLES } from "~/modules/invite/roles";
 import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
@@ -51,6 +50,7 @@ import { userHasPermission } from "./permission.validator.client";
 import {
   canManageBookingItems,
   canPartialCheckInOut,
+  isExplicitScanRequired,
   resolveRoleAccess,
 } from "./role-access";
 
@@ -563,12 +563,15 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
         [false, true].flatMap((admin) =>
           [false, true].map((selfService) => [
             `admin=${admin}|selfService=${selfService}`,
-            isExplicitCheckoutRequired({
-              role,
-              bookingSettings: {
+            isExplicitScanRequired({
+              access: accessFor([role]),
+              settings: {
                 requireExplicitCheckoutForAdmin: admin,
                 requireExplicitCheckoutForSelfService: selfService,
+                requireExplicitCheckinForAdmin: false,
+                requireExplicitCheckinForSelfService: false,
               },
+              direction: "checkout",
             }),
           ])
         )
@@ -1020,37 +1023,42 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Bookings: Task 4f =====================
 
-  // B9:D-26: explicit check-out / check-in switch for every membership.
-  // web: bookings.$bookingId.overview.tsx:1721,1764 (assertQuickCheckoutAllowed
-  // -> isExplicitCheckoutRequired), :1775-1804 (inline check-in), effective
-  // role. mobile + client (bookings.checkout.ts:113,
-  // bookings.fulfil-and-checkout.ts:133-134, bookings.checkin.ts:107-110,
-  // api+/mobile+/bookings.$bookingId.ts:633-639, edit-booking-form.tsx:445-448,470-475)
-  // use resolveMostPrivilegedRole, which keeps an unknown role unknown.
+  // B9:D-26: explicit check-out / check-in switch for every membership, read
+  // through `isExplicitScanRequired` with the caller's access on every surface.
+  // web: bookings.$bookingId.overview.tsx checkOut / checkOutRemaining
+  // (assertQuickCheckoutAllowed) and checkIn; bookings.$bookingId.overview.fulfil-and-checkout.tsx.
+  // mobile: bookings.checkout.ts, bookings.fulfil-and-checkout.ts,
+  // bookings.checkin.ts, api+/mobile+/bookings.$bookingId.ts (canQuickCheckin /
+  // canQuickCheckout). client: edit-booking-form.tsx (requireExplicitCheckout /
+  // requireExplicitCheckin).
   snapshot["B9:D-26:explicit-scan"] = perRoleSet((roles) =>
     Object.fromEntries(
       [false, true].flatMap((admin) =>
         [false, true].map((selfService) => {
-          const checkout = (role: OrganizationRoles) =>
-            isExplicitCheckoutRequired({
-              role,
-              bookingSettings: {
-                requireExplicitCheckoutForAdmin: admin,
-                requireExplicitCheckoutForSelfService: selfService,
-              },
-            });
-          const checkin = (role: OrganizationRoles) =>
-            (role === R.ADMIN && admin) ||
-            (role === R.SELF_SERVICE && selfService);
-          const web = webRole(roles);
-          const mobile = resolveMostPrivilegedRole(roles);
+          const settings = {
+            requireExplicitCheckoutForAdmin: admin,
+            requireExplicitCheckoutForSelfService: selfService,
+            requireExplicitCheckinForAdmin: admin,
+            requireExplicitCheckinForSelfService: selfService,
+          };
+          const access = accessFor(roles);
+          const checkout = isExplicitScanRequired({
+            access,
+            settings,
+            direction: "checkout",
+          });
+          const checkin = isExplicitScanRequired({
+            access,
+            settings,
+            direction: "checkin",
+          });
           return [
             `admin=${admin}|selfService=${selfService}`,
             {
-              webCheckout: checkout(web),
-              webCheckin: checkin(web),
-              mobileAndClientCheckout: checkout(mobile),
-              mobileAndClientCheckin: checkin(mobile),
+              webCheckout: checkout,
+              webCheckin: checkin,
+              mobileAndClientCheckout: checkout,
+              mobileAndClientCheckin: checkin,
             },
           ];
         })
@@ -1058,28 +1066,29 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     )
   );
 
-  // B9:D-25: client time-limit bypass `isAdministratorOrOwner` (any ADMIN/OWNER
-  // held): edit-booking-form.tsx:169,183; new-booking-form.tsx:74-96;
-  // components/assets/assets-index/create-booking-for-selected-assets-dialog.tsx:38-59;
-  // bookings.$bookingId.overview.duplicate.tsx:247-277; extend-booking-dialog.tsx:47-55.
+  // B9:D-25: client time-limit bypass, `useRoleAccess().policy.bookings.bypassTimeLimits`:
+  // edit-booking-form.tsx, new-booking-form.tsx,
+  // components/assets/assets-index/create-booking-for-selected-assets-dialog.tsx,
+  // bookings.$bookingId.overview.duplicate.tsx, extend-booking-dialog.tsx.
   snapshot["B9:D-25:web-client-time-bypass"] = perRoleSet(
-    (roles) => hookFlags(roles).isAdministratorOrOwner
+    (roles) => accessFor(roles).policy.bookings.bypassTimeLimits
   );
 
-  // B9:D-17: bookings index bulk menu (bookings._index.tsx:297,360): `!isBaseOrSelfService`.
+  // B9:D-17: bookings index bulk menu (bookings._index.tsx):
+  // `useRoleAccess().policy.bookings.showBulkActions`.
   snapshot["B9:D-17:web-bookings-bulk-menu"] = perRoleSet(
-    (roles) => !hookFlags(roles).isBaseOrSelfService
+    (roles) => accessFor(roles).policy.bookings.showBulkActions
   );
 
-  // B9:D-27: reservation presented as a request (`isBase`):
-  // edit-booking-form.tsx:283 (process sidebar), :357 (button label),
-  // booking-status-badge.tsx:22,30-34 (tooltip).
+  // B9:D-27: reservation presented as a request (`useReservationIsRequest`: a
+  // loaded membership without `booking:checkout`): edit-booking-form.tsx
+  // (process sidebar, button label), booking-status-badge.tsx (tooltip).
   snapshot["B9:D-27:web-reservation-request"] = perRoleSet((roles) => {
-    const { isBase } = hookFlags(roles);
+    const isRequest = roles.length > 0 && !can(roles, E.booking, A.checkout);
     return {
-      processSidebar: isBase,
-      reserveButtonLabel: isBase,
-      statusBadgeTooltip: isBase,
+      processSidebar: isRequest,
+      reserveButtonLabel: isRequest,
+      statusBadgeTooltip: isRequest,
     };
   });
 
@@ -1097,12 +1106,14 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   });
 
   // B9:D-17/D-22: bookings bulk delete: the menu renders only when
-  // `!isBaseOrSelfService` (bookings._index.tsx:360), and its Delete is disabled
-  // by `(isBase && !someBookingInDraft) || isBase` (bulk-actions-dropdown.tsx:77,93).
+  // `policy.bookings.showBulkActions` (bookings._index.tsx), and its Delete is
+  // disabled by `(isBase && !someBookingInDraft) || isBase`
+  // (bulk-actions-dropdown.tsx:77,93).
   snapshot["B9:D-17/D-22:web-bulk-delete"] = perRoleSet((roles) => {
-    const { isBase, isBaseOrSelfService } = hookFlags(roles);
+    const { isBase } = hookFlags(roles);
+    const showBulkActions = accessFor(roles).policy.bookings.showBulkActions;
     return perCase(SELECTION_CASES, (selection) => {
-      if (isBaseOrSelfService) return "no-menu";
+      if (!showBulkActions) return "no-menu";
       const someBookingInDraft = selection !== "noneDraft";
       const deleteDisabled = (isBase && !someBookingInDraft) || isBase;
       return deleteDisabled ? "disabled" : "enabled";

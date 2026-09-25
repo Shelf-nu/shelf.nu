@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
 import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
@@ -10,10 +9,10 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
@@ -30,6 +29,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
 import { Form } from "../../custom-form";
 import { CustodianField } from "./fields/custodian";
@@ -164,9 +164,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     );
   const bookingSettings = useBookingSettings();
 
-  const { roles, isBase, isAdministratorOrOwner, effectiveRole } =
-    useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
   const roleAccess = useRoleAccess();
+  const reservationIsRequest = useReservationIsRequest();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -178,7 +178,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       status,
       workingHours: workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 
@@ -275,7 +275,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       {canSeeActions ? (
         <AbsolutePositionedHeaderActions>
           <div className="flex flex-1 items-center justify-between gap-2">
-            <When truthy={isBase}>
+            <When truthy={reservationIsRequest}>
               <BookingProcessSidebar />
             </When>
 
@@ -349,7 +349,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 className="grow whitespace-nowrap"
                 size="sm"
               >
-                {isBase ? "Request reservation" : "Reserve"}
+                {reservationIsRequest ? "Request reservation" : "Reserve"}
               </Button>
             ) : null}
 
@@ -437,9 +437,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                       )
                     }
                     checkOutDisabled={checkoutDisabled}
-                    requireExplicitCheckout={isExplicitCheckoutRequired({
-                      role: effectiveRole,
-                      bookingSettings,
+                    requireExplicitCheckout={isExplicitScanRequired({
+                      access: roleAccess,
+                      settings: bookingSettings,
+                      direction: "checkout",
                     })}
                   />
                 );
@@ -462,12 +463,11 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   from: startDateAsDate,
                 }}
                 disabled={disabled || isLoadingWorkingHours}
-                requireExplicitCheckin={
-                  (effectiveRole === OrganizationRoles.ADMIN &&
-                    bookingSettings.requireExplicitCheckinForAdmin) ||
-                  (effectiveRole === OrganizationRoles.SELF_SERVICE &&
-                    bookingSettings.requireExplicitCheckinForSelfService)
-                }
+                requireExplicitCheckin={isExplicitScanRequired({
+                  access: roleAccess,
+                  settings: bookingSettings,
+                  direction: "checkin",
+                })}
               />
             </When>
           </div>

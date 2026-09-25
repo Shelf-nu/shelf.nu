@@ -80,7 +80,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
     getBookingDefaultStartEndTimes(
       workingHours,
       bookingSettings.bufferStartTime,
-      isAdministratorOrOwner,
+      roleAccess.policy.bookings.bypassTimeLimits,
       prefs
     );
 
@@ -94,7 +94,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
       action: "new",
       workingHours: workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 

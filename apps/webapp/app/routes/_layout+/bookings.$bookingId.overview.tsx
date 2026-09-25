@@ -2,7 +2,6 @@ import {
   AssetStatus,
   BookingStatus,
   TagUseFor,
-  OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
 import type {
@@ -119,7 +118,10 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { canRemoveBookingItems } from "~/utils/permissions/role-access";
+import {
+  canRemoveBookingItems,
+  isExplicitScanRequired,
+} from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import type { Route } from "./+types/bookings.$bookingId.overview";
 
@@ -1410,21 +1412,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       updateNotificationRecipients: PermissionAction.update,
     };
 
-    const {
-      organizationId,
-      role,
-      isSelfServiceOrBase,
-      access,
-      userOrganizations,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: intent2ActionMap[intent],
-    });
-
-    // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
-    const isAdminOrOwner = !isSelfServiceOrBase;
+    const { organizationId, isSelfServiceOrBase, access, userOrganizations } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: intent2ActionMap[intent],
+      });
 
     const user = await getUserByID(userId, {
       select: {
@@ -1598,10 +1592,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             prefs,
             workingHours,
             bookingSettings,
-            isAdminOrOwner,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
           }),
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
 
@@ -1657,10 +1651,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: basicBookingInfo.status,
             workingHours,
             bookingSettings,
-            isAdminOrOwner,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
           }),
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
 
@@ -1700,8 +1694,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "checkOut": {
         // The one-click check-out is refused when the workspace requires the
-        // explicit flow (scan or select) for this role.
-        assertQuickCheckoutAllowed({ role, bookingSettings });
+        // explicit flow (scan or select) for this caller.
+        assertQuickCheckoutAllowed({ access, bookingSettings });
 
         const booking = await checkoutBooking({
           id,
@@ -1744,7 +1738,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // progressive partial-checkout path, which writes notes/events.
         // Being one click, it is refused under the explicit check-out
         // requirement, the same as "Check out".
-        assertQuickCheckoutAllowed({ role, bookingSettings });
+        assertQuickCheckoutAllowed({ access, bookingSettings });
 
         return await checkoutRemainingAssets({
           formData,
@@ -1756,24 +1750,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "checkIn": {
-        // Enforce explicit check-in requirement based on role and settings
+        // Refuse the one-click check-in when the workspace requires the
+        // explicit flow for this caller.
         if (
-          role === OrganizationRoles.ADMIN &&
-          bookingSettings.requireExplicitCheckinForAdmin
-        ) {
-          throw new ShelfError({
-            cause: null,
-            title: "Not allowed to quick check-in",
-            message:
-              "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
-            status: 403,
-            label: "Booking",
-            shouldBeCaptured: false,
-          });
-        }
-        if (
-          role === OrganizationRoles.SELF_SERVICE &&
-          bookingSettings.requireExplicitCheckinForSelfService
+          isExplicitScanRequired({
+            access,
+            settings: bookingSettings,
+            direction: "checkin",
+          })
         ) {
           throw new ShelfError({
             cause: null,
@@ -1872,7 +1856,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             assetId: z.string(),
           }),
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
 
@@ -1930,7 +1914,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           formData,
           CancelBookingSchema,
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
         const cancelledBooking = await cancelBooking({
@@ -1975,7 +1959,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "removeKit": {
         const { kitId } = parseData(formData, z.object({ kitId: z.string() }), {
-          additionalData: { userId, id, organizationId, role },
+          additionalData: { userId, id, organizationId, role: access.role },
         });
 
         const kit = await db.kit.findUniqueOrThrow({
@@ -2056,7 +2040,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             workingHours,
             prefs,
             bookingSettings,
-            isAdminOrOwner,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
           }),
           {
             additionalData: { userId, organizationId },

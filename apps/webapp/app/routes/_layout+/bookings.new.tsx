@@ -182,9 +182,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
 
-    // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
-    const isAdminOrOwner = !isSelfServiceOrBase;
-
     const payload = parseData(
       formData,
       BookingFormSchema({
@@ -192,7 +189,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         action: "new",
         workingHours,
         bookingSettings,
-        isAdminOrOwner,
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }),
       {
         // Expected user-input validation (e.g. "Start date must be at least N

@@ -52,7 +52,6 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import { getBooking } from "~/modules/booking/service.server";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -73,7 +72,10 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { canManageBookingItems } from "~/utils/permissions/role-access";
+import {
+  canManageBookingItems,
+  isExplicitScanRequired,
+} from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -138,7 +140,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     // Matches the action's gate: this screen exists only to check out, so a
     // role without `booking:checkout` should not reach it at all.
-    const { organizationId, role, userOrganizations, access } =
+    const { organizationId, userOrganizations, access } =
       await requirePermission({
         userId,
         request,
@@ -250,8 +252,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const checksOutScannedOnly =
-      isExplicitCheckoutRequired({ role, bookingSettings }) ||
-      booking.status !== BookingStatus.RESERVED;
+      isExplicitScanRequired({
+        access,
+        settings: bookingSettings,
+        direction: "checkout",
+      }) || booking.status !== BookingStatus.RESERVED;
 
     const title = `Fulfil reservations & check out | ${booking.name}`;
     const header: HeaderData = {
@@ -299,7 +304,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // `checkout`, not `update`: BASE holds `update` and deliberately does NOT
     // hold `checkout`, so gating on `update` let a BASE user check out through
     // this route. The dedicated action exists precisely to withhold this.
-    const { organizationId, role, access } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -346,9 +351,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // are checked out.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
-    const requireExplicitCheckout = isExplicitCheckoutRequired({
-      role,
-      bookingSettings,
+    const requireExplicitCheckout = isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkout",
     });
 
     const { remainingAssetCount } = await fulfilAndCheckOut({

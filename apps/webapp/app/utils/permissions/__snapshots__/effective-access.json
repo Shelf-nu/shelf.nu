@@ -13873,19 +13873,19 @@
     "SELF_SERVICE": false,
     "BASE": false,
     "OWNER+ADMIN": true,
-    "OWNER+SELF_SERVICE": false,
-    "OWNER+BASE": false,
+    "OWNER+SELF_SERVICE": true,
+    "OWNER+BASE": true,
     "ADMIN+OWNER": true,
-    "ADMIN+SELF_SERVICE": false,
-    "ADMIN+BASE": false,
-    "SELF_SERVICE+OWNER": false,
-    "SELF_SERVICE+ADMIN": false,
+    "ADMIN+SELF_SERVICE": true,
+    "ADMIN+BASE": true,
+    "SELF_SERVICE+OWNER": true,
+    "SELF_SERVICE+ADMIN": true,
     "SELF_SERVICE+BASE": false,
-    "BASE+OWNER": false,
-    "BASE+ADMIN": false,
+    "BASE+OWNER": true,
+    "BASE+ADMIN": true,
     "BASE+SELF_SERVICE": false,
-    "(none)": true,
-    "UNKNOWN_ROLE": true
+    "(none)": false,
+    "UNKNOWN_ROLE": false
   },
   "B9:D-27:web-reservation-request": {
     "OWNER": {
@@ -13919,9 +13919,9 @@
       "statusBadgeTooltip": false
     },
     "OWNER+BASE": {
-      "processSidebar": true,
-      "reserveButtonLabel": true,
-      "statusBadgeTooltip": true
+      "processSidebar": false,
+      "reserveButtonLabel": false,
+      "statusBadgeTooltip": false
     },
     "ADMIN+OWNER": {
       "processSidebar": false,
@@ -13934,9 +13934,9 @@
       "statusBadgeTooltip": false
     },
     "ADMIN+BASE": {
-      "processSidebar": true,
-      "reserveButtonLabel": true,
-      "statusBadgeTooltip": true
+      "processSidebar": false,
+      "reserveButtonLabel": false,
+      "statusBadgeTooltip": false
     },
     "SELF_SERVICE+OWNER": {
       "processSidebar": false,
@@ -13949,24 +13949,24 @@
       "statusBadgeTooltip": false
     },
     "SELF_SERVICE+BASE": {
-      "processSidebar": true,
-      "reserveButtonLabel": true,
-      "statusBadgeTooltip": true
+      "processSidebar": false,
+      "reserveButtonLabel": false,
+      "statusBadgeTooltip": false
     },
     "BASE+OWNER": {
-      "processSidebar": true,
-      "reserveButtonLabel": true,
-      "statusBadgeTooltip": true
+      "processSidebar": false,
+      "reserveButtonLabel": false,
+      "statusBadgeTooltip": false
     },
     "BASE+ADMIN": {
-      "processSidebar": true,
-      "reserveButtonLabel": true,
-      "statusBadgeTooltip": true
+      "processSidebar": false,
+      "reserveButtonLabel": false,
+      "statusBadgeTooltip": false
     },
     "BASE+SELF_SERVICE": {
-      "processSidebar": true,
-      "reserveButtonLabel": true,
-      "statusBadgeTooltip": true
+      "processSidebar": false,
+      "reserveButtonLabel": false,
+      "statusBadgeTooltip": false
     },
     "(none)": {
       "processSidebar": false,
@@ -13974,9 +13974,9 @@
       "statusBadgeTooltip": false
     },
     "UNKNOWN_ROLE": {
-      "processSidebar": false,
-      "reserveButtonLabel": false,
-      "statusBadgeTooltip": false
+      "processSidebar": true,
+      "reserveButtonLabel": true,
+      "statusBadgeTooltip": true
     }
   },
   "B9:D-22:web-delete-menu": {
@@ -14080,14 +14080,14 @@
       "noneDraft": "enabled"
     },
     "OWNER+SELF_SERVICE": {
-      "allDraft": "no-menu",
-      "someDraft": "no-menu",
-      "noneDraft": "no-menu"
+      "allDraft": "enabled",
+      "someDraft": "enabled",
+      "noneDraft": "enabled"
     },
     "OWNER+BASE": {
-      "allDraft": "no-menu",
-      "someDraft": "no-menu",
-      "noneDraft": "no-menu"
+      "allDraft": "disabled",
+      "someDraft": "disabled",
+      "noneDraft": "disabled"
     },
     "ADMIN+OWNER": {
       "allDraft": "enabled",
@@ -14095,24 +14095,24 @@
       "noneDraft": "enabled"
     },
     "ADMIN+SELF_SERVICE": {
-      "allDraft": "no-menu",
-      "someDraft": "no-menu",
-      "noneDraft": "no-menu"
+      "allDraft": "enabled",
+      "someDraft": "enabled",
+      "noneDraft": "enabled"
     },
     "ADMIN+BASE": {
-      "allDraft": "no-menu",
-      "someDraft": "no-menu",
-      "noneDraft": "no-menu"
+      "allDraft": "disabled",
+      "someDraft": "disabled",
+      "noneDraft": "disabled"
     },
     "SELF_SERVICE+OWNER": {
-      "allDraft": "no-menu",
-      "someDraft": "no-menu",
-      "noneDraft": "no-menu"
+      "allDraft": "enabled",
+      "someDraft": "enabled",
+      "noneDraft": "enabled"
     },
     "SELF_SERVICE+ADMIN": {
-      "allDraft": "no-menu",
-      "someDraft": "no-menu",
-      "noneDraft": "no-menu"
+      "allDraft": "enabled",
+      "someDraft": "enabled",
+      "noneDraft": "enabled"
     },
     "SELF_SERVICE+BASE": {
       "allDraft": "no-menu",
@@ -14120,14 +14120,14 @@
       "noneDraft": "no-menu"
     },
     "BASE+OWNER": {
-      "allDraft": "no-menu",
-      "someDraft": "no-menu",
-      "noneDraft": "no-menu"
+      "allDraft": "disabled",
+      "someDraft": "disabled",
+      "noneDraft": "disabled"
     },
     "BASE+ADMIN": {
-      "allDraft": "no-menu",
-      "someDraft": "no-menu",
-      "noneDraft": "no-menu"
+      "allDraft": "disabled",
+      "someDraft": "disabled",
+      "noneDraft": "disabled"
     },
     "BASE+SELF_SERVICE": {
       "allDraft": "no-menu",
@@ -14135,14 +14135,14 @@
       "noneDraft": "no-menu"
     },
     "(none)": {
-      "allDraft": "enabled",
-      "someDraft": "enabled",
-      "noneDraft": "enabled"
+      "allDraft": "no-menu",
+      "someDraft": "no-menu",
+      "noneDraft": "no-menu"
     },
     "UNKNOWN_ROLE": {
-      "allDraft": "enabled",
-      "someDraft": "enabled",
-      "noneDraft": "enabled"
+      "allDraft": "no-menu",
+      "someDraft": "no-menu",
+      "noneDraft": "no-menu"
     }
   },
   "B9:D-29:mobile-custody": {

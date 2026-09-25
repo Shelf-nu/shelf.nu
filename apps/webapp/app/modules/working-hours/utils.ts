@@ -280,8 +280,8 @@ interface DefaultTimesResult {
  * day's working hours entirely.
  *
  * @param workingHoursData - The working hours data containing weekly schedules and overrides.
- * @param bufferStartTime - Buffer time in hours from current time. Bypassed for admin/owner users.
- * @param isAdminOrOwner - Whether the user is an ADMIN or OWNER (bypasses buffer time restrictions).
+ * @param bufferStartTime - Buffer time in hours from current time. Skipped when `bypassTimeLimits` is set.
+ * @param bypassTimeLimits - The caller's policy skips the buffer start time (`bookings.bypassTimeLimits`).
  * @param prefs - The acting user's resolved format prefs. Typed as
  *   {@link ResolvedFormatPrefs} rather than a bare zone string so a browser-hint
  *   object (`{ locale, timeZone }`) cannot satisfy it — the device zone is
@@ -291,15 +291,15 @@ interface DefaultTimesResult {
 export function getBookingDefaultStartEndTimes(
   workingHoursData: WorkingHoursData | null | undefined,
   bufferStartTime: number,
-  isAdminOrOwner: boolean,
+  bypassTimeLimits: boolean,
   prefs: ResolvedFormatPrefs
 ): DefaultTimesResult {
   const { timeZone } = prefs;
   const nowInstant = new Date();
   const now = DateTime.fromJSDate(nowInstant).setZone(timeZone);
 
-  // Admin/Owner users bypass buffer time restrictions
-  const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
+  // Callers whose policy bypasses time limits skip the buffer
+  const effectiveBufferStartTime = bypassTimeLimits ? 0 : bufferStartTime;
 
   // If no working hours data or working hours are disabled, use the original logic
   if (!workingHoursData || !workingHoursData.enabled) {

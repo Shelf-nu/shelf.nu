@@ -13,12 +13,7 @@
  * @see {@link file://./../../../modules/kit/service.server.ts} refreshExpiredKitImages
  * @see {@link file://./../../../modules/booking/shape-booking-assets.ts} sortCollapsedBookingAssets
  */
-import {
-  AssetStatus,
-  AssetType,
-  BookingStatus,
-  OrganizationRoles,
-} from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -55,7 +50,6 @@ import {
 } from "~/modules/booking/service.server";
 import { sortCollapsedBookingAssets } from "~/modules/booking/shape-booking-assets";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
@@ -66,6 +60,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 
 /**
  * GET /api/mobile/bookings/:bookingId
@@ -89,8 +84,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // override allows it. `isSelfServiceOrBase` is the narrower, role-only
     // question of which ACTIONS the caller may take, and must stay role-only:
     // the override widens reading and never writing.
-    const { access, isSelfServiceOrBase, effectiveRole, roles } =
-      await getMobileUserContext(user.id, organizationId);
+    const { access, isSelfServiceOrBase, roles } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const { bookingId } = getParams(
       params,
@@ -624,20 +621,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Quick "check in all" and "check out all" are disallowed when the
     // workspace requires EXPLICIT (scan/select) check-in or check-out for the
-    // caller's role. Mirrors the web booking action's `checkIn`, `checkOut` and
+    // caller, judged by the caller's access (its effective role). Mirrors the web booking action's `checkIn`, `checkOut` and
     // `checkOutRemaining` guards, so the app never offers an action the web /
     // workspace settings forbid.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
-    const canQuickCheckin = !(
-      (effectiveRole === OrganizationRoles.ADMIN &&
-        bookingSettings.requireExplicitCheckinForAdmin) ||
-      (effectiveRole === OrganizationRoles.SELF_SERVICE &&
-        bookingSettings.requireExplicitCheckinForSelfService)
-    );
-    const canQuickCheckout = !isExplicitCheckoutRequired({
-      role: effectiveRole,
-      bookingSettings,
+    const canQuickCheckin = !isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkin",
+    });
+    const canQuickCheckout = !isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkout",
     });
 
     // Per-booking lifecycle-action availability, mirroring the web

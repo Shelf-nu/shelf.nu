@@ -10,7 +10,6 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
@@ -19,6 +18,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 
 /**
  * POST /api/mobile/bookings/checkout
@@ -87,10 +87,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // custodian of. No-op when `access.bookings.writeAll`. `checkoutBooking`
     // does not check ownership itself, so without this the route is more
     // permissive than web. Mirrors the guard on bookings.fulfil-and-checkout.ts.
-    const { access, effectiveRole } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
@@ -101,13 +98,19 @@ export async function action({ request }: ActionFunctionArgs) {
     // PARITY with the web booking action: when the workspace requires EXPLICIT
     // check-out for the caller's role, the one-tap check-out is forbidden and
     // they must scan or select the assets (the partial-checkout path). Judged by
-    // the most privileged role, as the loader's `canQuickCheckout` is, so the
-    // app never offers a button this route refuses. Decided after the booking
+    // the caller's access (its effective role), as the loader's
+    // `canQuickCheckout` is, so the app never offers a button this route refuses. Decided after the booking
     // and ownership checks, so a missing or foreign booking answers 404 as
     // before and the settings are only read for a booking the caller may act on.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
-    if (isExplicitCheckoutRequired({ role: effectiveRole, bookingSettings })) {
+    if (
+      isExplicitScanRequired({
+        access,
+        settings: bookingSettings,
+        direction: "checkout",
+      })
+    ) {
       throw new ShelfError({
         cause: null,
         title: "Not allowed to quick check-out",

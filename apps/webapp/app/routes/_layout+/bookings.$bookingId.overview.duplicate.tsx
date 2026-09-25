@@ -39,8 +39,8 @@ import { Button } from "~/components/shared/button";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   computeBookingKitDrift,
   duplicateBooking,
@@ -135,7 +135,7 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
   const { bookingId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -153,9 +153,6 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
 
-    // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
-    const isAdminOrOwner = !isSelfServiceOrBase;
-
     // `coerceLocalDate` (inside the schema) parses the `datetime-local` wire
     // strings into absolute instants in the user's timezone via `fromISO`,
     // which tolerates second-precision input. Use the validated/coerced result
@@ -168,7 +165,7 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
         prefs,
         workingHours,
         bookingSettings,
-        isAdminOrOwner,
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }),
       {
         // Expected user-input validation (e.g. "Start date must be at least N
@@ -244,7 +241,7 @@ export default function DuplicateBooking() {
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
 
-  const { isAdministratorOrOwner } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
 
   // Prefill with the next valid working slot — NOT the source booking's dates,
   // which are usually in the past and would fail validation.
@@ -252,7 +249,7 @@ export default function DuplicateBooking() {
     getBookingDefaultStartEndTimes(
       workingHours,
       bookingSettings.bufferStartTime,
-      isAdministratorOrOwner,
+      roleAccess.policy.bookings.bypassTimeLimits,
       prefs
     );
 
@@ -274,7 +271,7 @@ export default function DuplicateBooking() {
       prefs,
       workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 

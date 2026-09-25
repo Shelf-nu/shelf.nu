@@ -178,7 +178,7 @@ export async function action({ request }: ActionFunctionArgs) {
         status: existing.status,
         workingHours,
         bookingSettings,
-        isAdminOrOwner: access.policy.bookings.bypassTimeLimits,
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }).parse({
         id: body.bookingId,
         name: body.name,

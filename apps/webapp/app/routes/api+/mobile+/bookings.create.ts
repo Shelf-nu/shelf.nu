@@ -166,7 +166,7 @@ export async function action({ request }: ActionFunctionArgs) {
         action: "new",
         workingHours,
         bookingSettings,
-        isAdminOrOwner: access.policy.bookings.bypassTimeLimits,
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }).parse({
         name: body.name,
         description: body.description,

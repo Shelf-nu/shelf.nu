@@ -21,7 +21,7 @@ import { Button } from "~/components/shared/button";
 import { Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
@@ -290,7 +290,7 @@ export default function BookingsIndexPage({
   disableBulkActions?: boolean;
 }) {
   const matches = useMatches();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
@@ -353,7 +353,8 @@ export default function BookingsIndexPage({
 
         <List
           bulkActions={
-            disableBulkActions || isBaseOrSelfService ? undefined : (
+            disableBulkActions ||
+            !roleAccess.policy.bookings.showBulkActions ? undefined : (
               <BulkActionsDropdown />
             )
           }
