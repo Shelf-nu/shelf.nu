@@ -123,4 +123,37 @@ describe("POST /api/mobile/bookings/delete: ownership and status", () => {
     expect((await post()).status).toBe(200);
     expect(deleteBooking).toHaveBeenCalledTimes(1);
   });
+
+  it("holds SELF_SERVICE to its own drafts", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "booking-1",
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+      status: "RESERVED",
+    } as never);
+
+    expect((await post()).status).toBe(403);
+    expect(deleteBooking).not.toHaveBeenCalled();
+  });
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "lets %s delete its own draft",
+    async (role) => {
+      vi.mocked(getMobileUserContext).mockResolvedValue(
+        mobileUserContext({ roles: [role] }) as never
+      );
+      vi.mocked(db.booking.findFirst).mockResolvedValue({
+        id: "booking-1",
+        creatorId: "user-1",
+        custodianUserId: null,
+        status: "DRAFT",
+      } as never);
+
+      expect((await post()).status).toBe(200);
+      expect(deleteBooking).toHaveBeenCalledTimes(1);
+    }
+  );
 });

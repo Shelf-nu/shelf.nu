@@ -8095,6 +8095,100 @@
     "(none)": [],
     "UNKNOWN_ROLE": []
   },
+  "D-22": {
+    "OWNER": {
+      "custodianNotCreator|DRAFT": "allowed",
+      "custodianNotCreator|RESERVED": "allowed",
+      "custodianNotCreator|ONGOING": "allowed",
+      "custodianNotCreator|OVERDUE": "allowed",
+      "custodianNotCreator|COMPLETE": "allowed",
+      "custodianNotCreator|ARCHIVED": "allowed",
+      "custodianNotCreator|CANCELLED": "allowed",
+      "creatorNotCustodian|DRAFT": "allowed",
+      "creatorNotCustodian|RESERVED": "allowed",
+      "creatorNotCustodian|ONGOING": "allowed",
+      "creatorNotCustodian|OVERDUE": "allowed",
+      "creatorNotCustodian|COMPLETE": "allowed",
+      "creatorNotCustodian|ARCHIVED": "allowed",
+      "creatorNotCustodian|CANCELLED": "allowed",
+      "neither|DRAFT": "allowed",
+      "neither|RESERVED": "allowed",
+      "neither|ONGOING": "allowed",
+      "neither|OVERDUE": "allowed",
+      "neither|COMPLETE": "allowed",
+      "neither|ARCHIVED": "allowed",
+      "neither|CANCELLED": "allowed"
+    },
+    "ADMIN": {
+      "custodianNotCreator|DRAFT": "allowed",
+      "custodianNotCreator|RESERVED": "allowed",
+      "custodianNotCreator|ONGOING": "allowed",
+      "custodianNotCreator|OVERDUE": "allowed",
+      "custodianNotCreator|COMPLETE": "allowed",
+      "custodianNotCreator|ARCHIVED": "allowed",
+      "custodianNotCreator|CANCELLED": "allowed",
+      "creatorNotCustodian|DRAFT": "allowed",
+      "creatorNotCustodian|RESERVED": "allowed",
+      "creatorNotCustodian|ONGOING": "allowed",
+      "creatorNotCustodian|OVERDUE": "allowed",
+      "creatorNotCustodian|COMPLETE": "allowed",
+      "creatorNotCustodian|ARCHIVED": "allowed",
+      "creatorNotCustodian|CANCELLED": "allowed",
+      "neither|DRAFT": "allowed",
+      "neither|RESERVED": "allowed",
+      "neither|ONGOING": "allowed",
+      "neither|OVERDUE": "allowed",
+      "neither|COMPLETE": "allowed",
+      "neither|ARCHIVED": "allowed",
+      "neither|CANCELLED": "allowed"
+    },
+    "SELF_SERVICE": {
+      "custodianNotCreator|DRAFT": "allowed",
+      "custodianNotCreator|RESERVED": "denied",
+      "custodianNotCreator|ONGOING": "denied",
+      "custodianNotCreator|OVERDUE": "denied",
+      "custodianNotCreator|COMPLETE": "denied",
+      "custodianNotCreator|ARCHIVED": "denied",
+      "custodianNotCreator|CANCELLED": "denied",
+      "creatorNotCustodian|DRAFT": "allowed",
+      "creatorNotCustodian|RESERVED": "denied",
+      "creatorNotCustodian|ONGOING": "denied",
+      "creatorNotCustodian|OVERDUE": "denied",
+      "creatorNotCustodian|COMPLETE": "denied",
+      "creatorNotCustodian|ARCHIVED": "denied",
+      "creatorNotCustodian|CANCELLED": "denied",
+      "neither|DRAFT": "denied",
+      "neither|RESERVED": "denied",
+      "neither|ONGOING": "denied",
+      "neither|OVERDUE": "denied",
+      "neither|COMPLETE": "denied",
+      "neither|ARCHIVED": "denied",
+      "neither|CANCELLED": "denied"
+    },
+    "BASE": {
+      "custodianNotCreator|DRAFT": "allowed",
+      "custodianNotCreator|RESERVED": "denied",
+      "custodianNotCreator|ONGOING": "denied",
+      "custodianNotCreator|OVERDUE": "denied",
+      "custodianNotCreator|COMPLETE": "denied",
+      "custodianNotCreator|ARCHIVED": "denied",
+      "custodianNotCreator|CANCELLED": "denied",
+      "creatorNotCustodian|DRAFT": "allowed",
+      "creatorNotCustodian|RESERVED": "denied",
+      "creatorNotCustodian|ONGOING": "denied",
+      "creatorNotCustodian|OVERDUE": "denied",
+      "creatorNotCustodian|COMPLETE": "denied",
+      "creatorNotCustodian|ARCHIVED": "denied",
+      "creatorNotCustodian|CANCELLED": "denied",
+      "neither|DRAFT": "denied",
+      "neither|RESERVED": "denied",
+      "neither|ONGOING": "denied",
+      "neither|OVERDUE": "denied",
+      "neither|COMPLETE": "denied",
+      "neither|ARCHIVED": "denied",
+      "neither|CANCELLED": "denied"
+    }
+  },
   "D-26": {
     "OWNER": {
       "admin=false|selfService=false": false,
@@ -10066,9 +10160,9 @@
     },
     "SELF_SERVICE": {
       "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "allowed",
+      "custodianNotCreator|RESERVED": "denied:status",
       "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "allowed",
+      "creatorNotCustodian|RESERVED": "denied:status",
       "neither|DRAFT": "denied:owner",
       "neither|RESERVED": "denied:owner"
     },
@@ -10146,9 +10240,9 @@
     },
     "SELF_SERVICE+BASE": {
       "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "allowed",
+      "custodianNotCreator|RESERVED": "denied:status",
       "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "allowed",
+      "creatorNotCustodian|RESERVED": "denied:status",
       "neither|DRAFT": "denied:owner",
       "neither|RESERVED": "denied:owner"
     },
@@ -10170,9 +10264,9 @@
     },
     "BASE+SELF_SERVICE": {
       "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "allowed",
+      "custodianNotCreator|RESERVED": "denied:status",
       "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "allowed",
+      "creatorNotCustodian|RESERVED": "denied:status",
       "neither|DRAFT": "denied:owner",
       "neither|RESERVED": "denied:owner"
     },
@@ -14002,11 +14096,11 @@
     },
     "OWNER+SELF_SERVICE": {
       "DRAFT": true,
-      "RESERVED": false
+      "RESERVED": true
     },
     "OWNER+BASE": {
       "DRAFT": true,
-      "RESERVED": false
+      "RESERVED": true
     },
     "ADMIN+OWNER": {
       "DRAFT": true,
@@ -14014,19 +14108,19 @@
     },
     "ADMIN+SELF_SERVICE": {
       "DRAFT": true,
-      "RESERVED": false
+      "RESERVED": true
     },
     "ADMIN+BASE": {
       "DRAFT": true,
-      "RESERVED": false
+      "RESERVED": true
     },
     "SELF_SERVICE+OWNER": {
       "DRAFT": true,
-      "RESERVED": false
+      "RESERVED": true
     },
     "SELF_SERVICE+ADMIN": {
       "DRAFT": true,
-      "RESERVED": false
+      "RESERVED": true
     },
     "SELF_SERVICE+BASE": {
       "DRAFT": true,
@@ -14034,11 +14128,11 @@
     },
     "BASE+OWNER": {
       "DRAFT": true,
-      "RESERVED": false
+      "RESERVED": true
     },
     "BASE+ADMIN": {
       "DRAFT": true,
-      "RESERVED": false
+      "RESERVED": true
     },
     "BASE+SELF_SERVICE": {
       "DRAFT": true,
@@ -14046,11 +14140,11 @@
     },
     "(none)": {
       "DRAFT": true,
-      "RESERVED": true
+      "RESERVED": false
     },
     "UNKNOWN_ROLE": {
       "DRAFT": true,
-      "RESERVED": true
+      "RESERVED": false
     }
   },
   "B9:D-17/D-22:web-bulk-delete": {
@@ -14085,9 +14179,9 @@
       "noneDraft": "enabled"
     },
     "OWNER+BASE": {
-      "allDraft": "disabled",
-      "someDraft": "disabled",
-      "noneDraft": "disabled"
+      "allDraft": "enabled",
+      "someDraft": "enabled",
+      "noneDraft": "enabled"
     },
     "ADMIN+OWNER": {
       "allDraft": "enabled",
@@ -14100,9 +14194,9 @@
       "noneDraft": "enabled"
     },
     "ADMIN+BASE": {
-      "allDraft": "disabled",
-      "someDraft": "disabled",
-      "noneDraft": "disabled"
+      "allDraft": "enabled",
+      "someDraft": "enabled",
+      "noneDraft": "enabled"
     },
     "SELF_SERVICE+OWNER": {
       "allDraft": "enabled",
@@ -14120,14 +14214,14 @@
       "noneDraft": "no-menu"
     },
     "BASE+OWNER": {
-      "allDraft": "disabled",
-      "someDraft": "disabled",
-      "noneDraft": "disabled"
+      "allDraft": "enabled",
+      "someDraft": "enabled",
+      "noneDraft": "enabled"
     },
     "BASE+ADMIN": {
-      "allDraft": "disabled",
-      "someDraft": "disabled",
-      "noneDraft": "disabled"
+      "allDraft": "enabled",
+      "someDraft": "enabled",
+      "noneDraft": "enabled"
     },
     "BASE+SELF_SERVICE": {
       "allDraft": "no-menu",

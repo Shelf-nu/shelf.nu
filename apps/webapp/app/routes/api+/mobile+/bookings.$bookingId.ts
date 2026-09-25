@@ -81,10 +81,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // `access.bookings.seeAll` answers who may READ a booking they do not
     // custody: ADMIN/OWNER always, SELF_SERVICE/BASE only where the workspace
-    // override allows it. `isSelfServiceOrBase` is the narrower, role-only
-    // question of which ACTIONS the caller may take, and must stay role-only:
-    // the override widens reading and never writing.
-    const { access, isSelfServiceOrBase, roles } = await getMobileUserContext(
+    // override allows it. The action flags below read the role policy and the
+    // matrix, never the override: it widens reading and never writing.
+    const { access, roles } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -730,12 +729,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       // route enforces create — we hide it for those who lack it rather than
       // 403 on tap).
       canDuplicate: canCreatePerm,
-      // Delete: requires the delete permission AND (admin/owner any status |
-      // self-service/base only on DRAFT). Mirrors the web client gate; the
-      // server endpoint enforces ownership + the same BASE-only-DRAFT rule.
+      // Delete: the delete permission, and drafts only for roles whose policy
+      // says so, the same rule the endpoint enforces (`assertCanDeleteBooking`).
+      // The companion reads this server-computed flag as is.
       canDelete:
-        ((isSelfServiceOrBase && booking.status === "DRAFT") ||
-          !isSelfServiceOrBase) &&
+        (!access.policy.bookings.deleteOnlyDrafts ||
+          booking.status === "DRAFT") &&
         canDeletePerm,
     };
 

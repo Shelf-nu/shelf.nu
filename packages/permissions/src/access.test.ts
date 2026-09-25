@@ -183,3 +183,19 @@ describe("rolesWhere", () => {
     );
   });
 });
+
+describe("delete drafts only", () => {
+  test("SELF_SERVICE and BASE delete only drafts; ADMIN and OWNER any status", () => {
+    const only = (roles: string[]) =>
+      access(roles).policy.bookings.deleteOnlyDrafts;
+    assert.deepEqual(
+      [
+        only(["OWNER"]),
+        only(["ADMIN"]),
+        only(["SELF_SERVICE"]),
+        only(["BASE"]),
+      ],
+      [false, false, true, true]
+    );
+  });
+});

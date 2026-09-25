@@ -362,15 +362,22 @@ describe("assertCanDeleteBooking", () => {
     status,
   });
 
-  it("holds BASE to its own DRAFT bookings", () => {
-    const access = accessFor([OrganizationRoles.BASE]);
-    expect(() =>
-      assertCanDeleteBooking({ access, booking: mine("DRAFT"), userId: ME })
-    ).not.toThrow();
-    expect(() =>
-      assertCanDeleteBooking({ access, booking: mine("RESERVED"), userId: ME })
-    ).toThrow(expect.objectContaining({ status: 403 }));
-  });
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "holds %s to its own DRAFT bookings",
+    (role) => {
+      const access = accessFor([role]);
+      expect(() =>
+        assertCanDeleteBooking({ access, booking: mine("DRAFT"), userId: ME })
+      ).not.toThrow();
+      expect(() =>
+        assertCanDeleteBooking({
+          access,
+          booking: mine("RESERVED"),
+          userId: ME,
+        })
+      ).toThrow(expect.objectContaining({ status: 403 }));
+    }
+  );
 
   it("refuses a restricted role on someone else's draft", () => {
     expect(() =>

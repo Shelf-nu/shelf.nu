@@ -13882,6 +13882,88 @@ describe("bulkDeleteBookings", () => {
       "the remaining commitment should keep it checked out"
     ).toBe(true);
   });
+
+  /** A booking row in the shape `bulkDeleteBookings` reads, owned by user-1. */
+  const row = (id: string, status: BookingStatus) => ({
+    id,
+    name: id,
+    status,
+    creatorId: "user-1",
+    custodianUserId: "user-1",
+    activeSchedulerReference: null,
+    bookingAssets: [],
+    from: new Date("2025-01-01T09:00:00Z"),
+    to: new Date("2025-01-02T17:00:00Z"),
+    organization: { customEmailFooter: null },
+    custodianUser: null,
+    custodianTeamMember: null,
+    _count: { bookingAssets: 0 },
+  });
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "refuses a %s selection that includes a non-draft booking, deleting nothing",
+    async (role) => {
+      //@ts-expect-error missing vitest type
+      db.booking.findMany.mockResolvedValue([
+        row("bk-draft", BookingStatus.DRAFT),
+        row("bk-reserved", BookingStatus.RESERVED),
+      ]);
+
+      await expect(
+        bulkDeleteBookings({
+          bookingIds: ["bk-draft", "bk-reserved"],
+          organizationId: "org-1",
+          userId: "user-1",
+          access: accessFor([role]),
+          hints: mockClientHints,
+        })
+      ).rejects.toMatchObject({ status: 403 });
+      expect(db.$transaction).not.toHaveBeenCalled();
+    }
+  );
+
+  it("lets SELF_SERVICE bulk-delete a selection of its own drafts", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      row("bk-draft", BookingStatus.DRAFT),
+    ]);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await bulkDeleteBookings({
+      bookingIds: ["bk-draft"],
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
+      hints: mockClientHints,
+    });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets ADMIN bulk-delete a selection that includes non-draft bookings", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      row("bk-draft", BookingStatus.DRAFT),
+      row("bk-reserved", BookingStatus.RESERVED),
+    ]);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await bulkDeleteBookings({
+      bookingIds: ["bk-draft", "bk-reserved"],
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      hints: mockClientHints,
+    });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("addScannedAssetsToBooking", () => {

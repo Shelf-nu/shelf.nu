@@ -13850,6 +13850,22 @@ export async function getBookingFlags(
   };
 }
 
+/**
+ * Deletes a selection of bookings in one request.
+ *
+ * The selection is scoped to the caller's filters and to the bookings they may
+ * act on. Roles whose policy limits delete to drafts are refused the whole
+ * request when the selection contains any non-draft booking, the same rule
+ * `assertCanDeleteBooking` applies to a single delete.
+ *
+ * @param params.bookingIds - Selected booking ids, or the select-all key
+ * @param params.organizationId - The caller's workspace
+ * @param params.userId - The caller
+ * @param params.hints - Client hints for the notification emails
+ * @param params.currentSearchParams - The list filters, used with select-all
+ * @param params.access - The caller's access
+ * @throws {ShelfError} 403 when the caller may not delete every selected booking
+ */
 export async function bulkDeleteBookings({
   bookingIds,
   organizationId,
@@ -13909,6 +13925,24 @@ export async function bulkDeleteBookings({
         } satisfies Prisma.UserSelect,
       }),
     ]);
+
+    // Roles whose policy limits delete to drafts may not delete a selection
+    // that contains anything else. The whole request is refused rather than
+    // silently deleting part of it.
+    if (
+      access.policy.bookings.deleteOnlyDrafts &&
+      bookings.some((booking) => booking.status !== BookingStatus.DRAFT)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
+        status: 403,
+        shouldBeCaptured: false,
+        additionalData: { bookingIds, organizationId },
+      });
+    }
 
     /** If some booking was OVERDUE or ONGOING, we have to make their assets and kits available */
     const overdueOrOngoingBookings = bookings.filter(

@@ -40,8 +40,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const intentToActionMap: Record<typeof intent, PermissionAction> = {
       "bulk-delete": PermissionAction.delete,
-      "bulk-archive": PermissionAction.update,
-      "bulk-cancel": PermissionAction.update,
+      // Archive and cancel have their own grants, which BASE does not hold.
+      // `update` is not the gate for them: BASE holds it.
+      "bulk-archive": PermissionAction.archive,
+      "bulk-cancel": PermissionAction.cancel,
     };
 
     // `access` decides whether the bulk query is scoped to the caller's own

@@ -555,6 +555,28 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     ])
   );
 
+  // D-22: delete a booking, single roles x relationship x status
+  // (`assertCanDeleteBooking`: ownership, then the policy's drafts-only rule).
+  snapshot["D-22"] = Object.fromEntries(
+    SINGLE_ROLES.map((role) => [
+      role,
+      Object.fromEntries(
+        Object.entries(RELATIONSHIPS).flatMap(([rel, booking]) =>
+          BOOKING_STATUSES.map((status) => [
+            `${rel}|${status}`,
+            outcome(() =>
+              assertCanDeleteBooking({
+                access: accessFor([role]),
+                booking: { ...booking, status },
+                userId: "caller",
+              })
+            ),
+          ])
+        )
+      ),
+    ])
+  );
+
   // D-26: explicit check-out requirement.
   snapshot["D-26"] = Object.fromEntries(
     SINGLE_ROLES.map((role) => [
@@ -1094,28 +1116,27 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Bookings: Task 4g (menu half: 4f) =====================
 
-  // B9:D-22: booking Delete menu item (actions-dropdown.tsx:56,170):
-  // `(isBaseOrSelfService && isDraft) || !isBaseOrSelfService`.
+  // B9:D-22: booking Delete menu item (actions-dropdown.tsx):
+  // `!useRoleAccess().policy.bookings.deleteOnlyDrafts || isDraft`.
   snapshot["B9:D-22:web-delete-menu"] = perRoleSet((roles) => {
-    const { isBaseOrSelfService } = hookFlags(roles);
+    const { deleteOnlyDrafts } = accessFor(roles).policy.bookings;
     return perCase(
       DRAFT_OR_NOT,
-      (status) =>
-        (isBaseOrSelfService && status === "DRAFT") || !isBaseOrSelfService
+      (status) => !deleteOnlyDrafts || status === "DRAFT"
     );
   });
 
   // B9:D-17/D-22: bookings bulk delete: the menu renders only when
   // `policy.bookings.showBulkActions` (bookings._index.tsx), and its Delete is
-  // disabled by `(isBase && !someBookingInDraft) || isBase`
-  // (bulk-actions-dropdown.tsx:77,93).
+  // disabled by `policy.bookings.deleteOnlyDrafts && !everyBookingInDraft`
+  // (bulk-actions-dropdown.tsx).
   snapshot["B9:D-17/D-22:web-bulk-delete"] = perRoleSet((roles) => {
-    const { isBase } = hookFlags(roles);
-    const showBulkActions = accessFor(roles).policy.bookings.showBulkActions;
+    const { showBulkActions, deleteOnlyDrafts } =
+      accessFor(roles).policy.bookings;
     return perCase(SELECTION_CASES, (selection) => {
       if (!showBulkActions) return "no-menu";
-      const someBookingInDraft = selection !== "noneDraft";
-      const deleteDisabled = (isBase && !someBookingInDraft) || isBase;
+      const everyBookingInDraft = selection === "allDraft";
+      const deleteDisabled = deleteOnlyDrafts && !everyBookingInDraft;
       return deleteDisabled ? "disabled" : "enabled";
     });
   });

@@ -235,8 +235,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       partialScanAsCustodian: true,
       bypassTimeLimits: false,
       explicitScanSetting: "selfService",
-      // Flipped to `true` by fix F5 in Task 4.
-      deleteOnlyDrafts: false,
+      deleteOnlyDrafts: true,
       custodianPicker: "self",
       showBulkActions: false,
       documentsForOthers: false,
