@@ -38,8 +38,10 @@ import {
   hasMultipleSources,
   isUnplacedSource,
   placedAtSource,
+  sourceShortfall,
   unitsLeftAtSource,
 } from "~/modules/asset/custody-source";
+import type { CustodySourceState } from "~/modules/asset/custody-source";
 import {
   createCustodySourceLocationNote,
   loadCustodySources,
@@ -587,6 +589,34 @@ export async function adjustQuantity({
         locationId === undefined || isUnplacedSource(locationId)
           ? null
           : locationId;
+
+      /** Refuses a loss larger than what the named source has left. */
+      const assertSourceHasRoom = ({
+        state,
+        locationId: sourceId,
+        sourceName,
+      }: {
+        state: CustodySourceState;
+        locationId: string | null;
+        sourceName: string | null;
+      }) => {
+        const left = unitsLeftAtSource(state, sourceId);
+        if (quantity <= left) return;
+        throw new ShelfError({
+          cause: null,
+          ...sourceShortfall({
+            sourceName,
+            placedCount:
+              formatUnitCount(asset, placedAtSource(state, sourceId)) ??
+              "0 units",
+            inCustody: custodyFromSource(state, sourceId),
+          }),
+          label,
+          status: 400,
+          additionalData: { assetId, locationId: sourceId, quantity, left },
+          shouldBeCaptured: false,
+        });
+      };
       /** Read only when a location was named; the default path is total-only. */
       const sources =
         locationId === undefined
@@ -635,40 +665,24 @@ export async function adjustQuantity({
             });
           }
 
-          const left = unitsLeftAtSource(sources.state, atLocationId);
-          if (quantity > left) {
-            const placedCount =
-              formatUnitCount(
-                asset,
-                placedAtSource(sources.state, atLocationId)
-              ) ?? "0 units";
-            const inCustodyThere = custodyFromSource(
-              sources.state,
-              atLocationId
-            );
-            throw new ShelfError({
-              cause: null,
-              title: "Not enough units at this location",
-              message:
-                inCustodyThere > 0
-                  ? `${
-                      location.name
-                    } has ${placedCount} and ${inCustodyThere} ${
-                      inCustodyThere === 1 ? "is" : "are"
-                    } in custody.`
-                  : `${location.name} has only ${placedCount}.`,
-              label,
-              status: 400,
-              additionalData: {
-                assetId,
-                locationId: atLocationId,
-                quantity,
-                left,
-              },
-              shouldBeCaptured: false,
-            });
-          }
+          assertSourceHasRoom({
+            state: sources.state,
+            locationId: atLocationId,
+            sourceName: location.name,
+          });
         }
+      } else if (sources && direction === "subtract") {
+        /**
+         * The unplaced units, named on purpose: capped the same way, at the
+         * unplaced units minus custody recorded against them, so custody
+         * never claims more unplaced units than exist. An Adjust that names
+         * nothing (`sources` NULL) stays total-only.
+         */
+        assertSourceHasRoom({
+          state: sources.state,
+          locationId: null,
+          sourceName: null,
+        });
       }
 
       /** Step 4: For subtraction, ensure the new total doesn't drop below in-custody */

@@ -111,6 +111,40 @@ export function unitsLeftAtSource(
   );
 }
 
+/**
+ * The refusal when a source has fewer units left than asked for, worded the
+ * same for Assign and for a loss: "Studio has 2 pcs and 1 is already in
+ * custody." or "Studio has only 2 pcs." The unplaced units are called
+ * "Unplaced", as in the dropdown the operator picked them from.
+ *
+ * @param sourceName - The location's name, NULL for the unplaced units
+ * @param placedCount - The source's units, already formatted ("2 pcs")
+ * @param inCustody - Units in operator custody taken from that source
+ * @returns The error's title and message
+ */
+export function sourceShortfall({
+  sourceName,
+  placedCount,
+  inCustody,
+}: {
+  sourceName: string | null;
+  placedCount: string;
+  inCustody: number;
+}): { title: string; message: string } {
+  const where = sourceName ?? "Unplaced";
+  return {
+    title: sourceName
+      ? "Not enough units at this location"
+      : "Not enough unplaced units",
+    message:
+      inCustody > 0
+        ? `${where} has ${placedCount} and ${inCustody} ${
+            inCustody === 1 ? "is" : "are"
+          } already in custody.`
+        : `${where} has only ${placedCount}.`,
+  };
+}
+
 /** Distinct manual placement locations, in the order given. */
 export function distinctPlacementLocationIds(
   state: Pick<CustodySourceState, "placements">

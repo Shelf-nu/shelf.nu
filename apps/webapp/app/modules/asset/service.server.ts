@@ -55,6 +55,7 @@ import {
   placedAtSource,
   planDrainRelease,
   resolveCustodySource,
+  sourceShortfall,
   unitsLeftAtSource,
   unplacedUnits,
 } from "~/modules/asset/custody-source";
@@ -8658,20 +8659,13 @@ export async function checkOutQuantity({
               asset,
               placedAtSource(sources.state, source.locationId)
             ) ?? "0 units";
-          const alreadyOut = custodyFromSource(
-            sources.state,
-            source.locationId
-          );
-          const where = sourceName ?? "The unplaced pile";
           throw new ShelfError({
             cause: null,
-            title: "Not enough units at this location",
-            message:
-              alreadyOut > 0
-                ? `${where} has ${placedCount} and ${alreadyOut} ${
-                    alreadyOut === 1 ? "is" : "are"
-                  } already in custody.`
-                : `${where} has only ${placedCount}.`,
+            ...sourceShortfall({
+              sourceName,
+              placedCount,
+              inCustody: custodyFromSource(sources.state, source.locationId),
+            }),
             label,
             status: 400,
             additionalData: {

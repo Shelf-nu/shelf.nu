@@ -850,7 +850,7 @@ describe("adjustQuantity: at a location", () => {
         locationId: STUDIO,
       })
     );
-    expect(error.message).toBe("Studio has 2 pcs and 1 is in custody.");
+    expect(error.message).toBe("Studio has 2 pcs and 1 is already in custody.");
 
     await adjustQuantity({
       assetId: "pool-1",
@@ -863,6 +863,39 @@ describe("adjustQuantity: at a location", () => {
     });
     expect(tables.asset[0].quantity).toBe(3);
     expect([placed(CAMERA_ROOM), placed(STUDIO)]).toEqual([2, 1]);
+  });
+
+  it("caps a loss from the unplaced units at what they have left", async () => {
+    // 100 in total, 80 placed, 20 unplaced of which 15 are in custody.
+    seedPool({
+      total: 100,
+      placements: [
+        [CAMERA_ROOM, 50],
+        [STUDIO, 30],
+      ],
+    });
+    seedCustody(AHMED, null, 15);
+    const loseUnplaced = (quantity: number) =>
+      adjustQuantity({
+        assetId: "pool-1",
+        quantity,
+        category: "LOSS",
+        direction: "subtract",
+        userId: "user-1",
+        organizationId: ORG,
+        locationId: "unplaced",
+      });
+
+    const error = await refusal(loseUnplaced(10));
+    expect(error.status).toBe(400);
+    expect(error.message).toBe(
+      "Unplaced has 20 pcs and 15 are already in custody."
+    );
+    expect(tables.asset[0].quantity).toBe(100);
+
+    await loseUnplaced(5);
+    expect(tables.asset[0].quantity).toBe(95);
+    expect([placed(CAMERA_ROOM), placed(STUDIO)]).toEqual([50, 30]);
   });
 
   it("does not dead-end a loss after a consume (the two-location glove case)", async () => {
