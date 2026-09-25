@@ -10,6 +10,7 @@ import When from "~/components/when/when";
 import {
   useClearValueFromParams,
   useSearchParamHasValue,
+  useSearchParams,
 } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -34,7 +35,7 @@ export function AssetIndexFilters({
   disableTeamMemberFilter?: boolean;
 }) {
   /** Used for filtering based on user type */
-  const filterParams: string[] = ["category", "tag", "location"];
+  const filterParams = ["category", "tag", "location", "lowStockOnly"];
   if (!disableTeamMemberFilter) {
     filterParams.push("teamMember");
   }
@@ -43,6 +44,8 @@ export function AssetIndexFilters({
   const { roles } = useUserRoleHelper();
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const lowStockActive = searchParams.get("lowStockOnly") === "true";
 
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
@@ -62,6 +65,21 @@ export function AssetIndexFilters({
                 defaultSortingBy="createdAt"
                 className="flex-1"
               />
+              <Button
+                type="button"
+                variant={lowStockActive ? "primary" : "secondary"}
+                aria-pressed={lowStockActive}
+                onClick={() =>
+                  setSearchParams((prev) => {
+                    if (lowStockActive) prev.delete("lowStockOnly");
+                    else prev.set("lowStockOnly", "true");
+                    prev.delete("page");
+                    return prev;
+                  })
+                }
+              >
+                Low stock only
+              </Button>
 
               <AvailabilityViewToggle />
             </div>

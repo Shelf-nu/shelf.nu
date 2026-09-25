@@ -20,13 +20,17 @@
  *
  * "Available" is computed as total quantity minus units currently in custody.
  *
+ * The emails carry the facts an owner needs without opening the app (what
+ * took the stock down, where the rest sits, what else is low). This module
+ * loads those facts; `emails/low-stock-copy.ts` words them.
+ *
  * THRESHOLD SEMANTICS: a threshold exists iff `minQuantity != null`, and the
  * asset is low iff `available <= minQuantity`. This intentionally treats
  * `minQuantity === 0` as a valid out-of-stock threshold (alert when nothing is
  * available). The shared `@shelf/quantity-control` `isLowStock` predicate uses
  * the same rule (only `null` disables the threshold), so this server path and
- * the package agree — the companion app can adopt the package predicate without
- * diverging from these alerts.
+ * the package agree, and the companion app can adopt the package predicate
+ * without diverging from these alerts.
  *
  * The debounce is BEST-EFFORT and non-transactional: two truly-concurrent
  * decrements could each read a `null` marker and double-fire the alert. That is
@@ -39,38 +43,95 @@
  * @see {@link file://../../utils/emitter/send-notification.server.ts} - notification emitter
  * @see {@link file://../../emails/low-stock-alert.tsx} - low-stock alert email template
  * @see {@link file://../../emails/low-stock-recovered.tsx} - recovered email template
+ * @see {@link file://../../emails/low-stock-copy.ts} - email wording
  */
 
 import { db } from "~/database/db.server";
+import type { StockLevelEmailProps } from "~/emails/components/stock-level-email";
 import { lowStockAlertHtml, lowStockAlertText } from "~/emails/low-stock-alert";
+import {
+  describePlacements,
+  describeStockMovement,
+  isFreshMovement,
+  lowStockSubject,
+  recoveredSubject,
+} from "~/emails/low-stock-copy";
 import {
   lowStockRecoveredHtml,
   lowStockRecoveredText,
 } from "~/emails/low-stock-recovered";
 import { sendEmail } from "~/emails/mail.server";
+import { buildLowStockWhere } from "~/modules/asset/utils.server";
 import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
+import { resolveFormatPrefs } from "~/utils/date-format";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfError } from "~/utils/error";
+import { SERVER_URL } from "~/utils/env";
+import { ShelfError, type AdditionalData } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { resolveUserGreetingName } from "~/utils/user";
 
 /** Which low-stock email to build and send. */
 type LowStockEmailVariant = "alert" | "recovered";
 
 /**
- * Sends the low-stock alert (or recovered notice) email to every OWNER and
- * ADMIN of the organization. Resilient by design:
+ * Runs a read the mail can do without. A failure is logged and answers `null`,
+ * so the mail still goes out with the row-less wording instead of not at all.
+ *
+ * Takes a thunk so a read that throws before returning its promise is caught
+ * too.
+ *
+ * @param read - Starts the read
+ * @param fact - What the read loads, for the log message
+ * @param additionalData - Ids for the log entry
+ */
+function optionalRead<T>(
+  read: () => Promise<T>,
+  fact: string,
+  additionalData: AdditionalData
+): Promise<T | null> {
+  return Promise.resolve()
+    .then(read)
+    .catch((cause: unknown) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: `Failed to load the ${fact} for a low-stock email`,
+          additionalData,
+          label: "Notification",
+        })
+      );
+      return null;
+    });
+}
+
+/**
+ * Sends the low-stock alert (or back-in-stock notice) to every OWNER and ADMIN
+ * of the organization, rendered once per recipient so each copy greets them,
+ * names their address in the footer and prints dates in their format.
+ *
+ * Besides the organization and the recipients it loads the facts the mail
+ * prints: the newest `ConsumptionLog` row (what happened), the asset's
+ * placements (where it is), and how many other items are low. Each of those is
+ * optional: a failed read is logged and the mail falls back to the row-less
+ * wording. When the log row is stale or missing, the acting user is loaded so
+ * the mail can still say who changed the quantity.
+ *
+ * Resilient by design:
  *   - the whole block is wrapped in try/catch so an email failure can never
  *     break the caller (which has already committed the stock change);
- *   - each per-recipient send is ALSO wrapped so one bad address can't abort
- *     the loop for the remaining recipients.
+ *   - each recipient's render and send is ALSO wrapped so one bad address
+ *     can't abort the loop for the remaining recipients.
  *
  * @param params.variant - "alert" (crossed into low stock) or "recovered"
- * @param params.organizationId - Organization whose admins/owner receive the email
- * @param params.assetId - Asset the notice is about (used for the "View Asset" link)
+ * @param params.organizationId - Organization whose owner and admins receive the email
+ * @param params.assetId - Asset the notice is about
  * @param params.assetTitle - Asset display title
  * @param params.available - Current available quantity (total minus in-custody)
  * @param params.minQuantity - The configured minimum-quantity threshold
- * @param params.unitOfMeasure - Unit label for the quantities in the email
+ * @param params.unitOfMeasure - `Asset.unitOfMeasure`; `null` and `""` mean no unit
+ * @param params.inCustody - Units of the asset held in custody
+ * @param params.userId - The user whose action triggered the check, if any
  */
 async function sendLowStockEmails({
   variant,
@@ -80,6 +141,8 @@ async function sendLowStockEmails({
   available,
   minQuantity,
   unitOfMeasure,
+  inCustody,
+  userId,
 }: {
   variant: LowStockEmailVariant;
   organizationId: string;
@@ -87,50 +150,126 @@ async function sendLowStockEmails({
   assetTitle: string;
   available: number;
   minQuantity: number;
-  unitOfMeasure: string;
+  unitOfMeasure: string | null;
+  inCustody: number;
+  userId?: string | null;
 }): Promise<void> {
   try {
+    const ids = { assetId, organizationId };
+    const [org, recipients, log, placementRows, otherLowCount] =
+      await Promise.all([
+        db.organization.findUnique({
+          where: { id: organizationId },
+          select: { name: true, customEmailFooter: true },
+        }),
+        getOrganizationAdminsForNotification({ organizationId }),
+        optionalRead(
+          () =>
+            db.consumptionLog.findFirst({
+              where: { assetId },
+              orderBy: { createdAt: "desc" },
+              select: {
+                category: true,
+                quantity: true,
+                note: true,
+                createdAt: true,
+                performedBy: { select: USER_NAME_SELECT },
+                custodian: {
+                  select: { name: true, user: { select: USER_NAME_SELECT } },
+                },
+                booking: { select: { id: true, name: true } },
+              },
+            }),
+          "newest consumption log row",
+          ids
+        ),
+        optionalRead(
+          () =>
+            db.assetLocation.findMany({
+              where: { assetId, organizationId },
+              select: { quantity: true, location: { select: { name: true } } },
+            }),
+          "placements",
+          ids
+        ),
+        optionalRead(
+          () =>
+            db.asset.count({
+              // The `lowStockOnly` list filter the mail links to, so the
+              // count matches what the link shows.
+              where: {
+                organizationId,
+                id: { not: assetId },
+                ...buildLowStockWhere(),
+              },
+            }),
+          "count of other low-stock items",
+          ids
+        ),
+      ]);
+
     /**
-     * Recipients: owner + admins. `getOrganizationAdminsForNotification`
-     * returns both OWNER and ADMIN role holders (the owner included), which
-     * widens the previous owner-only alerting.
+     * The acting user names the change only when the log row cannot: some
+     * edits write no row, and an old row belongs to an earlier change.
      */
-    const [org, recipients] = await Promise.all([
-      db.organization.findUnique({
-        where: { id: organizationId },
-        select: { name: true },
-      }),
-      getOrganizationAdminsForNotification({ organizationId }),
-    ]);
+    const now = new Date();
+    const actingUser =
+      userId && !isFreshMovement(log, now)
+        ? await optionalRead(
+            () =>
+              db.user.findUnique({
+                where: { id: userId },
+                select: USER_NAME_SELECT,
+              }),
+            "acting user",
+            { ...ids, userId }
+          )
+        : null;
 
     const organizationName = org?.name ?? "your organization";
-    const props = {
-      assetTitle,
-      available,
-      minQuantity,
-      unitOfMeasure,
-      assetId,
-      organizationName,
-    };
-
-    const html =
-      variant === "alert"
-        ? await lowStockAlertHtml(props)
-        : await lowStockRecoveredHtml(props);
-    const text =
-      variant === "alert"
-        ? lowStockAlertText(props)
-        : lowStockRecoveredText(props);
+    const placements = describePlacements(placementRows ?? []);
+    const numbers = { assetTitle, available, minQuantity, unitOfMeasure };
     const subject =
       variant === "alert"
-        ? `Low stock alert: ${assetTitle}`
-        : `Back in stock: ${assetTitle}`;
+        ? lowStockSubject(numbers)
+        : recoveredSubject(numbers);
 
     for (const recipient of recipients) {
       if (!recipient.email) {
         continue;
       }
       try {
+        const prefs = resolveFormatPrefs(recipient, null);
+        const props: StockLevelEmailProps = {
+          ...numbers,
+          recipient: {
+            greetingName: resolveUserGreetingName(recipient),
+            email: recipient.email,
+          },
+          assetId,
+          organizationName,
+          customEmailFooter: org?.customEmailFooter ?? null,
+          movement: describeStockMovement({
+            log,
+            actingUser,
+            prefs,
+            unitOfMeasure,
+            now,
+          }),
+          placements,
+          inCustody,
+          otherLowCount: otherLowCount ?? 0,
+          serverUrl: SERVER_URL,
+        };
+        const html =
+          variant === "alert"
+            ? await lowStockAlertHtml(props)
+            : await lowStockRecoveredHtml(props);
+        const text =
+          variant === "alert"
+            ? lowStockAlertText(props)
+            : lowStockRecoveredText(props);
+
         sendEmail({ to: recipient.email, subject, html, text });
       } catch (cause) {
         /** One bad recipient must not break the loop or the caller. */
@@ -272,13 +411,15 @@ async function runLowStockCheck({
     where: { assetId },
     _sum: { quantity: true },
   });
-  const available = (asset.quantity ?? 0) - (custodySum._sum.quantity ?? 0);
+  const inCustody = custodySum._sum.quantity ?? 0;
+  const available = (asset.quantity ?? 0) - inCustody;
 
   /**
    * PRESERVED predicate: low iff available is at or below the threshold.
    * `minQuantity === 0` legitimately alerts at out-of-stock (available <= 0).
    */
   const isLow = available <= asset.minQuantity;
+  /** In-app toast wording only; the emails format units via `formatQuantity`. */
   const unitLabel = asset.unitOfMeasure ?? "units";
 
   if (isLow && asset.lowStockNotifiedAt == null) {
@@ -301,7 +442,9 @@ async function runLowStockCheck({
       assetTitle: asset.title,
       available,
       minQuantity: asset.minQuantity,
-      unitOfMeasure: unitLabel,
+      unitOfMeasure: asset.unitOfMeasure,
+      inCustody,
+      userId,
     });
 
     /**
@@ -372,7 +515,9 @@ async function runLowStockCheck({
       assetTitle: asset.title,
       available,
       minQuantity: asset.minQuantity,
-      unitOfMeasure: unitLabel,
+      unitOfMeasure: asset.unitOfMeasure,
+      inCustody,
+      userId,
     });
   }
   /* else: no transition — already-notified-and-still-low, or fine-and-was-fine. */
