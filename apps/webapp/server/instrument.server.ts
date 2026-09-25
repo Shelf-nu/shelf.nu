@@ -6,13 +6,9 @@
  * @sentry/react-router auto-instrumentations (HTTP, Prisma, undici, etc.)
  * can patch their target modules before they are required.
  *
- * History — the previous version routed BOTH `beforeSend` (errors) and
- * `beforeSendTransaction` (performance traces) through the same handler,
- * which inspected `hint.originalException`. Transactions never carry an
- * exception, so they were silently dropped 100% of the time. As a result
- * Sentry collected only client-side spans and no Prisma / loader timing
- * was visible. Errors and transactions are now handled by separate
- * callbacks.
+ * Errors, transactions and logs each have their own `beforeSend*` hook, and
+ * every one of them masks email addresses before the payload leaves the
+ * server (see `~/utils/sentry-email-mask`).
  */
 import * as Sentry from "@sentry/react-router";
 import { type Event, type EventHint } from "@sentry/react-router";
@@ -23,6 +19,7 @@ import {
   isHandledClientError,
   isLikeShelfError,
 } from "~/utils/error";
+import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
 
 /**
  * Resolve the release identifier for this server process. Read from the
@@ -76,16 +73,20 @@ if (SENTRY_DSN) {
       return breadcrumb;
     },
     /**
-     * Performance transactions are passed through unchanged. Do NOT route
-     * them through the error-event filter — transactions carry no
-     * exception, and the old code returned null for any event without
-     * one, which silently dropped 100% of server traces.
+     * Performance transactions are kept, with email addresses masked. They
+     * must NOT go through the error-event filter: a transaction carries no
+     * exception, and that filter drops every event without one.
      */
     beforeSendTransaction(event) {
-      return event;
+      return maskEmailsInSentryPayload(event);
     },
     beforeSend(event, hint) {
-      return handleBeforeSendError(event, hint);
+      const kept = handleBeforeSendError(event, hint);
+      return kept && maskEmailsInSentryPayload(kept);
+    },
+    /** Structured logs quote `ShelfError` messages, which can name a user. */
+    beforeSendLog(log) {
+      return maskEmailsInSentryPayload(log);
     },
   });
 
@@ -101,7 +102,8 @@ if (SENTRY_DSN) {
  *  - client-disconnect / abort errors that bypass `makeShelfError`
  *
  * Also redacts the auth-session cookie and attaches our ShelfError
- * metadata as Sentry tags / extras.
+ * metadata as Sentry tags / extras. Email masking runs on the result, in the
+ * `beforeSend` hook.
  */
 function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
   const exception = hint.originalException;
@@ -121,8 +123,8 @@ function handleBeforeSendError<E extends Event>(event: E, hint: EventHint) {
 
   // Handled client errors (4xx) are not server faults. They're recorded as a
   // low-severity Sentry log trail (Logger.handledClientError) on the separate
-  // logs quota, so keep them OUT of the error-event pipeline entirely — this
-  // also makes PR3's per-site `shouldBeCaptured: false` opt-outs redundant.
+  // logs quota, so keep them OUT of the error-event pipeline entirely; a 4xx
+  // call site does not need its own `shouldBeCaptured: false`.
   if (isHandledClientError(exception)) {
     return null;
   }
