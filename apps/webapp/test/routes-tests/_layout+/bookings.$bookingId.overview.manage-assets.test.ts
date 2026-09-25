@@ -1282,7 +1282,7 @@ describe("manage-assets loader — Models tab payload", () => {
   });
 
   it("redacts custodian identity from picker rows for a restricted viewer", async () => {
-    // A real SELF_SERVICE membership with every workspace toggle off: it may
+    // why: a real SELF_SERVICE membership with every workspace toggle off: it may
     // manage items on its own DRAFT booking but may not see others' custody.
     vi.mocked(rolesServer.requirePermission).mockResolvedValue(
       permissionContext({
