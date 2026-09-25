@@ -11,6 +11,7 @@ import _ from "lodash";
 import { z } from "zod";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
+import { db } from "~/database/db.server";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
@@ -624,6 +625,19 @@ function applyCustodianAllowList(
     : kept;
 }
 
+/**
+ * Low-stock fragment: QUANTITY_TRACKED assets at or below their minimum, the
+ * same rows as the advanced index's `lowStockOnly` SQL. A function, not a
+ * constant, because the field reference comes from the live client.
+ */
+export function buildLowStockWhere(): Prisma.AssetWhereInput {
+  return {
+    type: "QUANTITY_TRACKED",
+    minQuantity: { not: null },
+    quantity: { lte: db.asset.fields.minQuantity },
+  };
+}
+
 export function getAssetsWhereInput({
   organizationId,
   currentSearchParams,
@@ -662,6 +676,11 @@ export function getAssetsWhereInput({
     searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
       ? null
       : (searchParams.get("status") as AssetStatus | null);
+
+  // First writer of `where.AND`; every later writer spreads it.
+  if (searchParams.get("lowStockOnly") === "true") {
+    where.AND = [buildLowStockWhere()];
+  }
 
   if (search) {
     where.title = {

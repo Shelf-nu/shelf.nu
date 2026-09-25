@@ -6,6 +6,7 @@ import {
   getCustomFieldUpdateNoteContent,
   getInitialPlacementNoteContent,
   getKitLocationUpdateNoteContent,
+  getAssetsWhereInput,
   getLocationUpdateNoteContent,
 } from "./utils.server";
 
@@ -919,5 +920,48 @@ describe("getInitialPlacementNoteContent", () => {
 
     expect(result).toContain('text="Dr. Smith"');
     expect(result).not.toContain("Alex Doe");
+  });
+});
+
+describe("getAssetsWhereInput: lowStockOnly", () => {
+  it("narrows simple-mode select-all to assets at or below their minimum, beside other filters", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "lowStockOnly=true&status=AVAILABLE",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.organizationId).toBe("org-1");
+    expect(where.AND).toEqual([
+      {
+        type: "QUANTITY_TRACKED",
+        minQuantity: { not: null },
+        quantity: { lte: expect.anything() },
+      },
+      // The status filter still applies alongside it.
+      {
+        OR: [
+          { type: "INDIVIDUAL", status: "AVAILABLE" },
+          { type: "QUANTITY_TRACKED" },
+        ],
+      },
+    ]);
+  });
+
+  it("adds nothing without the param", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "status=AVAILABLE",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { type: "INDIVIDUAL", status: "AVAILABLE" },
+          { type: "QUANTITY_TRACKED" },
+        ],
+      },
+    ]);
   });
 });
