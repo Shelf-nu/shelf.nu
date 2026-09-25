@@ -99,9 +99,10 @@ export async function action({ request }: ActionFunctionArgs) {
     // check-out for the caller's role, the one-tap check-out is forbidden and
     // they must scan or select the assets (the partial-checkout path). Judged by
     // the caller's access (its effective role), as the loader's
-    // `canQuickCheckout` is, so the app never offers a button this route refuses. Decided after the booking
-    // and ownership checks, so a missing or foreign booking answers 404 as
-    // before and the settings are only read for a booking the caller may act on.
+    // `canQuickCheckout` is, so the app never offers a button this route
+    // refuses. Decided after the booking and ownership checks, so a missing or
+    // foreign booking answers 404 and the settings are only read for a booking
+    // the caller may act on.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     if (

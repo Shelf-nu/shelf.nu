@@ -620,9 +620,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Quick "check in all" and "check out all" are disallowed when the
     // workspace requires EXPLICIT (scan/select) check-in or check-out for the
-    // caller, judged by the caller's access (its effective role). Mirrors the web booking action's `checkIn`, `checkOut` and
-    // `checkOutRemaining` guards, so the app never offers an action the web /
-    // workspace settings forbid.
+    // caller, judged by the caller's access (its effective role). Mirrors the
+    // web booking action's `checkIn`, `checkOut` and `checkOutRemaining`
+    // guards, so the app never offers an action the web / workspace settings
+    // forbid.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const canQuickCheckin = !isExplicitScanRequired({

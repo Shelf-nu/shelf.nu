@@ -38,7 +38,7 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * - Business validation runs through the shared {@link BookingFormSchema}
  *   (future-date + buffer + working-hours + max-length + required-tags),
  *   parameterised by the org's working hours / booking settings and whether the
- *   caller is admin/owner (admins bypass buffer + max-length).
+ *   caller's policy sets `bypassTimeLimits` (buffer and max-length skipped).
  * - Members whose booking custodian is fixed to themselves
  *   (`bookings.custodianPicker`) may only assign a booking to themselves.
  * - Bookings are a TEAM-plan feature (`assertCanUseBookings`).

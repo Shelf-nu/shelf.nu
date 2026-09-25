@@ -281,7 +281,7 @@ function buildBookingDateSchemas({
   // Create enhanced date schemas with working hours and buffer validation
   const startDateSchema = coerceLocalDate(prefs.timeZone).superRefine(
     (data, ctx) => {
-      // 1. Validate future date with buffer (skipped for ADMIN/OWNER when effectiveBufferStartTime is 0)
+      // 1. Validate future date with buffer (skipped under `bypassTimeLimits`, where effectiveBufferStartTime is 0)
       const futureValidation = validateFutureDate(
         data,
         effectiveBufferStartTime,
@@ -341,7 +341,7 @@ function buildBookingDateSchemas({
       });
     }
 
-    // Validate maximum booking length if configured (skipped for ADMIN/OWNER when effectiveMaxBookingLength is null)
+    // Validate maximum booking length if configured (skipped under `bypassTimeLimits`, where effectiveMaxBookingLength is null)
     if (effectiveMaxBookingLength && data.endDate && data.startDate) {
       const startDate = new Date(data.startDate);
       const endDate = new Date(data.endDate);
@@ -609,7 +609,7 @@ export function ExtendBookingSchema({
       // string in the server zone.
       startDate: coerceLocalDate(timeZone),
       endDate: coerceLocalDate(timeZone).superRefine((dateTime, ctx) => {
-        // 1. Validate future date with buffer using existing function (skipped for ADMIN/OWNER)
+        // 1. Validate future date with buffer using existing function (skipped under `bypassTimeLimits`)
         const futureValidation = validateFutureDate(
           dateTime,
           effectiveBufferStartTime,
@@ -640,7 +640,7 @@ export function ExtendBookingSchema({
       }),
     })
     .superRefine((data, ctx) => {
-      // Cross-field validation for maximum booking length (skipped for ADMIN/OWNER)
+      // Cross-field validation for maximum booking length (skipped under `bypassTimeLimits`)
       if (effectiveMaxBookingLength && data.startDate && data.endDate) {
         const { startDate, endDate } = data;
 

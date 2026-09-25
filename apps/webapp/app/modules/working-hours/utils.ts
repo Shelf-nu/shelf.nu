@@ -271,7 +271,8 @@ interface DefaultTimesResult {
  * If working hours are enabled, it checks today's schedule and overrides to determine the next available booking time.
  * Buffer time is applied from current time - the start time will be whichever is later: buffer expiry or next available working time.
  *
- * For ADMIN/OWNER users, buffer time restrictions are automatically bypassed (effective buffer = 0).
+ * When the caller's policy sets `bypassTimeLimits`, buffer time restrictions are
+ * bypassed (effective buffer = 0).
  *
  * Every calendar-day and wall-clock decision here is made in the acting user's
  * PREFERENCE zone, which is the zone the form field displays and the server
