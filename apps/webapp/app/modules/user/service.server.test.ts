@@ -1,5 +1,8 @@
 import { Roles, AssetIndexMode, OrganizationRoles } from "@prisma/client";
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
+import {
+  PrismaClientKnownRequestError,
+  type ITXClientDenyList,
+} from "@prisma/client/runtime/library";
 
 import { matchRequestUrl, http, HttpResponse } from "msw";
 import { server } from "@mocks";
@@ -16,7 +19,8 @@ import {
   USER_ID,
   USER_PASSWORD,
 } from "@mocks/user";
-import { db } from "~/database/db.server";
+import { db, type ExtendedPrismaClient } from "~/database/db.server";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import {
@@ -50,6 +54,13 @@ vitest.mock("~/database/db.server", () => ({
       upsert: vitest.fn().mockResolvedValue({}),
     },
   },
+}));
+
+// why: the signup event is the sink under test for attribution; the real
+// wrapper is a silent no-op without a PostHog key, so its calls are recorded
+// here instead.
+vitest.mock("~/integrations/posthog/client.server", () => ({
+  captureServerEvent: vitest.fn(),
 }));
 
 // why: ensureAssetIndexModeForRole has its own db dependencies unrelated to user creation
@@ -768,5 +779,76 @@ describe(createUser.name, () => {
       createUser({ email: USER_EMAIL, userId: USER_ID, username })
     ).rejects.toThrow("We had trouble while creating your account");
     expect(db.user.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The `signup_completed` event carries what the signup link asked for, so
+ * PostHog funnels agree with the business-intel record.
+ */
+describe("createUser — signup attribution on the signup event", () => {
+  /** The client shape a `$transaction` callback receives. */
+  type TransactionClient = Omit<ExtendedPrismaClient, ITXClientDenyList>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // @ts-expect-error missing vitest type
+    db.user.create.mockResolvedValue(newUserMock);
+    // why: the mocked $transaction just invokes the callback with the mocked db
+    // @ts-expect-error missing vitest type
+    db.$transaction.mockImplementation(
+      (callback: (tx: TransactionClient) => Promise<unknown>) =>
+        callback(db as unknown as TransactionClient)
+    );
+  });
+
+  it("puts the plan, trial and campaign on the event and sets them once on the person", async () => {
+    await createUser({
+      email: USER_EMAIL,
+      userId: USER_ID,
+      username,
+      signupIntent: {
+        plan: "team",
+        trial: true,
+        utmSource: "website",
+        utmMedium: "pricing",
+        utmCampaign: "launch",
+        utmContent: "hero",
+      },
+    });
+
+    expect(captureServerEvent).toHaveBeenCalledWith({
+      distinctId: USER_ID,
+      event: "signup_completed",
+      properties: {
+        created_with_invite: false,
+        is_sso: false,
+        signup_plan: "team",
+        signup_trial: true,
+        utm_source: "website",
+        utm_medium: "pricing",
+        utm_campaign: "launch",
+        utm_content: "hero",
+      },
+      setOnce: {
+        initial_signup_plan: "team",
+        initial_signup_trial: true,
+        $initial_utm_source: "website",
+        $initial_utm_medium: "pricing",
+        $initial_utm_campaign: "launch",
+        $initial_utm_content: "hero",
+      },
+    });
+  });
+
+  it("sends the event exactly as before when there is no intent", async () => {
+    await createUser({ email: USER_EMAIL, userId: USER_ID, username });
+
+    expect(captureServerEvent).toHaveBeenCalledWith({
+      distinctId: USER_ID,
+      event: "signup_completed",
+      properties: { created_with_invite: false, is_sso: false },
+      setOnce: undefined,
+    });
   });
 });

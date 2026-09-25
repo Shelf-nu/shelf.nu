@@ -26,6 +26,12 @@ export async function createBusinessIntel(
         primaryUseCase: payload.primaryUseCase,
         currentSolution: payload.currentSolution,
         timeline: payload.timeline,
+        signupPlan: payload.signupPlan,
+        signupTrial: payload.signupTrial,
+        utmSource: payload.utmSource,
+        utmMedium: payload.utmMedium,
+        utmCampaign: payload.utmCampaign,
+        utmContent: payload.utmContent,
       },
     });
 
@@ -60,6 +66,12 @@ export async function updateBusinessIntel(
         primaryUseCase: payload.primaryUseCase,
         currentSolution: payload.currentSolution,
         timeline: payload.timeline,
+        signupPlan: payload.signupPlan,
+        signupTrial: payload.signupTrial,
+        utmSource: payload.utmSource,
+        utmMedium: payload.utmMedium,
+        utmCampaign: payload.utmCampaign,
+        utmContent: payload.utmContent,
       },
     });
 
@@ -95,6 +107,12 @@ export async function upsertBusinessIntel(
         primaryUseCase: payload.primaryUseCase,
         currentSolution: payload.currentSolution,
         timeline: payload.timeline,
+        signupPlan: payload.signupPlan,
+        signupTrial: payload.signupTrial,
+        utmSource: payload.utmSource,
+        utmMedium: payload.utmMedium,
+        utmCampaign: payload.utmCampaign,
+        utmContent: payload.utmContent,
       },
       update: {
         howDidYouHearAboutUs: payload.howDidYouHearAboutUs,
@@ -104,6 +122,12 @@ export async function upsertBusinessIntel(
         primaryUseCase: payload.primaryUseCase,
         currentSolution: payload.currentSolution,
         timeline: payload.timeline,
+        signupPlan: payload.signupPlan,
+        signupTrial: payload.signupTrial,
+        utmSource: payload.utmSource,
+        utmMedium: payload.utmMedium,
+        utmCampaign: payload.utmCampaign,
+        utmContent: payload.utmContent,
       },
     });
 
