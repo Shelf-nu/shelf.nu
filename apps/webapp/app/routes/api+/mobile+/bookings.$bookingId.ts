@@ -47,6 +47,7 @@ import {
 } from "~/modules/booking/checkout-attribution";
 import {
   getCheckoutSourceQuestions,
+  loadMultiPlacedPoolIds,
   loadSliceSourceLocations,
 } from "~/modules/booking/checkout-source-location.server";
 import type { SliceSourceLocation } from "~/modules/booking/checkout-source-location.server";
@@ -302,15 +303,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       kit: { id: string; name: string } | null;
       /**
        * The location this pool slice's units left from, recorded when it was
-       * first checked out. `null` for individual assets, slices not out yet,
-       * the unplaced units, or a location since deleted.
+       * first checked out. Set only where the web booking row shows "from
+       * <Location>": a standalone slice of a pool at two or more placements.
+       * `null` otherwise (individual assets, kit slices, pools at one
+       * location, slices not out yet, the unplaced units, a deleted location).
        */
       sourceLocation: SliceSourceLocation | null;
     };
-    const sourceLocationsById = await loadSliceSourceLocations({
-      organizationId,
-      locationIds: booking.bookingAssets.map((ba) => ba.sourceLocationId),
-    });
+    const sourcedPoolSlices = booking.bookingAssets.filter(
+      (ba) =>
+        ba.asset.type === AssetType.QUANTITY_TRACKED &&
+        !ba.assetKitId &&
+        ba.sourceLocationId
+    );
+    const [sourceLocationsById, multiPlacedPoolIds] = await Promise.all([
+      loadSliceSourceLocations({
+        organizationId,
+        locationIds: sourcedPoolSlices.map((ba) => ba.sourceLocationId),
+      }),
+      loadMultiPlacedPoolIds({
+        organizationId,
+        assetIds: sourcedPoolSlices.map((ba) => ba.asset.id),
+      }),
+    ]);
     type CollapsedRow = {
       assetId: string;
       first: (typeof booking.bookingAssets)[number];
@@ -334,7 +349,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         assetKitId: ba.assetKitId,
         kit: sliceKit,
         sourceLocation:
-          ba.asset.type === AssetType.QUANTITY_TRACKED && ba.sourceLocationId
+          ba.asset.type === AssetType.QUANTITY_TRACKED &&
+          !ba.assetKitId &&
+          ba.sourceLocationId &&
+          multiPlacedPoolIds.has(ba.asset.id)
             ? sourceLocationsById.get(ba.sourceLocationId) ?? null
             : null,
       };

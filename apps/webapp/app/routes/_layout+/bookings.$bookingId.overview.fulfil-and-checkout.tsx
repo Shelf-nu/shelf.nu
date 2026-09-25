@@ -384,8 +384,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       from: basicBookingInfo.from,
       to: basicBookingInfo.to,
       requireExplicitCheckout,
-      // One "From location" pick per scanned pool at 2+ placements, keyed by
-      // asset id (the slice may be created by this same request).
+      // The confirm dialog's "From location" picks, keyed by slice id, for
+      // pools already on the booking at two or more placements. A pool this
+      // scan adds has no slice yet, so it gets the default (see
+      // `recordCheckoutSourceLocations`).
       sourceLocations: parseSourceLocationsFromFormData(formData),
     });
 

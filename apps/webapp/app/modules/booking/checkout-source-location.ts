@@ -15,8 +15,8 @@
  *   3. A submitted answer wins. It must name a manual placement of the pool,
  *      or be "Unplaced" (`null`).
  *   4. Otherwise the default: no placements, or one placement next to
- *      unplaced units, record nothing (`null`, the unplaced units absorb any
- *      drop, exactly as before); one placement and no unplaced units record
+ *      unplaced units, record nothing (`null`: the unplaced units absorb any
+ *      drop, which is also what a slice with no recorded source does); one placement and no unplaced units record
  *      that location; two or more placements record the one with the most
  *      units left. That last case is a guess, which is why the booking shows
  *      it on the asset row.
@@ -218,9 +218,9 @@ export function defaultSourceLocationId(
   const { placements, unplaced } = snapshot;
   if (placements.length === 0) return null;
   if (placements.length === 1) {
-    // One placement next to unplaced units: which of the two the units came
-    // from is unknown, and the unplaced pile absorbing a drop is what happened
-    // before sources existed. Recording nothing keeps that.
+    // One placement next to unplaced units is never asked about, so which of
+    // the two the units came from is unknown. Recording nothing lets the
+    // unplaced pile absorb a drop, the same as for any pool with no source.
     return unplaced > 0 ? null : placements[0].locationId;
   }
   // Two or more: the one with the most units left. A strict `>` keeps the
@@ -350,9 +350,9 @@ export type CheckinSourceSlice = {
  * damaged: the slice's recorded source, for all three. Returned units never
  * change a placement, so they are not counted.
  *
- * Nothing is returned (the unplaced units absorb the drop, as before sources
- * existed) for a slice with no recorded source, and for a kit slice: its units
- * belong to the kit, whose own placement shrinks with it, never a manual one.
+ * Nothing is returned (the unplaced units absorb the drop) for a slice with
+ * no recorded source, and for a kit slice: its units belong to the kit, whose
+ * own placement shrinks with it, never a manual one.
  *
  * @param args.slice - The slice being checked in, or `null` when unknown
  * @param args.consumed - Units used up

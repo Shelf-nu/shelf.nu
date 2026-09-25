@@ -43,7 +43,7 @@ vi.mock("~/database/db.server", () => ({
     // (BookingAsset.checkedOutAt/checkedInAt) plus the checkout sessions to
     // judge dispatched units per asset, and the asset order counts the
     // sessions and the quantity-tracked assets' disposition logs per slice;
-    // stub all three to empty — orthogonal to the slices/merged-kit
+    // stub all three to empty - not what this suite checks
     // serialization contract under test.
     bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
@@ -60,11 +60,11 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: mobile-auth is the request-auth boundary — it resolves the actor and
+// why: mobile-auth is the request-auth boundary - it resolves the actor and
 // org from a Supabase JWT. Stub requireMobileAuth/requireOrganizationAccess/
 // assertMobileCanUseBookings/getMobileUserContext so the test drives a
 // deterministic authenticated user + org without real JWT verification;
-// orthogonal to the slices/merged-kit serialization contract under test.
+// not what this suite checks serialization contract under test.
 vi.mock("~/modules/api/mobile-auth.server", async () => {
   const actual = await vi.importActual<typeof MobileAuthServer>(
     "~/modules/api/mobile-auth.server"
@@ -80,8 +80,8 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
 
 // why: the QT-remaining helpers hit `tx.bookingAsset` / `tx.consumptionLog`
 // directly (not through the mocked `db.booking`/`db.partialBookingCheckout`
-// above) — stub them to fixed values since per-asset remaining is unrelated
-// to the slices/merged-kit contract under test. `bookingDraftVisibilityClause`
+// above) - stub them to fixed values since per-asset remaining is unrelated
+// to the source-location contract under test. `bookingDraftVisibilityClause`
 // is kept real (pure where-clause builder, no db access) since it feeds the
 // mocked `findFirst`'s arguments only.
 vi.mock("~/modules/booking/service.server", async () => {
@@ -99,7 +99,7 @@ vi.mock("~/modules/booking/service.server", async () => {
 });
 
 // why: booking settings + permission checks are unrelated to the
-// slices/merged-kit serialization under test — stub them to fixed values.
+// source-location fields under test - stub them to fixed values.
 vi.mock("~/modules/booking-settings/service.server", () => ({
   getBookingSettingsForOrganization: vi.fn().mockResolvedValue({
     requireExplicitCheckinForAdmin: false,
@@ -120,6 +120,7 @@ beforeEach(() => {
   // `clearAllMocks` keeps implementations, so put back the empty default a
   // case may have replaced.
   vi.mocked(db.bookingAsset.findMany).mockResolvedValue([] as never);
+  vi.mocked(db.assetLocation.findMany).mockResolvedValue([] as never);
   requireMobileAuthMock.mockResolvedValue({
     user: { id: "user-1" },
   } as Awaited<ReturnType<typeof requireMobileAuth>>);
@@ -227,6 +228,11 @@ describe("GET /api/mobile/bookings/:bookingId source locations", () => {
     vi.mocked(db.location.findMany).mockResolvedValue([
       { id: "loc-studio", name: "Studio" },
     ] as never);
+    // The pool sits at two manual placements.
+    vi.mocked(db.assetLocation.findMany).mockResolvedValue([
+      { assetId: "pool-1" },
+      { assetId: "pool-1" },
+    ] as never);
 
     const body = await getBooking();
 
@@ -244,6 +250,30 @@ describe("GET /api/mobile/bookings/:bookingId source locations", () => {
         where: { id: { in: ["loc-studio"] }, organizationId: "org-1" },
       })
     );
+  });
+
+  it("sends no source for a pool at one location, the same as the web booking row", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue(
+      bookingRow("ONGOING", [
+        {
+          id: "ba-pool",
+          quantity: 10,
+          assetKitId: null,
+          sourceLocationId: "loc-studio",
+          asset: POOL,
+        },
+      ]) as never
+    );
+    vi.mocked(db.location.findMany).mockResolvedValue([
+      { id: "loc-studio", name: "Studio" },
+    ] as never);
+    vi.mocked(db.assetLocation.findMany).mockResolvedValue([
+      { assetId: "pool-1" },
+    ] as never);
+
+    const body = await getBooking();
+
+    expect(body.booking.assets[0].slices[0].sourceLocation).toBeNull();
   });
 
   it("lists a pool at two locations that has not gone out, pre-picking the one with most units", async () => {

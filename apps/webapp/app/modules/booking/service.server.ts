@@ -2885,9 +2885,9 @@ async function checkoutBookingWritesWithinTx(
   /**
    * Record where each pool slice's units leave from, before the counters
    * below grow: only a slice still at 0 gets a source, so a slice going out
-   * again keeps the one it has. The standalone pools are row-locked above, so
-   * their placements cannot move between this read and the write. An invalid
-   * pick throws and rolls the whole check-out back.
+   * again keeps the one it has. The placements are read in this transaction,
+   * after the standalone pools' row locks above. An invalid pick throws and
+   * rolls the whole check-out back.
    */
   await recordCheckoutSourceLocations(tx, {
     organizationId,
