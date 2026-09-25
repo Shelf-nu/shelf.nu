@@ -94,6 +94,8 @@ export function CustodySourceSelect({
   const [open, setOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  /** One entry per option, so the arrow keys can move focus with the highlight. */
+  const itemRefs = useRef<(HTMLLIElement | null)[]>([]);
 
   const selected = options.find((option) => option.value === value) ?? null;
 
@@ -103,23 +105,20 @@ export function CustodySourceSelect({
     triggerRef.current?.focus();
   };
 
+  /**
+   * The arrow keys move keyboard focus, and focus moves the highlight (see
+   * each option's `onFocus`), so the highlighted option is always the one
+   * that has focus. Enter and Space are handled by the focused option alone;
+   * this list-level handler never picks, so one key press makes one choice.
+   */
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        setHighlightedIndex((prev) => Math.min(prev + 1, options.length - 1));
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        setHighlightedIndex((prev) => Math.max(prev - 1, 0));
-        break;
-      case "Enter": {
-        event.preventDefault();
-        const candidate = options[highlightedIndex];
-        if (candidate) choose(candidate.value);
-        break;
-      }
-    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const next =
+      event.key === "ArrowDown"
+        ? Math.min(highlightedIndex + 1, options.length - 1)
+        : Math.max(highlightedIndex - 1, 0);
+    itemRefs.current[next]?.focus();
   };
 
   return (
@@ -179,6 +178,12 @@ export function CustodySourceSelect({
             sideOffset={4}
             className="z-[999999] max-h-[280px] w-[var(--radix-popover-trigger-width)] overflow-auto rounded-md border border-gray-200 bg-white shadow-md"
             onKeyDown={handleKeyDown}
+            // Open on the selected option (set in `onOpenChange`), not on
+            // the first one the popover would focus by default.
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              itemRefs.current[highlightedIndex]?.focus();
+            }}
           >
             <ul role="listbox" aria-label={label} className="py-1">
               {options.map((option, index) => {
@@ -186,6 +191,9 @@ export function CustodySourceSelect({
                 return (
                   <li
                     key={option.value || "unplaced"}
+                    ref={(node) => {
+                      itemRefs.current[index] = node;
+                    }}
                     role="option"
                     aria-selected={isSelected}
                     tabIndex={0}
@@ -196,6 +204,7 @@ export function CustodySourceSelect({
                     )}
                     onClick={() => choose(option.value)}
                     onMouseEnter={() => setHighlightedIndex(index)}
+                    onFocus={() => setHighlightedIndex(index)}
                     onKeyDown={handleActivationKeyPress(() =>
                       choose(option.value)
                     )}
