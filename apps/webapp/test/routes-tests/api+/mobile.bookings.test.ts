@@ -31,27 +31,21 @@ vi.mock("react-router", async () => ({
   data: createDataMock(),
 }));
 
-// why: external auth — the tests must not reach Supabase, and the role is the
+// why: external auth; the tests must not reach Supabase, and the role is the
 // input that decides which scoping branch runs.
-vi.mock("~/modules/api/mobile-auth.server", () => ({
-  requireMobileAuth: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
-  requireOrganizationAccess: vi.fn().mockResolvedValue("org-1"),
-  // why: a plain literal, not the `mobileUserContext` helper — `vi.mock`
-  // factories are hoisted above the imports, so referencing the helper here
-  // throws before it is initialised. Every test overrides this in `beforeEach`
-  // anyway; this only has to be a valid shape.
-  getMobileUserContext: vi.fn().mockResolvedValue({
-    role: "ADMIN",
-    roles: ["ADMIN"],
-    effectiveRole: "ADMIN",
-    isSelfServiceOrBase: false,
-    canUseBarcodes: true,
-    canUseAudits: true,
-    canSeeAllCustody: true,
-    canSeeAllBookings: true,
-    access: { bookings: { seeAll: true, writeAll: true } },
-  }),
-}));
+vi.mock("~/modules/api/mobile-auth.server", async () => {
+  // Hoisted factories run before the imports, so the helper is loaded here.
+  // Every test overrides this in `beforeEach`; the default only has to be a
+  // valid, complete shape.
+  const { mobileUserContext } = await import("@helpers/mobile-user-context");
+  return {
+    requireMobileAuth: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
+    requireOrganizationAccess: vi.fn().mockResolvedValue("org-1"),
+    getMobileUserContext: vi
+      .fn()
+      .mockResolvedValue(mobileUserContext({ roles: ["ADMIN"] })),
+  };
+});
 
 // why: the shared visibility helpers. Stubbed to sentinels so the assertions
 // are about what the route delegates, not about a copy of their logic.

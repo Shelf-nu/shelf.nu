@@ -136,8 +136,8 @@ describe("resolveCalendarVisibility", () => {
     ).toEqual({ canSeeAllBookings: false, canSeeAllCustody: false });
   });
 
-  it("resolves a mixed membership to its highest role, not its first (F3)", () => {
-    // Before: roles[0] = SELF_SERVICE, restricted. After: ADMIN, everything.
+  it("resolves a mixed membership to its highest role, not its first", () => {
+    // ADMIN outranks SELF_SERVICE whatever the order, so the toggles do not apply.
     expect(
       resolveCalendarVisibility({
         roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
@@ -146,9 +146,8 @@ describe("resolveCalendarVisibility", () => {
     ).toEqual({ canSeeAllBookings: true, canSeeAllCustody: true });
   });
 
-  it("applies the toggle of the effective role, not of the first role (F3)", () => {
-    // Before: roles[0] = BASE, whose toggle is off, so false. After:
-    // SELF_SERVICE is the effective role, and its toggle is on, so true.
+  it("applies the toggle of the effective role, not of the first role", () => {
+    // SELF_SERVICE outranks BASE, so its toggles (on) decide, not BASE's (off).
     expect(
       resolveCalendarVisibility({
         roles: [OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE],
@@ -161,10 +160,18 @@ describe("resolveCalendarVisibility", () => {
     ).toEqual({ canSeeAllBookings: true, canSeeAllCustody: true });
   });
 
-  it("gives an empty membership BASE visibility, never admin", () => {
+  it("treats an unrecognised role as BASE and follows the BASE toggles", () => {
+    // The cast models a membership row holding a role this build does not know.
+    const roles = ["UNKNOWN_ROLE" as OrganizationRoles];
     expect(
-      resolveCalendarVisibility({ roles: [], organization: noneVisible })
+      resolveCalendarVisibility({ roles, organization: noneVisible })
     ).toEqual({ canSeeAllBookings: false, canSeeAllCustody: false });
+    expect(
+      resolveCalendarVisibility({
+        roles,
+        organization: { ...noneVisible, baseUserCanSeeBookings: true },
+      })
+    ).toEqual({ canSeeAllBookings: true, canSeeAllCustody: false });
   });
 });
 

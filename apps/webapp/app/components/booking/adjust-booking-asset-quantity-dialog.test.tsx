@@ -215,8 +215,8 @@ describe("AdjustBookingAssetQuantityDialog", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("shows the View bookings link to SELF_SERVICE when the workspace lets them see bookings (B1)", () => {
-      // Before: hidden by role alone. After: follows access.bookings.seeAll.
+    it("shows the View bookings link to SELF_SERVICE when the workspace lets them see bookings", () => {
+      // The link follows access.bookings.seeAll, which folds in the workspace toggle.
       mockAccess = accessFor(["SELF_SERVICE"], {
         selfServiceCanSeeBookings: true,
       });

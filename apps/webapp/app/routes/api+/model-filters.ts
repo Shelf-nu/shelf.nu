@@ -299,16 +299,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * setting on.
        *
        * Resolved from the membership's effective role plus the organization's
-       * settings, never from a request param, and AND-ed so the search `OR`
-       * cannot widen it. The restriction used to be opt-in via a
-       * `scopeToCustodian` query param, which a caller could simply omit:
-       * every booking row in the workspace came back to a restricted user with
-       * the setting off.
+       * settings, never from a request param (a caller could omit a param),
+       * and AND-ed so the search `OR` cannot widen it.
        *
        * Shares `custodianScopeClause` with `getBookings` so the shape matches
-       * the loader that seeded the picker; matching only `custodianUserId` here
-       * dropped bookings custodied through a legacy team-member row as soon as
-       * the user typed.
+       * the loader that seeded the picker: the clause also matches bookings
+       * custodied through a legacy team-member row, which `custodianUserId`
+       * alone would miss.
        */
       if (!access.bookings.seeAll) {
         where.AND.push(

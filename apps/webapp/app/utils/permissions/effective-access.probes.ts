@@ -415,7 +415,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     ])
   );
 
-  // D-28: custody visibility, every role set x toggles (Task 5 migrates this).
+  // D-28: custody visibility, every role set x toggles.
   snapshot["D-28"] = Object.fromEntries(
     ROLE_SETS.map((roles) => [
       key(roles),
@@ -562,7 +562,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Bookings: Task 4b =====================
 
-  // B9:D-14 (B1): "view other bookings" link in the adjust-quantity dialog:
+  // B9:D-14: "view other bookings" link in the adjust-quantity dialog:
   // `useRoleAccess().bookings.seeAll`
   // (components/booking/adjust-booking-asset-quantity-dialog.tsx:113).
   // Recorded per booking see-toggle pair, since the migrated gate reads them.
@@ -572,8 +572,8 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // B9:F3: calendar feed visibility, the member's effective role folded with
   // the workspace toggles (modules/calendar-subscription/service.server.ts:298-315,
-  // `resolveCalendarVisibility`). Calls the real function, so this probe
-  // needed no rewrite when Task 4b changed the function's body.
+  // `resolveCalendarVisibility`). Calls the real function, so the probe
+  // tracks its body without a rewrite.
   snapshot["B9:F3:calendar-feed"] = perRoleSet((roles) =>
     perToggle(TOGGLE_COMBOS, (t) =>
       resolveCalendarVisibility({ roles, organization: t })
