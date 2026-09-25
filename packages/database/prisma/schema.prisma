@@ -1721,6 +1721,29 @@ model BookingAsset {
   // departure nothing can size.
   checkedOutQuantity Int @default(0)
 
+  // The location a QUANTITY_TRACKED slice's units left from, recorded once,
+  // when the slice is first checked out (`checkedOutQuantity` goes from 0).
+  // A slice sent out again keeps it.
+  //
+  // Check-in reads it: units reported consumed, lost or damaged come off this
+  // location's manual placement, so a pool placed at several locations loses
+  // them where they actually came from. NULL = the pool's unplaced units, a
+  // pool with no placements, or a slice checked out before this column
+  // existed; check-in then lets the unplaced units absorb the drop, as before.
+  //
+  // A kit-driven slice records its kit's location (`Kit.locationId`, may be
+  // NULL). That is for display only: kit units never come off a manual
+  // placement.
+  //
+  // Same plain-column treatment as `assetKitId` / `sourceKitId` above: the FK
+  // to `Location("id")` with `ON DELETE SET NULL ON UPDATE CASCADE` lives in
+  // the migration SQL, not in a Prisma `@relation`, because one more relation
+  // on this model (its grandparent `Booking` is a hub) pushes the extended
+  // client's generics past TS's recursion limit (TS2321), and a
+  // `bookingAssets` back-relation on `Location` would add another. Services
+  // read the id and look the location up themselves.
+  sourceLocationId String?
+
   // The old `@@unique([bookingId, assetId])` is replaced by two partial
   // unique indexes in the migration SQL (Postgres-only feature Prisma
   // can't express in the schema):
@@ -1732,6 +1755,7 @@ model BookingAsset {
   @@index([assetId])
   @@index([assetKitId])
   @@index([sourceKitId])
+  @@index([sourceLocationId])
 }
 
 model Booking {

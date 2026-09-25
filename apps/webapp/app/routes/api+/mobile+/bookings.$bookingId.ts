@@ -45,6 +45,8 @@ import {
   combineDispatchedWithStoredUnits,
   computeDispatchedUnitsByAsset,
 } from "~/modules/booking/checkout-attribution";
+import { loadSliceSourceLocations } from "~/modules/booking/checkout-source-location.server";
+import type { SliceSourceLocation } from "~/modules/booking/checkout-source-location.server";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
@@ -171,6 +173,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             id: true,
             quantity: true,
             assetKitId: true,
+            // Where a pool slice's units left from, recorded at check-out.
+            // Resolved to `{ id, name }` per slice below.
+            sourceLocationId: true,
             asset: {
               select: {
                 id: true,
@@ -292,7 +297,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       quantity: number;
       assetKitId: string | null;
       kit: { id: string; name: string } | null;
+      /**
+       * The location this pool slice's units left from, recorded when it was
+       * first checked out. `null` for individual assets, slices not out yet,
+       * the unplaced units, or a location since deleted.
+       */
+      sourceLocation: SliceSourceLocation | null;
     };
+    const sourceLocationsById = await loadSliceSourceLocations({
+      organizationId,
+      locationIds: booking.bookingAssets.map((ba) => ba.sourceLocationId),
+    });
     type CollapsedRow = {
       assetId: string;
       first: (typeof booking.bookingAssets)[number];
@@ -315,6 +330,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         quantity: ba.quantity,
         assetKitId: ba.assetKitId,
         kit: sliceKit,
+        sourceLocation:
+          ba.asset.type === AssetType.QUANTITY_TRACKED && ba.sourceLocationId
+            ? sourceLocationsById.get(ba.sourceLocationId) ?? null
+            : null,
       };
       const existing = byAssetId.get(ba.asset.id);
       if (existing) {

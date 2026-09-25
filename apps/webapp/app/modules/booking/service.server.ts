@@ -144,6 +144,9 @@ import {
   compareSlicesForGreedyFill,
   computeDispatchedUnitsTotalByAsset,
 } from "./checkout-attribution";
+import type { SourceLocationSubmission } from "./checkout-source-location";
+import { parseSourceLocationsFromFormData } from "./checkout-source-location";
+import { recordCheckoutSourceLocations } from "./checkout-source-location.server";
 import {
   ADDABLE_BOOKING_STATUSES,
   BOOKING_COMMON_INCLUDE,
@@ -2724,6 +2727,7 @@ async function checkoutBookingWritesWithinTx(
     from,
     to,
     checkedOutById,
+    sourceLocations,
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
@@ -2757,6 +2761,12 @@ async function checkoutBookingWritesWithinTx(
      */
     from: Booking["from"];
     to: Booking["to"];
+    /**
+     * Where each pool's units come from, as picked in the check-out dialog
+     * or sent by the phone. Missing answers resolve to the default; see
+     * {@link recordCheckoutSourceLocations}.
+     */
+    sourceLocations?: SourceLocationSubmission;
   }
 ) {
   /**
@@ -2871,6 +2881,19 @@ async function checkoutBookingWritesWithinTx(
     tx,
     bookingId
   );
+
+  /**
+   * Record where each pool slice's units leave from, before the counters
+   * below grow: only a slice still at 0 gets a source, so a slice going out
+   * again keeps the one it has. The standalone pools are row-locked above, so
+   * their placements cannot move between this read and the write. An invalid
+   * pick throws and rolls the whole check-out back.
+   */
+  await recordCheckoutSourceLocations(tx, {
+    organizationId,
+    sliceIds: departingSlices.map((s: { id: string }) => s.id),
+    submission: sourceLocations,
+  });
 
   /**
    * Record the checkout on each slice. Together with the residue session row
@@ -3109,12 +3132,19 @@ export async function checkoutBooking({
   from,
   to,
   userId,
+  sourceLocations,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckoutIntentEnum;
   from?: Date | null;
   to?: Date | null;
   userId?: string;
+  /**
+   * Where each pool's units come from, keyed by slice or asset id. Only
+   * pools at two or more placements are asked; anything missing resolves to
+   * the default (see {@link recordCheckoutSourceLocations}).
+   */
+  sourceLocations?: SourceLocationSubmission;
 }) {
   try {
     const bookingFound = await db.booking
@@ -3402,6 +3432,7 @@ export async function checkoutBooking({
           from: bookingFound.from,
           to: bookingFound.to,
           checkedOutById: userId ?? null,
+          sourceLocations,
         });
 
         // Activity events — one BOOKING_CHECKED_OUT per asset on the
@@ -3526,6 +3557,7 @@ export async function fulfilModelRequestsAndCheckout({
   hints,
   from,
   to,
+  sourceLocations,
 }: {
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
@@ -3543,6 +3575,12 @@ export async function fulfilModelRequestsAndCheckout({
   hints: ClientHint;
   from?: Date | null;
   to?: Date | null;
+  /**
+   * Where each pool's units come from. Keyed by asset id when the scan adds
+   * the slice in this same request (the slice id does not exist yet), or by
+   * slice id for slices already on the booking.
+   */
+  sourceLocations?: SourceLocationSubmission;
 }) {
   try {
     /**
@@ -3790,6 +3828,7 @@ export async function fulfilModelRequestsAndCheckout({
           from: bookingFound.from,
           to: bookingFound.to,
           checkedOutById: userId ?? null,
+          sourceLocations,
         });
 
         /**
@@ -7825,6 +7864,7 @@ export async function partialCheckoutBooking({
   userId,
   hints,
   intentChoice,
+  sourceLocations,
 }: Pick<Booking, "id" | "organizationId"> & {
   /** Legacy payload — asset IDs only, no per-asset quantities. INDIVIDUAL rows
    *  implicitly carry quantity = 1. */
@@ -7836,6 +7876,12 @@ export async function partialCheckoutBooking({
   userId: User["id"];
   hints: ClientHint;
   intentChoice?: CheckoutIntentEnum;
+  /**
+   * Where each pool's units come from, keyed by slice or asset id. Recorded
+   * on a slice the first time it goes out; see
+   * {@link recordCheckoutSourceLocations}.
+   */
+  sourceLocations?: SourceLocationSubmission;
 }) {
   try {
     // Dedupe once up front so counts, the PartialBookingCheckout record, and the
@@ -8193,6 +8239,7 @@ export async function partialCheckoutBooking({
         from: bookingFound.from,
         to: bookingFound.to,
         userId,
+        sourceLocations,
       });
 
       // Record the final batch in the partial-checkout source of truth.
@@ -9112,6 +9159,20 @@ export async function partialCheckoutBooking({
             bookingAssetId: sessionBookingAssetIds[index] || null,
             quantity: sessionQuantities[index] ?? 1,
           })),
+        });
+
+        /**
+         * Record where each pool slice's units leave from, before the counter
+         * below grows: only a slice still at 0 gets a source, so a slice this
+         * booking sent out in an earlier session keeps the one it has. An
+         * invalid pick throws and rolls the whole session back.
+         */
+        await recordCheckoutSourceLocations(tx, {
+          organizationId,
+          sliceIds: [...unitsBySliceId]
+            .filter(([, units]) => units > 0)
+            .map(([sliceId]) => sliceId),
+          submission: sourceLocations,
         });
 
         for (const [sliceId, units] of unitsBySliceId) {
@@ -16880,6 +16941,7 @@ export async function checkoutAssets({
     userId,
     hints,
     intentChoice: checkoutIntentChoice,
+    sourceLocations: parseSourceLocationsFromFormData(formData),
   });
 
   return respondToPartialCheckout({
@@ -17191,6 +17253,7 @@ export async function checkoutRemainingAssets({
     userId,
     hints,
     intentChoice: checkoutIntentChoice,
+    sourceLocations: parseSourceLocationsFromFormData(formData),
   });
 
   return respondToPartialCheckout({

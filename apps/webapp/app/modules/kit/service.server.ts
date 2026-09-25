@@ -97,6 +97,7 @@ import {
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import type { AllowedCustodianFilterIds } from "../asset/utils.server";
+import { recordCheckoutSourceLocations } from "../booking/checkout-source-location.server";
 import { PLANNING_BOOKING_STATUSES } from "../booking/constants";
 import { lockBookingForStatusCheck } from "../booking/utils.server";
 import {
@@ -6576,6 +6577,24 @@ export async function updateKitAssets({
                     assetKitIdsByQuantity.set(s.quantity, [s.assetKitId]);
                   }
                 }
+                /**
+                 * A pool member goes out with its kit, so it leaves from the
+                 * kit's location. Recorded before its counter is set, while
+                 * the counter still reads 0 (see
+                 * `recordCheckoutSourceLocations`).
+                 */
+                const departingKitSlices = await tx.bookingAsset.findMany({
+                  where: {
+                    bookingId: { in: eligibleBookingIds },
+                    assetKitId: { in: stampable.map((s) => s.assetKitId) },
+                  },
+                  select: { id: true },
+                });
+                await recordCheckoutSourceLocations(tx, {
+                  organizationId,
+                  sliceIds: departingKitSlices.map((slice) => slice.id),
+                });
+
                 for (const [quantity, assetKitIds] of assetKitIdsByQuantity) {
                   await tx.bookingAsset.updateMany({
                     // Same two keys as the marker write above, and tenancy comes
