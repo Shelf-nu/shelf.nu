@@ -108,8 +108,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         custody: { include: { custodian: true } },
         tags: true,
         customFields: true,
-        // Pulled so the duplicate inherits the source asset's primary
-        // placement (`duplicateAsset` reads it via `getPrimaryLocation`).
+        // Pulled so an individual duplicate inherits the source asset's
+        // primary placement (`duplicateAsset` reads it via
+        // `getPrimaryLocation`). A quantity-tracked duplicate starts unplaced.
         assetLocations: {
           select: { location: { select: { id: true } } },
         },

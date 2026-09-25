@@ -46,6 +46,7 @@ import {
   buildAssetKitCreateData,
   checkOutQuantity,
   createAsset,
+  duplicateAsset,
   setKitCustodyAfterAssetImport,
   getActiveCustomFieldsForAsset,
   moveAssetLocationUnits,
@@ -530,6 +531,181 @@ describe("relinkAssetQrCode (asset)", () => {
     });
     expect(db.asset.update).not.toHaveBeenCalled();
     expect(createNote).not.toHaveBeenCalled();
+  });
+});
+
+describe("duplicateAsset", () => {
+  type SourceAsset = Parameters<typeof duplicateAsset>[0]["asset"];
+
+  const mockAssetCreate = db.asset.create as ReturnType<typeof vitest.fn>;
+  const mockAssetLocationCreate = db.assetLocation.create as ReturnType<
+    typeof vitest.fn
+  >;
+
+  /** A source asset carrying only the fields `duplicateAsset` reads. */
+  function makeSource(overrides: Partial<SourceAsset> = {}): SourceAsset {
+    return {
+      id: "asset-src",
+      title: "Boxes",
+      description: "Cardboard boxes",
+      categoryId: null,
+      valuation: null,
+      mainImage: null,
+      tags: [],
+      customFields: [],
+      custody: [],
+      assetLocations: [],
+      type: AssetType.INDIVIDUAL,
+      quantity: null,
+      minQuantity: null,
+      consumptionType: null,
+      unitOfMeasure: null,
+      ...overrides,
+    } as SourceAsset;
+  }
+
+  /** The `data` passed to each `db.asset.create`, in call order. */
+  function createdRows() {
+    return mockAssetCreate.mock.calls.map(
+      ([args]) => (args as { data: Record<string, unknown> }).data
+    );
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // `mockReset` drops any `mockResolvedValueOnce` queued by earlier suites,
+    // which a plain clear would leave in place.
+    mockAssetCreate.mockReset();
+    mockAssetCreate.mockResolvedValue({ id: "asset-new" });
+    mockAssetLocationCreate.mockReset();
+    mockAssetLocationCreate.mockResolvedValue({});
+    vi.mocked(getActiveCustomFields).mockResolvedValue([]);
+  });
+
+  it.each(["ONE_WAY", "TWO_WAY"] as const)(
+    "copies the tracking method, quantity, unit and %s behaviour of a quantity-tracked asset",
+    async (consumptionType) => {
+      await duplicateAsset({
+        asset: makeSource({
+          type: AssetType.QUANTITY_TRACKED,
+          quantity: 100,
+          minQuantity: 10,
+          consumptionType,
+          unitOfMeasure: "boxes",
+          assetLocations: [
+            { location: { id: "loc-a" } },
+            { location: { id: "loc-b" } },
+          ],
+        }),
+        userId: "user-1",
+        amountOfDuplicates: 1,
+        organizationId: "org-1",
+      });
+
+      expect(createdRows()).toEqual([
+        expect.objectContaining({
+          type: AssetType.QUANTITY_TRACKED,
+          quantity: 100,
+          minQuantity: 10,
+          consumptionType,
+          unitOfMeasure: "boxes",
+        }),
+      ]);
+    }
+  );
+
+  it("leaves a quantity-tracked copy unplaced", async () => {
+    // A pool split across two locations must not be collapsed into one
+    // placement of the full quantity; its units are placed from the copy's
+    // asset page.
+    await duplicateAsset({
+      asset: makeSource({
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        consumptionType: "ONE_WAY",
+        unitOfMeasure: "boxes",
+        assetLocations: [
+          { location: { id: "loc-a" } },
+          { location: { id: "loc-b" } },
+        ],
+      }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(mockAssetCreate).toHaveBeenCalledTimes(1);
+    expect(mockAssetLocationCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps an individual copy at the source's primary location", async () => {
+    await duplicateAsset({
+      asset: makeSource({ assetLocations: [{ location: { id: "loc-a" } }] }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({
+        type: AssetType.INDIVIDUAL,
+        quantity: undefined,
+        consumptionType: undefined,
+        unitOfMeasure: undefined,
+      }),
+    ]);
+    expect(mockAssetLocationCreate).toHaveBeenCalledWith({
+      data: {
+        assetId: "asset-new",
+        locationId: "loc-a",
+        organizationId: "org-1",
+        quantity: 1,
+      },
+    });
+  });
+
+  it("refuses to copy a quantity-tracked asset with no units in stock", async () => {
+    await expect(
+      duplicateAsset({
+        asset: makeSource({
+          type: AssetType.QUANTITY_TRACKED,
+          quantity: 0,
+          consumptionType: "ONE_WAY",
+          unitOfMeasure: "boxes",
+        }),
+        userId: "user-1",
+        amountOfDuplicates: 2,
+        organizationId: "org-1",
+      })
+    ).rejects.toMatchObject({ status: 400, title: "No units to copy" });
+
+    expect(mockAssetCreate).not.toHaveBeenCalled();
+  });
+
+  it('titles a single copy "<title> (copy)"', async () => {
+    await duplicateAsset({
+      asset: makeSource(),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows().map((row) => row.title)).toEqual(["Boxes (copy)"]);
+  });
+
+  it("numbers the titles when creating several copies", async () => {
+    await duplicateAsset({
+      asset: makeSource(),
+      userId: "user-1",
+      amountOfDuplicates: 3,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows().map((row) => row.title)).toEqual([
+      "Boxes (copy 1)",
+      "Boxes (copy 2)",
+      "Boxes (copy 3)",
+    ]);
   });
 });
 
