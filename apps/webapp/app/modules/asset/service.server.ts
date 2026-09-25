@@ -49,6 +49,7 @@ import {
 } from "~/modules/asset/availability-primitives.server";
 import type { ReleaseLine } from "~/modules/asset/custody-source";
 import {
+  bookedOutFromSource,
   custodyFromSource,
   hasMultipleSources,
   isUnplacedSource,
@@ -8665,6 +8666,7 @@ export async function checkOutQuantity({
               sourceName,
               placedCount,
               inCustody: custodyFromSource(sources.state, source.locationId),
+              onBooking: bookedOutFromSource(sources.state, source.locationId),
             }),
             label,
             status: 400,

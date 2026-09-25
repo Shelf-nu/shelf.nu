@@ -217,6 +217,9 @@ vitest.mock("~/database/db.server", () => {
       // "Something went wrong while partially checking out booking" error.
       consumptionLog: {
         aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+        // why: units out on other bookings from a location are read with
+        // their check-in logs; nothing has come back in these fixtures.
+        findMany: vitest.fn().mockResolvedValue([]),
       },
       // Escape hatch for `beforeEach` to clear the in-memory PBC session log
       // between tests so a prior test's writes can't leak into the next one's

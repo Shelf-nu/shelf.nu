@@ -9,6 +9,7 @@ import {
   planCustodyRehome,
   planDrainRelease,
   resolveCustodySource,
+  sourceShortfall,
   unitsLeftAtSource,
   unplacedUnits,
 } from "./custody-source";
@@ -44,6 +45,89 @@ function row(
 ): CustodyRowForPlan {
   return { id, teamMemberId, locationId, quantity, createdAt };
 }
+
+describe("units out on a booking", () => {
+  /** 40 at A and 60 at B, with 40 of A's out on a booking. */
+  const withBooking = (): CustodySourceState => ({
+    ...state(100, [
+      [A, 40],
+      [B, 60],
+    ]),
+    bookedOut: [{ locationId: A, quantity: 40 }],
+  });
+
+  it("are not left at the location they left from", () => {
+    const s = withBooking();
+    expect(unitsLeftAtSource(s, A)).toBe(0);
+    expect(unitsLeftAtSource(s, B)).toBe(60);
+  });
+
+  it("stack with custody from the same location", () => {
+    const s: CustodySourceState = {
+      ...state(
+        100,
+        [
+          [A, 40],
+          [B, 60],
+        ],
+        [[A, 10]]
+      ),
+      bookedOut: [{ locationId: A, quantity: 25 }],
+    };
+    expect(unitsLeftAtSource(s, A)).toBe(5);
+  });
+
+  it("never change what the unplaced units have left", () => {
+    const s: CustodySourceState = {
+      ...state(110, [
+        [A, 40],
+        [B, 60],
+      ]),
+      bookedOut: [{ locationId: A, quantity: 40 }],
+    };
+    expect(unitsLeftAtSource(s, null)).toBe(10);
+  });
+
+  it("show on the option and steer the pre-selection away from an empty location", () => {
+    const options = buildCustodySourceOptions(withBooking(), [
+      { id: A, name: "Camera Room" },
+      { id: B, name: "Studio" },
+    ]);
+    expect(options[0]).toMatchObject({
+      locationId: A,
+      placed: 40,
+      onBooking: 40,
+      left: 0,
+    });
+    expect(defaultSourceOption(options)?.locationId).toBe(B);
+  });
+
+  it("are named in the refusal", () => {
+    expect(
+      sourceShortfall({
+        sourceName: "Camera Room",
+        placedCount: "40 pcs",
+        inCustody: 0,
+        onBooking: 40,
+      }).message
+    ).toBe("Camera Room has 40 pcs and 40 are out on a booking.");
+    expect(
+      sourceShortfall({
+        sourceName: "Camera Room",
+        placedCount: "40 pcs",
+        inCustody: 10,
+        onBooking: 30,
+      }).message
+    ).toBe("Camera Room has 40 pcs: 10 in custody and 30 out on a booking.");
+    expect(
+      sourceShortfall({
+        sourceName: "Camera Room",
+        placedCount: "2 pcs",
+        inCustody: 1,
+      }).message
+    ).toBe("Camera Room has 2 pcs and 1 is already in custody.");
+  });
+});
 
 describe("unitsLeftAtSource", () => {
   it("is placed minus custody from that location", () => {
@@ -153,6 +237,7 @@ describe("buildCustodySourceOptions", () => {
         label: "Camera Room",
         placed: 2,
         inCustody: 1,
+        onBooking: 0,
         left: 1,
       },
       {
@@ -161,6 +246,7 @@ describe("buildCustodySourceOptions", () => {
         label: "Studio",
         placed: 2,
         inCustody: 0,
+        onBooking: 0,
         left: 2,
       },
       {
@@ -169,6 +255,7 @@ describe("buildCustodySourceOptions", () => {
         label: "Unplaced",
         placed: 3,
         inCustody: 0,
+        onBooking: 0,
         left: 3,
       },
     ]);
@@ -267,6 +354,7 @@ describe("defaultSourceOption", () => {
           label: "Unplaced",
           placed: 3,
           inCustody: 0,
+          onBooking: 0,
           left: 3,
         },
       ])

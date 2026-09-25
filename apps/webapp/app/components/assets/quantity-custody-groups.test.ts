@@ -173,13 +173,17 @@ describe("formatCustodySourceOption", () => {
       label: "Camera Room",
       placed: 2,
       inCustody: 0,
+      onBooking: 0,
       left: 2,
     };
     expect(formatCustodySourceOption(option, "pcs")).toBe(
       "Camera Room · 2 pcs"
     );
     expect(
-      formatCustodySourceOption({ ...option, inCustody: 1, left: 1 }, "pcs")
+      formatCustodySourceOption(
+        { ...option, inCustody: 1, onBooking: 0, left: 1 },
+        "pcs"
+      )
     ).toBe("Camera Room · 2 pcs · 1 in custody");
   });
 });

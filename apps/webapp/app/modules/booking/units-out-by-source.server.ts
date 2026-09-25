@@ -6,10 +6,10 @@
  * booking never changes a location's placed count, so this is information,
  * not a correction.
  *
- * Its own module because it reads the disposition categories from
- * `booking-slice-unit-counts.server`, which imports the booking service; the
- * booking service imports `checkout-source-location.server`, so the counter
- * cannot live there without an import cycle.
+ * The same numbers also lower what a location has left to hand out
+ * (`unitsLeftAtSource`): units out on a booking from a location are not there
+ * for custody to take. So this module is read by the custody source loaders,
+ * and imports nothing from the booking service to keep that import one-way.
  *
  * @see {@link file://./checkout-source-location.server.ts} where the source is recorded
  * @see {@link file://../../routes/_layout+/locations.$locationId.assets.tsx} the reader
@@ -18,9 +18,12 @@
 import { BookingStatus } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 
-import { BOOKING_DISPOSITION_CATEGORIES } from "./booking-slice-unit-counts.server";
-import { attributeDispositionsByBookingAsset } from "./checkout-attribution";
+import {
+  attributeDispositionsByBookingAsset,
+  BOOKING_DISPOSITION_CATEGORIES,
+} from "./checkout-attribution";
 
 /** A booking slice as the counter reads it. */
 export type CountedSlice = {
@@ -96,11 +99,119 @@ export function unitsStillOutBySlice({
   return out;
 }
 
+/** Client this module reads through: the root `db` or a transaction. */
+type BookedOutClient = Pick<
+  ExtendedPrismaClient,
+  "bookingAsset" | "consumptionLog"
+>;
+
+/** Units of one pool still out on bookings, having left from one location. */
+export type BookedOutFromLocation = { locationId: string; quantity: number };
+
+/**
+ * For each pool, the units still out on ONGOING or OVERDUE bookings per
+ * location they left from: every standalone slice with a recorded source,
+ * minus what has come back on it (see {@link unitsStillOutBySlice}).
+ *
+ * Kit slices are left out: their units belong to the kit, never to a manual
+ * placement. So are slices with no recorded source.
+ *
+ * @param client - `db`, or the caller's transaction so the read sees its lock
+ * @param args.assetIds - Pools the caller has already proven belong to the
+ *   organization (a locked row or an org-scoped list)
+ * @param args.organizationId - Extra scope when the caller has it
+ * @param args.locationId - Only slices that left from this location
+ * @returns Per asset id, the non-zero units out per location
+ */
+export async function loadBookedOutBySource(
+  client: BookedOutClient,
+  {
+    assetIds,
+    organizationId,
+    locationId,
+  }: { assetIds: string[]; organizationId?: string; locationId?: string }
+): Promise<Map<string, BookedOutFromLocation[]>> {
+  const result = new Map<string, BookedOutFromLocation[]>();
+  const ids = [...new Set(assetIds)];
+  if (ids.length === 0) return result;
+
+  const sliceSelect = {
+    id: true,
+    bookingId: true,
+    assetId: true,
+    quantity: true,
+    assetKitId: true,
+  } as const;
+  const sourced = await client.bookingAsset.findMany({
+    where: {
+      assetId: { in: ids },
+      assetKitId: null,
+      sourceLocationId: locationId ?? { not: null },
+      checkedOutQuantity: { gt: 0 },
+      booking: {
+        ...(organizationId ? { organizationId } : {}),
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+      },
+    },
+    select: {
+      ...sliceSelect,
+      checkedOutQuantity: true,
+      sourceLocationId: true,
+    },
+  });
+  if (sourced.length === 0) return result;
+
+  const bookingIds = [...new Set(sourced.map((slice) => slice.bookingId))];
+  const sourcedAssetIds = [...new Set(sourced.map((slice) => slice.assetId))];
+  const [siblings, logs] = await Promise.all([
+    client.bookingAsset.findMany({
+      where: {
+        bookingId: { in: bookingIds },
+        assetId: { in: sourcedAssetIds },
+      },
+      select: sliceSelect,
+    }),
+    client.consumptionLog.findMany({
+      where: {
+        // Booking and asset ids come from the scoped read above.
+        bookingId: { in: bookingIds },
+        assetId: { in: sourcedAssetIds },
+        category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
+      },
+      select: {
+        bookingId: true,
+        assetId: true,
+        bookingAssetId: true,
+        quantity: true,
+      },
+    }),
+  ]);
+
+  const stillOut = unitsStillOutBySlice({ sourced, siblings, logs });
+  const byAssetAndLocation = new Map<string, Map<string, number>>();
+  for (const slice of sourced) {
+    const out = stillOut.get(slice.id) ?? 0;
+    if (out <= 0 || !slice.sourceLocationId) continue;
+    const perLocation =
+      byAssetAndLocation.get(slice.assetId) ?? new Map<string, number>();
+    perLocation.set(
+      slice.sourceLocationId,
+      (perLocation.get(slice.sourceLocationId) ?? 0) + out
+    );
+    byAssetAndLocation.set(slice.assetId, perLocation);
+  }
+  for (const [assetId, perLocation] of byAssetAndLocation) {
+    result.set(
+      assetId,
+      [...perLocation].map(([id, quantity]) => ({ locationId: id, quantity }))
+    );
+  }
+  return result;
+}
+
 /**
  * How many units of each pool are out on a booking right now having left from
- * one location: for every standalone slice on an ONGOING or OVERDUE booking
- * whose recorded source is `locationId`, the units still out on it (see
- * {@link unitsStillOutBySlice}).
+ * one location, for the location page's "· N on a booking".
  *
  * Counts only; a booking never changes a location's placed count.
  *
@@ -118,65 +229,17 @@ export async function countUnitsOnBookingsFromLocation({
   locationId: string;
   assetIds: string[];
 }): Promise<Map<string, number>> {
-  const counts = new Map<string, number>();
-  const ids = [...new Set(assetIds)];
-  if (ids.length === 0) return counts;
-
-  const sliceSelect = {
-    id: true,
-    bookingId: true,
-    assetId: true,
-    quantity: true,
-    assetKitId: true,
-  } as const;
-  const sourced = await db.bookingAsset.findMany({
-    where: {
-      sourceLocationId: locationId,
-      assetKitId: null,
-      assetId: { in: ids },
-      checkedOutQuantity: { gt: 0 },
-      booking: {
-        organizationId,
-        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-      },
-    },
-    select: { ...sliceSelect, checkedOutQuantity: true },
+  const bookedOut = await loadBookedOutBySource(db, {
+    assetIds,
+    organizationId,
+    locationId,
   });
-  if (sourced.length === 0) return counts;
-
-  const bookingIds = [...new Set(sourced.map((slice) => slice.bookingId))];
-  const sourcedAssetIds = [...new Set(sourced.map((slice) => slice.assetId))];
-  const [siblings, logs] = await Promise.all([
-    db.bookingAsset.findMany({
-      where: {
-        bookingId: { in: bookingIds },
-        assetId: { in: sourcedAssetIds },
-        booking: { organizationId },
-      },
-      select: sliceSelect,
-    }),
-    db.consumptionLog.findMany({
-      where: {
-        // Booking ids come from the org-scoped read above.
-        bookingId: { in: bookingIds },
-        assetId: { in: sourcedAssetIds },
-        category: { in: [...BOOKING_DISPOSITION_CATEGORIES] },
-      },
-      select: {
-        bookingId: true,
-        assetId: true,
-        bookingAssetId: true,
-        quantity: true,
-      },
-    }),
-  ]);
-
-  const stillOut = unitsStillOutBySlice({ sourced, siblings, logs });
-  for (const slice of sourced) {
-    const out = stillOut.get(slice.id) ?? 0;
-    if (out > 0) {
-      counts.set(slice.assetId, (counts.get(slice.assetId) ?? 0) + out);
-    }
+  const counts = new Map<string, number>();
+  for (const [assetId, rows] of bookedOut) {
+    counts.set(
+      assetId,
+      rows.reduce((sum, row) => sum + row.quantity, 0)
+    );
   }
   return counts;
 }

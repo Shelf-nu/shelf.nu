@@ -158,6 +158,9 @@ vitest.mock("~/database/db.server", () => ({
     // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
     bookingAsset: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      // why: a pool's units left at each location also subtract units out on
+      // bookings from there; no test here books a pool out, so none are.
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     // why: moveAssetLocationUnits + placeUnplacedUnits read/write the
     // AssetLocation pivot for the manual placement rows. `findFirst` is

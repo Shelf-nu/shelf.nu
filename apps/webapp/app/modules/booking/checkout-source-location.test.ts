@@ -6,6 +6,7 @@ import type {
 } from "./checkout-source-location";
 import {
   checkinPlacementSources,
+  checkoutSourceOptions,
   defaultSourceLocationId,
   parseSourceLocationsFromFormData,
   poolAsksForSource,
@@ -20,12 +21,16 @@ const cameraRoom = {
   locationId: "loc-camera",
   name: "Camera Room",
   placed: 60,
+  inCustody: 0,
+  onBooking: 0,
   left: 60,
 };
 const studio = {
   locationId: "loc-studio",
   name: "Studio",
   placed: 40,
+  inCustody: 0,
+  onBooking: 0,
   left: 40,
 };
 
@@ -86,8 +91,8 @@ describe("defaultSourceLocationId", () => {
     expect(
       defaultSourceLocationId(
         snapshot([
-          { ...cameraRoom, placed: 60, left: 5 },
-          { ...studio, placed: 40, left: 40 },
+          { ...cameraRoom, placed: 60, inCustody: 0, onBooking: 0, left: 5 },
+          { ...studio, placed: 40, inCustody: 0, onBooking: 0, left: 40 },
         ])
       )
     ).toBe("loc-studio");
@@ -331,5 +336,24 @@ describe("sliceForDisposition", () => {
 
   it("guesses nothing when an untagged asset has several slices", () => {
     expect(sliceForDisposition(slices, { assetId: "pool-1" })).toBeNull();
+  });
+});
+
+describe("checkoutSourceOptions", () => {
+  it("names custody and bookings on a location the same way the location page does", () => {
+    expect(
+      checkoutSourceOptions({
+        unitOfMeasure: "pcs",
+        unplaced: 5,
+        placements: [
+          { ...cameraRoom, inCustody: 10, onBooking: 20, left: 30 },
+          studio,
+        ],
+      }).map((option) => option.label)
+    ).toEqual([
+      "Camera Room · 60 pcs · 10 in custody · 20 on a booking",
+      "Studio · 40 pcs",
+      "Unplaced · 5 pcs",
+    ]);
   });
 });

@@ -246,6 +246,8 @@ const { tables, fakeDb, counter } = vi.hoisted(() => {
     },
     bookingAsset: {
       aggregate: async () => ({ _sum: { quantity: 0 } }),
+      // Units out on bookings per location: none in these scenarios.
+      findMany: async () => [],
     },
     teamMember: {
       findFirst: async ({ where }: { where: Row }) =>

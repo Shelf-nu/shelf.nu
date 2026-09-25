@@ -120,7 +120,14 @@ export type SourcePlacement = {
   name: string;
   /** Units placed there (`AssetLocation.quantity`). */
   placed: number;
-  /** Units that location has left to give. Drives the default. */
+  /** Units in custody taken from there. */
+  inCustody: number;
+  /** Units out on other bookings that left from there. */
+  onBooking: number;
+  /**
+   * Units that location has left to give: placed minus both of the above.
+   * Drives the default.
+   */
   left: number;
 };
 
@@ -168,9 +175,10 @@ export function sourceUnitLabel(unitOfMeasure: string | null): string {
 
 /**
  * The options a "From location" select offers for one pool: each manual
- * placement as "Camera Room · 60 pcs", then "Unplaced · 5 pcs" when the pool
- * has unplaced units. The counts are what is placed there, the same numbers
- * the asset page shows.
+ * placement as "Camera Room · 60 pcs", with "· 10 in custody" and "· 20 on a
+ * booking" when some of those units are out, then "Unplaced · 5 pcs" when the
+ * pool has unplaced units. The same words as the location page's row and the
+ * custody dialog.
  *
  * @param question - The pool being asked about
  * @returns `value` is the form value (a location id, or the unplaced sentinel)
@@ -182,10 +190,14 @@ export function checkoutSourceOptions(
   >
 ): Array<{ value: string; label: string }> {
   const unit = sourceUnitLabel(question.unitOfMeasure);
-  const options = question.placements.map((placement) => ({
-    value: placement.locationId,
-    label: `${placement.name} · ${placement.placed} ${unit}`,
-  }));
+  const options = question.placements.map((placement) => {
+    let label = `${placement.name} · ${placement.placed} ${unit}`;
+    if (placement.inCustody > 0)
+      label += ` · ${placement.inCustody} in custody`;
+    if (placement.onBooking > 0)
+      label += ` · ${placement.onBooking} on a booking`;
+    return { value: placement.locationId, label };
+  });
   if (question.unplaced > 0) {
     options.push({
       value: UNPLACED_SOURCE_FORM_VALUE,

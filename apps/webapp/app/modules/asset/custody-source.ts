@@ -51,6 +51,16 @@ export type SourceCustodyRow = {
   quantity: number;
 };
 
+/**
+ * Units of a pool still out on an ONGOING or OVERDUE booking, having left
+ * from one location (the slice's recorded `BookingAsset.sourceLocationId`).
+ * Standalone slices only: kit units never come from a manual placement.
+ */
+export type SourceBookedOutRow = {
+  locationId: string;
+  quantity: number;
+};
+
 /** What the source rules need to know about a pool. */
 export type CustodySourceState = {
   /** `Asset.quantity`. */
@@ -59,6 +69,11 @@ export type CustodySourceState = {
   placements: SourcePlacement[];
   /** Operator custody rows only (`kitCustodyId` NULL). */
   operatorCustody: SourceCustodyRow[];
+  /**
+   * Units out on bookings per location they left from. Omitted by callers
+   * that only plan custody moves, which never read it.
+   */
+  bookedOut?: SourceBookedOutRow[];
 };
 
 /**
@@ -92,14 +107,30 @@ export function custodyFromSource(
 }
 
 /**
- * How many units a source has left to hand out: placed there minus already in
- * custody from there. For NULL: the unplaced units minus custody recorded
- * against them. Never negative.
+ * Units out on bookings that left from `locationId`. Always 0 for the
+ * unplaced units: a booking slice with no recorded location cannot be told
+ * apart from one checked out before locations were recorded, so the
+ * pool-level availability check covers those.
+ */
+export function bookedOutFromSource(
+  state: CustodySourceState,
+  locationId: string | null
+): number {
+  if (locationId === null) return 0;
+  return (state.bookedOut ?? [])
+    .filter((row) => row.locationId === locationId)
+    .reduce((sum, row) => sum + row.quantity, 0);
+}
+
+/**
+ * How many units a source has left to hand out: placed there, minus already
+ * in custody from there, minus out on a booking from there. For NULL: the
+ * unplaced units minus custody recorded against them. Never negative.
  *
- * This is the one definition used by the Assign cap, the dropdown's
- * pre-selection and the loss cap. It deliberately ignores booking check-outs:
- * those units carry no location, so the pool-level availability check
- * (`computeCustodyAvailability`) keeps covering them.
+ * This is the one definition used by the Assign cap, the dropdown numbers and
+ * pre-selection, the loss cap and the booking check-out default. The
+ * pool-level availability check (`computeCustodyAvailability`) still runs as
+ * the ceiling across all sources.
  */
 export function unitsLeftAtSource(
   state: CustodySourceState,
@@ -107,41 +138,59 @@ export function unitsLeftAtSource(
 ): number {
   return Math.max(
     0,
-    placedAtSource(state, locationId) - custodyFromSource(state, locationId)
+    placedAtSource(state, locationId) -
+      custodyFromSource(state, locationId) -
+      bookedOutFromSource(state, locationId)
   );
 }
 
 /**
  * The refusal when a source has fewer units left than asked for, worded the
  * same for Assign and for a loss: "Studio has 2 pcs and 1 is already in
- * custody." or "Studio has only 2 pcs." The unplaced units are called
- * "Unplaced", as in the dropdown the operator picked them from.
+ * custody.", "Studio has 2 pcs and 2 are out on a booking.", "Studio has 4
+ * pcs: 1 in custody and 3 out on a booking." or "Studio has only 2 pcs." The
+ * unplaced units are called "Unplaced", as in the dropdown the operator
+ * picked them from.
  *
  * @param sourceName - The location's name, NULL for the unplaced units
  * @param placedCount - The source's units, already formatted ("2 pcs")
  * @param inCustody - Units in operator custody taken from that source
+ * @param onBooking - Units out on a booking from that source
  * @returns The error's title and message
  */
 export function sourceShortfall({
   sourceName,
   placedCount,
   inCustody,
+  onBooking = 0,
 }: {
   sourceName: string | null;
   placedCount: string;
   inCustody: number;
+  /** Units out on a booking from that source. */
+  onBooking?: number;
 }): { title: string; message: string } {
   const where = sourceName ?? "Unplaced";
+  const verb = (n: number) => (n === 1 ? "is" : "are");
+  let message: string;
+  if (inCustody > 0 && onBooking > 0) {
+    message = `${where} has ${placedCount}: ${inCustody} in custody and ${onBooking} out on a booking.`;
+  } else if (onBooking > 0) {
+    message = `${where} has ${placedCount} and ${onBooking} ${verb(
+      onBooking
+    )} out on a booking.`;
+  } else if (inCustody > 0) {
+    message = `${where} has ${placedCount} and ${inCustody} ${verb(
+      inCustody
+    )} already in custody.`;
+  } else {
+    message = `${where} has only ${placedCount}.`;
+  }
   return {
     title: sourceName
       ? "Not enough units at this location"
       : "Not enough unplaced units",
-    message:
-      inCustody > 0
-        ? `${where} has ${placedCount} and ${inCustody} ${
-            inCustody === 1 ? "is" : "are"
-          } already in custody.`
-        : `${where} has only ${placedCount}.`,
+    message,
   };
 }
 
@@ -188,6 +237,8 @@ export type CustodySourceOption = {
   placed: number;
   /** Units in operator custody taken from there. */
   inCustody: number;
+  /** Units out on a booking that left from there. */
+  onBooking: number;
   /** {@link unitsLeftAtSource} for this option. */
   left: number;
 };
@@ -229,6 +280,7 @@ export function buildCustodySourceOptions(
       label,
       placed: placedAtSource(state, id),
       inCustody: custodyFromSource(state, id),
+      onBooking: bookedOutFromSource(state, id),
       left: unitsLeftAtSource(state, id),
     };
   });
@@ -241,6 +293,7 @@ export function buildCustodySourceOptions(
       label: "Unplaced",
       placed: unplaced,
       inCustody: custodyFromSource(state, null),
+      onBooking: 0,
       left: unitsLeftAtSource(state, null),
     });
   }

@@ -19,7 +19,11 @@ import { AssetType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import type { CustodySourceState } from "~/modules/asset/custody-source";
-import { unitsLeftAtSource } from "~/modules/asset/custody-source";
+import {
+  bookedOutFromSource,
+  custodyFromSource,
+  unitsLeftAtSource,
+} from "~/modules/asset/custody-source";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
@@ -37,6 +41,7 @@ import {
   resolveSliceSource,
   submittedSourceForSlice,
 } from "./checkout-source-location";
+import { loadBookedOutBySource } from "./units-out-by-source.server";
 
 const label: ErrorLabel = "Booking";
 
@@ -47,7 +52,13 @@ const label: ErrorLabel = "Booking";
  */
 type SourceTxClient = Pick<
   ExtendedPrismaClient,
-  "asset" | "assetLocation" | "assetKit" | "bookingAsset" | "custody" | "kit"
+  | "asset"
+  | "assetLocation"
+  | "assetKit"
+  | "bookingAsset"
+  | "consumptionLog"
+  | "custody"
+  | "kit"
 >;
 
 /** A pool's placements plus what the dialogs print about it. */
@@ -76,7 +87,7 @@ export async function loadPoolSourceSnapshots(
   const uniqueAssetIds = [...new Set(assetIds)];
   if (uniqueAssetIds.length === 0) return snapshots;
 
-  const [assets, placements, operatorCustody] = await Promise.all([
+  const [assets, placements, operatorCustody, bookedOut] = await Promise.all([
     tx.asset.findMany({
       where: { id: { in: uniqueAssetIds }, organizationId },
       select: { id: true, title: true, quantity: true, unitOfMeasure: true },
@@ -108,6 +119,8 @@ export async function loadPoolSourceSnapshots(
       },
       select: { assetId: true, locationId: true, quantity: true },
     }),
+    // Units out on other bookings from each location are not there either.
+    loadBookedOutBySource(tx, { assetIds: uniqueAssetIds, organizationId }),
   ]);
 
   const placementsByAsset = new Map<string, SourcePlacement[]>();
@@ -117,6 +130,8 @@ export async function loadPoolSourceSnapshots(
       locationId: placement.locationId,
       name: placement.location.name,
       placed: placement.quantity,
+      inCustody: 0,
+      onBooking: 0,
       left: placement.quantity,
     });
     placementsByAsset.set(placement.assetId, list);
@@ -125,8 +140,9 @@ export async function loadPoolSourceSnapshots(
   for (const asset of assets) {
     const assetPlacements = placementsByAsset.get(asset.id) ?? [];
     const placedSum = assetPlacements.reduce((sum, p) => sum + p.placed, 0);
-    // Units left = placed minus custody taken from there: the one definition
-    // custody's own "From location" uses, so both questions agree.
+    // Units left = placed, minus custody taken from there, minus units out
+    // on bookings from there: the one definition custody's own "From
+    // location" uses, so both questions agree.
     const state: CustodySourceState = {
       total: asset.quantity ?? 0,
       placements: assetPlacements.map((p) => ({
@@ -134,8 +150,11 @@ export async function loadPoolSourceSnapshots(
         quantity: p.placed,
       })),
       operatorCustody: operatorCustody.filter((c) => c.assetId === asset.id),
+      bookedOut: bookedOut.get(asset.id) ?? [],
     };
     for (const placement of assetPlacements) {
+      placement.inCustody = custodyFromSource(state, placement.locationId);
+      placement.onBooking = bookedOutFromSource(state, placement.locationId);
       placement.left = unitsLeftAtSource(state, placement.locationId);
     }
     snapshots.set(asset.id, {

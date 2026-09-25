@@ -34,6 +34,7 @@ import { recordEvent } from "~/modules/activity-event/service.server";
 // `createConsumptionLog` in the booking suite. See the leaf's header doc.
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import {
+  bookedOutFromSource,
   custodyFromSource,
   hasMultipleSources,
   isUnplacedSource,
@@ -610,6 +611,7 @@ export async function adjustQuantity({
               formatUnitCount(asset, placedAtSource(state, sourceId)) ??
               "0 units",
             inCustody: custodyFromSource(state, sourceId),
+            onBooking: bookedOutFromSource(state, sourceId),
           }),
           label,
           status: 400,

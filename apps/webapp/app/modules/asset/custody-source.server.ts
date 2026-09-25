@@ -15,6 +15,7 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
+import { loadBookedOutBySource } from "~/modules/booking/units-out-by-source.server";
 import { createSystemLocationNote } from "~/modules/location-note/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { formatUnitCount } from "~/utils/asset-quantity";
@@ -56,7 +57,8 @@ export type LoadedCustodySources = {
 };
 
 /**
- * Reads a pool's manual placements and operator custody.
+ * Reads a pool's manual placements, operator custody, and the units out on
+ * bookings per location they left from.
  *
  * Call it inside the transaction that holds `lockAssetForQuantityUpdate` for
  * the asset, so the numbers cannot move before the caller writes.
@@ -69,7 +71,7 @@ export async function loadCustodySources(
   tx: CustodySourceTxClient,
   { assetId, total }: { assetId: string; total: number }
 ): Promise<LoadedCustodySources> {
-  const [placements, rows] = await Promise.all([
+  const [placements, rows, bookedOut] = await Promise.all([
     tx.assetLocation.findMany({
       where: { assetId, assetKitId: null },
       select: { locationId: true, quantity: true },
@@ -86,10 +88,17 @@ export async function loadCustodySources(
       },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     }),
+    // Units out on bookings from each location are not there to hand out.
+    loadBookedOutBySource(tx, { assetIds: [assetId] }),
   ]);
 
   return {
-    state: { total, placements, operatorCustody: rows },
+    state: {
+      total,
+      placements,
+      operatorCustody: rows,
+      bookedOut: bookedOut.get(assetId) ?? [],
+    },
     rows,
   };
 }

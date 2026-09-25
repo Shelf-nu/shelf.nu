@@ -47,7 +47,7 @@ type Placement = {
 
 /** The filter shapes the service sends; nothing else is understood. */
 type SliceWhere = {
-  id: { in: string[] };
+  id?: { in: string[] };
   checkedOutQuantity?: number;
   booking: { organizationId: string };
   asset?: { type: AssetType; organizationId: string };
@@ -72,6 +72,7 @@ function fakeTx({
   assets,
   kitLocationByMembership = {},
   custody = [],
+  bookedOut = [],
 }: {
   slices: Slice[];
   placements: Placement[];
@@ -89,30 +90,49 @@ function fakeTx({
     locationId: string | null;
     quantity: number;
   }>;
+  /** Slices on other ONGOING bookings, as the booked-out read returns them. */
+  bookedOut?: Array<{
+    id: string;
+    bookingId: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutQuantity: number;
+    sourceLocationId: string;
+  }>;
 }) {
   const assetById = new Map(assets.map((a) => [a.id, a]));
   return {
     bookingAsset: {
       findMany: vi.fn(({ where }: { where: SliceWhere }) =>
-        resolved(
-          slices
-            .filter((s) => where.id.in.includes(s.id))
-            .filter(
-              (s) =>
-                where.checkedOutQuantity === undefined ||
-                s.checkedOutQuantity === where.checkedOutQuantity
+        // Without slice ids this is the "units out on other bookings" read.
+        !where.id
+          ? resolved(bookedOut)
+          : resolved(
+              slices
+                .filter((s) => where.id!.in.includes(s.id))
+                .filter(
+                  (s) =>
+                    where.checkedOutQuantity === undefined ||
+                    s.checkedOutQuantity === where.checkedOutQuantity
+                )
+                .filter(
+                  (s) => s.organizationId === where.booking.organizationId
+                )
+                .filter((s) => {
+                  const asset = assetById.get(s.assetId);
+                  return (
+                    !where.asset ||
+                    (asset?.type === where.asset.type &&
+                      asset.organizationId === where.asset.organizationId)
+                  );
+                })
+                .map(({ id, assetId, assetKitId }) => ({
+                  id,
+                  assetId,
+                  assetKitId,
+                }))
             )
-            .filter((s) => s.organizationId === where.booking.organizationId)
-            .filter((s) => {
-              const asset = assetById.get(s.assetId);
-              return (
-                !where.asset ||
-                (asset?.type === where.asset.type &&
-                  asset.organizationId === where.asset.organizationId)
-              );
-            })
-            .map(({ id, assetId, assetKitId }) => ({ id, assetId, assetKitId }))
-        )
       ),
       updateMany: vi.fn(
         ({
@@ -122,15 +142,16 @@ function fakeTx({
           where: SliceWhere;
           data: { sourceLocationId: string | null };
         }) => {
+          const ids = where.id?.in ?? [];
           for (const s of slices) {
             if (
-              where.id.in.includes(s.id) &&
+              ids.includes(s.id) &&
               s.organizationId === where.booking.organizationId
             ) {
               s.sourceLocationId = data.sourceLocationId;
             }
           }
-          return resolved({ count: where.id.in.length });
+          return resolved({ count: ids.length });
         }
       ),
     },
@@ -148,6 +169,8 @@ function fakeTx({
         )
       ),
     },
+    // Nothing has come back on the other bookings in these scenarios.
+    consumptionLog: { findMany: vi.fn(() => resolved([])) },
     kit: {
       findMany: vi.fn(({ where }: { where: IdsWhere }) =>
         resolved(
@@ -200,7 +223,8 @@ function scenario(
     assetId: string;
     locationId: string | null;
     quantity: number;
-  }> = []
+  }> = [],
+  bookedOut: Parameters<typeof fakeTx>[0]["bookedOut"] = []
 ) {
   const slice: Slice = {
     id: "ba-1",
@@ -256,6 +280,7 @@ function scenario(
     ],
     kitLocationByMembership: { "ak-1": "loc-kit-shelf" },
     custody,
+    bookedOut,
   });
   return { slice, tx };
 }
@@ -307,6 +332,32 @@ describe("recordCheckoutSourceLocations", () => {
     const { slice, tx } = scenario({}, [
       { assetId: "pool-1", locationId: "loc-camera", quantity: 45 },
     ]);
+
+    await recordCheckoutSourceLocations(tx as never, {
+      organizationId: ORG,
+      sliceIds: [slice.id],
+    });
+
+    expect(slice.sourceLocationId).toBe("loc-studio");
+  });
+
+  it("goes by units left: units out on another booking from a location are not there", async () => {
+    // All 60 of Camera Room's units are out on another booking from there.
+    const { slice, tx } = scenario(
+      {},
+      [],
+      [
+        {
+          id: "ba-other",
+          bookingId: "b-other",
+          assetId: "pool-1",
+          quantity: 60,
+          assetKitId: null,
+          checkedOutQuantity: 60,
+          sourceLocationId: "loc-camera",
+        },
+      ]
+    );
 
     await recordCheckoutSourceLocations(tx as never, {
       organizationId: ORG,
