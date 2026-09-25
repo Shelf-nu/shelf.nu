@@ -49,7 +49,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId, canSeeAllBookings, canSeeAllCustody } =
+    const { organizationId, canSeeAllCustody, access } =
       await requirePermission({
         userId,
         request,
@@ -72,7 +72,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Self-service / base users see only their own bookings here. Resolve the
     // full scope (user link + every team-member link) so legacy team-member-
     // linked bookings aren't hidden while showing on the index.
-    const custodianScope = !canSeeAllBookings
+    const custodianScope = !access.bookings.seeAll
       ? await resolveCustodianScope({ userId, organizationId })
       : undefined;
 

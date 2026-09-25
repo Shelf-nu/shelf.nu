@@ -26,7 +26,6 @@ import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import {
   bookingWriteScopeClause,
   isSelfServiceOrBaseRole,
-  resolveCanSeeAllBookings,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
 import {
@@ -46,6 +45,7 @@ import {
 } from "~/utils/roles.server";
 import { PermissionAction, PermissionEntity } from "./permission.data";
 import { userHasPermission } from "./permission.validator.client";
+import { resolveRoleAccess } from "./role-access";
 
 const R = OrganizationRoles;
 const SINGLE_ROLES = [R.OWNER, R.ADMIN, R.SELF_SERVICE, R.BASE] as const;
@@ -104,6 +104,17 @@ function webRole(roles: string[]) {
     ],
     organizationId: "org",
   });
+}
+
+/** Workspace toggles all off. */
+const OFF = TOGGLE_COMBOS[0];
+
+/** The access a membership resolves to under the given toggles. */
+function accessFor(
+  roles: string[],
+  workspace: (typeof TOGGLE_COMBOS)[number] = OFF
+) {
+  return resolveRoleAccess({ roles, workspace });
 }
 
 /** Runs a throwing guard and records whether it allowed the call. */
@@ -344,23 +355,34 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     )
   );
 
-  // D-14 / D-28: visibility, every role set x toggles.
-  for (const [id, fn] of [
-    ["D-14", resolveCanSeeAllBookings],
-    ["D-28", resolveCanSeeAllCustody],
-  ] as const) {
-    snapshot[id] = Object.fromEntries(
-      ROLE_SETS.map((roles) => [
-        key(roles),
-        Object.fromEntries(
-          TOGGLE_COMBOS.map((t) => [
-            toggleKey(t),
-            fn({ role: webRole(roles), currentOrganization: t }),
-          ])
-        ),
-      ])
-    );
-  }
+  // D-14: booking visibility, every role set x toggles.
+  snapshot["D-14"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      Object.fromEntries(
+        TOGGLE_COMBOS.map((t) => [
+          toggleKey(t),
+          accessFor(roles, t).bookings.seeAll,
+        ])
+      ),
+    ])
+  );
+
+  // D-28: custody visibility, every role set x toggles (Task 5 migrates this).
+  snapshot["D-28"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      Object.fromEntries(
+        TOGGLE_COMBOS.map((t) => [
+          toggleKey(t),
+          resolveCanSeeAllCustody({
+            role: webRole(roles),
+            currentOrganization: t,
+          }),
+        ])
+      ),
+    ])
+  );
 
   // D-15: per-booking write gate, single roles x relationship x flags.
   snapshot["D-15"] = Object.fromEntries(
@@ -488,17 +510,18 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Bookings: Task 4b =====================
 
-  // B9:D-14: "view other bookings" link in the adjust-quantity dialog:
-  // `!isBaseOrSelfService` (components/booking/adjust-booking-asset-quantity-dialog.tsx:114-115).
-  // Recorded per booking see-toggle pair: the migrated gate (B1) reads them.
+  // B9:D-14 (B1): "view other bookings" link in the adjust-quantity dialog:
+  // `useRoleAccess().bookings.seeAll`
+  // (components/booking/adjust-booking-asset-quantity-dialog.tsx:113).
+  // Recorded per booking see-toggle pair, since the migrated gate reads them.
   snapshot["B9:D-14:adjust-quantity-link"] = perRoleSet((roles) =>
-    perToggle(BOOKING_TOGGLES, () => !hookFlags(roles).isBaseOrSelfService)
+    perToggle(BOOKING_TOGGLES, (t) => accessFor(roles, t).bookings.seeAll)
   );
 
-  // B9:F3: calendar feed visibility, `roles[0]`
-  // (modules/calendar-subscription/service.server.ts:297-326,
-  // `resolveCalendarVisibility`). Calls the real function: Task 4b changes its
-  // body, not its signature, so this probe needs no rewrite.
+  // B9:F3: calendar feed visibility, the member's effective role folded with
+  // the workspace toggles (modules/calendar-subscription/service.server.ts:298-315,
+  // `resolveCalendarVisibility`). Calls the real function, so this probe
+  // needed no rewrite when Task 4b changed the function's body.
   snapshot["B9:F3:calendar-feed"] = perRoleSet((roles) =>
     perToggle(TOGGLE_COMBOS, (t) =>
       resolveCalendarVisibility({ roles, organization: t })

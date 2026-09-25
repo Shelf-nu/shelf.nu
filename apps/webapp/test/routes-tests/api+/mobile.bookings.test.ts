@@ -49,6 +49,7 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
     canUseAudits: true,
     canSeeAllCustody: true,
     canSeeAllBookings: true,
+    access: { bookings: { seeAll: true, writeAll: true } },
   }),
 }));
 

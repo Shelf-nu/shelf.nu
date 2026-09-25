@@ -84,12 +84,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // details, assets, tags and action flags via mobile.
     await assertMobileCanUseBookings(organizationId);
 
-    // `canSeeAllBookings` answers who may READ a booking they do not custody:
-    // ADMIN/OWNER always, SELF_SERVICE/BASE only where the workspace override
-    // allows it. `isSelfServiceOrBase` is the narrower, role-only question of
-    // which ACTIONS the caller may take, and must stay role-only: the override
-    // widens reading and never writing.
-    const { canSeeAllBookings, isSelfServiceOrBase, effectiveRole, roles } =
+    // `access.bookings.seeAll` answers who may READ a booking they do not
+    // custody: ADMIN/OWNER always, SELF_SERVICE/BASE only where the workspace
+    // override allows it. `isSelfServiceOrBase` is the narrower, role-only
+    // question of which ACTIONS the caller may take, and must stay role-only:
+    // the override widens reading and never writing.
+    const { access, isSelfServiceOrBase, effectiveRole, roles } =
       await getMobileUserContext(user.id, organizationId);
 
     const { bookingId } = getParams(
@@ -264,7 +264,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
      * and this same status, so a booking that opens on one platform opens on
      * the other.
      */
-    if (!canSeeBooking({ canSeeAllBookings, booking, userId: user.id })) {
+    if (!canSeeBooking({ access, booking, userId: user.id })) {
       return data(
         { error: { message: "You are not authorized to view this booking" } },
         { status: 403 }

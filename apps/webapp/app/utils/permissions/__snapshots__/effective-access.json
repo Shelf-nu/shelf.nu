@@ -8142,15 +8142,15 @@
     },
     "SELF_SERVICE": {
       "none": false,
-      "ssB": false,
+      "ssB": true,
       "baB": false,
-      "ssB,baB": false
+      "ssB,baB": true
     },
     "BASE": {
       "none": false,
       "ssB": false,
-      "baB": false,
-      "ssB,baB": false
+      "baB": true,
+      "ssB,baB": true
     },
     "OWNER+ADMIN": {
       "none": true,
@@ -8159,16 +8159,16 @@
       "ssB,baB": true
     },
     "OWNER+SELF_SERVICE": {
-      "none": false,
-      "ssB": false,
-      "baB": false,
-      "ssB,baB": false
+      "none": true,
+      "ssB": true,
+      "baB": true,
+      "ssB,baB": true
     },
     "OWNER+BASE": {
-      "none": false,
-      "ssB": false,
-      "baB": false,
-      "ssB,baB": false
+      "none": true,
+      "ssB": true,
+      "baB": true,
+      "ssB,baB": true
     },
     "ADMIN+OWNER": {
       "none": true,
@@ -8177,62 +8177,62 @@
       "ssB,baB": true
     },
     "ADMIN+SELF_SERVICE": {
-      "none": false,
-      "ssB": false,
-      "baB": false,
-      "ssB,baB": false
-    },
-    "ADMIN+BASE": {
-      "none": false,
-      "ssB": false,
-      "baB": false,
-      "ssB,baB": false
-    },
-    "SELF_SERVICE+OWNER": {
-      "none": false,
-      "ssB": false,
-      "baB": false,
-      "ssB,baB": false
-    },
-    "SELF_SERVICE+ADMIN": {
-      "none": false,
-      "ssB": false,
-      "baB": false,
-      "ssB,baB": false
-    },
-    "SELF_SERVICE+BASE": {
-      "none": false,
-      "ssB": false,
-      "baB": false,
-      "ssB,baB": false
-    },
-    "BASE+OWNER": {
-      "none": false,
-      "ssB": false,
-      "baB": false,
-      "ssB,baB": false
-    },
-    "BASE+ADMIN": {
-      "none": false,
-      "ssB": false,
-      "baB": false,
-      "ssB,baB": false
-    },
-    "BASE+SELF_SERVICE": {
-      "none": false,
-      "ssB": false,
-      "baB": false,
-      "ssB,baB": false
-    },
-    "(none)": {
       "none": true,
       "ssB": true,
       "baB": true,
       "ssB,baB": true
     },
-    "UNKNOWN_ROLE": {
+    "ADMIN+BASE": {
       "none": true,
       "ssB": true,
+      "baB": true,
+      "ssB,baB": true
+    },
+    "SELF_SERVICE+OWNER": {
+      "none": true,
+      "ssB": true,
+      "baB": true,
+      "ssB,baB": true
+    },
+    "SELF_SERVICE+ADMIN": {
+      "none": true,
+      "ssB": true,
+      "baB": true,
+      "ssB,baB": true
+    },
+    "SELF_SERVICE+BASE": {
+      "none": false,
+      "ssB": true,
+      "baB": false,
+      "ssB,baB": true
+    },
+    "BASE+OWNER": {
+      "none": true,
+      "ssB": true,
+      "baB": true,
+      "ssB,baB": true
+    },
+    "BASE+ADMIN": {
+      "none": true,
+      "ssB": true,
+      "baB": true,
+      "ssB,baB": true
+    },
+    "BASE+SELF_SERVICE": {
+      "none": false,
+      "ssB": true,
+      "baB": false,
+      "ssB,baB": true
+    },
+    "(none)": {
+      "none": false,
+      "ssB": false,
+      "baB": true,
+      "ssB,baB": true
+    },
+    "UNKNOWN_ROLE": {
+      "none": false,
+      "ssB": false,
       "baB": true,
       "ssB,baB": true
     }
@@ -8900,23 +8900,23 @@
     },
     "SELF_SERVICE+OWNER": {
       "none": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "baB": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB,baB": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,ssC": {
@@ -8924,7 +8924,7 @@
         "canSeeAllCustody": true
       },
       "baB,ssC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,baB,ssC": {
@@ -8932,23 +8932,23 @@
         "canSeeAllCustody": true
       },
       "baC": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB,baC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "baB,baC": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB,baB,baC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssC,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,ssC,baC": {
@@ -8956,7 +8956,7 @@
         "canSeeAllCustody": true
       },
       "baB,ssC,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,baB,ssC,baC": {
@@ -8966,23 +8966,23 @@
     },
     "SELF_SERVICE+ADMIN": {
       "none": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "baB": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB,baB": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,ssC": {
@@ -8990,7 +8990,7 @@
         "canSeeAllCustody": true
       },
       "baB,ssC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,baB,ssC": {
@@ -8998,23 +8998,23 @@
         "canSeeAllCustody": true
       },
       "baC": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB,baC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "baB,baC": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB,baB,baC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssC,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,ssC,baC": {
@@ -9022,7 +9022,7 @@
         "canSeeAllCustody": true
       },
       "baB,ssC,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,baB,ssC,baC": {
@@ -9098,43 +9098,43 @@
     },
     "BASE+OWNER": {
       "none": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "baB": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssB,baB": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssC": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB,ssC": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "baB,ssC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssB,baB,ssC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "baB,baC": {
@@ -9146,11 +9146,11 @@
         "canSeeAllCustody": true
       },
       "ssC,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,ssC,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "baB,ssC,baC": {
@@ -9164,43 +9164,43 @@
     },
     "BASE+ADMIN": {
       "none": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "baB": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssB,baB": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssC": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "ssB,ssC": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "baB,ssC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssB,baB,ssC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "baB,baC": {
@@ -9212,11 +9212,11 @@
         "canSeeAllCustody": true
       },
       "ssC,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "ssB,ssC,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "baB,ssC,baC": {
@@ -9234,11 +9234,11 @@
         "canSeeAllCustody": false
       },
       "ssB": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": false
       },
       "baB": {
-        "canSeeAllBookings": true,
+        "canSeeAllBookings": false,
         "canSeeAllCustody": false
       },
       "ssB,baB": {
@@ -9247,46 +9247,46 @@
       },
       "ssC": {
         "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "ssB,ssC": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": true
       },
       "baB,ssC": {
-        "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllBookings": false,
+        "canSeeAllCustody": true
       },
       "ssB,baB,ssC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": false
+        "canSeeAllCustody": true
       },
       "baC": {
         "canSeeAllBookings": false,
-        "canSeeAllCustody": true
+        "canSeeAllCustody": false
       },
       "ssB,baC": {
-        "canSeeAllBookings": false,
-        "canSeeAllCustody": true
+        "canSeeAllBookings": true,
+        "canSeeAllCustody": false
       },
       "baB,baC": {
-        "canSeeAllBookings": true,
-        "canSeeAllCustody": true
+        "canSeeAllBookings": false,
+        "canSeeAllCustody": false
       },
       "ssB,baB,baC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": true
+        "canSeeAllCustody": false
       },
       "ssC,baC": {
         "canSeeAllBookings": false,
         "canSeeAllCustody": true
       },
       "ssB,ssC,baC": {
-        "canSeeAllBookings": false,
+        "canSeeAllBookings": true,
         "canSeeAllCustody": true
       },
       "baB,ssC,baC": {
-        "canSeeAllBookings": true,
+        "canSeeAllBookings": false,
         "canSeeAllCustody": true
       },
       "ssB,baB,ssC,baC": {
@@ -9362,43 +9362,43 @@
     },
     "UNKNOWN_ROLE": {
       "none": {
-        "canSeeAllBookings": true,
-        "canSeeAllCustody": true
+        "canSeeAllBookings": false,
+        "canSeeAllCustody": false
       },
       "ssB": {
-        "canSeeAllBookings": true,
-        "canSeeAllCustody": true
+        "canSeeAllBookings": false,
+        "canSeeAllCustody": false
       },
       "baB": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": true
+        "canSeeAllCustody": false
       },
       "ssB,baB": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": true
+        "canSeeAllCustody": false
       },
       "ssC": {
-        "canSeeAllBookings": true,
-        "canSeeAllCustody": true
+        "canSeeAllBookings": false,
+        "canSeeAllCustody": false
       },
       "ssB,ssC": {
-        "canSeeAllBookings": true,
-        "canSeeAllCustody": true
+        "canSeeAllBookings": false,
+        "canSeeAllCustody": false
       },
       "baB,ssC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": true
+        "canSeeAllCustody": false
       },
       "ssB,baB,ssC": {
         "canSeeAllBookings": true,
-        "canSeeAllCustody": true
+        "canSeeAllCustody": false
       },
       "baC": {
-        "canSeeAllBookings": true,
+        "canSeeAllBookings": false,
         "canSeeAllCustody": true
       },
       "ssB,baC": {
-        "canSeeAllBookings": true,
+        "canSeeAllBookings": false,
         "canSeeAllCustody": true
       },
       "baB,baC": {
@@ -9410,11 +9410,11 @@
         "canSeeAllCustody": true
       },
       "ssC,baC": {
-        "canSeeAllBookings": true,
+        "canSeeAllBookings": false,
         "canSeeAllCustody": true
       },
       "ssB,ssC,baC": {
-        "canSeeAllBookings": true,
+        "canSeeAllBookings": false,
         "canSeeAllCustody": true
       },
       "baB,ssC,baC": {

@@ -126,6 +126,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
+import { accessFor } from "@helpers/role-access";
 
 /**
  * Typed handles for the mocks every suite below drives. Auth fixtures are cast
@@ -585,6 +586,7 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
       canUseAudits: false,
       canSeeAllCustody: true,
       canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     assetFindUniqueMock.mockResolvedValue(buildCheckedOutAsset());
   });
@@ -649,6 +651,10 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
       canUseBarcodes: false,
       canUseAudits: false,
       ...overrides,
+      access: accessFor(["SELF_SERVICE"], {
+        selfServiceCanSeeBookings: overrides.canSeeAllBookings,
+        selfServiceCanSeeCustody: overrides.canSeeAllCustody,
+      }),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
   }
 

@@ -74,10 +74,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const {
       organizationId,
       role,
-      canSeeAllBookings,
       canSeeAllCustody,
       isSelfServiceOrBase,
       currentOrganization,
+      access,
     } = await requirePermission({
       userId,
       request,
@@ -211,7 +211,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // settings allow otherwise. AND-ed rather than merged in beside the
       // search `OR` above: custody is itself an OR across the user link and any
       // team-member link, and a search term must not be able to widen it away.
-      ...(canSeeAllBookings
+      ...(access.bookings.seeAll
         ? {}
         : {
             AND: [

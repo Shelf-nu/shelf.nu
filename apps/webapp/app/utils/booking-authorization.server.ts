@@ -44,26 +44,22 @@ export type BookingCustodyLinks = {
  * This does not widen access beyond the index — it grants only where the
  * booking's custodian team-member row IS the requester.
  *
- * @param params.canSeeAllBookings - Whether the role may see every booking in
- *   the workspace (ADMIN/OWNER, or SELF_SERVICE/BASE with the override).
+ * @param params.access - The caller's access; `bookings.seeAll` covers roles
+ *   that see every booking and restricted roles whose workspace toggle is on.
  * @param params.booking - The booking's two custody links.
  * @param params.userId - The requester.
  * @returns `true` if the requester may see this booking.
  */
 export function canSeeBooking({
-  canSeeAllBookings,
+  access,
   booking,
   userId,
 }: {
-  canSeeAllBookings: boolean;
+  access: RoleAccess;
   booking: BookingCustodyLinks;
   userId: string;
 }): boolean {
-  if (canSeeAllBookings) {
-    return true;
-  }
-
-  return isBookingCustodian({ booking, userId });
+  return access.bookings.seeAll || isBookingCustodian({ booking, userId });
 }
 
 /**

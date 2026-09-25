@@ -12,7 +12,7 @@ import {
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { removeAssets } from "~/modules/booking/service.server";
 import {
-  canSeeBooking,
+  isBookingCustodian,
   resolveMostPrivilegedRole,
 } from "~/utils/booking-authorization.server";
 import { canRoleRemoveBookingAssets } from "~/utils/bookings";
@@ -106,7 +106,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // BOTH custody links are needed. A booking assigned to a team member
         // before a user was attached to it keeps `custodianUserId = NULL` even
         // after the invite is accepted, so the user link alone fails closed for
-        // the very users those bookings belong to. See `canSeeBooking`.
+        // the very users those bookings belong to. See `isBookingCustodian`.
         custodianUserId: true,
         custodianTeamMember: { select: { userId: true } },
       },
@@ -142,8 +142,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // that narrower test 403s a custodian whose booking is held through the
     // team-member link, which is precisely the user this endpoint's removal
     // parity is meant to serve.
-    const ownsBooking = canSeeBooking({
-      canSeeAllBookings: false,
+    const ownsBooking = isBookingCustodian({
       booking,
       userId: user.id,
     });

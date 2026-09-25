@@ -125,8 +125,8 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       isSelfServiceOrBase,
       currentOrganization,
       organizationId,
-      canSeeAllBookings,
       canSeeAllCustody,
+      access,
     } = await requirePermission({
       userId,
       request,
@@ -186,7 +186,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         request,
         organizationId,
         userId,
-        canSeeAllBookings,
+        canSeeAllBookings: access.bookings.seeAll,
         canSeeAllCustody,
       }),
       getMemberCalendarFeedUrl({ organizationId, userId }),

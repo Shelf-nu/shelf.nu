@@ -52,7 +52,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     // Parent route already enforces booking.read permission
     // Only check bookingNote.read permission here
-    const { organizationId, canSeeAllBookings } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.bookingNote,
@@ -73,7 +73,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * user's activity rows — the custody check is a precondition, not a filter
      * applied after the data is already in memory.
      */
-    if (!canSeeBooking({ canSeeAllBookings, booking, userId })) {
+    if (!canSeeBooking({ access, booking, userId })) {
       throw new ShelfError({
         cause: null,
         message: "You are not authorized to view this booking",
@@ -123,7 +123,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const requiredAction =
       method === "DELETE" ? PermissionAction.delete : PermissionAction.create;
 
-    const { organizationId, canSeeAllBookings } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.bookingNote,
@@ -168,7 +168,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * user's activity feed for these roles; gating the mutation here keeps the
      * write path from being a way around that.
      */
-    if (!canSeeBooking({ canSeeAllBookings, booking, userId })) {
+    if (!canSeeBooking({ access, booking, userId })) {
       throw new ShelfError({
         cause: null,
         message: "You are not authorized to modify notes on this booking",

@@ -149,8 +149,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       isSelfServiceOrBase,
       currentOrganization,
       userOrganizations,
-      canSeeAllBookings,
       canSeeAllCustody,
+      access,
     } = await requirePermission({
       userId: authSession?.userId,
       request,
@@ -254,7 +254,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     if (
       !canSeeBooking({
-        canSeeAllBookings,
+        access,
         booking,
         userId: authSession.userId,
       })

@@ -69,8 +69,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizationId,
       currentOrganization,
       isSelfServiceOrBase,
-      canSeeAllBookings,
       canSeeAllCustody,
+      access,
     } = await requirePermission({
       userId,
       request,
@@ -105,7 +105,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       tags: filterTags,
     } = await getBookingsFilterData({
       request,
-      canSeeAllBookings,
+      canSeeAllBookings: access.bookings.seeAll,
       organizationId,
       userId,
     });

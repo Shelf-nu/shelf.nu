@@ -18,6 +18,7 @@
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { loader } from "~/routes/api+/bookings.$bookingId.assets-sidebar";
 import { requirePermission } from "~/utils/roles.server";
@@ -104,6 +105,7 @@ beforeEach(() => {
   requirePermissionMock.mockResolvedValue({
     organizationId: "org-1",
     canSeeAllBookings: true,
+    access: accessFor(["ADMIN"]),
   } as never);
 });
 
@@ -140,6 +142,7 @@ describe("api/bookings/:bookingId/assets-sidebar — read gate", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as never);
     dbMocks.bookingFindFirst.mockResolvedValue(
       bookingRow({
@@ -159,6 +162,7 @@ describe("api/bookings/:bookingId/assets-sidebar — read gate", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as never);
     dbMocks.bookingFindFirst.mockResolvedValue(
       bookingRow({

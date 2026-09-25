@@ -6,6 +6,7 @@ import {
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 import { locationDescendantsMock } from "@mocks/location-descendants";
+import { accessFor } from "@helpers/role-access";
 
 // why: mocking location descendants to avoid database queries during tests
 vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
@@ -81,6 +82,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
       canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",
@@ -167,6 +169,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
       canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",
@@ -194,6 +197,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
       canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",
@@ -226,6 +230,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
       canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",
@@ -252,6 +257,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
       canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",

@@ -15,6 +15,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
 
 import { action, loader } from "~/routes/_layout+/bookings.$bookingId.activity";
 import { db } from "~/database/db.server";
@@ -111,7 +112,7 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
-      access: {} as any,
+      access: accessFor(["BASE"]),
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -376,7 +377,7 @@ describe("bookings.$bookingId.activity action — organization scoping", () => {
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
-      access: {} as any,
+      access: accessFor(["ADMIN"]),
     });
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "someone-elses-booking",
@@ -412,6 +413,7 @@ describe("bookings.$bookingId.activity loader — custody scoping", () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-attacker",
       canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -502,6 +504,7 @@ describe("bookings.$bookingId.activity loader — custody scoping", () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-attacker",
       canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as any);
     vi.mocked(bookingService.getBooking).mockResolvedValue({
       id: "victim-booking",

@@ -42,7 +42,7 @@ describe("canSeeBooking", () => {
     it("allows a booking held via the user link", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: { custodianUserId: ME, custodianTeamMember: null },
           userId: ME,
         })
@@ -58,7 +58,7 @@ describe("canSeeBooking", () => {
     it("allows a legacy booking held via the team-member link alone", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: {
             custodianUserId: null,
             custodianTeamMember: { userId: ME },
@@ -71,7 +71,7 @@ describe("canSeeBooking", () => {
     it("refuses another user's booking on both links", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: {
             custodianUserId: SOMEONE_ELSE,
             custodianTeamMember: { userId: SOMEONE_ELSE },
@@ -84,7 +84,7 @@ describe("canSeeBooking", () => {
     it("refuses a booking whose team member belongs to another user", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: {
             custodianUserId: null,
             custodianTeamMember: { userId: SOMEONE_ELSE },
@@ -102,7 +102,7 @@ describe("canSeeBooking", () => {
     it("refuses a booking whose team member has no user attached", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: {
             custodianUserId: null,
             custodianTeamMember: { userId: null },
@@ -115,7 +115,7 @@ describe("canSeeBooking", () => {
     it("refuses an unassigned booking", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: { custodianUserId: null, custodianTeamMember: null },
           userId: ME,
         })
@@ -125,7 +125,7 @@ describe("canSeeBooking", () => {
     it("refuses when the team-member relation was not selected", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: { custodianUserId: SOMEONE_ELSE },
           userId: ME,
         })
@@ -137,7 +137,22 @@ describe("canSeeBooking", () => {
     it("allows another user's booking", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: true,
+          access: accessFor([OrganizationRoles.ADMIN]),
+          booking: {
+            custodianUserId: SOMEONE_ELSE,
+            custodianTeamMember: { userId: SOMEONE_ELSE },
+          },
+          userId: ME,
+        })
+      ).toBe(true);
+    });
+
+    it("allows another user's booking when a restricted role's workspace toggle is on", () => {
+      expect(
+        canSeeBooking({
+          access: accessFor([OrganizationRoles.SELF_SERVICE], {
+            selfServiceCanSeeBookings: true,
+          }),
           booking: {
             custodianUserId: SOMEONE_ELSE,
             custodianTeamMember: { userId: SOMEONE_ELSE },

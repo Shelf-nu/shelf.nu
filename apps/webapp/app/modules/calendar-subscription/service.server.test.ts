@@ -135,6 +135,37 @@ describe("resolveCalendarVisibility", () => {
       resolveCalendarVisibility({ roles: [], organization: noneVisible })
     ).toEqual({ canSeeAllBookings: false, canSeeAllCustody: false });
   });
+
+  it("resolves a mixed membership to its highest role, not its first (F3)", () => {
+    // Before: roles[0] = SELF_SERVICE, restricted. After: ADMIN, everything.
+    expect(
+      resolveCalendarVisibility({
+        roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
+        organization: noneVisible,
+      })
+    ).toEqual({ canSeeAllBookings: true, canSeeAllCustody: true });
+  });
+
+  it("applies the toggle of the effective role, not of the first role (F3)", () => {
+    // Before: roles[0] = BASE, whose toggle is off, so false. After:
+    // SELF_SERVICE is the effective role, and its toggle is on, so true.
+    expect(
+      resolveCalendarVisibility({
+        roles: [OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE],
+        organization: {
+          ...noneVisible,
+          selfServiceCanSeeBookings: true,
+          selfServiceCanSeeCustody: true,
+        },
+      })
+    ).toEqual({ canSeeAllBookings: true, canSeeAllCustody: true });
+  });
+
+  it("gives an empty membership BASE visibility, never admin", () => {
+    expect(
+      resolveCalendarVisibility({ roles: [], organization: noneVisible })
+    ).toEqual({ canSeeAllBookings: false, canSeeAllCustody: false });
+  });
 });
 
 describe("calendar feed tokens", () => {

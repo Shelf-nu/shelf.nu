@@ -28,6 +28,8 @@ import type { ReactNode } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { accessFor } from "@helpers/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { AdjustBookingAssetQuantityDialog } from "./adjust-booking-asset-quantity-dialog";
 
 /** Mutable per-test fetcher state, reassigned in `beforeEach`. */
@@ -38,8 +40,8 @@ type FetcherState = {
 
 let mockFetcherState: FetcherState = { state: "idle", data: undefined };
 let mockSubmit = vi.fn();
-/** Controls the viewer's role (owner vs self-service/base) per test. */
-const mockUseUserRoleHelper = vi.fn(() => ({ isBaseOrSelfService: false }));
+/** Controls the viewer's access per test. Default: an admin. */
+let mockAccess: RoleAccess = accessFor(["ADMIN"]);
 
 // why: useFetcher returns a Form component + state we need to control per
 // test, and a `submit` we assert against for the happy-path case.
@@ -88,11 +90,9 @@ vi.mock("~/hooks/use-disabled", () => ({
   useDisabled: () => false,
 }));
 
-// why: the dialog calls useUserRoleHelper (which reads route loader data) to
-// decide whether to show the owner-only "View bookings" link; mock it so tests
-// pick the role without a full data-router context.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => mockUseUserRoleHelper(),
+// why: the dialog reads the viewer's booking visibility from the layout data
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => mockAccess,
 }));
 
 // why: AlertDialog from `~/components/shared/modal` uses Radix's portal +
@@ -145,8 +145,8 @@ describe("AdjustBookingAssetQuantityDialog", () => {
   beforeEach(() => {
     mockFetcherState = { state: "idle", data: undefined };
     mockSubmit = vi.fn();
-    // Default: owner (can view other bookings). Individual tests override.
-    mockUseUserRoleHelper.mockReturnValue({ isBaseOrSelfService: false });
+    // Default: an admin (can view other bookings). Individual tests override.
+    mockAccess = accessFor(["ADMIN"]);
   });
 
   describe("booking context (totalQuantity provided)", () => {
@@ -193,7 +193,7 @@ describe("AdjustBookingAssetQuantityDialog", () => {
     });
 
     it("shows the generic note WITHOUT a link for self-service/base users", () => {
-      mockUseUserRoleHelper.mockReturnValue({ isBaseOrSelfService: true });
+      mockAccess = accessFor(["SELF_SERVICE"]);
       render(
         <AdjustBookingAssetQuantityDialog
           bookingId="booking-1"
@@ -213,6 +213,26 @@ describe("AdjustBookingAssetQuantityDialog", () => {
       expect(
         screen.queryByRole("link", { name: /View bookings/i })
       ).not.toBeInTheDocument();
+    });
+
+    it("shows the View bookings link to SELF_SERVICE when the workspace lets them see bookings (B1)", () => {
+      // Before: hidden by role alone. After: follows access.bookings.seeAll.
+      mockAccess = accessFor(["SELF_SERVICE"], {
+        selfServiceCanSeeBookings: true,
+      });
+      render(
+        <AdjustBookingAssetQuantityDialog
+          bookingId="booking-1"
+          assetId="asset-1"
+          currentQuantity={3}
+          maxQuantity={3}
+          totalQuantity={10}
+          reservedByOthers={7}
+          open
+          onOpenChange={() => {}}
+        />
+      );
+      expect(screen.getByRole("link", { name: /view bookings/i })).toBeTruthy();
     });
 
     it('does NOT show the "reserved by other bookings" note when reservedByOthers is 0', () => {

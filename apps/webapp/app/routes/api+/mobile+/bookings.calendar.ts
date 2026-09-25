@@ -191,12 +191,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
      * asks the same context the same question: the two must agree, or one lens
      * shows a booking the other says is not there.
      */
-    const { canSeeAllBookings, canSeeAllCustody } = await getMobileUserContext(
+    const { access, canSeeAllCustody } = await getMobileUserContext(
       user.id,
       organizationId
     );
 
-    const custodianScope = canSeeAllBookings
+    const custodianScope = access.bookings.seeAll
       ? null
       : await resolveCustodianScope({ userId: user.id, organizationId });
 
