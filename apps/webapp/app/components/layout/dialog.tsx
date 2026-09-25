@@ -46,8 +46,12 @@ export const Dialog = ({
       }
     };
 
-    // Attach to document to capture ESC even when Select or other components are focused
-    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    // `window`, not `document`, and capture: the capture phase runs
+    // window -> document, so this fires before an enclosing Radix overlay's
+    // own document-level Escape handler and stopPropagation() keeps the key
+    // from reaching it. On `document` the outer layer wins the race and a
+    // dialog opened inside a Sheet closes the Sheet instead of itself.
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
 
     const focusTarget =
       dialog.querySelector<HTMLElement>("[data-dialog-initial-focus]") ||
@@ -60,7 +64,7 @@ export const Dialog = ({
     focusTarget.focus();
 
     return () => {
-      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
       previouslyFocusedElement.current?.focus();
       previouslyFocusedElement.current = null;
     };

@@ -79,6 +79,8 @@ import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
   assertModelUnitsNotReservedElsewhere,
   fulfilModelRequestsForAssets,
+  loadActorBestEffort,
+  writeBookingModelRequestInTx,
 } from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
@@ -1007,6 +1009,7 @@ export async function createBooking({
   booking,
   assetIds,
   kitSlices,
+  modelRequests,
   hints,
 }: {
   /**
@@ -1047,6 +1050,19 @@ export async function createBooking({
    * `(bookingId, assetKitId)`).
    */
   kitSlices?: KitSliceSpec[];
+
+  /**
+   * Optional model-level reservations to create with the booking — units of an
+   * `AssetModel` promised to the booking without naming which physical assets
+   * will serve them. Each becomes a `BookingModelRequest` row.
+   *
+   * Written inside this function's own transaction, so the booking never
+   * commits without the reservations it was created to hold, and a model whose
+   * pool cannot cover its quantity aborts the create entirely.
+   *
+   * Every caller that books concrete assets omits this.
+   */
+  modelRequests?: { assetModelId: string; quantity: number }[];
 
   /**
    * Hints are used for setting the timezone of the booking
@@ -1143,6 +1159,24 @@ export async function createBooking({
         connect: booking.tags,
       };
     }
+
+    // Normalize the optional model reservations once, mirroring `slices`.
+    const reservations = modelRequests ?? [];
+
+    /**
+     * Loaded before the transaction opens, for the reason
+     * `upsertBookingModelRequest` hoists the same call: the actor read is a
+     * plain `User` lookup with nothing to serialise against the reservation
+     * write, so holding it inside the interactive transaction would widen the
+     * window past the rows that matter. One read serves every reservation.
+     *
+     * Non-null exactly when there is something to reserve — a single condition,
+     * so it also carries the narrowing for the loop below.
+     */
+    const reservationActor =
+      reservations.length > 0
+        ? await loadActorBestEffort(booking.creatorId)
+        : null;
 
     // Use transaction to ensure booking creation and activity events are atomic
     const createdBooking = await db.$transaction(async (tx) => {
@@ -1324,6 +1358,69 @@ export async function createBooking({
         );
       }
 
+      /**
+       * Model-level reservations are written with the booking, in the booking's
+       * own transaction: a booking that committed while one of its reservations
+       * failed would promise a workspace something nobody recorded, and a model
+       * that cannot cover its quantity must take the whole create down with it.
+       *
+       * `assetModelId` is request input like every other id here, but it does
+       * NOT get an `assert…BelongToOrg` call beside the guards above:
+       * `writeBookingModelRequestInTx` looks the model up with
+       * `where: { id: assetModelId, organizationId }` and throws 404 when it is
+       * not in the workspace, using the same `tx`. The org check is one level
+       * down, not missing — adding a second one here would only duplicate it.
+       *
+       * Sequential rather than concurrent on purpose: each write measures the
+       * free pool through `tx`, so two models sharing assets must be measured
+       * one after the other to see each other's reservation.
+       */
+      if (reservationActor) {
+        /**
+         * One entry per model, quantities summed.
+         *
+         * Every write takes an absolute target, so a model listed twice would
+         * be written twice and the second write would REPLACE the first rather
+         * than add to it — and the write still succeeds, so nothing reports the
+         * units that went missing. Summing here matches
+         * `upsertBookingModelRequests`, which folds for the same reason.
+         *
+         * Iterated in model-id order, NOT the order the caller listed them.
+         * Each write takes `SELECT … FOR UPDATE` on its model and holds it to
+         * commit, so two concurrent batches covering the same models in
+         * opposite orders would each hold what the other waits for; Postgres
+         * breaks that by aborting one, turning a valid booking into a spurious
+         * failure. A deterministic global order cannot form a cycle. Plain
+         * code-unit order, matching `upsertBookingModelRequests` exactly: the
+         * two paths lock the same rows, so a second, locale-dependent ordering
+         * from `localeCompare` would reopen the cycle it closes.
+         */
+        const quantityByModelId = new Map<string, number>();
+        for (const reservation of reservations) {
+          quantityByModelId.set(
+            reservation.assetModelId,
+            (quantityByModelId.get(reservation.assetModelId) ?? 0) +
+              reservation.quantity
+          );
+        }
+        const orderedModelIds = [...quantityByModelId.keys()].sort();
+
+        for (const assetModelId of orderedModelIds) {
+          await writeBookingModelRequestInTx(tx, {
+            bookingId: created.id,
+            assetModelId,
+            // The quantity is an absolute target, never a delta. A booking
+            // created in this call reserves nothing yet, so the amount asked
+            // for IS the target — unlike the add-to-existing path, which has to
+            // sum against what the booking already reserves.
+            quantity: quantityByModelId.get(assetModelId)!,
+            organizationId: booking.organizationId,
+            userId: booking.creatorId,
+            actor: reservationActor,
+          });
+        }
+      }
+
       return created;
     });
 
@@ -1334,7 +1431,10 @@ export async function createBooking({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while trying to create or update the booking. Please try again or contact support.",
-      additionalData: { booking, hints },
+      // `modelRequests` is carried because a short model pool aborts the whole
+      // create: without it the report says a booking failed and nothing says
+      // which reservation was the one that did not fit.
+      additionalData: { booking, hints, modelRequests },
       label,
       shouldBeCaptured: isLikeShelfError(cause)
         ? cause.shouldBeCaptured

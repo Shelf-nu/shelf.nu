@@ -2,6 +2,7 @@ import type { ReactElement, ReactNode } from "react";
 import React from "react";
 import { useLoaderData } from "react-router";
 
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { tw } from "~/utils/tw";
@@ -82,6 +83,17 @@ export type ListProps = {
    * This should be used in those cases
    */
   disableSelectAllItems?: boolean;
+
+  /**
+   * Rows to render. Defaults to the loader's `items` — pass this only when a
+   * view renders rows the loader supplies under a different key.
+   *
+   * These rows are also what the header's select-all checkbox ticks and what
+   * the title counts, so they must be the rows actually on screen. A list
+   * rendering one set while those two read `loaderData.items` gets a checkbox
+   * that selects rows nobody can see.
+   */
+  items?: ListItemData[];
 };
 
 /**
@@ -102,14 +114,19 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     headerExtraContent,
     extraItemComponentProps,
     disableSelectAllItems,
+    items: itemsProp,
   }: ListProps,
   ref
 ) {
-  const { items } = useLoaderData<IndexResponse>();
+  const { items: loaderItems } = useLoaderData<IndexResponse>();
+  const items = itemsProp ?? loaderItems;
   const totalIncomingItems = items?.length;
   const hasItems = totalIncomingItems > 0;
 
   const { modeIsAdvanced } = useAssetIndexViewState();
+  // The export button ships ASSET rows. The model view lists models, so it
+  // has nothing to export and no selectable rows to export from.
+  const { isModelView } = useAssetIndexView();
 
   const isUserPage = useIsUserAssetsPage();
 
@@ -141,11 +158,12 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                 title={title}
                 disableSelectAllItems={disableSelectAllItems}
                 hasBulkActions={!!bulkActions}
+                items={items}
               />
             </div>
             <div className="flex items-center justify-end gap-2">
               <When truthy={!!headerExtraContent}>{headerExtraContent}</When>
-              <When truthy={modeIsAdvanced}>
+              <When truthy={modeIsAdvanced && !isModelView}>
                 <ExportAssetsButton />
               </When>
               <When truthy={!!bulkActions}>{bulkActions}</When>
@@ -156,6 +174,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
           >
             <ListHeader
               bulkActions={bulkActions}
+              items={items}
               hideFirstColumn={hideFirstHeaderColumn}
             >
               {headerChildren}

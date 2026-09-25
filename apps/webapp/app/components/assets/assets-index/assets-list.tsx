@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { m } from "framer-motion";
+import { useSetAtom } from "jotai";
 import { Package } from "lucide-react";
 import { useFetcher, useFetchers, useLoaderData } from "react-router";
+import { setDisabledBulkItemsAtom } from "~/atoms/list";
 import { List, type ListProps } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { LocationBadge } from "~/components/location/location-badge";
@@ -20,19 +22,26 @@ import {
 import { Th, Td } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { AssetIndexSettingsProvider } from "~/context/asset-index-settings-context";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
-import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
+import type { AssetModelRollupRow } from "~/modules/asset-model/rollup.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { formatCustodyList } from "~/modules/custody/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { isPersonalOrg } from "~/utils/organization";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { AssetCodeBadge } from "../asset-code-badge";
 import { AssetImage } from "../asset-image";
@@ -41,13 +50,26 @@ import BulkActionsDropdown from "../bulk-actions-dropdown";
 import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
 import { AssetIndexPagination } from "./asset-index-pagination";
+import { AssetModelRow } from "./asset-model-row";
 import AssetQuickActions from "./asset-quick-actions";
 import { AssetIndexFilters } from "./filters";
 import { ListItemTagsColumn } from "./list-item-tags-column";
+import BookSelectedModelsDropdown from "./model-booking/book-selected-models-dropdown";
+import { getUnselectableModelRows } from "./model-booking/unselectable-model-rows";
 import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
 import { ResourceTitleLink } from "../../availability-calendar/resource-title-link";
 import { CategoryBadge } from "../category-badge";
 import { useAssetAvailabilityData } from "./use-asset-availability-data";
+
+/**
+ * The model view's bulk-action toolbar, built once.
+ *
+ * `List` hands this element to every row it renders, and `AssetModelRow` is
+ * memoised — a fresh element on each render would give the memo a new prop
+ * identity every time and re-render every row. Module scope is what keeps
+ * that identity stable.
+ */
+const MODEL_BULK_ACTIONS = <BookSelectedModelsDropdown />;
 
 export const AssetsList = ({
   customEmptyStateContent,
@@ -60,24 +82,76 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
   wrapperClassName?: string;
 }) => {
-  const { items } = useLoaderData<AssetIndexLoaderData>();
+  const { items, modelRollup, totalRollupAssets, totalModels, locale } =
+    useLoaderData<AssetIndexLoaderData>();
   // We use the hook because it handles optimistic UI
-  const { modeIsSimple } = useAssetIndexViewState();
-  const { isAvailabilityView, shouldShowAvailabilityView } =
-    useIsAvailabilityView();
+  const {
+    isAvailabilityView,
+    shouldShowAvailabilityView,
+    isModelView,
+    modeIsSimple,
+  } = useAssetIndexView();
   const columns = useAssetIndexColumns();
   // Memoize so the object reference stays stable across re-renders,
   // allowing React.memo on AdvancedAssetRow to work effectively.
   const advancedExtraProps = useMemo(() => ({ columns }), [columns]);
   const { isMd } = useViewportHeight();
   const isUserPage = useIsUserAssetsPage();
-  const { isBase } = useUserRoleHelper();
+  const { isBase, roles } = useUserRoleHelper();
   const fetchers = useFetchers();
   const { resources, events } = useAssetAvailabilityData(items);
   // Workspace pref + addon entitlement — used by the availability-view
   // resourceLabelContent to render AssetCodeBadge next to status + category.
   // resolveDisplayCode short-circuits to QR for non-addon orgs, so always safe.
   const currentOrganization = useCurrentOrganization();
+  // The header's model count. Three candidates, and only one is right:
+  // `modelRollup.length` is this page's rows, `totalItems` is every row the
+  // list renders (bucket included), and `totalModels` is the unpaged count of
+  // real models — which is what "N models" claims to be.
+  const totalModelsShown = isModelView ? totalModels : 0;
+  // Stable `id` per row (react-list-item key + click targeting) — the rollup
+  // row's natural identifier is `assetModelId`, which is `null` for the
+  // synthetic "No model" bucket.
+  const modelRollupItems = useMemo(
+    () =>
+      (modelRollup ?? []).map((row: AssetModelRollupRow) => ({
+        ...row,
+        id: row.assetModelId ?? "no-model",
+      })),
+    [modelRollup]
+  );
+  // Memoized so `AssetModelRow`'s `memo()` wrapper is not defeated by a new
+  // object identity on every render (see react-render-stability rule).
+  const modelExtraProps = useMemo(
+    () => ({ locale, currency: currentOrganization?.currency }),
+    [locale, currentOrganization?.currency]
+  );
+  /**
+   * Selection on the model view exists to feed the booking dropdown, so it is
+   * offered only where that dropdown has something to open: never in a
+   * personal workspace, which has no bookings, and never to a role that cannot
+   * create one. Withholding the element also withholds the checkbox column,
+   * which `List` renders only when `bulkActions` is present.
+   */
+  const canBookSelectedModels =
+    !disableBulkActions &&
+    !isPersonalOrg(currentOrganization) &&
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.create,
+    });
+  const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
+  // The "No model" bucket is not a model, so there are no units of it to
+  // reserve. It stays on the page — it answers "what has no model assigned" —
+  // and is registered as disabled so its checkbox refuses the click. Cleared
+  // on the other views, whose rows are all selectable: the view lives in a
+  // search param, which no route-change reset reaches.
+  useEffect(() => {
+    setDisabledBulkItems(
+      isModelView ? getUnselectableModelRows(modelRollupItems) : []
+    );
+  }, [isModelView, modelRollupItems, setDisabledBulkItems]);
   /** Find the fetcher used for toggling between asset index modes */
   const modeFetcher = fetchers.find(
     (fetcher) => fetcher.key === "asset-index-settings-mode"
@@ -144,7 +218,69 @@ export const AssetsList = ({
           <AssetIndexFilters
             disableTeamMemberFilter={disableTeamMemberFilter}
           />
-          {isAvailabilityView && shouldShowAvailabilityView ? (
+          {isModelView ? (
+            <>
+              <div className="-mb-2 flex items-center gap-1 px-1 text-sm text-gray-500">
+                <span>
+                  {`${totalModelsShown} models · ${totalRollupAssets} ${
+                    totalRollupAssets === 1 ? "asset" : "assets"
+                  } match your filters`}
+                </span>
+                {/* The asset count here is deliberately smaller than the list
+                    view's for the same filters: models are an INDIVIDUAL-only
+                    concept, so quantity-tracked assets are not part of this
+                    rollup. Stated rather than left for the reader to discover
+                    as apparent data loss when switching views. */}
+                <InfoTooltip
+                  iconClassName="size-4"
+                  content={
+                    <>
+                      <h6>Asset models</h6>
+                      <p>
+                        Counts cover the assets matching your current filters.
+                        Asset models apply to individually-tracked assets only,
+                        so quantity-tracked assets are not included here.
+                      </p>
+                    </>
+                  }
+                />
+              </div>
+              {/* Freezing is switched off here: it pins the header's name
+                  cell with `sticky left-[48px]`, and `AssetModelRow` applies no
+                  matching class to the name cell beneath it — so the pinned
+                  header would slide over unpinned body cells. */}
+              <AssetIndexSettingsProvider freezeColumn={false}>
+                <List
+                  title="Asset models"
+                  ItemComponent={AssetModelRow}
+                  customPagination={<AssetIndexPagination />}
+                  headerChildren={
+                    <>
+                      <Th>Category</Th>
+                      <Th>Assets</Th>
+                      <Th>Availability</Th>
+                      <Th>Total value</Th>
+                    </>
+                  }
+                  items={modelRollupItems}
+                  extraItemComponentProps={modelExtraProps}
+                  bulkActions={
+                    canBookSelectedModels ? MODEL_BULK_ACTIONS : undefined
+                  }
+                  // "Select all N entries" has no meaning here: both booking
+                  // endpoints take an explicit list of models with a quantity
+                  // each, so a marker standing for "every model matching the
+                  // filters" would reserve only the page in front of the user
+                  // while the header claimed the whole set.
+                  disableSelectAllItems
+                  customEmptyStateContent={{
+                    title: "No asset models match your filters",
+                    text: "Clear or change your filters to see models here.",
+                  }}
+                />
+              </AssetIndexSettingsProvider>
+            </>
+          ) : isAvailabilityView && shouldShowAvailabilityView ? (
             <>
               <AvailabilityCalendar
                 resources={resources}

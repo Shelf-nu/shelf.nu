@@ -43,6 +43,11 @@ type BulkDialogType =
   | "unavailable"
   | "bookings"
   | "booking-exist"
+  // Model reservations, from the asset index's model view. Separate from
+  // "bookings"/"booking-exist" because a model row carries a per-model
+  // quantity that an asset row does not.
+  | "model-bookings"
+  | "model-booking-exist"
   | "download-qr"
   | "partial-checkin"
   | "add-to-kit"
