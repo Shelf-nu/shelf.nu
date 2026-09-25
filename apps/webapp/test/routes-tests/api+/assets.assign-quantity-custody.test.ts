@@ -4,7 +4,7 @@
  * The route passes the "From location" choice through to `checkOutQuantity`
  * untouched (a location id, `"unplaced"` for the unplaced units, absent when the
  * dialog did not ask) and names the recorded source in the audit note for a
- * pool with two or more sources. The source rules themselves are the
+ * pool placed at two or more locations. The source rules themselves are the
  * service's and are tested there; the role gates are pinned here.
  *
  * @see {@link file://./../../../app/routes/api+/assets.assign-quantity-custody.ts}

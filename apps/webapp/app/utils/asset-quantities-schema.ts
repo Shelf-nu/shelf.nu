@@ -92,9 +92,9 @@ export const AssetQuantitiesSchema = z
 /**
  * Parses the JSON blob the custody scanner submits under `sourceLocations`:
  * `Record<assetId, source>`, where a source is a location id or `"unplaced"`
- * (see `isUnplacedSource`). Only pools placed at two or more locations (or at
- * one plus unplaced units) carry an entry; an asset without one lets the
- * service resolve its source as for any caller that does not ask.
+ * (see `isUnplacedSource`). Only pools placed at two or more locations carry
+ * an entry; an asset without one lets the service resolve its source as for
+ * any caller that does not ask.
  *
  * Like {@link AssetQuantitiesSchema} this guards the shape only: whether the
  * location is one of the asset's placements, and how many units it has left,

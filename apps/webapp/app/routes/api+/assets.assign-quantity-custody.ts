@@ -49,7 +49,7 @@ export const AssignQuantityCustodySchema = z.object({
     .transform((val) => (val === "" ? undefined : val)),
   /**
    * Where the units come from: a location id, or `"unplaced"` for the
-   * unplaced units. Only sent by the dialog for a pool with two or more sources;
+   * unplaced units. Only sent by the dialog for a pool placed at two or more locations;
    * absent means the service decides (see `resolveCustodySource`).
    */
   locationId: z.string().optional(),

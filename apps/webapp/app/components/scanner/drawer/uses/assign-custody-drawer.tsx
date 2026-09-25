@@ -182,7 +182,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // Per-row units for quantity-tracked scans, written by
   // `ScannedAssetQuantityInput` and keyed by asset id.
   const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
-  // Per-row "From location" picks for pools with two or more sources.
+  // Per-row "From location" picks for pools placed at two or more locations.
   const assetSources = useAtomValue(scannedAssetSourcesAtom);
   // The scanned rows themselves. The submit sends a quantity for every
   // quantity-tracked row, not only the ones whose input was edited.
@@ -420,7 +420,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const maxAllowed = assignableUnits(asset);
   const pickedSources = useAtomValue(scannedAssetSourcesAtom);
   const setSource = useSetAtom(setScannedAssetSourceAtom);
-  // "From location" for a pool with two or more sources; nothing otherwise.
+  // "From location" for a pool placed at two or more locations; nothing otherwise.
   const sourceChoice = scannedSourceChoice(asset, pickedSources);
   // Whole-row state badges are suppressed while a quantity row still has free
   // units. See `shouldShowStateBadges`.

@@ -2,7 +2,7 @@
  * POST /api/assets/adjust-quantity, from the "At location" angle.
  *
  * The Adjust dialog asks where units arrived or were lost only for a pool
- * with two or more sources. The route forwards that choice to
+ * placed at two or more locations. The route forwards that choice to
  * `adjustQuantity` (absent keeps the adjustment total-only) and names the
  * location in the audit note only when one was named for such a pool.
  *

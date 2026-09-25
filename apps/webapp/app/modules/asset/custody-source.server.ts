@@ -315,7 +315,7 @@ export async function applyCustodyRehome(
 /** What a placement change did to the custody sources. */
 export type CustodyRehomeResult = {
   moves: RehomeMove[];
-  /** Whether the pool had two or more sources before or after the change. */
+  /** Whether the pool was placed at two or more locations before or after the change. */
   multiSource: boolean;
 };
 
@@ -373,7 +373,7 @@ export async function rehomeCustodyForPlacementChange(
  * "1 pcs in custody are now unplaced.". Names of holders are kept out: the
  * phone shows recent notes to every role.
  *
- * Only written for pools with two or more sources, so a pool at one location
+ * Only written for pools placed at two or more locations, so a pool at one location
  * that moves wholesale changes nothing on screen. Best-effort: the placement
  * change has committed, so a failure is logged and swallowed.
  */
@@ -533,7 +533,7 @@ export type CustodySourceNoteVerb =
  * custody, are used up from it, or are restocked / lost there. Holders are
  * never named: the note says what happened to the location's units.
  *
- * Only called for pools with two or more sources, so a pool at one location
+ * Only called for pools placed at two or more locations, so a pool at one location
  * adds nothing new to its location's timeline. Best-effort: the stock
  * change has committed, so a failure is logged and swallowed.
  */
@@ -668,9 +668,9 @@ export function adjustLocationNoteSuffix(
 
 /**
  * Units in operator custody taken from one location, per quantity-tracked
- * asset, for the location page's "· N in custody". Only pools with two or
- * more sources appear in the result, so a pool at one location reads there
- * exactly as it always has.
+ * asset, for the location page's "· N in custody". Only pools placed at two
+ * or more locations appear in the result, so a pool at one location reads
+ * there exactly as it always has.
  *
  * @param locationId - The location the page is about (already org-verified)
  * @param pools - The page's quantity-tracked assets with their totals

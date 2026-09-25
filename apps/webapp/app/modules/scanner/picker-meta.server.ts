@@ -55,8 +55,8 @@ export type ScannerPickerMeta = {
   unitOfMeasure: string | null;
   /**
    * Custody context only: where the units can come from, for a pool placed
-   * at two or more locations (or one plus unplaced units). The assign drawer
-   * shows a "From location" picker from it; absent otherwise.
+   * at two or more locations. The assign drawer shows a "From location"
+   * picker from it; absent otherwise.
    */
   sources?: CustodySourceSummary | null;
 };

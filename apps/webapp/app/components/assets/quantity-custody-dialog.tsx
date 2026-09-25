@@ -9,9 +9,9 @@
  * detail overview page and from the asset header's actions menu. Both pass
  * the same `sources` summary from the asset detail loader.
  *
- * For a pool with two or more sources (locations, or a location plus
- * unplaced units) a "From location" field asks where the units come from,
- * pre-selected with the source that has the most units left. Every other
+ * For a pool placed at two or more locations a "From location" field asks
+ * where the units come from, pre-selected with the location that has the most
+ * units left ("Unplaced" is offered but never pre-selected). Every other
  * asset gets the dialog without it.
  *
  * @see {@link file://../../routes/api+/assets.assign-quantity-custody.ts} - API endpoint

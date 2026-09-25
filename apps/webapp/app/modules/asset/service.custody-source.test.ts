@@ -488,6 +488,22 @@ describe("checkOutQuantity: where the units come from", () => {
     expect(custodyRows()).toEqual([[AHMED, null, 2]]);
   });
 
+  it("asks nothing and records nothing for one location plus unplaced units", async () => {
+    // 4 at Camera Room, 3 unplaced: the units may come from either, so no
+    // source is guessed and nothing new appears anywhere.
+    seedPool({ total: 7, placements: [[CAMERA_ROOM, 4]] });
+
+    const { source } = await assign({ quantity: 2 });
+
+    expect(custodyRows()).toEqual([[AHMED, null, 2]]);
+    expect(source).toMatchObject({
+      locationId: null,
+      explicit: false,
+      multiSource: false,
+    });
+    expect(createSystemLocationNote).not.toHaveBeenCalled();
+  });
+
   it("records the chosen location of a pool at two locations, on the row, the ledger and the event", async () => {
     seedPool({
       total: 4,

@@ -21,7 +21,7 @@
  * quantity is shown instead.
  *
  * One line per person: a holder's operator rows (one per location the units
- * came from) are grouped and summed. For a pool with two or more sources the
+ * came from) are grouped and summed. For a pool placed at two or more locations the
  * line says where the units came from, and releasing a person who took units
  * from several locations asks per location. Kit-inherited rows stay separate
  * lines, released through the kit.
@@ -299,7 +299,7 @@ interface CustodyRowProps {
   isConsumable?: boolean;
   /** Whether the current user can release this custody record */
   canRelease?: boolean;
-  /** Whether the pool has two or more sources (see `hasMultipleSources`). */
+  /** Whether the pool is placed at two or more locations (see `hasMultipleSources`). */
   multiSource?: boolean;
   /** Whether the pool has unplaced units, for the NULL-source wording. */
   poolHasUnplaced?: boolean;
@@ -309,7 +309,7 @@ interface CustodyRowProps {
  * Renders one line of the breakdown: a person with their summed quantity
  * and the action that ends the hold, or a kit-inherited row with its badge.
  *
- * For a pool with two or more sources the quantity line adds where the
+ * For a pool placed at two or more locations the quantity line adds where the
  * units came from. A person holding units from several locations releases
  * them per location; everyone else gets the single-quantity dialog.
  *
@@ -512,7 +512,7 @@ interface ReleaseButtonProps {
   /** Consumable (ONE_WAY) assets are consumed, not returned */
   isConsumable?: boolean;
   /**
-   * The held units' single source, for a pool with two or more sources:
+   * The held units' single source, for a pool placed at two or more locations:
    * posted as `locationId` so the release targets that row, and named in a
    * line saying where the units go back to (or which location loses the
    * used-up ones). Null for every other pool: the form is unchanged.

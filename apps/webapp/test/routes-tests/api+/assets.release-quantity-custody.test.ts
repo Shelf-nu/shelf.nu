@@ -4,8 +4,8 @@
  * A person holding units taken from several locations is released per
  * location: the dialog posts the lines as a JSON `sources` field. The route
  * parses them strictly, forwards them (or a single `locationId`) to
- * `releaseQuantity`, and names the sources in the audit note for a pool with
- * two or more sources.
+ * `releaseQuantity`, and names the sources in the audit note for a pool placed
+ * at two or more locations.
  *
  * @see {@link file://./../../../app/routes/api+/assets.release-quantity-custody.ts}
  * @see {@link file://./../../../app/modules/asset/service.custody-source.test.ts}

@@ -2,10 +2,11 @@
  * Custody source locations for quantity-tracked assets ("pools").
  *
  * The rule: Shelf asks where units come from at the moment they LEAVE (Assign
- * for custody), once, and only when a pool has two or more sources. A source
- * is a manual placement (`AssetLocation` with `assetKitId` NULL) or, when the
- * pool has units no placement accounts for, "Unplaced". The chosen source is
- * stored on `Custody.locationId` (NULL = unplaced, or never recorded).
+ * for custody), once, and only when a pool is placed at two or more locations.
+ * A source is a manual placement (`AssetLocation` with `assetKitId` NULL) or,
+ * when the pool has units no placement accounts for, "Unplaced". The chosen
+ * source is stored on `Custody.locationId` (NULL = unplaced, or never
+ * recorded).
  *
  * Custody never changes a location's count. The source only decides which
  * location loses units that are used up, and caps how many can be taken from
@@ -118,15 +119,15 @@ export function distinctPlacementLocationIds(
 }
 
 /**
- * Whether the pool has two or more sources: two or more distinct manual
- * locations, or at least one location plus unplaced units. Every new element
- * on screen (the "From location" field, per-location custody text) is gated
- * on this, so a pool at one location, or with no placement at all, looks
- * exactly as it did before sources existed.
+ * Whether the pool is placed at two or more distinct manual locations. Every
+ * new element on screen (the "From location" field, per-location custody
+ * text) and every new note text is gated on this, so a pool at one location,
+ * at one location plus unplaced units, or with no placement at all looks
+ * exactly as it did before sources existed. Unplaced units alone never make
+ * a second source: they only add an "Unplaced" option once the gate is open.
  */
 export function hasMultipleSources(state: CustodySourceState): boolean {
-  const locations = distinctPlacementLocationIds(state).length;
-  return locations + (unplacedUnits(state) > 0 ? 1 : 0) >= 2;
+  return distinctPlacementLocationIds(state).length >= 2;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -215,7 +216,7 @@ export function buildCustodySourceOptions(
 
 /** What the asset page's dialogs and rows need about a pool's sources. */
 export type CustodySourceSummary = {
-  /** Two or more sources: the gate for every new element on screen. */
+  /** Placed at two or more locations: the gate for every new element. */
   multiSource: boolean;
   /** Dropdown choices, empty when `multiSource` is false. */
   options: CustodySourceOption[];
@@ -228,15 +229,17 @@ export type CustodySourceSummary = {
 };
 
 /**
- * The option a dialog opens with: the one with the most units left. Ties go
- * to the earlier option, so locations win over "Unplaced" and the order is
- * stable between renders.
+ * The option a dialog opens with: the LOCATION with the most units left.
+ * "Unplaced" is never the default, even when it has more left; the operator
+ * picks it on purpose. Ties go to the earlier location, so the choice is
+ * stable between renders. NULL only when there is no location option.
  */
 export function defaultSourceOption(
   options: CustodySourceOption[]
 ): CustodySourceOption | null {
   let best: CustodySourceOption | null = null;
   for (const option of options) {
+    if (option.locationId === null) continue;
     if (!best || option.left > best.left) best = option;
   }
   return best;

@@ -490,7 +490,7 @@ type AdjustQuantityArgs = {
 export type AdjustmentLocationOutcome = {
   locationId: string | null;
   locationName: string | null;
-  /** Whether the pool had two or more sources before the adjustment. */
+  /** Whether the pool was placed at two or more locations before the adjustment. */
   multiSource: boolean;
 };
 
@@ -865,9 +865,9 @@ export async function adjustQuantity({
     });
 
     /**
-     * The location's timeline records the restock or loss, for pools with
-     * two or more sources only (a pool at one location reads as it always
-     * has). Written after the commit, best-effort.
+     * The location's timeline records the restock or loss, for pools
+     * placed at two or more locations only (a pool at one location reads as
+     * it always has). Written after the commit, best-effort.
      */
     if (result.location.multiSource && result.location.locationId) {
       await createCustodySourceLocationNote({

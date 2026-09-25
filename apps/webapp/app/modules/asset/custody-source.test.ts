@@ -110,8 +110,10 @@ describe("hasMultipleSources", () => {
     expect(hasMultipleSources(state(10, [[A, 10]]))).toBe(false);
   });
 
-  it("is true for one location plus unplaced units", () => {
-    expect(hasMultipleSources(state(10, [[A, 4]]))).toBe(true);
+  it("is false for one location plus unplaced units", () => {
+    // Unplaced units never open the gate on their own: this pool asks
+    // nothing and records no source, exactly as before.
+    expect(hasMultipleSources(state(10, [[A, 4]]))).toBe(false);
   });
 
   it("is true for two locations", () => {
@@ -235,8 +237,40 @@ describe("defaultSourceOption", () => {
     expect(defaultSourceOption(options)?.locationId).toBe(A);
   });
 
-  it("returns null for no options", () => {
+  it("never pre-selects Unplaced, even when it has the most left", () => {
+    const options = buildCustodySourceOptions(
+      state(
+        20,
+        [
+          [A, 2],
+          [B, 3],
+        ],
+        [[B, 3]]
+      ),
+      [
+        { id: A, name: "Camera Room" },
+        { id: B, name: "Studio" },
+      ]
+    );
+    // Camera Room 2 left, Studio 0 left, Unplaced 15 left.
+    expect(options.map((o) => o.left)).toEqual([2, 0, 15]);
+    expect(defaultSourceOption(options)?.locationId).toBe(A);
+  });
+
+  it("returns null when there is no location to pre-select", () => {
     expect(defaultSourceOption([])).toBeNull();
+    expect(
+      defaultSourceOption([
+        {
+          value: "unplaced",
+          locationId: null,
+          label: "Unplaced",
+          placed: 3,
+          inCustody: 0,
+          left: 3,
+        },
+      ])
+    ).toBeNull();
   });
 });
 

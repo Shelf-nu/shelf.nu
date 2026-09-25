@@ -4,7 +4,7 @@
  * Pure helpers behind the asset page's custody breakdown. The database keeps
  * one operator custody row per holder per source location, but the page shows
  * ONE line per person: their rows are grouped here, their units summed, and
- * for a pool with two or more sources the line says where the units came
+ * for a pool placed at two or more locations the line says where the units came
  * from ("2 from Camera Room, 1 from Studio"). Kit-inherited rows stay their
  * own lines: they are released through the kit.
  *

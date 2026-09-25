@@ -194,8 +194,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
       /**
        * Three shapes, worded from what was actually persisted. For a pool
-       * with two or more sources the lines say which locations the units
-       * came from; otherwise the wording carries no location at all.
+       * placed at two or more locations the lines say which locations the
+       * units came from; otherwise the wording carries no location at all.
        */
       const fromSources = releaseSourceNoteSuffix({ lines, multiSource });
       const baseLine =

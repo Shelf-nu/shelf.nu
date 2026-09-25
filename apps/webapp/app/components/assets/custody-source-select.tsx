@@ -2,8 +2,8 @@
  * Custody Source Select
  *
  * The "From location" (Assign custody) and "At location" (Adjust quantity)
- * picker for a quantity-tracked asset placed at two or more locations, or at
- * one location plus unplaced units. Lists each manual placement as
+ * picker for a quantity-tracked asset placed at two or more locations. Lists
+ * each manual placement as
  * "Camera Room · 2 pcs", adding "· 1 in custody" when some of its units are
  * out, and "Unplaced · 3 pcs" when the pool has unplaced units.
  *
@@ -12,9 +12,9 @@
  * fetcher form posts it as `locationId` (a location id, or `"unplaced"` for
  * the unplaced units).
  *
- * Render it only when the pool has two or more sources: callers gate on
- * `CustodySourceSummary.multiSource`, so a pool at one location keeps its
- * dialog exactly as it was.
+ * Render it only when the pool is placed at two or more locations: callers
+ * gate on `CustodySourceSummary.multiSource`, so a pool at one location keeps
+ * its dialog exactly as it was.
  *
  * @see {@link file://../../modules/asset/custody-source.ts}
  * @see {@link file://./quantity-custody-dialog.tsx}

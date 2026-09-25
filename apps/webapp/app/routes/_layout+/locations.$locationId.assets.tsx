@@ -165,7 +165,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalAssetsWithinLocation / perPage);
 
     /**
-     * For pools with two or more sources, how many of this location's units
+     * For pools placed at two or more locations, how many of this location's units
      * are out with people ("· 2 in custody"). Counts only, never a name.
      */
     const custodyFromHere = await getCustodyFromLocationByPool({

@@ -125,7 +125,7 @@ export interface QuantityOverviewCardProps {
   className?: string;
   /**
    * The pool's sources, handed to the Adjust dialog so it can ask "At
-   * location" for a pool with two or more sources.
+   * location" for a pool placed at two or more locations.
    */
   custodySources?: CustodySourceSummary | null;
 }

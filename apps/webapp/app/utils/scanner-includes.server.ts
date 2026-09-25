@@ -188,7 +188,7 @@ export type ScannerAssetPickerMeta = {
   unitOfMeasure: string | null;
   /**
    * Custody context only: where a pool's units can come from, when it is
-   * placed at two or more locations (or one plus unplaced units).
+   * placed at two or more locations.
    */
   sources?: CustodySourceSummary | null;
 } | null;

@@ -30,9 +30,12 @@ ALTER TABLE "Custody" ADD CONSTRAINT "Custody_locationId_fkey" FOREIGN KEY ("loc
 ALTER TABLE "ConsumptionLog" ADD CONSTRAINT "ConsumptionLog_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- Backfill. Operator custody (kitCustodyId IS NULL) on a quantity-tracked
--- asset placed at exactly ONE manual location takes that location: the units
--- can only have come from there. Every other row keeps NULL:
+-- asset placed at exactly ONE manual location with no unplaced units takes
+-- that location: the units can only have come from there. This is the same
+-- source a new assignment on that pool records. Every other row keeps NULL:
 --   - pools with no manual placement (NULL already means "unplaced"),
+--   - pools at one location plus unplaced units (the units may have come
+--     from either; a new assignment there records NULL too),
 --   - pools placed at two or more locations (the source was never recorded),
 --   - kit-inherited rows (their units follow the kit, never a placement),
 --   - individual assets.
@@ -45,7 +48,8 @@ FROM (
   SELECT
     al."assetId",
     MIN(al."locationId") AS "locationId",
-    SUM(al."quantity") AS "placed"
+    SUM(al."quantity") AS "placed",
+    MAX(COALESCE(a."quantity", 0)) AS "total"
   FROM "AssetLocation" AS al
   JOIN "Asset" AS a ON a."id" = al."assetId"
   WHERE al."assetKitId" IS NULL
@@ -56,6 +60,7 @@ FROM (
 WHERE c."assetId" = single."assetId"
   AND c."kitCustodyId" IS NULL
   AND c."locationId" IS NULL
+  AND single."placed" >= single."total"
   AND (
     SELECT COALESCE(SUM(op."quantity"), 0)
     FROM "Custody" AS op

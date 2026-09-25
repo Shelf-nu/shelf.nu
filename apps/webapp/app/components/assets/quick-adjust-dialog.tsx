@@ -8,7 +8,7 @@
  * Designed to be triggered from the QuantityOverviewCard on the asset detail
  * page. Supports an optional `autoOpen` prop for QR-scan-triggered flows.
  *
- * For a pool with two or more sources an "At location" field says where the
+ * For a pool placed at two or more locations an "At location" field says where the
  * units arrived or were lost, pre-selected with the source that has the most
  * units left. The location's placement moves with the total. Every other
  * asset gets the dialog without it.

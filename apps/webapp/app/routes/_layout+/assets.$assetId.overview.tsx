@@ -1735,7 +1735,7 @@ export default function AssetOverview() {
                                 quantity={p.quantity}
                                 unit={unit}
                                 inCustody={
-                                  // For a pool with two or more sources, how
+                                  // For a pool placed at two or more locations, how
                                   // many of this location's units are out with
                                   // people. Manual rows only: kit-held units
                                   // follow the kit. Never names anyone.

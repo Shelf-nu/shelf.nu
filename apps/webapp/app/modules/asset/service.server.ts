@@ -8415,7 +8415,7 @@ export type CustodySourceOutcome = {
   /** Name of that location, for the audit note. */
   locationName: string | null;
   /**
-   * Whether the pool had two or more sources. Notes only mention the source
+   * Whether the pool was placed at two or more locations. Notes only mention the source
    * then, so a pool at one location reads exactly as it always has.
    */
   multiSource: boolean;
@@ -8808,7 +8808,7 @@ export async function checkOutQuantity({
 
     /**
      * Step 11: The source location's timeline says units went out from it,
-     * for pools with two or more sources only. Written after the commit
+     * for pools placed at two or more locations only. Written after the commit
      * (the location-note helper uses the global client), like the move
      * notes. The holder's name stays out of it.
      */
@@ -8942,7 +8942,7 @@ export type AppliedReleaseLine = {
  *
  * @param args - The release details
  * @returns The updated Asset record, the `consumed` / `returned` split, the
- *   per-source lines and whether the pool has two or more sources
+ *   per-source lines and whether the pool is placed at two or more locations
  * @throws {ShelfError} If no custody record exists (for that source), the
  *   release quantity exceeds what is held, `consumed` is out of range, or a
  *   returnable asset was asked to consume
@@ -9455,7 +9455,7 @@ export async function releaseQuantity({
 
     /**
      * Step 10: Used-up units taken off a location are written on that
-     * location's timeline, for pools with two or more sources only.
+     * location's timeline, for pools placed at two or more locations only.
      */
     if (result.multiSource) {
       for (const line of result.lines) {
