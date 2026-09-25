@@ -54,6 +54,7 @@ import {
   describePlacements,
   describeStockMovement,
   isFreshMovement,
+  MOVEMENT_GROUP_WINDOW_MS,
   type MinimumChange,
   lowStockSubject,
   recoveredSubject,
@@ -76,12 +77,66 @@ import { resolveUserGreetingName, type UserNameFields } from "~/utils/user";
 /** Which low-stock email to build and send. */
 type LowStockEmailVariant = "alert" | "recovered";
 
+/** The `ConsumptionLog` columns the "What happened" sentence reads. */
+const MOVEMENT_LOG_SELECT = {
+  category: true,
+  quantity: true,
+  note: true,
+  createdAt: true,
+  userId: true,
+  performedBy: { select: USER_NAME_SELECT },
+  custodianId: true,
+  custodian: { select: { name: true, user: { select: USER_NAME_SELECT } } },
+  booking: { select: { id: true, name: true } },
+} satisfies Prisma.ConsumptionLogSelect;
+
+/** Newest first; `id` breaks ties between rows written in the same instant. */
+const NEWEST_FIRST: Prisma.ConsumptionLogOrderByWithRelationInput[] = [
+  { createdAt: "desc" },
+  { id: "desc" },
+];
+
 /**
- * How many of the asset's newest log rows to read. One operation can write
- * several (a booking check-in writes one per disposition and booking slice),
- * and the copy module groups them; this bound only has to cover one operation.
+ * Loads every row of the asset's newest operation, newest first.
+ *
+ * There is no row cap: one check-in writes a row per disposition and per
+ * booking slice, and an asset can sit in any number of kits. The newest row
+ * names the operation; its other rows share its user and its booking or
+ * custodian, within {@link MOVEMENT_GROUP_WINDOW_MS} before it. Those are the
+ * keys `pickLatestMovement` groups by, so the two agree. A row with neither a
+ * booking nor a custodian is a single-row write and comes back alone.
+ *
+ * @param assetId - The asset, already verified to belong to the organization
+ * @returns The operation's rows, newest first; empty when the asset has none
  */
-const MOVEMENT_LOG_ROWS = 50;
+async function loadLatestMovementRows(assetId: string) {
+  const newest = await db.consumptionLog.findFirst({
+    where: { assetId },
+    orderBy: NEWEST_FIRST,
+    select: MOVEMENT_LOG_SELECT,
+  });
+  if (!newest) {
+    return [];
+  }
+  const bookingId = newest.booking?.id ?? null;
+  if (!bookingId && !newest.custodianId) {
+    return [newest];
+  }
+  return db.consumptionLog.findMany({
+    where: {
+      assetId,
+      userId: newest.userId,
+      bookingId,
+      custodianId: newest.custodianId,
+      createdAt: {
+        gte: new Date(newest.createdAt.getTime() - MOVEMENT_GROUP_WINDOW_MS),
+        lte: newest.createdAt,
+      },
+    },
+    orderBy: NEWEST_FIRST,
+    select: MOVEMENT_LOG_SELECT,
+  });
+}
 
 /**
  * Runs a read the mail can do without. A failure is logged and answers `null`,
@@ -229,26 +284,7 @@ async function sendLowStockEmails({
       }),
       getOrganizationAdminsForNotification({ organizationId }),
       optionalRead(
-        () =>
-          db.consumptionLog.findMany({
-            where: { assetId },
-            // `id` breaks ties between rows written in the same instant.
-            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-            take: MOVEMENT_LOG_ROWS,
-            select: {
-              category: true,
-              quantity: true,
-              note: true,
-              createdAt: true,
-              userId: true,
-              performedBy: { select: USER_NAME_SELECT },
-              custodianId: true,
-              custodian: {
-                select: { name: true, user: { select: USER_NAME_SELECT } },
-              },
-              booking: { select: { id: true, name: true } },
-            },
-          }),
+        () => loadLatestMovementRows(assetId),
         "newest consumption log rows",
         ids
       ),

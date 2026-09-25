@@ -37,9 +37,12 @@ export const MOVEMENT_FRESHNESS_MS = 5 * 60 * 1000;
 /**
  * How far apart the rows of one operation can be written. A booking check-in
  * writes its rows one by one inside a transaction, so their timestamps differ
- * by milliseconds rather than tying.
+ * rather than tie, and that transaction may run for up to 15 seconds (its
+ * timeout in `checkinBooking`). Keep the two equal. The cost of the width: two
+ * check-ins of the same booking by the same person within 15 seconds read as
+ * one.
  */
-export const MOVEMENT_GROUP_WINDOW_MS = 5 * 1000;
+export const MOVEMENT_GROUP_WINDOW_MS = 15 * 1000;
 
 /** The "Where it is" value when the asset has no `AssetLocation` rows. */
 export const NOT_PLACED = "Not placed at a location";
@@ -438,6 +441,9 @@ export function describeStockMovement({
  * @returns `"Ogden warehouse: 2, Van 3: 1"`, or {@link NOT_PLACED}
  */
 export function describePlacements(rows: PlacementRow[]) {
+  // Location names are unique per workspace, case-insensitively (the
+  // `Location_name_organizationId_key` index), so a name sums only the manual
+  // and kit-driven rows of one location, never two locations.
   const totals = new Map<string, number>();
   for (const row of rows) {
     const name = row.location.name;
@@ -524,8 +530,8 @@ export function preheader({
  */
 export function otherLowSentence(n: number) {
   return n === 1
-    ? "1 other item is below its minimum"
-    : `${n} other items are below their minimum`;
+    ? "1 other item is at or below its minimum"
+    : `${n} other items are at or below their minimum`;
 }
 
 /**

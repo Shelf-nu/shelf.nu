@@ -81,7 +81,7 @@ describe("low-stock alert email", () => {
       "Out with people",
       "3 Units",
       "Also low",
-      "1 other item is below its minimum",
+      "1 other item is at or below its minimum",
       "See all low-stock items",
       "Open booking",
       "Open asset",

@@ -81,7 +81,7 @@ describe("back-in-stock email", () => {
       "Where it is",
       "Ogden warehouse: 14",
       "Also low",
-      "2 other items are below their minimum",
+      "2 other items are at or below their minimum",
       "See all low-stock items",
       "Open asset",
       "No action needed.",

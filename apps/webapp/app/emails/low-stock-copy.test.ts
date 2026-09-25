@@ -353,6 +353,21 @@ describe("describeStockMovement: one operation that wrote several rows", () => {
     );
   });
 
+  it("keeps a slow check-in together, up to its transaction timeout", () => {
+    const out = movement([
+      logRow({ category: "LOSS", quantity: 1, booking: SPRING_FAIR }),
+      logRow({
+        category: "CONSUME",
+        quantity: 2,
+        booking: SPRING_FAIR,
+        createdAt: before(12_000),
+      }),
+    ]);
+    expect(out?.text).toBe(
+      `2 Units used up and 1 Units reported lost by Dana Reyes during booking Spring Fair ${WHEN}`
+    );
+  });
+
   it("leaves out an earlier check-in of the same booking", () => {
     const out = movement([
       logRow({ category: "CONSUME", quantity: 2, booking: SPRING_FAIR }),
@@ -580,13 +595,13 @@ describe("preheader", () => {
 describe("otherLowSentence", () => {
   it("is singular for one item", () => {
     expect(record(otherLowSentence(1))).toBe(
-      "1 other item is below its minimum"
+      "1 other item is at or below its minimum"
     );
   });
 
   it("is plural for several", () => {
     expect(record(otherLowSentence(3))).toBe(
-      "3 other items are below their minimum"
+      "3 other items are at or below their minimum"
     );
   });
 });
@@ -630,7 +645,7 @@ describe("buildFactRows", () => {
       { label: "Out with people", value: "3 Units" },
       {
         label: "Also low",
-        value: "1 other item is below its minimum",
+        value: "1 other item is at or below its minimum",
         link: {
           text: "See all low-stock items",
           href: "/assets?lowStockOnly=true",

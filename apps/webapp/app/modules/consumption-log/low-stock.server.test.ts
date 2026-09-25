@@ -72,7 +72,7 @@ vitest.mock("~/database/db.server", () => ({
     },
     custody: { aggregate: vitest.fn() },
     organization: { findUnique: vitest.fn() },
-    consumptionLog: { findMany: vitest.fn() },
+    consumptionLog: { findFirst: vitest.fn(), findMany: vitest.fn() },
     assetLocation: { findMany: vitest.fn() },
     user: { findUnique: vitest.fn() },
     activityEvent: { findFirst: vitest.fn() },
@@ -94,9 +94,23 @@ const assetCountMock = db.asset.count as ReturnType<typeof vitest.fn>;
 const orgFindUniqueMock = db.organization.findUnique as ReturnType<
   typeof vitest.fn
 >;
+const logFindFirstMock = db.consumptionLog.findFirst as ReturnType<
+  typeof vitest.fn
+>;
 const logFindManyMock = db.consumptionLog.findMany as ReturnType<
   typeof vitest.fn
 >;
+
+/**
+ * Feeds the notifier's two-step log read: the newest row first, then, for a
+ * row with a booking or custodian, every row of its operation.
+ *
+ * @param rows - The asset's rows, newest first
+ */
+function logsAre(rows: unknown[]) {
+  logFindFirstMock.mockResolvedValue(rows[0] ?? null);
+  logFindManyMock.mockResolvedValue(rows);
+}
 const placementsMock = db.assetLocation.findMany as ReturnType<
   typeof vitest.fn
 >;
@@ -131,7 +145,7 @@ beforeEach(() => {
     name: "Acme",
     customEmailFooter: null,
   });
-  logFindManyMock.mockResolvedValue([]);
+  logsAre([]);
   placementsMock.mockResolvedValue([]);
   userFindUniqueMock.mockResolvedValue(null);
   minEventMock.mockResolvedValue(null);
@@ -623,7 +637,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
       },
     ]);
     findFirstMock.mockResolvedValue(assetRow({ quantity: 2, minQuantity: 5 }));
-    logFindManyMock.mockResolvedValue([consumeRow]);
+    logsAre([consumeRow]);
 
     await checkAndNotifyLowStock({
       assetId: ASSET_ID,
@@ -667,7 +681,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
       { quantity: 1, location: { name: "Van 3" } },
     ]);
     assetCountMock.mockResolvedValue(1);
-    logFindManyMock.mockResolvedValue([consumeRow]);
+    logsAre([consumeRow]);
 
     await checkAndNotifyLowStock({
       assetId: ASSET_ID,
@@ -707,11 +721,13 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
     );
     // A fresh log row explains the change, so the acting user is not loaded.
     expect(userFindUniqueMock).not.toHaveBeenCalled();
+    // A row with neither booking nor custodian stands alone: no second read.
+    expect(logFindManyMock).not.toHaveBeenCalled();
   });
 
   it("names the acting user when no log row explains the change", async () => {
     findFirstMock.mockResolvedValue(assetRow({ quantity: 2, minQuantity: 5 }));
-    logFindManyMock.mockResolvedValue([]);
+    logsAre([]);
     userFindUniqueMock.mockResolvedValue({
       firstName: "Sam",
       lastName: "Ortiz",
@@ -734,7 +750,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
 
   it("names the acting user when the log row is older than the change", async () => {
     findFirstMock.mockResolvedValue(assetRow({ quantity: 2, minQuantity: 5 }));
-    logFindManyMock.mockResolvedValue([
+    logsAre([
       { ...consumeRow, createdAt: new Date("2026-09-24T19:00:00.000Z") },
     ]);
     userFindUniqueMock.mockResolvedValue({
@@ -770,7 +786,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
 
   it("still sends when the optional reads fail, and claims nothing it could not read", async () => {
     findFirstMock.mockResolvedValue(assetRow({ quantity: 2, minQuantity: 5 }));
-    logFindManyMock.mockRejectedValue(new Error("log read failed"));
+    logFindFirstMock.mockRejectedValue(new Error("log read failed"));
     placementsMock.mockRejectedValue(new Error("placements read failed"));
     assetCountMock.mockRejectedValue(new Error("count failed"));
     userFindUniqueMock.mockResolvedValue({
@@ -817,7 +833,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
     findFirstMock.mockResolvedValue(assetRow({ quantity: 2, minQuantity: 5 }));
     const springFair = { id: "bk-1", name: "Spring Fair" };
     // One check-in transaction: rows land milliseconds apart, newest first.
-    logFindManyMock.mockResolvedValue([
+    logsAre([
       { ...consumeRow, category: "RETURN", quantity: 4, booking: springFair },
       { ...consumeRow, category: "LOSS", quantity: 1, booking: springFair },
       {
@@ -835,14 +851,52 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
       organizationId: ORG_ID,
     });
 
-    expect(logFindManyMock).toHaveBeenCalledWith(
+    expect(logFindFirstMock).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { assetId: ASSET_ID },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       })
     );
+    // The newest row names the operation; its keys load the rest, uncapped.
+    const operationRead = logFindManyMock.mock.calls[0][0];
+    expect(operationRead.where).toEqual({
+      assetId: ASSET_ID,
+      userId: "user-dana",
+      bookingId: "bk-1",
+      custodianId: null,
+      createdAt: {
+        gte: new Date(LOGGED_AT.getTime() - 15_000),
+        lte: LOGGED_AT,
+      },
+    });
+    expect(operationRead).not.toHaveProperty("take");
     expect(alertRenders()[0].movement).toEqual({
       text: "3 boards used up, 1 boards reported lost and 4 boards returned by Dana Reyes during booking Spring Fair on 09/24/2026 at 8:53 PM",
+      href: "/bookings/bk-1",
+    });
+  });
+
+  it("sums a check-in of many kit slices in full", async () => {
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 2, minQuantity: 5 }));
+    const springFair = { id: "bk-1", name: "Spring Fair" };
+    // One unit used up on each of 60 slices, a millisecond apart.
+    logsAre(
+      Array.from({ length: 60 }, (_, index) => ({
+        ...consumeRow,
+        quantity: 1,
+        booking: springFair,
+        createdAt: new Date(LOGGED_AT.getTime() - index),
+      }))
+    );
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(alertRenders()[0].movement).toEqual({
+      text: "60 boards used up by Dana Reyes during booking Spring Fair on 09/24/2026 at 8:53 PM",
       href: "/bookings/bk-1",
     });
   });
@@ -924,9 +978,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
     findFirstMock.mockResolvedValue(
       assetRow({ quantity: 14, minQuantity: 5, lowStockNotifiedAt: new Date() })
     );
-    logFindManyMock.mockResolvedValue([
-      { ...consumeRow, category: "RESTOCK", quantity: 12 },
-    ]);
+    logsAre([{ ...consumeRow, category: "RESTOCK", quantity: 12 }]);
     placementsMock.mockResolvedValue([
       { quantity: 14, location: { name: "Ogden warehouse" } },
     ]);
