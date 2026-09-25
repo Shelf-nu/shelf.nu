@@ -60,6 +60,43 @@ describe("NewAssetFormSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  /**
+   * `minQuantity = 0` is the out-of-stock threshold: alert when nothing is
+   * left. `low-stock.server.ts` states that semantics explicitly and tests
+   * `minQuantity != null`, never truthiness, and the CSV importer accepts any
+   * non-negative whole number, so the form is the only place that can refuse
+   * it, and refusing it makes a supported configuration unreachable from the UI.
+   */
+  it("accepts minQuantity of 0 as the out-of-stock threshold", () => {
+    const result = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      type: "QUANTITY_TRACKED",
+      quantity: "10",
+      minQuantity: "0",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.minQuantity).toBe(0);
+    }
+  });
+
+  it("still maps an empty minQuantity to null rather than 0", () => {
+    // Empty and zero are different answers: no threshold vs. a threshold of
+    // zero. The transform has to keep them apart.
+    const result = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      type: "QUANTITY_TRACKED",
+      quantity: "10",
+      minQuantity: "",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.minQuantity).toBeNull();
+    }
+  });
+
   it("rejects negative minQuantity", () => {
     const result = NewAssetFormSchema.safeParse({
       ...baseValidData,

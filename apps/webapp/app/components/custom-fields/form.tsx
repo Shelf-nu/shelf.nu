@@ -46,12 +46,48 @@ export const NewCustomFieldFormSchema = z.object({
     .optional()
     .transform((val) => (val === "on" ? true : false)),
   organizationId: z.string(),
-  options: z.array(z.string()).optional(),
+  // Trimmed, with blanks dropped. `OptionBuilder` gates on a truthy string and
+  // never trims, so a whitespace-only entry reaches here; stored as-is it would
+  // render a row in the dropdown that an operator can see but not meaningfully
+  // pick, and padded values would not match the stored value on the asset form.
+  options: z
+    .array(z.string())
+    .optional()
+    .transform(
+      (opts) => opts?.map((opt) => opt.trim()).filter((opt) => opt !== "")
+    ),
   categories: z
     .array(z.string().min(1, "Please select a category"))
     .optional()
     .default([]),
 });
+
+/**
+ * What the create and edit ACTIONS parse.
+ *
+ * Adds the one rule that spans two fields, which is why it cannot live inside
+ * the object above: an OPTION field needs at least one option. Both routes parse
+ * through this, so the rule cannot hold on one page and not the other.
+ *
+ * `NewCustomFieldFormSchema` stays a plain `ZodObject` because the form reads
+ * `.shape` for its required markers and hands the schema to `useZorm`, neither of
+ * which works on the `ZodEffects` a refinement produces. The cross-field message
+ * reaches the UI through the server-error fallback the form already renders.
+ */
+export const CustomFieldSubmissionSchema = NewCustomFieldFormSchema.superRefine(
+  (data, ctx) => {
+    // An OPTION field with nothing to choose from is not merely empty, it is
+    // unusable: the dropdown renders no choices, and a REQUIRED one then demands
+    // a value that cannot be picked, which blocks saving the asset entirely.
+    if (data.type === CustomFieldType.OPTION && !data.options?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: "Please add at least one option for a dropdown field",
+      });
+    }
+  }
+);
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
@@ -116,9 +152,9 @@ export const CustomFieldForm = ({
   const actionData = useActionData<
     typeof newCustomFieldsAction | typeof editCustomFieldsAction
   >();
-  const validationErrors = getValidationErrors<typeof NewCustomFieldFormSchema>(
-    actionData?.error
-  );
+  const validationErrors = getValidationErrors<
+    typeof CustomFieldSubmissionSchema
+  >(actionData?.error);
 
   return (
     <Card className="w-full md:w-min">
@@ -212,6 +248,14 @@ export const CustomFieldForm = ({
                     value={op}
                   />
                 ))}
+                {/* "At least one option" spans type + options, so it is refined
+                    on the submission schema rather than on a single field and
+                    arrives here as a server error. */}
+                {validationErrors?.options ? (
+                  <div className="text-sm text-error-500">
+                    {validationErrors.options.message}
+                  </div>
+                ) : null}
               </FormRow>
             </>
           ) : null}
