@@ -3,6 +3,11 @@ import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody
 import { db } from "~/database/db.server";
 import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import {
+  isUnplacedSource,
+  unitsLeftAtSource,
+} from "~/modules/asset/custody-source";
+import { loadCustodySources } from "~/modules/asset/custody-source.server";
+import {
   bulkCheckOutAssets,
   checkOutQuantity,
 } from "~/modules/asset/service.server";
@@ -53,7 +58,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, custodian, currentSearchParams, quantities } = parseData(
+    const {
+      assetIds,
+      custodian,
+      currentSearchParams,
+      quantities,
+      sourceLocations,
+    } = parseData(
       formData,
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
@@ -166,6 +177,39 @@ export async function action({ context, request }: ActionFunctionArgs) {
         unavailable.push(
           `"${asset.title}" (asked for ${quantities[assetId]}, ${available} free)`
         );
+        continue;
+      }
+
+      /**
+       * A pool placed at two or more locations names where its units come
+       * from; that location caps the hand-over too (placed there minus
+       * already in custody from there), the same rule `checkOutQuantity`
+       * applies under its lock. Checked here so the refusal still lands
+       * before anything is written.
+       */
+      const source = sourceLocations[assetId];
+      if (source !== undefined) {
+        const locationId = isUnplacedSource(source) ? null : source;
+        const { state } = await loadCustodySources(db, {
+          assetId,
+          total: asset.quantity ?? 0,
+        });
+        const left = unitsLeftAtSource(state, locationId);
+        if (quantities[assetId] > left) {
+          const where = locationId
+            ? `left at ${
+                (
+                  await db.location.findFirst({
+                    where: { id: locationId, organizationId },
+                    select: { name: true },
+                  })
+                )?.name ?? "the chosen location"
+              }`
+            : "unplaced left";
+          unavailable.push(
+            `"${asset.title}" (asked for ${quantities[assetId]}, ${left} ${where})`
+          );
+        }
       }
     }
 
@@ -189,6 +233,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
         userId,
         organizationId,
         role,
+        // Undefined for pools the scanner showed no picker for: the service
+        // then resolves the source as for any caller that does not ask.
+        locationId: sourceLocations[assetId],
       });
     }
 

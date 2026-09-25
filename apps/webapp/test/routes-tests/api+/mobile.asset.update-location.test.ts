@@ -51,6 +51,11 @@ const dbMocks = vi.hoisted(() => ({
   location: {
     findFirst: vi.fn(),
   },
+  // why: the collapse reads the operator custody rows to re-home custody
+  // taken from a dropped placement; none are out in these tests.
+  custody: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
   $transaction: vi.fn(),
 }));
 

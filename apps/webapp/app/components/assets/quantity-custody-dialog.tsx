@@ -6,10 +6,17 @@
  * a quantity input, then submits to `/api/assets/assign-quantity-custody`.
  *
  * Designed to be triggered from the QuantityCustodyList card on the asset
- * detail overview page.
+ * detail overview page and from the asset header's actions menu. Both pass
+ * the same `sources` summary from the asset detail loader.
+ *
+ * For a pool placed at two or more locations a "From location" field asks
+ * where the units come from, pre-selected with the location that has the most
+ * units left ("Unplaced" is offered but never pre-selected). Every other
+ * asset gets the dialog without it.
  *
  * @see {@link file://../../routes/api+/assets.assign-quantity-custody.ts} - API endpoint
  * @see {@link file://./quantity-custody-list.tsx} - Trigger location
+ * @see {@link file://./custody-source-select.tsx} - The "From location" field
  */
 
 import type { ReactNode } from "react";
@@ -29,8 +36,11 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
+import type { CustodySourceSummary } from "~/modules/asset/custody-source";
+import { defaultSourceOption } from "~/modules/asset/custody-source";
 import { isFormProcessing } from "~/utils/form";
 import { resolveTeamMemberName } from "~/utils/user";
+import { CustodySourceSelect } from "./custody-source-select";
 
 /** Props for the QuantityCustodyDialog component */
 export interface QuantityCustodyDialogProps {
@@ -51,6 +61,11 @@ export interface QuantityCustodyDialogProps {
    * operator assignment they're about to make is tracked separately from
    * the kit's allocation. */
   inKit?: { id: string; name: string } | null;
+  /**
+   * The pool's sources, from the asset detail loader. The "From location"
+   * field renders only when `multiSource` is true.
+   */
+  sources?: CustodySourceSummary | null;
 }
 
 /**
@@ -77,6 +92,7 @@ export function QuantityCustodyDialog({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   inKit,
+  sources,
 }: QuantityCustodyDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
@@ -102,6 +118,29 @@ export function QuantityCustodyDialog({
   const unitLabel = unitOfMeasure || "units";
   const isSubmitting = isFormProcessing(fetcher.state);
 
+  /**
+   * The "From location" choice. Held as the operator's pick; until they
+   * pick (or when their pick no longer exists after a revalidation) the
+   * field shows the source with the most units left.
+   */
+  const sourceOptions = sources?.multiSource ? sources.options : [];
+  const showSource = sourceOptions.length > 0;
+  const [pickedSource, setPickedSource] = useState<string | null>(null);
+  const sourceValue =
+    pickedSource !== null &&
+    sourceOptions.some((option) => option.value === pickedSource)
+      ? pickedSource
+      : defaultSourceOption(sourceOptions)?.value ?? "";
+
+  /**
+   * Server-side refusal, shown above the form: the source may have fewer
+   * units left than asked for, or custody moved while the dialog was open.
+   */
+  const serverErrorMessage =
+    fetcher.data?.error != null
+      ? (fetcher.data.error as { message?: string })?.message
+      : null;
+
   /** Close the dialog and reset state after a successful submission */
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
@@ -112,7 +151,15 @@ export function QuantityCustodyDialog({
   }, [fetcher.state, fetcher.data, setOpen]);
 
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        // Each open starts from the pre-selected source. The header menu
+        // mounts this dialog only while open, which resets it the same way.
+        if (next) setPickedSource(null);
+        setOpen(next);
+      }}
+    >
       {trigger ? (
         <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       ) : null}
@@ -121,10 +168,29 @@ export function QuantityCustodyDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Assign Quantity Custody</AlertDialogTitle>
           <AlertDialogDescription>
-            Assign a quantity of this asset to a team member. Select who
-            receives custody and how many {unitLabel} to assign.
+            {showSource ? (
+              <>
+                Assign a quantity of this asset to a team member. Select who
+                receives custody, where the units come from, and how many{" "}
+                {unitLabel} to assign.
+              </>
+            ) : (
+              <>
+                Assign a quantity of this asset to a team member. Select who
+                receives custody and how many {unitLabel} to assign.
+              </>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        {serverErrorMessage ? (
+          <div
+            role="alert"
+            className="rounded border border-error-300 bg-error-25 p-4 text-sm text-error-700"
+          >
+            {serverErrorMessage}
+          </div>
+        ) : null}
 
         {inKit ? (
           <div className="rounded border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
@@ -182,6 +248,18 @@ export function QuantityCustodyDialog({
                 }}
               />
             </div>
+
+            {showSource ? (
+              <CustodySourceSelect
+                id={`assign-custody-source-${assetId}`}
+                label="From location"
+                options={sourceOptions}
+                value={sourceValue}
+                onChange={setPickedSource}
+                unitLabel={unitLabel}
+                disabled={disabled}
+              />
+            ) : null}
 
             <Input
               name="quantity"

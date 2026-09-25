@@ -34,7 +34,7 @@ import When from "../when/when";
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
 const ConditionalActionsDropdown = () => {
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset, custodySources } = useLoaderData<typeof loader>();
   const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
   const [isSetReminderDialogOpen, setIsSetReminderDialogOpen] = useState(false);
   const [isQuantityCustodyDialogOpen, setIsQuantityCustodyDialogOpen] =
@@ -431,17 +431,13 @@ const ConditionalActionsDropdown = () => {
         />
       </When>
       <When truthy={isQuantityCustodyDialogOpen}>
+        {/* Max and sources come from the same loader summary the custody
+            card's dialog reads, so both entry points agree. */}
         <QuantityCustodyDialog
           assetId={asset.id}
           unitOfMeasure={asset.unitOfMeasure}
-          availableQuantity={
-            (asset.quantity ?? 0) -
-            (asset.custody?.reduce(
-              (sum: number, c: { quantity?: number }) =>
-                sum + (c.quantity ?? 0),
-              0
-            ) ?? 0)
-          }
+          availableQuantity={custodySources.poolAvailable}
+          sources={custodySources}
           open={isQuantityCustodyDialogOpen}
           onOpenChange={setIsQuantityCustodyDialogOpen}
         />
@@ -450,6 +446,7 @@ const ConditionalActionsDropdown = () => {
         <QuickAdjustDialog
           assetId={asset.id}
           unitOfMeasure={asset.unitOfMeasure}
+          sources={custodySources}
           availableQuantity={
             (asset.quantity ?? 0) -
             (asset.custody?.reduce(

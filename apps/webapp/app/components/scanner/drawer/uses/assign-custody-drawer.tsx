@@ -10,18 +10,24 @@ import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
   scannedAssetQuantitiesAtom,
+  scannedAssetSourcesAtom,
   scannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
   scannedItemIdsAtom,
+  setScannedAssetSourceAtom,
 } from "~/atoms/qr-scanner";
+import { CustodySourceSelect } from "~/components/assets/custody-source-select";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { CheckmarkIcon } from "~/components/icons/library";
 import {
   assignableUnits,
   buildQuantitiesPayload,
+  buildSourceLocationsPayload,
+  scannedSourceChoice,
   shouldShowStateBadges,
+  sourceCappedMax,
 } from "~/components/scanner/drawer/custody-scan-quantities";
 import { Button } from "~/components/shared/button";
 import {
@@ -177,6 +183,8 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
   // Per-row units for quantity-tracked scans, written by
   // `ScannedAssetQuantityInput` and keyed by asset id.
   const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
+  // Per-row "From location" picks for pools placed at two or more locations.
+  const assetSources = useAtomValue(scannedAssetSourcesAtom);
   // The scanned rows themselves. The submit sends a quantity for every
   // quantity-tracked row, not only the ones whose input was edited.
   const items = useAtomValue(scannedItemsAtom);
@@ -201,11 +209,22 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           })
         );
 
+        // Where each such pool's units come from; rows without a picker send
+        // no entry and the server resolves them as it always has.
+        const sourceLocations = JSON.stringify(
+          buildSourceLocationsPayload({
+            items,
+            assetIds,
+            picked: assetSources,
+          })
+        );
+
         // Create object data structure for assets
         const assetData = {
           custodian,
           assetIds,
           quantities,
+          sourceLocations,
         };
 
         // Convert to FormData
@@ -400,6 +419,12 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const qtyTracked = isQuantityTracked(asset);
   const maxAllowed = assignableUnits(asset);
+  const pickedSources = useAtomValue(scannedAssetSourcesAtom);
+  const setSource = useSetAtom(setScannedAssetSourceAtom);
+  // "From location" for a pool placed at two or more locations; nothing otherwise.
+  const sourceChoice = scannedSourceChoice(asset, pickedSources);
+  // The quantity never goes above what the chosen location has left.
+  const rowMax = sourceCappedMax(maxAllowed, sourceChoice);
   // Whole-row state badges are suppressed while a quantity row still has free
   // units. See `shouldShowStateBadges`.
   const showStateBadges = shouldShowStateBadges(asset, maxAllowed);
@@ -443,17 +468,50 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
           </span>
           <AssetAvailabilityLabels />
         </div>
+
+        {qtyTracked && maxAllowed > 0 && sourceChoice.value !== null ? (
+          <div
+            className="mt-1 max-w-xs"
+            role="presentation"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CustodySourceSelect
+              id={`scan-source-${asset.id}`}
+              label="From location"
+              options={sourceChoice.options}
+              value={sourceChoice.value}
+              onChange={(source) =>
+                setSource({
+                  assetId: asset.id,
+                  source,
+                  maxQuantity: sourceCappedMax(maxAllowed, {
+                    options: sourceChoice.options,
+                    value: source,
+                  }),
+                })
+              }
+              unitLabel={asset.unitOfMeasure || "units"}
+              name={null}
+              compact
+            />
+          </div>
+        ) : null}
       </div>
 
       {/* Quantity-tracked rows hand over a number of units, not the whole
           item. Hidden once nothing is free: the row is still listed, and the
           blocker below explains why it cannot go. */}
-      {qtyTracked && maxAllowed > 0 ? (
+      {qtyTracked && rowMax > 0 ? (
         <ScannedAssetQuantityInput
           assetId={asset.id}
-          max={maxAllowed}
+          max={rowMax}
           unit={asset.unitOfMeasure || "units"}
         />
+      ) : null}
+      {qtyTracked && maxAllowed > 0 && rowMax === 0 ? (
+        <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">
+          None left here
+        </span>
       ) : null}
     </div>
   );
