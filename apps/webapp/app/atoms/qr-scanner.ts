@@ -68,14 +68,38 @@ function dropScannedAssetEntries(get: Getter, set: Setter, assetIds: string[]) {
   set(scannedAssetSourcesAtom, sources);
 }
 
-/** Writer for {@link scannedAssetSourcesAtom}: one asset's picked source. */
+/**
+ * Writer for {@link scannedAssetSourcesAtom}: one asset's picked source.
+ * Pass `maxQuantity`, the new source's cap, to lower an entered quantity
+ * that no longer fits in the same update. A cap below 1 leaves the quantity
+ * alone: the row then shows no input, and the bulk route's up-front check
+ * names the location.
+ */
 export const setScannedAssetSourceAtom = atom(
   null,
-  (get, set, payload: { assetId: string; source: string }) => {
+  (
+    get,
+    set,
+    payload: { assetId: string; source: string; maxQuantity?: number }
+  ) => {
+    const { assetId, source, maxQuantity } = payload;
     set(scannedAssetSourcesAtom, {
       ...get(scannedAssetSourcesAtom),
-      [payload.assetId]: payload.source,
+      [assetId]: source,
     });
+    const quantities = get(scannedAssetQuantitiesAtom);
+    const entered = quantities[assetId];
+    if (
+      maxQuantity !== undefined &&
+      maxQuantity >= 1 &&
+      entered !== undefined &&
+      entered > maxQuantity
+    ) {
+      set(scannedAssetQuantitiesAtom, {
+        ...quantities,
+        [assetId]: maxQuantity,
+      });
+    }
   }
 );
 

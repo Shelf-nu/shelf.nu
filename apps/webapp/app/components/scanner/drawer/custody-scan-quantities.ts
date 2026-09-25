@@ -147,10 +147,10 @@ export function buildQuantitiesPayload({
 
 /**
  * The "From location" choices of a scanned pool and the one in effect: the
- * operator's pick, else the source with the most units left (also when the
+ * operator's pick, else the location with the most units left (also when the
  * pick is no longer among the options). No options for an individual asset
- * or a pool at fewer than two sources: those rows show no picker and send
- * no entry, exactly as before sources existed.
+ * or a pool placed at fewer than two locations: those rows show no picker and
+ * send no entry, exactly as before sources existed.
  *
  * @param picked - `scannedAssetSourcesAtom`, keyed by asset id
  */
@@ -169,6 +169,26 @@ export function scannedSourceChoice(
       ? pick
       : defaultSourceOption(options)?.value ?? null;
   return { options, value };
+}
+
+/**
+ * The most units a scanned pool's row can hand over: the pool-wide ceiling,
+ * lowered to what the source in effect has left when the row shows a
+ * "From location" picker. The same cap the bulk route checks up front, so a
+ * row never offers units its location cannot give.
+ *
+ * @param maxAllowed - The row's pool-wide ceiling (`assignableUnits`)
+ * @param choice - The row's {@link scannedSourceChoice}, or one with the
+ *   source about to be picked as `value`
+ * @returns The row's cap; 0 when the chosen source has nothing left
+ */
+export function sourceCappedMax(
+  maxAllowed: number,
+  choice: { options: CustodySourceOption[]; value: string | null }
+): number {
+  if (choice.value === null) return maxAllowed;
+  const option = choice.options.find((o) => o.value === choice.value);
+  return option ? Math.min(maxAllowed, option.left) : maxAllowed;
 }
 
 /**

@@ -27,6 +27,7 @@ import {
   buildSourceLocationsPayload,
   scannedSourceChoice,
   shouldShowStateBadges,
+  sourceCappedMax,
 } from "~/components/scanner/drawer/custody-scan-quantities";
 import { Button } from "~/components/shared/button";
 import {
@@ -422,6 +423,8 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const setSource = useSetAtom(setScannedAssetSourceAtom);
   // "From location" for a pool placed at two or more locations; nothing otherwise.
   const sourceChoice = scannedSourceChoice(asset, pickedSources);
+  // The quantity never goes above what the chosen location has left.
+  const rowMax = sourceCappedMax(maxAllowed, sourceChoice);
   // Whole-row state badges are suppressed while a quantity row still has free
   // units. See `shouldShowStateBadges`.
   const showStateBadges = shouldShowStateBadges(asset, maxAllowed);
@@ -477,7 +480,16 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
               label="From location"
               options={sourceChoice.options}
               value={sourceChoice.value}
-              onChange={(source) => setSource({ assetId: asset.id, source })}
+              onChange={(source) =>
+                setSource({
+                  assetId: asset.id,
+                  source,
+                  maxQuantity: sourceCappedMax(maxAllowed, {
+                    options: sourceChoice.options,
+                    value: source,
+                  }),
+                })
+              }
               unitLabel={asset.unitOfMeasure || "units"}
               name={null}
               compact
@@ -489,12 +501,17 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       {/* Quantity-tracked rows hand over a number of units, not the whole
           item. Hidden once nothing is free: the row is still listed, and the
           blocker below explains why it cannot go. */}
-      {qtyTracked && maxAllowed > 0 ? (
+      {qtyTracked && rowMax > 0 ? (
         <ScannedAssetQuantityInput
           assetId={asset.id}
-          max={maxAllowed}
+          max={rowMax}
           unit={asset.unitOfMeasure || "units"}
         />
+      ) : null}
+      {qtyTracked && maxAllowed > 0 && rowMax === 0 ? (
+        <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">
+          None left here
+        </span>
       ) : null}
     </div>
   );

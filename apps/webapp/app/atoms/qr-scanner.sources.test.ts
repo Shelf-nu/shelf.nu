@@ -81,3 +81,32 @@ describe("removing a scanned asset drops its picked source", () => {
     expect(store.get(scannedAssetQuantitiesAtom)).toEqual({});
   });
 });
+
+describe("picking a source", () => {
+  it("lowers an entered quantity the new source cannot give", () => {
+    store.set(setScannedAssetSourceAtom, {
+      assetId: "pool-b",
+      source: "loc-2",
+      maxQuantity: 2,
+    });
+
+    expect(store.get(scannedAssetSourcesAtom)["pool-b"]).toBe("loc-2");
+    expect(store.get(scannedAssetQuantitiesAtom)["pool-b"]).toBe(2);
+  });
+
+  it("keeps a quantity that fits, and leaves it alone when nothing is left", () => {
+    store.set(setScannedAssetSourceAtom, {
+      assetId: "pool-a",
+      source: "loc-2",
+      maxQuantity: 5,
+    });
+    expect(store.get(scannedAssetQuantitiesAtom)["pool-a"]).toBe(2);
+
+    store.set(setScannedAssetSourceAtom, {
+      assetId: "pool-a",
+      source: "loc-3",
+      maxQuantity: 0,
+    });
+    expect(store.get(scannedAssetQuantitiesAtom)["pool-a"]).toBe(2);
+  });
+});

@@ -23,6 +23,7 @@ import {
   operatorHolderCount,
   releasableUnits,
   scannedSourceChoice,
+  sourceCappedMax,
   shouldShowStateBadges,
 } from "./custody-scan-quantities";
 
@@ -316,6 +317,17 @@ describe("scanned pools: where the units come from", () => {
     expect(scannedSourceChoice(pool(twoLocations), {}).value).toBe(
       "loc-studio"
     );
+  });
+
+  it("caps the row at what the chosen location has left", () => {
+    const choice = scannedSourceChoice(pool(twoLocations), {});
+    // Studio (pre-selected) has 2 left of a pool-wide 4.
+    expect(sourceCappedMax(4, choice)).toBe(2);
+    expect(sourceCappedMax(4, { ...choice, value: "loc-camera" })).toBe(1);
+    // The pool-wide ceiling still wins when it is lower.
+    expect(sourceCappedMax(1, choice)).toBe(1);
+    // A row with no picker keeps the pool-wide ceiling.
+    expect(sourceCappedMax(4, { options: [], value: null })).toBe(4);
   });
 
   it("keeps the operator's pick while it is still an option", () => {
