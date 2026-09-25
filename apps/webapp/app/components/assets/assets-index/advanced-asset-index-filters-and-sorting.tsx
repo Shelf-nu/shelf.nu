@@ -398,7 +398,7 @@ function AdvancedFilter() {
                   reorder question and says so. */}
               Needs reordering
               <span className="text-gray-500">
-                : at or below the reorder point you set
+                : at or below the min quantity you set
               </span>
             </button>
 

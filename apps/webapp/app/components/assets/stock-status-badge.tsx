@@ -97,7 +97,7 @@ export type StockStatusBreakdown = {
   topBooking?: { id: string; name: string; units: number } | null;
   /**
    * This asset's id, so the no-reorder-point hover can link to the form that
-   * sets one. Without it that hover says "set a reorder point" and offers no
+   * sets one. Without it that hover says "set a min quantity" and offers no
    * way to do it, advice with no door, on the state that covers MOST quantity
    * assets in a real workspace.
    */
@@ -243,14 +243,12 @@ function StockStatusDetail({
       : status === "LOW"
       ? `${withUnit(
           available
-        )} available, at or below your reorder point of ${withUnit(
+        )} available, at or below your min quantity of ${withUnit(
           minQuantity ?? 0
         )}`
       : `${withUnit(
           available
-        )} available, above your reorder point of ${withUnit(
-          minQuantity ?? 0
-        )}`;
+        )} available, above your min quantity of ${withUnit(minQuantity ?? 0)}`;
 
   /**
    * `LOW` and `ENOUGH` are DEFINED against the reorder point, so their reason
@@ -314,7 +312,7 @@ function StockStatusDetail({
 
       {showReorderPoint ? (
         <p className="text-xs text-gray-500">
-          Reorder point: {withUnit(minQuantity ?? 0)}
+          Min quantity: {withUnit(minQuantity ?? 0)}
         </p>
       ) : null}
 
@@ -365,7 +363,7 @@ export function StockStatusBadge({ status, breakdown }: StockStatusBadgeProps) {
           <HoverCardTrigger asChild>
             <button
               type="button"
-              aria-label="No reorder point set"
+              aria-label="No min quantity set"
               className="cursor-default rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
             >
               <EmptyTableValue />
@@ -375,14 +373,14 @@ export function StockStatusBadge({ status, breakdown }: StockStatusBadgeProps) {
             <HoverCardContent className="w-auto max-w-xs p-3">
               <div className="flex flex-col gap-1.5 text-left">
                 <p className="text-sm font-medium text-gray-900">
-                  No reorder point
+                  No min quantity
                 </p>
                 <p className="text-xs text-gray-600">
                   {breakdown.available} of {breakdown.total}
                   {breakdown.unitOfMeasure
                     ? ` ${breakdown.unitOfMeasure}`
                     : ""}{" "}
-                  available. Set a reorder point and Shelf will flag this asset
+                  available. Set a min quantity and Shelf will flag this asset
                   once it drops to that level.
                 </p>
                 {breakdown.assetId ? (
@@ -390,7 +388,7 @@ export function StockStatusBadge({ status, breakdown }: StockStatusBadgeProps) {
                     to={`/assets/${breakdown.assetId}/edit`}
                     className="text-xs text-gray-700 underline decoration-gray-300 underline-offset-2 hover:text-gray-900 hover:decoration-gray-500"
                   >
-                    Set a reorder point
+                    Set a min quantity
                   </Link>
                 ) : null}
               </div>

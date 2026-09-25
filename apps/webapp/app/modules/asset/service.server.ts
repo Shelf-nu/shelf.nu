@@ -7113,7 +7113,7 @@ export async function bulkUpdateAssetMinQuantity({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while bulk updating the reorder point.",
+      message: "Something went wrong while bulk updating the min quantity.",
       additionalData: { userId, assetIds, organizationId },
       label,
     });

@@ -1,5 +1,5 @@
 /**
- * Bulk "Set reorder point" dialog.
+ * Bulk "Set min quantity" dialog.
  *
  * Sets `Asset.minQuantity` across a selection. This is the cure for the state
  * the Stock status column spends most of its time reporting: measured on a live
@@ -33,7 +33,7 @@ export const BulkSetReorderPointSchema = z.object({
     .transform((value) => value.trim())
     .refine(
       (value) => value === "" || /^\d+$/.test(value),
-      "Enter a whole number, or leave empty to clear the reorder point"
+      "Enter a whole number, or leave empty to clear the min quantity"
     )
     .transform((value) => (value === "" ? null : Number(value))),
 });
@@ -46,7 +46,7 @@ export default function BulkSetReorderPointDialog() {
       ref={zo.ref}
       type="reorder-point"
       arrayFieldId="assetIds"
-      title="Set reorder point"
+      title="Set min quantity"
       description="Stock status shows “Running low” once available units fall to or below this number. Leave empty to clear it. Individually-tracked assets in your selection are skipped."
     >
       {({ disabled, handleCloseDialog, fetcherError }) => (
@@ -56,7 +56,7 @@ export default function BulkSetReorderPointDialog() {
               type="number"
               min={0}
               step={1}
-              label="Reorder point"
+              label="Min quantity"
               name={zo.fields.minQuantity()}
               disabled={disabled}
               className="w-full"

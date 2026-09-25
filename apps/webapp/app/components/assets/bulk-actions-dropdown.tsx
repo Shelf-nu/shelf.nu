@@ -372,13 +372,13 @@ function ConditionalDropdown() {
                 />
               </DropdownMenuItem>
               {/* Sits beside category rather than at the bottom of the menu:
-                  the reorder point is the input Stock status depends on, and
+                  min quantity is the input Stock status depends on, and
                   10 of 12 quantity assets in a real workspace have none. This
                   is the only bulk way to fix that. */}
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="reorder-point"
-                  label="Set reorder point"
+                  label="Set min quantity"
                   onClick={closeMenu}
                   disabled={isLoading}
                 />

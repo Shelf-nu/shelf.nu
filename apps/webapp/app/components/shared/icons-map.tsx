@@ -118,7 +118,7 @@ export type IconType =
   | "release-custody"
   | "partial-checkin"
   | "asset-label"
-  // Bulk "Set reorder point". The bulk-dialog trigger renders <Icon icon={type} />,
+  // Bulk "Set min quantity". The bulk-dialog trigger renders <Icon icon={type} />,
   // so every BulkDialogType must also be an IconType. Reuses the graph glyph:
   // a reorder point is a line you draw across a level.
   | "reorder-point"

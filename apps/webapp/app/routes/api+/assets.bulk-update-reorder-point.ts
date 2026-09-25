@@ -84,15 +84,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
         ? {
             title: "Nothing to change",
             message:
-              "None of the selected assets needed updating. Individually-tracked assets are skipped, and any already using this reorder point were left alone.",
+              "None of the selected assets needed updating. Individually-tracked assets are skipped, and any already using this min quantity were left alone.",
             icon: { name: "success", variant: "success" },
             senderId: userId,
           }
         : {
             title:
               minQuantity === null
-                ? "Reorder point cleared"
-                : "Reorder point set",
+                ? "Min quantity cleared"
+                : "Min quantity set",
             message:
               minQuantity === null
                 ? `Cleared on ${changedCount} ${noun}. Stock status will stop judging their level.`
