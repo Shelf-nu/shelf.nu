@@ -34,6 +34,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { ROLE_POLICIES } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -254,7 +255,8 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
         <InviteStatusBadge status={item.status} />
       </Td>
       <Td className="text-right">
-        {canUpdateTeamMembers && item.role !== "Owner" ? (
+        {canUpdateTeamMembers &&
+        !ROLE_POLICIES[item.roleEnum].membership.ownsWorkspace ? (
           <TeamUsersActionsDropdown
             inviteStatus={item.status}
             userId={item.userId}

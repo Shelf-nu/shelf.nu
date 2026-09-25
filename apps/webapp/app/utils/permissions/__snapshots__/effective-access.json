@@ -6996,6 +6996,152 @@
     "SELF_SERVICE",
     "BASE"
   ],
+  "D-01/B9:membership": {
+    "OWNER": {
+      "effectiveRole": "OWNER",
+      "label": "Owner",
+      "ownsWorkspace": true,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": false
+    },
+    "ADMIN": {
+      "effectiveRole": "ADMIN",
+      "label": "Administrator",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": true
+    },
+    "SELF_SERVICE": {
+      "effectiveRole": "SELF_SERVICE",
+      "label": "Self service",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": false,
+      "receivesTransfers": false,
+      "eligibleAsNewOwner": false
+    },
+    "BASE": {
+      "effectiveRole": "BASE",
+      "label": "Base",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": false,
+      "receivesTransfers": false,
+      "eligibleAsNewOwner": false
+    },
+    "OWNER+ADMIN": {
+      "effectiveRole": "OWNER",
+      "label": "Owner",
+      "ownsWorkspace": true,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": true
+    },
+    "OWNER+SELF_SERVICE": {
+      "effectiveRole": "OWNER",
+      "label": "Owner",
+      "ownsWorkspace": true,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": false
+    },
+    "OWNER+BASE": {
+      "effectiveRole": "OWNER",
+      "label": "Owner",
+      "ownsWorkspace": true,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": false
+    },
+    "ADMIN+OWNER": {
+      "effectiveRole": "OWNER",
+      "label": "Owner",
+      "ownsWorkspace": true,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": true
+    },
+    "ADMIN+SELF_SERVICE": {
+      "effectiveRole": "ADMIN",
+      "label": "Administrator",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": true
+    },
+    "ADMIN+BASE": {
+      "effectiveRole": "ADMIN",
+      "label": "Administrator",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": true
+    },
+    "SELF_SERVICE+OWNER": {
+      "effectiveRole": "OWNER",
+      "label": "Owner",
+      "ownsWorkspace": true,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": false
+    },
+    "SELF_SERVICE+ADMIN": {
+      "effectiveRole": "ADMIN",
+      "label": "Administrator",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": true
+    },
+    "SELF_SERVICE+BASE": {
+      "effectiveRole": "SELF_SERVICE",
+      "label": "Self service",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": false,
+      "receivesTransfers": false,
+      "eligibleAsNewOwner": false
+    },
+    "BASE+OWNER": {
+      "effectiveRole": "OWNER",
+      "label": "Owner",
+      "ownsWorkspace": true,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": false
+    },
+    "BASE+ADMIN": {
+      "effectiveRole": "ADMIN",
+      "label": "Administrator",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": true,
+      "receivesTransfers": true,
+      "eligibleAsNewOwner": true
+    },
+    "BASE+SELF_SERVICE": {
+      "effectiveRole": "SELF_SERVICE",
+      "label": "Self service",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": false,
+      "receivesTransfers": false,
+      "eligibleAsNewOwner": false
+    },
+    "(none)": {
+      "effectiveRole": "BASE",
+      "label": "Base",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": false,
+      "receivesTransfers": false,
+      "eligibleAsNewOwner": false
+    },
+    "UNKNOWN_ROLE": {
+      "effectiveRole": "BASE",
+      "label": "Base",
+      "ownsWorkspace": false,
+      "changeRequiresOwner": false,
+      "receivesTransfers": false,
+      "eligibleAsNewOwner": false
+    }
+  },
   "D-05:ssoAssignable": [
     "ADMIN",
     "SELF_SERVICE",
@@ -15688,21 +15834,21 @@
     },
     "ADMIN+OWNER": {
       "teamList": {
-        "roleEnum": "ADMIN",
-        "label": "Administrator",
-        "rowActions": true
+        "roleEnum": "OWNER",
+        "label": "Owner",
+        "rowActions": false
       },
       "inviteList": {
-        "roleEnum": "ADMIN",
-        "label": "Administrator",
-        "rowActions": true
+        "roleEnum": "OWNER",
+        "label": "Owner",
+        "rowActions": false
       },
       "memberPage": {
-        "roleEnum": "ADMIN",
-        "label": "Administrator",
-        "showActions": true
+        "roleEnum": "OWNER",
+        "label": "Owner",
+        "showActions": false
       },
-      "calendarFeedRole": "ADMIN"
+      "calendarFeedRole": "OWNER"
     },
     "ADMIN+SELF_SERVICE": {
       "teamList": {
@@ -15742,39 +15888,39 @@
     },
     "SELF_SERVICE+OWNER": {
       "teamList": {
-        "roleEnum": "SELF_SERVICE",
-        "label": "Self service",
-        "rowActions": true
+        "roleEnum": "OWNER",
+        "label": "Owner",
+        "rowActions": false
       },
       "inviteList": {
-        "roleEnum": "SELF_SERVICE",
-        "label": "Self service",
-        "rowActions": true
+        "roleEnum": "OWNER",
+        "label": "Owner",
+        "rowActions": false
       },
       "memberPage": {
-        "roleEnum": "SELF_SERVICE",
-        "label": "Self service",
-        "showActions": true
+        "roleEnum": "OWNER",
+        "label": "Owner",
+        "showActions": false
       },
-      "calendarFeedRole": "SELF_SERVICE"
+      "calendarFeedRole": "OWNER"
     },
     "SELF_SERVICE+ADMIN": {
       "teamList": {
-        "roleEnum": "SELF_SERVICE",
-        "label": "Self service",
+        "roleEnum": "ADMIN",
+        "label": "Administrator",
         "rowActions": true
       },
       "inviteList": {
-        "roleEnum": "SELF_SERVICE",
-        "label": "Self service",
+        "roleEnum": "ADMIN",
+        "label": "Administrator",
         "rowActions": true
       },
       "memberPage": {
-        "roleEnum": "SELF_SERVICE",
-        "label": "Self service",
+        "roleEnum": "ADMIN",
+        "label": "Administrator",
         "showActions": true
       },
-      "calendarFeedRole": "SELF_SERVICE"
+      "calendarFeedRole": "ADMIN"
     },
     "SELF_SERVICE+BASE": {
       "teamList": {
@@ -15796,62 +15942,62 @@
     },
     "BASE+OWNER": {
       "teamList": {
-        "roleEnum": "BASE",
-        "label": "Base",
-        "rowActions": true
+        "roleEnum": "OWNER",
+        "label": "Owner",
+        "rowActions": false
       },
       "inviteList": {
-        "roleEnum": "BASE",
-        "label": "Base",
-        "rowActions": true
+        "roleEnum": "OWNER",
+        "label": "Owner",
+        "rowActions": false
       },
       "memberPage": {
-        "roleEnum": "BASE",
-        "label": "Base",
-        "showActions": true
+        "roleEnum": "OWNER",
+        "label": "Owner",
+        "showActions": false
       },
-      "calendarFeedRole": "BASE"
+      "calendarFeedRole": "OWNER"
     },
     "BASE+ADMIN": {
       "teamList": {
-        "roleEnum": "BASE",
-        "label": "Base",
+        "roleEnum": "ADMIN",
+        "label": "Administrator",
         "rowActions": true
       },
       "inviteList": {
-        "roleEnum": "BASE",
-        "label": "Base",
+        "roleEnum": "ADMIN",
+        "label": "Administrator",
         "rowActions": true
       },
       "memberPage": {
-        "roleEnum": "BASE",
-        "label": "Base",
+        "roleEnum": "ADMIN",
+        "label": "Administrator",
         "showActions": true
       },
-      "calendarFeedRole": "BASE"
+      "calendarFeedRole": "ADMIN"
     },
     "BASE+SELF_SERVICE": {
       "teamList": {
-        "roleEnum": "BASE",
-        "label": "Base",
+        "roleEnum": "SELF_SERVICE",
+        "label": "Self service",
         "rowActions": true
       },
       "inviteList": {
-        "roleEnum": "BASE",
-        "label": "Base",
+        "roleEnum": "SELF_SERVICE",
+        "label": "Self service",
         "rowActions": true
       },
       "memberPage": {
-        "roleEnum": "BASE",
-        "label": "Base",
+        "roleEnum": "SELF_SERVICE",
+        "label": "Self service",
         "showActions": true
       },
-      "calendarFeedRole": "BASE"
+      "calendarFeedRole": "SELF_SERVICE"
     },
     "(none)": {
       "teamList": {
-        "roleEnum": null,
-        "label": null,
+        "roleEnum": "BASE",
+        "label": "Base",
         "rowActions": true
       },
       "inviteList": {
@@ -15860,29 +16006,29 @@
         "rowActions": true
       },
       "memberPage": {
-        "roleEnum": null,
-        "label": null,
+        "roleEnum": "BASE",
+        "label": "Base",
         "showActions": true
       },
       "calendarFeedRole": "BASE"
     },
     "UNKNOWN_ROLE": {
       "teamList": {
-        "roleEnum": "UNKNOWN_ROLE",
-        "label": null,
+        "roleEnum": "BASE",
+        "label": "Base",
         "rowActions": true
       },
       "inviteList": {
-        "roleEnum": "UNKNOWN_ROLE",
-        "label": null,
+        "roleEnum": "BASE",
+        "label": "Base",
         "rowActions": true
       },
       "memberPage": {
-        "roleEnum": "UNKNOWN_ROLE",
-        "label": null,
+        "roleEnum": "BASE",
+        "label": "Base",
         "showActions": true
       },
-      "calendarFeedRole": "UNKNOWN_ROLE"
+      "calendarFeedRole": "BASE"
     }
   },
   "B9:D-07:users-menu": {
@@ -15894,13 +16040,13 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "open",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "SELF_SERVICE+OWNER": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
+      "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
@@ -15914,14 +16060,14 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "locked",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "SELF_SERVICE+OWNER": "open",
-      "SELF_SERVICE+ADMIN": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
+      "SELF_SERVICE+ADMIN": "locked",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
-      "BASE+ADMIN": "open",
+      "BASE+OWNER": "no-menu",
+      "BASE+ADMIN": "locked",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -15974,14 +16120,14 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "locked",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "SELF_SERVICE+OWNER": "open",
-      "SELF_SERVICE+ADMIN": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
+      "SELF_SERVICE+ADMIN": "locked",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
-      "BASE+ADMIN": "open",
+      "BASE+OWNER": "no-menu",
+      "BASE+ADMIN": "locked",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -15994,13 +16140,13 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "open",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "SELF_SERVICE+OWNER": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
+      "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
@@ -16014,13 +16160,13 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "open",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "SELF_SERVICE+OWNER": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
+      "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
@@ -16034,14 +16180,14 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "locked",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "SELF_SERVICE+OWNER": "open",
-      "SELF_SERVICE+ADMIN": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
+      "SELF_SERVICE+ADMIN": "locked",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
-      "BASE+ADMIN": "open",
+      "BASE+OWNER": "no-menu",
+      "BASE+ADMIN": "locked",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -16054,14 +16200,14 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "locked",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "SELF_SERVICE+OWNER": "open",
-      "SELF_SERVICE+ADMIN": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
+      "SELF_SERVICE+ADMIN": "locked",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
-      "BASE+ADMIN": "open",
+      "BASE+OWNER": "no-menu",
+      "BASE+ADMIN": "locked",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -16074,14 +16220,14 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "locked",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "SELF_SERVICE+OWNER": "open",
-      "SELF_SERVICE+ADMIN": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
+      "SELF_SERVICE+ADMIN": "locked",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
-      "BASE+ADMIN": "open",
+      "BASE+OWNER": "no-menu",
+      "BASE+ADMIN": "locked",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -16094,13 +16240,13 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "open",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "SELF_SERVICE+OWNER": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
+      "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
@@ -16114,14 +16260,14 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "locked",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "SELF_SERVICE+OWNER": "open",
-      "SELF_SERVICE+ADMIN": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
+      "SELF_SERVICE+ADMIN": "locked",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
-      "BASE+ADMIN": "open",
+      "BASE+OWNER": "no-menu",
+      "BASE+ADMIN": "locked",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -16154,13 +16300,13 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "open",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "SELF_SERVICE+OWNER": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
+      "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
@@ -16174,14 +16320,14 @@
       "OWNER+ADMIN": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
-      "ADMIN+OWNER": "locked",
+      "ADMIN+OWNER": "no-menu",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "SELF_SERVICE+OWNER": "open",
-      "SELF_SERVICE+ADMIN": "open",
+      "SELF_SERVICE+OWNER": "no-menu",
+      "SELF_SERVICE+ADMIN": "locked",
       "SELF_SERVICE+BASE": "open",
-      "BASE+OWNER": "open",
-      "BASE+ADMIN": "open",
+      "BASE+OWNER": "no-menu",
+      "BASE+ADMIN": "locked",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"

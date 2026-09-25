@@ -19,7 +19,7 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
-import { InviteStatuses, OrganizationRoles } from "@prisma/client";
+import { InviteStatuses } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import jwt from "jsonwebtoken";
 import lodash from "lodash";
@@ -30,7 +30,6 @@ import type { InviteUserFormSchema } from "~/components/settings/invite-user-dia
 import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { sendEmail } from "~/emails/mail.server";
-import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { DetectedFormatPrefs } from "~/utils/date-format";
@@ -40,6 +39,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { ROLE_LABELS, resolveRole } from "~/utils/permissions/role-access";
 import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
 import {
   caseInsensitiveEmailFilter,
@@ -633,14 +633,15 @@ export async function getPaginatedAndFilterableSettingInvites({
      * Create the same structure for the invites
      */
     const items = invites.map((invite) => {
-      const roleEnum = invite.roles[0] ?? OrganizationRoles.BASE;
+      // The invite's effective role; an invite with no role resolves to BASE.
+      const roleEnum = resolveRole(invite.roles);
       return {
         id: invite.id,
         name: invite.inviteeTeamMember.name,
         img: "/static/images/default_pfp.jpg",
         email: invite.inviteeEmail,
         status: invite.status,
-        role: organizationRolesMap[roleEnum],
+        role: ROLE_LABELS[roleEnum],
         roleEnum,
         userId: null,
         sso: false,

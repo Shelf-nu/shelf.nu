@@ -13,11 +13,14 @@
  * @see {@link file://./../../routes/_layout+/calendar.tsx}
  */
 import { randomBytes } from "node:crypto";
-import { OrganizationRoles } from "@prisma/client";
+import type { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
-import { resolveRoleAccess } from "~/utils/permissions/role-access";
+import {
+  resolveRole,
+  resolveRoleAccess,
+} from "~/utils/permissions/role-access";
 import {
   assertCanUseBookings,
   canUseBookings,
@@ -188,6 +191,7 @@ export async function assertMemberCanManageCalendar({
 export type MemberCalendarFeed = {
   organizationId: string;
   name: string;
+  /** The member's effective role in that workspace. */
   role: OrganizationRoles;
   /** Absolute feed URL, or null when the member hasn't generated one yet. */
   feedUrl: string | null;
@@ -230,7 +234,7 @@ export async function getMemberCalendarFeeds({
       .map((m) => ({
         organizationId: m.organization.id,
         name: m.organization.name,
-        role: m.roles[0] ?? OrganizationRoles.BASE,
+        role: resolveRole(m.roles),
         feedUrl: m.calendarTokenId
           ? buildCalendarFeedUrl(m.calendarTokenId)
           : null,

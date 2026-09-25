@@ -26,6 +26,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { ROLE_LABELS } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 
 /**
@@ -113,9 +114,7 @@ export default function CalendarsSettings() {
                     <h5 className="text-sm font-semibold text-gray-900">
                       {feed.name}
                     </h5>
-                    <GrayBadge>
-                      {feed.role.toLowerCase().replace("_", " ")}
-                    </GrayBadge>
+                    <GrayBadge>{ROLE_LABELS[feed.role]}</GrayBadge>
                   </div>
                   <CalendarFeedControls
                     organizationId={feed.organizationId}

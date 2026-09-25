@@ -27,9 +27,13 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import {
+  ROLE_LABELS,
+  isWorkspaceOwner,
+  resolveRole,
+} from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveUserDisplayName } from "~/utils/user";
-import { organizationRolesMap } from "./settings.team";
 
 export const loader = async ({
   request,
@@ -145,10 +149,11 @@ export default function UserPage() {
   const currentOrgMembership = user.userOrganizations.find(
     (uo) => uo.organizationId === organizationId
   );
-  const userOrgRole =
-    organizationRolesMap[
-      currentOrgMembership?.roles[0] ?? user.userOrganizations[0].roles[0]
-    ];
+  const membershipRoles =
+    currentOrgMembership?.roles ?? user.userOrganizations[0]?.roles ?? [];
+  /** The member's effective role: the one every policy decision reads. */
+  const userOrgRoleEnum = resolveRole(membershipRoles);
+  const userOrgRole = ROLE_LABELS[userOrgRoleEnum];
   return (
     <>
       <Header
@@ -174,7 +179,7 @@ export default function UserPage() {
         subHeading={<UserSubheading user={user} />}
       />
 
-      <When truthy={canUpdateTeamMembers && userOrgRole !== "Owner"}>
+      <When truthy={canUpdateTeamMembers && !isWorkspaceOwner(membershipRoles)}>
         <AbsolutePositionedHeaderActions className="hidden w-full md:flex">
           <TeamUsersActionsDropdown
             userId={user.id}
@@ -193,10 +198,7 @@ export default function UserPage() {
               </Button>
             )}
             role={userOrgRole}
-            roleEnum={
-              currentOrgMembership?.roles[0] ??
-              user.userOrganizations[0].roles[0]
-            }
+            roleEnum={userOrgRoleEnum}
           />
         </AbsolutePositionedHeaderActions>
       </When>

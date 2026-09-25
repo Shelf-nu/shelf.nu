@@ -34,25 +34,23 @@ import {
   canScanAddBookingItems,
   mayRemoveBookingItems,
 } from "~/utils/bookings";
-import {
-  ROLE_PRECEDENCE,
-  SSO_ASSIGNABLE_ROLE_PRECEDENCE,
-  resolveMostPrivilegedRole,
-} from "~/utils/role-precedence";
+import { SSO_ASSIGNABLE_ROLE_PRECEDENCE } from "~/utils/role-precedence";
 import { isDemotion } from "~/utils/roles";
-import {
-  isOrganizationOwner,
-  resolveEffectiveRole,
-} from "~/utils/roles.server";
+import { isOrganizationOwner } from "~/utils/roles.server";
 import type { AdminArea } from "./admin-areas";
 import { canSeeAdminArea } from "./admin-areas";
 import { userHasCustodyViewPermission } from "./custody-and-bookings-permissions.validator.client";
+import { holdsRoleWhere } from "./membership-access";
 import { PermissionAction, PermissionEntity } from "./permission.data";
 import { userHasPermission } from "./permission.validator.client";
 import {
+  ROLE_LABELS,
+  ROLE_POLICIES,
+  ROLES_BY_RANK,
   canManageBookingItems,
   canPartialCheckInOut,
   isExplicitScanRequired,
+  isWorkspaceOwner,
   resolveRole,
   resolveRoleAccess,
 } from "./role-access";
@@ -107,14 +105,9 @@ const toggleKey = (t: (typeof TOGGLE_COMBOS)[number]) =>
     .filter(Boolean)
     .join(",") || "none";
 
-/** The effective role the WEB server uses for a membership. */
-function webRole(roles: string[]) {
-  return resolveEffectiveRole({
-    userOrganizations: [
-      { organization: { id: "org" }, roles: roles as OrganizationRoles[] },
-    ],
-    organizationId: "org",
-  });
+/** The effective role every surface uses for a membership. */
+function webRole(roles: string[]): OrganizationRoles {
+  return resolveRole(roles);
 }
 
 /** Workspace toggles all off. */
@@ -339,11 +332,6 @@ function bookingWriteGate({
   }
 }
 
-/** `organizationRolesMap[role]`, `null` where the map has no entry. */
-function roleLabel(role: string | undefined): string | null {
-  return role ? organizationRolesMap[role] ?? null : null;
-}
-
 /**
  * Builds the complete effective-access snapshot.
  *
@@ -377,11 +365,36 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
       key(roles),
       {
         web: webRole(roles),
-        mobile: resolveMostPrivilegedRole(roles as OrganizationRoles[]),
+        mobile: resolveRole(roles),
       },
     ])
   );
-  snapshot["D-01:precedence"] = ROLE_PRECEDENCE;
+  snapshot["D-01:precedence"] = ROLES_BY_RANK;
+
+  // D-01/B9: every membership decision read from one member's roles.
+  snapshot["D-01/B9:membership"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => {
+      const role = resolveRole(roles);
+      return [
+        key(roles),
+        {
+          effectiveRole: role,
+          label: ROLE_LABELS[role],
+          ownsWorkspace: isWorkspaceOwner(roles),
+          changeRequiresOwner:
+            ROLE_POLICIES[role].membership.changeRequiresOwner,
+          receivesTransfers: holdsRoleWhere(
+            roles,
+            (p) => p.membership.canReceiveTransfers
+          ),
+          eligibleAsNewOwner: holdsRoleWhere(
+            roles,
+            (p) => p.membership.eligibleAsNewOwner
+          ),
+        },
+      ];
+    })
+  );
   snapshot["D-05:ssoAssignable"] = SSO_ASSIGNABLE_ROLE_PRECEDENCE;
   snapshot["D-04:invitable"] = INVITABLE_ROLES;
   snapshot["D-10:labels"] = organizationRolesMap;
@@ -1319,46 +1332,42 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Membership: Tasks 8a-8f =====================
 
-  // B9:D-01/D-10: how a membership is shown:
-  // teamList modules/settings/service.server.ts:116-117 + settings.team.users.tsx:235;
-  // inviteList modules/invite/service.server.ts:636-644 (BASE fallback) + settings.team.invites.tsx:226;
-  // memberPage routes/_layout+/settings.team.users.$userId.tsx:151-154,172-174,180,199-201;
-  // calendarFeedRole modules/calendar-subscription/service.server.ts:232.
+  // B9:D-01/D-10: how a membership is shown, always as its effective role:
+  // teamList modules/settings/service.server.ts (getPaginatedAndFilterableSettingUsers)
+  // + settings.team.users.tsx UserRow (row menu hidden for an owning role);
+  // inviteList modules/invite/service.server.ts (getPaginatedAndFilterableSettingInvites)
+  // + settings.team.invites.tsx UserRow;
+  // memberPage routes/_layout+/settings.team.users.$userId.tsx (badge, actions
+  // hidden for an OWNER-holding membership, dropdown roleEnum);
+  // calendarFeedRole modules/calendar-subscription/service.server.ts getMemberCalendarFeeds.
   snapshot["B9:D-01:membership-display"] = perRoleSet((roles) => {
-    const first = roles[0];
-    const inviteRole = roles[0] ?? R.BASE;
+    const role = resolveRole(roles);
+    const rowActions = !ROLE_POLICIES[role].membership.ownsWorkspace;
     return {
-      teamList: {
-        roleEnum: first ?? null,
-        label: roleLabel(first),
-        rowActions: roleLabel(first) !== "Owner",
-      },
-      inviteList: {
-        roleEnum: inviteRole,
-        label: roleLabel(inviteRole),
-        rowActions: roleLabel(inviteRole) !== "Owner",
-      },
+      teamList: { roleEnum: role, label: ROLE_LABELS[role], rowActions },
+      inviteList: { roleEnum: role, label: ROLE_LABELS[role], rowActions },
       memberPage: {
-        roleEnum: first ?? null,
-        label: roleLabel(first),
-        showActions: roleLabel(first) !== "Owner",
+        roleEnum: role,
+        label: ROLE_LABELS[role],
+        showActions: !isWorkspaceOwner(roles),
       },
-      calendarFeedRole: roles[0] ?? R.BASE,
+      calendarFeedRole: role,
     };
   });
 
   // B9:D-07: team member row menu, caller × target
-  // (components/workspace/users-actions-dropdown.tsx:53,154,185): locked when
-  // the caller holds ADMIN and the target's team-list roleEnum (roles[0]) is
-  // ADMIN. The page needs teamMember:read (settings.team.users.tsx:48-54); the
-  // row menu is hidden for an "Owner" label (settings.team.users.tsx:235).
+  // (components/workspace/users-actions-dropdown.tsx, change role and revoke):
+  // locked when the caller holds ADMIN and the target's team-list roleEnum
+  // (its effective role) is ADMIN. The page needs teamMember:read
+  // (settings.team.users.tsx loader); the row menu is hidden when the target's
+  // effective role owns the workspace (settings.team.users.tsx UserRow).
   snapshot["B9:D-07:users-menu"] = perRoleSet((caller) => {
     const { isAdministrator } = hookFlags(caller);
     const reachesPage = can(caller, E.teamMember, A.read);
     return perRoleSet((target) => {
-      const roleEnum = target[0];
+      const roleEnum = resolveRole(target);
       if (!reachesPage) return "no-page";
-      if (roleLabel(roleEnum) === "Owner") return "no-menu";
+      if (ROLE_POLICIES[roleEnum].membership.ownsWorkspace) return "no-menu";
       return isAdministrator && roleEnum === R.ADMIN ? "locked" : "open";
     });
   });

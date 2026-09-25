@@ -194,7 +194,14 @@ export async function requirePermission({
   Sentry.setUser({ id: userId });
   Sentry.setTag("organizationId", organizationId);
 
-  const role = resolveEffectiveRole({ userOrganizations, organizationId });
+  // The caller's reach: one object every loader and action reads, instead of
+  // re-deriving it from the role. Folds this membership's policy with the
+  // workspace's visibility toggles.
+  const access = resolveRoleAccess({ roles, workspace: currentOrganization });
+
+  // The membership's effective (highest-rank) role, the same one `access`
+  // reads its policy from.
+  const role: OrganizationRoles = access.role;
 
   const isSelfServiceOrBase = isSelfServiceOrBaseRole(role);
 
@@ -212,15 +219,6 @@ export async function requirePermission({
 
   // Determine if user can use audits based on organization settings
   const canUseAudits = currentOrganization.auditsEnabled ?? false;
-
-  // The caller's reach: one object every loader and action reads, instead of
-  // re-deriving it from the role. Folds this membership's policy with the
-  // workspace's visibility toggles.
-  const access = resolveRoleAccess({
-    roles: userOrganizations.find((o) => o.organization.id === organizationId)
-      ?.roles,
-    workspace: currentOrganization,
-  });
 
   // Mirrors `access.custody.seeAll` for callers that still read the flag.
   const canSeeAllCustody = access.custody.seeAll;

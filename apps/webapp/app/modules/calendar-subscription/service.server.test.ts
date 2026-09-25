@@ -413,4 +413,23 @@ describe("getMemberCalendarFeeds", () => {
       },
     ]);
   });
+
+  it("labels each feed with the membership's effective role", async () => {
+    vi.mocked(canUseBookings).mockReturnValue(true);
+    // A membership stored as [SELF_SERVICE, ADMIN] is an Administrator.
+    vi.mocked(db.user.findUnique).mockResolvedValue({
+      sso: false,
+      userOrganizations: [
+        {
+          roles: ["SELF_SERVICE", "ADMIN"],
+          calendarTokenId: null,
+          organization: { id: "o1", name: "Acme", type: "TEAM" },
+        },
+      ],
+    } as never);
+
+    const feeds = await getMemberCalendarFeeds({ userId: USER_ID });
+
+    expect(feeds[0].role).toBe("ADMIN");
+  });
 });
