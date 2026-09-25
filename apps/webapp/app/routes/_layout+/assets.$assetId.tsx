@@ -20,6 +20,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   deleteAsset,
@@ -273,6 +274,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const assetWithEffectiveBookingAssets = {
       ...asset,
       bookingAssets: [...reservedRows, ...cleanedActiveRows],
+      // The engine's free-now figure, so the header tooltip's "free right
+      // now" matches the Quantity Overview and the assets index.
+      freeNow: isQuantityTracked(asset)
+        ? Math.max(
+            0,
+            (await getAssetAvailability({ assetId: asset.id, organizationId }))
+              .physicalAvailable
+          )
+        : null,
     };
 
     /**

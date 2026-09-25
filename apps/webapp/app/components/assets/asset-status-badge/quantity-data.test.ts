@@ -142,4 +142,18 @@ describe("quantity pool status label", () => {
     expect(data?.freeNow).toBe(10);
     expect(data?.available).toBeLessThan(0);
   });
+
+  it("quotes the engine's free-now figure when the loader passes it", () => {
+    // A kit of 10 in custody: the rows carry the kit's custody AND the kit's
+    // units, so a recount from rows subtracts the same 10 units twice. The
+    // loader passes the engine's figure, 20, and the tooltip must use it.
+    const kitInCustody = asset({
+      quantity: 30,
+      custody: [{ quantity: 10 }],
+      assetKits: [{ id: "ak1", quantity: 10 }],
+    });
+
+    expect(getQuantityData({ ...kitInCustody, freeNow: 20 })?.freeNow).toBe(20);
+    expect(getQuantityData(kitInCustody)?.freeNow).toBe(10);
+  });
 });

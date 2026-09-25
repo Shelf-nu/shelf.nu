@@ -74,6 +74,14 @@ export interface QuantityAwareAsset {
    * this one aggregate instead and the card still gets to say WHEN.
    */
   nextReservedFrom?: string | Date | null;
+  /**
+   * Units free to hand over right now, as the availability engine computes
+   * it (`physicalAvailable`, clamped at 0). Loaders that have it pass it, and
+   * the tooltip then quotes the same figure as the asset page and the index.
+   * Without it the reducer derives it from the rows, which cannot tell
+   * kit-held custody or kit units out on a booking apart from loose ones.
+   */
+  freeNow?: number | null;
   /** Allow additional properties so any asset-like object can be passed */
   [key: string]: unknown;
 }
@@ -176,7 +184,10 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
    */
   const inKits = assetKits.reduce((sum, ak) => sum + (ak.quantity ?? 0), 0);
 
-  const freeNow = Math.max(0, total - inCustody - inKits - checkedOut);
+  const freeNow =
+    typeof asset.freeNow === "number"
+      ? Math.max(0, asset.freeNow)
+      : Math.max(0, total - inCustody - inKits - checkedOut);
 
   return {
     total,

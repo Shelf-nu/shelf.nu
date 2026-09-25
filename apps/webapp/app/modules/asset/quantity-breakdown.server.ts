@@ -19,6 +19,10 @@
  */
 
 import type { ExtendedPrismaClient } from "~/database/db.server";
+import {
+  getAssetAvailabilityBatch,
+  type AvailabilityBatchClient,
+} from "~/modules/asset/availability.server";
 import { computeCheckedOutByBookingForAsset } from "~/modules/booking/checked-out.server";
 import { ShelfError } from "~/utils/error";
 
@@ -146,8 +150,25 @@ export async function getAssetQuantityRows(
     (row) => (row.quantity ?? 0) > 0
   );
 
+  // The engine's figure, so "free right now" in the tooltip matches the asset
+  // page and the assets index even when units sit in kits.
+  const freeNow =
+    asset.type === "QUANTITY_TRACKED"
+      ? Math.max(
+          0,
+          (
+            await getAssetAvailabilityBatch([asset.id], {
+              organizationId,
+              window: null,
+              db: db as unknown as AvailabilityBatchClient,
+            })
+          ).get(asset.id)?.physicalAvailable ?? 0
+        )
+      : null;
+
   return {
     ...asset,
     bookingAssets: [...reservedRows, ...cleanedActiveRows],
+    freeNow,
   };
 }
