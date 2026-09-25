@@ -194,8 +194,8 @@ export const defaultFields: Column[] = [
   // The quantity columns sit together right after `status`, in
   // QUANTITY_COLUMN_BLOCK order. Only Free now and Stock status start visible:
   // Free now reads "14 of 20 pcs", so it already carries the total and the
-  // unit, and Stock status says how short a pool is. Total quantity and
-  // Reserved are one switch away in the columns list.
+  // unit, and Stock status says how short a pool is. Total quantity, Reserved
+  // and Min quantity are one switch away in the columns list.
   { name: "id", visible: false, position: 0 },
   { name: "sequentialId", visible: true, position: 1 },
   { name: "qrId", visible: true, position: 2 },
@@ -204,22 +204,22 @@ export const defaultFields: Column[] = [
   { name: "quantity", visible: false, position: 5 },
   { name: "reserved", visible: false, position: 6 },
   { name: "stockStatus", visible: true, position: 7 },
-  { name: "description", visible: true, position: 8 },
-  { name: "valuation", visible: true, position: 9 },
-  { name: "availableToBook", visible: true, position: 10 },
-  { name: "createdAt", visible: true, position: 11 },
-  { name: "updatedAt", visible: true, position: 12 },
-  { name: "category", visible: true, position: 13 },
-  { name: "tags", visible: true, position: 14 },
-  { name: "location", visible: true, position: 15 },
-  { name: "kit", visible: true, position: 16 },
-  { name: "custody", visible: true, position: 17 },
-  { name: "upcomingReminder", visible: true, position: 18 },
-  { name: "actions", visible: true, position: 19 },
-  { name: "upcomingBookings", visible: true, position: 20 },
-  { name: "type", visible: false, position: 21 },
-  { name: "assetModel", visible: false, position: 22 },
-  { name: "minQuantity", visible: false, position: 23 },
+  { name: "minQuantity", visible: false, position: 8 },
+  { name: "description", visible: true, position: 9 },
+  { name: "valuation", visible: true, position: 10 },
+  { name: "availableToBook", visible: true, position: 11 },
+  { name: "createdAt", visible: true, position: 12 },
+  { name: "updatedAt", visible: true, position: 13 },
+  { name: "category", visible: true, position: 14 },
+  { name: "tags", visible: true, position: 15 },
+  { name: "location", visible: true, position: 16 },
+  { name: "kit", visible: true, position: 17 },
+  { name: "custody", visible: true, position: 18 },
+  { name: "upcomingReminder", visible: true, position: 19 },
+  { name: "actions", visible: true, position: 20 },
+  { name: "upcomingBookings", visible: true, position: 21 },
+  { name: "type", visible: false, position: 22 },
+  { name: "assetModel", visible: false, position: 23 },
 ];
 
 /**
@@ -232,6 +232,8 @@ export const QUANTITY_COLUMN_BLOCK: readonly ColumnLabelKey[] = [
   "quantity",
   "reserved",
   "stockStatus",
+  // The floor Stock status judges against, so it sits beside the verdict.
+  "minQuantity",
 ];
 
 function isQuantityColumn(name: ColumnLabelKey): boolean {
