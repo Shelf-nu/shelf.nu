@@ -21,9 +21,22 @@
  *
  * Mirrors {@link file://./quantity-input-sheet.tsx}'s modal contract
  * (`<Modal presentationStyle="pageSheet">` + SafeAreaView + header-with-close).
+ *
+ * The last asset's confirm sends the check-in without closing the sheet. The
+ * caller passes `isSubmitting` while the request runs; the steppers lock, the
+ * confirm button shows a spinner, and the sheet cannot be dismissed until the
+ * request settles. It closes only once the server accepts, so a refusal keeps
+ * every disposition the queue collected.
  */
 import { useEffect, useState } from "react";
-import { View, Text, Modal, TextInput, TouchableOpacity } from "react-native";
+import {
+  View,
+  Text,
+  Modal,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { ConsumptionType } from "@/lib/api";
@@ -69,7 +82,21 @@ type Props = {
    * button submits ("Check in N"); earlier ones advance ("Next").
    */
   isLast: boolean;
+  /**
+   * True while the check-in request runs. Locks the steppers, shows a spinner
+   * on the confirm button, and blocks dismissal until the request settles.
+   */
+  isSubmitting?: boolean;
+  /**
+   * Called with this asset's disposition on confirm. On the last asset the
+   * caller sends the check-in with the sheet still open and closes it only
+   * once the server accepts.
+   */
   onSubmit: (value: CheckinDispositionValue) => void;
+  /**
+   * Called when the user dismisses the sheet without confirming. Never called
+   * while `isSubmitting`.
+   */
   onClose: () => void;
 };
 
@@ -93,6 +120,7 @@ export function CheckinDispositionSheet({
   consumptionType,
   unitOfMeasure,
   isLast,
+  isSubmitting = false,
   onSubmit,
   onClose,
 }: Props) {
@@ -120,6 +148,7 @@ export function CheckinDispositionSheet({
     counts.returned + counts.consumed + counts.lost + counts.damaged;
   const remainder = Math.max(remaining - total, 0);
   const isValid = total >= 1 && total <= remaining;
+  const canConfirm = isValid && !isSubmitting;
 
   /** Set one bucket, clamped so the running total can never exceed `remaining`. */
   const setField = (key: FieldKey, next: number) => {
@@ -145,7 +174,8 @@ export function CheckinDispositionSheet({
   /** One labelled stepper row (dot + label + -/value/+), capped to remaining. */
   const renderStepperRow = (key: FieldKey, label: string) => {
     const cur = counts[key];
-    const canInc = total < remaining;
+    const canDec = !isSubmitting && cur > 0;
+    const canInc = !isSubmitting && total < remaining;
     return (
       <View style={styles.fieldRow}>
         <View style={styles.fieldLabelWrap}>
@@ -156,13 +186,13 @@ export function CheckinDispositionSheet({
         </View>
         <View style={styles.stepperGroup}>
           <TouchableOpacity
-            style={[styles.stepButton, cur <= 0 && styles.stepButtonDisabled]}
+            style={[styles.stepButton, !canDec && styles.stepButtonDisabled]}
             onPress={() => setField(key, cur - 1)}
-            disabled={cur <= 0}
+            disabled={!canDec}
             activeOpacity={0.7}
             accessibilityLabel={`Decrease ${label.toLowerCase()}`}
             accessibilityRole="button"
-            accessibilityState={{ disabled: cur <= 0 }}
+            accessibilityState={{ disabled: !canDec }}
           >
             <Ionicons name="remove" size={20} color={colors.foreground} />
           </TouchableOpacity>
@@ -172,6 +202,7 @@ export function CheckinDispositionSheet({
             onChangeText={(t) =>
               setField(key, parseInt(t.replace(/[^0-9]/g, ""), 10) || 0)
             }
+            editable={!isSubmitting}
             keyboardType="number-pad"
             returnKeyType="done"
             accessibilityLabel={`${label} quantity`}
@@ -205,21 +236,33 @@ export function CheckinDispositionSheet({
     { key: "remainder", value: remainder, color: colors.gray300 },
   ].filter((s) => s.value > 0);
 
+  /**
+   * Every dismissal path goes through here. A check-in in flight decides
+   * whether the sheet closes, and a refusal must find the dispositions still
+   * on screen, so dismissal waits for it to settle.
+   */
+  const requestClose = () => {
+    if (isSubmitting) return;
+    onClose();
+  };
+
   return (
     <Modal
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      onRequestClose={requestClose}
     >
       <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Check in</Text>
           <TouchableOpacity
-            onPress={onClose}
-            style={styles.closeButton}
+            onPress={requestClose}
+            disabled={isSubmitting}
+            style={[styles.closeButton, isSubmitting && styles.dismissDisabled]}
             accessibilityLabel="Close check-in"
             accessibilityRole="button"
+            accessibilityState={{ disabled: isSubmitting }}
           >
             <Ionicons name="close" size={24} color={colors.foreground} />
           </TouchableOpacity>
@@ -295,17 +338,27 @@ export function CheckinDispositionSheet({
           </View>
 
           <TouchableOpacity
-            style={[styles.confirmPrimary, !isValid && styles.confirmDisabled]}
+            style={[
+              styles.confirmPrimary,
+              !canConfirm && styles.confirmDisabled,
+            ]}
             onPress={() => {
-              if (isValid) onSubmit(counts);
+              if (canConfirm) onSubmit(counts);
             }}
-            disabled={!isValid}
+            disabled={!canConfirm}
             activeOpacity={0.7}
             accessibilityLabel={confirmLabel}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !isValid }}
+            accessibilityState={{ disabled: !canConfirm, busy: isSubmitting }}
           >
-            <Text style={styles.confirmText}>{confirmLabel}</Text>
+            {isSubmitting ? (
+              <ActivityIndicator
+                size="small"
+                color={colors.primaryForeground}
+              />
+            ) : (
+              <Text style={styles.confirmText}>{confirmLabel}</Text>
+            )}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -334,6 +387,9 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   closeButton: {
     padding: spacing.xs,
+  },
+  dismissDisabled: {
+    opacity: 0.5,
   },
   body: {
     paddingHorizontal: spacing.lg,

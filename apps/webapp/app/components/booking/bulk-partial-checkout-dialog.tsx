@@ -15,14 +15,16 @@
  * If the submitted set equals ALL still-Booked assets in the booking, this is
  * a "final" checkout; combined with `isBookingEarlyCheckout(booking.from)` it
  * becomes an early checkout and we delegate to `CheckoutDialog` so the user
- * can choose whether to adjust the start date. Otherwise a plain
- * `partial-checkout` submit is used.
+ * can choose whether to adjust the start date. A batch that takes a RESERVED
+ * booking out while model reservations are still unassigned also goes through
+ * `CheckoutDialog`, which names those units for the user to confirm; they stay
+ * open on the booking. Otherwise a plain `partial-checkout` submit is used.
  *
  * @see {@link file://./bulk-partial-checkin-dialog.tsx} — the mirror source
  * @see {@link file://./checkout-dialog.tsx} — early-checkout confirmation
  * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx}
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AssetType } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useActionData, useLoaderData } from "react-router";
@@ -32,16 +34,18 @@ import {
   selectedBulkItemsAtom,
 } from "~/atoms/list";
 import { useDisabled } from "~/hooks/use-disabled";
-import { shouldPromptEarlyCheckout } from "~/modules/booking/helpers";
+import {
+  makeCheckoutEligibility,
+  shouldPromptEarlyCheckout,
+} from "~/modules/booking/helpers";
 import type {
   BookingPageLoaderData,
   BookingPageActionData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithStatus } from "~/utils/booking-assets";
-import {
-  flattenSelectedBookingItems,
-  isAssetCheckableOut,
-} from "~/utils/booking-assets";
+import { flattenSelectedBookingItems } from "~/utils/booking-assets";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
 import CheckoutDialog from "./checkout-dialog";
 import { AssetImage } from "../assets/asset-image/component";
@@ -132,6 +136,7 @@ function CheckoutQtyInput({
       <span className="text-xs font-medium text-gray-700">Checked out</span>
       <input
         type="number"
+        {...numberInputWheelGuard}
         min={1}
         max={max}
         step={1}
@@ -167,8 +172,12 @@ export default function BulkPartialCheckoutDialog({
   setOpen: (open: boolean) => void;
 }) {
   const disabled = useDisabled();
-  const { booking, checkedOutAssetIds, remainingToCheckOutByAsset } =
-    useLoaderData<BookingPageLoaderData>();
+  const {
+    booking,
+    checkedOutAssetIds,
+    remainingToCheckOutByAsset,
+    partialCheckinDetails,
+  } = useLoaderData<BookingPageLoaderData>();
 
   const rawSelectedItems = useAtomValue(selectedBulkItemsAtom);
 
@@ -217,33 +226,39 @@ export default function BulkPartialCheckoutDialog({
     [booking.bookingAssets]
   );
 
-  // Set of asset ids already checked out for THIS booking (partial-checkout
-  // records). Asset `status === CHECKED_OUT` is checked separately by the
-  // shared `isAssetCheckableOut` helper.
-  const checkedOutIdsSet = useMemo(
-    () => new Set(checkedOutAssetIds || []),
-    [checkedOutAssetIds]
-  );
-
   /**
    * Per-asset remaining-to-check-out lookup, sourced from the loader. For
    * QUANTITY_TRACKED assets this is `sum(bookedQuantity) - sum(checkedOutQuantity)`
    * across every slice the asset has on this booking. An asset is "fully
    * out" only when its value reaches 0; while > 0 the user can still top
-   * off the remaining units via this dialog. Passed into the SHARED
-   * `isAssetCheckableOut` predicate so the dropdown, this dialog, and any
-   * future consumer all agree on top-off eligibility.
+   * off the remaining units via this dialog. Read through the shared
+   * check-out eligibility so the dropdown, this dialog and the scan drawer
+   * agree on top-off.
    */
   const remainingByAssetId = useMemo(
     () => remainingToCheckOutByAsset ?? {},
     [remainingToCheckOutByAsset]
   );
 
+  /**
+   * Which rows can still go out on this booking — the scan drawer's rule, so
+   * the dialog never offers what the server refuses. An item sent out by the
+   * Check out button and checked back in is named by no check-out session and
+   * reads AVAILABLE; only the returned set keeps it out of this dialog.
+   */
+  const checkoutEligibility = useMemo(
+    () =>
+      makeCheckoutEligibility({
+        checkedOutAssetIds: checkedOutAssetIds ?? [],
+        partialCheckinDetails: partialCheckinDetails ?? {},
+        remainingToCheckOutByAsset: remainingByAssetId,
+      }),
+    [checkedOutAssetIds, partialCheckinDetails, remainingByAssetId]
+  );
+
   // Flatten/enrich the selection via the SHARED resolver (single source of
   // truth with the dropdown and check-in dialog), then keep kits + the assets
-  // that are still actionable. The QT-aware branch lives inside
-  // `isAssetCheckableOut` via the `remainingByAssetId` option — collapsing
-  // our previous inline branch into one helper.
+  // that can still go out.
   const flattenedItems = useMemo(
     () => flattenSelectedBookingItems(rawSelectedItems, assetsList),
     [rawSelectedItems, assetsList]
@@ -252,11 +267,9 @@ export default function BulkPartialCheckoutDialog({
     () =>
       flattenedItems.filter((item) => {
         if (item.type === "kit" || (item.name && item._count)) return true;
-        return isAssetCheckableOut(item as AssetWithStatus, checkedOutIdsSet, {
-          remainingByAssetId,
-        });
+        return checkoutEligibility.isEligible(item as AssetWithStatus);
       }),
-    [flattenedItems, checkedOutIdsSet, remainingByAssetId]
+    [flattenedItems, checkoutEligibility]
   );
 
   /** Use state instead of ref so the component re-renders once the form
@@ -269,10 +282,12 @@ export default function BulkPartialCheckoutDialog({
   // `assetsList` (post-pivot — `booking.assets` no longer exists) and runs
   // the same shared predicate as the selection filter so dropdown, dialog,
   // and final-checkout detection all agree, including QT top-off semantics.
+  // A row that cannot go out is not "still Booked". On a reserved booking that
+  // is an item held in custody: counting it would keep checking out the last
+  // item that CAN leave from reading as final, and skip the early-checkout
+  // prompt.
   const remainingBookedAssets = assetsList.filter((asset) =>
-    isAssetCheckableOut(asset as AssetWithStatus, checkedOutIdsSet, {
-      remainingByAssetId,
-    })
+    checkoutEligibility.isEligible(asset as AssetWithStatus)
   );
 
   // Count only individual assets (exclude kit IDs), deduped, for final-checkout
@@ -304,6 +319,18 @@ export default function BulkPartialCheckoutDialog({
   const isEarlyCheckout = Boolean(
     isFinalCheckout && shouldPromptEarlyCheckout(booking.status, booking.from)
   );
+
+  // Reserved model units still unassigned. The batch that takes a RESERVED
+  // booking out leaves them open on it, so that batch asks first; once the
+  // booking is underway it already went out with them open.
+  const unassignedUnits =
+    booking.status === "RESERVED"
+      ? getOutstandingModelRequests(booking.modelRequests).map((request) => ({
+          name: request.assetModel.name,
+          count: request.quantity - request.fulfilledQuantity,
+        }))
+      : [];
+  const needsConfirmation = isEarlyCheckout || unassignedUnits.length > 0;
 
   function handleCloseDialog() {
     setOpen(false);
@@ -752,14 +779,16 @@ export default function BulkPartialCheckoutDialog({
               Cancel
             </Button>
 
-            {/* Submit button - conditional based on early check-out. The
-                CheckoutDialog submits this same form (carrying the hidden
-                assetIds + returnJson). We pass intent="partial-checkout" so the
-                overview action routes to checkoutAssets/partialCheckoutBooking
-                (which records the batch + applies the date choice) rather than
-                the whole-booking checkoutBooking that the default intent would
-                trigger on this intent-routed page. */}
-            {isEarlyCheckout ? (
+            {/* Submit button - a confirming CheckoutDialog for an early
+                check-out or one that leaves reserved units unassigned, a
+                plain submit otherwise. The CheckoutDialog submits this same
+                form (carrying the hidden assetIds + returnJson). We pass
+                intent="partial-checkout" so the overview action routes to
+                checkoutAssets/partialCheckoutBooking (which records the batch
+                + applies the date choice) rather than the whole-booking
+                checkoutBooking that the default intent would trigger on this
+                intent-routed page. */}
+            {needsConfirmation ? (
               <CheckoutDialog
                 booking={{
                   id: booking.id,
@@ -767,10 +796,13 @@ export default function BulkPartialCheckoutDialog({
                   from: booking.from,
                 }}
                 intent="partial-checkout"
+                label={isEarlyCheckout ? undefined : "Check out items"}
                 disabled={disabled || noAssetsToCheckOut}
                 portalContainer={formElement || undefined}
                 formId="bulk-partial-checkout-form"
                 fullWidth
+                unassignedUnits={unassignedUnits}
+                suppressEarlyCheckoutPrompt={!isEarlyCheckout}
               />
             ) : (
               <Button

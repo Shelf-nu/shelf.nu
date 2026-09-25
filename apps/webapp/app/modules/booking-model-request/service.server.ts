@@ -11,8 +11,13 @@
  * regardless of how it got there: "Manage assets", the web scanner, the asset
  * index, or the mobile API. Every one of those routes through
  * {@link fulfilModelRequestsForAssets}. That helper's JSDoc explains why this
- * is deliberately surface-independent — it used to be scanner-only, and the
- * asymmetry hard-blocked check-out.
+ * is deliberately surface-independent.
+ *
+ * Unassigned units never hold a check-out back: a booking goes ongoing once at
+ * least one item leaves, and whatever is still unassigned stays open on it —
+ * and stays adjustable, so units that turn out to be damaged or were never
+ * collected can be released back to the pool instead of being held for the
+ * rest of the booking.
  *
  * ## Availability formula
  *
@@ -36,6 +41,7 @@
 import type { Asset, Prisma } from "@prisma/client";
 import { AssetType, BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { canEditModelReservations } from "~/utils/booking-model-requests";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
@@ -53,6 +59,28 @@ const ACTIVE_BOOKING_STATUSES = [
   BookingStatus.ONGOING,
   BookingStatus.OVERDUE,
 ] as const;
+
+/**
+ * The `Booking` predicate for "overlaps this window".
+ *
+ * An absent end means a draft with no dates: nothing can overlap it, so the
+ * predicate is empty and every active booking counts — the conservative
+ * reading, and the one the DRAFT to RESERVED transition re-measures once real
+ * dates exist. Shared so the pool read and the reservation lookup that gates
+ * it always ask about the same span.
+ */
+function bookingWindowOverlap(
+  from?: Date | null,
+  to?: Date | null
+): Prisma.BookingWhereInput {
+  if (!from || !to) return {};
+  return {
+    OR: [
+      { from: { lte: to }, to: { gte: from } },
+      { from: { gte: from }, to: { lte: to } },
+    ],
+  };
+}
 
 /* -------------------------------------------------------------------------- */
 /*                          getAssetModelAvailability                         */
@@ -153,8 +181,13 @@ export type AssetModelAvailability = {
  * `FOR UPDATE` on the model row first makes the second caller wait for the
  * first to commit and re-read the pool it actually left behind.
  *
- * The model row is the right grain: contention is exactly "requests for this
- * model", and every writer of a `BookingModelRequest` passes through here.
+ * The model row is the right grain for POOL contention: what competes is
+ * "requests for this model", across bookings. It is not a lock on any one
+ * reservation, and most writers of a `BookingModelRequest` row never take it
+ * — `materializeModelRequestForAsset` does not, and
+ * `assertModelUnitsNotReservedElsewhere` skips it for a write that fits
+ * inside the booking's own remaining units. A caller that needs one
+ * reservation held still needs {@link lockModelRequestRow}.
  *
  * Scoped by `organizationId` as well as `id`, so a caller supplying another
  * workspace's model id takes no lock at all rather than contending on a row
@@ -186,6 +219,53 @@ async function lockAssetModelForReservation(
 }
 
 /**
+ * Serializes every writer of one booking's reservation of one model.
+ *
+ * `quantity` and `fulfilledQuantity` are moved by different callers: an
+ * operator sets the first, assignment increments the second
+ * ({@link materializeModelRequestForAsset}), and cancellation removes the row
+ * on the condition that the second is zero. Each of those decisions is taken
+ * in application code against a row the transaction has read, so without a
+ * lock on that row the decision rests on a snapshot another transaction is
+ * free to invalidate before the write lands — leaving `fulfilledQuantity`
+ * above `quantity`, or deleting a reservation whose units have just arrived
+ * and stripping their provenance through the FK's `ON DELETE SET NULL`.
+ *
+ * The pool lock cannot stand in for this.
+ * {@link assertModelUnitsNotReservedElsewhere} skips it entirely for a write
+ * that fits inside the booking's own remaining units — which is exactly the
+ * assignment that competes here.
+ *
+ * Locks nothing when the reservation does not exist yet: there is no row to
+ * lock, and two concurrent creates serialize on the unique constraint
+ * instead, which the upsert's `wasCreated` discriminator already expects.
+ *
+ * Needs no `organizationId` of its own: both callers prove the booking
+ * belongs to the caller's workspace before reaching this.
+ *
+ * Callers that take both locks take {@link lockAssetModelForReservation}
+ * FIRST, matching the order assignment takes them in, so the two paths cannot
+ * deadlock.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param bookingId - The booking whose reservation is being written
+ * @param assetModelId - The reserved model
+ */
+async function lockModelRequestRow(
+  tx: RawQueryClient,
+  bookingId: string,
+  assetModelId: string
+): Promise<void> {
+  // Column names are literal — `BookingModelRequest` declares no `@map`.
+  // @see {@link file://./../../../../../.claude/rules/raw-sql-respects-prisma-map.md}
+  await tx.$queryRaw`
+    SELECT "id" FROM "BookingModelRequest"
+    WHERE "bookingId" = ${bookingId} AND "assetModelId" = ${assetModelId}
+    FOR UPDATE
+  `;
+}
+
+/**
  * Compute availability for an `AssetModel` over a booking window.
  *
  * Safe to call from any loader/action path. Does not mutate. Excludes
@@ -202,15 +282,7 @@ export async function getAssetModelAvailability({
   const client = dbClient ?? db;
 
   try {
-    const dateOverlap =
-      from && to
-        ? {
-            OR: [
-              { from: { lte: to }, to: { gte: from } },
-              { from: { gte: from }, to: { lte: to } },
-            ],
-          }
-        : {};
+    const dateOverlap = bookingWindowOverlap(from, to);
 
     const [total, custodyAgg, bookingAssetAgg, modelRequestAgg] =
       await Promise.all([
@@ -298,6 +370,492 @@ export async function getAssetModelAvailability({
       additionalData: { assetModelId, bookingId, organizationId },
     });
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                    assertModelUnitsNotReservedElsewhere                    */
+/* -------------------------------------------------------------------------- */
+
+/** An INDIVIDUAL asset about to hold a standalone row on a booking. */
+type ModelUnitCandidate = Pick<Asset, "id" | "title" | "assetModelId">;
+
+/**
+ * The reads {@link assertModelUnitsNotReservedElsewhere} issues on top of the
+ * availability reads. Structural, like {@link AssetModelAvailabilityClient},
+ * so an interactive transaction client satisfies it without a cast.
+ */
+export type ModelReservationGuardClient = RawQueryClient &
+  AssetModelAvailabilityClient & {
+    bookingModelRequest: AssetModelAvailabilityClient["bookingModelRequest"] & {
+      findMany: (args: {
+        where: Prisma.BookingModelRequestWhereInput;
+        select: {
+          assetModelId: true;
+          quantity: true;
+          fulfilledQuantity: true;
+        };
+      }) => Promise<
+        Array<{
+          assetModelId: string;
+          quantity: number;
+          fulfilledQuantity: number;
+        }>
+      >;
+    };
+    asset: AssetModelAvailabilityClient["asset"] & {
+      findMany: (args: {
+        where: Prisma.AssetWhereInput;
+        select: {
+          id: true;
+          assetModelId: true;
+          custody: { select: { id: true }; take: 1 };
+        };
+      }) => Promise<
+        Array<{
+          id: string;
+          assetModelId: string | null;
+          custody: Array<{ id: string }>;
+        }>
+      >;
+    };
+    assetModel: {
+      findMany: (args: {
+        where: Prisma.AssetModelWhereInput;
+        select: { id: true; name: true };
+      }) => Promise<Array<{ id: string; name: string }>>;
+    };
+  };
+
+type AssertModelUnitsNotReservedElsewhereArgs = {
+  /**
+   * The INDIVIDUAL assets about to hold a standalone `BookingAsset` row on
+   * `bookingId`. Assets without a model are ignored. Kit-driven slices must
+   * not be passed: a kit is reserved as one unit on its own axis, and its
+   * members are not claims on the loose pool.
+   */
+  assets: ModelUnitCandidate[];
+  bookingId: string;
+  /**
+   * The booking's status at the time of the write. A DRAFT claims nothing on
+   * the pool yet, so everything it would hold of a model has to fit. An active
+   * booking already holds its units and its own request, so only the units a
+   * write adds beyond that request are measured; a write that merely fulfils
+   * the request never changes what the booking takes from the pool.
+   */
+  bookingStatus: BookingStatus;
+  /**
+   * The booking's window is changing (an extension). The pool for the new
+   * dates has never measured this booking, so its whole footprint is checked
+   * again, exactly as for a draft, even though nothing is being added.
+   */
+  windowChanged?: boolean;
+  organizationId: string;
+  /**
+   * The booking's window. When either end is missing there is nothing to
+   * overlap, so the check is skipped; the DRAFT → RESERVED transition runs it
+   * again once the dates exist.
+   */
+  from: Date | null | undefined;
+  to: Date | null | undefined;
+  /**
+   * The caller's interactive transaction. Required: the model lock only
+   * serialises writers when it is held by the transaction that goes on to
+   * write, and the counts only see that transaction's own rows through it.
+   */
+  tx: ModelReservationGuardClient;
+};
+
+/** Groups asset ids by model, each asset counted once per model. */
+function groupAssetIdsByModel(
+  rows: Array<{ assetId: string; assetModelId: string | null }>
+): Map<string, Set<string>> {
+  const byModel = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (!row.assetModelId) continue;
+    const ids = byModel.get(row.assetModelId) ?? new Set<string>();
+    ids.add(row.assetId);
+    byModel.set(row.assetModelId, ids);
+  }
+  return byModel;
+}
+
+/** Units of one model a booking holds by name, and how many are in custody. */
+type OwnNamedUnits = {
+  /** Distinct asset ids, standalone and kit-driven alike. */
+  unitIds: Set<string>;
+  /** How many of those units a custodian is holding. */
+  inCustody: number;
+};
+
+/**
+ * The units of these models a booking holds by name, with the subset a
+ * custodian holds.
+ *
+ * Both halves feed a pool comparison, and each answers a question the sums in
+ * {@link getAssetModelAvailability} cannot:
+ *
+ * - **Kit-driven rows count.** A kit member is a physical unit off the loose
+ *   pool, and the pool read already counts it that way for every OTHER booking
+ *   (`reservedConcrete` does not filter `assetKitId`). Leaving it out of the
+ *   booking's own footprint is the asymmetry that lets a booking hold a unit
+ *   through a kit and still name another. `unitIds` is a set, so an asset
+ *   carrying both a standalone and a kit row counts once.
+ * - **Custody is already deducted.** `available` subtracts every unit of the
+ *   model a custodian holds. Charging such a unit again as a named one refuses
+ *   a booking that took nothing a foreign reservation could have drawn on.
+ *
+ * @param args.assetModelIds - Models to report on; others are ignored
+ * @returns One entry per model that has at least one held unit
+ */
+export async function readOwnNamedUnits({
+  bookingId,
+  assetModelIds,
+  organizationId,
+  tx,
+}: {
+  bookingId: string;
+  assetModelIds: string[];
+  organizationId: string;
+  tx: Pick<ModelReservationGuardClient, "asset">;
+}): Promise<Map<string, OwnNamedUnits>> {
+  const rows = await tx.asset.findMany({
+    where: {
+      organizationId,
+      assetModelId: { in: assetModelIds },
+      type: AssetType.INDIVIDUAL,
+      bookingAssets: { some: { bookingId } },
+    },
+    select: {
+      id: true,
+      assetModelId: true,
+      // Existence only — the count of rows is irrelevant, a unit is either in
+      // someone's hands or it is not.
+      custody: { select: { id: true }, take: 1 },
+    },
+  });
+
+  const byModel = new Map<string, OwnNamedUnits>();
+  for (const row of rows) {
+    if (!row.assetModelId) continue;
+    const entry = byModel.get(row.assetModelId) ?? {
+      unitIds: new Set<string>(),
+      inCustody: 0,
+    };
+    if (!entry.unitIds.has(row.id)) {
+      entry.unitIds.add(row.id);
+      if (row.custody.length > 0) entry.inCustody += 1;
+    }
+    byModel.set(row.assetModelId, entry);
+  }
+  return byModel;
+}
+
+/**
+ * Models in `assetModelIds` that another booking still owes unnamed units of,
+ * over the same window {@link getAssetModelAvailability} measures.
+ *
+ * This is the only thing the by-name guard protects. A model nobody has
+ * reserved cannot be over-committed by naming its units: named units and the
+ * units other bookings hold by name are disjoint sets, because the per-asset
+ * conflict rule already forbids one unit on two overlapping bookings. So a
+ * model that fails this test needs no lock, no pool read and no decision — and
+ * skipping it is what keeps a picker page of N models from costing 4N queries.
+ *
+ * @param args.excludeBookingId - The booking being written; its own request is
+ *   a promise to itself, not competition
+ * @returns The subset of `assetModelIds` with outstanding foreign units
+ */
+export async function findModelsReservedByOtherBookings({
+  assetModelIds,
+  excludeBookingId,
+  organizationId,
+  from,
+  to,
+  db: dbClient,
+}: {
+  assetModelIds: string[];
+  excludeBookingId: string;
+  organizationId: string;
+  from?: Date | null;
+  to?: Date | null;
+  db?: Pick<ModelReservationGuardClient, "bookingModelRequest">;
+}): Promise<Set<string>> {
+  if (assetModelIds.length === 0) return new Set();
+
+  const client = dbClient ?? db;
+  const rows = await client.bookingModelRequest.findMany({
+    where: {
+      assetModelId: { in: assetModelIds },
+      bookingId: { not: excludeBookingId },
+      fulfilledAt: null,
+      booking: {
+        organizationId,
+        status: { in: [...ACTIVE_BOOKING_STATUSES] },
+        ...bookingWindowOverlap(from, to),
+      },
+    },
+    select: { assetModelId: true, quantity: true, fulfilledQuantity: true },
+  });
+
+  const outstandingByModel = new Map<string, number>();
+  for (const row of rows) {
+    outstandingByModel.set(
+      row.assetModelId,
+      (outstandingByModel.get(row.assetModelId) ?? 0) +
+        (row.quantity - row.fulfilledQuantity)
+    );
+  }
+  return new Set(
+    [...outstandingByModel.entries()]
+      .filter(([, outstanding]) => outstanding > 0)
+      .map(([assetModelId]) => assetModelId)
+  );
+}
+
+/** What a booking would take from one model's pool once a write lands. */
+type ModelClaim = {
+  assetModelId: string;
+  /** Units of the model the booking holds by name after the write. */
+  named: number;
+  /**
+   * The same units minus the ones a custodian holds — what the booking
+   * actually takes from the pool a foreign reservation draws on. This is the
+   * number the pool is compared against; `named` only states the claim.
+   */
+  namedNotInCustody: number;
+  /** Units of the booking's own request still unassigned after the write. */
+  stillToAssign: number;
+};
+
+/**
+ * Refuses to book a model's units by name when other bookings have already
+ * reserved that model's free pool for the same window.
+ *
+ * A `BookingModelRequest` promises N unnamed units of a model. Naming one of
+ * those units on another booking takes it out of the pool the promise draws
+ * from, so it competes for the same units as the request even though no
+ * `BookingAsset` row ever names the request. This guard is the per-asset
+ * counterpart of the reservation guard in {@link upsertBookingModelRequest}:
+ * both measure the same pool through {@link getAssetModelAvailability}, under
+ * the same per-model lock.
+ *
+ * The pool is measured excluding `bookingId`, so what is compared against it is
+ * the booking's whole footprint on the model once the write lands: the units it
+ * will hold by name (its existing ones plus `assets`, each asset counted once,
+ * kit-driven rows included) and the units of its own outstanding request that
+ * stay unassigned. A new unit fulfils that request before it claims anything
+ * (see {@link fulfilModelRequestsForAssets}), so run this before fulfilment,
+ * while the request is still outstanding.
+ *
+ * Two things are deliberately NOT charged to the booking. Units a custodian
+ * holds are already deducted from the pool, so naming one takes nothing a
+ * reservation could have drawn on. And a model no other booking is owed units
+ * of is skipped entirely — nothing can be over-committed there, because one
+ * unit cannot sit on two overlapping bookings. That skip is what keeps the
+ * cost at one query for the overwhelming majority of writes, and it is taken
+ * under the model locks so a reservation cannot appear after it.
+ *
+ * A DRAFT holds nothing on the pool yet, so its whole footprint must fit. An
+ * active booking's footprint is already on the pool; only a write that adds
+ * units beyond its own request is measured, and a write that only fulfils the
+ * request is never refused, even on a pool that is already over-committed.
+ * When the window changes (`windowChanged`), the pool for the new dates has
+ * never seen this booking, so its whole footprint is measured again.
+ *
+ * @throws {ShelfError} 400 (`shouldBeCaptured: false`) naming every model whose
+ *   units do not fit, in one message.
+ * @throws {ShelfError} 404 when a model is not in the caller's workspace.
+ */
+export async function assertModelUnitsNotReservedElsewhere({
+  assets,
+  bookingId,
+  bookingStatus,
+  windowChanged = false,
+  organizationId,
+  from,
+  to,
+  tx,
+}: AssertModelUnitsNotReservedElsewhereArgs): Promise<void> {
+  if (!from || !to) return;
+
+  const newAssetIdsByModel = groupAssetIdsByModel(
+    assets.map((asset) => ({
+      assetId: asset.id,
+      assetModelId: asset.assetModelId,
+    }))
+  );
+  if (newAssetIdsByModel.size === 0) return;
+  const candidateModelIds = [...newAssetIdsByModel.keys()];
+
+  const ownRequests = await tx.bookingModelRequest.findMany({
+    where: {
+      bookingId,
+      assetModelId: { in: candidateModelIds },
+      fulfilledAt: null,
+    },
+    select: { assetModelId: true, quantity: true, fulfilledQuantity: true },
+  });
+  const remainingByModel = new Map<string, number>();
+  for (const request of ownRequests) {
+    remainingByModel.set(
+      request.assetModelId,
+      (remainingByModel.get(request.assetModelId) ?? 0) +
+        Math.max(0, request.quantity - request.fulfilledQuantity)
+    );
+  }
+
+  // Units of these models the booking already holds by name. They are not in
+  // `availability` (it excludes this booking), so they count on the booking's
+  // side.
+  const heldByModel = await readOwnNamedUnits({
+    bookingId,
+    assetModelIds: candidateModelIds,
+    organizationId,
+    tx,
+  });
+
+  const isDraft = bookingStatus === BookingStatus.DRAFT;
+  const claims: ModelClaim[] = [];
+  for (const [assetModelId, newAssetIds] of newAssetIdsByModel) {
+    const held = heldByModel.get(assetModelId);
+    const heldAssetIds = held?.unitIds ?? new Set<string>();
+    const addedUnits = [...newAssetIds].filter(
+      (assetId) => !heldAssetIds.has(assetId)
+    ).length;
+    const remaining = remainingByModel.get(assetModelId) ?? 0;
+    // On an active booking a write that stays within its own request adds no
+    // claim: the units it names were promised to it already. A window change
+    // is measured in full, whatever it adds.
+    if (!isDraft && !windowChanged && addedUnits <= remaining) continue;
+    const named = new Set([...newAssetIds, ...heldAssetIds]);
+    claims.push({
+      assetModelId,
+      named: named.size,
+      // `available` has already deducted every unit of this model a custodian
+      // holds. A named unit among them takes nothing a foreign reservation
+      // could have drawn on, so charging it again would refuse the booking for
+      // a unit that was never in the promisable pool. Only units this booking
+      // holds can be discounted — a unit it is merely adding is not yet known
+      // to be one of them.
+      namedNotInCustody: named.size - (held?.inCustody ?? 0),
+      stillToAssign: Math.max(0, remaining - addedUnits),
+    });
+  }
+  if (claims.length === 0) return;
+
+  // Sorted so two transactions contending for the same models take the locks
+  // in one global order and cannot deadlock. Every lock is taken before any
+  // pool is measured, matching the reservation guard.
+  claims.sort((a, b) => a.assetModelId.localeCompare(b.assetModelId));
+  for (const claim of claims) {
+    await lockAssetModelForReservation(tx, claim.assetModelId, organizationId);
+  }
+
+  /**
+   * Only a model another booking still owes unnamed units of can be
+   * over-committed by naming units, so only those are worth measuring. Read
+   * through `tx` and AFTER the locks: a competing `upsertBookingModelRequest`
+   * is serialised behind them, so a reservation cannot slip in between this
+   * answer and the write it gates.
+   */
+  const contestedModelIds = await findModelsReservedByOtherBookings({
+    assetModelIds: claims.map((claim) => claim.assetModelId),
+    excludeBookingId: bookingId,
+    organizationId,
+    from,
+    to,
+    db: tx,
+  });
+  const contestedClaims = claims.filter((claim) =>
+    contestedModelIds.has(claim.assetModelId)
+  );
+  if (contestedClaims.length === 0) return;
+
+  const shortfalls: Array<
+    ModelClaim & Omit<AssetModelAvailability, "total" | "reserved">
+  > = [];
+  for (const claim of contestedClaims) {
+    const availability = await getAssetModelAvailability({
+      assetModelId: claim.assetModelId,
+      organizationId,
+      bookingId,
+      from,
+      to,
+      db: tx,
+    });
+    if (
+      claim.namedNotInCustody + claim.stillToAssign >
+      availability.available
+    ) {
+      shortfalls.push({
+        ...claim,
+        inCustody: availability.inCustody,
+        reservedConcrete: availability.reservedConcrete,
+        reservedViaRequest: availability.reservedViaRequest,
+        available: availability.available,
+      });
+    }
+  }
+  if (shortfalls.length === 0) return;
+
+  const models = await tx.assetModel.findMany({
+    where: {
+      id: { in: shortfalls.map((s) => s.assetModelId) },
+      organizationId,
+    },
+    select: { id: true, name: true },
+  });
+  const nameById = new Map(models.map((m) => [m.id, m.name]));
+
+  const units = (n: number) => `${n} ${n === 1 ? "unit" : "units"}`;
+  const lines = shortfalls.map((s) => {
+    const ownRequest =
+      s.stillToAssign > 0
+        ? ` and ${units(
+            s.stillToAssign
+          )} still to assign from this booking's own reservation`
+        : "";
+    // Custody and concrete rows on other bookings shrink the pool as well;
+    // name them when they do, so the numbers in the sentence add up.
+    const otherDeductions = [
+      s.inCustody > 0 ? `${units(s.inCustody)} in custody` : null,
+      s.reservedConcrete > 0
+        ? `${units(s.reservedConcrete)} booked by name on other bookings`
+        : null,
+    ].filter((part): part is string => part !== null);
+    const deductions =
+      otherDeductions.length > 0
+        ? ` ${otherDeductions.join(" and ")} also ${
+            otherDeductions.length === 1 ? "counts" : "count"
+          } against the pool.`
+        : "";
+    // A model is only measured once another booking is owed units of it, so
+    // the reservation is always the leading reason. Stated conditionally all
+    // the same: a sentence that can read "0 units are reserved" tells the
+    // operator the refusal is a bug even when it is not.
+    const reservation =
+      s.reservedViaRequest > 0
+        ? `but ${units(s.reservedViaRequest)} ${
+            s.reservedViaRequest === 1 ? "is" : "are"
+          } reserved by model on other bookings for these dates and only ${
+            s.available
+          } more can be booked`
+        : `but only ${s.available} more can be booked for these dates`;
+    return `"${nameById.get(s.assetModelId) ?? s.assetModelId}": ${units(
+      s.named
+    )} requested by name${ownRequest}, ${reservation}.${deductions}`;
+  });
+
+  throw new ShelfError({
+    cause: null,
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+    message: `Some assets cannot be booked by name for these dates:\n${lines.join(
+      "\n"
+    )}\nRemove them, or change the dates.`,
+    additionalData: { bookingId, shortfalls },
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -578,9 +1136,10 @@ type UpsertBookingModelRequestArgs = {
  * leave a phantom entry in the audit trail; the note stays outside it,
  * matching the concrete-asset add path in `updateBookingAssets`.
  *
- * Rejected when the booking isn't in a state that accepts edits (we only
- * allow DRAFT / RESERVED here — ONGOING bookings must reconcile by scanning,
- * not by editing the intent).
+ * Editable for as long as the booking is live — DRAFT, RESERVED, ONGOING or
+ * OVERDUE (see `canEditModelReservations`). The floor is `fulfilledQuantity`:
+ * units already assigned to the booking cannot be reserved away, so the
+ * lowest a reservation can go is "exactly what went out", which closes it.
  */
 export async function upsertBookingModelRequest({
   bookingId,
@@ -626,16 +1185,13 @@ export async function upsertBookingModelRequest({
           shouldBeCaptured: false,
         });
       }
-      if (
-        booking.status !== BookingStatus.DRAFT &&
-        booking.status !== BookingStatus.RESERVED
-      ) {
+      if (!canEditModelReservations(booking.status)) {
         throw new ShelfError({
           cause: null,
           label,
           status: 400,
           message:
-            "Model-level reservations can only be edited while the booking is DRAFT or RESERVED.",
+            "This booking is finished, cancelled or archived. Its reservations are a record of what was promised and can no longer be changed.",
           shouldBeCaptured: false,
         });
       }
@@ -654,10 +1210,18 @@ export async function upsertBookingModelRequest({
         });
       }
 
-      // Peek at the existing row first — we need its `fulfilledQuantity`
-      // both for the "can't shrink below already-fulfilled" guard and
-      // for the availability delta calculation ("only claim the still-
-      // outstanding share against the pool").
+      // Both locks before the read, because every decision below is made in
+      // application code against the row this read returns: the floor, whether
+      // this write is a reduction, and the completion stamp. Taken without the
+      // row lock that is a pre-write snapshot, and an assignment committing
+      // between the read and the upsert lands `fulfilledQuantity` above
+      // `quantity` — an invariant nothing in the database enforces.
+      //
+      // Pool first, then the row: assignment takes them in that order, and
+      // the reverse is a deadlock rather than a wrong answer.
+      await lockAssetModelForReservation(tx, assetModelId, organizationId);
+      await lockModelRequestRow(tx, bookingId, assetModelId);
+
       const existing = await tx.bookingModelRequest.findUnique({
         where: {
           bookingId_assetModelId: { bookingId, assetModelId },
@@ -680,39 +1244,85 @@ export async function upsertBookingModelRequest({
           cause: null,
           label,
           status: 400,
-          message: `Cannot shrink reservation below ${existingFulfilled} — that many units have already been assigned via scan. Remove the assigned assets from the booking first, or raise the quantity to match.`,
+          message: `Cannot reduce this reservation below ${existingFulfilled} — that many units are already assigned to this booking. Set it to ${existingFulfilled} to release the rest, or remove those assets from the booking first.`,
           shouldBeCaptured: false,
         });
       }
 
-      // Claim the pool before measuring it. Both statements have to be in
-      // this transaction: the lock serializes competing reservations, and
-      // `db: tx` is what makes the counts observe it.
-      await lockAssetModelForReservation(tx, assetModelId, organizationId);
+      /**
+       * A reduction takes nothing from the pool, so nothing about the pool can
+       * refuse it — and measuring anyway would, in the one case that matters
+       * most. A booking holding more units than the pool now contains (an
+       * asset retired or moved into custody mid-booking) fails the comparison
+       * below at EVERY quantity, which would leave the operator unable to give
+       * back the units they are trying to give back.
+       *
+       * Sound only because `previousQuantity` is read under the row lock
+       * above. Off an unlocked read it is a guess, and a concurrent write can
+       * make a genuine INCREASE look like a reduction — which would skip the
+       * pool measurement on the one path that actually needs it.
+       */
+      const isReduction =
+        previousQuantity != null && quantity <= previousQuantity;
 
-      const availability = await getAssetModelAvailability({
-        assetModelId,
-        organizationId,
-        bookingId,
-        from: booking.from,
-        to: booking.to,
-        db: tx,
-      });
-
-      // We only need fresh pool availability for the NEW outstanding
-      // units this upsert will claim. Fulfilled units are already
-      // reflected as concrete `BookingAsset` rows (not double-counted
-      // against our own request since `availability` excludes this
-      // booking), so the delta against the pool is `newOutstanding`.
-      const newOutstanding = quantity - existingFulfilled;
-      if (newOutstanding > availability.available) {
-        throw new ShelfError({
-          cause: null,
-          label,
-          status: 400,
-          message: `Cannot reserve ${quantity} × ${assetModel.name}. Only ${availability.available} more available in this window.`,
-          shouldBeCaptured: false,
+      if (!isReduction) {
+        const availability = await getAssetModelAvailability({
+          assetModelId,
+          organizationId,
+          bookingId,
+          from: booking.from,
+          to: booking.to,
+          db: tx,
         });
+
+        /**
+         * What this booking would take from the pool once the upsert lands.
+         *
+         * `availability` excludes this booking, so BOTH halves of its footprint
+         * belong on this side of the comparison:
+         *
+         * - the units it already holds by name. Without them a booking holding
+         *   two of three units could still reserve three more by model — the
+         *   same over-commit this module's by-name guard refuses in the other
+         *   direction, and the two have to agree or a pair of writes that each
+         *   pass can still break the pool.
+         * - the units of this request that stay unassigned. Already-fulfilled
+         *   units are named units, so `newOutstanding` nets them out rather than
+         *   counting them twice.
+         *
+         * Units a custodian holds are discounted exactly as the by-name guard
+         * discounts them: the pool never offered them.
+         */
+        const heldByModel = await readOwnNamedUnits({
+          bookingId,
+          assetModelIds: [assetModelId],
+          organizationId,
+          tx,
+        });
+        const held = heldByModel.get(assetModelId);
+        const namedNotInCustody =
+          (held?.unitIds.size ?? 0) - (held?.inCustody ?? 0);
+        const newOutstanding = quantity - existingFulfilled;
+
+        if (namedNotInCustody + newOutstanding > availability.available) {
+          const headroom = Math.max(
+            0,
+            availability.available - namedNotInCustody + existingFulfilled
+          );
+          const heldNote =
+            namedNotInCustody > 0
+              ? ` This booking already holds ${namedNotInCustody} ${
+                  namedNotInCustody === 1 ? "unit" : "units"
+                } of it by name.`
+              : "";
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            message: `Cannot reserve ${quantity} × ${assetModel.name}. Only ${headroom} can be reserved in this window.${heldNote}`,
+            shouldBeCaptured: false,
+          });
+        }
       }
 
       // `fulfilledAt` transitions:
@@ -886,9 +1496,11 @@ type RemoveBookingModelRequestArgs = {
 };
 
 /**
- * Delete a model-level request. Only allowed on DRAFT / RESERVED
- * bookings — ONGOING / OVERDUE must drain requests via scan-to-assign,
- * not manual cancellation (preserves intent audit).
+ * Delete a model-level request. Allowed for as long as the booking is live
+ * (see `canEditModelReservations`) and nothing has been assigned to it yet.
+ * A reservation that already has units on the booking is reduced to
+ * `fulfilledQuantity` via {@link upsertBookingModelRequest} instead, so the
+ * concrete rows keep the record of how they got there.
  *
  * Emits `BOOKING_MODEL_REQUEST_REMOVED` inside the deleting transaction. The
  * cancelled `quantity` rides in `meta` because the row itself is gone — after
@@ -928,19 +1540,22 @@ export async function removeBookingModelRequest({
           shouldBeCaptured: false,
         });
       }
-      if (
-        booking.status !== BookingStatus.DRAFT &&
-        booking.status !== BookingStatus.RESERVED
-      ) {
+      if (!canEditModelReservations(booking.status)) {
         throw new ShelfError({
           cause: null,
           label,
           status: 400,
           message:
-            "Model-level reservations can only be cancelled while the booking is DRAFT or RESERVED. Active bookings must reconcile by scanning.",
+            "This booking is finished, cancelled or archived. Its reservations are a record of what was promised and can no longer be cancelled.",
           shouldBeCaptured: false,
         });
       }
+
+      // The "nothing assigned yet" guard below is evaluated in application
+      // code, so it is only as good as the read behind it. Locked, an
+      // assignment either commits first and this read refuses the
+      // cancellation, or waits and then finds no row to claim.
+      await lockModelRequestRow(tx, bookingId, assetModelId);
 
       const existing = await tx.bookingModelRequest.findUnique({
         where: { bookingId_assetModelId: { bookingId, assetModelId } },
@@ -951,27 +1566,48 @@ export async function removeBookingModelRequest({
         return null;
       }
 
-      // If any units have been fulfilled, the corresponding
-      // `BookingAsset` rows exist on the booking. Deleting the
-      // request here would orphan those rows from their "how they
-      // got here" context and silently destroy the audit trail. Ask
-      // the operator to unassign the concrete assets first (which
-      // doesn't currently decrement `fulfilledQuantity` — intentional,
-      // a scan is a historical fact). Or they can edit the quantity
-      // down to match `fulfilledQuantity` to close out the request.
+      // Assigned units mean concrete `BookingAsset` rows are on the booking,
+      // and this row is the record of how they got there — deleting it cuts
+      // them loose from it.
+      //
+      // Both ways out that the message below offers really do work:
+      // reducing the quantity to `fulfilledQuantity` closes the reservation
+      // and releases everything still unassigned, and removing the assets
+      // returns their units too — `removeAssets` decrements
+      // `fulfilledQuantity` for every removed row carrying this request's
+      // `bookingModelRequestId`, reopening the request. Take all of them out
+      // and the count reaches zero, which lets this cancellation through.
       if (existing.fulfilledQuantity > 0) {
+        const assigned = existing.fulfilledQuantity;
         throw new ShelfError({
           cause: null,
           label,
           status: 400,
-          message: `Cannot cancel — ${existing.fulfilledQuantity} unit(s) have already been assigned. Edit the quantity down to ${existing.fulfilledQuantity} to close out, or remove the assigned assets from the booking first.`,
+          message: `Cannot cancel — ${assigned} ${
+            assigned === 1 ? "unit is" : "units are"
+          } already assigned to this booking. Set the reserved quantity to ${assigned} to release the rest, or remove those assets from the booking first.`,
           shouldBeCaptured: false,
         });
       }
 
-      await tx.bookingModelRequest.delete({
-        where: { bookingId_assetModelId: { bookingId, assetModelId } },
+      // `fulfilledQuantity: 0` restates the guard above as part of the write.
+      // The row lock already makes the guard sound, so this can only ever
+      // match — which is the point: the invariant travels with the statement
+      // rather than depending on a lock a later edit might move or drop.
+      const { count } = await tx.bookingModelRequest.deleteMany({
+        where: { bookingId, assetModelId, fulfilledQuantity: 0 },
       });
+
+      if (count === 0) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          status: 400,
+          message:
+            "Units were assigned to this reservation while it was being cancelled. Reload the booking and reduce the quantity instead.",
+          shouldBeCaptured: false,
+        });
+      }
 
       // In the same tx as the delete — a rolled-back cancellation must not
       // leave an event claiming the reservation was cancelled.
@@ -1048,9 +1684,9 @@ type MaterializeArgs = {
    * Actor for the activity note. Optional because not every add-assets path
    * threads one through (`api/assets.add-to-booking` writes its own
    * user-attributed note instead, so passing a user here would duplicate it).
-   * Fulfilment itself must not depend on attribution — a reservation that
-   * silently survived because the caller had no `userId` would hard-block
-   * check-out. Without an actor the note is written in the system voice.
+   * Fulfilment itself must not depend on attribution — a reservation must not
+   * stay open just because the caller had no `userId`. Without an actor the
+   * note is written in the system voice.
    */
   userId?: string;
   /**
@@ -1146,11 +1782,10 @@ export async function materializeModelRequestForAsset({
      *
      *   T1 reads 0, T2 reads 0. Both compute `justCompleted = (1 === 2)` =
      *   false. Both increment. The row lands on `2/2` with `fulfilledAt` still
-     *   NULL — invisible to `getOutstandingModelRequests` (`2 < 2` is false),
-     *   still hard-blocking check-out (the guard matched `fulfilledAt: null`
-     *   alone), and un-removable (`removeBookingModelRequest` refuses while
-     *   `fulfilledQuantity > 0`). No visible row to fix. The old absolute write
-     *   at least produced a visible, recoverable under-count.
+     *   NULL — invisible to `getOutstandingModelRequests` (`2 < 2` is false)
+     *   yet never stamped complete, and un-removable
+     *   (`removeBookingModelRequest` refuses while `fulfilledQuantity > 0`).
+     *   No visible row to fix.
      *
      * The stale capacity check had the mirror problem: on a 1-unit request two
      * concurrent fulfilments both read 0, both passed, both incremented, and
@@ -1323,16 +1958,8 @@ export async function materializeModelRequestForAsset({
  * units". Naming a concrete unit of M and putting it on the booking ANSWERS
  * that — the promise and the delivery describe the same physical thing. If the
  * reservation survives, the booking demands N unnamed units PLUS the named one,
- * which is not what the operator asked for, and because unfulfilled requests
- * are a hard block on check-out, the booking then cannot leave at all.
- *
- * Until this helper existed, {@link materializeModelRequestForAsset} had
- * exactly one production caller: the scan path. Adding the very same asset
- * through "Manage assets" (`updateBookingAssets`) left the reservation
- * untouched — verified against a live database, not inferred: identical asset,
- * identical reservation, scanner ⇒ `1/1 fulfilled, checkout allowed`, picker ⇒
- * `0/1 fulfilled, checkout HARD BLOCKED`. The operator's only escape was to
- * delete the reservation they had correctly made.
+ * which is not what the operator asked for: the booking shows units still to
+ * pull that are already on it, and holds pool availability it doesn't need.
  *
  * Routing every add-assets path through here makes fulfilment a property of an
  * asset landing on the booking, not of the device it was added with. Web
@@ -1341,13 +1968,20 @@ export async function materializeModelRequestForAsset({
  * inherit identical behaviour, and a future surface gets it by construction
  * rather than by remembering to call this.
  *
+ * How the asset arrived is likewise not a property of the unit: one inside a
+ * kit is the same camera as a loose one, so it answers the same promise. The
+ * limit is per PHYSICAL unit, not per row — an asset claims at most once per
+ * booking, enforced here against the stamps already on the booking so no
+ * caller can opt out of it.
+ *
  * Callers MUST persist the returned provenance — see
  * {@link file://./../../../../../packages/database/prisma/schema.prisma}
  * `BookingAsset.bookingModelRequestId`.
  *
  * @param args.bookingId - Booking being fulfilled.
- * @param args.assets - The assets being added. Pre-fetched by every caller
- *   already, so it is taken as data rather than re-queried here.
+ * @param args.assets - The assets being added, deduplicated by the caller:
+ *   one entry is one claim. Pre-fetched by every caller already, so it is
+ *   taken as data rather than re-queried here.
  * @param args.organizationId - Caller's org, for the error payload.
  * @param args.userId - Actor, for the per-assignment activity note.
  * @param args.tx - Interactive transaction client. Required: the decrements,
@@ -1394,7 +2028,39 @@ export async function fulfilModelRequestsForAssets({
   });
   if (outstandingCount === 0) return fulfilledRequestIdByAssetId;
 
+  /**
+   * Assets that already answered a promise on this booking.
+   *
+   * One physical unit discharges at most one reserved unit per booking,
+   * however it got there: loose, inside a kit, or one of each. The stamp on
+   * `BookingAsset.bookingModelRequestId` is the record of that, so a stamped
+   * row anywhere on the booking means this asset has already claimed and must
+   * not claim again — otherwise a 2-unit reservation reads as satisfied with
+   * one camera behind it.
+   *
+   * Keyed on the stamp rather than on "does a row exist", so the rule also
+   * holds for a row that arrived before it could carry one: the asset is on
+   * the booking, nothing was claimed for it, and claiming now is correct.
+   *
+   * One indexed read for the whole call, not one per asset — the
+   * interactive-transaction budget noted above is why.
+   */
+  const assetIds = assets.map((asset) => asset.id);
+  const alreadyClaimedRows: Array<{ assetId: string }> =
+    await tx.bookingAsset.findMany({
+      where: {
+        bookingId,
+        assetId: { in: assetIds },
+        bookingModelRequestId: { not: null },
+      },
+      select: { assetId: true },
+    });
+  const alreadyClaimedAssetIds = new Set(
+    alreadyClaimedRows.map((row) => row.assetId)
+  );
+
   for (const asset of assets) {
+    if (alreadyClaimedAssetIds.has(asset.id)) continue;
     // Sequential, not `Promise.all`: several assets of the SAME model compete
     // for one request row, and each call reads `fulfilledQuantity` then writes
     // back. Running them concurrently inside one transaction would let two

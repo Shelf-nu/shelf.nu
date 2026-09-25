@@ -3,6 +3,10 @@ import { OrganizationRoles, Roles } from "@prisma/client";
 import * as Sentry from "@sentry/react-router";
 import { db } from "~/database/db.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
+import {
+  isSelfServiceOrBaseRole,
+  resolveCanSeeAllBookings,
+} from "./booking-authorization.server";
 import { ShelfError } from "./error";
 import type {
   PermissionAction,
@@ -88,54 +92,19 @@ export function resolveEffectiveRole({
 }
 
 /**
- * Whether a role is one of the two restricted, "own records only" roles.
+ * `isSelfServiceOrBaseRole` and `resolveCanSeeAllBookings` are defined in
+ * `booking-authorization.server.ts` and re-exported here for the modules that
+ * import them from this path.
  *
- * @param role - Effective role from {@link resolveEffectiveRole}.
- * @returns `true` for SELF_SERVICE and BASE.
+ * They live there because the mobile API needs the same rule and cannot import
+ * this module: it pulls in Sentry and the organization service, and through it
+ * Stripe and the mailer. Import them from `booking-authorization.server` in
+ * new code.
  */
-export function isSelfServiceOrBaseRole(role: OrganizationRoles): boolean {
-  return (
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE
-  );
-}
-
-/**
- * Whether the caller may see bookings they are not the custodian of.
- *
- * ADMIN / OWNER always can. SELF_SERVICE and BASE only can when the workspace
- * has switched the corresponding setting on. This is the standard visibility
- * rule for bookings; every read path that can surface someone else's booking
- * gates on it (`/bookings`, the command palette, CSV export).
- *
- * Exported so callers outside {@link requirePermission} resolve it identically.
- * A surface that invents its own rule ends up disagreeing with the loader that
- * seeded it, which is how a picker's list changes the moment a user types.
- *
- * @param args.role - Effective role from {@link resolveEffectiveRole}.
- * @param args.currentOrganization - Workspace whose override settings apply.
- * @returns `true` when bookings should NOT be restricted to the caller's own.
- */
-export function resolveCanSeeAllBookings({
-  role,
-  currentOrganization,
-}: {
-  role: OrganizationRoles;
-  currentOrganization: {
-    selfServiceCanSeeBookings: boolean;
-    baseUserCanSeeBookings: boolean;
-  };
-}): boolean {
-  return (
-    // Admin/Owner always can see all
-    !isSelfServiceOrBaseRole(role) ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
-      currentOrganization.selfServiceCanSeeBookings) ||
-    // BASE can see all if org setting allows
-    (role === OrganizationRoles.BASE &&
-      currentOrganization.baseUserCanSeeBookings)
-  );
-}
+export {
+  isSelfServiceOrBaseRole,
+  resolveCanSeeAllBookings,
+} from "./booking-authorization.server";
 
 /**
  * Whether the caller may see custody information for people other than
@@ -259,6 +228,59 @@ export async function requirePermission({
     canUseBarcodes,
     canUseAudits,
   };
+}
+
+/**
+ * Checks a permission against the organization a route is about, rather than
+ * the one the user currently has selected.
+ *
+ * `requirePermission` judges the caller by their role in the SELECTED
+ * workspace, which is right for routes that act on the workspace the user is
+ * in. A route that names an organization in its params can act on a different
+ * one, and a user's roles differ between workspaces: the owner of the workspace
+ * being edited can be a BASE member of the one they are sitting in. Such a route
+ * must be judged by the role held in the organization it names.
+ *
+ * @param userId - The caller
+ * @param request - The incoming request, used to resolve the caller's memberships
+ * @param organizationId - The organization named by the route, not the selected one
+ * @param entity - The entity the route acts on
+ * @param action - The action the route performs
+ * @returns The caller's memberships and the organizations visible to them
+ * @throws {ShelfError} 403 when the caller is not a member of `organizationId`, or
+ *   their role there does not grant the permission
+ */
+export async function requirePermissionInOrganization({
+  userId,
+  request,
+  organizationId,
+  entity,
+  action,
+}: {
+  userId: string;
+  request: Request;
+  organizationId: string;
+  entity: PermissionEntity;
+  action: PermissionAction;
+}) {
+  const { organizations, userOrganizations } = await getSelectedOrganization({
+    userId,
+    request,
+  });
+
+  // A non-member holds no roles there, which grants nothing. Passing an empty
+  // array rather than `undefined` keeps the check from falling back to a
+  // database lookup that would reach the same answer.
+  const roles =
+    userOrganizations.find((o) => o.organization.id === organizationId)
+      ?.roles ?? [];
+
+  await validatePermission({ roles, action, entity, organizationId, userId });
+
+  Sentry.setUser({ id: userId });
+  Sentry.setTag("organizationId", organizationId);
+
+  return { organizations, userOrganizations };
 }
 
 /**

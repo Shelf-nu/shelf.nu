@@ -1338,3 +1338,52 @@ describe("BookingFormSchema - prefs param rejects a browser-hints object", () =>
     expect(build).toBeTypeOf("function");
   });
 });
+
+describe("BookingFormSchema - custodian field", () => {
+  /**
+   * The custodian arrives as the picker's selection serialised to JSON. What
+   * matters is that a value the form cannot use is a validation issue on the
+   * field — never an exception out of `safeParse`, which the action would turn
+   * into a 500.
+   */
+  const schema = () =>
+    BookingFormSchema({
+      prefs: RUNTIME_ZONE_PREFS,
+      action: "new",
+      workingHours: { enabled: false, weeklySchedule: {}, overrides: [] },
+      bookingSettings: {
+        bufferStartTime: 0,
+        tagsRequired: false,
+        maxBookingLength: null,
+        maxBookingLengthSkipClosedDays: false,
+      },
+      isAdminOrOwner: true,
+    });
+
+  it.each([
+    { label: "unreadable JSON", custodian: "{not json" },
+    { label: "an empty value", custodian: "" },
+  ])("reports $label as a custodian issue", ({ custodian }) => {
+    const result = schema().safeParse({ name: "Test Booking", custodian });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.find((issue) => issue.path[0] === "custodian")
+          ?.message
+      ).toBe("Please select a custodian");
+    }
+  });
+
+  it("accepts a readable selection", () => {
+    const result = schema().safeParse({
+      name: "Test Booking",
+      custodian: JSON.stringify({ id: "tm-1", name: "Test User" }),
+    });
+
+    expect(
+      result.success ||
+        !result.error.issues.some((issue) => issue.path[0] === "custodian")
+    ).toBe(true);
+  });
+});

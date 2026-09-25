@@ -7,6 +7,48 @@ import type { BookingStatus } from "@prisma/client";
 import { formatDate, type ResolvedFormatPrefs } from "~/utils/date-format";
 import { getWeekStartingAndEndingDates } from "./date-fns";
 
+/**
+ * Class the availability hook puts on a bar whose asset has been checked in
+ * from the booking. Read back by the hover handlers below, which repaint every
+ * bar of a booking at once and must not turn a returned bar into a live one.
+ */
+export const RETURNED_EVENT_CLASS = "booking-returned";
+
+/**
+ * The status a calendar bar is DRAWN with. A returned bar borrows the
+ * COMPLETE palette so it reads as settled, while `status` itself keeps the
+ * booking's real value for the popover badge and any other status logic.
+ */
+export function calendarDisplayStatus(props: {
+  status: BookingStatus;
+  returned?: boolean;
+}): BookingStatus {
+  return props.returned ? "COMPLETE" : props.status;
+}
+
+/**
+ * Classes for one bar on the availability calendar. A returned bar is drawn
+ * with the COMPLETE palette and is never treated as a one-day event, because
+ * that treatment strips the fill and the bar's point is its fill up to the
+ * check-in time. Every other bar keeps the status and one-day rules as is.
+ */
+export function availabilityEventClassNames(
+  props: { status: BookingStatus; returned?: boolean },
+  start: Date | string | null,
+  end: Date | string | null,
+  viewType?: string
+): string[] {
+  const oneDay = props.returned ? false : isOneDayEvent(start, end);
+  return getStatusClasses(calendarDisplayStatus(props), oneDay, viewType);
+}
+
+/**
+ * Tailwind classes for a calendar bar of the given booking status.
+ * @param status - The status the bar is drawn as (see `calendarDisplayStatus`)
+ * @param oneDayEvent - True renders the dot-style, transparent one-day variant
+ * @param viewType - FullCalendar view type; time-grid views add the hover class
+ * @returns The class list for the bar element
+ */
 export function getStatusClasses(
   status: BookingStatus,
   oneDayEvent: boolean = false,
@@ -59,10 +101,9 @@ export function getStatusClasses(
         "md:focus:!bg-purple-100",
       ];
       break;
-    // Red, not amber. `bookingStatusColorMap` maps OVERDUE to red and every
-    // other place a booking status is shown reads from it - the badge on the
-    // bookings index, the booking detail, the asset page, the companion app.
-    // The calendar was the only surface calling an overdue booking a warning.
+    // Red, never amber: every surface that shows a booking status reads
+    // `bookingStatusColorMap`, which maps OVERDUE to the error palette, and
+    // the calendar must agree with them.
     case "OVERDUE":
       statusClasses = [
         "md:!text-error-700",
@@ -105,6 +146,10 @@ export const statusClassesOnHover: Record<BookingStatus, string> = {
   COMPLETE: "md:!bg-success-100",
 };
 
+/**
+ * Whether the two instants fall on the same calendar day (local time).
+ * @returns False when either bound is missing
+ */
 export function isOneDayEvent(
   from: Date | string | null,
   to: Date | string | null
@@ -126,7 +171,9 @@ export function isOneDayEvent(
 
 /**
  * Handles the mouse enter event for calendar events.
- * It applies a hover effect based on the event's status and the allowed view type.
+ * Highlights every bar of the hovered booking, each in the hover colour of
+ * its own rendered state: the booking's status, or COMPLETE for a bar that
+ * carries `RETURNED_EVENT_CLASS`.
  * @param allowedViewType - The view type(s) where the hover effect should be applied.
  */
 export const handleEventMouseEnter =
@@ -182,24 +229,41 @@ export const handleEventMouseEnter =
       if (viewType !== allowedViewType) return;
     }
 
-    const statusClass: BookingStatus = info.event._def.extendedProps.status;
+    const statusClass = info.event._def.extendedProps.status as BookingStatus;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
 
     for (let i = 0; i < elements.length; i++) {
       const element = elements[i] as HTMLElement;
-      element.classList.add(statusClassesOnHover[statusClass]);
+      element.classList.add(hoverClassForElement(element, statusClass));
     }
   };
 
 /**
+ * One booking spans several asset rows and the hover paints all of them, so
+ * each row picks its own hover colour from what it is drawn as: a bar marked
+ * returned takes the COMPLETE hover, every other bar takes the hover of the
+ * booking's real status. Which bar the pointer is on does not matter.
+ */
+function hoverClassForElement(
+  element: HTMLElement,
+  bookingStatus: BookingStatus
+): string {
+  return element.classList.contains(RETURNED_EVENT_CLASS)
+    ? statusClassesOnHover.COMPLETE
+    : statusClassesOnHover[bookingStatus];
+}
+
+/**
  * Handles the mouse leave event for calendar events.
- * It removes the hover effect based on the event's status and the allowed view type.
+ * Removes from every bar of the booking the hover class that
+ * `handleEventMouseEnter` added for that bar's rendered state, including
+ * the COMPLETE hover on bars carrying `RETURNED_EVENT_CLASS`.
  * @param allowedViewType - The view type(s) where the hover effect should be removed.
  */
 export const handleEventMouseLeave =
   (allowedViewType: string | string[]) => (info: EventHoveringArg) => {
-    // Show the new tab icon on hover
+    // Hide the new-tab icon again when the pointer leaves
     const newTabIcon = info.el?.querySelector(
       ".external-link-icon"
     ) as HTMLElement | null;
@@ -237,12 +301,12 @@ export const handleEventMouseLeave =
       if (viewType !== allowedViewType) return;
     }
 
-    const statusClass: BookingStatus = info.event._def.extendedProps.status;
+    const statusClass = info.event._def.extendedProps.status as BookingStatus;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
     for (let i = 0; i < elements.length; i++) {
       const element = elements[i] as HTMLElement;
-      element.classList.remove(statusClassesOnHover[statusClass]);
+      element.classList.remove(hoverClassForElement(element, statusClass));
     }
   };
 

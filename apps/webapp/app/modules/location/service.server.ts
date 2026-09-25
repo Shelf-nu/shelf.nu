@@ -29,6 +29,7 @@ import { geolocate } from "~/utils/geolocate.server";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
+import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
@@ -47,7 +48,10 @@ import {
   buildKitListMarkup,
   LOCATION_SORTING_OPTIONS,
 } from "./utils";
-import { getLocationKitsWhereInput } from "./utils.server";
+import {
+  getLocationKitsWhereInput,
+  getLocationsWhereInput,
+} from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
@@ -618,17 +622,12 @@ export async function getLocations(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the items belonging to current org */
-    const where: Prisma.LocationWhereInput = { organizationId };
-
-    /** If the search string exists, match it across the text fields */
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { description: { contains: search, mode: "insensitive" } },
-        { address: { contains: search, mode: "insensitive" } },
-      ];
-    }
+    /**
+     * Org scope plus the search predicate, from the builder a bulk "select all"
+     * also uses — so the set this list shows and the set a bulk action resolves
+     * cannot search different fields.
+     */
+    const where = getLocationsWhereInput({ organizationId, search });
 
     /**
      * orderBy is user-supplied via the URL. Guard against arbitrary values
@@ -1347,11 +1346,23 @@ export async function generateLocationWithImages({
   image: File;
 }) {
   try {
+    // Every generated location shares the one uploaded file, so the bytes are
+    // read and validated once rather than per iteration.
+    const blob = Buffer.from(await image.arrayBuffer());
+    // Derived from the bytes, never from the caller's `File.type`: these rows
+    // are served back inline by `api+/image.$imageId`, so the stored content
+    // type decides how a browser renders them.
+    const contentType = assertUploadedImageContentType(blob, {
+      userId,
+      organizationId,
+      field: "image",
+    });
+
     for (let i = 1; i <= numberOfLocations; i++) {
       const imageCreated = await db.image.create({
         data: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
+          blob,
+          contentType,
           ownerOrg: { connect: { id: organizationId } },
           user: { connect: { id: userId } },
         },

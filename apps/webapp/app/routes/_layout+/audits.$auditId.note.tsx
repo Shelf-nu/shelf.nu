@@ -4,7 +4,10 @@ import { z } from "zod";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import { db } from "~/database/db.server";
 import { createAuditNote } from "~/modules/audit/note-service.server";
-import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
+import {
+  createWhileAuditAcceptsComments,
+  requireAuditAssigneeForBaseSelfService,
+} from "~/modules/audit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
@@ -80,18 +83,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           }
         );
 
+        // Created only while the audit still accepts comments, checked on the
+        // locked row so a completion cannot slip in between.
+        const note = await createWhileAuditAcceptsComments(
+          { auditSessionId: auditId, organizationId },
+          (tx) =>
+            createAuditNote({
+              content,
+              type: "COMMENT",
+              userId,
+              auditSessionId: auditId,
+              tx,
+            })
+        );
+
+        // After the write, so a refused comment is never announced as created.
         sendNotification({
           title: "Note created",
           message: "Your audit note has been created successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
-        });
-
-        const note = await createAuditNote({
-          content,
-          type: "COMMENT",
-          userId,
-          auditSessionId: auditId,
         });
 
         return data(payload({ note }));
@@ -110,10 +121,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // deleteMany, not delete: `delete` needs a unique where, and the
         // organization scope has to come through the parent audit session
         // (AuditNote has no organizationId column).
+        //
+        // Only COMMENT notes are deletable. The audit's own activity entries —
+        // started, scanned, removed, completed — are UPDATE notes that record
+        // the acting user's id, so an author filter alone would let someone
+        // erase the trail of what they did. Scoped to the audit in the URL too.
         const deleted = await db.auditNote.deleteMany({
           where: {
             id: noteId,
             userId, // Ensure user can only delete their own notes
+            type: "COMMENT",
+            auditSessionId: auditId,
             auditSession: { organizationId },
           },
         });
@@ -126,6 +144,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             additionalData: { noteId, organizationId },
             label: "Audit",
             status: 403,
+            shouldBeCaptured: false,
           });
         }
 

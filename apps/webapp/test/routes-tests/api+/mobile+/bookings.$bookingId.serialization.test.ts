@@ -21,8 +21,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 
 import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
@@ -75,13 +77,9 @@ beforeEach(() => {
     user: { id: "user-1" },
   } as Awaited<ReturnType<typeof requireMobileAuth>>);
   requireOrganizationAccessMock.mockResolvedValue("org-1");
-  getMobileUserContextMock.mockResolvedValue({
-    role: OrganizationRoles.ADMIN,
-    roles: [OrganizationRoles.ADMIN],
-    canUseBarcodes: true,
-    canUseAudits: true,
-    canSeeAllCustody: true,
-  });
+  getMobileUserContextMock.mockResolvedValue(
+    mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+  );
 });
 
 describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
@@ -91,7 +89,7 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
       id: "booking-1",
       name: "Shoot",
       description: null,
-      status: "DRAFT", // DRAFT → skips getPartiallyCheckedInAssetIds
+      status: "DRAFT", // DRAFT → skips getDetailedPartialCheckinData
       from: null,
       to: null,
       createdAt: new Date("2026-01-01T00:00:00.000Z"),
@@ -166,6 +164,68 @@ describe("GET /api/mobile/bookings/:bookingId — model requests", () => {
     // Roll-ups: 2 distinct models, 2 units still to assign (2 + 0).
     expect(body.booking.modelRequestCount).toBe(2);
     expect(body.booking.outstandingModelUnitCount).toBe(2);
+  });
+
+  it("offers check-out while reserved units are still unassigned", async () => {
+    // why: `canCheckout` is state AND permission; grant the permission so the
+    // assertion is about the model-request state alone.
+    vi.mocked(hasPermission).mockResolvedValue(true);
+    findFirstMock.mockResolvedValue({
+      id: "booking-1",
+      name: "Shoot",
+      description: null,
+      status: "RESERVED",
+      from: new Date("2026-01-03T09:00:00.000Z"),
+      to: new Date("2026-01-04T17:00:00.000Z"),
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      creator: null,
+      custodianUser: null,
+      custodianTeamMember: null,
+      tags: [],
+      bookingAssets: [
+        {
+          id: "ba-1",
+          quantity: 1,
+          assetKitId: null,
+          asset: {
+            id: "asset-1",
+            title: "Dell XPS #1",
+            type: "INDIVIDUAL",
+            status: "AVAILABLE",
+            mainImage: null,
+            thumbnailImage: null,
+            assetModel: null,
+            assetKits: [],
+          },
+        },
+      ],
+      modelRequests: [
+        {
+          id: "mr-1",
+          assetModelId: "model-a",
+          // Nothing assigned yet. The booking still holds an item, and one
+          // item going out is all a check-out needs.
+          quantity: 2,
+          fulfilledQuantity: 0,
+          fulfilledAt: null,
+          assetModel: { id: "model-a", name: "Dell XPS" },
+        },
+      ],
+      _count: { bookingAssets: 1 },
+    } as never);
+
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request(
+          "http://localhost:3000/api/mobile/bookings/booking-1"
+        ),
+        params: { bookingId: "booking-1" },
+      })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect((response.data as { canCheckout: boolean }).canCheckout).toBe(true);
   });
 
   it("returns empty model-request fields when the booking reserves no models", async () => {
