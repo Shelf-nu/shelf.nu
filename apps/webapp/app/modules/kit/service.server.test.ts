@@ -7,10 +7,12 @@ import {
   AssetStatus,
   ErrorCorrection,
 } from "@prisma/client";
+import { onTestFinished } from "vitest";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 
 import {
   createKit,
@@ -83,6 +85,9 @@ vitest.mock("~/database/db.server", () => ({
       findFirst: vitest.fn().mockResolvedValue(null),
       delete: vitest.fn().mockResolvedValue({}),
       upsert: vitest.fn().mockResolvedValue({}),
+      // why: `removeDestroyedUnitsFromKits` sums each asset's kit units before
+      // writing, to stay clear of the kit-sum trigger. Defaults to no rows.
+      groupBy: vitest.fn().mockResolvedValue([]),
     },
     // Location mutations go through this delegate instead of asset.updateMany,
     // since placement lives on the AssetLocation pivot. Includes
@@ -7024,5 +7029,197 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
     expect(lockOrder.length).toBeGreaterThan(0);
     expect(insertOrder.length).toBeGreaterThan(0);
     expect(Math.max(...lockOrder)).toBeLessThan(Math.min(...insertOrder));
+  });
+});
+
+/**
+ * A check-in that consumes, loses or damages units out of a kit slice takes
+ * them out of the kit as well as out of the stock total.
+ */
+describe("removeDestroyedUnitsFromKits", () => {
+  /** A kit membership of 5 batteries, as the helper reads it back. */
+  const membership = (
+    overrides: { quantity?: number; stock?: number } = {}
+  ) => ({
+    id: "ak-1",
+    assetId: "asset-pool",
+    kitId: "kit-1",
+    quantity: overrides.quantity ?? 5,
+    kit: { name: "Kit A" },
+    asset: {
+      title: "Batteries",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      // The stock total AFTER the check-in's decrement.
+      quantity: overrides.stock ?? 0,
+    },
+  });
+  const membershipReads = () =>
+    db.assetKit.findMany as unknown as ReturnType<typeof vitest.fn>;
+  const kitSums = () =>
+    db.assetKit.groupBy as unknown as ReturnType<typeof vitest.fn>;
+  const args = (units: number) => ({
+    destroyedUnitsByAssetKitId: new Map([["ak-1", units]]),
+    organizationId: "org-1",
+    actorUserId: "user-1",
+    bookingId: "booking-1",
+  });
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    membershipReads().mockReset().mockResolvedValue([]);
+    kitSums().mockReset().mockResolvedValue([]);
+    (db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.assetLocation.findMany as unknown as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+  });
+
+  it("shrinks the membership and the kit placement that mirrors it", async () => {
+    expect.assertions(4);
+
+    // 10 in stock, 5 of them in the kit; 3 of the kit's are consumed.
+    membershipReads().mockResolvedValueOnce([membership({ stock: 7 })]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(3));
+
+    expect(db.assetKit.update).toHaveBeenCalledWith({
+      where: { id: "ak-1" },
+      data: { quantity: 2 },
+    });
+    expect(db.assetLocation.updateMany).toHaveBeenCalledWith({
+      where: { assetKitId: "ak-1" },
+      data: { quantity: 2 },
+    });
+    // A booking that has not started tracks the kit, so it cannot keep more
+    // of it than the kit now holds.
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
+      where: {
+        assetKitId: "ak-1",
+        quantity: { gt: 2 },
+        booking: {
+          organizationId: "org-1",
+          status: { in: [BookingStatus.DRAFT, BookingStatus.RESERVED] },
+        },
+      },
+      data: { quantity: 2 },
+    });
+    expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("removes a membership whose units are all gone, the way the kit service removes a member", async () => {
+    expect.assertions(5);
+
+    membershipReads().mockResolvedValueOnce([membership()]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    const result = await removeDestroyedUnitsFromKits(db, args(5));
+
+    expect(db.assetKit.update).not.toHaveBeenCalled();
+    expect(db.assetKit.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
+    });
+    // Planning slices of the kit go before the membership does.
+    expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          assetKitId: { in: ["ak-1"] },
+          booking: {
+            organizationId: "org-1",
+            status: { in: [BookingStatus.DRAFT, BookingStatus.RESERVED] },
+          },
+        },
+      })
+    );
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-pool",
+          kitId: "kit-1",
+          bookingId: "booking-1",
+          fromValue: "kit-1",
+          toValue: null,
+          meta: { quantity: 5 },
+        }),
+      ],
+      db
+    );
+    expect(result.emptiedMemberships).toEqual([
+      {
+        assetId: "asset-pool",
+        assetTitle: "Batteries",
+        assetType: AssetType.QUANTITY_TRACKED,
+        unitOfMeasure: null,
+        kitId: "kit-1",
+        kitName: "Kit A",
+        quantity: 5,
+      },
+    ]);
+  });
+
+  it("never takes more than the membership holds", async () => {
+    expect.assertions(2);
+
+    membershipReads().mockResolvedValueOnce([membership()]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(8));
+
+    expect(db.assetKit.update).not.toHaveBeenCalled();
+    expect(db.assetKit.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
+    });
+  });
+
+  it("leaves the kits alone and logs it when they would still hold more than the stock", async () => {
+    expect.assertions(3);
+
+    // Two kits claim 10 units between them, but only 2 are left after the
+    // check-in. Shrinking this kit by 3 still leaves 7 claimed, and the
+    // kit-sum trigger would roll the whole check-in back at commit.
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    onTestFinished(() => loggerError.mockRestore());
+    membershipReads().mockResolvedValueOnce([membership({ stock: 2 })]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 10 } },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(3));
+
+    expect(db.assetKit.update).not.toHaveBeenCalled();
+    expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
+    expect(loggerError).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a membership outside the organization", async () => {
+    expect.assertions(3);
+
+    // The org-scoped read returns nothing for a foreign membership.
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    const result = await removeDestroyedUnitsFromKits(db, args(3));
+
+    expect(membershipReads()).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
+      })
+    );
+    expect(db.assetKit.update).not.toHaveBeenCalled();
+    expect(result).toEqual({ emptiedMemberships: [], detachmentImpact: [] });
   });
 });
