@@ -226,6 +226,7 @@ export default createHonoServer<ServerEnv>({
           "/reset-password",
           "/send-otp",
           "/healthcheck",
+          "/stream-test", // TEMPORARY streaming/Cloudflare-buffering probe — remove with the route
           // Native-app deep-link association files (iOS Universal Links /
           // Android App Links). Must be publicly reachable — the OS fetches
           // them unauthenticated to verify the Companion app's domain claim.
