@@ -105,6 +105,9 @@ function createPartialCheckinRequest(
 describe("POST /api/mobile/bookings/partial-checkin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks keeps implementations; reset the one some tests install
+    // so it cannot answer a later test.
+    vi.mocked(makeShelfError).mockReset();
 
     (requireMobileAuth as any).mockResolvedValue({
       user: mockUser,
@@ -115,7 +118,7 @@ describe("POST /api/mobile/bookings/partial-checkin", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
     (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
 
-    // Org-scoped booking lookup + eligibility added by the check-in hardening.
+    // Org-scoped booking lookup that feeds the eligibility check.
     (getMobileUserContext as any).mockResolvedValue(
       mobileUserContext({ roles: [OrganizationRoles.OWNER] })
     );

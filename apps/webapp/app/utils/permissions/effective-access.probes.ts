@@ -754,9 +754,9 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     );
   });
 
-  // B9:D-15: mobile model requests (bookings.$bookingId.model-requests.ts:
-  // gate booking:update; a caller who does not write every booking must be
-  // the custodian).
+  // B9:D-15: mobile model requests (bookings.$bookingId.model-requests.ts).
+  // Gate booking:update; a caller who does not write every booking must be
+  // the custodian.
   snapshot["B9:D-15:mobile-model-requests"] = perRoleSet((roles) => {
     const restricted = !accessFor(roles).bookings.writeAll;
     return perCase(RELATIONSHIP_NAMES, (rel) =>
@@ -922,9 +922,9 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     }));
   });
 
-  // B9:D-15/D-20: mobile add-scanned-assets (bookings.add-scanned-assets.ts:
-  // gate booking:update; a caller who does not write every booking must be
-  // the custodian; then the manage-items rule on the context's `access`).
+  // B9:D-15/D-20: mobile add-scanned-assets (bookings.add-scanned-assets.ts).
+  // Gate booking:update; a caller who does not write every booking must be
+  // the custodian; then the manage-items rule on the context's `access`.
   snapshot["B9:D-15/D-20:mobile-add-scanned"] = perRoleSet((roles) => {
     const access = accessFor(roles);
     return Object.fromEntries(
