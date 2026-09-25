@@ -134,6 +134,12 @@ import {
   assertTeamMemberBelongsToOrg,
   assertUserBelongsToOrg,
 } from "~/utils/org-validation.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
@@ -10973,18 +10979,30 @@ export async function revertBookingToDraft({
   }
 }
 
+/**
+ * Extends an ongoing or overdue booking to a new end date.
+ *
+ * @param params.userId - The caller
+ * @param params.access - The caller's access, for the ownership gate
+ * @param params.roles - Every role on the caller's membership, for the
+ *   `booking:extend` grant
+ * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
+ *   own the booking
+ */
 export async function extendBooking({
   id,
   organizationId,
   newEndDate,
   hints,
   userId,
-  role,
+  access,
+  roles,
 }: Pick<Booking, "id" | "organizationId"> & {
   newEndDate: Date;
   hints: ClientHint;
   userId: string;
-  role: OrganizationRoles;
+  access: RoleAccess;
+  roles: OrganizationRoles[];
 }) {
   try {
     const booking = await db.booking
@@ -11026,13 +11044,26 @@ export async function extendBooking({
         });
       });
 
-    validateBookingOwnership({
-      booking,
+    // `booking:extend` is its own grant (BASE does not hold it). The route
+    // gates on it too; this keeps the service safe for any other caller.
+    const canExtend = await hasPermission({
       userId,
-      role,
-      action: "extend",
-      blockBaseEntirely: true,
+      organizationId,
+      roles,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.extend,
     });
+    if (!canExtend) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: "You are not authorized to extend this booking.",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    validateBookingOwnership({ booking, userId, access, action: "extend" });
 
     /** Extending booking is allowed only for these status */
     const allowedStatus: BookingStatus[] = [
@@ -11685,10 +11716,10 @@ export async function getBookings(params: {
    * an action gated by `validateBookingOwnership`; omit for read-only lists.
    *
    * ONE object rather than two sibling params on purpose: a half-set pair
-   * (id without role, or role without id) would silently skip the restriction
-   * entirely. Both halves are required together or not at all.
+   * (id without access, or access without id) would silently skip the
+   * restriction entirely. Both halves are required together or not at all.
    */
-  writableBy?: { userId: string; role: OrganizationRoles } | null;
+  writableBy?: { userId: string; access: RoleAccess } | null;
   excludeBookingIds?: Booking["id"][] | null;
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
@@ -13819,15 +13850,15 @@ export async function bulkDeleteBookings({
   userId,
   hints,
   currentSearchParams,
-  role,
+  access,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
-  /** Caller's effective role — decides whether ownership scoping applies */
-  role: OrganizationRoles;
+  /** Caller's access, which decides whether ownership scoping applies */
+  access: RoleAccess;
 }) {
   try {
     /**
@@ -13839,7 +13870,7 @@ export async function bulkDeleteBookings({
       bookingIds,
       organizationId,
       currentSearchParams,
-      role,
+      access,
       userId,
     });
 
@@ -14012,7 +14043,7 @@ export async function bulkArchiveBookings({
   organizationId,
   userId,
   currentSearchParams,
-  role,
+  access,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
@@ -14024,8 +14055,8 @@ export async function bulkArchiveBookings({
    */
   userId?: User["id"];
   currentSearchParams?: string | null;
-  /** Caller's effective role — decides whether ownership scoping applies */
-  role: OrganizationRoles;
+  /** Caller's access, which decides whether ownership scoping applies */
+  access: RoleAccess;
 }) {
   try {
     /**
@@ -14037,7 +14068,7 @@ export async function bulkArchiveBookings({
       bookingIds,
       organizationId,
       currentSearchParams,
-      role,
+      access,
       userId,
     });
 
@@ -14218,15 +14249,15 @@ export async function bulkCancelBookings({
   userId,
   hints,
   currentSearchParams,
-  role,
+  access,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
-  /** Caller's effective role — decides whether ownership scoping applies */
-  role: OrganizationRoles;
+  /** Caller's access, which decides whether ownership scoping applies */
+  access: RoleAccess;
 }) {
   try {
     /**
@@ -14238,7 +14269,7 @@ export async function bulkCancelBookings({
       bookingIds,
       organizationId,
       currentSearchParams,
-      role,
+      access,
       userId,
     });
 
@@ -15572,10 +15603,10 @@ export async function getAvailableAssetsIdsForBooking(
  * @param organizationId - The caller's validated organization ID. Forwarded to
  *   {@link getAvailableAssetsIdsForBooking} so foreign-org assets cannot be
  *   added to the booking (cross-org IDOR protection).
- * @param auth - The acting user's id and org role. Used to enforce per-user
- *   booking ownership: `booking:create/update` is granted org-wide to
- *   SELF_SERVICE/BASE, so without this a non-owner could add items to another
- *   user's booking (cross-user IDOR). ADMIN/OWNER are unrestricted.
+ * @param auth - The acting user's id and access. Enforces per-user booking
+ *   ownership for callers that do not write every booking: `booking:update`
+ *   is granted org-wide, so without this a non-owner could add items to
+ *   another user's booking (cross-user IDOR).
  * @returns The resolved (org-scoped) asset IDs and the booking details
  * @throws {ShelfError} If no assets are available, the booking lookup fails, or
  *   the caller does not own the booking
@@ -15584,7 +15615,7 @@ export async function processBooking(
   bookingId: string,
   assetIds: string[],
   organizationId: string,
-  auth: { userId: string; role: OrganizationRoles }
+  auth: { userId: string; access: RoleAccess }
 ) {
   try {
     const [finalAssetIds, bookingInfo] = await Promise.all([
@@ -15592,8 +15623,8 @@ export async function processBooking(
       getExistingBookingDetails(bookingId, organizationId),
     ]);
 
-    // Cross-user IDOR guard: SELF_SERVICE/BASE may only add to bookings they
-    // created or are custodian of. No-op for ADMIN/OWNER. Runs before any
+    // Cross-user IDOR guard: a caller who does not write every booking may
+    // only add to bookings they created or are custodian of. Runs before any
     // mutation-shaping logic below.
     validateBookingOwnership({
       booking: {
@@ -15601,7 +15632,7 @@ export async function processBooking(
         custodianUserId: bookingInfo.custodianUserId,
       },
       userId: auth.userId,
-      role: auth.role,
+      access: auth.access,
       action: "add items to",
     });
 
@@ -15794,26 +15825,18 @@ export async function loadBookingsData({
   request,
   organizationId,
   userId,
-  role,
-  canSeeAllBookings,
+  access,
   ids,
 }: {
   request: Request;
   organizationId: string;
   userId: string;
   /**
-   * Effective role, from `requirePermission`. Drives the WRITE restriction —
-   * these pickers choose a mutation target, so they may only offer bookings
-   * the submitting action will accept.
+   * The caller's access: `bookings.seeAll` drives the READ scope,
+   * `bookings.writeAll` the WRITE scope. The pickers choose a mutation target,
+   * so they offer only bookings the submitting action accepts.
    */
-  role: OrganizationRoles;
-  /**
-   * Standard booking READ visibility, from `requirePermission`. Gating on the
-   * role alone ignored the workspace's `selfServiceCanSeeBookings` /
-   * `baseUserCanSeeBookings` overrides, so these pickers stayed restricted even
-   * when the workspace had switched the setting on.
-   */
-  canSeeAllBookings: boolean;
+  access: RoleAccess;
   ids?: string[];
 }): Promise<BookingLoaderResponse> {
   // Get search parameters and pagination settings
@@ -15832,7 +15855,7 @@ export async function loadBookingsData({
   // 1. READ — the standard booking-visibility rule. Resolve the FULL custodian
   //    scope (user link + every team-member link) so legacy rows aren't hidden
   //    here while showing on the index.
-  const custodianScope = !canSeeAllBookings
+  const custodianScope = !access.bookings.seeAll
     ? await resolveCustodianScope({ userId, organizationId })
     : undefined;
 
@@ -15848,7 +15871,7 @@ export async function loadBookingsData({
     //    separate from the read rule because the workspace visibility toggle
     //    does NOT grant write: without this, enabling it offers a restricted
     //    user bookings the action then rejects with a 403.
-    writableBy: { userId, role },
+    writableBy: { userId, access },
   });
 
   // Set up header and model name

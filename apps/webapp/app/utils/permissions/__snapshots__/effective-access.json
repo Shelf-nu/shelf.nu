@@ -9917,12 +9917,12 @@
     "SELF_SERVICE+OWNER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
-      "neither": "denied:owner"
+      "neither": "allowed"
     },
     "SELF_SERVICE+ADMIN": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
-      "neither": "denied:owner"
+      "neither": "allowed"
     },
     "SELF_SERVICE+BASE": {
       "custodianNotCreator": "allowed",
@@ -9932,12 +9932,12 @@
     "BASE+OWNER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
-      "neither": "denied:owner"
+      "neither": "allowed"
     },
     "BASE+ADMIN": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
-      "neither": "denied:owner"
+      "neither": "allowed"
     },
     "BASE+SELF_SERVICE": {
       "custodianNotCreator": "allowed",
@@ -10009,12 +10009,12 @@
     "SELF_SERVICE+OWNER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
-      "neither": "denied:owner"
+      "neither": "allowed"
     },
     "SELF_SERVICE+ADMIN": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
-      "neither": "denied:owner"
+      "neither": "allowed"
     },
     "SELF_SERVICE+BASE": {
       "custodianNotCreator": "allowed",
@@ -10024,12 +10024,12 @@
     "BASE+OWNER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
-      "neither": "denied:owner"
+      "neither": "allowed"
     },
     "BASE+ADMIN": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
-      "neither": "denied:owner"
+      "neither": "allowed"
     },
     "BASE+SELF_SERVICE": {
       "custodianNotCreator": "allowed",
@@ -10133,16 +10133,16 @@
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
       "creatorNotCustodian|RESERVED": "allowed",
-      "neither|DRAFT": "denied:owner",
-      "neither|RESERVED": "denied:owner"
+      "neither|DRAFT": "allowed",
+      "neither|RESERVED": "allowed"
     },
     "SELF_SERVICE+ADMIN": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
       "creatorNotCustodian|RESERVED": "allowed",
-      "neither|DRAFT": "denied:owner",
-      "neither|RESERVED": "denied:owner"
+      "neither|DRAFT": "allowed",
+      "neither|RESERVED": "allowed"
     },
     "SELF_SERVICE+BASE": {
       "custodianNotCreator|DRAFT": "allowed",
@@ -10154,25 +10154,25 @@
     },
     "BASE+OWNER": {
       "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "denied:status",
+      "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "denied:status",
-      "neither|DRAFT": "denied:owner",
-      "neither|RESERVED": "denied:owner"
+      "creatorNotCustodian|RESERVED": "allowed",
+      "neither|DRAFT": "allowed",
+      "neither|RESERVED": "allowed"
     },
     "BASE+ADMIN": {
       "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "denied:status",
+      "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "denied:status",
-      "neither|DRAFT": "denied:owner",
-      "neither|RESERVED": "denied:owner"
+      "creatorNotCustodian|RESERVED": "allowed",
+      "neither|DRAFT": "allowed",
+      "neither|RESERVED": "allowed"
     },
     "BASE+SELF_SERVICE": {
       "custodianNotCreator|DRAFT": "allowed",
-      "custodianNotCreator|RESERVED": "denied:status",
+      "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
-      "creatorNotCustodian|RESERVED": "denied:status",
+      "creatorNotCustodian|RESERVED": "allowed",
       "neither|DRAFT": "denied:owner",
       "neither|RESERVED": "denied:owner"
     },
@@ -10246,13 +10246,13 @@
     },
     "SELF_SERVICE+OWNER": {
       "custodianNotCreator": "allowed",
-      "creatorNotCustodian": "denied:custodian",
-      "neither": "denied:owner"
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
     },
     "SELF_SERVICE+ADMIN": {
       "custodianNotCreator": "allowed",
-      "creatorNotCustodian": "denied:custodian",
-      "neither": "denied:owner"
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
     },
     "SELF_SERVICE+BASE": {
       "custodianNotCreator": "allowed",
@@ -10261,13 +10261,13 @@
     },
     "BASE+OWNER": {
       "custodianNotCreator": "allowed",
-      "creatorNotCustodian": "denied:custodian",
-      "neither": "denied:owner"
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
     },
     "BASE+ADMIN": {
       "custodianNotCreator": "allowed",
-      "creatorNotCustodian": "denied:custodian",
-      "neither": "denied:owner"
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
     },
     "BASE+SELF_SERVICE": {
       "custodianNotCreator": "allowed",
@@ -10338,13 +10338,13 @@
     },
     "SELF_SERVICE+OWNER": {
       "custodianNotCreator": "allowed",
-      "creatorNotCustodian": "denied:owner",
-      "neither": "denied:owner"
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
     },
     "SELF_SERVICE+ADMIN": {
       "custodianNotCreator": "allowed",
-      "creatorNotCustodian": "denied:owner",
-      "neither": "denied:owner"
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
     },
     "SELF_SERVICE+BASE": {
       "custodianNotCreator": "allowed",
@@ -10353,13 +10353,13 @@
     },
     "BASE+OWNER": {
       "custodianNotCreator": "allowed",
-      "creatorNotCustodian": "denied:owner",
-      "neither": "denied:owner"
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
     },
     "BASE+ADMIN": {
       "custodianNotCreator": "allowed",
-      "creatorNotCustodian": "denied:owner",
-      "neither": "denied:owner"
+      "creatorNotCustodian": "allowed",
+      "neither": "allowed"
     },
     "BASE+SELF_SERVICE": {
       "custodianNotCreator": "allowed",
@@ -10388,14 +10388,14 @@
     "ADMIN+OWNER": "workspace",
     "ADMIN+SELF_SERVICE": "workspace",
     "ADMIN+BASE": "workspace",
-    "SELF_SERVICE+OWNER": "custodian-scope",
-    "SELF_SERVICE+ADMIN": "custodian-scope",
+    "SELF_SERVICE+OWNER": "workspace",
+    "SELF_SERVICE+ADMIN": "workspace",
     "SELF_SERVICE+BASE": "custodian-scope",
-    "BASE+OWNER": "custodian-scope",
-    "BASE+ADMIN": "custodian-scope",
+    "BASE+OWNER": "workspace",
+    "BASE+ADMIN": "workspace",
     "BASE+SELF_SERVICE": "custodian-scope",
     "(none)": "custodian-scope",
-    "UNKNOWN_ROLE": "workspace"
+    "UNKNOWN_ROLE": "custodian-scope"
   },
   "B9:D-15:web-form-actions": {
     "OWNER": {
@@ -10454,8 +10454,8 @@
         "bookingAssetsColumn": true
       },
       "notHolder": {
-        "editBookingForm": false,
-        "bookingAssetsColumn": false
+        "editBookingForm": true,
+        "bookingAssetsColumn": true
       }
     },
     "OWNER+BASE": {
@@ -10464,8 +10464,8 @@
         "bookingAssetsColumn": true
       },
       "notHolder": {
-        "editBookingForm": false,
-        "bookingAssetsColumn": false
+        "editBookingForm": true,
+        "bookingAssetsColumn": true
       }
     },
     "ADMIN+OWNER": {
@@ -10484,8 +10484,8 @@
         "bookingAssetsColumn": true
       },
       "notHolder": {
-        "editBookingForm": false,
-        "bookingAssetsColumn": false
+        "editBookingForm": true,
+        "bookingAssetsColumn": true
       }
     },
     "ADMIN+BASE": {
@@ -10494,8 +10494,8 @@
         "bookingAssetsColumn": true
       },
       "notHolder": {
-        "editBookingForm": false,
-        "bookingAssetsColumn": false
+        "editBookingForm": true,
+        "bookingAssetsColumn": true
       }
     },
     "SELF_SERVICE+OWNER": {
@@ -10504,8 +10504,8 @@
         "bookingAssetsColumn": true
       },
       "notHolder": {
-        "editBookingForm": false,
-        "bookingAssetsColumn": false
+        "editBookingForm": true,
+        "bookingAssetsColumn": true
       }
     },
     "SELF_SERVICE+ADMIN": {
@@ -10514,8 +10514,8 @@
         "bookingAssetsColumn": true
       },
       "notHolder": {
-        "editBookingForm": false,
-        "bookingAssetsColumn": false
+        "editBookingForm": true,
+        "bookingAssetsColumn": true
       }
     },
     "SELF_SERVICE+BASE": {
@@ -10534,8 +10534,8 @@
         "bookingAssetsColumn": true
       },
       "notHolder": {
-        "editBookingForm": false,
-        "bookingAssetsColumn": false
+        "editBookingForm": true,
+        "bookingAssetsColumn": true
       }
     },
     "BASE+ADMIN": {
@@ -10544,8 +10544,8 @@
         "bookingAssetsColumn": true
       },
       "notHolder": {
-        "editBookingForm": false,
-        "bookingAssetsColumn": false
+        "editBookingForm": true,
+        "bookingAssetsColumn": true
       }
     },
     "BASE+SELF_SERVICE": {
@@ -10564,8 +10564,8 @@
         "bookingAssetsColumn": true
       },
       "notHolder": {
-        "editBookingForm": true,
-        "bookingAssetsColumn": true
+        "editBookingForm": false,
+        "bookingAssetsColumn": false
       }
     },
     "UNKNOWN_ROLE": {
@@ -10574,8 +10574,8 @@
         "bookingAssetsColumn": true
       },
       "notHolder": {
-        "editBookingForm": true,
-        "bookingAssetsColumn": true
+        "editBookingForm": false,
+        "bookingAssetsColumn": false
       }
     }
   },

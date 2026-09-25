@@ -12,10 +12,7 @@ import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { checkoutBooking } from "~/modules/booking/service.server";
 import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import {
-  resolveMostPrivilegedRole,
-  validateBookingOwnership,
-} from "~/utils/booking-authorization.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -86,18 +83,18 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Cross-user IDOR guard: SELF_SERVICE holds `booking:checkout` in the
     // permission map, so the role gate above passes for ANY booking id in the
-    // organization — they may only check out bookings they created or are
-    // custodian of. No-op for ADMIN/OWNER. `checkoutBooking` does not check
-    // ownership itself, so without this the route is more permissive than web.
-    // Mirrors the guard on bookings.fulfil-and-checkout.ts.
-    const { roles, effectiveRole } = await getMobileUserContext(
+    // organization. They may only check out bookings they created or are
+    // custodian of. No-op when `access.bookings.writeAll`. `checkoutBooking`
+    // does not check ownership itself, so without this the route is more
+    // permissive than web. Mirrors the guard on bookings.fulfil-and-checkout.ts.
+    const { access, effectiveRole } = await getMobileUserContext(
       user.id,
       organizationId
     );
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role: resolveMostPrivilegedRole(roles),
+      access,
       action: "check out",
     });
 

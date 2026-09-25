@@ -29,7 +29,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const userId = authSession.userId;
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -46,9 +46,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // bookings too (added assets stay AVAILABLE — progressive checkout), not
       // just DRAFT/RESERVED ones.
       statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
-      // Custody may sit on the user link or on a team-member link; the
-      // service resolves both.
-      ...(isSelfServiceOrBase && { restrictToCustodian: true }),
+      // This list feeds the add-to-existing-booking write picker, so it
+      // follows the WRITE scope, not visibility. Custody may sit on the user
+      // link or on a team-member link; the service resolves both.
+      ...(!access.bookings.writeAll && { restrictToCustodian: true }),
     });
 
     return data(payload({ bookings }));

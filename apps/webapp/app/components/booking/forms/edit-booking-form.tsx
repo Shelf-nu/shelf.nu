@@ -10,6 +10,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
@@ -169,6 +170,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     isAdministratorOrOwner,
     effectiveRole,
   } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -255,18 +257,15 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   }
 
   /**
-   * Check whether the user can see actions
-   * 1. Admin/Owner always can see all
-   * 2. SELF_SERVICE can see actions if they are the custodian of the booking
-   * 3. BASE can see actions if they are the custodian of the booking
-   * This is also used to disabled the name & description fields
-   *
+   * Whether the user can see the booking actions:
+   * - Members who write every booking always see them.
+   * - Everyone else only on a booking they hold.
+   * This also decides whether the name and description fields are disabled.
    */
   const canSeeActions =
-    !isBaseOrSelfService ||
-    (isBaseOrSelfService &&
-      (defaultTeamMember?.userId === userId ||
-        defaultTeamMember?.id === userId));
+    roleAccess.bookings.writeAll ||
+    defaultTeamMember?.userId === userId ||
+    defaultTeamMember?.id === userId;
 
   return (
     <Form

@@ -86,6 +86,7 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
+  assertCanDeleteBooking,
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
@@ -1411,13 +1412,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       updateNotificationRecipients: PermissionAction.update,
     };
 
-    const { organizationId, role, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: intent2ActionMap[intent],
-      });
+    const {
+      organizationId,
+      role,
+      isSelfServiceOrBase,
+      access,
+      userOrganizations,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: intent2ActionMap[intent],
+    });
 
     // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
     const isAdminOrOwner = !isSelfServiceOrBase;
@@ -1441,33 +1447,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * so we must not call findUniqueOrThrow before this.
      */
     if (intent === "delete") {
-      if (isSelfServiceOrBase) {
-        /**
-         * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
-         * They have delete permissions but shouldnt be able to delete other people's bookings
-         * Practically they should not be able to even view/access another booking but this is just an extra security measure
-         */
+      // A caller who writes every booking and may delete any status needs no
+      // lookup. Everyone else is held to their own bookings, and roles whose
+      // policy limits delete to drafts are held to drafts.
+      if (
+        !access.bookings.writeAll ||
+        access.policy.bookings.deleteOnlyDrafts
+      ) {
         const b = await getBooking({ id, organizationId, request });
-        validateBookingOwnership({
-          booking: b,
-          userId,
-          role,
-          action: "delete",
-        });
-
-        // BASE users can only delete DRAFT bookings
-        if (
-          role === OrganizationRoles.BASE &&
-          b.status !== BookingStatus.DRAFT
-        ) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
-            status: 403,
-            label: "Booking",
-          });
-        }
+        assertCanDeleteBooking({ access, booking: b, userId });
       }
 
       const deletedBooking = await deleteBooking(
@@ -1584,19 +1572,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * ownership references -- so this is the only thing standing between a
      * restricted role and someone else's booking.
      *
-     * No-op for ADMIN/OWNER. `delete` is not reachable here -- it returns
-     * before this point, with its own check, because it must not fetch the
-     * booking first. The compiler confirms it: `intent` has already narrowed to
-     * exclude it.
+     * `delete` is not reachable here: it returns before this point, with its
+     * own check, because it must not fetch the booking first. The compiler
+     * confirms it: `intent` has already narrowed to exclude it.
+     *
+     * No-op when `access.bookings.writeAll`.
      */
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking: basicBookingInfo,
-        userId,
-        role,
-        action: intent,
-      });
-    }
+    validateBookingOwnership({
+      booking: basicBookingInfo,
+      userId,
+      access,
+      action: intent,
+    });
 
     switch (intent) {
       case "save": {
@@ -2088,7 +2075,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints,
           newEndDate: endDate,
           userId,
-          role,
+          access,
+          roles:
+            userOrganizations.find((o) => o.organization.id === organizationId)
+              ?.roles ?? [],
         });
 
         sendNotification({

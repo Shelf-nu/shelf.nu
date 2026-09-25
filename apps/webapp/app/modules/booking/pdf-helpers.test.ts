@@ -145,7 +145,7 @@ async function run(prefs: OrgPrefs, overrides: Partial<typeof ASSET> = {}) {
     "booking-1",
     "org-1",
     "user-1",
-    // No role: the ownership check is exercised by its own tests.
+    // No access: the ownership check is exercised by its own tests.
     undefined,
     new Request("http://localhost/x")
   );

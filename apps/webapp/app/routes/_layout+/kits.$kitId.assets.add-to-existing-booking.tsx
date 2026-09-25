@@ -70,21 +70,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, canSeeAllBookings } = await requirePermission(
-      {
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.create,
-      }
-    );
+    const { organizationId, access } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.create,
+    });
 
     const loaderData = await loadBookingsData({
       request,
       organizationId,
       userId: authSession?.userId,
-      role,
-      canSeeAllBookings,
+      access,
       ids: kitId ? [kitId] : undefined,
     });
 
@@ -117,7 +114,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -153,15 +150,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     // Cross-user IDOR guard: `booking:create` is granted org-wide to
     // SELF_SERVICE/BASE, so without this a non-owner could add kits to another
-    // user's booking. No-op for ADMIN/OWNER. Mirrors the asset flow's guard in
-    // processBooking and the sibling adjust-asset-quantity route.
+    // user's booking. No-op when `access.bookings.writeAll`. Mirrors the asset
+    // flow's guard in processBooking and the sibling adjust-asset-quantity
+    // route.
     validateBookingOwnership({
       booking: {
         creatorId: bookingInfo.creatorId,
         custodianUserId: bookingInfo.custodianUserId,
       },
       userId,
-      role,
+      access,
       action: "add kits to",
     });
 

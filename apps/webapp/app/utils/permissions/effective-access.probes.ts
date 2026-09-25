@@ -24,11 +24,14 @@ import { INVITABLE_ROLES } from "~/modules/invite/roles";
 import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import {
+  assertCanDeleteBooking,
+  assertCanDownloadBookingDocuments,
   bookingWriteScopeClause,
   isSelfServiceOrBaseRole,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
 import {
+  bookingCustodianIsSelf,
   canRoleRemoveBookingAssets,
   canUserManageBookingAssets,
 } from "~/utils/bookings";
@@ -298,6 +301,50 @@ function hookFlags(roles: OrganizationRoles[]) {
   };
 }
 
+/**
+ * The per-booking write gate as its call sites run it. `checkCustodianOnly`
+ * selects the booking-documents rule (`assertCanDownloadBookingDocuments`),
+ * otherwise creator-or-custodian (`validateBookingOwnership`).
+ * `blockBaseEntirely` is the extend path: the `booking:extend` grant over every
+ * held role is checked first (`extendBooking`).
+ *
+ * @throws when the gate refuses
+ */
+function bookingWriteGate({
+  roles,
+  booking,
+  checkCustodianOnly,
+  blockBaseEntirely,
+}: {
+  roles: string[];
+  booking: { creatorId: string | null; custodianUserId: string | null };
+  checkCustodianOnly: boolean;
+  blockBaseEntirely: boolean;
+}): void {
+  const access = accessFor(roles);
+  if (
+    blockBaseEntirely &&
+    !can(roles as OrganizationRoles[], E.booking, A.extend)
+  ) {
+    throw new Error("no booking:extend grant");
+  }
+  if (checkCustodianOnly) {
+    assertCanDownloadBookingDocuments({
+      access,
+      booking,
+      userId: "caller",
+      action: "probe",
+    });
+  } else {
+    validateBookingOwnership({
+      access,
+      booking,
+      userId: "caller",
+      action: "probe",
+    });
+  }
+}
+
 /** `organizationRolesMap[role]`, `null` where the map has no entry. */
 function roleLabel(role: string | undefined): string | null {
   return role ? organizationRolesMap[role] ?? null : null;
@@ -385,6 +432,10 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   );
 
   // D-15: per-booking write gate, single roles x relationship x flags.
+  // The key's flags name the two call-site variants the gate has:
+  // `custodianOnly` is the booking-documents rule (documentsForOthers), and
+  // `blockBase` is the extend path, where the matrix grant `booking:extend`
+  // gates before ownership.
   snapshot["D-15"] = Object.fromEntries(
     SINGLE_ROLES.map((role) => [
       role,
@@ -394,11 +445,9 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
             [false, true].map((blockBaseEntirely) => [
               `${rel}|custodianOnly=${checkCustodianOnly}|blockBase=${blockBaseEntirely}`,
               outcome(() =>
-                validateBookingOwnership({
+                bookingWriteGate({
+                  roles: [role],
                   booking,
-                  userId: "caller",
-                  role,
-                  action: "probe",
                   checkCustodianOnly,
                   blockBaseEntirely,
                 })
@@ -416,9 +465,12 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
       role,
       {
         writeScopeClause:
-          bookingWriteScopeClause({ userId: "caller", role }) ?? null,
+          bookingWriteScopeClause({
+            userId: "caller",
+            access: accessFor([role]),
+          }) ?? null,
         bulkOwnershipScope: getBookingOwnershipScope({
-          role,
+          access: accessFor([role]),
           userId: "caller",
         }),
       },
@@ -531,7 +583,8 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // ===================== Bookings: Task 4c =====================
 
   // B9:D-15: the web write gate for every membership (web callers pass the
-  // effective role from requirePermission, roles.server.ts:194).
+  // `access` requirePermission resolves, and the membership's roles for the
+  // extend grant).
   snapshot["B9:D-15:web-server"] = perRoleSet((roles) =>
     Object.fromEntries(
       RELATIONSHIP_NAMES.flatMap((rel) =>
@@ -539,11 +592,9 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
           [false, true].map((blockBaseEntirely) => [
             `${rel}|custodianOnly=${checkCustodianOnly}|blockBase=${blockBaseEntirely}`,
             outcome(() =>
-              validateBookingOwnership({
+              bookingWriteGate({
+                roles,
                 booking: RELATIONSHIPS[rel],
-                userId: "caller",
-                role: webRole(roles),
-                action: "probe",
                 checkCustodianOnly,
                 blockBaseEntirely,
               })
@@ -557,16 +608,16 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // B9:D-16: web query-side write scopes for every membership.
   snapshot["B9:D-16:web-server"] = perRoleSet((roles) => ({
     writeScopeClause:
-      bookingWriteScopeClause({ userId: "caller", role: webRole(roles) }) ??
+      bookingWriteScopeClause({ userId: "caller", access: accessFor(roles) }) ??
       null,
     bulkOwnershipScope: getBookingOwnershipScope({
-      role: webRole(roles),
+      access: accessFor(roles),
       userId: "caller",
     }),
   }));
 
-  // B9:D-15: mobile archive (routes/api+/mobile+/bookings.archive.ts:55-60
-  // gate booking:archive; :66 positional role; :80-85 ownership).
+  // B9:D-15: mobile archive (routes/api+/mobile+/bookings.archive.ts: gate
+  // booking:archive, then ownership on the context's `access`).
   snapshot["B9:D-15:mobile-archive"] = perRoleSet((roles) =>
     perCase(RELATIONSHIP_NAMES, (rel) =>
       firstRefusal([
@@ -578,7 +629,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
               validateBookingOwnership({
                 booking: RELATIONSHIPS[rel],
                 userId: "caller",
-                role: mobilePositionalRole(roles),
+                access: accessFor(roles),
                 action: "archive",
               })
             ),
@@ -587,8 +638,8 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     )
   );
 
-  // B9:D-15: mobile cancel (bookings.cancel.ts:61-66 gate booking:cancel;
-  // :76 positional role; :93-98 ownership).
+  // B9:D-15: mobile cancel (bookings.cancel.ts: gate booking:cancel, then
+  // ownership on the context's `access`).
   snapshot["B9:D-15:mobile-cancel"] = perRoleSet((roles) =>
     perCase(RELATIONSHIP_NAMES, (rel) =>
       firstRefusal([
@@ -600,7 +651,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
               validateBookingOwnership({
                 booking: RELATIONSHIPS[rel],
                 userId: "caller",
-                role: mobilePositionalRole(roles),
+                access: accessFor(roles),
                 action: "cancel",
               })
             ),
@@ -609,11 +660,11 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     )
   );
 
-  // B9:D-22: mobile delete (bookings.delete.ts:56-61 gate booking:delete;
-  // :67 positional role; :86-113 ownership for a restricted role, then the
-  // BASE-only draft rule).
+  // B9:D-22: mobile delete (bookings.delete.ts: gate booking:delete, then
+  // `assertCanDeleteBooking` on the context's `access`: ownership first, then
+  // the policy's drafts-only rule).
   snapshot["B9:D-22:mobile-delete"] = perRoleSet((roles) => {
-    const role = mobilePositionalRole(roles);
+    const access = accessFor(roles);
     return Object.fromEntries(
       RELATIONSHIP_NAMES.flatMap((rel) =>
         DRAFT_OR_NOT.map((status) => [
@@ -623,28 +674,37 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
             [
               "denied:owner",
               () =>
-                isRestricted(role) &&
                 throws(() =>
                   validateBookingOwnership({
                     booking: RELATIONSHIPS[rel],
                     userId: "caller",
-                    role,
+                    access,
                     action: "delete",
                   })
                 ),
             ],
-            ["denied:status", () => role === R.BASE && status !== "DRAFT"],
+            [
+              "denied:status",
+              () =>
+                throws(() =>
+                  assertCanDeleteBooking({
+                    access,
+                    booking: { ...RELATIONSHIPS[rel], status },
+                    userId: "caller",
+                  })
+                ),
+            ],
           ]),
         ])
       )
     );
   });
 
-  // B9:D-15/D-19: mobile duplicate (bookings.duplicate.ts:58-63 gate
-  // booking:create; :69 positional role; :91-96 ownership; :103-105 a
-  // restricted caller must be the source booking's custodian).
+  // B9:D-15/D-19: mobile duplicate (bookings.duplicate.ts: gate
+  // booking:create, ownership on the context's `access`, then a caller who may
+  // only book for themself must be the source booking's custodian).
   snapshot["B9:D-15/D-19:mobile-duplicate"] = perRoleSet((roles) => {
-    const role = mobilePositionalRole(roles);
+    const access = accessFor(roles);
     return perCase(RELATIONSHIP_NAMES, (rel) =>
       firstRefusal([
         ["denied:gate", () => !can(roles, E.booking, A.create)],
@@ -655,7 +715,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
               validateBookingOwnership({
                 booking: RELATIONSHIPS[rel],
                 userId: "caller",
-                role,
+                access,
                 action: "duplicate",
               })
             ),
@@ -663,17 +723,18 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
         [
           "denied:custodian",
           () =>
-            isRestricted(role) &&
+            bookingCustodianIsSelf(access) &&
             RELATIONSHIPS[rel].custodianUserId !== "caller",
         ],
       ])
     );
   });
 
-  // B9:D-15: mobile model requests (bookings.$bookingId.model-requests.ts:96-101
-  // gate booking:update; :126-138 a restricted caller must be the custodian).
+  // B9:D-15: mobile model requests (bookings.$bookingId.model-requests.ts:
+  // gate booking:update; a caller who does not write every booking must be
+  // the custodian).
   snapshot["B9:D-15:mobile-model-requests"] = perRoleSet((roles) => {
-    const restricted = isRestricted(mobilePositionalRole(roles));
+    const restricted = !accessFor(roles).bookings.writeAll;
     return perCase(RELATIONSHIP_NAMES, (rel) =>
       firstRefusal([
         ["denied:gate", () => !can(roles, E.booking, A.update)],
@@ -685,20 +746,21 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     );
   });
 
-  // B9:D-16: mobile available-models booking lookup (bookings.available-models.ts:79-112;
-  // no matrix gate): a restricted caller is limited to bookings in its custody scope.
+  // B9:D-16: mobile available-models booking lookup (bookings.available-models.ts;
+  // no matrix gate): a caller who does not write every booking is limited to
+  // bookings in its custody scope.
   snapshot["B9:D-16:mobile-available-models"] = perRoleSet((roles) =>
-    isRestricted(mobilePositionalRole(roles)) ? "custodian-scope" : "workspace"
+    accessFor(roles).bookings.writeAll ? "workspace" : "custodian-scope"
   );
 
-  // B9:D-15: web "can see actions" on a booking (any restricted role held):
-  // editBookingForm components/booking/forms/edit-booking-form.tsx:265-269,
-  // bookingAssetsColumn components/booking/booking-assets-column.tsx:188-189.
+  // B9:D-15: web "can see actions" on a booking,
+  // `useRoleAccess().bookings.writeAll || holder`: editBookingForm
+  // (components/booking/forms/edit-booking-form.tsx) and bookingAssetsColumn
+  // (components/booking/booking-assets-column.tsx).
   snapshot["B9:D-15:web-form-actions"] = perRoleSet((roles) => {
-    const { isBaseOrSelfService } = hookFlags(roles);
+    const { writeAll } = accessFor(roles).bookings;
     return perCase(HOLDER_CASES, (holder) => {
-      const visible =
-        !isBaseOrSelfService || (isBaseOrSelfService && holder === "holder");
+      const visible = writeAll || holder === "holder";
       return { editBookingForm: visible, bookingAssetsColumn: visible };
     });
   });

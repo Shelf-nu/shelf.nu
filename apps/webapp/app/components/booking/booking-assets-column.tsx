@@ -3,6 +3,7 @@ import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetWithResolvableImage } from "~/modules/asset/image-resolution";
@@ -82,7 +83,8 @@ export function BookingAssetsColumn() {
   // book-by-model booking still shows its reservations while this table
   // correctly reports that no concrete assets have been added yet.
   const hasItems = paginatedItems?.length > 0;
-  const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
+  const { isBase, isSelfService } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
   const { isCompleted, isArchived, isCancelled } = useBookingStatusHelpers(
     booking.status
   );
@@ -178,15 +180,11 @@ export function BookingAssetsColumn() {
   );
 
   /**
-   * Check whether the user can see actions
-   * 1. Admin/Owner always can see all
-   * 2. SELF_SERVICE can see actions if they are the custodian of the booking
-   * 3. BASE can see actions if they are the custodian of the booking
+   * Whether the user can see row actions: members who write every booking
+   * always do; everyone else only on a booking they hold.
    */
-
   const canSeeActions =
-    !isBaseOrSelfService ||
-    (isBaseOrSelfService && booking?.custodianUser?.id === userId);
+    roleAccess.bookings.writeAll || booking?.custodianUser?.id === userId;
 
   /**
    * Custody alone decides whether this column offers actions at all; which of

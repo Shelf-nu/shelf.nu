@@ -12,10 +12,7 @@ import {
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import {
-  resolveMostPrivilegedRole,
-  validateBookingOwnership,
-} from "~/utils/booking-authorization.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -79,15 +76,15 @@ export async function action({ request }: ActionFunctionArgs) {
     // Cross-user IDOR guard, mirroring the checkout routes: SELF_SERVICE holds
     // `booking:checkin`, so the role gate above passes for ANY booking id in
     // the organization, and `checkinBooking` does not check ownership itself.
-    // No-op for ADMIN/OWNER.
-    const { roles, effectiveRole } = await getMobileUserContext(
+    // No-op when `access.bookings.writeAll`.
+    const { access, effectiveRole } = await getMobileUserContext(
       user.id,
       organizationId
     );
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role: resolveMostPrivilegedRole(roles),
+      access,
       action: "check in",
     });
 

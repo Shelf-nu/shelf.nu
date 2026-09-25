@@ -332,8 +332,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * action rejects turns the picker into a 403 dead end. A future read-only
        * booking search for these roles needs a purpose distinction here.
        */
-      const role = resolveEffectiveRole({ userOrganizations, organizationId });
-      const writeScope = bookingWriteScopeClause({ userId, role });
+      const writeScope = bookingWriteScopeClause({ userId, access });
 
       if (writeScope) {
         where.AND.push(writeScope);

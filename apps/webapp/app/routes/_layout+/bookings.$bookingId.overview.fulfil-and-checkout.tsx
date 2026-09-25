@@ -138,14 +138,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     // Matches the action's gate: this screen exists only to check out, so a
     // role without `booking:checkout` should not reach it at all.
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, role, userOrganizations, access } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkout,
-      }
-    );
+      });
 
     // NOTE: BASE is deliberately not folded in here. `canUserManageBookingAssets`
     // takes an is-self-service flag, and BASE reaching this loader would get the
@@ -165,15 +164,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // this MY booking". Without this, a SELF_SERVICE user could load another
     // member's booking, its model requests and its asset data through this
     // screen, even though the action would refuse the checkout. Read access is
-    // the leak; the write guard does not cover it.
-    if (isSelfService) {
-      validateBookingOwnership({
-        booking,
-        userId,
-        role,
-        action: "check out",
-      });
-    }
+    // the leak; the write guard does not cover it. No-op when
+    // `access.bookings.writeAll`.
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "check out",
+    });
 
     const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
 
@@ -305,13 +303,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // `checkout`, not `update`: BASE holds `update` and deliberately does NOT
     // hold `checkout`, so gating on `update` let a BASE user check out through
     // this route. The dedicated action exists precisely to withhold this.
-    const { organizationId, role, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.checkout,
-      });
+    const { organizationId, role, access } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.checkout,
+    });
 
     const formData = await request.formData();
 
@@ -339,16 +336,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // The loader's `canUserManageBookingAssets` only shapes what renders; this
     // check is what stops a cross-user check-out on a direct POST. SELF_SERVICE
     // holds `booking:checkout`, and `fulfilAndCheckOut` does not check
-    // ownership itself. No-op for ADMIN/OWNER. Mirrors
+    // ownership itself. No-op when `access.bookings.writeAll`. Mirrors
     // api+/mobile+/bookings.fulfil-and-checkout.ts.
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking: basicBookingInfo,
-        userId,
-        role,
-        action: "check out",
-      });
-    }
+    validateBookingOwnership({
+      booking: basicBookingInfo,
+      userId,
+      access,
+      action: "check out",
+    });
 
     // Decided after the booking and ownership checks, so a missing or foreign
     // booking answers as such. Under the requirement only the scanned units

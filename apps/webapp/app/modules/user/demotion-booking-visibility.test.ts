@@ -3,9 +3,13 @@ import { OrganizationRoles } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  assertCanDownloadBookingDocuments,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { transferEntitiesToNewOwner } from "./service.server";
 
 // why: service.server.ts (user) imports `db` from `~/database/db.server` at
@@ -203,7 +207,7 @@ describe("demotion preserves booking visibility (observable outcome)", () => {
     ).toBe(true);
   });
 
-  it("does not throw validateBookingOwnership for a demoted SELF_SERVICE Paul on either row, including checkCustodianOnly (PDF / .ics paths)", async () => {
+  it("does not throw validateBookingOwnership for a demoted SELF_SERVICE Paul on either row, including the booking-documents path (PDF / .ics)", async () => {
     const [reserved, draft] = await transferAndApply("demotion");
 
     for (const booking of [reserved, draft]) {
@@ -211,18 +215,17 @@ describe("demotion preserves booking visibility (observable outcome)", () => {
         validateBookingOwnership({
           booking,
           userId: PAUL_ID,
-          role: OrganizationRoles.SELF_SERVICE,
+          access: accessFor([OrganizationRoles.SELF_SERVICE]),
           action: "view",
         })
       ).not.toThrow();
 
       expect(() =>
-        validateBookingOwnership({
+        assertCanDownloadBookingDocuments({
           booking,
           userId: PAUL_ID,
-          role: OrganizationRoles.SELF_SERVICE,
+          access: accessFor([OrganizationRoles.SELF_SERVICE]),
           action: "view",
-          checkCustodianOnly: true,
         })
       ).not.toThrow();
     }
