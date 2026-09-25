@@ -5,10 +5,12 @@ import type {
   SliceSourceInput,
 } from "./checkout-source-location";
 import {
+  checkinPlacementSources,
   defaultSourceLocationId,
   parseSourceLocationsFromFormData,
   poolAsksForSource,
   resolveSliceSource,
+  sliceForDisposition,
   sourceLocationFieldName,
   sourceSubmissionFromRecord,
   submittedSourceForSlice,
@@ -250,5 +252,74 @@ describe("submissions", () => {
     expect(
       submittedSourceForSlice(submission, { id: "ba-9", assetId: "asset-9" })
     ).toBeUndefined();
+  });
+});
+
+describe("checkinPlacementSources", () => {
+  const standalone = { assetKitId: null, sourceLocationId: "loc-studio" };
+
+  it("takes consumed, lost and damaged off the recorded location", () => {
+    expect(
+      checkinPlacementSources({
+        slice: standalone,
+        consumed: 6,
+        lost: 1,
+        damaged: 2,
+      })
+    ).toEqual([{ locationId: "loc-studio", quantity: 9 }]);
+  });
+
+  it("leaves placements alone when everything came back", () => {
+    expect(checkinPlacementSources({ slice: standalone })).toEqual([]);
+  });
+
+  it("names no placement for a slice with no source, a kit slice, or an unknown slice", () => {
+    expect(
+      checkinPlacementSources({
+        slice: { assetKitId: null, sourceLocationId: null },
+        consumed: 3,
+      })
+    ).toEqual([]);
+    expect(
+      checkinPlacementSources({
+        slice: { assetKitId: "ak-1", sourceLocationId: "loc-kit-shelf" },
+        consumed: 3,
+      })
+    ).toEqual([]);
+    expect(checkinPlacementSources({ slice: null, consumed: 3 })).toEqual([]);
+  });
+});
+
+describe("sliceForDisposition", () => {
+  const slices = [
+    { id: "ba-1", assetId: "pool-1", assetKitId: null, sourceLocationId: "a" },
+    {
+      id: "ba-2",
+      assetId: "pool-1",
+      assetKitId: "ak-1",
+      sourceLocationId: "k",
+    },
+    { id: "ba-3", assetId: "pool-2", assetKitId: null, sourceLocationId: "b" },
+  ];
+
+  it("returns the slice a disposition names", () => {
+    expect(
+      sliceForDisposition(slices, { assetId: "pool-1", bookingAssetId: "ba-2" })
+        ?.id
+    ).toBe("ba-2");
+  });
+
+  it("refuses a named slice that belongs to another asset", () => {
+    expect(
+      sliceForDisposition(slices, { assetId: "pool-2", bookingAssetId: "ba-1" })
+    ).toBeNull();
+  });
+
+  it("returns the asset's only slice for an untagged disposition", () => {
+    expect(sliceForDisposition(slices, { assetId: "pool-2" })?.id).toBe("ba-3");
+  });
+
+  it("guesses nothing when an untagged asset has several slices", () => {
+    expect(sliceForDisposition(slices, { assetId: "pool-1" })).toBeNull();
   });
 });

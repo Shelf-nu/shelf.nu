@@ -35,6 +35,7 @@ import { render, screen } from "@testing-library/react";
 import { useActionData, useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import BulkPartialCheckoutDialog from "./bulk-partial-checkout-dialog";
 
 // why: react-router hooks need a router context — stub them so we can drive
@@ -143,6 +144,7 @@ function makeLoaderData({
   status = BookingStatus.ONGOING,
   from = new Date("2024-01-01T10:00:00Z"),
   modelRequests = [],
+  checkoutSourceQuestions = [],
 }: {
   bookingAssets: Array<{
     id: string;
@@ -189,6 +191,8 @@ function makeLoaderData({
     fulfilledAt: Date | null;
     assetModel: { name: string };
   }>;
+  /** Pools at two or more locations still to go out, see the loader. */
+  checkoutSourceQuestions?: CheckoutSourceQuestion[];
 }) {
   return {
     booking: {
@@ -203,6 +207,7 @@ function makeLoaderData({
     checkedOutAssetIds,
     remainingToCheckOutByAsset,
     partialCheckinDetails,
+    checkoutSourceQuestions,
   };
 }
 
@@ -388,6 +393,121 @@ describe("BulkPartialCheckoutDialog — QT partial top-off", () => {
     );
     expect(submit).not.toBeNull();
     expect(submit).not.toBeDisabled();
+  });
+
+  it("asks where a pool at two locations leaves from, pre-picking the one with most units", () => {
+    const batteries: SelectedAssetRow = {
+      id: "battery-id",
+      title: "Batteries",
+      status: AssetStatus.AVAILABLE,
+      type: AssetType.QUANTITY_TRACKED,
+      bookingAssetId: "ba-standalone",
+      bookedQuantity: 10,
+      kitId: null,
+      thumbnailImage: null,
+      mainImage: null,
+      mainImageExpiration: null,
+      category: null,
+    };
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData({
+        bookingAssets: [
+          {
+            id: "ba-standalone",
+            quantity: 10,
+            assetKitId: null,
+            asset: {
+              id: "battery-id",
+              title: "Batteries",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+            },
+          },
+        ],
+        checkedOutAssetIds: [],
+        remainingToCheckOutByAsset: { "battery-id": 10 },
+        checkoutSourceQuestions: [
+          {
+            sliceId: "ba-standalone",
+            assetId: "battery-id",
+            title: "Batteries",
+            unitOfMeasure: "pcs",
+            quantity: 10,
+            placements: [
+              {
+                locationId: "loc-store",
+                name: "Store Room",
+                placed: 60,
+                left: 60,
+              },
+              {
+                locationId: "loc-studio",
+                name: "Studio",
+                placed: 40,
+                left: 40,
+              },
+            ],
+            unplaced: 0,
+            defaultLocationId: "loc-store",
+          },
+        ],
+      })
+    );
+    seedSelection([batteries]);
+
+    renderDialog();
+
+    const select = screen.getByLabelText(
+      "From location for Batteries"
+    ) as HTMLSelectElement;
+    expect(select.name).toBe("sourceLocation.ba-standalone");
+    expect(select.value).toBe("loc-store");
+    expect([...select.options].map((option) => option.text)).toEqual([
+      "Store Room · 60 pcs",
+      "Studio · 40 pcs",
+    ]);
+    // Inside the dialog's form, so it posts with the check-out.
+    expect(select.form?.id).toBe("bulk-partial-checkout-form");
+  });
+
+  it("asks nothing for a pool the loader has no question for", () => {
+    const batteries: SelectedAssetRow = {
+      id: "battery-id",
+      title: "Batteries",
+      status: AssetStatus.AVAILABLE,
+      type: AssetType.QUANTITY_TRACKED,
+      bookingAssetId: "ba-standalone",
+      bookedQuantity: 10,
+      kitId: null,
+      thumbnailImage: null,
+      mainImage: null,
+      mainImageExpiration: null,
+      category: null,
+    };
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData({
+        bookingAssets: [
+          {
+            id: "ba-standalone",
+            quantity: 10,
+            assetKitId: null,
+            asset: {
+              id: "battery-id",
+              title: "Batteries",
+              status: AssetStatus.AVAILABLE,
+              type: AssetType.QUANTITY_TRACKED,
+            },
+          },
+        ],
+        checkedOutAssetIds: [],
+        remainingToCheckOutByAsset: { "battery-id": 10 },
+      })
+    );
+    seedSelection([batteries]);
+
+    renderDialog();
+
+    expect(document.querySelector("select")).toBeNull();
   });
 
   it("still filters INDIVIDUAL assets whose id appears in checkedOutAssetIds (unchanged)", () => {

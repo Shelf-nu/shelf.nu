@@ -130,9 +130,17 @@ function fakeTx({
     assetKit: {
       findMany: vi.fn(({ where }: { where: IdsWhere }) =>
         resolved(
-          where.id.in.map((id: string) => ({
-            id,
-            kit: { locationId: kitLocationByMembership[id] ?? null },
+          where.id.in.map((id: string) => ({ id, kitId: `kit-of-${id}` }))
+        )
+      ),
+    },
+    kit: {
+      findMany: vi.fn(({ where }: { where: IdsWhere }) =>
+        resolved(
+          where.id.in.map((kitId: string) => ({
+            id: kitId,
+            locationId:
+              kitLocationByMembership[kitId.replace("kit-of-", "")] ?? null,
           }))
         )
       ),

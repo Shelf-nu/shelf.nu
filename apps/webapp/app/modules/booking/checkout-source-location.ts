@@ -336,3 +336,71 @@ export function submittedSourceForSlice(
   }
   return undefined;
 }
+
+/** The slice fields check-in reads to find where used-up units come off. */
+export type CheckinSourceSlice = {
+  id: string;
+  assetId: string;
+  assetKitId: string | null;
+  sourceLocationId: string | null;
+};
+
+/**
+ * Which manual placement loses the units a check-in reports consumed, lost or
+ * damaged: the slice's recorded source, for all three. Returned units never
+ * change a placement, so they are not counted.
+ *
+ * Nothing is returned (the unplaced units absorb the drop, as before sources
+ * existed) for a slice with no recorded source, and for a kit slice: its units
+ * belong to the kit, whose own placement shrinks with it, never a manual one.
+ *
+ * @param args.slice - The slice being checked in, or `null` when unknown
+ * @param args.consumed - Units used up
+ * @param args.lost - Units lost
+ * @param args.damaged - Units damaged
+ * @returns The `sources` for `reconcileManualPlacementsForStockDecrease`
+ */
+export function checkinPlacementSources({
+  slice,
+  consumed = 0,
+  lost = 0,
+  damaged = 0,
+}: {
+  slice: Pick<CheckinSourceSlice, "assetKitId" | "sourceLocationId"> | null;
+  consumed?: number;
+  lost?: number;
+  damaged?: number;
+}): Array<{ locationId: string; quantity: number }> {
+  if (!slice || slice.assetKitId || !slice.sourceLocationId) return [];
+  const quantity = consumed + lost + damaged;
+  return quantity > 0 ? [{ locationId: slice.sourceLocationId, quantity }] : [];
+}
+
+/**
+ * The slice a check-in disposition belongs to. A disposition that names its
+ * slice gets that slice. One that does not (an older phone app) gets the
+ * asset's only slice on the booking; with several slices the owner is
+ * unknown and nothing is guessed.
+ *
+ * @param slices - The booking's slices
+ * @param disposition - The asset and, when the client knows it, the slice
+ * @returns The slice, or `null` when it cannot be told
+ */
+export function sliceForDisposition<T extends CheckinSourceSlice>(
+  slices: readonly T[],
+  disposition: { assetId: string; bookingAssetId?: string | null }
+): T | null {
+  if (disposition.bookingAssetId) {
+    return (
+      slices.find(
+        (slice) =>
+          slice.id === disposition.bookingAssetId &&
+          slice.assetId === disposition.assetId
+      ) ?? null
+    );
+  }
+  const ofAsset = slices.filter(
+    (slice) => slice.assetId === disposition.assetId
+  );
+  return ofAsset.length === 1 ? ofAsset[0] : null;
+}

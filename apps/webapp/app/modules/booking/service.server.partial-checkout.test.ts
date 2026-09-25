@@ -137,6 +137,15 @@ vitest.mock("~/database/db.server", () => {
       },
       kit: {
         updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+        // why: a kit slice going out records its kit's location as its
+        // source. No fixture here places a kit, so none has a location.
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
+      // why: a pool slice going out for the first time records which manual
+      // placement its units leave from. No fixture here places a pool, so
+      // every slice records none, as before sources existed.
+      assetLocation: {
+        findMany: vitest.fn().mockResolvedValue([]),
       },
       // why: post-pivot the bookingAsset pivot is read by both
       // checkoutBooking's delegate-path enumeration AND

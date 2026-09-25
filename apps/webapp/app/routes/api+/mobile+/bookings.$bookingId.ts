@@ -45,7 +45,10 @@ import {
   combineDispatchedWithStoredUnits,
   computeDispatchedUnitsByAsset,
 } from "~/modules/booking/checkout-attribution";
-import { loadSliceSourceLocations } from "~/modules/booking/checkout-source-location.server";
+import {
+  getCheckoutSourceQuestions,
+  loadSliceSourceLocations,
+} from "~/modules/booking/checkout-source-location.server";
 import type { SliceSourceLocation } from "~/modules/booking/checkout-source-location.server";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
@@ -909,6 +912,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           ).hasAlreadyBookedAssets
         : false;
 
+    /**
+     * Pools on this booking that sit at two or more locations and have not
+     * gone out yet, with the options a "From location" picker needs. The same
+     * data the web check-out dialogs read, so the phone can ask the same
+     * question and send the answers as `sourceLocations`. Empty unless the
+     * booking can still check out. Additive: older apps ignore it.
+     */
+    const checkoutSourceQuestions = (
+      [
+        BookingStatus.RESERVED,
+        BookingStatus.ONGOING,
+        BookingStatus.OVERDUE,
+      ] as BookingStatus[]
+    ).includes(booking.status)
+      ? await getCheckoutSourceQuestions({
+          organizationId,
+          bookingId: booking.id,
+        })
+      : [];
+
     return data({
       booking: {
         id: booking.id,
@@ -955,6 +978,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckinAll,
       canQuickCheckout,
       bookingActions,
+      checkoutSourceQuestions,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

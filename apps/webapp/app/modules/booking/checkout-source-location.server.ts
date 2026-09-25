@@ -45,7 +45,7 @@ const label: ErrorLabel = "Booking";
  */
 type SourceTxClient = Pick<
   ExtendedPrismaClient,
-  "asset" | "assetLocation" | "assetKit" | "bookingAsset"
+  "asset" | "assetLocation" | "assetKit" | "bookingAsset" | "kit"
 >;
 
 /** A pool's placements plus what the dialogs print about it. */
@@ -126,6 +126,45 @@ export async function loadPoolSourceSnapshots(
 }
 
 /**
+ * The location of the kit behind each kit-driven slice's membership row.
+ *
+ * @param tx - Transaction client
+ * @param args.organizationId - Scopes both reads
+ * @param args.membershipIds - `BookingAsset.assetKitId` values (`AssetKit.id`)
+ * @returns The kit's `locationId` (possibly `null`) per membership id
+ */
+async function loadKitLocationsByMembership(
+  tx: SourceTxClient,
+  {
+    organizationId,
+    membershipIds,
+  }: { organizationId: string; membershipIds: string[] }
+): Promise<Map<string, string | null>> {
+  const byMembership = new Map<string, string | null>();
+  if (membershipIds.length === 0) return byMembership;
+
+  const memberships = await tx.assetKit.findMany({
+    where: { id: { in: [...new Set(membershipIds)] }, organizationId },
+    select: { id: true, kitId: true },
+  });
+  const kits = await tx.kit.findMany({
+    where: {
+      id: { in: [...new Set(memberships.map((m) => m.kitId))] },
+      organizationId,
+    },
+    select: { id: true, locationId: true },
+  });
+  const locationByKitId = new Map(kits.map((kit) => [kit.id, kit.locationId]));
+  for (const membership of memberships) {
+    byMembership.set(
+      membership.id,
+      locationByKitId.get(membership.kitId) ?? null
+    );
+  }
+  return byMembership;
+}
+
+/**
  * Record the source of every quantity-tracked slice this check-out sends out
  * for the first time.
  *
@@ -171,19 +210,12 @@ export async function recordCheckoutSourceLocations(
   });
   if (slices.length === 0) return decisions;
 
-  const kitSliceMembershipIds = slices
-    .map((slice) => slice.assetKitId)
-    .filter((id): id is string => Boolean(id));
-  const kitLocationByMembershipId = new Map<string, string | null>();
-  if (kitSliceMembershipIds.length > 0) {
-    const memberships = await tx.assetKit.findMany({
-      where: { id: { in: kitSliceMembershipIds }, organizationId },
-      select: { id: true, kit: { select: { locationId: true } } },
-    });
-    for (const membership of memberships) {
-      kitLocationByMembershipId.set(membership.id, membership.kit.locationId);
-    }
-  }
+  const kitLocationByMembershipId = await loadKitLocationsByMembership(tx, {
+    organizationId,
+    membershipIds: slices
+      .map((slice) => slice.assetKitId)
+      .filter((id): id is string => Boolean(id)),
+  });
 
   const snapshots = await loadPoolSourceSnapshots(tx, {
     organizationId,
@@ -211,7 +243,10 @@ export async function recordCheckoutSourceLocations(
 
     if (decision.action === "invalid") {
       const title = snapshots.get(slice.assetId)?.title ?? "This asset";
-      const names = snapshot.placements.map((p) => p.name).join(", ");
+      const names = [
+        ...snapshot.placements.map((p) => p.name),
+        ...(snapshot.unplaced > 0 ? ["Unplaced"] : []),
+      ].join(", ");
       throw new ShelfError({
         cause: null,
         label,
@@ -219,7 +254,7 @@ export async function recordCheckoutSourceLocations(
         shouldBeCaptured: false,
         title: "Pick where the units come from",
         message: names
-          ? `"${title}" is not placed at the location you picked. Pick one of its locations (${names}) or Unplaced, then check out again.`
+          ? `"${title}" is not placed at the location you picked. Pick one of: ${names}. Then check out again.`
           : `"${title}" is not placed at the location you picked. Check out again without picking a location.`,
         additionalData: {
           organizationId,
