@@ -81,6 +81,30 @@ describe("unitsStillOutBySlice", () => {
     expect(out.get("ba-1")).toBe(3);
   });
 
+  it("lets untagged returns cover every trip a slice made, not one booked quantity", () => {
+    // Out twice (10 + 10), back twice from an older app that names no slice.
+    const twice = { ...slice, checkedOutQuantity: 20 };
+    const out = unitsStillOutBySlice({
+      sourced: [twice],
+      siblings: [twice],
+      logs: [
+        {
+          bookingId: "b-1",
+          assetId: "pool-1",
+          bookingAssetId: null,
+          quantity: 10,
+        },
+        {
+          bookingId: "b-1",
+          assetId: "pool-1",
+          bookingAssetId: null,
+          quantity: 10,
+        },
+      ],
+    });
+    expect(out.get("ba-1")).toBe(0);
+  });
+
   it("ignores logs from another booking", () => {
     const out = unitsStillOutBySlice({
       sourced: [{ ...slice, checkedOutQuantity: 10 }],

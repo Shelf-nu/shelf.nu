@@ -32,6 +32,8 @@ export type CountedSlice = {
   assetId: string;
   quantity: number;
   assetKitId: string | null;
+  /** Units sent out on it so far, cumulative across trips. */
+  checkedOutQuantity?: number;
 };
 
 /**
@@ -85,8 +87,18 @@ export function unitsStillOutBySlice({
     const groupKey = key(slice.bookingId, slice.assetId);
     let attributed = attributedByGroup.get(groupKey);
     if (!attributed) {
+      // A slice can go out and come back more than once, so what it can
+      // absorb is its cumulative departures, not one booked quantity.
+      // Otherwise untagged returns from later trips spill nowhere and read
+      // as units still out.
       attributed = attributeDispositionsByBookingAsset({
-        bookingAssetRows: slicesByGroup.get(groupKey) ?? [slice],
+        bookingAssetRows: (slicesByGroup.get(groupKey) ?? [slice]).map(
+          (row) => ({
+            id: row.id,
+            assetKitId: row.assetKitId,
+            quantity: Math.max(row.quantity, row.checkedOutQuantity ?? 0),
+          })
+        ),
         consumptionLogs: logsByGroup.get(groupKey) ?? [],
       });
       attributedByGroup.set(groupKey, attributed);
@@ -169,7 +181,7 @@ export async function loadBookedOutBySource(
         bookingId: { in: bookingIds },
         assetId: { in: sourcedAssetIds },
       },
-      select: sliceSelect,
+      select: { ...sliceSelect, checkedOutQuantity: true },
     }),
     client.consumptionLog.findMany({
       where: {
