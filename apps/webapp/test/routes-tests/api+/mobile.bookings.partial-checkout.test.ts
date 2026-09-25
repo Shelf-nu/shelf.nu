@@ -163,6 +163,8 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       checkouts: undefined,
       userId: "user-1",
       hints: { timeZone: "UTC", locale: "en-US" },
+      // No `sourceLocations` in the body: no answers, so the default applies.
+      sourceLocations: new Map(),
     });
   });
 
@@ -206,6 +208,7 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       userId: "user-1",
       // Body-supplied timeZone overrides the Accept-Language/cookie hints.
       hints: expect.objectContaining({ timeZone: "Europe/Berlin" }),
+      sourceLocations: new Map(),
     });
   });
 
