@@ -147,6 +147,11 @@ vitest.mock("~/database/db.server", () => {
       assetLocation: {
         findMany: vitest.fn().mockResolvedValue([]),
       },
+      // why: a location's units left to give subtract the custody taken from
+      // it. No fixture here places a pool, so custody is never read for one.
+      custody: {
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
       // why: post-pivot the bookingAsset pivot is read by both
       // checkoutBooking's delegate-path enumeration AND
       // `computeBookingAssetRemainingToCheckOut` (which computes booked total

@@ -56,6 +56,7 @@ vi.mock("~/database/db.server", () => ({
     // Each case sets what its pools look like.
     asset: { findMany: vi.fn().mockResolvedValue([]) },
     assetLocation: { findMany: vi.fn().mockResolvedValue([]) },
+    custody: { findMany: vi.fn().mockResolvedValue([]) },
     location: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));

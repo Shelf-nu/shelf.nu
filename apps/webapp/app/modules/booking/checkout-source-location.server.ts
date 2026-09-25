@@ -18,6 +18,8 @@ import { AssetType } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import type { ExtendedPrismaClient } from "~/database/db.server";
+import type { CustodySourceState } from "~/modules/asset/custody-source";
+import { unitsLeftAtSource } from "~/modules/asset/custody-source";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 
@@ -45,7 +47,7 @@ const label: ErrorLabel = "Booking";
  */
 type SourceTxClient = Pick<
   ExtendedPrismaClient,
-  "asset" | "assetLocation" | "assetKit" | "bookingAsset" | "kit"
+  "asset" | "assetLocation" | "assetKit" | "bookingAsset" | "custody" | "kit"
 >;
 
 /** A pool's placements plus what the dialogs print about it. */
@@ -74,7 +76,7 @@ export async function loadPoolSourceSnapshots(
   const uniqueAssetIds = [...new Set(assetIds)];
   if (uniqueAssetIds.length === 0) return snapshots;
 
-  const [assets, placements] = await Promise.all([
+  const [assets, placements, operatorCustody] = await Promise.all([
     tx.asset.findMany({
       where: { id: { in: uniqueAssetIds }, organizationId },
       select: { id: true, title: true, quantity: true, unitOfMeasure: true },
@@ -96,6 +98,16 @@ export async function loadPoolSourceSnapshots(
       // Creation order breaks ties in the default; `id` keeps it total.
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     }),
+    // Operator custody only: kit-inherited rows follow their kit. What is in
+    // custody from a location is not left there to hand out.
+    tx.custody.findMany({
+      where: {
+        assetId: { in: uniqueAssetIds },
+        kitCustodyId: null,
+        asset: { organizationId },
+      },
+      select: { assetId: true, locationId: true, quantity: true },
+    }),
   ]);
 
   const placementsByAsset = new Map<string, SourcePlacement[]>();
@@ -113,6 +125,19 @@ export async function loadPoolSourceSnapshots(
   for (const asset of assets) {
     const assetPlacements = placementsByAsset.get(asset.id) ?? [];
     const placedSum = assetPlacements.reduce((sum, p) => sum + p.placed, 0);
+    // Units left = placed minus custody taken from there: the one definition
+    // custody's own "From location" uses, so both questions agree.
+    const state: CustodySourceState = {
+      total: asset.quantity ?? 0,
+      placements: assetPlacements.map((p) => ({
+        locationId: p.locationId,
+        quantity: p.placed,
+      })),
+      operatorCustody: operatorCustody.filter((c) => c.assetId === asset.id),
+    };
+    for (const placement of assetPlacements) {
+      placement.left = unitsLeftAtSource(state, placement.locationId);
+    }
     snapshots.set(asset.id, {
       assetId: asset.id,
       title: asset.title,

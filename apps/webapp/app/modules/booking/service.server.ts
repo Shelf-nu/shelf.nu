@@ -145,7 +145,11 @@ import {
   computeDispatchedUnitsTotalByAsset,
 } from "./checkout-attribution";
 import type { SourceLocationSubmission } from "./checkout-source-location";
-import { parseSourceLocationsFromFormData } from "./checkout-source-location";
+import {
+  checkinPlacementSources,
+  parseSourceLocationsFromFormData,
+  sliceForDisposition,
+} from "./checkout-source-location";
 import { recordCheckoutSourceLocations } from "./checkout-source-location.server";
 import {
   ADDABLE_BOOKING_STATUSES,
@@ -4976,6 +4980,9 @@ export async function checkinBooking({
               // `getKitIdsByBookingSlices`, so dropping either is a type error.
               assetKitId: true,
               sourceKitId: true,
+              // Where the slice's units left from at check-out: consumed, lost
+              // and damaged units come off that placement below.
+              sourceLocationId: true,
               asset: {
                 select: {
                   id: true,
@@ -5238,6 +5245,8 @@ export async function checkinBooking({
       .map((ba) => ({
         id: ba.id,
         assetId: ba.assetId,
+        assetKitId: ba.assetKitId,
+        sourceLocationId: ba.sourceLocationId,
         consumptionType: ba.asset.consumptionType,
         title: ba.asset.title,
       }));
@@ -5451,6 +5460,9 @@ export async function checkinBooking({
               userId: userId!,
               bookingId: id,
               bookingAssetId: dispBookingAssetId,
+              // The location the slice's units left from: returned units go
+              // back there, used-up ones come off it.
+              locationId: slice.sourceLocationId,
               tx,
             });
           }
@@ -5462,6 +5474,9 @@ export async function checkinBooking({
               userId: userId!,
               bookingId: id,
               bookingAssetId: dispBookingAssetId,
+              // The location the slice's units left from: returned units go
+              // back there, used-up ones come off it.
+              locationId: slice.sourceLocationId,
               tx,
             });
           }
@@ -5473,6 +5488,9 @@ export async function checkinBooking({
               userId: userId!,
               bookingId: id,
               bookingAssetId: dispBookingAssetId,
+              // The location the slice's units left from: returned units go
+              // back there, used-up ones come off it.
+              locationId: slice.sourceLocationId,
               tx,
             });
           }
@@ -5484,6 +5502,9 @@ export async function checkinBooking({
               userId: userId!,
               bookingId: id,
               bookingAssetId: dispBookingAssetId,
+              // The location the slice's units left from: returned units go
+              // back there, used-up ones come off it.
+              locationId: slice.sourceLocationId,
               tx,
             });
           }
@@ -5522,6 +5543,15 @@ export async function checkinBooking({
               assetId: slice.assetId,
               newTotal: beforeQuantity - poolDecrement,
               tx,
+              // The units left from the location recorded at check-out, so
+              // that placement loses them. None recorded (or a kit slice):
+              // the unplaced units absorb the drop, as before.
+              sources: checkinPlacementSources({
+                slice,
+                consumed: disposition.consumed,
+                lost: disposition.lost,
+                damaged: disposition.damaged,
+              }),
             });
 
             reportAmbiguousPlacementReconcile({
@@ -6915,6 +6945,15 @@ export async function partialCheckinBooking({
         // the slice (drawer post-Polish-6); legacy callers leave it null and
         // the loader's greedy-fill handles them on read.
         const dispBookingAssetId = disp.bookingAssetId ?? null;
+        /**
+         * The slice these units belong to, for the location they left from.
+         * A disposition that names no slice (an older phone app) resolves
+         * only when the asset has a single slice on this booking.
+         */
+        const sourceSlice = sliceForDisposition(bookingFound.bookingAssets, {
+          assetId: disp.assetId,
+          bookingAssetId: disp.bookingAssetId,
+        });
         if ((disp.returned ?? 0) > 0) {
           await createConsumptionLog({
             assetId: disp.assetId,
@@ -6923,6 +6962,7 @@ export async function partialCheckinBooking({
             userId,
             bookingId: id,
             bookingAssetId: dispBookingAssetId,
+            locationId: sourceSlice?.sourceLocationId ?? null,
             tx,
           });
         }
@@ -6934,6 +6974,7 @@ export async function partialCheckinBooking({
             userId,
             bookingId: id,
             bookingAssetId: dispBookingAssetId,
+            locationId: sourceSlice?.sourceLocationId ?? null,
             tx,
           });
         }
@@ -6945,6 +6986,7 @@ export async function partialCheckinBooking({
             userId,
             bookingId: id,
             bookingAssetId: dispBookingAssetId,
+            locationId: sourceSlice?.sourceLocationId ?? null,
             tx,
           });
         }
@@ -6956,6 +6998,7 @@ export async function partialCheckinBooking({
             userId,
             bookingId: id,
             bookingAssetId: dispBookingAssetId,
+            locationId: sourceSlice?.sourceLocationId ?? null,
             tx,
           });
         }
@@ -6993,6 +7036,12 @@ export async function partialCheckinBooking({
             assetId: disp.assetId,
             newTotal: beforeQuantity - poolDecrement,
             tx,
+            sources: checkinPlacementSources({
+              slice: sourceSlice,
+              consumed: disp.consumed,
+              lost: disp.lost,
+              damaged: disp.damaged,
+            }),
           });
 
           reportAmbiguousPlacementReconcile({

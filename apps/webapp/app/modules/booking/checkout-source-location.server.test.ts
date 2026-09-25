@@ -71,6 +71,7 @@ function fakeTx({
   placements,
   assets,
   kitLocationByMembership = {},
+  custody = [],
 }: {
   slices: Slice[];
   placements: Placement[];
@@ -82,6 +83,12 @@ function fakeTx({
     organizationId: string;
   }>;
   kitLocationByMembership?: Record<string, string | null>;
+  /** Operator custody rows: `locationId` is where the units were taken from. */
+  custody?: Array<{
+    assetId: string;
+    locationId: string | null;
+    quantity: number;
+  }>;
 }) {
   const assetById = new Map(assets.map((a) => [a.id, a]));
   return {
@@ -134,6 +141,13 @@ function fakeTx({
         )
       ),
     },
+    custody: {
+      findMany: vi.fn(({ where }: { where: { assetId: { in: string[] } } }) =>
+        resolved(
+          custody.filter((row) => where.assetId.in.includes(row.assetId))
+        )
+      ),
+    },
     kit: {
       findMany: vi.fn(({ where }: { where: IdsWhere }) =>
         resolved(
@@ -180,7 +194,14 @@ function fakeTx({
 }
 
 /** A 60 + 40 pool at two locations with one slice about to go out. */
-function scenario(overrides: Partial<Slice> = {}) {
+function scenario(
+  overrides: Partial<Slice> = {},
+  custody: Array<{
+    assetId: string;
+    locationId: string | null;
+    quantity: number;
+  }> = []
+) {
   const slice: Slice = {
     id: "ba-1",
     assetId: "pool-1",
@@ -234,6 +255,7 @@ function scenario(overrides: Partial<Slice> = {}) {
       },
     ],
     kitLocationByMembership: { "ak-1": "loc-kit-shelf" },
+    custody,
   });
   return { slice, tx };
 }
@@ -277,6 +299,21 @@ describe("recordCheckoutSourceLocations", () => {
       locationId: "loc-camera",
       reason: "most-left",
     });
+  });
+
+  it("goes by units left: custody taken from a location lowers what it can give", async () => {
+    // Camera Room holds 60 but 45 of them are in custody from there, so
+    // Studio (40 placed, none in custody) has more left.
+    const { slice, tx } = scenario({}, [
+      { assetId: "pool-1", locationId: "loc-camera", quantity: 45 },
+    ]);
+
+    await recordCheckoutSourceLocations(tx as never, {
+      organizationId: ORG,
+      sliceIds: [slice.id],
+    });
+
+    expect(slice.sourceLocationId).toBe("loc-studio");
   });
 
   it("records nothing for an explicit Unplaced", async () => {

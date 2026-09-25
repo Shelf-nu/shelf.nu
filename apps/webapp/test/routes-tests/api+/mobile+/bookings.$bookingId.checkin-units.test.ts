@@ -60,6 +60,7 @@ vi.mock("~/database/db.server", () => ({
     bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     asset: { findMany: vi.fn().mockResolvedValue([]) },
     assetLocation: { findMany: vi.fn().mockResolvedValue([]) },
+    custody: { findMany: vi.fn().mockResolvedValue([]) },
     partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
     consumptionLog: { findMany: vi.fn().mockResolvedValue([]) },
     kit: { findMany: vi.fn().mockResolvedValue([]) },
