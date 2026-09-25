@@ -2494,10 +2494,20 @@ model AuditImage {
   @@index([uploadedById])
 }
 
+/// How a membership's role came to change.
+enum RoleChangeSource {
+  /// An owner or administrator changed it in the team settings.
+  MANUAL
+  /// The member's identity-provider groups changed it at sign-in.
+  SSO
+}
+
 model RoleChangeLog {
   id           String            @id @default(cuid())
   previousRole OrganizationRoles
   newRole      OrganizationRoles
+  /// How the change was made. SSO rows name the member themself as `changedBy`.
+  source       RoleChangeSource  @default(MANUAL)
   createdAt    DateTime          @default(now())
 
   // Who was changed

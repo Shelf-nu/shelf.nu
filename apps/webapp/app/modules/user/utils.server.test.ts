@@ -435,4 +435,28 @@ describe("resolveUserAction: change role", () => {
     expect(changeUserRole).not.toHaveBeenCalled();
     expect(db.roleChangeLog.create).not.toHaveBeenCalled();
   });
+
+  it("records a manual role change with source MANUAL", async () => {
+    lockedMembership([OrganizationRoles.BASE]);
+    vi.mocked(transferOnRoleChange).mockResolvedValue({
+      ownership: false,
+      bookingsCreatedForOthers: false,
+    });
+
+    await resolveUserAction(
+      changeRoleRequest({ userId: "target", role: "SELF_SERVICE" }),
+      "org-1",
+      "owner-user",
+      accessFor([OrganizationRoles.OWNER])
+    );
+
+    expect(db.roleChangeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        changedById: "owner-user",
+        source: "MANUAL",
+        previousRole: OrganizationRoles.BASE,
+        newRole: OrganizationRoles.SELF_SERVICE,
+      }),
+    });
+  });
 });

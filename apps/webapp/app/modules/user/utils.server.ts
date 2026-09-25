@@ -450,6 +450,7 @@ export async function resolveUserAction(
           data: {
             userId: targetUserId,
             changedById: userId,
+            source: "MANUAL",
             organizationId,
             previousRole,
             newRole,
