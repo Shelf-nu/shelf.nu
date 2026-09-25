@@ -40,6 +40,7 @@ import {
   type Tag,
   type MobileCustomFieldDefinition,
 } from "@/lib/api";
+import { ValuationField } from "@/components/asset-edit/valuation-field";
 import { useOrg } from "@/lib/org-context";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
@@ -76,6 +77,9 @@ export default function CreateAssetScreen() {
   // ── Form state ──────────────────────────────────
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  // Held as the raw string the field produces, not a number: an empty box
+  // means "not set", which is different from a deliberate 0.
+  const [valuation, setValuation] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(
     null
   );
@@ -277,6 +281,7 @@ export default function CreateAssetScreen() {
   const hasUnsavedChanges =
     title.trim().length > 0 ||
     description.trim().length > 0 ||
+    valuation.trim().length > 0 ||
     !!selectedCategory ||
     !!selectedLocation ||
     selectedTags.length > 0 ||
@@ -474,6 +479,16 @@ export default function CreateAssetScreen() {
     const customFieldsPayload = buildCustomFieldsPayload();
 
     setIsSubmitting(true);
+    const trimmedValuation = valuation.trim();
+    if (trimmedValuation !== "" && !Number.isFinite(Number(trimmedValuation))) {
+      Alert.alert(
+        "Check the value",
+        "Enter the value as a number, or leave it empty."
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
     const { data, error } = await api.createAsset(currentOrg.id, {
       title: trimmedTitle,
       description: description.trim() || undefined,
@@ -483,6 +498,8 @@ export default function CreateAssetScreen() {
       customFields:
         customFieldsPayload.length > 0 ? customFieldsPayload : undefined,
       qrId: qrId || undefined,
+      // A blank box is omitted; a typed 0 is a real value and is sent.
+      valuation: trimmedValuation === "" ? undefined : Number(trimmedValuation),
     });
 
     setIsSubmitting(false);
@@ -532,6 +549,7 @@ export default function CreateAssetScreen() {
           setImageUri(null);
           setImageMimeType("image/jpeg");
           setCustomFieldValues({});
+          setValuation("");
           setQrId(undefined);
           // The route still carries the old qrId; clear it too, or a screen
           // remount would re-seed the state and resurrect the banner.
@@ -657,6 +675,13 @@ export default function CreateAssetScreen() {
             accessibilityLabel="Description"
           />
         </View>
+
+        {/* ── Value (optional) ─────────────────────── */}
+        <ValuationField
+          value={valuation}
+          onChange={setValuation}
+          currency={currentOrg?.currency ?? "USD"}
+        />
 
         {/* ── Category Picker ──────────────────────── */}
         <View style={styles.field}>
