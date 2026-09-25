@@ -62,6 +62,12 @@ type KitFormProps = Partial<
   referer?: string | null;
 };
 
+/**
+ * Create and edit form for kits: name, description, category, location,
+ * image and barcodes.
+ *
+ * @param props - Current values when editing; omit them to create a kit
+ */
 export default function KitsForm({
   className,
   id,

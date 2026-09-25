@@ -47,13 +47,19 @@ afterEach(() => {
 });
 
 describe("LocationImageField", () => {
-  it("shows the saved thumbnail, which opens the full image", () => {
+  it("shows the saved thumbnail, which opens the full image", async () => {
+    const user = userEvent.setup();
     renderField({ imageUrl: IMAGE_URL, thumbnailUrl: THUMBNAIL_URL });
 
     expect(picture()).toHaveAttribute("src", THUMBNAIL_URL);
-    expect(
+
+    await user.click(
       screen.getByRole("button", { name: "Open preview for Location image" })
-    ).toBeInTheDocument();
+    );
+
+    // The dialog shows the full-size image, not the thumbnail.
+    const images = screen.getAllByAltText("Location image");
+    expect(images.map((img) => img.getAttribute("src"))).toContain(IMAGE_URL);
   });
 
   it("falls back to the full image when there is no thumbnail", () => {

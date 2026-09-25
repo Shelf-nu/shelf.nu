@@ -74,6 +74,12 @@ interface Props {
   excludeLocationId?: Location["id"];
 }
 
+/**
+ * Create and edit form for locations. Renders as a full page, or compact
+ * inside a dialog when `onSuccess` is passed (inline creation).
+ *
+ * @param props - See {@link Props}; image props show the saved image when editing
+ */
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export const LocationForm = ({
   className,

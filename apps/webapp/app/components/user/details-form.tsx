@@ -29,6 +29,12 @@ export const UserDetailsFormSchema = z.object({
   lastName: z.string().optional(),
 });
 
+/**
+ * "My details" card on account settings: email, username, names and the
+ * profile picture upload.
+ *
+ * @param props.user - The signed-in user with contact details, from the loader
+ */
 export function UserDetailsForm({
   user,
 }: {
