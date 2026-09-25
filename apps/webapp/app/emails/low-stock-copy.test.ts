@@ -31,6 +31,7 @@ import {
   recoveredSubject,
   restockNotice,
   segmentsToText,
+  type MinimumChange,
   type StockMovementLog,
 } from "./low-stock-copy";
 
@@ -88,6 +89,7 @@ function movement(
   log: StockMovementLog | StockMovementLog[] | null,
   options: {
     actingUser?: typeof SAM | null;
+    minimumChange?: MinimumChange | null;
     unit?: string | null;
     now?: Date;
   } = {}
@@ -96,6 +98,7 @@ function movement(
     describeStockMovement({
       logs: log == null ? [] : Array.isArray(log) ? log : [log],
       actingUser: options.actingUser ?? null,
+      minimumChange: options.minimumChange ?? null,
       prefs: PREFS,
       unitOfMeasure: options.unit === undefined ? "Units" : options.unit,
       now: options.now ?? NOW,
@@ -263,6 +266,7 @@ describe("describeStockMovement: one sentence per log category", () => {
     const out = describeStockMovement({
       logs: [logRow()],
       actingUser: null,
+      minimumChange: null,
       prefs: us,
       unitOfMeasure: "Units",
       now: NOW,
@@ -386,6 +390,75 @@ describe("describeStockMovement: one operation that wrote several rows", () => {
       logRow({ category: "LOSS", quantity: 1, createdAt: before(1_500) }),
     ]);
     expect(out?.text).toBe(`12 Units restocked by Dana Reyes ${WHEN}`);
+  });
+});
+
+describe("describeStockMovement: a minimum change", () => {
+  const stale = new Date(CREATED_AT.getTime() - MOVEMENT_FRESHNESS_MS - 60_000);
+
+  /** Sam raised the minimum from 3 to 10 at the fixture moment. */
+  function minimumChange(
+    overrides: Partial<MinimumChange> = {}
+  ): MinimumChange {
+    return { from: 3, to: 10, createdAt: CREATED_AT, by: SAM, ...overrides };
+  }
+
+  it("names the minimum change when no log row explains it", () => {
+    expect(movement(null, { minimumChange: minimumChange() })).toEqual({
+      text: `Minimum changed from 3 to 10 by Sam Ortiz ${WHEN}`,
+    });
+  });
+
+  it("a fresh minimum change wins over a stale log row", () => {
+    const out = movement(logRow({ createdAt: stale }), {
+      minimumChange: minimumChange(),
+    });
+    expect(out?.text).toBe(`Minimum changed from 3 to 10 by Sam Ortiz ${WHEN}`);
+  });
+
+  it("a minimum change newer than a fresh log row wins", () => {
+    const out = movement(
+      logRow({ createdAt: new Date(CREATED_AT.getTime() - 30_000) }),
+      { minimumChange: minimumChange() }
+    );
+    expect(out?.text).toBe(`Minimum changed from 3 to 10 by Sam Ortiz ${WHEN}`);
+  });
+
+  it("a stale minimum change loses to a fresh log row", () => {
+    const out = movement(logRow(), {
+      minimumChange: minimumChange({ createdAt: stale }),
+    });
+    expect(out?.text).toBe(`2 Units used up by Dana Reyes ${WHEN}`);
+  });
+
+  it("a fresh log row newer than the minimum change wins", () => {
+    const out = movement(logRow(), {
+      minimumChange: minimumChange({
+        createdAt: new Date(CREATED_AT.getTime() - 30_000),
+      }),
+    });
+    expect(out?.text).toBe(`2 Units used up by Dana Reyes ${WHEN}`);
+  });
+
+  it("says the minimum was set when there was none before", () => {
+    expect(
+      movement(null, { minimumChange: minimumChange({ from: null }) })?.text
+    ).toBe(`Minimum set to 10 by Sam Ortiz ${WHEN}`);
+  });
+
+  it("drops the 'by' part when the change has no known actor", () => {
+    expect(
+      movement(null, { minimumChange: minimumChange({ by: null }) })?.text
+    ).toBe(`Minimum changed from 3 to 10 ${WHEN}`);
+  });
+
+  it("a stale minimum change falls back to the neutral sentence", () => {
+    expect(
+      movement(null, {
+        minimumChange: minimumChange({ createdAt: stale }),
+        actingUser: SAM,
+      })
+    ).toEqual({ text: "Stock or minimum was changed by Sam Ortiz" });
   });
 });
 

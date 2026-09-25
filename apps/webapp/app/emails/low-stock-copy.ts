@@ -77,6 +77,20 @@ export type StockMovementLog = {
   booking: { id: string; name: string } | null;
 };
 
+/**
+ * The newest change of the asset's minimum, as the notifier reads it from the
+ * `ASSET_MIN_QUANTITY_CHANGED` activity event. A minimum change writes no
+ * `ConsumptionLog` row, so this is the only record of it.
+ */
+export type MinimumChange = {
+  /** The minimum before the change; null when the asset had none. */
+  from: number | null;
+  to: number;
+  createdAt: Date;
+  /** Who changed it, from the event's actor snapshot; null when unknown. */
+  by: UserNameFields | null;
+};
+
 /** The "What happened" sentence. */
 export type StockMovement = {
   text: string;
@@ -331,9 +345,9 @@ function describeOperation(
 }
 
 /**
- * Whether a log row is recent enough to be the change that triggered the mail.
+ * Whether a record is recent enough to be the change that triggered the mail.
  *
- * @param log - The newest `ConsumptionLog` row, or null
+ * @param log - The newest `ConsumptionLog` row or minimum change, or null
  * @param now - The moment the mail is built
  */
 export function isFreshMovement(
@@ -349,15 +363,18 @@ export function isFreshMovement(
 /**
  * Builds the "What happened" sentence.
  *
- * The newest operation in the log explains the change only while it is fresh
- * (see {@link MOVEMENT_FRESHNESS_MS}); {@link pickLatestMovement} decides which
- * rows belong to it. Past that, or with no row at all, the mail falls back to
- * naming whoever made the change. That sentence must stay true for every
- * trigger without a row: a minimum change writes none, so it says "stock or
- * minimum", never "quantity". With neither a row nor an acting user there is
- * nothing true to say, so the row is left out.
+ * Two records can explain the change, each only while it is fresh (see
+ * {@link MOVEMENT_FRESHNESS_MS}): the newest operation in the log, whose rows
+ * {@link pickLatestMovement} picks, and the newest minimum change, which writes
+ * no log row. When both are fresh the newer one wins.
+ *
+ * With neither, the mail falls back to naming whoever made the change. That
+ * sentence must stay true whatever the trigger was, so it says "stock or
+ * minimum", never "quantity". With neither a record nor an acting user there
+ * is nothing true to say, so the row is left out.
  *
  * @param params.logs - The asset's newest `ConsumptionLog` rows, newest first
+ * @param params.minimumChange - The asset's newest minimum change, or null
  * @param params.actingUser - The user whose action triggered the check, or null
  * @param params.prefs - The recipient's resolved format preferences
  * @param params.unitOfMeasure - `Asset.unitOfMeasure`
@@ -366,19 +383,36 @@ export function isFreshMovement(
  */
 export function describeStockMovement({
   logs,
+  minimumChange,
   actingUser,
   prefs,
   unitOfMeasure,
   now = new Date(),
 }: {
   logs: StockMovementLog[];
+  minimumChange: MinimumChange | null;
   actingUser: UserNameFields | null;
   prefs: ResolvedFormatPrefs;
   unitOfMeasure: string | null;
   now?: Date;
 }): StockMovement | null {
   const latest = pickLatestMovement(logs);
-  if (isFreshMovement(latest[0], now)) {
+  const logIsFresh = isFreshMovement(latest[0], now);
+  if (
+    isFreshMovement(minimumChange, now) &&
+    (!logIsFresh ||
+      minimumChange.createdAt.getTime() > latest[0].createdAt.getTime())
+  ) {
+    const by = byName(resolveUserDisplayName(minimumChange.by));
+    const when = onDateAtTime(minimumChange.createdAt, prefs);
+    return {
+      text:
+        minimumChange.from === null
+          ? `Minimum set to ${minimumChange.to}${by}${when}`
+          : `Minimum changed from ${minimumChange.from} to ${minimumChange.to}${by}${when}`,
+    };
+  }
+  if (logIsFresh) {
     return describeOperation(
       mergeByCategory(latest),
       latest[0].createdAt,

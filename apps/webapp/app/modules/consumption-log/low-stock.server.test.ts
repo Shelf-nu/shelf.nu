@@ -75,6 +75,7 @@ vitest.mock("~/database/db.server", () => ({
     consumptionLog: { findMany: vitest.fn() },
     assetLocation: { findMany: vitest.fn() },
     user: { findUnique: vitest.fn() },
+    activityEvent: { findFirst: vitest.fn() },
   },
 }));
 
@@ -100,6 +101,7 @@ const placementsMock = db.assetLocation.findMany as ReturnType<
   typeof vitest.fn
 >;
 const userFindUniqueMock = db.user.findUnique as ReturnType<typeof vitest.fn>;
+const minEventMock = db.activityEvent.findFirst as ReturnType<typeof vitest.fn>;
 
 /**
  * A quantity-tracked asset row as `db.asset.findFirst` returns it inside the
@@ -132,6 +134,7 @@ beforeEach(() => {
   logFindManyMock.mockResolvedValue([]);
   placementsMock.mockResolvedValue([]);
   userFindUniqueMock.mockResolvedValue(null);
+  minEventMock.mockResolvedValue(null);
   lowStockAlertHtmlMock.mockResolvedValue("<html>alert</html>");
   lowStockAlertTextMock.mockReturnValue("alert text");
   lowStockRecoveredHtmlMock.mockResolvedValue("<html>recovered</html>");
@@ -841,6 +844,79 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
     expect(alertRenders()[0].movement).toEqual({
       text: "3 boards used up, 1 boards reported lost and 4 boards returned by Dana Reyes during booking Spring Fair on 09/24/2026 at 8:53 PM",
       href: "/bookings/bk-1",
+    });
+  });
+
+  it("names a minimum change, which writes no log row, as the cause", async () => {
+    // Stock stays at 5; raising the minimum from 3 to 10 tips it into low.
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 5, minQuantity: 10 }));
+    minEventMock.mockResolvedValue({
+      occurredAt: LOGGED_AT,
+      fromValue: 3,
+      toValue: 10,
+      actorSnapshot: { firstName: "Sam", lastName: "Ortiz", displayName: null },
+    });
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(minEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          organizationId: ORG_ID,
+          assetId: ASSET_ID,
+          action: "ASSET_MIN_QUANTITY_CHANGED",
+        },
+      })
+    );
+    expect(alertRenders()[0].movement).toEqual({
+      text: "Minimum changed from 3 to 10 by Sam Ortiz on 09/24/2026 at 8:53 PM",
+    });
+    // The event names who changed it, so the acting user is not loaded.
+    expect(userFindUniqueMock).not.toHaveBeenCalled();
+  });
+
+  it("says the minimum was set when the asset had none", async () => {
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 5, minQuantity: 10 }));
+    minEventMock.mockResolvedValue({
+      occurredAt: LOGGED_AT,
+      fromValue: null,
+      toValue: 10,
+      actorSnapshot: null,
+    });
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(alertRenders()[0].movement).toEqual({
+      text: "Minimum set to 10 on 09/24/2026 at 8:53 PM",
+    });
+  });
+
+  it("falls back to the neutral sentence when the minimum-change read fails", async () => {
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 5, minQuantity: 10 }));
+    minEventMock.mockRejectedValue(new Error("event read failed"));
+    userFindUniqueMock.mockResolvedValue({
+      firstName: "Sam",
+      lastName: "Ortiz",
+      displayName: null,
+    });
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    expect(alertRenders()[0].movement).toEqual({
+      text: "Stock or minimum was changed by Sam Ortiz",
     });
   });
 

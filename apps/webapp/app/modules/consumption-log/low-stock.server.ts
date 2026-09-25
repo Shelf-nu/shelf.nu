@@ -46,6 +46,7 @@
  * @see {@link file://../../emails/low-stock-copy.ts} - email wording
  */
 
+import type { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { StockLevelEmailProps } from "~/emails/components/stock-level-email";
 import { lowStockAlertHtml, lowStockAlertText } from "~/emails/low-stock-alert";
@@ -53,6 +54,7 @@ import {
   describePlacements,
   describeStockMovement,
   isFreshMovement,
+  type MinimumChange,
   lowStockSubject,
   recoveredSubject,
 } from "~/emails/low-stock-copy";
@@ -69,7 +71,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError, type AdditionalData } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { resolveUserGreetingName } from "~/utils/user";
+import { resolveUserGreetingName, type UserNameFields } from "~/utils/user";
 
 /** Which low-stock email to build and send. */
 type LowStockEmailVariant = "alert" | "recovered";
@@ -113,15 +115,65 @@ function optionalRead<T>(
 }
 
 /**
+ * Reads the name fields out of an activity event's actor snapshot, which is
+ * JSON and so untyped at runtime.
+ *
+ * @param snapshot - `ActivityEvent.actorSnapshot`
+ * @returns The actor's name fields, or null when the event has no actor
+ */
+function actorFromSnapshot(
+  snapshot: Prisma.JsonValue | null
+): UserNameFields | null {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    return null;
+  }
+  const text = (value: Prisma.JsonValue | undefined) =>
+    typeof value === "string" ? value : null;
+  return {
+    firstName: text(snapshot.firstName),
+    lastName: text(snapshot.lastName),
+    displayName: text(snapshot.displayName),
+  };
+}
+
+/**
+ * Turns the newest `ASSET_MIN_QUANTITY_CHANGED` event into a
+ * {@link MinimumChange}. `fromValue` and `toValue` are JSON: a number, or null
+ * when the asset had no minimum. An event without a numeric new minimum cannot
+ * have triggered a low-stock check, so it is ignored.
+ *
+ * @param event - The event row, or null when there is none or the read failed
+ */
+function toMinimumChange(
+  event: {
+    occurredAt: Date;
+    fromValue: Prisma.JsonValue | null;
+    toValue: Prisma.JsonValue | null;
+    actorSnapshot: Prisma.JsonValue | null;
+  } | null
+): MinimumChange | null {
+  if (!event || typeof event.toValue !== "number") {
+    return null;
+  }
+  return {
+    from: typeof event.fromValue === "number" ? event.fromValue : null,
+    to: event.toValue,
+    createdAt: event.occurredAt,
+    by: actorFromSnapshot(event.actorSnapshot),
+  };
+}
+
+/**
  * Sends the low-stock alert (or back-in-stock notice) to every OWNER and ADMIN
  * of the organization, rendered once per recipient so each copy greets them,
  * names their address in the footer and prints dates in their format.
  *
  * Besides the organization and the recipients it loads the facts the mail
- * prints: the newest `ConsumptionLog` rows (what happened), the asset's
- * placements (where it is), and how many other items are low. Each of those is
+ * prints: the newest `ConsumptionLog` rows and the newest minimum change (what
+ * happened), the asset's placements (where it is), and how many other items
+ * are low. Each of those is
  * optional: a failed read is logged and the mail goes out without the fact it
- * could not load, never with a guess. When no fresh log row explains the
+ * could not load, never with a guess. When no fresh record explains the
  * change, the acting user is loaded so the mail can still say who made it.
  *
  * Resilient by design:
@@ -163,70 +215,99 @@ async function sendLowStockEmails({
 }): Promise<void> {
   try {
     const ids = { assetId, organizationId };
-    const [org, recipients, logRows, placementRows, otherLowCount] =
-      await Promise.all([
-        db.organization.findUnique({
-          where: { id: organizationId },
-          select: { name: true, customEmailFooter: true },
-        }),
-        getOrganizationAdminsForNotification({ organizationId }),
-        optionalRead(
-          () =>
-            db.consumptionLog.findMany({
-              where: { assetId },
-              // `id` breaks ties between rows written in the same instant.
-              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-              take: MOVEMENT_LOG_ROWS,
-              select: {
-                category: true,
-                quantity: true,
-                note: true,
-                createdAt: true,
-                userId: true,
-                performedBy: { select: USER_NAME_SELECT },
-                custodianId: true,
-                custodian: {
-                  select: { name: true, user: { select: USER_NAME_SELECT } },
-                },
-                booking: { select: { id: true, name: true } },
+    const [
+      org,
+      recipients,
+      logRows,
+      placementRows,
+      otherLowCount,
+      minimumEvent,
+    ] = await Promise.all([
+      db.organization.findUnique({
+        where: { id: organizationId },
+        select: { name: true, customEmailFooter: true },
+      }),
+      getOrganizationAdminsForNotification({ organizationId }),
+      optionalRead(
+        () =>
+          db.consumptionLog.findMany({
+            where: { assetId },
+            // `id` breaks ties between rows written in the same instant.
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            take: MOVEMENT_LOG_ROWS,
+            select: {
+              category: true,
+              quantity: true,
+              note: true,
+              createdAt: true,
+              userId: true,
+              performedBy: { select: USER_NAME_SELECT },
+              custodianId: true,
+              custodian: {
+                select: { name: true, user: { select: USER_NAME_SELECT } },
               },
-            }),
-          "newest consumption log rows",
-          ids
-        ),
-        optionalRead(
-          () =>
-            db.assetLocation.findMany({
-              where: { assetId, organizationId },
-              select: { quantity: true, location: { select: { name: true } } },
-            }),
-          "placements",
-          ids
-        ),
-        optionalRead(
-          () =>
-            db.asset.count({
-              // The `lowStockOnly` list filter the mail links to, so the
-              // count matches what the link shows.
-              where: {
-                organizationId,
-                id: { not: assetId },
-                ...buildLowStockWhere(),
-              },
-            }),
-          "count of other low-stock items",
-          ids
-        ),
-      ]);
+              booking: { select: { id: true, name: true } },
+            },
+          }),
+        "newest consumption log rows",
+        ids
+      ),
+      optionalRead(
+        () =>
+          db.assetLocation.findMany({
+            where: { assetId, organizationId },
+            select: { quantity: true, location: { select: { name: true } } },
+          }),
+        "placements",
+        ids
+      ),
+      optionalRead(
+        () =>
+          db.asset.count({
+            // The `lowStockOnly` list filter the mail links to, so the
+            // count matches what the link shows.
+            where: {
+              organizationId,
+              id: { not: assetId },
+              ...buildLowStockWhere(),
+            },
+          }),
+        "count of other low-stock items",
+        ids
+      ),
+      optionalRead(
+        () =>
+          db.activityEvent.findFirst({
+            // A minimum change writes no log row; this event is its record.
+            where: {
+              organizationId,
+              assetId,
+              action: "ASSET_MIN_QUANTITY_CHANGED",
+            },
+            orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+            select: {
+              occurredAt: true,
+              fromValue: true,
+              toValue: true,
+              actorSnapshot: true,
+            },
+          }),
+        "newest minimum change",
+        ids
+      ),
+    ]);
 
     /**
-     * The acting user names the change only when the log cannot: a minimum
-     * change writes no row, and an old row belongs to an earlier change.
+     * The acting user names the change only when neither the log nor a
+     * minimum change can: an old record belongs to an earlier change.
      */
     const now = new Date();
     const logs = logRows ?? [];
+    const minimumChange = toMinimumChange(minimumEvent);
     const actingUser =
-      userId && !isFreshMovement(logs[0], now)
+      userId &&
+      !isFreshMovement(logs[0], now) &&
+      !isFreshMovement(minimumChange, now)
         ? await optionalRead(
             () =>
               db.user.findUnique({
@@ -264,6 +345,7 @@ async function sendLowStockEmails({
           customEmailFooter: org?.customEmailFooter ?? null,
           movement: describeStockMovement({
             logs,
+            minimumChange,
             actingUser,
             prefs,
             unitOfMeasure,
