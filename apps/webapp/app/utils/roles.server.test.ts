@@ -25,6 +25,8 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { SSO_ASSIGNABLE_ROLES } from "~/utils/permissions/role-access";
+import { SSO_GROUP_ROLE, hasSsoGroupMappings } from "~/utils/sso-group-roles";
 import {
   getRoleFromGroupId,
   requireAnyPermission,
@@ -77,6 +79,31 @@ function makeSso(overrides: Partial<SsoDetails>): SsoDetails {
     ...overrides,
   };
 }
+
+describe("SSO group columns", () => {
+  it("confer exactly the SSO-assignable roles, one column each", () => {
+    expect(Object.values(SSO_GROUP_ROLE).sort()).toEqual(
+      [...SSO_ASSIGNABLE_ROLES].sort()
+    );
+  });
+
+  it("a workspace has group mappings when any column is set", () => {
+    expect(
+      hasSsoGroupMappings({
+        adminGroupId: null,
+        selfServiceGroupId: null,
+        baseUserGroupId: null,
+      })
+    ).toBe(false);
+    expect(
+      hasSsoGroupMappings({
+        adminGroupId: null,
+        selfServiceGroupId: "g",
+        baseUserGroupId: null,
+      })
+    ).toBe(true);
+  });
+});
 
 describe("getRoleFromGroupId", () => {
   it("matches an exact single admin group", () => {

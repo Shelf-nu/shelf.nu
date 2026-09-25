@@ -16799,9 +16799,9 @@
     "OWNER": {
       "ADMIN": {
         "rolesAfter": [
-          "ADMIN"
+          "OWNER"
         ],
-        "newRole": "ADMIN",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -16809,9 +16809,9 @@
       },
       "SELF_SERVICE": {
         "rolesAfter": [
-          "SELF_SERVICE"
+          "OWNER"
         ],
-        "newRole": "SELF_SERVICE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -16819,9 +16819,9 @@
       },
       "BASE": {
         "rolesAfter": [
-          "BASE"
+          "OWNER"
         ],
-        "newRole": "BASE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -16855,8 +16855,8 @@
         ],
         "newRole": "SELF_SERVICE",
         "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
+          "ownership": true,
+          "bookingsCreatedForOthers": true
         }
       },
       "BASE": {
@@ -16865,8 +16865,8 @@
         ],
         "newRole": "BASE",
         "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
+          "ownership": true,
+          "bookingsCreatedForOthers": true
         }
       },
       "none": {
@@ -16961,9 +16961,10 @@
     "OWNER+ADMIN": {
       "ADMIN": {
         "rolesAfter": [
+          "OWNER",
           "ADMIN"
         ],
-        "newRole": "ADMIN",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -16971,9 +16972,10 @@
       },
       "SELF_SERVICE": {
         "rolesAfter": [
-          "SELF_SERVICE"
+          "OWNER",
+          "ADMIN"
         ],
-        "newRole": "SELF_SERVICE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -16981,9 +16983,10 @@
       },
       "BASE": {
         "rolesAfter": [
-          "BASE"
+          "OWNER",
+          "ADMIN"
         ],
-        "newRole": "BASE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17004,9 +17007,10 @@
     "OWNER+SELF_SERVICE": {
       "ADMIN": {
         "rolesAfter": [
-          "ADMIN"
+          "OWNER",
+          "SELF_SERVICE"
         ],
-        "newRole": "ADMIN",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17014,9 +17018,10 @@
       },
       "SELF_SERVICE": {
         "rolesAfter": [
+          "OWNER",
           "SELF_SERVICE"
         ],
-        "newRole": "SELF_SERVICE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17024,9 +17029,10 @@
       },
       "BASE": {
         "rolesAfter": [
-          "BASE"
+          "OWNER",
+          "SELF_SERVICE"
         ],
-        "newRole": "BASE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17047,9 +17053,10 @@
     "OWNER+BASE": {
       "ADMIN": {
         "rolesAfter": [
-          "ADMIN"
+          "OWNER",
+          "BASE"
         ],
-        "newRole": "ADMIN",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17057,9 +17064,10 @@
       },
       "SELF_SERVICE": {
         "rolesAfter": [
-          "SELF_SERVICE"
+          "OWNER",
+          "BASE"
         ],
-        "newRole": "SELF_SERVICE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17067,9 +17075,10 @@
       },
       "BASE": {
         "rolesAfter": [
+          "OWNER",
           "BASE"
         ],
-        "newRole": "BASE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17090,9 +17099,10 @@
     "ADMIN+OWNER": {
       "ADMIN": {
         "rolesAfter": [
-          "ADMIN"
+          "ADMIN",
+          "OWNER"
         ],
-        "newRole": "ADMIN",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17100,9 +17110,10 @@
       },
       "SELF_SERVICE": {
         "rolesAfter": [
-          "SELF_SERVICE"
+          "ADMIN",
+          "OWNER"
         ],
-        "newRole": "SELF_SERVICE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17110,9 +17121,10 @@
       },
       "BASE": {
         "rolesAfter": [
-          "BASE"
+          "ADMIN",
+          "OWNER"
         ],
-        "newRole": "BASE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17123,7 +17135,7 @@
           "ADMIN",
           "OWNER"
         ],
-        "newRole": "ADMIN",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17147,8 +17159,8 @@
         ],
         "newRole": "SELF_SERVICE",
         "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
+          "ownership": true,
+          "bookingsCreatedForOthers": true
         }
       },
       "BASE": {
@@ -17157,8 +17169,8 @@
         ],
         "newRole": "BASE",
         "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
+          "ownership": true,
+          "bookingsCreatedForOthers": true
         }
       },
       "none": {
@@ -17187,8 +17199,8 @@
         ],
         "newRole": "SELF_SERVICE",
         "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
+          "ownership": true,
+          "bookingsCreatedForOthers": true
         }
       },
       "BASE": {
@@ -17197,8 +17209,8 @@
         ],
         "newRole": "BASE",
         "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
+          "ownership": true,
+          "bookingsCreatedForOthers": true
         }
       },
       "none": {
@@ -17213,9 +17225,10 @@
     "SELF_SERVICE+OWNER": {
       "ADMIN": {
         "rolesAfter": [
-          "ADMIN"
+          "SELF_SERVICE",
+          "OWNER"
         ],
-        "newRole": "ADMIN",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17223,9 +17236,10 @@
       },
       "SELF_SERVICE": {
         "rolesAfter": [
-          "SELF_SERVICE"
+          "SELF_SERVICE",
+          "OWNER"
         ],
-        "newRole": "SELF_SERVICE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17233,9 +17247,10 @@
       },
       "BASE": {
         "rolesAfter": [
-          "BASE"
+          "SELF_SERVICE",
+          "OWNER"
         ],
-        "newRole": "BASE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17246,7 +17261,7 @@
           "SELF_SERVICE",
           "OWNER"
         ],
-        "newRole": "SELF_SERVICE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17270,8 +17285,8 @@
         ],
         "newRole": "SELF_SERVICE",
         "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
+          "ownership": true,
+          "bookingsCreatedForOthers": true
         }
       },
       "BASE": {
@@ -17280,8 +17295,8 @@
         ],
         "newRole": "BASE",
         "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
+          "ownership": true,
+          "bookingsCreatedForOthers": true
         }
       },
       "none": {
@@ -17336,9 +17351,10 @@
     "BASE+OWNER": {
       "ADMIN": {
         "rolesAfter": [
-          "ADMIN"
+          "BASE",
+          "OWNER"
         ],
-        "newRole": "ADMIN",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17346,9 +17362,10 @@
       },
       "SELF_SERVICE": {
         "rolesAfter": [
-          "SELF_SERVICE"
+          "BASE",
+          "OWNER"
         ],
-        "newRole": "SELF_SERVICE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17356,9 +17373,10 @@
       },
       "BASE": {
         "rolesAfter": [
-          "BASE"
+          "BASE",
+          "OWNER"
         ],
-        "newRole": "BASE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17369,7 +17387,7 @@
           "BASE",
           "OWNER"
         ],
-        "newRole": "BASE",
+        "newRole": "OWNER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -17393,8 +17411,8 @@
         ],
         "newRole": "SELF_SERVICE",
         "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
+          "ownership": true,
+          "bookingsCreatedForOthers": true
         }
       },
       "BASE": {
@@ -17403,8 +17421,8 @@
         ],
         "newRole": "BASE",
         "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
+          "ownership": true,
+          "bookingsCreatedForOthers": true
         }
       },
       "none": {

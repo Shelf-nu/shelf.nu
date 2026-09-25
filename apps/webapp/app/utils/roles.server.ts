@@ -16,11 +16,9 @@ import {
   hasPermission,
   validatePermission,
 } from "./permissions/permission.validator.server";
-import { resolveRoleAccess } from "./permissions/role-access";
-import {
-  ROLE_PRECEDENCE,
-  SSO_ASSIGNABLE_ROLE_PRECEDENCE,
-} from "./role-precedence";
+import { resolveRole, resolveRoleAccess } from "./permissions/role-access";
+import { ROLE_PRECEDENCE } from "./role-precedence";
+import { SSO_GROUP_ROLE, type SsoGroupField } from "./sso-group-roles";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
   try {
@@ -432,7 +430,7 @@ export function assertIsOrganizationOwner({
  * already used by `SsoDetails.domain`, so one role can map to several IdP groups
  * without a schema change.
  *
- * @param field - Raw group-id field (`adminGroupId` | `selfServiceGroupId` | `baseUserGroupId`)
+ * @param field - Raw group-id field (one of `SsoGroupField`)
  * @returns Normalized group ids (possibly empty)
  */
 function parseGroupIds(field: string | null | undefined): string[] {
@@ -481,10 +479,11 @@ function groupClaimMatches(
 
 /**
  * Resolves the Shelf organization role for an SSO user from the SAML `groups`
- * claim, using the group ids mapped on `SsoDetails`. Precedence is
- * ADMIN > SELF_SERVICE > BASE: if the user is in groups for multiple roles, the
- * highest wins. Returns `null` when no configured group matches (the caller then
- * grants no org access → the user lands on `/sso-pending-assignment`).
+ * claim, using the group ids mapped on `SsoDetails`. When the user's groups
+ * match several columns, the highest-rank role wins (`resolveRole`: ADMIN >
+ * SELF_SERVICE > BASE). Returns `null` when no configured group matches (the
+ * caller then grants no org access, and the user lands on
+ * `/sso-pending-assignment`).
  *
  * @param ssoDetails - The org's SSO config (holds the per-role group ids)
  * @param groupIds - The `groups` claim values from the SAML assertion
@@ -494,22 +493,9 @@ export function getRoleFromGroupId(
   ssoDetails: SsoDetails,
   groupIds: string[]
 ): OrganizationRoles | null {
-  // Which SsoDetails field configures the group for each role.
-  const groupField: Record<
-    (typeof SSO_ASSIGNABLE_ROLE_PRECEDENCE)[number],
-    string | null
-  > = {
-    [OrganizationRoles.ADMIN]: ssoDetails.adminGroupId,
-    [OrganizationRoles.SELF_SERVICE]: ssoDetails.selfServiceGroupId,
-    [OrganizationRoles.BASE]: ssoDetails.baseUserGroupId,
-  };
+  const matched = (Object.keys(SSO_GROUP_ROLE) as SsoGroupField[])
+    .filter((field) => groupClaimMatches(ssoDetails[field], groupIds))
+    .map((field) => SSO_GROUP_ROLE[field]);
 
-  // Walk in precedence order so the highest matching role wins. The order is
-  // shared with the booking ownership guard (see role-precedence.ts) rather
-  // than restated here, so the two cannot drift.
-  return (
-    SSO_ASSIGNABLE_ROLE_PRECEDENCE.find((role) =>
-      groupClaimMatches(groupField[role], groupIds)
-    ) ?? null
-  );
+  return matched.length > 0 ? resolveRole(matched) : null;
 }

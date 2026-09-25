@@ -1,7 +1,7 @@
 /**
  * SSO group-claim reconciliation: an SSO login whose group claims no longer map
  * to a role in a workspace revokes access the same way the admin "revoke
- * access" UI does, through `revokeAccessToOrganization`.
+ * access" UI does, through `revokeMembershipInTx`.
  *
  * That means the `TeamMember` is disconnected from the `User`, not just the
  * membership deleted. A linked `TeamMember.user` is what the booking
@@ -12,7 +12,9 @@
  * member") for the downstream half.
  *
  * The workspace owner is the exception: a login never revokes the owner, since
- * that would strand the workspace and lock the owner out on the way in.
+ * that would strand the workspace and lock the owner out on the way in. Who
+ * owns the workspace is read from the membership as persisted under the
+ * transition's lock, so each case sets the persisted roles.
  *
  * @see {@link file://./service.server.ts}
  */
@@ -45,8 +47,9 @@ vi.mock("~/database/db.server", () => {
     },
     userOrganization: {
       findFirst: dbMocks.userOrganizationFindFirst,
-      // The revocation re-reads the membership under its row lock; it answers
-      // from the same mock as the pre-read, so each case sets the roles once.
+      // The transition re-reads the membership under its row lock, and the role
+      // write re-reads it again; both answer from this one mock, so each case
+      // sets the persisted roles once.
       findUnique: dbMocks.userOrganizationFindFirst,
       deleteMany: dbMocks.userOrganizationDeleteMany,
       update: dbMocks.userOrganizationUpdate,
@@ -184,6 +187,7 @@ describe("SSO group-claim revocation", () => {
         previousRoles: ["BASE"],
         newRole: null,
         transitionType: "ACCESS_REVOKED",
+        hasAccess: false,
       },
     ]);
     expect(result.org).toBeNull();
@@ -209,6 +213,8 @@ describe("SSO group-claim revocation", () => {
   });
 
   it("keeps the workspace owner's access", async () => {
+    dbMocks.userOrganizationFindFirst.mockResolvedValue({ roles: ["OWNER"] });
+
     const result = await login(["g-alumni"], ["OWNER"]);
 
     expect(dbMocks.userOrganizationDeleteMany).not.toHaveBeenCalled();
@@ -223,6 +229,7 @@ describe("SSO group-claim revocation", () => {
     // The owner keeps access although no group claim maps, so this workspace
     // is still a valid landing org, and a missing team member is re-created
     // as for any login that keeps access.
+    dbMocks.userOrganizationFindFirst.mockResolvedValue({ roles: ["OWNER"] });
     dbMocks.queryRaw.mockResolvedValue([{ id: "uo-1" }]);
     dbMocks.teamMemberFindFirst.mockResolvedValue(null);
 
@@ -236,9 +243,9 @@ describe("SSO group-claim revocation", () => {
   });
 
   it("keeps access when ownership was transferred to the user mid-login", async () => {
-    // `currentRoles` still says BASE, but the owner guard inside
-    // `revokeAccessToOrganization` sees OWNER and refuses. That refusal must
-    // not fail the owner's login.
+    // `currentRoles` still says BASE, but the row read under the lock holds
+    // OWNER, so the owner is kept and reported as OWNER, and the login does
+    // not fail.
     dbMocks.userOrganizationFindFirst.mockResolvedValue({ roles: ["OWNER"] });
 
     const result = await login(["g-alumni"]);
@@ -246,7 +253,8 @@ describe("SSO group-claim revocation", () => {
     expect(dbMocks.userOrganizationDeleteMany).not.toHaveBeenCalled();
     expect(result.transitions[0]).toMatchObject({
       transitionType: "ROLE_CHANGE",
-      newRole: "BASE",
+      newRole: "OWNER",
+      hasAccess: true,
     });
   });
 

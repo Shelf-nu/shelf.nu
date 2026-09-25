@@ -470,8 +470,8 @@ describe("getBookingNotificationRecipients", () => {
    * Regression: SSO group-claim revocation.
    *
    * When an SSO login drops a workspace's group claim,
-   * `reconcileSsoGroupMembership` revokes access via
-   * `revokeAccessToOrganization`, which disconnects the `TeamMember` from the
+   * `reconcileSsoGroupMembership` revokes access via `revokeMembershipInTx`
+   * (the revocation behind `revokeAccessToOrganization`), which disconnects the `TeamMember` from the
    * `User` and leaves the row behind so custody and booking history keeps a
    * name. `TeamMember.user === null` is therefore the shape a revoked member
    * has here, and it is the ONLY signal this resolver gets — none of the

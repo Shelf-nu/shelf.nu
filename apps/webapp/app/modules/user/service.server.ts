@@ -67,6 +67,7 @@ import {
   rolesWhere,
 } from "~/utils/permissions/role-access";
 import { getRoleFromGroupId } from "~/utils/roles.server";
+import { hasSsoGroupMappings } from "~/utils/sso-group-roles";
 import {
   deleteProfilePicture,
   getPublicFileURL,
@@ -493,11 +494,7 @@ export async function createUserFromSSO(
       const { ssoDetails } = org;
       if (!ssoDetails) continue;
 
-      const hasGroupMappings = !!(
-        ssoDetails.adminGroupId ||
-        ssoDetails.baseUserGroupId ||
-        ssoDetails.selfServiceGroupId
-      );
+      const hasGroupMappings = hasSsoGroupMappings(ssoDetails);
 
       if (hasGroupMappings) {
         const role = getRoleFromGroupId(ssoDetails, groups);
@@ -548,6 +545,8 @@ interface UserOrgTransition {
   previousRoles: OrganizationRoles[];
   newRole: OrganizationRoles | null;
   transitionType: "ROLE_CHANGE" | "ACCESS_REVOKED" | "ACCESS_GRANTED";
+  /** Whether the user still has access to the workspace after the transition. */
+  hasAccess: boolean;
 }
 
 /**
@@ -559,34 +558,42 @@ interface UserOrgTransition {
  * `~/modules/scim/service.server`. Runs on EVERY SSO login, once per workspace
  * on the user's email domain.
  *
- * Revocation delegates to {@link revokeAccessToOrganization}, the same
- * function behind the admin "revoke access" UI and `revokeScimMembership`, so
- * it:
- *   1. disconnects every `TeamMember` linked to the `User` in the workspace
- *      (rows survive, so custody and booking history keep a name),
- *   2. deletes the `UserOrganization`,
- *   3. clears `User.lastSelectedOrganizationId` when it pointed at this org.
+ * Every branch runs in ONE transaction that takes the membership lock
+ * ({@link lockMembership}) first and decides from the row it re-reads under
+ * that lock, never from the login's snapshot (`currentRoles`): the membership
+ * may have been revoked, or ownership transferred to this user, since the
+ * snapshot was read.
  *
- * Step 1 is the load-bearing one. A `TeamMember` with no linked user is how the
- * rest of the codebase recognises revoked access: the booking notification
- * resolver and the `usersOnly` custodian pickers read straight through
- * `TeamMember.user` with no membership check, so a linked row keeps routing
- * this workspace's booking emails and recipient pickers to the user.
+ * - No membership any more: nothing is written; the user has no access.
+ * - The workspace owner (OWNER anywhere in the membership) is never changed by
+ *   a group mapping: the membership is kept as-is, nothing moves, and a warning
+ *   is logged. Removing the owner would strand the workspace, and throwing
+ *   would lock the owner out on the way in; an operator must transfer
+ *   ownership before the IdP can deprovision them.
+ * - No mapped role: access is revoked by {@link revokeMembershipInTx}, the same
+ *   revocation behind the admin "revoke access" UI and SCIM. It deletes the
+ *   membership and disconnects EVERY `TeamMember` linked to the user in the
+ *   workspace (rows survive, so custody and booking history keep a name). The
+ *   disconnect is load-bearing: the booking notification resolver and the
+ *   `usersOnly` custodian pickers read straight through `TeamMember.user` with
+ *   no membership check. `lastSelectedOrganizationId` is cleared after commit.
+ * - A mapped role: the same steps, in the same order, as a manual role change
+ *   (`changeUserRole` with no acting member, then `transferOnRoleChange` with
+ *   the workspace owner as recipient), and a changed effective role is recorded
+ *   in `RoleChangeLog` with `source: SSO` and the member as `changedById`.
  *
- * The workspace OWNER is never revoked here (see the branch below).
- *
- * ERROR SEMANTICS: deliberately fail closed. Any other failure aborts the
- * whole login rather than being logged and skipped per workspace: swallowing it
- * would leave the user signed in holding access this call exists to remove.
- * `revokeAccessToOrganization` performs the disconnect and the membership delete
- * in one transaction, so it cannot half-apply, and its
- * `lastSelectedOrganizationId` cleanup is best-effort internally.
+ * ERROR SEMANTICS: deliberately fail closed. Any failure aborts the whole login
+ * rather than being logged and skipped per workspace: swallowing it would leave
+ * the user signed in holding access this call exists to change. The
+ * transaction cannot half-apply.
  *
  * @param userId - The Shelf user signing in
- * @param organization - The workspace being reconciled
- * @param currentRoles - Roles the user holds in it right now
+ * @param organization - The workspace; `userId` is its owner, the transfer
+ *   recipient
+ * @param currentRoles - Roles the login read for the user in it (reported as
+ *   `previousRoles`; not used for any decision)
  * @param desiredRole - Role the group claims map to, or `null` to revoke
- * @returns Transition details for logging/notification
+ * @returns Transition details, including whether the user keeps access
  */
 async function reconcileSsoGroupMembership(
   userId: string,
@@ -594,96 +601,137 @@ async function reconcileSsoGroupMembership(
   currentRoles: OrganizationRoles[],
   desiredRole: OrganizationRoles | null
 ): Promise<UserOrgTransition> {
-  const transition: UserOrgTransition = {
+  const base = {
     userId,
     organizationId: organization.id,
     previousRoles: currentRoles,
-    newRole: desiredRole,
-    transitionType: desiredRole ? "ROLE_CHANGE" : "ACCESS_REVOKED",
   };
 
   try {
-    if (!desiredRole) {
-      /**
-       * The workspace owner lost their group claims. Removing them would
-       * strand the workspace with no owner and no way back, and this runs
-       * during SSO login, so throwing would lock the owner out of their own
-       * workspace on the way in. Keep the access and make the divergence loud
-       * instead; an operator must transfer ownership before the IdP can
-       * deprovision them.
-       */
-      const keepOwnerAccess = () => {
+    const outcome = await db.$transaction(async (tx) => {
+      const persisted = await lockMembership(tx, {
+        userId,
+        organizationId: organization.id,
+      });
+
+      if (!persisted) {
+        return { kind: "gone" as const };
+      }
+      if (isWorkspaceOwner(persisted.roles)) {
+        return { kind: "owner" as const, roles: persisted.roles };
+      }
+
+      if (!desiredRole) {
+        // Re-takes the lock this transaction already holds, which is a no-op.
+        // No acting member, so the owner-only revoke rule does not apply.
+        await revokeMembershipInTx(tx, {
+          userId,
+          organizationId: organization.id,
+        });
+        return { kind: "revoked" as const, roles: persisted.roles };
+      }
+
+      const previousRole = resolveRole(persisted.roles);
+
+      // Same order as the manual role change: write the role, then move what
+      // the change moves (decided from the roles read under the lock), then
+      // record it.
+      await changeUserRole({
+        userId,
+        organizationId: organization.id,
+        newRole: desiredRole,
+        actorOwnsWorkspace: null,
+        tx,
+      });
+
+      await transferOnRoleChange({
+        tx,
+        targetUserId: userId,
+        organizationId: organization.id,
+        fromRoles: persisted.roles,
+        toRole: desiredRole,
+        recipientId: organization.userId,
+      });
+
+      // The role write also collapses a mixed membership to one role; only a
+      // change of the effective role is recorded.
+      if (previousRole !== desiredRole) {
+        await tx.roleChangeLog.create({
+          data: {
+            userId,
+            // No admin acted: the member's own login applied their IdP groups.
+            changedById: userId,
+            source: "SSO",
+            organizationId: organization.id,
+            previousRole,
+            newRole: desiredRole,
+          },
+        });
+      }
+
+      return { kind: "changed" as const, role: desiredRole };
+    });
+
+    switch (outcome.kind) {
+      case "gone":
+        return {
+          ...base,
+          newRole: null,
+          transitionType: "ACCESS_REVOKED",
+          hasAccess: false,
+        };
+      case "owner":
         Logger.warn({
           message:
-            "SSO group claims would have revoked the workspace owner's access; kept it and skipped the revocation",
-          additionalData: { userId, organizationId: organization.id },
-        });
-
-        transition.transitionType = "ROLE_CHANGE";
-        transition.newRole = currentRoles[0];
-
-        return transition;
-      };
-
-      if (currentRoles.includes(OrganizationRoles.OWNER)) {
-        return keepOwnerAccess();
-      }
-
-      try {
-        await revokeAccessToOrganization({
-          userId,
-          organizationId: organization.id,
-        });
-      } catch (cause) {
-        // The only 400 `revokeAccessToOrganization` raises is its owner guard:
-        // ownership was transferred to this user after `currentRoles` was read.
-        if (isLikeShelfError(cause) && cause.status === 400) {
-          return keepOwnerAccess();
-        }
-
-        throw cause;
-      }
-
-      transition.transitionType = "ACCESS_REVOKED";
-
-      Logger.info({
-        message: "Revoked user access due to SSO group claim changes",
-        additionalData: {
-          userId,
-          organizationId: organization.id,
-          previousRoles: currentRoles,
-        },
-      });
-    } else {
-      // Update to SCIM-based role
-      await db.userOrganization.update({
-        where: {
-          userId_organizationId: {
+            "SSO group claims would have changed the workspace owner's membership; kept it unchanged",
+          additionalData: {
             userId,
             organizationId: organization.id,
+            desiredRole,
           },
-        },
-        data: {
-          roles: {
-            set: [desiredRole],
-          },
-        },
-      });
-
-      transition.transitionType = "ROLE_CHANGE";
-
-      Logger.info({
-        message: "Updated user role based on SSO group claims",
-        additionalData: {
+        });
+        return {
+          ...base,
+          newRole: resolveRole(outcome.roles),
+          transitionType: "ROLE_CHANGE",
+          hasAccess: true,
+        };
+      case "revoked":
+        await clearLastSelectedOrganization({
           userId,
           organizationId: organization.id,
-          previousRoles: currentRoles,
-          newRole: desiredRole,
-        },
-      });
+        });
+        Logger.info({
+          message: "Revoked user access due to SSO group claim changes",
+          additionalData: {
+            userId,
+            organizationId: organization.id,
+            previousRoles: outcome.roles,
+          },
+        });
+        return {
+          ...base,
+          newRole: null,
+          transitionType: "ACCESS_REVOKED",
+          hasAccess: false,
+        };
+      case "changed":
+        Logger.info({
+          message: "Updated user role based on SSO group claims",
+          additionalData: {
+            userId,
+            organizationId: organization.id,
+            previousRoles: currentRoles,
+            newRole: outcome.role,
+          },
+        });
+        return {
+          ...base,
+          newRole: outcome.role,
+          transitionType: "ROLE_CHANGE",
+          hasAccess: true,
+        };
     }
-
-    return transition;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -798,11 +846,7 @@ export async function updateUserFromSSO(
       const { ssoDetails } = org;
       if (!ssoDetails) continue;
 
-      const hasGroupMappings = !!(
-        ssoDetails.adminGroupId ||
-        ssoDetails.baseUserGroupId ||
-        ssoDetails.selfServiceGroupId
-      );
+      const hasGroupMappings = hasSsoGroupMappings(ssoDetails);
 
       if (hasGroupMappings) {
         const desiredRole = getRoleFromGroupId(ssoDetails, groups);
@@ -819,14 +863,11 @@ export async function updateUserFromSSO(
           );
           transitions.push(transition);
 
-          // Access survives unless the transition revoked it. A workspace
-          // owner keeps access even when no group claim maps to a role.
-          const keptAccess = transition.transitionType !== "ACCESS_REVOKED";
-
-          // Repair an account whose team-member record never got written.
-          // Only while access is kept: a revoked transition is removing this
-          // user's access rather than restoring it.
-          if (keptAccess) {
+          // Repair an account whose team-member record never got written,
+          // only while the user keeps access: a revoked transition is removing
+          // this user's access rather than restoring it. A workspace owner
+          // keeps access even when no group claim maps to a role.
+          if (transition.hasAccess) {
             await db.$transaction(async (tx) => {
               // `TeamMember` has no uniqueness on (userId, organizationId), so
               // two logins arriving together would both find nothing and both
@@ -839,11 +880,10 @@ export async function updateUserFromSSO(
                 FOR UPDATE
               `;
 
-              // The membership was read before the transition ran and can be
-              // gone by the time the lock resolves — a concurrent callback
-              // whose group claims revoke access deletes the row. Creating the
-              // record anyway would leave a custodian attached to a workspace
-              // its user is no longer in.
+              // The transition committed before this transaction opened, so a
+              // concurrent callback whose group claims revoke access can delete
+              // the row in between. Creating the record anyway would leave a
+              // custodian attached to a workspace its user is no longer in.
               if (!membership || membership.length === 0) {
                 return;
               }
@@ -856,8 +896,9 @@ export async function updateUserFromSSO(
             });
           }
 
-          // A revoked org must not become the post-login landing org.
-          if (keptAccess) {
+          // The org is a landing org whenever the user keeps access,
+          // including an owner whose groups no longer map to a role.
+          if (transition.hasAccess) {
             firstMatchedOrg ??= org;
           }
         } else if (desiredRole && !(await isScimDeactivated(user.id, org.id))) {
@@ -884,6 +925,7 @@ export async function updateUserFromSSO(
             previousRoles: [],
             newRole: desiredRole,
             transitionType: "ACCESS_GRANTED",
+            hasAccess: true,
           });
 
           // Access was just granted, so this org is a valid landing org.
@@ -1997,13 +2039,16 @@ export async function revokeAccessToOrganization({
  *   an owner stepping down to Administrator would keep the bookings they
  *   created for others, so an owner must never reach a role change;
  * - granting a role, or changing a member whose effective role, needs the
- *   workspace owner (`membership.changeRequiresOwner`) when the actor is not
- *   the owner.
+ *   workspace owner (`membership.changeRequiresOwner`) when the actor is a
+ *   member who is not the owner.
  *
  * @param args.userId - The member whose role changes
  * @param args.organizationId - The workspace
  * @param args.newRole - The single role they will hold
- * @param args.actorOwnsWorkspace - `access.ownsWorkspace` of the acting member
+ * @param args.actorOwnsWorkspace - `access.ownsWorkspace` of the acting member,
+ *   or `null` when no member acts: an SSO login applying the member's IdP
+ *   groups, which is not bound by the owner-only rules. Required, so every
+ *   caller states which it is.
  * @param args.tx - The role-change transaction holding the membership lock
  * @returns The updated membership plus the member's previous effective role
  * @throws {ShelfError} 400 when assigning a workspace-owning role, 403 when the
@@ -2020,7 +2065,7 @@ export async function changeUserRole({
   userId: User["id"];
   organizationId: Organization["id"];
   newRole: OrganizationRoles;
-  actorOwnsWorkspace: boolean;
+  actorOwnsWorkspace: boolean | null;
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
   try {
@@ -2065,7 +2110,10 @@ export async function changeUserRole({
       });
     }
 
-    if (!canAssignRole({ actorOwnsWorkspace, role: newRole })) {
+    if (
+      actorOwnsWorkspace !== null &&
+      !canAssignRole({ actorOwnsWorkspace, role: newRole })
+    ) {
       throw new ShelfError({
         cause: null,
         title: "Insufficient permissions",
@@ -2076,7 +2124,7 @@ export async function changeUserRole({
       });
     }
 
-    if (!actorOwnsWorkspace && roleChangeRequiresOwner(currentRole)) {
+    if (actorOwnsWorkspace === false && roleChangeRequiresOwner(currentRole)) {
       throw new ShelfError({
         cause: null,
         title: "Insufficient permissions",

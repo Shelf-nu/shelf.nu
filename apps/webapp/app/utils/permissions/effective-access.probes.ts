@@ -33,7 +33,6 @@ import {
   canScanAddBookingItems,
   mayRemoveBookingItems,
 } from "~/utils/bookings";
-import { SSO_ASSIGNABLE_ROLE_PRECEDENCE } from "~/utils/role-precedence";
 import { isOrganizationOwner } from "~/utils/roles.server";
 import type { AdminArea } from "./admin-areas";
 import { canSeeAdminArea } from "./admin-areas";
@@ -50,6 +49,7 @@ import {
   ROLE_LABELS,
   ROLE_POLICIES,
   ROLES_BY_RANK,
+  SSO_ASSIGNABLE_ROLES,
   canManageBookingItems,
   canPartialCheckInOut,
   isExplicitScanRequired,
@@ -198,7 +198,7 @@ const BOOKING_TOGGLES = TOGGLE_COMBOS.filter(
   (t) => !t.selfServiceCanSeeCustody && !t.baseUserCanSeeCustody
 );
 
-/** A role change moves nothing: what every SSO transition does today. */
+/** Nothing moves: an SSO transition that revokes, or keeps an owner as-is. */
 const NO_TRANSFER = { ownership: false, bookingsCreatedForOthers: false };
 
 /** How a route answered: allowed, or the first check that refused. */
@@ -402,7 +402,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
       ];
     })
   );
-  snapshot["D-05:ssoAssignable"] = SSO_ASSIGNABLE_ROLE_PRECEDENCE;
+  snapshot["D-05:ssoAssignable"] = SSO_ASSIGNABLE_ROLES;
   // The invitable list is recorded sorted, and the labels in a fixed key order,
   // so the recorded values do not depend on the policy table's rank order.
   snapshot["D-04:invitable"] = [...INVITABLE_ROLES].sort();
@@ -1429,29 +1429,28 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   );
 
   // B9:D-05 (+F6, F12): SSO group-claim transition, `reconcileSsoGroupMembership`
-  // (modules/user/service.server.ts:577-686; the function the plan's brief
-  // called `handleSCIMTransition` was renamed before this task ran). A
-  // membership with no mapped group keeps the row when it holds OWNER
-  // (:601-616, `keepOwnerAccess`, which reports `newRole: currentRoles[0]`) and
-  // otherwise deletes it via `revokeAccessToOrganization` (:619, :1710-1835),
-  // which independently refuses to remove an OWNER-holding row (:1731-1742).
-  // Any mapped group overwrites `roles` with `userOrganization.update`
-  // (:643-657) and transfers nothing.
+  // (modules/user/service.server.ts), deciding from the membership read under
+  // its lock. A membership holding OWNER is kept as-is whatever the groups map
+  // to, reporting its effective role (F12). Otherwise no mapped group revokes
+  // (`revokeMembershipInTx`), and a mapped group sets the single role
+  // (`changeUserRole`) and moves what `transferOnRoleChange` moves for a manual
+  // change from the effective role (F6, B9).
   snapshot["B9:D-05:sso-transition"] = perRoleSet((current) =>
     perCase(["ADMIN", "SELF_SERVICE", "BASE", "none"] as const, (desired) => {
+      if (isWorkspaceOwner(current)) {
+        return {
+          rolesAfter: current,
+          newRole: resolveRole(current),
+          transfers: NO_TRANSFER,
+        };
+      }
       if (desired === "none") {
-        return current.includes(R.OWNER)
-          ? {
-              rolesAfter: current,
-              newRole: current[0] ?? null,
-              transfers: NO_TRANSFER,
-            }
-          : { rolesAfter: null, newRole: null, transfers: NO_TRANSFER };
+        return { rolesAfter: null, newRole: null, transfers: NO_TRANSFER };
       }
       return {
         rolesAfter: [desired],
         newRole: desired,
-        transfers: NO_TRANSFER,
+        transfers: roleChangeTransfers({ fromRoles: current, to: desired }),
       };
     })
   );
