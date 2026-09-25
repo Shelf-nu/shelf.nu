@@ -13853,8 +13853,10 @@ export async function getBookingFlags(
 /**
  * Deletes a selection of bookings in one request.
  *
- * The selection is scoped to the caller's filters and to the bookings they may
- * act on. Roles whose policy limits delete to drafts are refused the whole
+ * The selection is the explicit ids, or with select-all every booking matching
+ * the list's status filter (the only filter select-all carries), and in both
+ * cases only the bookings the caller may act on. Roles whose policy limits
+ * delete to drafts are refused the whole
  * request when the selection contains any non-draft booking, the same rule
  * `assertCanDeleteBooking` applies to a single delete.
  *

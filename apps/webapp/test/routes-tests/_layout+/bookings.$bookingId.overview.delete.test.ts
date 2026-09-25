@@ -154,11 +154,13 @@ describe("booking page delete intent", () => {
   });
 
   it("lets SELF_SERVICE delete its own draft", async () => {
-    await postDelete({
+    const response = await postDelete({
       roles: [OrganizationRoles.SELF_SERVICE],
       status: "DRAFT",
     });
     expect(deleteBookingMock).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/bookings");
   });
 
   it("refuses BASE on someone else's draft", async () => {
@@ -172,12 +174,14 @@ describe("booking page delete intent", () => {
   });
 
   it("lets ADMIN delete someone else's ONGOING booking", async () => {
-    await postDelete({
+    const response = await postDelete({
       roles: [OrganizationRoles.ADMIN],
       status: "ONGOING",
       creatorId: "someone-else",
     });
     expect(deleteBookingMock).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/bookings");
   });
 });
 

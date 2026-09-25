@@ -38,6 +38,7 @@ import * as quantityLock from "~/modules/consumption-log/quantity-lock.server";
 import * as consumptionLogService from "~/modules/consumption-log/service.server";
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
@@ -13921,6 +13922,26 @@ describe("bulkDeleteBookings", () => {
       expect(db.$transaction).not.toHaveBeenCalled();
     }
   );
+
+  it("refuses a SELF_SERVICE select-all whose resolved rows include a non-draft booking", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      row("bk-draft", BookingStatus.DRAFT),
+      row("bk-ongoing", BookingStatus.ONGOING),
+    ]);
+
+    await expect(
+      bulkDeleteBookings({
+        bookingIds: [ALL_SELECTED_KEY],
+        currentSearchParams: "status=ALL",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        hints: mockClientHints,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
 
   it("lets SELF_SERVICE bulk-delete a selection of its own drafts", async () => {
     //@ts-expect-error missing vitest type
