@@ -119,6 +119,7 @@ import {
   rethrowIfClientError,
   throwIfAssetQuantityOverAllocation,
 } from "~/utils/error";
+import { getRandomColor } from "~/utils/get-random-color";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
@@ -153,6 +154,7 @@ import {
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
+import { custodyForRestore } from "./backup-custody";
 import {
   placementsForRestore,
   readLegacyBackupLocation,
@@ -5106,59 +5108,156 @@ export async function createAssetsFromContentImport({
 }
 
 /**
- * Finds a workspace's locations by name for a backup restore, creating the
- * ones that are missing. Names match regardless of case, the same way the
- * database's unique index on location names compares them.
+ * Resolves names from a backup file to records in the workspace, creating the
+ * ones that are missing.
  *
- * @param args.names - Location names from the backup file, repeats allowed.
- * @returns Location ids keyed by lower-cased name.
+ * The restore creates its assets in parallel, so every name is resolved here,
+ * once, before that starts. Resolved per asset, two assets that share a new
+ * name would both miss it and both create it: a duplicate record where the
+ * name has no unique index, a failed restore where it has one.
+ *
+ * @param args.names - Names from the backup file, repeats allowed.
+ * @param args.keyOf - When two names mean the same record. Lower-casing
+ *   matches the `LOWER("name")` unique indexes.
+ * @param args.findExisting - Loads the workspace's records that carry any of
+ *   the given names. When several share a key, the first one is used.
+ * @param args.create - Creates a missing record under the file's first
+ *   spelling of its name.
+ * @returns Record ids keyed by `keyOf(name)`.
  */
-async function findOrCreateLocationsByName({
+async function findOrCreateByName({
   names,
-  details,
-  userId,
-  organizationId,
+  keyOf,
+  findExisting,
+  create,
 }: {
-  names: string[];
-  /** Details to create a missing location with, keyed by lower-cased name. */
-  details: Map<string, BackupLocationDetails>;
-  userId: User["id"];
-  organizationId: Organization["id"];
+  names: Iterable<string>;
+  keyOf: (name: string) => string;
+  findExisting: (names: string[]) => Promise<{ id: string; name: string }[]>;
+  create: (name: string, key: string) => Promise<{ id: string }>;
 }) {
-  /** Lower-cased name -> the first spelling the file uses for it. */
+  /** Key -> the first spelling the file uses for it. */
   const spellings = new Map<string, string>();
   for (const name of names) {
-    const key = name.toLowerCase();
+    const key = keyOf(name);
     if (!spellings.has(key)) spellings.set(key, name);
   }
 
-  const locationIds = new Map<string, Location["id"]>();
-  if (spellings.size === 0) return locationIds;
+  const ids = new Map<string, string>();
+  if (spellings.size === 0) return ids;
 
-  // `in` + insensitive compiles to LOWER(name) IN (LOWER($1), …): an exact
-  // match. `equals` + insensitive would be an ILIKE, where `_` and `%` in a
-  // location name act as wildcards.
-  const existing = await db.location.findMany({
-    where: {
-      organizationId,
-      name: { in: [...spellings.values()], mode: "insensitive" },
-    },
-    select: { id: true, name: true },
-  });
-  for (const location of existing) {
-    locationIds.set(location.name.toLowerCase(), location.id);
+  for (const record of await findExisting([...spellings.values()])) {
+    const key = keyOf(record.name);
+    if (!ids.has(key)) ids.set(key, record.id);
   }
 
   for (const [key, name] of spellings) {
-    if (locationIds.has(key)) continue;
-    const created = await db.location.create({
-      data: { ...details.get(key), name, organizationId, userId },
-      select: { id: true },
-    });
-    locationIds.set(key, created.id);
+    if (ids.has(key)) continue;
+    const created = await create(name, key);
+    ids.set(key, created.id);
   }
 
-  return locationIds;
+  return ids;
+}
+
+const lowerCase = (name: string) => name.toLowerCase();
+
+/** A name the restore can look up: text that is more than whitespace. */
+function readBackupName(value: unknown) {
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+/**
+ * The category a backup row names, if any.
+ *
+ * @returns The category's name and the details a missing one is created with.
+ */
+function readBackupCategory(category: unknown) {
+  if (typeof category !== "object" || category === null) return null;
+  const { name, description, color, createdAt, updatedAt } = category as Record<
+    string,
+    unknown
+  >;
+  const categoryName = readBackupName(name);
+  if (!categoryName) return null;
+  const date = (value: unknown) => {
+    const parsed = new Date(String(value));
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  };
+  return {
+    name: categoryName,
+    description: typeof description === "string" ? description : "",
+    color: typeof color === "string" && color !== "" ? color : getRandomColor(),
+    createdAt: date(createdAt),
+    updatedAt: date(updatedAt),
+  };
+}
+
+/**
+ * The asset model a backup row names, if it can have one. Models are for
+ * individual assets only, so a quantity-tracked row drops its model rather
+ * than failing the restore.
+ */
+function readBackupAssetModelName(asset: CreateAssetFromBackupImportPayload) {
+  if (asset.type === AssetType.QUANTITY_TRACKED) return null;
+  if (typeof asset.assetModel !== "object" || asset.assetModel === null) {
+    return null;
+  }
+  const name = readBackupName((asset.assetModel as { name?: unknown }).name);
+  return name ? name.trim() : null;
+}
+
+/**
+ * Collects the custom field definitions a backup uses, one per name.
+ *
+ * An option field gets every option the backup's copy of it lists, plus any
+ * option an asset holds that the list lacks.
+ *
+ * @returns Definitions keyed by lower-cased name, ready for `upsertCustomField`.
+ */
+function collectBackupCustomFields({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromBackupImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  const definitions = new Map<
+    string,
+    CustomFieldDraftPayload & { options: string[] }
+  >();
+  for (const asset of data) {
+    for (const { value, customField } of asset.customFields ?? []) {
+      const name = readBackupName(customField?.name);
+      if (!name) continue;
+
+      const key = lowerCase(name);
+      let definition = definitions.get(key);
+      if (!definition) {
+        definition = {
+          name,
+          helpText: customField.helpText || null,
+          type: customField.type,
+          required: customField.required,
+          active: customField.active,
+          options: Array.isArray(customField.options)
+            ? [...customField.options]
+            : [],
+          userId,
+          organizationId,
+        };
+        definitions.set(key, definition);
+      }
+
+      const heldOption = value?.valueOption;
+      if (heldOption && !definition.options.includes(heldOption)) {
+        definition.options.push(heldOption);
+      }
+    }
+  }
+  return definitions;
 }
 
 export async function createAssetsFromBackupImport({
@@ -5171,9 +5270,8 @@ export async function createAssetsFromBackupImport({
   organizationId: Organization["id"];
 }) {
   try {
-    // Placements travel by location name. Every name is resolved once, here,
-    // before the assets are created in parallel: resolving per asset would let
-    // two assets that share a new location each create their own copy of it.
+    // Relations travel by name. Every name is resolved once, here, before the
+    // assets are created in parallel: see `findOrCreateByName`.
     const placementsPerRow = data.map((asset) =>
       placementsForRestore({
         type: asset.type,
@@ -5187,16 +5285,135 @@ export async function createAssetsFromBackupImport({
     const legacyLocationDetails = new Map<string, BackupLocationDetails>();
     for (const asset of data) {
       const legacy = readLegacyBackupLocation(asset.location);
-      if (legacy && !legacyLocationDetails.has(legacy.name.toLowerCase())) {
-        legacyLocationDetails.set(legacy.name.toLowerCase(), legacy.details);
+      if (legacy && !legacyLocationDetails.has(lowerCase(legacy.name))) {
+        legacyLocationDetails.set(lowerCase(legacy.name), legacy.details);
       }
     }
-    const locationIds = await findOrCreateLocationsByName({
+    const locationIds = await findOrCreateByName({
       names: placementsPerRow.flat().map((placement) => placement.location),
-      details: legacyLocationDetails,
+      keyOf: lowerCase,
+      // `in` + insensitive compiles to LOWER(name) IN (LOWER($1), …): an
+      // exact match. `equals` + insensitive would be an ILIKE, where `_` and
+      // `%` in a name act as wildcards. The same holds for every lookup below.
+      findExisting: (names) =>
+        db.location.findMany({
+          where: { organizationId, name: { in: names, mode: "insensitive" } },
+          select: { id: true, name: true },
+        }),
+      create: (name, key) =>
+        db.location.create({
+          data: {
+            ...legacyLocationDetails.get(key),
+            name,
+            organizationId,
+            userId,
+          },
+          select: { id: true },
+        }),
+    });
+
+    const categoryPerRow = data.map((asset) =>
+      readBackupCategory(asset.category)
+    );
+    const categoryIds = await findOrCreateByName({
+      names: categoryPerRow.flatMap((category) =>
+        category ? [category.name] : []
+      ),
+      keyOf: lowerCase,
+      findExisting: (names) =>
+        db.category.findMany({
+          where: { organizationId, name: { in: names, mode: "insensitive" } },
+          select: { id: true, name: true },
+        }),
+      create: (name, key) => {
+        const category = categoryPerRow.find(
+          (candidate) => candidate && lowerCase(candidate.name) === key
+        )!;
+        return db.category.create({
+          data: { ...category, name, organizationId, userId },
+          select: { id: true },
+        });
+      },
+    });
+
+    const tagIds = await findOrCreateByName({
+      names: data.flatMap((asset) =>
+        (asset.tags ?? []).flatMap((tag) => readBackupName(tag?.name) ?? [])
+      ),
+      keyOf: lowerCase,
+      findExisting: (names) =>
+        db.tag.findMany({
+          where: { organizationId, name: { in: names, mode: "insensitive" } },
+          select: { id: true, name: true },
+        }),
+      create: (name) =>
+        db.tag.create({
+          data: { name, organizationId, userId },
+          select: { id: true },
+        }),
+    });
+
+    const assetModelNamePerRow = data.map(readBackupAssetModelName);
+    const assetModelIds = await findOrCreateByName({
+      names: assetModelNamePerRow.flatMap((name) => name ?? []),
+      keyOf: lowerCase,
+      // Asset model names have no unique index, so a workspace can hold two
+      // that differ only in case; the oldest one is used.
+      findExisting: (names) =>
+        db.assetModel.findMany({
+          where: { organizationId, name: { in: names, mode: "insensitive" } },
+          orderBy: { createdAt: "asc" },
+          select: { id: true, name: true },
+        }),
+      create: (name) =>
+        db.assetModel.create({
+          data: { name, organizationId, userId },
+          select: { id: true },
+        }),
+    });
+
+    const custodyPerRow = data.map((asset) =>
+      custodyForRestore({ type: asset.type, custody: asset.custody })
+    );
+    const custodians = custodyPerRow.flat().map(({ custodian }) => custodian);
+    const custodianIds = await findOrCreateByName({
+      names: custodians.map((custodian) => custodian.name),
+      // Custodians match by exact name. Team member names have no unique
+      // index, and two people whose names differ only in case stay two.
+      keyOf: (name) => name,
+      findExisting: (names) =>
+        db.teamMember.findMany({
+          where: { organizationId, deletedAt: null, name: { in: names } },
+          orderBy: { createdAt: "asc" },
+          select: { id: true, name: true },
+        }),
+      create: (name) => {
+        const { createdAt, updatedAt } = custodians.find(
+          (custodian) => custodian.name === name
+        )!;
+        return db.teamMember.create({
+          data: { name, organizationId, createdAt, updatedAt },
+          select: { id: true },
+        });
+      },
+    });
+
+    const customFieldDefinitions = collectBackupCustomFields({
+      data,
       userId,
       organizationId,
     });
+    const customFieldIds = new Map<string, string>();
+    if (customFieldDefinitions.size > 0) {
+      // One call for the whole file. It works through the definitions in
+      // order, creating each missing field and adding missing options.
+      const { customFields } = await upsertCustomField([
+        ...customFieldDefinitions.values(),
+      ]);
+      for (const [name, customField] of Object.entries(customFields)) {
+        customFieldIds.set(lowerCase(name), customField.id);
+      }
+    }
 
     //TODO use concurrency control or it will overload the server
     await Promise.all(
@@ -5238,6 +5455,25 @@ export async function createAssetsFromBackupImport({
             ? (asset.consumptionType as ConsumptionType)
             : undefined;
 
+        /** Custody, as operator rows. A custodian named on two rows gets one
+         * row with their units added up: the database allows one operator
+         * row per asset and team member. */
+        const unitsByTeamMemberId = new Map<string, number>();
+        for (const { custodian, quantity } of custodyPerRow[rowIndex]) {
+          const teamMemberId = custodianIds.get(custodian.name)!;
+          unitsByTeamMemberId.set(
+            teamMemberId,
+            (unitsByTeamMemberId.get(teamMemberId) ?? 0) + quantity
+          );
+        }
+        // Kit custody is not restored (see `custodyForRestore`), so an asset
+        // that was in custody only through its kit comes back available.
+        const status =
+          asset.status === AssetStatus.IN_CUSTODY &&
+          unitsByTeamMemberId.size === 0
+            ? AssetStatus.AVAILABLE
+            : asset.status;
+
         /** Base data from asset */
         const d = {
           data: {
@@ -5247,7 +5483,7 @@ export async function createAssetsFromBackupImport({
             mainImageExpiration: threeDaysFromNow(),
             userId,
             organizationId,
-            status: asset.status,
+            status,
             createdAt: new Date(asset.createdAt),
             updatedAt: new Date(asset.updatedAt),
             qrCodes: {
@@ -5274,76 +5510,18 @@ export async function createAssetsFromBackupImport({
           },
         };
 
-        /** AssetModel by name — mirrors the category block below.
-         * Skip linkage entirely when the row is QUANTITY_TRACKED:
-         * models are INDIVIDUAL-only by design. Importing a backup that
-         * predates this rule should not block (we just drop the model
-         * connect) — the user can clean up the export upstream or
-         * re-import the model link manually after fixing the type. */
-        if (
-          asset.assetModel &&
-          typeof asset.assetModel === "object" &&
-          (asset.assetModel as any).name &&
-          backupType !== AssetType.QUANTITY_TRACKED
-        ) {
-          const modelPayload = asset.assetModel as { name: string };
-          const existingModel = await db.assetModel.findFirst({
-            where: {
-              organizationId,
-              name: {
-                equals: modelPayload.name.trim(),
-                mode: "insensitive",
-              },
-            },
+        const assetModelName = assetModelNamePerRow[rowIndex];
+        if (assetModelName) {
+          Object.assign(d.data, {
+            assetModelId: assetModelIds.get(lowerCase(assetModelName)),
           });
-          if (existingModel) {
-            Object.assign(d.data, { assetModelId: existingModel.id });
-          } else {
-            const newModel = await db.assetModel.create({
-              data: {
-                name: modelPayload.name.trim(),
-                createdBy: { connect: { id: userId } },
-                organization: { connect: { id: organizationId } },
-              },
-            });
-            Object.assign(d.data, { assetModelId: newModel.id });
-          }
         }
 
-        /** Category */
-        if (asset.category && Object.keys(asset?.category).length > 0) {
-          const category = asset.category as Category;
-
-          const existingCat = await db.category.findFirst({
-            where: {
-              organizationId,
-              name: category.name,
-            },
+        const category = categoryPerRow[rowIndex];
+        if (category) {
+          Object.assign(d.data, {
+            categoryId: categoryIds.get(lowerCase(category.name)),
           });
-
-          /** If it doesn't exist, create a new one */
-          if (!existingCat) {
-            const newCat = await db.category.create({
-              data: {
-                organizationId,
-                name: category.name,
-                description: category.description || "",
-                color: category.color,
-                userId,
-                createdAt: new Date(category.createdAt),
-                updatedAt: new Date(category.updatedAt),
-              },
-            });
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              categoryId: newCat.id,
-            });
-          } else {
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              categoryId: existingCat.id,
-            });
-          }
         }
 
         /** Placements. They are created with the asset, in one write, so the
@@ -5352,7 +5530,7 @@ export async function createAssetsFromBackupImport({
          * location, so their units are added up. */
         const unitsByLocationId = new Map<string, number>();
         for (const { location, quantity } of placementsPerRow[rowIndex]) {
-          const locationId = locationIds.get(location.toLowerCase())!;
+          const locationId = locationIds.get(lowerCase(location))!;
           unitsByLocationId.set(
             locationId,
             (unitsByLocationId.get(locationId) ?? 0) + quantity
@@ -5368,114 +5546,40 @@ export async function createAssetsFromBackupImport({
           Object.assign(d.data, { assetLocations: { create: placements } });
         }
 
-        /** Custody */
-        if (asset.custody && Object.keys(asset?.custody).length > 0) {
-          const { custodian } = asset.custody;
-
-          const existingCustodian = await db.teamMember.findFirst({
-            where: {
-              deletedAt: null,
-              organizationId,
-              name: custodian.name,
-            },
-          });
-
-          if (!existingCustodian) {
-            const newCustodian = await db.teamMember.create({
-              data: {
-                name: custodian.name,
-                organizationId,
-                createdAt: new Date(custodian.createdAt),
-                updatedAt: new Date(custodian.updatedAt),
-              },
-            });
-
-            Object.assign(d.data, {
-              custody: {
-                create: [{ teamMemberId: newCustodian.id }],
-              },
-            });
-          } else {
-            Object.assign(d.data, {
-              custody: {
-                create: [{ teamMemberId: existingCustodian.id }],
-              },
-            });
-          }
+        if (unitsByTeamMemberId.size > 0) {
+          const custody: Prisma.CustodyUncheckedCreateWithoutAssetInput[] = [
+            ...unitsByTeamMemberId,
+          ].map(([teamMemberId, quantity]) => ({ teamMemberId, quantity }));
+          Object.assign(d.data, { custody: { create: custody } });
         }
 
         /** Tags */
-        if (asset.tags && asset.tags.length > 0) {
-          const tagsNames = asset.tags.map((t) => t.name);
-          // now we loop through the categories and check if they exist
-          const tags: Record<string, string> = {};
-          for (const tag of tagsNames) {
-            const existingTag = await db.tag.findFirst({
-              where: {
-                name: tag,
-                organizationId,
-              },
-            });
-
-            if (!existingTag) {
-              // if the tag doesn't exist, we create a new one
-              const newTag = await db.tag.create({
-                data: {
-                  name: tag as string,
-                  user: {
-                    connect: {
-                      id: userId,
-                    },
-                  },
-                  organization: {
-                    connect: {
-                      id: organizationId,
-                    },
-                  },
-                },
-              });
-              tags[tag] = newTag.id;
-            } else {
-              // if the tag exists, we just update the id
-              tags[tag] = existingTag.id;
-            }
-          }
-
+        const tagIdsOfAsset = new Set(
+          (asset.tags ?? []).flatMap((tag) => {
+            const name = readBackupName(tag?.name);
+            return name ? [tagIds.get(lowerCase(name))!] : [];
+          })
+        );
+        if (tagIdsOfAsset.size > 0) {
           Object.assign(d.data, {
-            tags:
-              asset.tags.length > 0
-                ? {
-                    connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
-                  }
-                : undefined,
+            tags: {
+              connect: [...tagIdsOfAsset].map((tagId) => ({ id: tagId })),
+            },
           });
         }
 
         /** Custom fields */
-        if (asset.customFields && asset.customFields.length > 0) {
-          const customFieldDef = asset.customFields.reduce(
-            (res, { value, customField }) => {
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              const { id, createdAt, updatedAt, ...rest } = customField;
-              const options = value?.valueOption?.length
-                ? [value?.valueOption]
-                : undefined;
-              res.push({ ...rest, options, userId, organizationId });
-              return res;
-            },
-            [] as Array<CustomFieldDraftPayload>
-          );
-
-          const cfIds = await upsertCustomField(customFieldDef);
-
+        const customFieldValues = (asset.customFields ?? []).flatMap(
+          ({ value, customField }) => {
+            const name = readBackupName(customField?.name);
+            return name
+              ? [{ value, customFieldId: customFieldIds.get(lowerCase(name))! }]
+              : [];
+          }
+        );
+        if (customFieldValues.length > 0) {
           Object.assign(d.data, {
-            customFields: {
-              create: asset.customFields.map((cf) => ({
-                value: cf.value,
-                // @ts-ignore
-                customFieldId: cfIds[cf.customField.name].id,
-              })),
-            },
+            customFields: { create: customFieldValues },
           });
         }
 

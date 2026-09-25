@@ -1,10 +1,12 @@
 /**
- * @file Tests how `createAssetsFromBackupImport` restores placements.
+ * @file Tests how `createAssetsFromBackupImport` restores placements, custody
+ * and the records assets point at by name.
  *
- * The restore creates its assets in parallel. Locations are therefore resolved
- * by name once, before the assets: resolving per asset would let two assets
- * that share a new location each try to create it. These tests pin that, and
- * the placements each asset is created with.
+ * The restore creates its assets in parallel. Every name (location, category,
+ * tag, asset model, custodian, custom field) is therefore resolved once,
+ * before the assets: resolving per asset would let two assets that share a new
+ * name each try to create it. These tests pin that, and what each asset is
+ * created with.
  *
  * @see {@link file://./service.server.ts} `createAssetsFromBackupImport`
  */
@@ -12,6 +14,16 @@ import { beforeEach, describe, expect, it, vitest } from "vitest";
 
 const locationFindMany = vitest.fn();
 const locationCreate = vitest.fn();
+const categoryFindMany = vitest.fn();
+const categoryCreate = vitest.fn();
+const tagFindMany = vitest.fn();
+const tagCreate = vitest.fn();
+const assetModelFindMany = vitest.fn();
+const assetModelCreate = vitest.fn();
+const teamMemberFindMany = vitest.fn();
+const teamMemberCreate = vitest.fn();
+const customFieldFindFirst = vitest.fn();
+const customFieldCreate = vitest.fn();
 const assetCreate = vitest.fn();
 
 // why: the restore's only reads and writes that matter here. The rest of
@@ -19,6 +31,13 @@ const assetCreate = vitest.fn();
 vitest.mock("~/database/db.server", () => ({
   db: {
     location: { findMany: locationFindMany, create: locationCreate },
+    category: { findMany: categoryFindMany, create: categoryCreate },
+    tag: { findMany: tagFindMany, create: tagCreate },
+    assetModel: { findMany: assetModelFindMany, create: assetModelCreate },
+    teamMember: { findMany: teamMemberFindMany, create: teamMemberCreate },
+    customField: { findFirst: customFieldFindFirst, create: customFieldCreate },
+    // A new custom field is added to each saved index view; there are none.
+    assetIndexSettings: { findMany: vitest.fn().mockResolvedValue([]) },
     asset: { create: assetCreate },
   },
 }));
@@ -58,6 +77,108 @@ function restore(data: Record<string, unknown>[]) {
   });
 }
 
+/** Every lookup finds nothing, and every create returns `new-<name>`. */
+function resetDb() {
+  vitest.clearAllMocks();
+  const createdByName = ({ data }: { data: { name: string } }) =>
+    Promise.resolve({ id: `new-${data.name}` });
+  for (const findMany of [
+    locationFindMany,
+    categoryFindMany,
+    tagFindMany,
+    assetModelFindMany,
+    teamMemberFindMany,
+  ]) {
+    findMany.mockResolvedValue([]);
+  }
+  for (const create of [
+    locationCreate,
+    categoryCreate,
+    tagCreate,
+    assetModelCreate,
+    teamMemberCreate,
+  ]) {
+    create.mockImplementation(createdByName);
+  }
+  customFieldFindFirst.mockResolvedValue(null);
+  customFieldCreate.mockImplementation(({ data }) =>
+    Promise.resolve({ ...data, id: `new-${data.name}` })
+  );
+  assetCreate.mockImplementation(({ data }) =>
+    Promise.resolve({ id: `asset-${data.title}` })
+  );
+}
+
+/** The data each `db.asset.create` call received, by title. */
+function assetDataByTitle() {
+  const calls = assetCreate.mock.calls as [
+    { data: Record<string, unknown> & { title: string } },
+  ][];
+  return Object.fromEntries(calls.map(([{ data }]) => [data.title, data]));
+}
+
+/** A Custody row as the backup export writes it. */
+function custodyRow({
+  name,
+  quantity = 1,
+  kitCustodyId = "",
+}: {
+  name: string;
+  quantity?: number;
+  kitCustodyId?: string;
+}) {
+  return {
+    id: `custody-${name}`,
+    teamMemberId: `source-${name}`,
+    assetId: "source-id",
+    kitCustodyId,
+    quantity,
+    createdAt: "2026-09-01T10:00:00.000Z",
+    updatedAt: "2026-09-01T10:00:00.000Z",
+    custodian: {
+      id: `source-${name}`,
+      name,
+      organizationId: "source-org",
+      userId: "",
+      createdAt: "2026-08-01T10:00:00.000Z",
+      updatedAt: "2026-08-02T10:00:00.000Z",
+      deletedAt: "",
+    },
+  };
+}
+
+/** A custom field value as the backup export writes it. */
+function customFieldValue({
+  name,
+  type = "TEXT",
+  options = [],
+  value,
+}: {
+  name: string;
+  type?: string;
+  options?: string[];
+  value: Record<string, unknown>;
+}) {
+  return {
+    id: `value-${name}`,
+    value,
+    customField: {
+      id: `source-${name}`,
+      name,
+      helpText: "",
+      required: false,
+      active: true,
+      type,
+      options,
+      organizationId: "source-org",
+      userId: "source-user",
+      createdAt: "2026-08-01T10:00:00.000Z",
+      updatedAt: "2026-08-01T10:00:00.000Z",
+      deletedAt: "",
+    },
+  };
+}
+
 /** One placement row as the restore nests it under `db.asset.create`. */
 type PlacementCreate = {
   locationId: string;
@@ -78,16 +199,7 @@ function placementsByTitle() {
 }
 
 describe("createAssetsFromBackupImport placements", () => {
-  beforeEach(() => {
-    vitest.clearAllMocks();
-    locationFindMany.mockResolvedValue([]);
-    locationCreate.mockImplementation(({ data }) =>
-      Promise.resolve({ id: `new-${data.name}` })
-    );
-    assetCreate.mockImplementation(({ data }) =>
-      Promise.resolve({ id: `asset-${data.title}` })
-    );
-  });
+  beforeEach(resetDb);
 
   it("recreates a pool's placements and an individual asset's placement", async () => {
     await restore([
@@ -214,5 +326,291 @@ describe("createAssetsFromBackupImport placements", () => {
     expect(locationFindMany).not.toHaveBeenCalled();
     expect(locationCreate).not.toHaveBeenCalled();
     expect(placementsByTitle()).toEqual({ Loose: undefined });
+  });
+});
+
+describe("createAssetsFromBackupImport custody", () => {
+  beforeEach(resetDb);
+
+  it("restores an individual custodian and a pool's custodians with their units, not kit custody", async () => {
+    await restore([
+      row({
+        title: "Tripod",
+        type: "INDIVIDUAL",
+        status: "IN_CUSTODY",
+        custody: [custodyRow({ name: "Ana" })],
+      }),
+      row({
+        title: "Pens",
+        type: "QUANTITY_TRACKED",
+        quantity: "100",
+        status: "IN_CUSTODY",
+        custody: [
+          custodyRow({ name: "Ana", quantity: 30 }),
+          custodyRow({ name: "Ben", quantity: 20 }),
+          custodyRow({ name: "Cleo", quantity: 5, kitCustodyId: "kc-1" }),
+        ],
+      }),
+    ]);
+
+    const assets = assetDataByTitle();
+    expect(assets.Tripod.custody).toEqual({
+      create: [{ teamMemberId: "new-Ana", quantity: 1 }],
+    });
+    expect(assets.Pens.custody).toEqual({
+      create: [
+        { teamMemberId: "new-Ana", quantity: 30 },
+        { teamMemberId: "new-Ben", quantity: 20 },
+      ],
+    });
+    expect(assets.Tripod.status).toBe("IN_CUSTODY");
+    expect(assets.Pens.status).toBe("IN_CUSTODY");
+    // Ana holds both assets and is created once; Cleo held units only
+    // through a kit, which the backup does not carry.
+    expect(teamMemberCreate.mock.calls.map(([{ data }]) => data)).toEqual([
+      {
+        name: "Ana",
+        organizationId: "org-1",
+        createdAt: new Date("2026-08-01T10:00:00.000Z"),
+        updatedAt: new Date("2026-08-02T10:00:00.000Z"),
+      },
+      {
+        name: "Ben",
+        organizationId: "org-1",
+        createdAt: new Date("2026-08-01T10:00:00.000Z"),
+        updatedAt: new Date("2026-08-02T10:00:00.000Z"),
+      },
+    ]);
+  });
+
+  it("adds up a pool's units for two custody rows that name the same custodian", async () => {
+    await restore([
+      row({
+        title: "Pens",
+        type: "QUANTITY_TRACKED",
+        quantity: "100",
+        custody: [
+          custodyRow({ name: "Ana", quantity: 30 }),
+          custodyRow({ name: "Ana", quantity: 10 }),
+        ],
+      }),
+    ]);
+
+    expect(assetDataByTitle().Pens.custody).toEqual({
+      create: [{ teamMemberId: "new-Ana", quantity: 40 }],
+    });
+  });
+
+  it("restores an asset held only through its kit as available, without custody", async () => {
+    await restore([
+      row({
+        title: "Camera",
+        type: "INDIVIDUAL",
+        status: "IN_CUSTODY",
+        custody: [custodyRow({ name: "Cleo", kitCustodyId: "kc-1" })],
+      }),
+    ]);
+
+    const { Camera } = assetDataByTitle();
+    expect(Camera.status).toBe("AVAILABLE");
+    expect(Camera.custody).toBeUndefined();
+    expect(teamMemberFindMany).not.toHaveBeenCalled();
+    expect(teamMemberCreate).not.toHaveBeenCalled();
+  });
+
+  it("restores a backup's single custody object as one custody row", async () => {
+    const {
+      kitCustodyId: _kitCustodyId,
+      quantity: _quantity,
+      ...legacy
+    } = custodyRow({ name: "Ana" });
+
+    await restore([
+      row({ title: "Tripod", status: "IN_CUSTODY", custody: legacy }),
+    ]);
+
+    expect(assetDataByTitle().Tripod.custody).toEqual({
+      create: [{ teamMemberId: "new-Ana", quantity: 1 }],
+    });
+  });
+
+  it("uses the workspace's team member with exactly that name", async () => {
+    teamMemberFindMany.mockResolvedValue([{ id: "tm-ana", name: "Ana" }]);
+
+    await restore([
+      row({ title: "Tripod", custody: [custodyRow({ name: "Ana" })] }),
+    ]);
+
+    expect(teamMemberFindMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        deletedAt: null,
+        name: { in: ["Ana"] },
+      },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true },
+    });
+    expect(teamMemberCreate).not.toHaveBeenCalled();
+    expect(assetDataByTitle().Tripod.custody).toEqual({
+      create: [{ teamMemberId: "tm-ana", quantity: 1 }],
+    });
+  });
+});
+
+describe("createAssetsFromBackupImport names shared by several assets", () => {
+  beforeEach(resetDb);
+
+  /** An asset row naming the same new category, tag, model, custodian and
+   * custom field, each name spelled the way `spelling` returns it. */
+  const mic = (title: string, spelling: (name: string) => string) =>
+    row({
+      title,
+      type: "INDIVIDUAL",
+      status: "IN_CUSTODY",
+      category: {
+        id: "source-category",
+        name: spelling("Audio"),
+        description: "Microphones and mixers",
+        color: "#ab47bc",
+        createdAt: "2026-07-01T10:00:00.000Z",
+        updatedAt: "2026-07-02T10:00:00.000Z",
+      },
+      tags: [{ id: "source-tag", name: spelling("Live") }],
+      assetModel: { name: spelling("SM58") },
+      custody: [custodyRow({ name: "Ana" })],
+      customFields: [
+        customFieldValue({
+          name: spelling("Serial"),
+          value: { raw: title, valueText: title },
+        }),
+      ],
+    });
+
+  it("creates each new name once and points every asset at it", async () => {
+    await restore([
+      mic("Mic 1", (name) => name),
+      mic("Mic 2", (name) => name),
+      mic("Mic 3", (name) => name.toLowerCase()),
+    ]);
+
+    expect(categoryCreate).toHaveBeenCalledTimes(1);
+    expect(categoryCreate).toHaveBeenCalledWith({
+      data: {
+        name: "Audio",
+        description: "Microphones and mixers",
+        color: "#ab47bc",
+        createdAt: new Date("2026-07-01T10:00:00.000Z"),
+        updatedAt: new Date("2026-07-02T10:00:00.000Z"),
+        organizationId: "org-1",
+        userId: "user-1",
+      },
+      select: { id: true },
+    });
+    expect(tagCreate).toHaveBeenCalledTimes(1);
+    expect(assetModelCreate).toHaveBeenCalledTimes(1);
+    expect(teamMemberCreate).toHaveBeenCalledTimes(1);
+    expect(customFieldCreate).toHaveBeenCalledTimes(1);
+
+    const assets = assetDataByTitle();
+    for (const title of ["Mic 1", "Mic 2", "Mic 3"]) {
+      expect(assets[title]).toMatchObject({
+        categoryId: "new-Audio",
+        tags: { connect: [{ id: "new-Live" }] },
+        assetModelId: "new-SM58",
+        custody: { create: [{ teamMemberId: "new-Ana", quantity: 1 }] },
+        customFields: {
+          create: [
+            {
+              value: { raw: title, valueText: title },
+              customFieldId: "new-Serial",
+            },
+          ],
+        },
+      });
+    }
+  });
+
+  it("uses the workspace's records whose names match regardless of case", async () => {
+    categoryFindMany.mockResolvedValue([{ id: "cat-audio", name: "AUDIO" }]);
+    tagFindMany.mockResolvedValue([{ id: "tag-live", name: "live" }]);
+    assetModelFindMany.mockResolvedValue([{ id: "model-sm58", name: "sm58" }]);
+    customFieldFindFirst.mockResolvedValue({
+      id: "cf-serial",
+      name: "SERIAL",
+      type: "TEXT",
+      options: [],
+    });
+
+    await restore([mic("Mic 1", (name) => name)]);
+
+    const exactly = (name: string) => ({ in: [name], mode: "insensitive" });
+    expect(categoryFindMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", name: exactly("Audio") },
+      select: { id: true, name: true },
+    });
+    expect(tagFindMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", name: exactly("Live") },
+      select: { id: true, name: true },
+    });
+    expect(assetModelFindMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", name: exactly("SM58") },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true },
+    });
+    expect(customFieldFindFirst).toHaveBeenCalledWith({
+      where: {
+        name: exactly("Serial"),
+        organizationId: "org-1",
+        deletedAt: null,
+      },
+    });
+    expect(categoryCreate).not.toHaveBeenCalled();
+    expect(tagCreate).not.toHaveBeenCalled();
+    expect(assetModelCreate).not.toHaveBeenCalled();
+    expect(customFieldCreate).not.toHaveBeenCalled();
+    expect(assetDataByTitle()["Mic 1"]).toMatchObject({
+      categoryId: "cat-audio",
+      tags: { connect: [{ id: "tag-live" }] },
+      assetModelId: "model-sm58",
+      customFields: { create: [{ customFieldId: "cf-serial" }] },
+    });
+  });
+
+  it("creates an option field once, with its listed options and every held one", async () => {
+    const color = (title: string, held: string) =>
+      row({
+        title,
+        customFields: [
+          customFieldValue({
+            name: "Color",
+            type: "OPTION",
+            options: ["Red", "Green"],
+            value: { raw: held, valueOption: held },
+          }),
+        ],
+      });
+
+    await restore([color("Cable 1", "Red"), color("Cable 2", "Blue")]);
+
+    expect(customFieldCreate).toHaveBeenCalledTimes(1);
+    expect(customFieldCreate.mock.calls[0][0].data).toMatchObject({
+      name: "Color",
+      type: "OPTION",
+      options: ["Red", "Green", "Blue"],
+    });
+  });
+
+  it("drops the model of a quantity-tracked row and looks no model up", async () => {
+    await restore([
+      row({
+        title: "Batteries",
+        type: "QUANTITY_TRACKED",
+        quantity: "40",
+        assetModel: { name: "AA" },
+      }),
+    ]);
+
+    expect(assetModelFindMany).not.toHaveBeenCalled();
+    expect(assetDataByTitle().Batteries.assetModelId).toBeUndefined();
   });
 });
