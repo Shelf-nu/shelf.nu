@@ -11,6 +11,7 @@ import { Tag } from "~/components/shared/tag";
 import {
   PersonalWorkspaceEscapeLink,
   SelectPlanSubmitButtons,
+  selectPlanTrialCopy,
 } from "~/components/welcome/select-plan-intent";
 import { AUDIT_ADDON, BARCODE_ADDON } from "~/config/addon-copy";
 import { config } from "~/config/shelf.config";
@@ -104,6 +105,10 @@ export default function SelectPlan() {
   // for. Without a Team intent there is no escape link and one trial button.
   const arrivedWithTeamIntent = planIntent?.plan === "team";
   const leadsWithSubscribe = arrivedWithTeamIntent && !planIntent.trial;
+  const trialCopy = selectPlanTrialCopy({
+    planIntent,
+    freeTrialDays: config.freeTrialDays,
+  });
   type BillingInterval = "month" | "year";
 
   const planPrices = useMemo(() => {
@@ -213,9 +218,7 @@ export default function SelectPlan() {
         <h3 className="text-2xl font-semibold text-gray-900">
           Select your payment plan
         </h3>
-        <p className="mt-3 text-base text-gray-600">
-          No credit card or payment required to start your 7-day trial.{" "}
-        </p>
+        <p className="mt-3 text-base text-gray-600">{trialCopy.subheading}</p>
       </div>
 
       <Form
@@ -345,9 +348,11 @@ export default function SelectPlan() {
                           <h4 className="text-base font-semibold text-gray-900">
                             {AUDIT_ADDON.label}
                           </h4>
-                          <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
-                            7-day trial
-                          </Tag>
+                          {trialCopy.addonTrialTag ? (
+                            <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
+                              {trialCopy.addonTrialTag}
+                            </Tag>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -425,9 +430,11 @@ export default function SelectPlan() {
                           <h4 className="text-base font-semibold text-gray-900">
                             {BARCODE_ADDON.label}
                           </h4>
-                          <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
-                            7-day trial
-                          </Tag>
+                          {trialCopy.addonTrialTag ? (
+                            <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
+                              {trialCopy.addonTrialTag}
+                            </Tag>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -488,7 +495,7 @@ export default function SelectPlan() {
             <h3 className="mb-3 text-sm font-semibold text-gray-700">
               Cost summary{" "}
               <span className="font-normal text-gray-600">
-                (applied after free trial ends)
+                {trialCopy.costSummaryNote}
               </span>
             </h3>
             <div className="space-y-2 text-sm">

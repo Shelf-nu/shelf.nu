@@ -3,8 +3,8 @@
 /**
  * Code confirmation: a new account records the signup link's intent on its
  * signup event, and the cookie is handed on to onboarding. `redirectTo` only
- * decides where an existing account lands; the app layout sends an account
- * that has not onboarded, which includes every new one, to onboarding first.
+ * decides where an onboarded account lands; every other account lands on
+ * `/assets`, whose layout sends it to onboarding. A login ignores the intent.
  *
  * @see {@link file://./../../../app/routes/_auth+/otp.tsx}
  * @see {@link file://./../../../app/modules/signup-intent/cookie.server.ts}
@@ -52,7 +52,7 @@ vi.mock("~/modules/organization/context.server", () => ({
 // module-level connect rejects in a DB-less test env.
 vi.mock("~/database/db.server", () => ({ db: {} }));
 
-function confirmArgs(cookie?: string) {
+function confirmArgs(cookie?: string, mode?: string) {
   const headers = new Headers({
     "Content-Type": "application/x-www-form-urlencoded",
   });
@@ -60,11 +60,16 @@ function confirmArgs(cookie?: string) {
     headers.set("Cookie", cookie);
   }
   return {
-    request: new Request("http://localhost:3000/otp", {
-      method: "POST",
-      headers,
-      body: new URLSearchParams({ email: USER_EMAIL, otp: "123456" }),
-    }),
+    request: new Request(
+      mode
+        ? `http://localhost:3000/otp?mode=${mode}`
+        : "http://localhost:3000/otp",
+      {
+        method: "POST",
+        headers,
+        body: new URLSearchParams({ email: USER_EMAIL, otp: "123456" }),
+      }
+    ),
     context: { isAuthenticated: false, setSession: vi.fn() },
     params: {},
   } as unknown as ActionFunctionArgs;
@@ -141,8 +146,11 @@ describe("otp action — confirming the code", () => {
     );
   });
 
-  it("sends an existing account to the link's in-app redirectTo", async () => {
-    vi.mocked(findUserByEmail).mockResolvedValue({ id: USER_ID } as never);
+  it("sends an onboarded account to the link's in-app redirectTo", async () => {
+    vi.mocked(findUserByEmail).mockResolvedValue({
+      id: USER_ID,
+      onboarded: true,
+    } as never);
 
     const response = (await action(
       confirmArgs(await intentCookie({ redirectTo: "/qr/abc?x=1" }))
@@ -152,7 +160,59 @@ describe("otp action — confirming the code", () => {
     expect(createUser).not.toHaveBeenCalled();
   });
 
+  it("sends a new account to /assets, and so to onboarding, whatever the redirectTo", async () => {
+    const response = (await action(
+      confirmArgs(await intentCookie({ redirectTo: "/qr/abc" }))
+    )) as Response;
+
+    expect(response.headers.get("Location")).toBe("/assets");
+    expect(createUser).toHaveBeenCalledTimes(1);
+    // The intent still travels on for onboarding to consume.
+    await expect(signupIntentSetBy(response)).resolves.toEqual({
+      redirectTo: "/qr/abc",
+    });
+  });
+
+  it("sends an account that has not onboarded to /assets, whatever the redirectTo", async () => {
+    vi.mocked(findUserByEmail).mockResolvedValue({
+      id: USER_ID,
+      onboarded: false,
+    } as never);
+
+    const response = (await action(
+      confirmArgs(await intentCookie({ redirectTo: "/qr/abc" }))
+    )) as Response;
+
+    expect(response.headers.get("Location")).toBe("/assets");
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it("ignores a leftover intent when the code is for a login", async () => {
+    vi.mocked(findUserByEmail).mockResolvedValue({
+      id: USER_ID,
+      onboarded: true,
+    } as never);
+
+    const response = (await action(
+      confirmArgs(
+        await intentCookie({ plan: "team", redirectTo: "/qr/abc" }),
+        "login"
+      )
+    )) as Response;
+
+    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.getSetCookie()).toEqual([
+      "selected-organization-id=org",
+    ]);
+  });
+
   it("never follows a redirectTo off our origin", async () => {
+    // Onboarded, so the only thing keeping it on /assets is safeRedirect.
+    vi.mocked(findUserByEmail).mockResolvedValue({
+      id: USER_ID,
+      onboarded: true,
+    } as never);
+
     const response = (await action(
       confirmArgs(await intentCookie({ redirectTo: "https://evil.example/x" }))
     )) as Response;

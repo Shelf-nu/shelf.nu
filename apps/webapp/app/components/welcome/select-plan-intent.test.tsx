@@ -12,6 +12,7 @@ import type { PlanIntent } from "~/modules/signup-intent/schema";
 import {
   PersonalWorkspaceEscapeLink,
   SelectPlanSubmitButtons,
+  selectPlanTrialCopy,
 } from "./select-plan-intent";
 
 /** Renders inside a router so `<Button to>` can produce a real link. */
@@ -93,5 +94,50 @@ describe("SelectPlanSubmitButtons", () => {
       { intent: "trial", label: "Start 7-day free trial", disabled: true },
       { intent: "subscribe", label: "Subscribe now instead", disabled: true },
     ]);
+  });
+});
+
+describe("selectPlanTrialCopy", () => {
+  it("talks only about the trial without an intent", () => {
+    expect(selectPlanTrialCopy({ planIntent: null, freeTrialDays: 7 })).toEqual(
+      {
+        subheading:
+          "No credit card or payment required to start your 7-day trial.",
+        costSummaryNote: "(applied after free trial ends)",
+        addonTrialTag: "7-day trial",
+      }
+    );
+  });
+
+  it("says what subscribing costs when it is offered next to a leading trial", () => {
+    const copy = selectPlanTrialCopy({
+      planIntent: { plan: "team", trial: true },
+      freeTrialDays: 7,
+    });
+
+    expect(copy.subheading).toContain("7-day trial");
+    expect(copy.costSummaryNote).toContain("today if you subscribe");
+    expect(copy.addonTrialTag).toBe("7-day trial");
+  });
+
+  it("promises no trial first when subscribing leads", () => {
+    const copy = selectPlanTrialCopy({
+      planIntent: { plan: "team", trial: false },
+      freeTrialDays: 14,
+    });
+
+    expect(copy.subheading).toBe(
+      "Subscribe now, or start a 14-day free trial with no credit card."
+    );
+    expect(copy.costSummaryNote).toBe(
+      "(billed today, or after the free trial if you start one)"
+    );
+    expect(copy.addonTrialTag).toBeNull();
+  });
+
+  it("uses the configured trial length", () => {
+    expect(
+      selectPlanTrialCopy({ planIntent: null, freeTrialDays: 30 }).subheading
+    ).toContain("30-day trial");
   });
 });

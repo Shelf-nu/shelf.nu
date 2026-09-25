@@ -31,7 +31,9 @@ export async function action({ request }: ActionFunctionArgs) {
           `/otp?email=${encodeURIComponent(email)}&mode=${mode}`,
           {
             // Carry the signup link's intent (if any) on to the code step.
-            headers: await refreshSignupIntentHeaders(request),
+            // A login is not a signup, so it carries nothing.
+            headers:
+              mode === "login" ? [] : await refreshSignupIntentHeaders(request),
           }
         );
       }

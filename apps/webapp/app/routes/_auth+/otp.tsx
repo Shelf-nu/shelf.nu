@@ -92,12 +92,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         const authSession = await verifyOtpAndSignin(email, otp);
-        const userExists = Boolean(await findUserByEmail(email));
+        const existingUser = await findUserByEmail(email);
+        const userExists = Boolean(existingUser);
 
         // What the signup link asked for, carried by cookie. A new account
         // records it on its signup event; the cookie then travels on for
-        // onboarding to store and act on.
-        const signupIntent = await readSignupIntent(request);
+        // onboarding to store and act on. A login is not a signup: the form
+        // posts back to this page's URL, so `mode` is on the request, and a
+        // login ignores whatever intent an earlier `/join` visit left behind.
+        const isLogin =
+          new URL(request.url).searchParams.get("mode") === "login";
+        const signupIntent = isLogin ? null : await readSignupIntent(request);
 
         if (!userExists) {
           try {
@@ -135,11 +140,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
           request,
         });
 
-        // The link's `redirectTo` takes effect only for an account that has
-        // already onboarded. The app layout sends every other account, which
-        // includes every brand-new one, to onboarding first; onboarding picks
-        // the landing page itself and does not read `redirectTo`.
-        return redirect(safeRedirect(signupIntent?.redirectTo, "/assets"), {
+        // The link's `redirectTo` is followed only by an account that has
+        // already onboarded. Everyone else lands on `/assets`, whose layout
+        // sends them to onboarding: `redirectTo` can name a page outside that
+        // layout (the QR pages have no onboarding check), and following it
+        // would skip onboarding altogether.
+        const landing = existingUser?.onboarded
+          ? safeRedirect(signupIntent?.redirectTo, "/assets")
+          : "/assets";
+
+        return redirect(landing, {
           headers: [
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
             ...(await signupIntentHeaders(signupIntent)),

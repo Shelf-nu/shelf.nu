@@ -11,16 +11,22 @@
  * @see {@link file://./../../../app/routes/_welcome+/onboarding.tsx}
  * @see {@link file://./../../../app/modules/signup-intent/schema.ts}
  */
-import type { ActionFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 
-import { signInWithEmail } from "~/modules/auth/service.server";
+import {
+  getAuthUserById,
+  signInWithEmail,
+} from "~/modules/auth/service.server";
 import { upsertBusinessIntel } from "~/modules/business-intel/service.server";
 import { getOrganizationById } from "~/modules/organization/service.server";
-import { serializeSignupIntent } from "~/modules/signup-intent/cookie.server";
+import {
+  readSignupIntent,
+  serializeSignupIntent,
+} from "~/modules/signup-intent/cookie.server";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
-import { action } from "~/routes/_welcome+/onboarding";
+import { action, loader } from "~/routes/_welcome+/onboarding";
 import { createStripeCustomer } from "~/utils/stripe.server";
 
 // why: preventing Prisma from trying to connect to a real database during tests
@@ -30,12 +36,13 @@ vi.mock("~/database/db.server", () => ({ db: {} }));
 const createDataMock = vi.hoisted(() => {
   return () =>
     vi.fn((body: unknown, init?: ResponseInit) => {
+      // `Headers` accepts every HeadersInit shape, including the
+      // `[name, value][]` the loader passes for its Set-Cookie.
+      const headers = new Headers(init?.headers);
+      headers.set("Content-Type", "application/json");
       return new Response(JSON.stringify(body), {
         status: init?.status || 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers || {}),
-        },
+        headers,
       });
     });
 });
@@ -286,6 +293,48 @@ describe("onboarding action — consuming the signup intent", () => {
     expect(response.status).toBe(400);
     expect(updateUser).not.toHaveBeenCalled();
     expect(upsertBusinessIntel).not.toHaveBeenCalled();
+    expect(signupIntentCookieSetBy(response)).toBeUndefined();
+  });
+});
+
+describe("onboarding loader: keeping the signup intent alive", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getUserByID).mockResolvedValue(USER as never);
+    vi.mocked(getAuthUserById).mockResolvedValue({
+      user_metadata: { signup_method: "email-password" },
+    } as never);
+  });
+
+  function load(cookie?: string) {
+    const headers = new Headers();
+    if (cookie) {
+      headers.set("Cookie", cookie);
+    }
+    return loader({
+      context,
+      request: new Request("http://localhost:3000/onboarding", { headers }),
+      params: {},
+    } as unknown as LoaderFunctionArgs) as Promise<Response>;
+  }
+
+  it("re-issues the intent with a fresh window while the form is open", async () => {
+    const response = await load(await intentCookie(TEAM_TRIAL_INTENT));
+
+    const setCookie = signupIntentCookieSetBy(response);
+    expect(setCookie).toBeDefined();
+    await expect(
+      readSignupIntent(
+        new Request("http://localhost:3000/onboarding", {
+          headers: { Cookie: setCookie!.split(";")[0] },
+        })
+      )
+    ).resolves.toEqual(TEAM_TRIAL_INTENT);
+  });
+
+  it("sets no cookie without an intent", async () => {
+    const response = await load();
+
     expect(signupIntentCookieSetBy(response)).toBeUndefined();
   });
 });

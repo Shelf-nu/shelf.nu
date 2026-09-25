@@ -14,6 +14,59 @@ import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { PlanIntent } from "~/modules/signup-intent/schema";
 
+/** The trial wording on the plan page, which depends on the offered actions. */
+export type SelectPlanTrialCopy = {
+  /** Line under the page heading. */
+  subheading: string;
+  /** Qualifier after "Cost summary": when the shown total is billed. */
+  costSummaryNote: string;
+  /** Tag on each add-on card, or `null` to show none. */
+  addonTrialTag: string | null;
+};
+
+/**
+ * The plan page's trial wording for the actions it offers.
+ *
+ * Without a Team intent the only action is the trial, so the page talks about
+ * nothing else. A Team intent adds "Subscribe", which goes to Stripe Checkout
+ * and bills straight away, so any wording that promises a trial must also say
+ * what subscribing costs. When subscribing leads, the add-on cards drop their
+ * trial tag: the trial is the secondary choice there.
+ *
+ * @param planIntent - The plan the signup link asked for, if any
+ * @param freeTrialDays - Length of the trial, from `config.freeTrialDays`
+ */
+export function selectPlanTrialCopy({
+  planIntent,
+  freeTrialDays,
+}: {
+  planIntent: PlanIntent | null;
+  freeTrialDays: number;
+}): SelectPlanTrialCopy {
+  if (planIntent?.plan !== "team") {
+    return {
+      subheading: `No credit card or payment required to start your ${freeTrialDays}-day trial.`,
+      costSummaryNote: "(applied after free trial ends)",
+      addonTrialTag: `${freeTrialDays}-day trial`,
+    };
+  }
+
+  if (planIntent.trial) {
+    return {
+      subheading: `No credit card or payment required to start your ${freeTrialDays}-day trial.`,
+      costSummaryNote:
+        "(applied after the free trial ends, or today if you subscribe now)",
+      addonTrialTag: `${freeTrialDays}-day trial`,
+    };
+  }
+
+  return {
+    subheading: `Subscribe now, or start a ${freeTrialDays}-day free trial with no credit card.`,
+    costSummaryNote: "(billed today, or after the free trial if you start one)",
+    addonTrialTag: null,
+  };
+}
+
 /**
  * The way back for someone who skipped the Personal/Team question. It does
  * what choosing Personal on `/welcome` does: opens the free Personal

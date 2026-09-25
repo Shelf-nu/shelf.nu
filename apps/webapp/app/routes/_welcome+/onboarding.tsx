@@ -47,6 +47,7 @@ import { getOrganizationById } from "~/modules/organization/service.server";
 import {
   clearSignupIntentHeaders,
   readSignupIntent,
+  refreshSignupIntentHeaders,
 } from "~/modules/signup-intent/cookie.server";
 import { resolveOnboardingDestination } from "~/modules/signup-intent/schema";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
@@ -292,18 +293,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const subHeading =
       "You are almost ready to use Shelf. We just need some basic information to get you started.";
 
-    return payload({
-      title,
-      subHeading,
-      user,
-      userSignedUpWithPassword,
-      OnboardingFormSchema,
-      collectBusinessIntel: config.collectBusinessIntel,
-      createdWithInvite,
-      requireCompanyName,
-      organizationName,
-      organizationId: verifiedOrganizationId,
-    });
+    return data(
+      payload({
+        title,
+        subHeading,
+        user,
+        userSignedUpWithPassword,
+        OnboardingFormSchema,
+        collectBusinessIntel: config.collectBusinessIntel,
+        createdWithInvite,
+        requireCompanyName,
+        organizationName,
+        organizationId: verifiedOrganizationId,
+      }),
+      {
+        // Restart the signup intent's window while the form is open, so the
+        // time spent filling it in does not count against the intent.
+        headers: await refreshSignupIntentHeaders(request),
+      }
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw data(error(reason), { status: reason.status });

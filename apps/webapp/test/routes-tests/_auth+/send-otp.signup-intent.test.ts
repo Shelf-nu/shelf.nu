@@ -113,6 +113,17 @@ describe("send-otp action — signup by one-time code", () => {
     expect(validateNonSSOSignup).not.toHaveBeenCalled();
   });
 
+  it("does not carry a leftover intent into a login code", async () => {
+    const cookie = (await serializeSignupIntent(INTENT)).split(";")[0];
+
+    const response = (await action(
+      sendOtpArgs({ mode: "login", cookie })
+    )) as Response;
+
+    expect(response.status).toBe(302);
+    expect(response.headers.getSetCookie()).toEqual([]);
+  });
+
   it("does not hand anything on when the SSO gate refuses", async () => {
     vi.mocked(validateNonSSOSignup).mockRejectedValue(
       Object.assign(new Error("This email domain uses SSO authentication."), {
