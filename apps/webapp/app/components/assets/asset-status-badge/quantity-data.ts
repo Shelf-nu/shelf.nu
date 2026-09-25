@@ -104,14 +104,12 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
     .filter((ba) => ba.booking?.status === "RESERVED")
     .reduce((sum, ba) => sum + (ba.quantity ?? 0), 0);
 
-  // `ba.quantity` for ONGOING/OVERDUE rows is the SERVER-COMPUTED effective
-  // claimed count — booked quantity minus PartialBookingCheckout claims
-  // attributed to this asset (see `computeCheckedOutForAsset` in
-  // `~/modules/booking/service.server`). This helper trusts that contract
-  // and simply sums. If a future loader feeds in a raw `BookingAsset[]`
-  // snapshot from the pivot table without that subtraction, the badge will
-  // over-report checked-out units (regression tracked as #96) — perform
-  // the subtraction at the data source, not here, so this helper stays pure.
+  // `ba.quantity` for ONGOING/OVERDUE rows is the SERVER-COMPUTED count of
+  // units still off the shelf on that booking: what went out minus what came
+  // back or was used up (`getAssetQuantityRows`, reading
+  // `~/modules/booking/checked-out.server`). This helper trusts that contract
+  // and simply sums. A raw `BookingAsset.quantity` fed in here over-reports
+  // checked-out units: do the netting at the data source, so this stays pure.
   const checkedOut = bookingAssets
     .filter(
       (ba) =>
