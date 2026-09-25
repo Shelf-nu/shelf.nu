@@ -891,18 +891,11 @@ export async function createLocation({
 type LocationImageFiles = Pick<Location, "id" | "imageUrl" | "thumbnailUrl">;
 
 /**
- * Locations per storage request. Each location has at most two files, so a
- * chunk stays within the storage API's per-request limit.
- */
-const LOCATIONS_PER_STORAGE_REMOVE = MAX_PUBLIC_FILES_PER_REMOVE / 2;
-
-/**
  * Removes the image and thumbnail files of deleted locations from the public
  * storage bucket.
  *
  * Call this only after the location rows are deleted. Files are removed in one
- * storage request per {@link LOCATIONS_PER_STORAGE_REMOVE} locations, one
- * request after another, so even a select-all delete makes only a handful of
+ * storage request per chunk of locations, one request after another, so even a select-all delete makes only a handful of
  * requests. Best effort: a failed request is logged and the next one still
  * runs, because a stale storage object can be cleaned up later, while failing
  * would report a delete that already happened as an error. Never rejects.
@@ -912,6 +905,13 @@ const LOCATIONS_PER_STORAGE_REMOVE = MAX_PUBLIC_FILES_PER_REMOVE / 2;
 async function safeRemoveImageFilesOfLocations(
   locations: LocationImageFiles[]
 ): Promise<void> {
+  /**
+   * Each location has at most two files, so a chunk of this size stays within
+   * the storage API's per-request limit. Read at call time rather than module
+   * load, so tests that mock the storage module without it can still import
+   * this service.
+   */
+  const LOCATIONS_PER_STORAGE_REMOVE = MAX_PUBLIC_FILES_PER_REMOVE / 2;
   const locationsWithFiles = locations.filter(
     (location) => !!location.imageUrl || !!location.thumbnailUrl
   );
