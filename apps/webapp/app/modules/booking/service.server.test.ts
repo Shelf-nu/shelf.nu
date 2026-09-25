@@ -16646,6 +16646,85 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
     expect(removeDestroyedUnitsFromKits).not.toHaveBeenCalled();
   });
 
+  it("puts an asset-level disposition on the standalone slice whatever order the rows come back in", async () => {
+    expect.assertions(2);
+
+    // The kit slice comes back FIRST. An asset-level disposition applies to
+    // one slice only, so row order must not decide which one.
+    const slice = (
+      id: string,
+      assetKitId: string | null,
+      quantity: number
+    ) => ({
+      id,
+      checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+      checkedInAt: null,
+      assetId: ASSET_ID,
+      assetKitId,
+      sourceKitId: assetKitId ? "kit-pens" : null,
+      quantity,
+      asset: {
+        id: ASSET_ID,
+        type: AssetType.QUANTITY_TRACKED,
+        consumptionType: ConsumptionType.TWO_WAY,
+        title: "Pens",
+        assetKits: [{ kitId: "kit-pens" }],
+        status: AssetStatus.CHECKED_OUT,
+        bookingAssets: [
+          { booking: { id: BOOKING_ID, status: BookingStatus.ONGOING } },
+        ],
+      },
+    });
+    const booking = {
+      id: BOOKING_ID,
+      name: "Field day",
+      status: BookingStatus.ONGOING,
+      organizationId: "org-1",
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+      custodianTeamMemberId: null,
+      from: futureFromDate,
+      to: futureToDate,
+      bookingAssets: [
+        slice("ba-pens-kit", ASSET_KIT_ID, 5),
+        slice("ba-pens-loose", null, 3),
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...booking,
+      status: BookingStatus.COMPLETE,
+    });
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([{ quantity: 5 }, { quantity: 3 }]);
+    (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockImplementation((q?: any) =>
+        Promise.resolve(
+          booking.bookingAssets.find((ba) => ba.id === q?.where?.id) ?? null
+        )
+      );
+
+    await checkinBooking({
+      ...params,
+      checkins: [{ assetId: ASSET_ID, consumed: 2 }],
+    });
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "CONSUME",
+        quantity: 2,
+        bookingAssetId: "ba-pens-loose",
+      })
+    );
+    // The kit slice's units all came back, so the kit keeps them.
+    expect(removeDestroyedUnitsFromKits).not.toHaveBeenCalled();
+  });
+
   it("notes the asset that left its kit and notifies other bookings, not this one", async () => {
     expect.assertions(2);
 

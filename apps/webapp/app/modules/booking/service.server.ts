@@ -5430,7 +5430,11 @@ export async function checkinBooking({
         title: ba.asset.title,
         // The kit membership the slice draws from, or null when standalone.
         assetKitId: ba.assetKitId ?? null,
-      }));
+      }))
+      // The relation carries no ORDER BY, and an asset-level disposition
+      // applies to the FIRST slice of its asset, so the order is fixed here:
+      // standalone before kit-driven, the order every untagged claim uses.
+      .sort(compareSlicesForGreedyFill);
 
     /** Distinct qty-tracked asset ids touched by the slices above. */
     const qtyTrackedAssetIds = [

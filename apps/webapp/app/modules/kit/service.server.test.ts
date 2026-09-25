@@ -7077,6 +7077,26 @@ describe("removeDestroyedUnitsFromKits", () => {
       .mockResolvedValue([]);
   });
 
+  it("locks the memberships before it reads them", async () => {
+    expect.assertions(3);
+
+    membershipReads().mockResolvedValueOnce([membership({ stock: 7 })]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+    const lock = db.$queryRaw as unknown as ReturnType<typeof vitest.fn>;
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(3));
+
+    const [sql, ids, organizationId] = lock.mock.calls[0];
+    expect((sql as string[]).join("?")).toContain("FOR UPDATE");
+    expect([ids, organizationId]).toEqual([["ak-1"], "org-1"]);
+    expect(lock.mock.invocationCallOrder[0]).toBeLessThan(
+      membershipReads().mock.invocationCallOrder[0]
+    );
+  });
+
   it("shrinks the membership and the kit placement that mirrors it", async () => {
     expect.assertions(4);
 

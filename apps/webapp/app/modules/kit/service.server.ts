@@ -1315,6 +1315,16 @@ export async function removeDestroyedUnitsFromKits(
     .map(([assetKitId]) => assetKitId);
   if (assetKitIds.length === 0) return result;
 
+  // Lock the memberships before reading them, in a fixed order. Every other
+  // write to these rows then waits for this transaction, and the read below
+  // sees whatever was committed before the lock.
+  await tx.$queryRaw`
+    SELECT id FROM "AssetKit"
+    WHERE id = ANY(${assetKitIds}::text[]) AND "organizationId" = ${organizationId}
+    ORDER BY id
+    FOR UPDATE
+  `;
+
   type Membership = {
     id: string;
     assetId: string;
