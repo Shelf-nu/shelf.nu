@@ -69,8 +69,8 @@ interface Props {
   settings: AssetIndexSettings;
   /**
    * Resolved custody read-visibility, from `requirePermission`. Required, not
-   * optional: the custodian filter seed previously passed no scoping at all,
-   * and an optional field would let a caller silently restore that.
+   * optional: the custodian filter seed must always be scoped, and an optional
+   * field would let a caller skip that silently.
    */
   canSeeAllCustody: boolean;
   /** The viewer's access, for the booking form's custodian seed. */
@@ -163,8 +163,8 @@ export async function simpleModeLoader({
   canSeeAllCustody,
   access,
 }: Props) {
-  // Threaded into the asset query so the custodian FILTER seed is scoped —
-  // it used a role-only check that let BASE through unscoped. See
+  // `canSeeAllCustody` is threaded into the asset query so the custodian
+  // FILTER seed is scoped for every restricted role, BASE included. See
   // `getPaginatedAndFilterableAssets`.
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
