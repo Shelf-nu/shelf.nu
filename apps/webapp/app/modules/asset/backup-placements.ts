@@ -1,11 +1,24 @@
+/**
+ * Asset placements in the workspace backup.
+ *
+ * The backup export writes each asset's placements as JSON, by location name,
+ * and the backup restore reads them back and recreates them. These helpers are
+ * the pure half of that round trip: what goes into the `assetLocations` cell,
+ * how the cell is read back, and which placements a restored asset gets. The
+ * database half (resolving names to locations) lives in the restore itself.
+ *
+ * @see {@link file://./../../utils/csv.server.ts} `buildCsvBackupDataFromAssets`
+ * @see {@link file://./../../utils/import.server.ts} `extractCSVDataFromBackupImport`
+ * @see {@link file://./service.server.ts} `createAssetsFromBackupImport`
+ */
 import { AssetType } from "@prisma/client";
 import { z } from "zod";
 import { ShelfError } from "~/utils/error";
 
 /**
- * One manual placement as the workspace backup carries it: the location's
- * name and how many units sit there. It is a name, never an id, because an id
- * only resolves in the workspace the backup came from.
+ * One placement as the workspace backup carries it: the location's name and
+ * how many units sit there. It is a name, never an id, because an id only
+ * resolves in the workspace the backup came from.
  */
 export type BackupPlacement = { location: string; quantity: number };
 
@@ -16,19 +29,27 @@ const backupPlacementsSchema = z.array(
   })
 );
 
-/** The part of an `assetLocations` row (location included) the backup reads. */
-type ManualPlacementRow = { quantity: number; location: { name: string } };
-
 /**
- * A manual placement is one with no `assetKitId`. A kit-driven row is not the
- * asset's own placement: it mirrors the kit's location and is recreated when
- * the asset joins a kit, so writing it out would place those units twice.
+ * The `assetLocations` cell of a backup exported before placements had their
+ * own case: each row stringified to `[object Object]`. It holds no placement
+ * data at all, so it reads as "no placements" and the rest of the row restores.
  */
-function isManualPlacementRow(row: unknown): row is ManualPlacementRow {
+const UNSERIALIZED_PLACEMENTS_CELL = /^\[object Object\](,\[object Object\])*$/;
+
+/** The part of an `assetLocations` row (location included) the backup reads. */
+type PlacementRow = {
+  quantity: number;
+  assetKitId?: string | null;
+  location: { name: string };
+};
+
+function isPlacementRow(row: unknown): row is PlacementRow {
   if (typeof row !== "object" || row === null) return false;
   const { assetKitId, quantity, location } = row as Record<string, unknown>;
   return (
-    (assetKitId === null || assetKitId === undefined) &&
+    (assetKitId === null ||
+      assetKitId === undefined ||
+      typeof assetKitId === "string") &&
     typeof quantity === "number" &&
     typeof location === "object" &&
     location !== null &&
@@ -39,13 +60,33 @@ function isManualPlacementRow(row: unknown): row is ManualPlacementRow {
 /**
  * Writes an asset's placements for the backup export.
  *
+ * - An individual asset sits at one location, so it writes that one, at 1.
+ *   Its row there is normally manual, but a kit-driven one names the same
+ *   place, and the backup carries no kits to rebuild it from.
+ * - A pool writes its manual placements (`assetKitId` null) only. Its kit
+ *   slices are a separate axis: the database caps manual placements at the
+ *   pool's quantity without counting them, so written back as manual rows
+ *   they could exceed it.
+ *
  * @param rows - The asset's `assetLocations`, loaded with their `location`.
- * @returns One entry per manual placement, by location name. An individual
- *   asset has at most one, with a quantity of 1.
+ * @param assetType - The asset's type. Anything but `QUANTITY_TRACKED` is
+ *   treated as individual, the column's default.
+ * @returns One entry per written placement, by location name.
  */
-export function serializeBackupPlacements(rows: unknown): BackupPlacement[] {
+export function serializeBackupPlacements(
+  rows: unknown,
+  assetType: unknown
+): BackupPlacement[] {
   if (!Array.isArray(rows)) return [];
-  return rows.filter(isManualPlacementRow).map((row) => ({
+  const placed = rows.filter(isPlacementRow);
+  const manual = placed.filter((row) => !row.assetKitId);
+
+  if (assetType !== AssetType.QUANTITY_TRACKED) {
+    const row = manual[0] ?? placed[0];
+    return row ? [{ location: row.location.name, quantity: 1 }] : [];
+  }
+
+  return manual.map((row) => ({
     location: row.location.name,
     quantity: row.quantity,
   }));
@@ -55,14 +96,18 @@ export function serializeBackupPlacements(rows: unknown): BackupPlacement[] {
  * Reads an `assetLocations` cell of a backup file back into placements.
  *
  * @param cell - The raw cell, JSON as {@link serializeBackupPlacements} writes it.
- * @param rowNumber - The row's line in the file, for the error message.
- * @throws {ShelfError} 400 when the cell is not that shape. Restoring the
+ * @param rowNumber - The row's number in the file, for the error message.
+ * @returns The placements. None for a cell written before placements were
+ *   exported (see {@link UNSERIALIZED_PLACEMENTS_CELL}).
+ * @throws {ShelfError} 400 when the cell is any other shape. Restoring the
  *   asset without its placements would lose them silently.
  */
 export function parseBackupPlacements(
   cell: string,
   rowNumber: number
 ): BackupPlacement[] {
+  if (UNSERIALIZED_PLACEMENTS_CELL.test(cell.trim())) return [];
+
   const invalid = (cause: unknown) =>
     new ShelfError({
       cause,
@@ -84,6 +129,48 @@ export function parseBackupPlacements(
   const result = backupPlacementsSchema.safeParse(json);
   if (!result.success) throw invalid(result.error);
   return result.data;
+}
+
+/** What a backup's legacy `location` object says about the location. */
+export type BackupLocationDetails = {
+  description?: string;
+  address?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+};
+
+/**
+ * Reads the `location` object of a backup written before placements existed.
+ *
+ * @param location - The parsed `location` cell, if the row has one.
+ * @returns The location's name and the details a restore creates it with when
+ *   the workspace has no location of that name. `null` when there is none.
+ */
+export function readLegacyBackupLocation(
+  location: unknown
+): { name: string; details: BackupLocationDetails } | null {
+  if (typeof location !== "object" || location === null) return null;
+  const { name, description, address, createdAt, updatedAt } =
+    location as Record<string, unknown>;
+  if (typeof name !== "string" || name.trim() === "") return null;
+
+  const text = (value: unknown) =>
+    typeof value === "string" && value !== "" ? value : undefined;
+  const date = (value: unknown) => {
+    if (typeof value !== "string" || value === "") return undefined;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  };
+
+  return {
+    name,
+    details: {
+      description: text(description),
+      address: text(address),
+      createdAt: date(createdAt),
+      updatedAt: date(updatedAt),
+    },
+  };
 }
 
 /**
@@ -121,16 +208,13 @@ export function placementsForRestore({
       : [{ location: assetLocations[0].location, quantity: 1 }];
   }
 
-  const legacyName =
-    typeof location === "object" && location !== null
-      ? (location as Record<string, unknown>).name
-      : undefined;
-  if (typeof legacyName !== "string" || legacyName.trim() === "") return [];
+  const legacy = readLegacyBackupLocation(location);
+  if (!legacy) return [];
 
   const total = Number(quantity);
   return [
     {
-      location: legacyName,
+      location: legacy.name,
       quantity: isPool && Number.isInteger(total) && total > 0 ? total : 1,
     },
   ];

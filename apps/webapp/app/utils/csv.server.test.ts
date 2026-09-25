@@ -334,15 +334,16 @@ describe("buildCsvBackupDataFromAssets", () => {
       location: { id: `loc-${locationName}`, name: locationName },
     });
 
-    const cellFor = (assetLocations: unknown[]) =>
+    /** The exported `assetLocations` cell, the row's third column. */
+    const cellFor = (type: string, assetLocations: unknown[]) =>
       buildCsvBackupDataFromAssets({
-        assets: [{ id: "asset-1", assetLocations }],
+        assets: [{ id: "asset-1", type, assetLocations }],
         keysToSkip: [],
-      })[0]?.[1];
+      })[0]?.[2];
 
     it("writes a pool's placements as JSON names and quantities", () => {
       expect(
-        cellFor([
+        cellFor("QUANTITY_TRACKED", [
           placement("Simulation Suite A", 99),
           placement("Simulation Suite B", 44),
         ])
@@ -352,14 +353,17 @@ describe("buildCsvBackupDataFromAssets", () => {
     });
 
     it("writes an individual asset's placement as one entry", () => {
-      expect(cellFor([placement("Studio", 1)])).toBe(
+      expect(cellFor("INDIVIDUAL", [placement("Studio", 1)])).toBe(
         '"[{""location"":""Studio"",""quantity"":1}]"'
       );
     });
 
-    it("leaves kit-driven placements out", () => {
+    it("leaves a pool's kit-driven placements out", () => {
       expect(
-        cellFor([placement("Warehouse", 5), placement("Van 2", 3, "ak-1")])
+        cellFor("QUANTITY_TRACKED", [
+          placement("Warehouse", 5),
+          placement("Van 2", 3, "ak-1"),
+        ])
       ).toBe('"[{""location"":""Warehouse"",""quantity"":5}]"');
     });
   });

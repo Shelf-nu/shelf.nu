@@ -180,13 +180,32 @@ describe("createAssetsFromBackupImport placements", () => {
         title: "Cable Ties",
         type: "QUANTITY_TRACKED",
         quantity: "40",
-        location: { name: "Warehouse", createdAt: "", updatedAt: "" },
+        location: {
+          name: "Warehouse",
+          description: "Back room",
+          address: "1 Dock Road",
+          createdAt: "2026-01-02T03:04:05.000Z",
+          updatedAt: "2026-01-02T03:04:05.000Z",
+        },
       }),
     ]);
 
     expect(placementsByTitle()["Cable Ties"]).toEqual([
       { locationId: "new-Warehouse", organizationId: "org-1", quantity: 40 },
     ]);
+    // The backup describes the location, so the created one keeps it.
+    expect(locationCreate).toHaveBeenCalledWith({
+      data: {
+        name: "Warehouse",
+        description: "Back room",
+        address: "1 Dock Road",
+        createdAt: new Date("2026-01-02T03:04:05.000Z"),
+        updatedAt: new Date("2026-01-02T03:04:05.000Z"),
+        organizationId: "org-1",
+        userId: "user-1",
+      },
+      select: { id: true },
+    });
   });
 
   it("leaves an unplaced asset without placements and looks nothing up", async () => {

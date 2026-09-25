@@ -246,9 +246,12 @@ export const buildCsvBackupDataFromAssets = ({
        * the default branch stringifies to `[object Object]`. */
       switch (key) {
         case "assetLocations":
-          // Manual placements only, as `[{ location: <name>, quantity }]`.
+          // As `[{ location: <name>, quantity }]`; which rows go out depends
+          // on the asset's type, see `serializeBackupPlacements`.
           toExport.push(
-            quoteCsvCell(JSON.stringify(serializeBackupPlacements(value)))
+            quoteCsvCell(
+              JSON.stringify(serializeBackupPlacements(value, asset.type))
+            )
           );
           break;
         // Custody rows go out whole, ids included. Those ids are

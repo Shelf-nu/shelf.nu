@@ -153,7 +153,11 @@ import {
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
-import { placementsForRestore } from "./backup-placements";
+import {
+  placementsForRestore,
+  readLegacyBackupLocation,
+  type BackupLocationDetails,
+} from "./backup-placements";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
@@ -5111,10 +5115,13 @@ export async function createAssetsFromContentImport({
  */
 async function findOrCreateLocationsByName({
   names,
+  details,
   userId,
   organizationId,
 }: {
   names: string[];
+  /** Details to create a missing location with, keyed by lower-cased name. */
+  details: Map<string, BackupLocationDetails>;
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
@@ -5145,7 +5152,7 @@ async function findOrCreateLocationsByName({
   for (const [key, name] of spellings) {
     if (locationIds.has(key)) continue;
     const created = await db.location.create({
-      data: { name, organizationId, userId },
+      data: { ...details.get(key), name, organizationId, userId },
       select: { id: true },
     });
     locationIds.set(key, created.id);
@@ -5175,8 +5182,18 @@ export async function createAssetsFromBackupImport({
         location: asset.location,
       })
     );
+    // A backup written before placements existed describes the location
+    // itself; a location created from it keeps that description.
+    const legacyLocationDetails = new Map<string, BackupLocationDetails>();
+    for (const asset of data) {
+      const legacy = readLegacyBackupLocation(asset.location);
+      if (legacy && !legacyLocationDetails.has(legacy.name.toLowerCase())) {
+        legacyLocationDetails.set(legacy.name.toLowerCase(), legacy.details);
+      }
+    }
     const locationIds = await findOrCreateLocationsByName({
       names: placementsPerRow.flat().map((placement) => placement.location),
+      details: legacyLocationDetails,
       userId,
       organizationId,
     });
