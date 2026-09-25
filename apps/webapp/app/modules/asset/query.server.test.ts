@@ -10,6 +10,7 @@ import {
   generateCustomFieldSelect,
   generateWhereClause,
   parseSortingOptions,
+  POOL_AGGREGATE_JOIN,
 } from "./query.server";
 
 // why: mocking location descendants to avoid database queries during tests
@@ -1346,7 +1347,106 @@ describe("generateWhereClause - lowStockOnly", () => {
     );
     expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
     expect(sql).toContain(`a."minQuantity" IS NOT NULL`);
-    expect(sql).toContain(`a."quantity" <= a."minQuantity"`);
+    // Compares AVAILABLE against the threshold, via the shared pool expression.
+    expect(sql).toContain(`pool.in_custody`);
+    expect(sql).toContain(`<= a."minQuantity"`);
+  });
+
+  it("compares AVAILABLE, not total quantity, against the threshold", () => {
+    // why: this is the defect the unification closes, and a total-based
+    // predicate would pass every other assertion in this file. The toggle used
+    // to read `a."quantity" <= a."minQuantity"`, which disagreed with the
+    // low-stock EMAIL (available-based) the moment any unit was in custody:
+    // 6 total, 2 in custody, threshold 5 → the alert fired and this filter
+    // could not find the row. Two of the three thresholded assets in the dev
+    // workspace were invisible to the old predicate.
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
+    );
+    expect(sql).not.toContain(`a."quantity" <= a."minQuantity"`);
+  });
+});
+
+describe("POOL_AGGREGATE_JOIN, the SQL twin of getAssetAvailability", () => {
+  const sql = POOL_AGGREGATE_JOIN.strings.join("?");
+
+  it("counts direct custody only, leaving kit-inherited rows to in_kits", () => {
+    // A kit in custody writes Custody rows tagged kitCustodyId for its members;
+    // those units are already in AssetKit.quantity. Summing both painted every
+    // member of a kit in custody as None free.
+    expect(sql).toContain(`cu_q."kitCustodyId" IS NULL`);
+  });
+
+  it("keeps kit-driven booking slices out of every booking figure", () => {
+    // A booked kit writes BookingAsset rows tagged assetKitId for its members.
+    // Reserved, checked-out, the peak and the top booking all read standalone
+    // slices only; a member of a reserved kit read Short before this.
+    expect(sql).toContain(`(ba."assetKitId" IS NULL) AS standalone`);
+    expect(sql).toContain(
+      `FROM slices WHERE standalone AND status = 'RESERVED'), 0) AS reserved,`
+    );
+    expect(sql).toMatch(
+      /FROM slices WHERE standalone AND ahead AND remaining > 0/
+    );
+  });
+
+  it("counts what is still out as what left minus what came back", () => {
+    // Mirror of computeUnitsStillOutBySlice. What left: the whole slice for an
+    // all-at-once checkout, otherwise the larger of the session claims and the
+    // stored counter.
+    // One trip's reading: session claims, else the whole slice when the slice
+    // itself is stamped as checked out. Never the asset's global status.
+    expect(sql).toContain(
+      `WHEN oc.claimed > 0 THEN LEAST(oc.quantity, oc.claimed)`
+    );
+    expect(sql).toContain(
+      `WHEN oc.checked_out_at IS NOT NULL THEN oc.quantity`
+    );
+    expect(sql).not.toContain(`a.status = 'CHECKED_OUT'`);
+    // The cumulative counter floors both readings, so a slice sent out a
+    // second time, by either checkout, still counts.
+    expect(sql).toMatch(/END,\s+oc\.counter\s+\) AS departed/);
+    // What came back comes off the slice, never below zero or above booked.
+    expect(sql).toContain(`LEAST(od.quantity, GREATEST(od.departed - (`);
+    // Untagged claims and returns fill standalone slices first, then by id in
+    // the byte order JavaScript compares these ids in.
+    expect(sql).toContain(
+      `ORDER BY NOT ob.standalone, ob.slice_id COLLATE "C"`
+    );
+    expect(sql).toContain(
+      `ORDER BY NOT od.standalone, od.slice_id COLLATE "C"`
+    );
+  });
+
+  it("looks up each slice's booking by key rather than joining every active booking", () => {
+    // Without the fence the planner joins every RESERVED / ONGOING / OVERDUE
+    // booking in the database once per asset. Same result, several times the
+    // cost on the Stock status sort, which runs this for every asset.
+    expect(sql).toMatch(
+      /CROSS JOIN LATERAL \(\s+SELECT b\.name, b\.status, b\."from", b\."to"\s+FROM public\."Booking" b\s+WHERE b\.id = ba\."bookingId"[\s\S]*?OFFSET 0\s+\) bk/
+    );
+  });
+
+  it("nets the ledger against what a booking still owes", () => {
+    expect(sql).toContain(
+      `cl.category IN ('RETURN', 'CONSUME', 'LOSS', 'DAMAGE')`
+    );
+    expect(sql).toContain(
+      `GREATEST(act.quantity - COALESCE(booked_logs.q, 0), 0) AS remaining`
+    );
+  });
+
+  it("sweeps bookings as intervals for the peak, releases before claims at a tie", () => {
+    // peakConcurrent in SQL: +qty at start, -qty at end, running sum ordered by
+    // (t, delta) so a booking ending exactly when another starts never overlaps.
+    expect(sql).toContain(
+      `SUM(delta) OVER (ORDER BY t, delta ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`
+    );
+    expect(sql).toContain(`GREATEST(COALESCE(from_at, now()), now()) AS t`);
+    expect(sql).toContain(
+      `CASE WHEN bk.status = 'OVERDUE' THEN 'infinity'::timestamptz ELSE bk."to" END AS end_at`
+    );
+    expect(sql).not.toContain("largest_booking");
   });
 });
 
@@ -1637,7 +1737,9 @@ describe("custodian display name", () => {
     // the custody JSON projection and inside BOOKING_CUSTODIAN_NAME's COALESCE,
     // so a bare `toContain` over the whole query stays green even when the
     // grouping column is removed — which is the only thing this guards.
-    const groupBy = sql.match(/GROUP BY [^\n]*/)?.[0] ?? "";
+    // Anchor on `a.id`: the per-asset pool LATERAL carries its own GROUP BY
+    // earlier in the text, and the outer clause is the one under test.
+    const groupBy = sql.match(/GROUP BY a\.id[^\n]*/)?.[0] ?? "";
 
     expect(groupBy).toContain('bu."displayName"');
   });

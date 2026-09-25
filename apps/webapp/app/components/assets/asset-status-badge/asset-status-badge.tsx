@@ -28,6 +28,7 @@ import {
   getQuantityBadgeLabelAndColor,
   getQuantityData,
   type QuantityAwareAsset,
+  type QuantityBreakdown,
 } from "./quantity-data";
 import { QuantityTooltipContent } from "./quantity-tooltip-content";
 import { assetStatusColorMap, userFriendlyAssetStatus } from "./status-labels";
@@ -47,6 +48,7 @@ export function AssetStatusBadge({
   suppressQtyAware = false,
   availableToBook = true,
   asset,
+  quantityBreakdown,
 }: {
   id: string;
   status: ExtendedAssetStatus;
@@ -80,8 +82,27 @@ export function AssetStatusBadge({
    * Falls back to standard status if data is missing.
    */
   asset?: QuantityAwareAsset | null;
+  /**
+   * A breakdown the CALLER has already computed server-side. When supplied it
+   * wins over deriving one from `asset`, and it suppresses the lazy
+   * `/quantity-breakdown` fetch entirely.
+   *
+   * Why this exists: deriving from `asset` needs `custody` AND `bookingAssets`
+   * on the row. The assets index carries custody but not booking slices, so the
+   * derived breakdown came back reserved/checkedOut = 0, or null when custody
+   * was 0 too, and the badge fell back to the raw `Asset.status`. It then
+   * REWROTE itself on first mouse-enter once the lazy fetch landed, so a row
+   * reading "Available" flipped to "Reserved" under the cursor.
+   *
+   * Passing the server's numbers fixes three things at once: the badge is right
+   * on first paint, it agrees with the `Available` / `Stock status` columns
+   * beside it because it is the same arithmetic, and the index stops firing one
+   * HTTP request per hovered quantity row.
+   */
+  quantityBreakdown?: QuantityBreakdown | null;
 }) {
-  const inlineQuantityData = useMemo(() => getQuantityData(asset), [asset]);
+  const derivedQuantityData = useMemo(() => getQuantityData(asset), [asset]);
+  const inlineQuantityData = quantityBreakdown ?? derivedQuantityData;
 
   // Whether the asset is actually QT (by schema type). Used to gate the
   // qty-aware render branch AND the `ongoing-booking` fetch (the latter

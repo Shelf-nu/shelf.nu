@@ -1,5 +1,6 @@
 import {
   AssetIndexMode,
+  AssetType,
   OrganizationRoles,
   type CustomField,
   type Prisma,
@@ -12,9 +13,11 @@ import type { Column, ColumnLabelKey } from "./helpers";
 import { syncCustomFieldColumn } from "./helpers";
 import {
   barcodeFields,
+  defaultColumnsForWorkspace,
   defaultFields,
   fixedFields,
   generateBarcodeColumns,
+  insertMissingDefaultColumns,
 } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
@@ -56,11 +59,17 @@ export async function createUserAssetIndexSettings({
   const _db = tx || db;
 
   try {
-    const org = await getOrganizationById(organizationId, {
-      customFields: {
-        where: { active: true, deletedAt: null },
-      },
-    });
+    const [org, quantityAsset] = await Promise.all([
+      getOrganizationById(organizationId, {
+        customFields: {
+          where: { active: true, deletedAt: null },
+        },
+      }),
+      _db.asset.findFirst({
+        where: { organizationId, type: AssetType.QUANTITY_TRACKED },
+        select: { id: true },
+      }),
+    ]);
 
     /** We start at the default fields length */
     let position = defaultFields.length - 1;
@@ -81,7 +90,9 @@ export async function createUserAssetIndexSettings({
     });
 
     const columns = [
-      ...defaultFields,
+      ...defaultColumnsForWorkspace({
+        hasQuantityAssets: Boolean(quantityAsset),
+      }),
       ...barcodeColumns,
       ...customFieldsColumns,
     ];
@@ -439,12 +450,13 @@ async function validateColumns({
       (name) => !existingDefaultFields.includes(name)
     );
 
-    // If default fields are missing, add them from our static defaults
+    // If default fields are missing, add them from our static defaults at
+    // their default positions, keeping the saved order of everything else
     if (missingDefaultFields.length > 0) {
-      const fieldsToAdd = defaultFields.filter((field) =>
-        missingDefaultFields.includes(field.name)
+      updatedColumns = insertMissingDefaultColumns(
+        updatedColumns,
+        missingDefaultFields
       );
-      updatedColumns = [...updatedColumns, ...fieldsToAdd];
       needsUpdate = true;
     }
 

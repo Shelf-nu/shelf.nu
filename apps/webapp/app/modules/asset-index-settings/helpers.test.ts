@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { columnsLabelsMap, defaultFields, fixedFields } from "./helpers";
+import {
+  columnsLabelsMap,
+  defaultFields,
+  fixedFields,
+  QUANTITY_COLUMN_BLOCK,
+} from "./helpers";
 
 describe("asset index column metadata", () => {
   it("registers last updated as a fixed field with a label", () => {
@@ -36,5 +41,26 @@ describe("asset index column metadata", () => {
     expect(minQuantityColumn).toEqual(
       expect.objectContaining({ visible: false })
     );
+  });
+
+  it("keeps the quantity columns together right after Status, with Min quantity beside Stock status", () => {
+    const order = [...defaultFields]
+      .sort((a, b) => a.position - b.position)
+      .map((column) => column.name);
+    const start = order.indexOf("status") + 1;
+
+    expect(order.slice(start, start + QUANTITY_COLUMN_BLOCK.length)).toEqual([
+      ...QUANTITY_COLUMN_BLOCK,
+    ]);
+    expect(order[order.indexOf("stockStatus") + 1]).toBe("minQuantity");
+  });
+
+  it("starts only Free now and Stock status visible in the quantity block", () => {
+    const visible = defaultFields
+      .filter((column) => QUANTITY_COLUMN_BLOCK.includes(column.name))
+      .filter((column) => column.visible)
+      .map((column) => column.name);
+
+    expect(visible).toEqual(["available", "stockStatus"]);
   });
 });

@@ -12,6 +12,7 @@ import {
   MaxFileSizeExceededError,
   parseFormData,
 } from "@remix-run/form-data-parser";
+import { STOCK_STATUS_LABELS } from "@shelf/labels";
 
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
@@ -754,6 +755,36 @@ export const buildCsvExportDataFromAssets = ({
             value = isQuantityTracked(asset)
               ? "Tracked by quantity"
               : "Individual";
+            break;
+          case "available":
+            // Derived, so export-only in practice: the importer has no
+            // "available" input and never will, it is an output of custody,
+            // kits and bookings. Included because "filter to Running low, then
+            // export" is the reorder list an inventory manager actually wants,
+            // and it is useless without the number next to the name.
+            value =
+              isQuantityTracked(asset) && asset.available != null
+                ? `${asset.available}`
+                : "";
+            break;
+          case "reserved":
+            // NOT gated on quantity-tracking, matching the column exactly. An
+            // individually-tracked asset is a pool of one and reads 1 here when
+            // a booking claims it, gating this emitted a blank cell for every
+            // booked camera while the screen showed 1, so the export quietly
+            // disagreed with the page it was exported from.
+            value = asset.reserved != null ? `${asset.reserved}` : "";
+            break;
+          case "stockStatus":
+            // Emit the human label, not the enum key: a CSV opened in a
+            // spreadsheet is read by people, and "Running low" is the word they
+            // saw on screen. Blank for INDIVIDUAL assets and for quantity
+            // assets with no reorder point, matching the column exactly, a
+            // CSV that disagrees with the screen is worse than an empty cell.
+            value =
+              asset.stockStatus && asset.stockStatus !== "NO_THRESHOLD"
+                ? STOCK_STATUS_LABELS[asset.stockStatus]
+                : "";
             break;
           case "assetModel":
             value = asset.assetModelName ?? "";

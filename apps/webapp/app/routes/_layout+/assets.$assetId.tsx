@@ -20,6 +20,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   deleteAsset,
@@ -160,8 +161,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           select: {
             quantity: true,
             assetKitId: true,
-            booking: { select: { id: true, name: true, status: true } },
+            // `from` lets the status tooltip say WHEN each claim starts, which
+            // is what reconciles "12 reserved" with "10 free right now".
+            // Mirrors the select in `getAssetQuantityRows`, the lazy-fetch
+            // endpoint and this inline-SSR path feed the SAME component, so a
+            // field added to one has to be added to the other or the tooltip
+            // silently loses the date on whichever surface was missed.
+            booking: {
+              select: { id: true, name: true, status: true, from: true },
+            },
           },
+          // Soonest first, the tooltip caps how many slices it renders, so
+          // this decides which ones survive the cut.
+          orderBy: { booking: { from: "asc" } },
         },
       },
     });
@@ -262,6 +274,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const assetWithEffectiveBookingAssets = {
       ...asset,
       bookingAssets: [...reservedRows, ...cleanedActiveRows],
+      // The engine's free-now figure, so the header tooltip's "free right
+      // now" matches the Quantity Overview and the assets index.
+      freeNow: isQuantityTracked(asset)
+        ? Math.max(
+            0,
+            (await getAssetAvailability({ assetId: asset.id, organizationId }))
+              .physicalAvailable
+          )
+        : null,
     };
 
     /**

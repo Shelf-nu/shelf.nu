@@ -48,6 +48,7 @@ import {
   lowStockRecoveredText,
 } from "~/emails/low-stock-recovered";
 import { sendEmail } from "~/emails/mail.server";
+import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-out.server";
 import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
@@ -216,10 +217,29 @@ async function runLowStockCheck({
   assetId,
   userId,
   organizationId,
+  silent = false,
 }: {
   assetId: string;
   userId?: string | null;
   organizationId: string;
+  /**
+   * Run the state transitions WITHOUT sending anything, no email, no in-app
+   * toast. The `lowStockNotifiedAt` marker is still stamped or cleared exactly
+   * as it would be, so a later genuine crossing and the "back in stock"
+   * recovery notice both still work.
+   *
+   * Exists for BULK callers. This notifier emails the owner AND every admin,
+   * and a bulk threshold change can put hundreds of assets into the low band in
+   * one click, that is hundreds of notifier runs, each mailing several people,
+   * for a change the user just made deliberately and can already see as amber
+   * badges on the screen in front of them. Alerting is for stock moving while
+   * nobody is watching, not for the operation the user just performed.
+   *
+   * Do NOT reach for this to quieten a noisy single-asset path; the debounce
+   * marker already handles repeat firing. Defaults to `false` so every existing
+   * call site behaves exactly as before.
+   */
+  silent?: boolean;
 }): Promise<void> {
   const asset = await db.asset.findFirst({
     // org-scoped: scope the low-stock lookup to the caller's org
@@ -267,12 +287,33 @@ async function runLowStockCheck({
     return;
   }
 
-  /** Compute available = total - inCustody */
-  const custodySum = await db.custody.aggregate({
-    where: { assetId },
-    _sum: { quantity: true },
-  });
-  const available = (asset.quantity ?? 0) - (custodySum._sum.quantity ?? 0);
+  /**
+   * Free now, measured the way `getAssetAvailability` measures it: direct
+   * custody only (a kit's inherited custody rows sit inside the kit figure),
+   * units earmarked to kits, and standalone units that have actually left on
+   * a booking. The `Stock status` column and the "Low stock only" filter read
+   * the same three terms, so this alert fires exactly when they show
+   * Running low, never for a row they call Enough, and never silent on a row
+   * they flag.
+   */
+  const [custodySum, kitSum, checkedOut] = await Promise.all([
+    db.custody.aggregate({
+      where: { assetId, kitCustodyId: null },
+      _sum: { quantity: true },
+    }),
+    db.assetKit.aggregate({
+      where: { assetId, organizationId },
+      _sum: { quantity: true },
+    }),
+    computeCheckedOutBreakdownForAsset(db, assetId, organizationId),
+  ]);
+  const available = Math.max(
+    0,
+    (asset.quantity ?? 0) -
+      (custodySum._sum.quantity ?? 0) -
+      (kitSum._sum.quantity ?? 0) -
+      checkedOut.standalone
+  );
 
   /**
    * PRESERVED predicate: low iff available is at or below the threshold.
@@ -284,8 +325,8 @@ async function runLowStockCheck({
   if (isLow && asset.lowStockNotifiedAt == null) {
     /* ----------------------- Enter low: fire alert ----------------------- */
 
-    /** In-app notification for the acting user (skipped when none). */
-    if (userId) {
+    /** In-app notification for the acting user (skipped when none, or silent). */
+    if (userId && !silent) {
       notifyInAppBestEffort({
         title: "Low stock alert",
         message: `${asset.title} has ${available} ${unitLabel} available (threshold: ${asset.minQuantity})`,
@@ -294,20 +335,26 @@ async function runLowStockCheck({
       });
     }
 
-    await sendLowStockEmails({
-      variant: "alert",
-      organizationId,
-      assetId,
-      assetTitle: asset.title,
-      available,
-      minQuantity: asset.minQuantity,
-      unitOfMeasure: unitLabel,
-    });
+    if (!silent) {
+      await sendLowStockEmails({
+        variant: "alert",
+        organizationId,
+        assetId,
+        assetTitle: asset.title,
+        available,
+        minQuantity: asset.minQuantity,
+        unitOfMeasure: unitLabel,
+      });
+    }
 
     /**
      * Stamp the debounce marker AFTER sending so a further decrement while the
-     * asset stays low won't re-alert. Best-effort (see file header): a failed
-     * stamp just means the next decrement re-fires — never a rollback.
+     * asset stays low won't re-alert. Stamped even in silent mode: the marker
+     * records "this low-stock episode is accounted for", which is exactly true
+     * when the user set the threshold themselves, and leaving it null would
+     * make the very next stock movement fire the alert we just suppressed.
+     * Best-effort (see file header): a failed stamp just means the next
+     * decrement re-fires, never a rollback.
      */
     try {
       await db.asset.update({
@@ -356,7 +403,7 @@ async function runLowStockCheck({
     }
 
     /** In-app notification for the acting user (skipped when none). */
-    if (userId) {
+    if (userId && !silent) {
       notifyInAppBestEffort({
         title: "Back in stock",
         message: `${asset.title} is back above its threshold: ${available} ${unitLabel} available (threshold: ${asset.minQuantity})`,
@@ -365,15 +412,17 @@ async function runLowStockCheck({
       });
     }
 
-    await sendLowStockEmails({
-      variant: "recovered",
-      organizationId,
-      assetId,
-      assetTitle: asset.title,
-      available,
-      minQuantity: asset.minQuantity,
-      unitOfMeasure: unitLabel,
-    });
+    if (!silent) {
+      await sendLowStockEmails({
+        variant: "recovered",
+        organizationId,
+        assetId,
+        assetTitle: asset.title,
+        available,
+        minQuantity: asset.minQuantity,
+        unitOfMeasure: unitLabel,
+      });
+    }
   }
   /* else: no transition — already-notified-and-still-low, or fine-and-was-fine. */
 }

@@ -8,6 +8,7 @@ import {
   PopoverContent,
 } from "@radix-ui/react-popover";
 import {
+  ASSET_QUANTITY_FIGURE_LABELS,
   ASSET_TYPE_LABELS,
   CONSUMPTION_TYPE_DESCRIPTIONS,
   CONSUMPTION_TYPE_LABELS,
@@ -845,14 +846,14 @@ export const AssetForm = ({
         <When truthy={isQtyTracked}>
           <div className="flex flex-col gap-2">
             <FormRow
-              rowLabel="Quantity"
+              rowLabel={ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
               className="border-b-0 pb-[10px]"
               subHeading="Total number of items in this pool."
               required={true}
             >
               <Input
                 type="number"
-                label="Quantity"
+                label={ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
                 hideLabel
                 name="quantity"
                 disabled={disabled}

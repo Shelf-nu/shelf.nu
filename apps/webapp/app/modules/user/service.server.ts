@@ -62,7 +62,7 @@ import { randomUsernameFromEmail } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import { type UpdateUserPayload, USER_STATIC_INCLUDE } from "./types";
-import { defaultFields } from "../asset-index-settings/helpers";
+import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 import { defaultUserCategories } from "../category/default-categories";
 import {
@@ -990,7 +990,10 @@ export async function createUser(
                     assetIndexSettings: {
                       create: {
                         mode: AssetIndexMode.ADVANCED,
-                        columns: defaultFields,
+                        // A new workspace has no assets yet, so no quantity-tracked ones.
+                        columns: defaultColumnsForWorkspace({
+                          hasQuantityAssets: false,
+                        }),
                         user: {
                           connect: {
                             id: userId,
