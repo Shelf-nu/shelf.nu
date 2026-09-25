@@ -118,9 +118,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
           userId,
-          // A FILTER. This passed no scoping argument at all, so a restricted
-          // user — /kits is gated on `kit:read`, which BASE holds — received
-          // the entire team roster here.
+          // A FILTER, so custody visibility governs: only the caller's own
+          // team member unless custody is visible to them.
           filterByUserId: !access.custody.seeAll,
         }),
         getTagsForBookingTagsFilter({

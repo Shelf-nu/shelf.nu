@@ -51,6 +51,7 @@ import {
   canManageBookingItems,
   canPartialCheckInOut,
   isExplicitScanRequired,
+  resolveRole,
   resolveRoleAccess,
 } from "./role-access";
 
@@ -1198,43 +1199,45 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     getDefaultModeForRole(webRole(roles))
   );
 
-  // B9:D-33: index mode seeded when an invite is accepted, from the INVITE's
-  // roles[0] (modules/user/service.server.ts:380-384, 396-400,
-  // `ensureAssetIndexModeForRole`).
+  // B9:D-33: index mode seeded when an invite is accepted, from the invite's
+  // effective role (modules/user/service.server.ts, `ensureAssetIndexModeForRole`
+  // with `resolveRole(roles)`).
   snapshot["B9:D-33:invite-accept"] = perRoleSet((roles) =>
-    getDefaultModeForRole(roles[0])
+    getDefaultModeForRole(resolveRole(roles))
   );
 
-  // B9:D-34: asset write affordances:
-  // codePreview `!isBaseOrSelfService` (components/code-preview/code-preview.tsx:133,319,328);
-  // sequentialIdPrompt `isOwner || isOrgAdmin` (routes/_layout+/_layout.tsx:197-202);
-  // sequentialIdEndpoint `includes(OWNER) || includes(ADMIN)` (routes/api+/generate-sequential-ids.tsx:35);
-  // scannerLocations `!isSelfServiceOrBase`, effective role (routes/_layout+/scanner.tsx:108).
+  // B9:D-34: asset write affordances, each an `asset:update` matrix check:
+  // codePreview (components/code-preview/code-preview.tsx, `userHasPermission`);
+  // sequentialIdPrompt (routes/_layout+/_layout.tsx, `hasPermission`);
+  // sequentialIdEndpoint (routes/api+/generate-sequential-ids.tsx, `hasPermission`);
+  // scannerLocations (routes/_layout+/scanner.tsx, `hasPermission`).
   // The palette's Create asset/kit entries are in B9:D-38:palette.
   snapshot["B9:D-34:asset-write-affordances"] = perRoleSet((roles) => {
-    const flags = hookFlags(roles);
+    const mayUpdateAssets = can(roles, E.asset, A.update);
     return {
-      codePreview: !flags.isBaseOrSelfService,
-      sequentialIdPrompt: flags.isOwner || flags.isAdministrator,
-      sequentialIdEndpoint: roles.includes(R.OWNER) || roles.includes(R.ADMIN),
-      scannerLocations: !isSelfServiceOrBaseRole(webRole(roles)),
+      codePreview: mayUpdateAssets,
+      sequentialIdPrompt: mayUpdateAssets,
+      sequentialIdEndpoint: mayUpdateAssets,
+      scannerLocations: mayUpdateAssets,
     };
   });
 
-  // B9:D-35: asset index bulk menu (assets-list.tsx:74,217): `!isBase`.
-  snapshot["B9:D-35:assets-bulk-menu"] = perRoleSet(
-    (roles) => !hookFlags(roles).isBase
+  // B9:D-35: asset index bulk menu (components/assets/assets-index/assets-list.tsx):
+  // any of `asset:custody`, `asset:update`, `asset:delete`.
+  snapshot["B9:D-35:assets-bulk-menu"] = perRoleSet((roles) =>
+    can(roles, E.asset, [A.custody, A.update, A.delete])
   );
 
-  // B9:D-36: kit index bulk menu (routes/_layout+/kits._index.tsx:314,436): `!isBase`.
-  snapshot["B9:D-36:kits-bulk-menu"] = perRoleSet(
-    (roles) => !hookFlags(roles).isBase
+  // B9:D-36: kit index bulk menu (routes/_layout+/kits._index.tsx):
+  // any of `kit:custody`, `kit:update`, `kit:delete`.
+  snapshot["B9:D-36:kits-bulk-menu"] = perRoleSet((roles) =>
+    can(roles, E.kit, [A.custody, A.update, A.delete])
   );
 
-  // B9:D-37: "Set reminder" (components/assets/actions-dropdown.tsx:59,313,424):
-  // `isAdministratorOrOwner`.
-  snapshot["B9:D-37:set-reminder"] = perRoleSet(
-    (roles) => hookFlags(roles).isAdministratorOrOwner
+  // B9:D-37: "Set reminder" (components/assets/actions-dropdown.tsx):
+  // `assetReminders:create`.
+  snapshot["B9:D-37:set-reminder"] = perRoleSet((roles) =>
+    can(roles, E.assetReminders, A.create)
   );
 
   // ===================== Audits: Tasks 6a, 6b =====================
@@ -1534,9 +1537,9 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // D-28:client: the CLIENT's custody visibility (custody filters,
   // availability columns, custody chips), every role set x toggles. Reads
   // `userHasCustodyViewPermission`
-  // (custody-and-bookings-permissions.validator.client.ts:39-80): the matrix
-  // grant, else a restricted role held ANYWHERE in the membership whose toggle
-  // is on.
+  // (custody-and-bookings-permissions.validator.client.ts): the effective
+  // role's `access.custody.seeAll`, and nothing for a membership with no known
+  // role.
   snapshot["D-28:client"] = Object.fromEntries(
     ROLE_SETS.map((roles) => [
       key(roles),
@@ -1567,26 +1570,22 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   );
 
   // D-31: the web asset index lists only bookable assets. Both index loaders
-  // compare the effective role from `requirePermission` with SELF_SERVICE:
-  // simple (modules/asset/data.server.ts:170,299 into
-  // modules/asset/service.server.ts:4406) and advanced
-  // (modules/asset/data.server.ts:610).
+  // (modules/asset/data.server.ts, simple and advanced) read the caller's
+  // `access.policy.assets.listScope`.
   snapshot["D-31"] = Object.fromEntries(
     ROLE_SETS.map((roles) => [
       key(roles),
-      webRole(roles) === R.SELF_SERVICE ? "bookable" : "all",
+      accessFor(roles).policy.assets.listScope,
     ])
   );
 
   // D-32: the advanced asset index is available. The index loader refuses
-  // ADVANCED mode for an effective role of BASE or SELF_SERVICE
-  // (routes/_layout+/assets._index.tsx:118).
+  // ADVANCED mode when `access.policy.ui.advancedAssetIndex` is off
+  // (routes/_layout+/assets._index.tsx).
   snapshot["D-32"] = Object.fromEntries(
     ROLE_SETS.map((roles) => [
       key(roles),
-      !([R.BASE, R.SELF_SERVICE] as OrganizationRoles[]).includes(
-        webRole(roles)
-      ),
+      accessFor(roles).policy.ui.advancedAssetIndex,
     ])
   );
 

@@ -61,6 +61,11 @@ import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
 import { payload, error } from "~/utils/http.server";
 import { skipRevalidationOnClientViewChange } from "~/utils/list-view-params";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { resolveRoleAccess } from "~/utils/permissions/role-access";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
@@ -194,14 +199,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       (userOrg) => userOrg.organization.id === organizationId
     )?.roles;
 
-    // Check if current user has OWNER or ADMIN role in the organization
-    const isOwner = currentOrganizationUserRoles?.includes("OWNER");
-    const isOrgAdmin = currentOrganizationUserRoles?.includes("ADMIN");
-
-    // Check if sequential ID migration is needed
-    const needsSequentialIdMigration =
-      (isOwner || isOrgAdmin) && !currentOrganization.hasSequentialIdsMigrated;
-
     if (!organizations.length || !currentOrganization) {
       throw new ShelfError({
         cause: null,
@@ -212,6 +209,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         label: "Organization",
       });
     }
+
+    // The migration prompt is for members who may edit assets.
+    const needsSequentialIdMigration =
+      !currentOrganization.hasSequentialIdsMigrated &&
+      (await hasPermission({
+        organizationId,
+        userId,
+        roles: currentOrganizationUserRoles ?? [],
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      }));
 
     // The caller's reach in the current organization: the one object every
     // client component reads (via useRoleAccess), instead of re-deriving a

@@ -269,7 +269,7 @@ export const getPaginatedAndFilterableTeamMembers = async ({
  * everything and look like the filter had worked.
  *
  * @param args.teamMemberIds - Raw ids from the query string.
- * @param args.canSeeAllCustody - Resolved by `resolveCanSeeAllCustody`.
+ * @param args.canSeeAllCustody - The caller's `access.custody.seeAll`.
  * @param args.userId - The caller.
  * @param args.organizationId - Active workspace.
  * @returns The ids the caller is allowed to filter by.

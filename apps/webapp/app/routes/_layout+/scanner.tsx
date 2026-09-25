@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { OrganizationRoles } from "@prisma/client";
 import { useAtom, useSetAtom } from "jotai";
 import type {
   LinksFunction,
@@ -33,6 +32,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
@@ -56,13 +56,26 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, access, isSelfServiceOrBase } =
+    const { organizationId, access, userOrganizations } =
       await requirePermission({
         userId,
         request,
         entity: PermissionEntity.asset,
         action: PermissionAction.read,
       });
+    /**
+     * The locations feed the scanner's "update location" drawer, whose action
+     * requires `asset:update`; members without it get no location list.
+     */
+    const canUpdateLocations = await hasPermission({
+      organizationId,
+      userId,
+      roles:
+        userOrganizations.find((o) => o.organization.id === organizationId)
+          ?.roles ?? [],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
     const header: HeaderData = {
       title: "Locations",
     };
@@ -97,7 +110,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     /** Get locations  */
     let locationsData;
-    if (!isSelfServiceOrBase) {
+    if (canUpdateLocations) {
       const locationSelected = searchParams.get("location") ?? "";
       const getAllEntries = searchParams.getAll(
         "getAll"

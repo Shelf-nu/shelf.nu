@@ -191,8 +191,9 @@ describe("manage-assets route validation", () => {
         organizationId: "org123",
         roles: [OrganizationRoles.ADMIN],
       }),
-      // The fields below keep this suite's fixture: no see-all flags, and a
-      // membership list the mocked booking lookups never read.
+      // An ADMIN membership: the routes decide from `access`. The legacy
+      // `canSeeAll*` fields below are false and unread, and the membership
+      // list is empty because the mocked booking lookups never read it.
       organizations: [],
       currentOrganization: {} as any,
       userOrganizations: [],
@@ -1208,8 +1209,9 @@ describe("manage-assets loader — Models tab payload", () => {
         organizationId: "org123",
         roles: [OrganizationRoles.ADMIN],
       }),
-      // The fields below keep this suite's fixture: no see-all flags, and a
-      // membership list the mocked booking lookups never read.
+      // An ADMIN membership: the routes decide from `access`. The legacy
+      // `canSeeAll*` fields below are false and unread, and the membership
+      // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
       organizations: [],
       currentOrganization: {} as any,
@@ -1482,8 +1484,9 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
         organizationId: "org123",
         roles: [OrganizationRoles.ADMIN],
       }),
-      // The fields below keep this suite's fixture: no see-all flags, and a
-      // membership list the mocked booking lookups never read.
+      // An ADMIN membership: the routes decide from `access`. The legacy
+      // `canSeeAll*` fields below are false and unread, and the membership
+      // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
       organizations: [],
       currentOrganization: {} as any,

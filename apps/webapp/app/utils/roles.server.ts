@@ -112,10 +112,9 @@ export {
  * themselves.
  *
  * ADMIN / OWNER always can. SELF_SERVICE and BASE only when the workspace has
- * switched their respective override on. Exported so callers outside
- * {@link requirePermission} — notably `/api/model-filters` — resolve it
- * identically; a surface that invents its own rule ends up disagreeing with
- * the loader that seeded it.
+ * switched their respective override on. Callers read the same answer from
+ * `access.custody.seeAll` (returned by {@link requirePermission}); a surface
+ * that invents its own rule ends up disagreeing with the loader that seeded it.
  *
  * This governs VIEWING only. It never grants the right to assign custody:
  * SELF_SERVICE may assign only to themselves and BASE may not assign at all,

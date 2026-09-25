@@ -168,8 +168,9 @@ describe("manage-kits route validation", () => {
         organizationId: "org123",
         roles: [OrganizationRoles.ADMIN],
       }),
-      // The fields below keep this suite's fixture: no see-all flags, and a
-      // membership list the mocked booking lookups never read.
+      // An ADMIN membership: the routes decide from `access`. The legacy
+      // `canSeeAll*` fields below are false and unread, and the membership
+      // list is empty because the mocked booking lookups never read it.
       organizations: [],
       currentOrganization: {} as any,
       userOrganizations: [],
@@ -914,8 +915,9 @@ describe("manage-kits loader — Models tab payload", () => {
         organizationId: "org123",
         roles: [OrganizationRoles.ADMIN],
       }),
-      // The fields below keep this suite's fixture: no see-all flags, and a
-      // membership list the mocked booking lookups never read.
+      // An ADMIN membership: the routes decide from `access`. The legacy
+      // `canSeeAll*` fields below are false and unread, and the membership
+      // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
       organizations: [],
       currentOrganization: {} as any,
@@ -1053,8 +1055,8 @@ describe("manage-kits loader — Models tab payload", () => {
   });
 
   it("redacts custodian identity from picker rows for a restricted viewer", async () => {
-    // A real SELF_SERVICE membership with every workspace toggle off: it may
-    // manage items on its own DRAFT booking but may not see others' custody.
+    // why: a real SELF_SERVICE membership with every workspace toggle off: it
+    // may manage items on its own DRAFT booking but may not see others' custody.
     vi.mocked(rolesServer.requirePermission).mockResolvedValue(
       permissionContext({
         organizationId: "org123",

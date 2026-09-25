@@ -52,6 +52,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id as generateId } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { resolveRole } from "~/utils/permissions/role-access";
 import { getRoleFromGroupId } from "~/utils/roles.server";
 import {
   deleteProfilePicture,
@@ -380,7 +381,8 @@ export async function createUserOrAttachOrg({
       await ensureAssetIndexModeForRole({
         userId: newUser.id,
         organizationId,
-        role: roles[0],
+        // The effective (highest) role of the invite, whatever its order.
+        role: resolveRole(roles),
       });
 
       return newUser;
@@ -396,7 +398,7 @@ export async function createUserOrAttachOrg({
     await ensureAssetIndexModeForRole({
       userId: shelfUser.id,
       organizationId,
-      role: roles[0],
+      role: resolveRole(roles),
     });
 
     return shelfUser;

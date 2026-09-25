@@ -113,8 +113,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
     const mode = settings.mode;
 
-    /** For base and self service users, we dont allow to view the advanced index */
-    if (mode === "ADVANCED" && ["BASE", "SELF_SERVICE"].includes(role)) {
+    /** The advanced index is a per-role capability; switch back if the role lacks it. */
+    if (mode === "ADVANCED" && !access.policy.ui.advancedAssetIndex) {
       await changeMode({
         userId,
         organizationId,

@@ -314,7 +314,20 @@ export const handle = {
 
 export default function KitsIndexPage() {
   const { items } = useLoaderData<typeof loader>();
-  const { roles, isBase } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
+  /**
+   * The bulk menu holds custody, edit and delete actions; any one opens it.
+   * Each item inside stays gated on its own permission.
+   */
+  const canBulkAct = userHasPermission({
+    roles,
+    entity: PermissionEntity.kit,
+    action: [
+      PermissionAction.custody,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+  });
   const canCreateKit = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
@@ -436,7 +449,7 @@ export default function KitsIndexPage() {
           <List
             className="overflow-x-visible md:overflow-x-auto"
             ItemComponent={ListContent}
-            bulkActions={isBase ? undefined : <BulkActionsDropdown />}
+            bulkActions={canBulkAct ? <BulkActionsDropdown /> : undefined}
             customEmptyStateContent={{
               title: "No kits yet",
               text: "Kits let you group related assets together. Create a kit to bundle equipment that's typically used as a set.",

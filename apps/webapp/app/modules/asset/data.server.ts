@@ -1,7 +1,10 @@
 /** In this file you can find the different ways of fetching data for the asset index. They are either for the simple or advanced mode */
 
-import type { AssetIndexSettings, Kit } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
+import type {
+  AssetIndexSettings,
+  Kit,
+  OrganizationRoles,
+} from "@prisma/client";
 import { data, redirect } from "react-router";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
@@ -170,7 +173,6 @@ export async function simpleModeLoader({
   // FILTER seed is scoped for every restricted role, BASE included. See
   // `getPaginatedAndFilterableAssets`.
   const { locale, timeZone } = getClientHint(request);
-  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
   const assignsSelfOnly = access.custody.assign === "self";
 
   // Check if URL contains advanced filter syntax (from browser back button or old bookmark)
@@ -245,8 +247,8 @@ export async function simpleModeLoader({
     getPaginatedAndFilterableAssets({
       request,
       organizationId,
-      // The fix: this route DOES render the custodian filter, and the seed was
-      // scoped on a role check that let BASE through unscoped.
+      // This route renders the custodian filter, so its seed is scoped by the
+      // custody rule for every restricted role.
       canSeeAllCustody,
       filters,
       extraInclude:
@@ -300,7 +302,7 @@ export async function simpleModeLoader({
               },
             }
           : undefined,
-      isSelfService,
+      availableToBookOnly: access.policy.assets.listScope === "bookable",
       userId,
     }),
     getTagsForBookingTagsFilter({
@@ -611,7 +613,7 @@ export async function advancedModeLoader({
       settings,
       getBookings: view === "availability",
       canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
-      availableToBookOnly: role === OrganizationRoles.SELF_SERVICE,
+      availableToBookOnly: access.policy.assets.listScope === "bookable",
       preParsedFilters: parsedFilters,
     }),
     // We need the custom fields so we can create the options for filtering
@@ -628,8 +630,7 @@ export async function advancedModeLoader({
         searchParams.has("getAll") &&
         hasGetAllValue(searchParams, "teamMember"),
       userId,
-      // A FILTER. This passed no scoping argument at all, so the seed
-      // disagreed with the search endpoint for any restricted role.
+      // A FILTER: scoped by the custody rule, like the search endpoint.
       filterByUserId: !canSeeAllCustody,
     }),
 

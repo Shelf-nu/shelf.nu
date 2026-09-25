@@ -419,10 +419,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         trustedSelectedTeamMembers: booking.custodianTeamMemberId
           ? [booking.custodianTeamMemberId]
           : [],
-        // A sidebar FILTER, so the custody read-visibility rule governs — the
-        // role alone ignored the workspace's `selfServiceCanSeeCustody` /
-        // `baseUserCanSeeCustody` overrides, which made this seed disagree with
-        // the search endpoint.
+        // A sidebar FILTER, so custody visibility governs (including the
+        // workspace toggles): only the caller's own team member unless custody
+        // is visible to them, matching the search endpoint.
         filterByUserId: !access.custody.seeAll,
         userId,
       }),

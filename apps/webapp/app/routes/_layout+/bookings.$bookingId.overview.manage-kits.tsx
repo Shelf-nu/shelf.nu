@@ -333,9 +333,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // `email` included, and this picker is reachable with `booking: update`
       // — which BASE and SELF_SERVICE both hold on their own DRAFT booking.
       // Scoping the custodian FILTER (above) does not shape the rows, so the
-      // identity has to be redacted here too. Not the literal `false` passed to
-      // the filter: that argument is deliberately fixed for a seed nothing
-      // renders, and reusing it would redact for ADMIN/OWNER as well.
+      // identity has to be redacted here too.
       items: redactCustodianForViewer(kits, {
         canSeeAllCustody: access.custody.seeAll,
         userId,

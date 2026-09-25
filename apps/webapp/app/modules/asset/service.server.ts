@@ -4276,7 +4276,7 @@ export async function getPaginatedAndFilterableAssets({
   excludeTagsQuery = false,
   excludeLocationQuery = false,
   filters = "",
-  isSelfService,
+  availableToBookOnly,
   canSeeAllCustody,
   userId,
 }: {
@@ -4291,11 +4291,12 @@ export async function getPaginatedAndFilterableAssets({
   excludeLocationQuery?: boolean;
   filters?: string;
 
-  isSelfService?: boolean;
+  /** Limit the list to assets available to book (the caller's `assets.listScope` is "bookable"). */
+  availableToBookOnly?: boolean;
   /**
    * Resolved custody read-visibility, from `requirePermission`. Required so
-   * the custodian filter seed is scoped by the rule rather than by a role
-   * check — `isSelfService` is false for BASE, which left the seed unscoped.
+   * the custodian filter seed is scoped by the custody rule for every
+   * restricted role, never by a role check.
    */
   canSeeAllCustody: boolean;
   userId?: string;
@@ -4378,10 +4379,9 @@ export async function getPaginatedAndFilterableAssets({
         // unscoped id here would fetch that person's row back.
         selectedTeamMembers: scopedTeamMemberIds,
         getAll: getAllEntries.includes("teamMember"),
-        // A read FILTER, so the resolved custody rule governs — NOT the role.
-        // `isSelfService` was false for BASE, which left this seed unscoped
-        // and shipped the whole roster to a BASE user with
-        // `baseUserCanSeeCustody` off. Same shape as the /scanner seed.
+        // A read FILTER, so the resolved custody rule governs, never the role:
+        // a member who may not see others' custody gets only their own row.
+        // Same shape as the /scanner seed.
         filterByUserId: !canSeeAllCustody,
         userId,
       }),
@@ -4403,7 +4403,7 @@ export async function getPaginatedAndFilterableAssets({
         teamMemberIds: scopedTeamMemberIds,
         extraInclude,
         assetKitFilter,
-        availableToBookOnly: isSelfService,
+        availableToBookOnly,
       }),
     ]);
 

@@ -9,6 +9,11 @@ import { Button } from "~/components/shared/button";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { resolveShowShelfBranding } from "~/utils/branding";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { slugify } from "~/utils/slugify";
 import { tw } from "~/utils/tw";
@@ -130,7 +135,13 @@ export const CodePreview = ({
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
-  const { isBaseOrSelfService, isOwner } = useUserRoleHelper();
+  const { roles, isOwner } = useUserRoleHelper();
+  /** Adding a code writes to the asset, so it follows `asset:update`. */
+  const canAddCode = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
   const organization = useCurrentOrganization();
   const resolvedShowShelfBranding = resolveShowShelfBranding(
     showShelfBranding,
@@ -316,7 +327,7 @@ export const CodePreview = ({
             }}
             className={tw(
               "min-w-0  flex-1 truncate rounded-md border border-gray-300 bg-white px-3 py-2 pr-7 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500",
-              isBaseOrSelfService ? "max-w-[320px]" : "max-w-[280px]"
+              canAddCode ? "max-w-[280px]" : "max-w-[320px]"
             )}
           >
             {availableCodes.map((code) => (
@@ -325,7 +336,7 @@ export const CodePreview = ({
               </option>
             ))}
           </select>
-          <When truthy={!isBaseOrSelfService}>
+          <When truthy={canAddCode}>
             <Button
               type="button"
               icon="plus"

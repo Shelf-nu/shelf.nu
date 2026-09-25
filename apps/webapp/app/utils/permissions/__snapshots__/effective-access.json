@@ -14582,14 +14582,14 @@
     "ADMIN+OWNER": "ADVANCED",
     "ADMIN+SELF_SERVICE": "ADVANCED",
     "ADMIN+BASE": "ADVANCED",
-    "SELF_SERVICE+OWNER": "SIMPLE",
-    "SELF_SERVICE+ADMIN": "SIMPLE",
+    "SELF_SERVICE+OWNER": "ADVANCED",
+    "SELF_SERVICE+ADMIN": "ADVANCED",
     "SELF_SERVICE+BASE": "SIMPLE",
-    "BASE+OWNER": "SIMPLE",
-    "BASE+ADMIN": "SIMPLE",
+    "BASE+OWNER": "ADVANCED",
+    "BASE+ADMIN": "ADVANCED",
     "BASE+SELF_SERVICE": "SIMPLE",
     "(none)": "SIMPLE",
-    "UNKNOWN_ROLE": "ADVANCED"
+    "UNKNOWN_ROLE": "SIMPLE"
   },
   "B9:D-34:asset-write-affordances": {
     "OWNER": {
@@ -14623,13 +14623,13 @@
       "scannerLocations": true
     },
     "OWNER+SELF_SERVICE": {
-      "codePreview": false,
+      "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
     "OWNER+BASE": {
-      "codePreview": false,
+      "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
       "scannerLocations": true
@@ -14641,25 +14641,25 @@
       "scannerLocations": true
     },
     "ADMIN+SELF_SERVICE": {
-      "codePreview": false,
+      "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
     "ADMIN+BASE": {
-      "codePreview": false,
+      "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
     "SELF_SERVICE+OWNER": {
-      "codePreview": false,
+      "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
     "SELF_SERVICE+ADMIN": {
-      "codePreview": false,
+      "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
       "scannerLocations": true
@@ -14671,13 +14671,13 @@
       "scannerLocations": false
     },
     "BASE+OWNER": {
-      "codePreview": false,
+      "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
     "BASE+ADMIN": {
-      "codePreview": false,
+      "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
       "scannerLocations": true
@@ -14689,13 +14689,13 @@
       "scannerLocations": false
     },
     "(none)": {
-      "codePreview": true,
+      "codePreview": false,
       "sequentialIdPrompt": false,
       "sequentialIdEndpoint": false,
       "scannerLocations": false
     },
     "UNKNOWN_ROLE": {
-      "codePreview": true,
+      "codePreview": false,
       "sequentialIdPrompt": false,
       "sequentialIdEndpoint": false,
       "scannerLocations": false
@@ -14708,18 +14708,18 @@
     "BASE": false,
     "OWNER+ADMIN": true,
     "OWNER+SELF_SERVICE": true,
-    "OWNER+BASE": false,
+    "OWNER+BASE": true,
     "ADMIN+OWNER": true,
     "ADMIN+SELF_SERVICE": true,
-    "ADMIN+BASE": false,
+    "ADMIN+BASE": true,
     "SELF_SERVICE+OWNER": true,
     "SELF_SERVICE+ADMIN": true,
-    "SELF_SERVICE+BASE": false,
-    "BASE+OWNER": false,
-    "BASE+ADMIN": false,
-    "BASE+SELF_SERVICE": false,
-    "(none)": true,
-    "UNKNOWN_ROLE": true
+    "SELF_SERVICE+BASE": true,
+    "BASE+OWNER": true,
+    "BASE+ADMIN": true,
+    "BASE+SELF_SERVICE": true,
+    "(none)": false,
+    "UNKNOWN_ROLE": false
   },
   "B9:D-36:kits-bulk-menu": {
     "OWNER": true,
@@ -14728,18 +14728,18 @@
     "BASE": false,
     "OWNER+ADMIN": true,
     "OWNER+SELF_SERVICE": true,
-    "OWNER+BASE": false,
+    "OWNER+BASE": true,
     "ADMIN+OWNER": true,
     "ADMIN+SELF_SERVICE": true,
-    "ADMIN+BASE": false,
+    "ADMIN+BASE": true,
     "SELF_SERVICE+OWNER": true,
     "SELF_SERVICE+ADMIN": true,
-    "SELF_SERVICE+BASE": false,
-    "BASE+OWNER": false,
-    "BASE+ADMIN": false,
-    "BASE+SELF_SERVICE": false,
-    "(none)": true,
-    "UNKNOWN_ROLE": true
+    "SELF_SERVICE+BASE": true,
+    "BASE+OWNER": true,
+    "BASE+ADMIN": true,
+    "BASE+SELF_SERVICE": true,
+    "(none)": false,
+    "UNKNOWN_ROLE": false
   },
   "B9:D-37:set-reminder": {
     "OWNER": true,
@@ -18707,10 +18707,10 @@
       "ssB,ssC": true,
       "baB,ssC": true,
       "ssB,baB,ssC": true,
-      "baC": true,
-      "ssB,baC": true,
-      "baB,baC": true,
-      "ssB,baB,baC": true,
+      "baC": false,
+      "ssB,baC": false,
+      "baB,baC": false,
+      "ssB,baB,baC": false,
       "ssC,baC": true,
       "ssB,ssC,baC": true,
       "baB,ssC,baC": true,
@@ -18761,10 +18761,10 @@
       "ssB,ssC": true,
       "baB,ssC": true,
       "ssB,baB,ssC": true,
-      "baC": true,
-      "ssB,baC": true,
-      "baB,baC": true,
-      "ssB,baB,baC": true,
+      "baC": false,
+      "ssB,baC": false,
+      "baB,baC": false,
+      "ssB,baB,baC": false,
       "ssC,baC": true,
       "ssB,ssC,baC": true,
       "baB,ssC,baC": true,
