@@ -39,7 +39,10 @@ export const REPORTS: ReportDefinition[] = [
     filters: [
       { type: "status", label: "Status", multi: true },
       { type: "team_member", label: "Custodian", multi: false },
-      { type: "location", label: "Location", multi: false },
+      { type: "location", label: "Location", multi: true },
+      { type: "category", label: "Category", multi: true },
+      { type: "asset_model", label: "Asset model", multi: true },
+      { type: "custom_field", label: "Custom field", multi: true },
     ],
     hasChart: true,
     exportable: true,
@@ -54,7 +57,9 @@ export const REPORTS: ReportDefinition[] = [
     enabled: true, // R3
     filters: [
       { type: "category", label: "Category", multi: true },
-      { type: "location", label: "Location", multi: false },
+      { type: "location", label: "Location", multi: true },
+      { type: "asset_model", label: "Asset model", multi: true },
+      { type: "custom_field", label: "Custom field", multi: true },
     ],
     hasChart: true,
     exportable: true,
@@ -84,7 +89,9 @@ export const REPORTS: ReportDefinition[] = [
     enabled: true, // R9
     filters: [
       { type: "category", label: "Category", multi: true },
-      { type: "location", label: "Location", multi: false },
+      { type: "location", label: "Location", multi: true },
+      { type: "asset_model", label: "Asset model", multi: true },
+      { type: "custom_field", label: "Custom field", multi: true },
     ],
     hasChart: true,
     exportable: true, // Monthly breakdown table can be exported
@@ -99,7 +106,10 @@ export const REPORTS: ReportDefinition[] = [
     enabled: true, // R6
     filters: [
       { type: "team_member", label: "Custodian", multi: false },
-      { type: "location", label: "Location", multi: false },
+      { type: "location", label: "Location", multi: true },
+      { type: "category", label: "Category", multi: true },
+      { type: "asset_model", label: "Asset model", multi: true },
+      { type: "custom_field", label: "Custom field", multi: true },
     ],
     hasChart: false,
     exportable: true,
@@ -120,6 +130,8 @@ export const REPORTS: ReportDefinition[] = [
       { type: "category", label: "Category", multi: true },
       { type: "location", label: "Location", multi: true },
       { type: "status", label: "Status", multi: true },
+      { type: "asset_model", label: "Asset model", multi: true },
+      { type: "custom_field", label: "Custom field", multi: true },
     ],
     hasChart: false,
     exportable: true,
@@ -135,6 +147,9 @@ export const REPORTS: ReportDefinition[] = [
     filters: [
       { type: "asset", label: "Asset", multi: false },
       { type: "category", label: "Category", multi: true },
+      { type: "location", label: "Location", multi: true },
+      { type: "asset_model", label: "Asset model", multi: true },
+      { type: "custom_field", label: "Custom field", multi: true },
     ],
     hasChart: true,
     exportable: true,
@@ -149,7 +164,9 @@ export const REPORTS: ReportDefinition[] = [
     enabled: true, // R8
     filters: [
       { type: "category", label: "Category", multi: true },
-      { type: "location", label: "Location", multi: false },
+      { type: "location", label: "Location", multi: true },
+      { type: "asset_model", label: "Asset model", multi: true },
+      { type: "custom_field", label: "Custom field", multi: true },
     ],
     hasChart: true,
     exportable: true,
@@ -164,7 +181,9 @@ export const REPORTS: ReportDefinition[] = [
     enabled: true, // R4
     filters: [
       { type: "category", label: "Category", multi: true },
-      { type: "location", label: "Location", multi: false },
+      { type: "location", label: "Location", multi: true },
+      { type: "asset_model", label: "Asset model", multi: true },
+      { type: "custom_field", label: "Custom field", multi: true },
     ],
     hasChart: false,
     exportable: true,
@@ -177,7 +196,12 @@ export const REPORTS: ReportDefinition[] = [
     category: "assets",
     icon: "LayoutGrid",
     enabled: true, // R10
-    filters: [],
+    filters: [
+      { type: "category", label: "Category", multi: true },
+      { type: "location", label: "Location", multi: true },
+      { type: "asset_model", label: "Asset model", multi: true },
+      { type: "custom_field", label: "Custom field", multi: true },
+    ],
     hasChart: true,
     exportable: true,
   },
@@ -195,7 +219,10 @@ export const REPORTS: ReportDefinition[] = [
     enabled: true, // R5
     filters: [
       { type: "team_member", label: "Team Member", multi: false },
-      { type: "location", label: "Location", multi: false },
+      { type: "location", label: "Location", multi: true },
+      { type: "category", label: "Category", multi: true },
+      { type: "asset_model", label: "Asset model", multi: true },
+      { type: "custom_field", label: "Custom field", multi: true },
     ],
     hasChart: false,
     exportable: true,
