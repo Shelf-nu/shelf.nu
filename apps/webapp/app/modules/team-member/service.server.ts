@@ -994,6 +994,121 @@ export async function deleteNRM({
 }
 
 /**
+ * Builds the 404 answered when an id is not an NRM of the workspace.
+ *
+ * @param args.nrmId - The member id from the URL
+ * @param args.organizationId - The caller's workspace
+ * @returns A client-error `ShelfError` that is not reported to Sentry
+ */
+function nrmNotFoundError({
+  nrmId,
+  organizationId,
+}: {
+  nrmId: TeamMember["id"];
+  organizationId: TeamMember["organizationId"];
+}) {
+  return new ShelfError({
+    cause: null,
+    title: "Team member not found",
+    message: "This non-registered member does not exist in your workspace.",
+    additionalData: { nrmId, organizationId },
+    label,
+    status: 404,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Loads a non-registered member for the edit form.
+ *
+ * Read through the NRM index scope, so a registered member's team record, a
+ * member with a pending invite, a soft-deleted NRM and another workspace's
+ * member are all "not found".
+ *
+ * @param args.nrmId - The member id from the URL
+ * @param args.organizationId - The caller's workspace
+ * @returns The member's id and name
+ * @throws {ShelfError} 404 when the id is not an NRM of the workspace, 500 if
+ *   the read fails
+ */
+export async function getNrmForEdit({
+  nrmId,
+  organizationId,
+}: {
+  nrmId: TeamMember["id"];
+  organizationId: TeamMember["organizationId"];
+}): Promise<{ id: string; name: string }> {
+  try {
+    const nrm = await db.teamMember.findFirst({
+      where: { ...getNrmIndexWhere({ organizationId }), id: nrmId },
+      select: { id: true, name: true },
+    });
+
+    if (!nrm) {
+      throw nrmNotFoundError({ nrmId, organizationId });
+    }
+
+    return nrm;
+  } catch (cause) {
+    // The 404 above is a deliberate answer; re-wrapping it would turn it into
+    // a 500.
+    rethrowIfClientError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while loading the team member.",
+      additionalData: { nrmId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Renames a non-registered member.
+ *
+ * The NRM index scope is part of the write, so a row that became registered
+ * or invited after the form was loaded can never be renamed through this
+ * path: a registered member's `TeamMember.name` is their stored display name.
+ *
+ * @param args.nrmId - The member id from the URL
+ * @param args.organizationId - The caller's workspace
+ * @param args.name - The new name, already trimmed
+ * @throws {ShelfError} 404 when the id is not an NRM of the workspace, 500 if
+ *   the write fails
+ */
+export async function renameNrm({
+  nrmId,
+  organizationId,
+  name,
+}: {
+  nrmId: TeamMember["id"];
+  organizationId: TeamMember["organizationId"];
+  name: TeamMember["name"];
+}): Promise<void> {
+  try {
+    const { count } = await db.teamMember.updateMany({
+      where: { ...getNrmIndexWhere({ organizationId }), id: nrmId },
+      data: { name },
+    });
+
+    if (count === 0) {
+      throw nrmNotFoundError({ nrmId, organizationId });
+    }
+  } catch (cause) {
+    // The 404 above is a deliberate answer; re-wrapping it would turn it into
+    // a 500.
+    rethrowIfClientError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while renaming the team member.",
+      additionalData: { nrmId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
  * Soft-deletes the selected NRMs, refusing the whole batch if any of them
  * still holds custody.
  *

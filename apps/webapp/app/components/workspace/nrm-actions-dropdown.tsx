@@ -15,9 +15,26 @@ import { DeleteMember } from "./delete-member";
 import InviteUserDialog from "../settings/invite-user-dialog";
 import { Button } from "../shared/button";
 
+/**
+ * Row actions for a non-registered member: invite, edit and delete.
+ *
+ * Edit and delete show with the caller's `nonRegisteredMember` grants; the
+ * routes behind them keep their own gates. With neither grant the menu is not
+ * rendered.
+ *
+ * @param props.teamMember - The member the actions apply to
+ * @param props.canEdit - Whether the caller holds `nonRegisteredMember:update`
+ * @param props.canDelete - Whether the caller holds `nonRegisteredMember:delete`
+ */
 export function TeamMembersActionsDropdown({
   teamMember,
+  canEdit,
+  canDelete,
 }: {
+  /** Whether the caller holds `nonRegisteredMember:update`: shows Edit. */
+  canEdit: boolean;
+  /** Whether the caller holds `nonRegisteredMember:delete`: shows Delete. */
+  canDelete: boolean;
   teamMember: Prisma.TeamMemberGetPayload<{
     include: {
       _count: {
@@ -32,6 +49,10 @@ export function TeamMembersActionsDropdown({
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const { isPersonalOrg } = useLoaderData<typeof loader>();
   const { ref, open, setOpen } = useControlledDropdownMenu();
+
+  if (!canEdit && !canDelete) {
+    return null;
+  }
 
   return (
     <>
@@ -79,21 +100,23 @@ export function TeamMembersActionsDropdown({
             </Button>
           </DropdownMenuItem>
 
-          <DropdownMenuItem className="p-0 text-gray-700 hover:bg-slate-100 hover:text-gray-700">
-            <Button
-              to={`${teamMember.id}/edit`}
-              role="link"
-              variant="link"
-              className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
-              width="full"
-              icon="pen"
-              onClick={() => setOpen(false)}
-            >
-              Edit
-            </Button>
-          </DropdownMenuItem>
+          {canEdit ? (
+            <DropdownMenuItem className="p-0 text-gray-700 hover:bg-slate-100 hover:text-gray-700">
+              <Button
+                to={`${teamMember.id}/edit`}
+                role="link"
+                variant="link"
+                className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
+                width="full"
+                icon="pen"
+                onClick={() => setOpen(false)}
+              >
+                Edit
+              </Button>
+            </DropdownMenuItem>
+          ) : null}
 
-          <DeleteMember teamMember={teamMember} />
+          {canDelete ? <DeleteMember teamMember={teamMember} /> : null}
         </DropdownMenuContent>
       </DropdownMenu>
 

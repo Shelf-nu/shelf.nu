@@ -1289,10 +1289,11 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     };
   });
 
-  // B9:D-39: admin list bulk menus, `!isBaseOrSelfService`:
+  // B9:D-39: admin list bulk menus. `!isBaseOrSelfService`:
   // categories.tsx:152,171; tags.tsx:156,179; locations._index.tsx:101,129;
-  // settings.custom-fields.index.tsx:129,154; settings.asset-models.index.tsx:98,121;
-  // settings.team.nrm.tsx:157,184.
+  // settings.custom-fields.index.tsx:129,154; settings.asset-models.index.tsx:98,121.
+  // The NRM list (settings.team.nrm.tsx) shows its bulk menu with
+  // `nonRegisteredMember:delete`, the only bulk action it offers.
   snapshot["B9:D-39:admin-bulk-menus"] = perRoleSet((roles) => {
     const shown = !hookFlags(roles).isBaseOrSelfService;
     return {
@@ -1301,7 +1302,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
       locations: shown,
       customFields: shown,
       assetModels: shown,
-      nonRegisteredMembers: shown,
+      nonRegisteredMembers: can(roles, E.nonRegisteredMember, A.delete),
     };
   });
 

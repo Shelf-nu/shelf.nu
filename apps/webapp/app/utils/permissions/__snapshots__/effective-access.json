@@ -1093,16 +1093,9 @@
       ]
     },
     "SELF_SERVICE": {
-      "asset": [
-        "read",
-        "custody"
-      ],
-      "assetIndexSettings": [
-        "read"
-      ],
-      "qr": [
-        "read"
-      ],
+      "asset": ["read", "custody"],
+      "assetIndexSettings": ["read"],
+      "qr": ["read"],
       "booking": [
         "create",
         "read",
@@ -1117,10 +1110,7 @@
         "manage-assets",
         "manage-kits"
       ],
-      "bookingNote": [
-        "create",
-        "read"
-      ],
+      "bookingNote": ["create", "read"],
       "tag": [],
       "category": [],
       "location": [],
@@ -1131,52 +1121,28 @@
       "teamMemberProfile": [],
       "dashboard": [],
       "generalSettings": [],
-      "workingHours": [
-        "read"
-      ],
+      "workingHours": ["read"],
       "subscription": [],
-      "kit": [
-        "read",
-        "custody"
-      ],
+      "kit": ["read", "custody"],
       "note": [],
       "scan": [],
       "custody": [],
       "assetReminders": [],
-      "audit": [
-        "read",
-        "update"
-      ],
-      "auditNote": [
-        "create",
-        "read"
-      ],
+      "audit": ["read", "update"],
+      "auditNote": ["create", "read"],
       "reports": [],
       "teamMemberNote": [],
       "nonRegisteredMember": [],
       "assetModel": [],
       "emailSettings": [],
-      "user-data": [
-        "read",
-        "update"
-      ],
-      "update": [
-        "read"
-      ],
-      "command-palette-search": [
-        "read"
-      ]
+      "user-data": ["read", "update"],
+      "update": ["read"],
+      "command-palette-search": ["read"]
     },
     "BASE": {
-      "asset": [
-        "read"
-      ],
-      "assetIndexSettings": [
-        "read"
-      ],
-      "qr": [
-        "read"
-      ],
+      "asset": ["read"],
+      "assetIndexSettings": ["read"],
+      "qr": ["read"],
       "booking": [
         "create",
         "read",
@@ -1186,10 +1152,7 @@
         "manage-assets",
         "manage-kits"
       ],
-      "bookingNote": [
-        "create",
-        "read"
-      ],
+      "bookingNote": ["create", "read"],
       "tag": [],
       "category": [],
       "location": [],
@@ -1200,42 +1163,23 @@
       "teamMemberProfile": [],
       "dashboard": [],
       "generalSettings": [],
-      "workingHours": [
-        "read"
-      ],
+      "workingHours": ["read"],
       "subscription": [],
-      "kit": [
-        "read"
-      ],
+      "kit": ["read"],
       "note": [],
       "scan": [],
       "custody": [],
       "assetReminders": [],
-      "audit": [
-        "read",
-        "update"
-      ],
-      "auditNote": [
-        "create",
-        "read"
-      ],
+      "audit": ["read", "update"],
+      "auditNote": ["create", "read"],
       "reports": [],
       "teamMemberNote": [],
       "nonRegisteredMember": [],
-      "assetModel": [
-        "read"
-      ],
+      "assetModel": ["read"],
       "emailSettings": [],
-      "user-data": [
-        "read",
-        "update"
-      ],
-      "update": [
-        "read"
-      ],
-      "command-palette-search": [
-        "read"
-      ]
+      "user-data": ["read", "update"],
+      "update": ["read"],
+      "command-palette-search": ["read"]
     },
     "OWNER+ADMIN": {
       "asset": [
@@ -5606,16 +5550,9 @@
       ]
     },
     "SELF_SERVICE+BASE": {
-      "asset": [
-        "read",
-        "custody"
-      ],
-      "assetIndexSettings": [
-        "read"
-      ],
-      "qr": [
-        "read"
-      ],
+      "asset": ["read", "custody"],
+      "assetIndexSettings": ["read"],
+      "qr": ["read"],
       "booking": [
         "create",
         "read",
@@ -5630,10 +5567,7 @@
         "manage-assets",
         "manage-kits"
       ],
-      "bookingNote": [
-        "create",
-        "read"
-      ],
+      "bookingNote": ["create", "read"],
       "tag": [],
       "category": [],
       "location": [],
@@ -5644,43 +5578,23 @@
       "teamMemberProfile": [],
       "dashboard": [],
       "generalSettings": [],
-      "workingHours": [
-        "read"
-      ],
+      "workingHours": ["read"],
       "subscription": [],
-      "kit": [
-        "read",
-        "custody"
-      ],
+      "kit": ["read", "custody"],
       "note": [],
       "scan": [],
       "custody": [],
       "assetReminders": [],
-      "audit": [
-        "read",
-        "update"
-      ],
-      "auditNote": [
-        "create",
-        "read"
-      ],
+      "audit": ["read", "update"],
+      "auditNote": ["create", "read"],
       "reports": [],
       "teamMemberNote": [],
       "nonRegisteredMember": [],
-      "assetModel": [
-        "read"
-      ],
+      "assetModel": ["read"],
       "emailSettings": [],
-      "user-data": [
-        "read",
-        "update"
-      ],
-      "update": [
-        "read"
-      ],
-      "command-palette-search": [
-        "read"
-      ]
+      "user-data": ["read", "update"],
+      "update": ["read"],
+      "command-palette-search": ["read"]
     },
     "BASE+OWNER": {
       "asset": [
@@ -6775,16 +6689,9 @@
       ]
     },
     "BASE+SELF_SERVICE": {
-      "asset": [
-        "read",
-        "custody"
-      ],
-      "assetIndexSettings": [
-        "read"
-      ],
-      "qr": [
-        "read"
-      ],
+      "asset": ["read", "custody"],
+      "assetIndexSettings": ["read"],
+      "qr": ["read"],
       "booking": [
         "create",
         "read",
@@ -6799,10 +6706,7 @@
         "manage-assets",
         "manage-kits"
       ],
-      "bookingNote": [
-        "create",
-        "read"
-      ],
+      "bookingNote": ["create", "read"],
       "tag": [],
       "category": [],
       "location": [],
@@ -6813,43 +6717,23 @@
       "teamMemberProfile": [],
       "dashboard": [],
       "generalSettings": [],
-      "workingHours": [
-        "read"
-      ],
+      "workingHours": ["read"],
       "subscription": [],
-      "kit": [
-        "read",
-        "custody"
-      ],
+      "kit": ["read", "custody"],
       "note": [],
       "scan": [],
       "custody": [],
       "assetReminders": [],
-      "audit": [
-        "read",
-        "update"
-      ],
-      "auditNote": [
-        "create",
-        "read"
-      ],
+      "audit": ["read", "update"],
+      "auditNote": ["create", "read"],
       "reports": [],
       "teamMemberNote": [],
       "nonRegisteredMember": [],
-      "assetModel": [
-        "read"
-      ],
+      "assetModel": ["read"],
       "emailSettings": [],
-      "user-data": [
-        "read",
-        "update"
-      ],
-      "update": [
-        "read"
-      ],
-      "command-palette-search": [
-        "read"
-      ]
+      "user-data": ["read", "update"],
+      "update": ["read"],
+      "command-palette-search": ["read"]
     },
     "(none)": {
       "asset": [],
@@ -6990,22 +6874,9 @@
       "mobile": "BASE"
     }
   },
-  "D-01:precedence": [
-    "OWNER",
-    "ADMIN",
-    "SELF_SERVICE",
-    "BASE"
-  ],
-  "D-05:ssoAssignable": [
-    "ADMIN",
-    "SELF_SERVICE",
-    "BASE"
-  ],
-  "D-04:invitable": [
-    "ADMIN",
-    "BASE",
-    "SELF_SERVICE"
-  ],
+  "D-01:precedence": ["OWNER", "ADMIN", "SELF_SERVICE", "BASE"],
+  "D-05:ssoAssignable": ["ADMIN", "SELF_SERVICE", "BASE"],
+  "D-04:invitable": ["ADMIN", "BASE", "SELF_SERVICE"],
   "D-10:labels": {
     "ADMIN": "Administrator",
     "OWNER": "Owner",
@@ -8005,93 +7876,22 @@
     }
   },
   "D-21": {
-    "OWNER": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "ADMIN": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "SELF_SERVICE": [
-      "DRAFT",
-      "RESERVED"
-    ],
-    "BASE": [
-      "DRAFT"
-    ],
-    "OWNER+ADMIN": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "OWNER+SELF_SERVICE": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "OWNER+BASE": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "ADMIN+OWNER": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "ADMIN+SELF_SERVICE": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "ADMIN+BASE": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "SELF_SERVICE+OWNER": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "SELF_SERVICE+ADMIN": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "SELF_SERVICE+BASE": [
-      "DRAFT",
-      "RESERVED"
-    ],
-    "BASE+OWNER": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "BASE+ADMIN": [
-      "DRAFT",
-      "RESERVED",
-      "ONGOING",
-      "OVERDUE"
-    ],
-    "BASE+SELF_SERVICE": [
-      "DRAFT",
-      "RESERVED"
-    ],
+    "OWNER": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "ADMIN": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "SELF_SERVICE": ["DRAFT", "RESERVED"],
+    "BASE": ["DRAFT"],
+    "OWNER+ADMIN": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "OWNER+SELF_SERVICE": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "OWNER+BASE": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "ADMIN+OWNER": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "ADMIN+SELF_SERVICE": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "ADMIN+BASE": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "SELF_SERVICE+OWNER": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "SELF_SERVICE+ADMIN": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "SELF_SERVICE+BASE": ["DRAFT", "RESERVED"],
+    "BASE+OWNER": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "BASE+ADMIN": ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+    "BASE+SELF_SERVICE": ["DRAFT", "RESERVED"],
     "(none)": [],
     "UNKNOWN_ROLE": []
   },
@@ -15460,7 +15260,7 @@
       "locations": false,
       "customFields": false,
       "assetModels": false,
-      "nonRegisteredMembers": false
+      "nonRegisteredMembers": true
     },
     "OWNER+BASE": {
       "categories": false,
@@ -15468,7 +15268,7 @@
       "locations": false,
       "customFields": false,
       "assetModels": false,
-      "nonRegisteredMembers": false
+      "nonRegisteredMembers": true
     },
     "ADMIN+OWNER": {
       "categories": true,
@@ -15484,7 +15284,7 @@
       "locations": false,
       "customFields": false,
       "assetModels": false,
-      "nonRegisteredMembers": false
+      "nonRegisteredMembers": true
     },
     "ADMIN+BASE": {
       "categories": false,
@@ -15492,7 +15292,7 @@
       "locations": false,
       "customFields": false,
       "assetModels": false,
-      "nonRegisteredMembers": false
+      "nonRegisteredMembers": true
     },
     "SELF_SERVICE+OWNER": {
       "categories": false,
@@ -15500,7 +15300,7 @@
       "locations": false,
       "customFields": false,
       "assetModels": false,
-      "nonRegisteredMembers": false
+      "nonRegisteredMembers": true
     },
     "SELF_SERVICE+ADMIN": {
       "categories": false,
@@ -15508,7 +15308,7 @@
       "locations": false,
       "customFields": false,
       "assetModels": false,
-      "nonRegisteredMembers": false
+      "nonRegisteredMembers": true
     },
     "SELF_SERVICE+BASE": {
       "categories": false,
@@ -15524,7 +15324,7 @@
       "locations": false,
       "customFields": false,
       "assetModels": false,
-      "nonRegisteredMembers": false
+      "nonRegisteredMembers": true
     },
     "BASE+ADMIN": {
       "categories": false,
@@ -15532,7 +15332,7 @@
       "locations": false,
       "customFields": false,
       "assetModels": false,
-      "nonRegisteredMembers": false
+      "nonRegisteredMembers": true
     },
     "BASE+SELF_SERVICE": {
       "categories": false,
@@ -15548,7 +15348,7 @@
       "locations": true,
       "customFields": true,
       "assetModels": true,
-      "nonRegisteredMembers": true
+      "nonRegisteredMembers": false
     },
     "UNKNOWN_ROLE": {
       "categories": true,
@@ -15556,7 +15356,7 @@
       "locations": true,
       "customFields": true,
       "assetModels": true,
-      "nonRegisteredMembers": true
+      "nonRegisteredMembers": false
     }
   },
   "B9:D-01:membership-display": {
@@ -16652,9 +16452,7 @@
   "B9:D-05:sso-transition": {
     "OWNER": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -16662,9 +16460,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -16672,9 +16468,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -16682,9 +16476,7 @@
         }
       },
       "none": {
-        "rolesAfter": [
-          "OWNER"
-        ],
+        "rolesAfter": ["OWNER"],
         "newRole": "OWNER",
         "transfers": {
           "ownership": false,
@@ -16694,9 +16486,7 @@
     },
     "ADMIN": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -16704,9 +16494,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -16714,9 +16502,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -16734,9 +16520,7 @@
     },
     "SELF_SERVICE": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -16744,9 +16528,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -16754,9 +16536,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -16774,9 +16554,7 @@
     },
     "BASE": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -16784,9 +16562,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -16794,9 +16570,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -16814,9 +16588,7 @@
     },
     "OWNER+ADMIN": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -16824,9 +16596,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -16834,9 +16604,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -16844,10 +16612,7 @@
         }
       },
       "none": {
-        "rolesAfter": [
-          "OWNER",
-          "ADMIN"
-        ],
+        "rolesAfter": ["OWNER", "ADMIN"],
         "newRole": "OWNER",
         "transfers": {
           "ownership": false,
@@ -16857,9 +16622,7 @@
     },
     "OWNER+SELF_SERVICE": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -16867,9 +16630,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -16877,9 +16638,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -16887,10 +16646,7 @@
         }
       },
       "none": {
-        "rolesAfter": [
-          "OWNER",
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["OWNER", "SELF_SERVICE"],
         "newRole": "OWNER",
         "transfers": {
           "ownership": false,
@@ -16900,9 +16656,7 @@
     },
     "OWNER+BASE": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -16910,9 +16664,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -16920,9 +16672,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -16930,10 +16680,7 @@
         }
       },
       "none": {
-        "rolesAfter": [
-          "OWNER",
-          "BASE"
-        ],
+        "rolesAfter": ["OWNER", "BASE"],
         "newRole": "OWNER",
         "transfers": {
           "ownership": false,
@@ -16943,9 +16690,7 @@
     },
     "ADMIN+OWNER": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -16953,9 +16698,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -16963,9 +16706,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -16973,10 +16714,7 @@
         }
       },
       "none": {
-        "rolesAfter": [
-          "ADMIN",
-          "OWNER"
-        ],
+        "rolesAfter": ["ADMIN", "OWNER"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -16986,9 +16724,7 @@
     },
     "ADMIN+SELF_SERVICE": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -16996,9 +16732,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17006,9 +16740,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -17026,9 +16758,7 @@
     },
     "ADMIN+BASE": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -17036,9 +16766,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17046,9 +16774,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -17066,9 +16792,7 @@
     },
     "SELF_SERVICE+OWNER": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -17076,9 +16800,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17086,9 +16808,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -17096,10 +16816,7 @@
         }
       },
       "none": {
-        "rolesAfter": [
-          "SELF_SERVICE",
-          "OWNER"
-        ],
+        "rolesAfter": ["SELF_SERVICE", "OWNER"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17109,9 +16826,7 @@
     },
     "SELF_SERVICE+ADMIN": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -17119,9 +16834,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17129,9 +16842,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -17149,9 +16860,7 @@
     },
     "SELF_SERVICE+BASE": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -17159,9 +16868,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17169,9 +16876,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -17189,9 +16894,7 @@
     },
     "BASE+OWNER": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -17199,9 +16902,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17209,9 +16910,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -17219,10 +16918,7 @@
         }
       },
       "none": {
-        "rolesAfter": [
-          "BASE",
-          "OWNER"
-        ],
+        "rolesAfter": ["BASE", "OWNER"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -17232,9 +16928,7 @@
     },
     "BASE+ADMIN": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -17242,9 +16936,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17252,9 +16944,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -17272,9 +16962,7 @@
     },
     "BASE+SELF_SERVICE": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -17282,9 +16970,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17292,9 +16978,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -17312,9 +16996,7 @@
     },
     "(none)": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -17322,9 +17004,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17332,9 +17012,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
@@ -17352,9 +17030,7 @@
     },
     "UNKNOWN_ROLE": {
       "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
+        "rolesAfter": ["ADMIN"],
         "newRole": "ADMIN",
         "transfers": {
           "ownership": false,
@@ -17362,9 +17038,7 @@
         }
       },
       "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
+        "rolesAfter": ["SELF_SERVICE"],
         "newRole": "SELF_SERVICE",
         "transfers": {
           "ownership": false,
@@ -17372,9 +17046,7 @@
         }
       },
       "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
+        "rolesAfter": ["BASE"],
         "newRole": "BASE",
         "transfers": {
           "ownership": false,
