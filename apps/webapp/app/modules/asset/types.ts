@@ -18,6 +18,7 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
+import type { BackupPlacement } from "./backup-placements";
 import type { assetIndexFields } from "./fields";
 
 export interface ICustomFieldValueJson {
@@ -133,7 +134,11 @@ export interface CreateAssetFromBackupImportPayload
   tags: {
     name: string;
   }[];
-  location:
+  /** Manual placements, by location name. Absent when the asset had none. */
+  assetLocations?: BackupPlacement[];
+  /** Only in a backup written before placements existed: the asset's one
+   * location. See `placementsForRestore`. */
+  location?:
     | {
         name: string;
         description?: string;
