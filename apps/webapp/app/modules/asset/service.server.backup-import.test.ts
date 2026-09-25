@@ -25,6 +25,7 @@ const teamMemberCreate = vitest.fn();
 const customFieldFindFirst = vitest.fn();
 const customFieldCreate = vitest.fn();
 const assetCreate = vitest.fn();
+const assetUpdate = vitest.fn();
 
 // why: the restore's only reads and writes that matter here. The rest of
 // `db` is left out: a call to it would throw and fail the test loudly.
@@ -38,7 +39,7 @@ vitest.mock("~/database/db.server", () => ({
     customField: { findFirst: customFieldFindFirst, create: customFieldCreate },
     // A new custom field is added to each saved index view; there are none.
     assetIndexSettings: { findMany: vitest.fn().mockResolvedValue([]) },
-    asset: { create: assetCreate },
+    asset: { create: assetCreate, update: assetUpdate },
   },
 }));
 
@@ -96,9 +97,11 @@ function resetDb() {
     customFieldFindFirst,
     customFieldCreate,
     assetCreate,
+    assetUpdate,
   ]) {
     fn.mockReset();
   }
+  assetUpdate.mockResolvedValue({});
   const createdByName = ({ data }: { data: { name: string } }) =>
     Promise.resolve({ id: `new-${data.name}` });
   for (const findMany of [
@@ -342,6 +345,42 @@ describe("createAssetsFromBackupImport placements", () => {
       },
       select: { id: true },
     });
+  });
+
+  it("restores a pool whose placements exceed its stock as the source holds it", async () => {
+    await restore([
+      row({
+        title: "Batteries",
+        type: "QUANTITY_TRACKED",
+        quantity: "94",
+        assetLocations: [
+          { location: "Store", quantity: 60 },
+          { location: "Studio", quantity: 40 },
+        ],
+      }),
+      row({
+        title: "Pens",
+        type: "QUANTITY_TRACKED",
+        quantity: "143",
+        assetLocations: [{ location: "Store", quantity: 99 }],
+      }),
+    ]);
+
+    const assets = assetDataByTitle();
+    // Created with stock for its placements, so the placement check passes,
+    expect(assets.Batteries.quantity).toBe(100);
+    expect(placementsByTitle().Batteries).toEqual([
+      { locationId: "new-Store", organizationId: "org-1", quantity: 60 },
+      { locationId: "new-Studio", organizationId: "org-1", quantity: 40 },
+    ]);
+    // then lowered to the backup's stock.
+    expect(assetUpdate).toHaveBeenCalledTimes(1);
+    expect(assetUpdate).toHaveBeenCalledWith({
+      where: { id: "asset-Batteries", organizationId: "org-1" },
+      data: { quantity: 94 },
+    });
+    // A pool within its stock is created as it is.
+    expect(assets.Pens.quantity).toBe(143);
   });
 
   it("leaves an unplaced asset without placements and looks nothing up", async () => {

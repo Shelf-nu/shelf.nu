@@ -5597,6 +5597,27 @@ export async function createAssetsFromBackupImport({
           Object.assign(d.data, { assetLocations: { create: placements } });
         }
 
+        /** A pool's placements can hold more units than its stock: when a
+         * consume cannot tell which of several locations lost the units, the
+         * app lowers the stock and leaves the placements as they were (see
+         * `reconcileManualPlacementsForStockDecrease`). The restore takes the
+         * same two steps: it creates the pool with stock for its placements,
+         * then lowers the stock to the backup's quantity. Trimming a placement
+         * instead would record a location's count that was never true. */
+        const placedUnits = [...unitsByLocationId.values()].reduce(
+          (sum, units) => sum + units,
+          0
+        );
+        const stockBelowPlacements =
+          backupType === AssetType.QUANTITY_TRACKED &&
+          backupQuantity !== undefined &&
+          placedUnits > backupQuantity
+            ? backupQuantity
+            : undefined;
+        if (stockBelowPlacements !== undefined) {
+          Object.assign(d.data, { quantity: placedUnits });
+        }
+
         if (unitsByTeamMemberId.size > 0) {
           const custody: Prisma.CustodyUncheckedCreateWithoutAssetInput[] = [
             ...unitsByTeamMemberId,
@@ -5636,6 +5657,15 @@ export async function createAssetsFromBackupImport({
 
         /** Create the Asset */
         const { id: assetId } = await db.asset.create(d);
+        if (stockBelowPlacements !== undefined) {
+          // A write of its own, after the create has committed: the placement
+          // check is deferred to commit, and lowering the stock writes no
+          // placement, so nothing checks the sum again.
+          await db.asset.update({
+            where: { id: assetId, organizationId },
+            data: { quantity: stockBelowPlacements },
+          });
+        }
 
         // Activity event: ASSET_CREATED at the moment of creation.
         // The per-note createMany below restores HISTORICAL notes with
