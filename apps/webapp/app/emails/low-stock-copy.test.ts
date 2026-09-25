@@ -71,16 +71,21 @@ function logRow(overrides: Partial<StockMovementLog> = {}): StockMovementLog {
     quantity: 2,
     note: null,
     createdAt: CREATED_AT,
+    userId: "user-dana",
     performedBy: DANA,
+    custodianId: null,
     custodian: null,
     booking: null,
     ...overrides,
   };
 }
 
-/** Runs `describeStockMovement` with the suite's prefs, unit and clock. */
+/**
+ * Runs `describeStockMovement` with the suite's prefs, unit and clock. Takes
+ * one row, the asset's rows newest first, or null for none.
+ */
 function movement(
-  log: StockMovementLog | null,
+  log: StockMovementLog | StockMovementLog[] | null,
   options: {
     actingUser?: typeof SAM | null;
     unit?: string | null;
@@ -89,7 +94,7 @@ function movement(
 ) {
   return record(
     describeStockMovement({
-      log,
+      logs: log == null ? [] : Array.isArray(log) ? log : [log],
       actingUser: options.actingUser ?? null,
       prefs: PREFS,
       unitOfMeasure: options.unit === undefined ? "Units" : options.unit,
@@ -256,7 +261,7 @@ describe("describeStockMovement: one sentence per log category", () => {
       null
     );
     const out = describeStockMovement({
-      log: logRow(),
+      logs: [logRow()],
       actingUser: null,
       prefs: us,
       unitOfMeasure: "Units",
@@ -265,6 +270,122 @@ describe("describeStockMovement: one sentence per log category", () => {
     expect(record(out)?.text).toBe(
       "2 Units used up by Dana Reyes on 09/24/2026 at 4:53 PM"
     );
+  });
+});
+
+describe("describeStockMovement: one operation that wrote several rows", () => {
+  /** A row written `ms` milliseconds before the fixture moment. */
+  const before = (ms: number) => new Date(CREATED_AT.getTime() - ms);
+  const SPRING_FAIR = { id: "bk-1", name: "Spring Fair" };
+
+  it("sums a booking check-in's dispositions into one sentence, causes first", () => {
+    // Written in check-in order, one transaction, a few milliseconds apart.
+    const out = movement([
+      logRow({ category: "LOSS", quantity: 2, booking: SPRING_FAIR }),
+      logRow({
+        category: "CONSUME",
+        quantity: 3,
+        booking: SPRING_FAIR,
+        createdAt: before(4),
+      }),
+      logRow({
+        category: "RETURN",
+        quantity: 5,
+        booking: SPRING_FAIR,
+        createdAt: before(9),
+      }),
+    ]);
+    expect(out).toEqual({
+      text: `3 Units used up, 2 Units reported lost and 5 Units returned by Dana Reyes during booking Spring Fair ${WHEN}`,
+      href: "/bookings/bk-1",
+    });
+  });
+
+  it("reads the same whichever tied row sorts first", () => {
+    const rows = [
+      logRow({ category: "RETURN", quantity: 5, booking: SPRING_FAIR }),
+      logRow({ category: "CONSUME", quantity: 3, booking: SPRING_FAIR }),
+    ];
+    expect(movement(rows)?.text).toBe(movement([...rows].reverse())?.text);
+    expect(movement(rows)?.text).toBe(
+      `3 Units used up and 5 Units returned by Dana Reyes during booking Spring Fair ${WHEN}`
+    );
+  });
+
+  it("adds up the same disposition across several booking slices", () => {
+    const out = movement([
+      logRow({ category: "CONSUME", quantity: 2, booking: SPRING_FAIR }),
+      logRow({
+        category: "CONSUME",
+        quantity: 3,
+        booking: SPRING_FAIR,
+        createdAt: before(6),
+      }),
+    ]);
+    expect(out).toEqual({
+      text: `5 Units used up by Dana Reyes during booking Spring Fair ${WHEN}`,
+      href: "/bookings/bk-1",
+    });
+  });
+
+  it("combines the used-up and returned rows of one custody release", () => {
+    const out = movement([
+      logRow({
+        category: "RETURN",
+        quantity: 3,
+        custodianId: "tm-van",
+        custodian: { name: "Van crew" },
+      }),
+      logRow({
+        category: "CONSUME",
+        quantity: 2,
+        custodianId: "tm-van",
+        custodian: { name: "Van crew" },
+        createdAt: before(3),
+      }),
+    ]);
+    expect(out?.text).toBe(
+      `2 Units used up and 3 Units returned by Dana Reyes ${WHEN}`
+    );
+  });
+
+  it("leaves out an earlier check-in of the same booking", () => {
+    const out = movement([
+      logRow({ category: "CONSUME", quantity: 2, booking: SPRING_FAIR }),
+      logRow({
+        category: "LOSS",
+        quantity: 4,
+        booking: SPRING_FAIR,
+        createdAt: before(60_000),
+      }),
+    ]);
+    expect(out?.text).toBe(
+      `2 Units used up by Dana Reyes during booking Spring Fair ${WHEN}`
+    );
+  });
+
+  it("leaves out rows another user wrote at the same moment", () => {
+    const out = movement([
+      logRow({ category: "CONSUME", quantity: 2, booking: SPRING_FAIR }),
+      logRow({
+        category: "LOSS",
+        quantity: 4,
+        booking: SPRING_FAIR,
+        userId: "user-sam",
+        performedBy: SAM,
+      }),
+    ]);
+    expect(out?.text).toBe(
+      `2 Units used up by Dana Reyes during booking Spring Fair ${WHEN}`
+    );
+  });
+
+  it("never merges single-row writes such as adjustments made seconds apart", () => {
+    const out = movement([
+      logRow({ category: "RESTOCK", quantity: 12 }),
+      logRow({ category: "LOSS", quantity: 1, createdAt: before(1_500) }),
+    ]);
+    expect(out?.text).toBe(`12 Units restocked by Dana Reyes ${WHEN}`);
   });
 });
 
@@ -280,19 +401,19 @@ describe("describeStockMovement: stale or missing log row", () => {
 
   it("a stale row with an acting user names the acting user", () => {
     expect(movement(logRow(), { now: stale, actingUser: SAM })).toEqual({
-      text: "Quantity was edited by Sam Ortiz",
+      text: "Stock or minimum was changed by Sam Ortiz",
     });
   });
 
-  it("a stale row without an acting user says the quantity was edited", () => {
+  it("a stale row without an acting user says stock or minimum changed", () => {
     expect(movement(logRow(), { now: stale })).toEqual({
-      text: "Quantity was edited",
+      text: "Stock or minimum was changed",
     });
   });
 
   it("no row with an acting user names the acting user", () => {
     expect(movement(null, { actingUser: SAM })).toEqual({
-      text: "Quantity was edited by Sam Ortiz",
+      text: "Stock or minimum was changed by Sam Ortiz",
     });
   });
 
@@ -355,6 +476,13 @@ describe("subjects", () => {
 describe("preheader", () => {
   const used = { text: `2 Units used up by Dana Reyes ${WHEN}` };
 
+  it("claims nothing about placement when the placements could not be read", () => {
+    expect(record(preheader({ movement: used, placements: null }))).toBe(
+      `2 Units used up by Dana Reyes ${WHEN}.`
+    );
+    expect(preheader({ movement: null, placements: null })).toBe("");
+  });
+
   it("joins the movement and where the stock is", () => {
     expect(
       record(preheader({ movement: used, placements: "Ogden warehouse: 2" }))
@@ -398,6 +526,10 @@ describe("buildFactRows", () => {
     otherLowCount: 0,
     unitOfMeasure: "Units",
   };
+
+  it("leaves out where the stock is when the placements could not be read", () => {
+    expect(record(buildFactRows({ ...base, placements: null }))).toEqual([]);
+  });
 
   it("always shows where the stock is, and nothing it has no fact for", () => {
     expect(record(buildFactRows(base))).toEqual([

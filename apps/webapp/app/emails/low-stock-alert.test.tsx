@@ -158,6 +158,17 @@ describe("low-stock alert email", () => {
     }
   });
 
+  it("says nothing about placement when the placements could not be read", async () => {
+    const { text, visible } = await renderAlert(
+      alertProps({ placements: null })
+    );
+    for (const body of [visible, text]) {
+      expect(body).not.toContain("Where it is");
+      expect(body).not.toContain("Not placed");
+      expect(body).not.toContain("Stock is at");
+    }
+  });
+
   it("reads out of stock when nothing is available, even below zero", async () => {
     const { text, visible } = await renderAlert(alertProps({ available: -1 }));
     const lead =

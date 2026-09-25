@@ -75,6 +75,13 @@ import { resolveUserGreetingName } from "~/utils/user";
 type LowStockEmailVariant = "alert" | "recovered";
 
 /**
+ * How many of the asset's newest log rows to read. One operation can write
+ * several (a booking check-in writes one per disposition and booking slice),
+ * and the copy module groups them; this bound only has to cover one operation.
+ */
+const MOVEMENT_LOG_ROWS = 50;
+
+/**
  * Runs a read the mail can do without. A failure is logged and answers `null`,
  * so the mail still goes out with the row-less wording instead of not at all.
  *
@@ -111,11 +118,11 @@ function optionalRead<T>(
  * names their address in the footer and prints dates in their format.
  *
  * Besides the organization and the recipients it loads the facts the mail
- * prints: the newest `ConsumptionLog` row (what happened), the asset's
+ * prints: the newest `ConsumptionLog` rows (what happened), the asset's
  * placements (where it is), and how many other items are low. Each of those is
- * optional: a failed read is logged and the mail falls back to the row-less
- * wording. When the log row is stale or missing, the acting user is loaded so
- * the mail can still say who changed the quantity.
+ * optional: a failed read is logged and the mail goes out without the fact it
+ * could not load, never with a guess. When no fresh log row explains the
+ * change, the acting user is loaded so the mail can still say who made it.
  *
  * Resilient by design:
  *   - the whole block is wrapped in try/catch so an email failure can never
@@ -156,7 +163,7 @@ async function sendLowStockEmails({
 }): Promise<void> {
   try {
     const ids = { assetId, organizationId };
-    const [org, recipients, log, placementRows, otherLowCount] =
+    const [org, recipients, logRows, placementRows, otherLowCount] =
       await Promise.all([
         db.organization.findUnique({
           where: { id: organizationId },
@@ -165,22 +172,26 @@ async function sendLowStockEmails({
         getOrganizationAdminsForNotification({ organizationId }),
         optionalRead(
           () =>
-            db.consumptionLog.findFirst({
+            db.consumptionLog.findMany({
               where: { assetId },
-              orderBy: { createdAt: "desc" },
+              // `id` breaks ties between rows written in the same instant.
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              take: MOVEMENT_LOG_ROWS,
               select: {
                 category: true,
                 quantity: true,
                 note: true,
                 createdAt: true,
+                userId: true,
                 performedBy: { select: USER_NAME_SELECT },
+                custodianId: true,
                 custodian: {
                   select: { name: true, user: { select: USER_NAME_SELECT } },
                 },
                 booking: { select: { id: true, name: true } },
               },
             }),
-          "newest consumption log row",
+          "newest consumption log rows",
           ids
         ),
         optionalRead(
@@ -209,12 +220,13 @@ async function sendLowStockEmails({
       ]);
 
     /**
-     * The acting user names the change only when the log row cannot: some
-     * edits write no row, and an old row belongs to an earlier change.
+     * The acting user names the change only when the log cannot: a minimum
+     * change writes no row, and an old row belongs to an earlier change.
      */
     const now = new Date();
+    const logs = logRows ?? [];
     const actingUser =
-      userId && !isFreshMovement(log, now)
+      userId && !isFreshMovement(logs[0], now)
         ? await optionalRead(
             () =>
               db.user.findUnique({
@@ -227,7 +239,8 @@ async function sendLowStockEmails({
         : null;
 
     const organizationName = org?.name ?? "your organization";
-    const placements = describePlacements(placementRows ?? []);
+    /** A failed read is unknown, not "not placed": the row is left out. */
+    const placements = placementRows ? describePlacements(placementRows) : null;
     const numbers = { assetTitle, available, minQuantity, unitOfMeasure };
     const subject =
       variant === "alert"
@@ -250,7 +263,7 @@ async function sendLowStockEmails({
           organizationName,
           customEmailFooter: org?.customEmailFooter ?? null,
           movement: describeStockMovement({
-            log,
+            logs,
             actingUser,
             prefs,
             unitOfMeasure,

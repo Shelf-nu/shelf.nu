@@ -60,8 +60,8 @@ export type StockLevelEmailProps = {
   customEmailFooter: string | null;
   /** "What happened", already formatted in this recipient's date format. */
   movement: StockMovement | null;
-  /** "Where it is", from `describePlacements`. */
-  placements: string;
+  /** "Where it is", from `describePlacements`; null when the read failed. */
+  placements: string | null;
   /** Units of this asset held in custody. */
   inCustody: number;
   /** Other assets in the workspace at or below their minimum. */

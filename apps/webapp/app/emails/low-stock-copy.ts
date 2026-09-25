@@ -34,6 +34,13 @@ import {
  */
 export const MOVEMENT_FRESHNESS_MS = 5 * 60 * 1000;
 
+/**
+ * How far apart the rows of one operation can be written. A booking check-in
+ * writes its rows one by one inside a transaction, so their timestamps differ
+ * by milliseconds rather than tying.
+ */
+export const MOVEMENT_GROUP_WINDOW_MS = 5 * 1000;
+
 /** The "Where it is" value when the asset has no `AssetLocation` rows. */
 export const NOT_PLACED = "Not placed at a location";
 
@@ -53,16 +60,19 @@ export type CopySegment = { text: string; bold?: boolean };
 export type CopyLink = { text: string; href: string };
 
 /**
- * The newest `ConsumptionLog` row of the asset, in the shape the notifier
- * selects it (`performedBy` via `USER_NAME_SELECT`, the custodian with its
- * user account so a display name wins over the stored team-member name).
+ * A `ConsumptionLog` row of the asset, in the shape the notifier selects it
+ * (`performedBy` via `USER_NAME_SELECT`, the custodian with its user account so
+ * a display name wins over the stored team-member name). `userId` and
+ * `custodianId` tell the rows of one operation apart from their neighbours.
  */
 export type StockMovementLog = {
   category: ConsumptionCategory;
   quantity: number;
   note: string | null;
   createdAt: Date;
+  userId: string;
   performedBy: UserNameFields | null;
+  custodianId: string | null;
   custodian: TeamMemberNameFields | null;
   booking: { id: string; name: string } | null;
 };
@@ -76,6 +86,20 @@ export type StockMovement = {
 
 /** A placement row as `assetLocation.findMany` returns it. */
 export type PlacementRow = { quantity: number; location: { name: string } };
+
+/**
+ * The order of the parts of a combined sentence: what took stock away first,
+ * then what brought it back.
+ */
+const CATEGORY_ORDER: ConsumptionCategory[] = [
+  "CONSUME",
+  "LOSS",
+  "DAMAGE",
+  "CHECKOUT",
+  "RETURN",
+  "RESTOCK",
+  "ADJUSTMENT",
+];
 
 /** One row of the grey facts panel. */
 export type FactRow = {
@@ -157,54 +181,153 @@ function toName(name: string | null | undefined) {
   return trimmed ? ` to ${trimmed}` : "";
 }
 
+/** `"a"`, `"a and b"`, `"a, b and c"`. */
+function joinList(items: string[]) {
+  if (items.length <= 1) {
+    return items.join("");
+  }
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
 /**
- * Words a fresh `ConsumptionLog` row. The row's category decides the sentence,
- * not the kind of mail: a restock can close a low-stock episode and a return
- * into custody can open one.
+ * What one row did to the stock, without who or when: `"3 Units used up"`.
+ *
+ * @param capitalize - Whether this part opens the sentence
  */
-function describeLog(
+function movementHead(
   log: StockMovementLog,
+  unitOfMeasure: string | null,
+  capitalize: boolean
+) {
+  const qty = formatQuantity(log.quantity, unitOfMeasure);
+  switch (log.category) {
+    case "CHECKOUT":
+      return `${qty} checked out${toName(
+        resolveTeamMemberName(log.custodian)
+      )}`;
+    case "CONSUME":
+      return `${qty} used up`;
+    case "LOSS":
+      return `${qty} reported lost`;
+    case "DAMAGE":
+      return `${qty} reported damaged`;
+    case "RETURN":
+      return `${qty} returned`;
+    case "RESTOCK":
+      return `${qty} restocked`;
+    case "ADJUSTMENT":
+      return capitalize ? "Quantity adjusted" : "quantity adjusted";
+  }
+}
+
+/**
+ * Picks the rows of the newest operation from the asset's log rows.
+ *
+ * A booking check-in writes one row per disposition (returned, used up, lost,
+ * damaged) and per booking slice, and releasing custody writes a used-up row
+ * beside a returned one. Those rows share the acting user and the booking or
+ * custodian, and land within {@link MOVEMENT_GROUP_WINDOW_MS} of each other. A
+ * row with neither a booking nor a custodian comes from a single-row write (an
+ * adjustment, a restock, an asset edit), so it stands alone.
+ *
+ * @param logs - The asset's newest `ConsumptionLog` rows, newest first
+ * @returns The newest operation's rows, newest first; empty when there are none
+ */
+export function pickLatestMovement(
+  logs: StockMovementLog[]
+): StockMovementLog[] {
+  const [newest] = logs;
+  if (!newest) {
+    return [];
+  }
+  const bookingId = newest.booking?.id ?? null;
+  if (!bookingId && !newest.custodianId) {
+    return [newest];
+  }
+  const cutoff = newest.createdAt.getTime() - MOVEMENT_GROUP_WINDOW_MS;
+  return logs.filter(
+    (log) =>
+      log.createdAt.getTime() >= cutoff &&
+      log.userId === newest.userId &&
+      (log.booking?.id ?? null) === bookingId &&
+      log.custodianId === newest.custodianId
+  );
+}
+
+/**
+ * Sums one operation's rows per category, in {@link CATEGORY_ORDER}, so a
+ * check-in over several booking slices reads as one count per disposition.
+ * Each merged row keeps the newest row of its category, including its note.
+ */
+function mergeByCategory(logs: StockMovementLog[]) {
+  const merged = new Map<ConsumptionCategory, StockMovementLog>();
+  for (const log of logs) {
+    const seen = merged.get(log.category);
+    merged.set(
+      log.category,
+      seen ? { ...seen, quantity: seen.quantity + log.quantity } : log
+    );
+  }
+  return [...merged.values()].sort(
+    (a, b) =>
+      CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category)
+  );
+}
+
+/**
+ * Words one operation. The rows' categories decide the sentence, not the kind
+ * of mail: a restock can close a low-stock episode and a return into custody
+ * can open one.
+ *
+ * A single category keeps its own sentence: a return names who brought the
+ * units back, a used-up row names its booking, an adjustment its note.
+ * Several categories share one sentence naming who recorded them and the
+ * booking they belong to.
+ *
+ * @param parts - The operation's rows merged per category, never empty
+ * @param at - When the operation happened (its newest row)
+ */
+function describeOperation(
+  parts: StockMovementLog[],
+  at: Date,
   unitOfMeasure: string | null,
   prefs: ResolvedFormatPrefs
 ): StockMovement {
-  const qty = formatQuantity(log.quantity, unitOfMeasure);
-  const by = byName(resolveUserDisplayName(log.performedBy));
-  const custodian = resolveTeamMemberName(log.custodian);
-  const when = onDateAtTime(log.createdAt, prefs);
+  const [first] = parts;
+  const single = parts.length === 1;
+  const heads = joinList(
+    parts.map((log, index) => movementHead(log, unitOfMeasure, index === 0))
+  );
+  const who =
+    single && first.category === "RETURN"
+      ? byName(resolveTeamMemberName(first.custodian))
+      : byName(resolveUserDisplayName(first.performedBy));
+  const when = onDateAtTime(at, prefs);
 
-  switch (log.category) {
-    case "CHECKOUT":
-      return {
-        text: `${qty} checked out${toName(custodian)}${by}${when}`,
-      };
-    case "CONSUME": {
-      const bookingName = log.booking?.name.trim();
-      if (log.booking && bookingName) {
-        return {
-          text: `${qty} used up${by} during booking ${bookingName}${when}`,
-          href: `/bookings/${log.booking.id}`,
-        };
-      }
-      return { text: `${qty} used up${by}${when}` };
-    }
-    case "LOSS":
-      return { text: `${qty} reported lost${by}${when}` };
-    case "DAMAGE":
-      return { text: `${qty} reported damaged${by}${when}` };
-    case "ADJUSTMENT": {
-      /** A note is free text; fold it onto one line so the row stays one line. */
-      const note = log.note?.replace(/\s+/g, " ").trim();
-      if (note === ASSET_EDIT_ADJUSTMENT_NOTE) {
-        return { text: `Quantity adjusted${by} on the asset edit page${when}` };
-      }
-      const quoted = note ? ` "${note}"` : "";
-      return { text: `Quantity adjusted${by}${quoted}${when}` };
-    }
-    case "RESTOCK":
-      return { text: `${qty} restocked${by}${when}` };
-    case "RETURN":
-      return { text: `${qty} returned${byName(custodian)}${when}` };
+  if (single && first.category === "ADJUSTMENT") {
+    /** A note is free text; fold it onto one line so the row stays one line. */
+    const note = first.note?.replace(/\s+/g, " ").trim();
+    const detail =
+      note === ASSET_EDIT_ADJUSTMENT_NOTE
+        ? " on the asset edit page"
+        : note
+        ? ` "${note}"`
+        : "";
+    return { text: `${heads}${who}${detail}${when}` };
   }
+
+  const bookingName = first.booking?.name.trim();
+  if (
+    first.booking &&
+    bookingName &&
+    (!single || first.category === "CONSUME")
+  ) {
+    return {
+      text: `${heads}${who} during booking ${bookingName}${when}`,
+      href: `/bookings/${first.booking.id}`,
+    };
+  }
+  return { text: `${heads}${who}${when}` };
 }
 
 /**
@@ -214,7 +337,7 @@ function describeLog(
  * @param now - The moment the mail is built
  */
 export function isFreshMovement(
-  log: Pick<StockMovementLog, "createdAt"> | null,
+  log: Pick<StockMovementLog, "createdAt"> | null | undefined,
   now: Date
 ): log is Pick<StockMovementLog, "createdAt"> {
   return (
@@ -226,13 +349,15 @@ export function isFreshMovement(
 /**
  * Builds the "What happened" sentence.
  *
- * The newest log row explains the change only while it is fresh (see
- * {@link MOVEMENT_FRESHNESS_MS}). Past that, or with no row at all, the mail
- * falls back to naming whoever made the change, because some edits write no
- * log row. With neither a row nor an acting user there is nothing true to say,
- * so the row is left out.
+ * The newest operation in the log explains the change only while it is fresh
+ * (see {@link MOVEMENT_FRESHNESS_MS}); {@link pickLatestMovement} decides which
+ * rows belong to it. Past that, or with no row at all, the mail falls back to
+ * naming whoever made the change. That sentence must stay true for every
+ * trigger without a row: a minimum change writes none, so it says "stock or
+ * minimum", never "quantity". With neither a row nor an acting user there is
+ * nothing true to say, so the row is left out.
  *
- * @param params.log - The newest `ConsumptionLog` row of the asset, or null
+ * @param params.logs - The asset's newest `ConsumptionLog` rows, newest first
  * @param params.actingUser - The user whose action triggered the check, or null
  * @param params.prefs - The recipient's resolved format preferences
  * @param params.unitOfMeasure - `Asset.unitOfMeasure`
@@ -240,26 +365,34 @@ export function isFreshMovement(
  * @returns The sentence, or null when the row is left out
  */
 export function describeStockMovement({
-  log,
+  logs,
   actingUser,
   prefs,
   unitOfMeasure,
   now = new Date(),
 }: {
-  log: StockMovementLog | null;
+  logs: StockMovementLog[];
   actingUser: UserNameFields | null;
   prefs: ResolvedFormatPrefs;
   unitOfMeasure: string | null;
   now?: Date;
 }): StockMovement | null {
-  if (log && isFreshMovement(log, now)) {
-    return describeLog(log, unitOfMeasure, prefs);
+  const latest = pickLatestMovement(logs);
+  if (isFreshMovement(latest[0], now)) {
+    return describeOperation(
+      mergeByCategory(latest),
+      latest[0].createdAt,
+      unitOfMeasure,
+      prefs
+    );
   }
-  if (!log && !actingUser) {
+  if (logs.length === 0 && !actingUser) {
     return null;
   }
   return {
-    text: `Quantity was edited${byName(resolveUserDisplayName(actingUser))}`,
+    text: `Stock or minimum was changed${byName(
+      resolveUserDisplayName(actingUser)
+    )}`,
   };
 }
 
@@ -326,7 +459,8 @@ export function recoveredSubject({
  * The preheader: the grey line most inboxes show after the subject.
  *
  * @param params.movement - The "What happened" sentence, or null
- * @param params.placements - The "Where it is" value from {@link describePlacements}
+ * @param params.placements - The "Where it is" value from
+ *   {@link describePlacements}, or null when the placements could not be read
  * @returns e.g. `2 Units used up by Dana Reyes on 24 Sep 2026 at 20:53. Stock is at Ogden warehouse: 2.`
  */
 export function preheader({
@@ -334,11 +468,19 @@ export function preheader({
   placements,
 }: {
   movement: StockMovement | null;
-  placements: string;
+  placements: string | null;
 }) {
-  const where =
-    placements === NOT_PLACED ? `${NOT_PLACED}.` : `Stock is at ${placements}.`;
-  return movement ? `${movement.text}. ${where}` : where;
+  const parts = [
+    ...(movement ? [`${movement.text}.`] : []),
+    ...(placements === null
+      ? []
+      : [
+          placements === NOT_PLACED
+            ? `${NOT_PLACED}.`
+            : `Stock is at ${placements}.`,
+        ]),
+  ];
+  return parts.join(" ");
 }
 
 /**
@@ -357,13 +499,15 @@ export function otherLowSentence(n: number) {
  * render this list, so they always carry the same facts.
  *
  * - "What happened": only when there is a sentence; links its booking.
- * - "Where it is": always.
+ * - "Where it is": whenever the placements were read, including "not placed".
+ *   A failed read leaves the row out rather than claim the asset is unplaced.
  * - "Out with people": only when units are in custody, so the available count
  *   in the lead never contradicts the total on the asset page.
  * - "Also low": only when other items are low; links the filtered list.
  *
  * @param params.movement - From {@link describeStockMovement}
- * @param params.placements - From {@link describePlacements}
+ * @param params.placements - From {@link describePlacements}, or null when the
+ *   placements could not be read
  * @param params.inCustody - Units of this asset held in custody
  * @param params.otherLowCount - Other assets in the workspace at or below their minimum
  * @param params.unitOfMeasure - `Asset.unitOfMeasure`
@@ -376,7 +520,7 @@ export function buildFactRows({
   unitOfMeasure,
 }: {
   movement: StockMovement | null;
-  placements: string;
+  placements: string | null;
   inCustody: number;
   otherLowCount: number;
   unitOfMeasure: string | null;
@@ -391,7 +535,9 @@ export function buildFactRows({
         : {}),
     });
   }
-  rows.push({ label: "Where it is", value: placements });
+  if (placements !== null) {
+    rows.push({ label: "Where it is", value: placements });
+  }
   if (inCustody > 0) {
     rows.push({
       label: "Out with people",
