@@ -12,7 +12,10 @@ import type {
   PermissionAction,
   PermissionEntity,
 } from "./permissions/permission.data";
-import { validatePermission } from "./permissions/permission.validator.server";
+import {
+  hasPermission,
+  validatePermission,
+} from "./permissions/permission.validator.server";
 import { resolveRoleAccess } from "./permissions/role-access";
 import {
   ROLE_PRECEDENCE,
@@ -234,6 +237,71 @@ export async function requirePermission({
     canUseBarcodes,
     canUseAudits,
     access,
+  };
+}
+
+/**
+ * `requirePermission` for a page that opens with ANY of several permissions:
+ * a layout whose children are gated separately (Settings, Team).
+ *
+ * Checks the membership against each permission in order and continues with
+ * the first one held, so the result is exactly `requirePermission`'s. Opening
+ * such a layout grants nothing by itself: each child keeps its own gate.
+ *
+ * @param args.userId - The caller
+ * @param args.request - The incoming request, used to resolve the caller's memberships
+ * @param args.anyOf - Permissions, any of which admits the caller
+ * @returns `requirePermission`'s result, plus the membership's roles
+ * @throws {ShelfError} 403 when the membership holds none of them
+ */
+export async function requireAnyPermission({
+  userId,
+  request,
+  anyOf,
+}: {
+  userId: string;
+  request: Request;
+  anyOf: ReadonlyArray<{ entity: PermissionEntity; action: PermissionAction }>;
+}): Promise<
+  Awaited<ReturnType<typeof requirePermission>> & {
+    roles: OrganizationRoles[];
+  }
+> {
+  const { organizationId, userOrganizations } = await getSelectedOrganization({
+    userId,
+    request,
+  });
+  // An empty array (never `undefined`) so a non-member is refused without the
+  // database lookup `hasPermission` falls back to.
+  const roles =
+    userOrganizations.find((o) => o.organization.id === organizationId)
+      ?.roles ?? [];
+
+  let granted: (typeof anyOf)[number] | undefined;
+  for (const candidate of anyOf) {
+    if (await hasPermission({ organizationId, userId, roles, ...candidate })) {
+      granted = candidate;
+      break;
+    }
+  }
+
+  if (!granted) {
+    throw new ShelfError({
+      cause: null,
+      title: "Unauthorized",
+      message: "You have no permission to perform this action",
+      additionalData: { userId, organizationId, anyOf },
+      status: 403,
+      label: "Permission",
+      shouldBeCaptured: false,
+    });
+  }
+
+  // `getSelectedOrganization` is cached per request, so the lookup inside
+  // `requirePermission` costs nothing more.
+  return {
+    ...(await requirePermission({ userId, request, ...granted })),
+    roles,
   };
 }
 

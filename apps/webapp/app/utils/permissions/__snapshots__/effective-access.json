@@ -14954,8 +14954,22 @@
       "asset-models",
       "team"
     ],
-    "OWNER+SELF_SERVICE": [],
-    "OWNER+BASE": [],
+    "OWNER+SELF_SERVICE": [
+      "general",
+      "bookings",
+      "emails",
+      "custom-fields",
+      "asset-models",
+      "team"
+    ],
+    "OWNER+BASE": [
+      "general",
+      "bookings",
+      "emails",
+      "custom-fields",
+      "asset-models",
+      "team"
+    ],
     "ADMIN+OWNER": [
       "general",
       "bookings",
@@ -14964,15 +14978,7 @@
       "asset-models",
       "team"
     ],
-    "ADMIN+SELF_SERVICE": [],
-    "ADMIN+BASE": [],
-    "SELF_SERVICE+OWNER": [],
-    "SELF_SERVICE+ADMIN": [],
-    "SELF_SERVICE+BASE": [],
-    "BASE+OWNER": [],
-    "BASE+ADMIN": [],
-    "BASE+SELF_SERVICE": [],
-    "(none)": [
+    "ADMIN+SELF_SERVICE": [
       "general",
       "bookings",
       "emails",
@@ -14980,14 +14986,50 @@
       "asset-models",
       "team"
     ],
-    "UNKNOWN_ROLE": [
+    "ADMIN+BASE": [
       "general",
       "bookings",
       "emails",
       "custom-fields",
       "asset-models",
       "team"
-    ]
+    ],
+    "SELF_SERVICE+OWNER": [
+      "general",
+      "bookings",
+      "emails",
+      "custom-fields",
+      "asset-models",
+      "team"
+    ],
+    "SELF_SERVICE+ADMIN": [
+      "general",
+      "bookings",
+      "emails",
+      "custom-fields",
+      "asset-models",
+      "team"
+    ],
+    "SELF_SERVICE+BASE": [],
+    "BASE+OWNER": [
+      "general",
+      "bookings",
+      "emails",
+      "custom-fields",
+      "asset-models",
+      "team"
+    ],
+    "BASE+ADMIN": [
+      "general",
+      "bookings",
+      "emails",
+      "custom-fields",
+      "asset-models",
+      "team"
+    ],
+    "BASE+SELF_SERVICE": [],
+    "(none)": [],
+    "UNKNOWN_ROLE": []
   },
   "B9:D-38:sidebar": {
     "OWNER": {

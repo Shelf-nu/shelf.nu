@@ -54,6 +54,7 @@ import {
   resolveRole,
   resolveRoleAccess,
 } from "./role-access";
+import { visibleSettingsTabs } from "./settings-tabs";
 
 const R = OrganizationRoles;
 const SINGLE_ROLES = [R.OWNER, R.ADMIN, R.SELF_SERVICE, R.BASE] as const;
@@ -194,16 +195,6 @@ const RELATIONSHIP_NAMES = Object.keys(RELATIONSHIPS) as RelationshipName[];
 const BOOKING_TOGGLES = TOGGLE_COMBOS.filter(
   (t) => !t.selfServiceCanSeeCustody && !t.baseUserCanSeeCustody
 );
-
-/** Settings tabs of a team workspace, in `settings.tsx:60-66` order. */
-const ALL_SETTINGS_TABS = [
-  "general",
-  "bookings",
-  "emails",
-  "custom-fields",
-  "asset-models",
-  "team",
-];
 
 /** A role change moves nothing: what every SSO transition does today. */
 const NO_TRANSFER = { ownership: false, bookingsCreatedForOthers: false };
@@ -1256,10 +1247,11 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Admin areas: Tasks 7b, 7e =====================
 
-  // B9:D-38: settings tabs for a team workspace (routes/_layout+/settings.tsx:60-83):
-  // every tab removed when `isBaseOrSelfService`.
+  // B9:D-38: settings tabs for a team workspace, as the Settings layout loader
+  // computes them (routes/_layout+/settings.tsx): each tab shows with the
+  // matrix grant of the page it opens.
   snapshot["B9:D-38:settings-tabs"] = perRoleSet((roles) =>
-    hookFlags(roles).isBaseOrSelfService ? [] : ALL_SETTINGS_TABS
+    visibleSettingsTabs({ roles, isPersonalOrg: false }).map((t) => t.to)
   );
 
   // B9:D-38: sidebar (hooks/use-sidebar-nav-items.tsx:71; `hidden:

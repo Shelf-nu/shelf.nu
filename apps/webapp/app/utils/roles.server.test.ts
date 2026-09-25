@@ -12,6 +12,9 @@
  * every loader and action asks one object instead of re-deriving the same
  * decision per call site.
  *
+ * And `requireAnyPermission`, the gate for layouts that open with any of
+ * several permissions (Settings, Team).
+ *
  * @see {@link file://./roles.server.ts}
  */
 import type { SsoDetails } from "@prisma/client";
@@ -24,6 +27,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import {
   getRoleFromGroupId,
+  requireAnyPermission,
   requirePermission,
   resolveCanSeeAllCustody,
   resolveEffectiveRole,
@@ -45,10 +49,16 @@ vi.mock("~/modules/organization/context.server", () => ({
 
 // why: validatePermission is the matrix gate that runs before access is
 // resolved. These tests exercise the access computation that follows it, so
-// the gate is stubbed to always permit.
-vi.mock("~/utils/permissions/permission.validator.server", () => ({
-  validatePermission: vi.fn().mockResolvedValue(true),
-}));
+// the gate is stubbed to always permit. `hasPermission` stays real: with the
+// roles supplied it is a pure matrix lookup, which requireAnyPermission's
+// refusal case depends on.
+vi.mock(
+  "~/utils/permissions/permission.validator.server",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    validatePermission: vi.fn().mockResolvedValue(true),
+  })
+);
 
 // why: requirePermission tags the Sentry scope with the caller and the
 // organization; no Sentry client exists under `pnpm test:run`.
@@ -329,5 +339,88 @@ describe("requirePermission: access", () => {
     });
 
     expect(result.access.custody.seeAll).toBe(true);
+  });
+});
+
+describe("requireAnyPermission", () => {
+  const ORG_ID = "org-1";
+  const getSelectedOrganizationMock = vi.mocked(getSelectedOrganization);
+
+  /** Points getSelectedOrganization at a caller holding `roles` in ORG_ID. */
+  function mockMembership(roles: OrganizationRoles[]) {
+    const currentOrganization = {
+      id: ORG_ID,
+      type: "TEAM",
+      selfServiceCanSeeBookings: false,
+      baseUserCanSeeBookings: false,
+      selfServiceCanSeeCustody: false,
+      baseUserCanSeeCustody: false,
+      barcodesEnabled: false,
+      auditsEnabled: false,
+    };
+    getSelectedOrganizationMock.mockResolvedValue({
+      organizationId: ORG_ID,
+      userOrganizations: [{ organization: { id: ORG_ID }, roles }],
+      organizations: [],
+      currentOrganization,
+      cookieRefreshNeeded: false,
+    } as never);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("passes when any listed permission is held and returns the membership roles", async () => {
+    mockMembership([OrganizationRoles.ADMIN]);
+
+    const result = await requireAnyPermission({
+      userId: "user-1",
+      request: new Request("http://localhost/settings"),
+      anyOf: [
+        {
+          entity: PermissionEntity.generalSettings,
+          action: PermissionAction.read,
+        },
+        { entity: PermissionEntity.teamMember, action: PermissionAction.read },
+      ],
+    });
+
+    expect(result.roles).toEqual(["ADMIN"]);
+    expect(result.organizationId).toBe(ORG_ID);
+  });
+
+  it("refuses with 403 when none is held", async () => {
+    mockMembership([OrganizationRoles.BASE]);
+
+    await expect(
+      requireAnyPermission({
+        userId: "user-1",
+        request: new Request("http://localhost/settings"),
+        anyOf: [
+          {
+            entity: PermissionEntity.generalSettings,
+            action: PermissionAction.read,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("refuses an empty membership", async () => {
+    mockMembership([]);
+
+    await expect(
+      requireAnyPermission({
+        userId: "user-1",
+        request: new Request("http://localhost/settings"),
+        anyOf: [
+          {
+            entity: PermissionEntity.generalSettings,
+            action: PermissionAction.read,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ status: 403 });
   });
 });
