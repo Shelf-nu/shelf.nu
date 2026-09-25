@@ -7236,6 +7236,51 @@ describe("removeDestroyedUnitsFromKits", () => {
     ]);
   });
 
+  it("writes one note per booking when several of its kit assets shrink", async () => {
+    expect.assertions(2);
+
+    // Two pools in two kits; the same reserved booking holds both kits.
+    membershipReads().mockResolvedValueOnce([
+      membership({ stock: 7 }),
+      {
+        ...membership({ stock: 8 }),
+        id: "ak-2",
+        assetId: "asset-cable",
+        kitId: "kit-2",
+        kit: { name: "Kit B" },
+        asset: { ...membership().asset, title: "Cables", quantity: 8 },
+      },
+    ]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+      { assetId: "asset-cable", _sum: { quantity: 5 } },
+    ]);
+    (db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([
+        { id: "ba-pool", bookingId: "booking-next-week", quantity: 5 },
+      ])
+      .mockResolvedValueOnce([
+        { id: "ba-cable", bookingId: "booking-next-week", quantity: 5 },
+      ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, {
+      ...args(3),
+      destroyedUnitsByAssetKitId: new Map([
+        ["ak-1", 3],
+        ["ak-2", 2],
+      ]),
+    });
+
+    const [{ notes }] = (
+      createSystemBookingNotes as unknown as ReturnType<typeof vitest.fn>
+    ).mock.calls[0];
+    expect(notes).toHaveLength(1);
+    expect(notes[0].content).toContain(
+      "so this booking now holds less of **Batteries** in kit **Kit A** (**3 units** fewer, **2 units** left), **Cables** in kit **Kit B** (**2 units** fewer, **3 units** left)."
+    );
+  });
+
   it("tells a planning booking the kit's last units were not returned", async () => {
     expect.assertions(1);
 

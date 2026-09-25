@@ -1309,22 +1309,45 @@ async function recordPlanningKitSliceCaps(
     "another booking"
   );
 
+  // One note per booking: several of its kit assets can shrink in the same
+  // check-in, and they collapse into a single line.
+  const cappedByBookingId = new Map<string, typeof capped>();
+  for (const entry of capped) {
+    const bucket = cappedByBookingId.get(entry.bookingId);
+    if (bucket) {
+      bucket.push(entry);
+    } else {
+      cappedByBookingId.set(entry.bookingId, [entry]);
+    }
+  }
+
   await createSystemBookingNotes(
     {
       organizationId,
-      notes: capped.map(({ bookingId, membership, removed, remaining }) => {
-        const unitCount = (units: number) =>
-          formatUnitCount(membership.asset, units) ?? String(units);
-        // Asset title and kit name are user-supplied literal text here.
-        const title = stripMarkdocDelimiters(membership.asset.title);
-        const kitName = stripMarkdocDelimiters(membership.kit.name);
+      notes: [...cappedByBookingId].map(([bookingId, entries]) => {
+        const described = entries.map(({ membership, removed, remaining }) => {
+          const unitCount = (units: number) =>
+            formatUnitCount(membership.asset, units) ?? String(units);
+          return {
+            // Asset title and kit name are user-supplied literal text here.
+            title: stripMarkdocDelimiters(membership.asset.title),
+            kitName: stripMarkdocDelimiters(membership.kit.name),
+            removed: unitCount(removed),
+            remaining: unitCount(remaining),
+          };
+        });
+        const cause =
+          described.length === 1
+            ? `where **${described[0].removed}** of **${described[0].title}** in kit **${described[0].kitName}** were not returned, so this booking now holds **${described[0].remaining}** of it`
+            : `where kit units were not returned, so this booking now holds less of ${described
+                .map(
+                  (item) =>
+                    `**${item.title}** in kit **${item.kitName}** (**${item.removed}** fewer, **${item.remaining}** left)`
+                )
+                .join(", ")}`;
         return {
           bookingId,
-          content: `${actorLink} checked in ${checkinLink} where **${unitCount(
-            removed
-          )}** of **${title}** in kit **${kitName}** were not returned, so this booking now holds **${unitCount(
-            remaining
-          )}** of it. Nothing has been checked out yet, so the booking follows the kit's contents.`,
+          content: `${actorLink} checked in ${checkinLink} ${cause}. Nothing has been checked out yet, so the booking follows the kit's contents.`,
         };
       }),
     },
