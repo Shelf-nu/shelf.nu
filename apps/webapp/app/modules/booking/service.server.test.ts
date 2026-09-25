@@ -13895,7 +13895,7 @@ describe("addScannedAssetsToBooking", () => {
     BookingStatus.CANCELLED,
   ])("refuses to add scanned assets to a %s booking", async (status) => {
     // This path had no booking-status check anywhere before: the route action
-    // only called requirePermission, and the loader's canUserManageBookingAssets
+    // only called requirePermission, and the loader's canScanAddBookingItems
     // decided what to RENDER, not what to accept. A direct POST could therefore
     // append assets to a closed booking. (detail.dev D097)
     //

@@ -5,6 +5,7 @@ import { LocationBadge } from "~/components/location/location-badge";
 import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
@@ -20,7 +21,12 @@ import {
   resolveBookingRowQtyState,
   resolveQtyStockBadgeVariant,
 } from "~/utils/booking-assets";
-import { canRoleRemoveBookingAssets } from "~/utils/bookings";
+import { mayRemoveBookingItems } from "~/utils/bookings";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import {
@@ -93,7 +99,8 @@ export default function ListAssetContent({
     >;
   }>();
   const currentOrganization = useCurrentOrganization();
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
   const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
 
   // Resolve the asset's display code (QR id, SAM id, or barcode value) per
@@ -145,20 +152,28 @@ export default function ListAssetContent({
     // Never show actions if asset is part of a kit
     if (isPartOfKit) return false;
 
-    // Admins and owners can always see actions
-    if (!isBaseOrSelfService) return true;
+    // Members who write every booking see the menu on every row; others only
+    // on a booking they hold, within their removable statuses.
+    if (roleAccess.bookings.writeAll) return true;
 
-    // Check if user is the custodian of the item
     const isUserCustodian = booking?.custodianUser?.id === user?.id;
     if (!isUserCustodian) return false;
 
     /**
-     * BASE stops at DRAFT, SELF_SERVICE at RESERVED. Resolved through the
-     * shared helper rather than spelled out inline, so this menu, the bulk
-     * actions menu and the two server-side remove gates cannot drift apart.
+     * Resolved through the shared helper rather than spelled out inline, so
+     * this menu, the bulk actions menu and the two server-side remove gates
+     * cannot drift apart.
      */
-    return canRoleRemoveBookingAssets({ roles, booking });
-  }, [isPartOfKit, booking, user?.id, roles, isBaseOrSelfService]);
+    return mayRemoveBookingItems({
+      canUpdateBooking: userHasPermission({
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      }),
+      access: roleAccess,
+      bookingStatus: booking.status,
+    });
+  }, [isPartOfKit, booking, user?.id, roles, roleAccess]);
 
   /**
    * Qty-tracked partial dispositioning.

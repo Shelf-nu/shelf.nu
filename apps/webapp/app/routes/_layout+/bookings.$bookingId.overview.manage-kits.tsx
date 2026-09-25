@@ -95,6 +95,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -157,17 +158,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const {
-      organizationId,
-      userOrganizations,
-      isSelfServiceOrBase,
-      canSeeAllCustody,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, userOrganizations, access, canSeeAllCustody } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     const modelName = {
       singular: "kit",
@@ -181,24 +178,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    /** Self service can only manage kits for bookings that are DRAFT */
-    const cantManageAssetsAsBase =
-      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
-
-    /** Changing kits is not allowed at this stage */
-    const notAllowedStatus: BookingStatus[] = [
-      BookingStatus.CANCELLED,
-      BookingStatus.ARCHIVED,
-      BookingStatus.COMPLETE,
-    ];
-
-    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+    // Kits can be changed while the booking is open; roles whose policy does
+    // not allow adding after DRAFT are held to DRAFT.
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         label: "Booking",
-        message: isSelfServiceOrBase
-          ? "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-          : "Changing of kits is not allowed for current status of booking.",
+        // The message names the rule that applies to this caller: members
+        // held to DRAFT get the "already reserved" explanation.
+        message: access.policy.bookings.manageItemsAfterDraft
+          ? "Changing of kits is not allowed for current status of booking."
+          : "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes.",
         shouldBeCaptured: false,
       });
     }
@@ -365,7 +355,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -414,24 +404,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       });
 
-    /** Self service can only manage kits for bookings that are DRAFT */
-    const cantManageAssetsAsBase =
-      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
-
-    /** Changing kits is not allowed at this stage */
-    const notAllowedStatus: BookingStatus[] = [
-      BookingStatus.CANCELLED,
-      BookingStatus.ARCHIVED,
-      BookingStatus.COMPLETE,
-    ];
-
-    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+    // Kits can be changed while the booking is open; roles whose policy does
+    // not allow adding after DRAFT are held to DRAFT.
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         label: "Booking",
-        message: isSelfServiceOrBase
-          ? "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-          : "Changing of kits is not allowed for current status of booking.",
+        // The message names the rule that applies to this caller: members
+        // held to DRAFT get the "already reserved" explanation.
+        message: access.policy.bookings.manageItemsAfterDraft
+          ? "Changing of kits is not allowed for current status of booking."
+          : "You are unable to manage kits at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes.",
         shouldBeCaptured: false,
       });
     }

@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -30,7 +29,6 @@ import {
 import { calculatePartialCheckinProgress } from "~/modules/booking/utils.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -39,6 +37,8 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canPartialCheckInOut } from "~/utils/permissions/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -47,14 +47,15 @@ export const links: LinksFunction = () => [
 ];
 
 /**
- * Check-in eligibility guard shared by the loader and the action.
+ * Check-in guard shared by the loader and the action (spec section 4.6.1,
+ * partial check-in page).
  *
- * Self-service users may check in only a booking they are the CUSTODIAN of, and
- * only while it is ongoing or overdue; everyone else is gated by
- * `canUserManageBookingAssets`. It MUST run in the action as well as the
- * loader: an action can be POSTed directly, and `PermissionAction.checkin`
- * alone is granted to SELF_SERVICE, while `checkinAssets` never checks the
- * caller's relationship to the booking.
+ * `canPartialCheckInOut` answers it: the manage-items rule, or, for roles
+ * whose policy has `bookings.partialScanAsCustodian`, an ONGOING or OVERDUE
+ * booking the caller is the custodian of. Creating the booking is not
+ * enough. It MUST run in the action as well as the loader: an action can be
+ * POSTed directly, and `booking:checkin` alone lets SELF_SERVICE reach any
+ * booking in the workspace.
  *
  * @throws {ShelfError} 403 when the caller may not check in this booking
  * @returns the loaded booking, so the loader can reuse it
@@ -63,21 +64,19 @@ async function assertUserCanCheckinBooking({
   bookingId,
   organizationId,
   userId,
-  role,
+  access,
   userOrganizations,
   request,
 }: {
   bookingId: string;
   organizationId: string;
   userId: string;
-  role: OrganizationRoles;
+  access: RoleAccess;
   userOrganizations: Awaited<
     ReturnType<typeof requirePermission>
   >["userOrganizations"];
   request: Request;
 }) {
-  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
   const booking = await getBooking({
     id: bookingId,
     organizationId,
@@ -85,16 +84,15 @@ async function assertUserCanCheckinBooking({
     request,
   });
 
-  // Self-service users may check in their own live booking. The generic
-  // canUserManageBookingAssets blocks self-service on non-draft bookings, but
-  // that restriction is for adding/removing assets, not for checking in.
-  const isCheckinEligible =
-    booking.status === "ONGOING" || booking.status === "OVERDUE";
-  const isCustodian = booking.custodianUserId === userId;
-  const canCheckin =
-    isSelfService && isCheckinEligible && isCustodian
-      ? true
-      : canUserManageBookingAssets(booking, isSelfService);
+  const canCheckin = canPartialCheckInOut({
+    access,
+    booking: {
+      status: booking.status,
+      custodianUserId: booking.custodianUserId,
+    },
+    userId,
+    direction: "checkin",
+  });
 
   if (!canCheckin) {
     throw new ShelfError({
@@ -119,20 +117,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkin,
-      }
-    );
+      });
 
     const booking = await assertUserCanCheckinBooking({
       bookingId,
       organizationId,
       userId,
-      role,
+      access,
       userOrganizations,
       request,
     });
@@ -458,21 +455,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkin,
-      }
-    );
+      });
 
     // The action is directly POST-able, so it re-applies the loader's guard.
     await assertUserCanCheckinBooking({
       bookingId,
       organizationId,
       userId,
-      role,
+      access,
       userOrganizations,
       request,
     });

@@ -90,10 +90,7 @@ import {
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import {
-  calculateTotalValueOfAssets,
-  canRoleRemoveBookingAssets,
-} from "~/utils/bookings";
+import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import {
@@ -122,6 +119,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canRemoveBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import type { Route } from "./+types/bookings.$bookingId.overview";
 
@@ -1525,9 +1523,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * rules is cosmetic, and a crafted POST reaches this action directly.
      *
      * A closed booking (COMPLETE / ARCHIVED / CANCELLED) is immutable for
-     * everyone. Below that, a restricted role is bounded by status — removing
-     * from a live booking reconciles the asset back to available, which is a
-     * check-in, and BASE holds no `booking:checkin`.
+     * everyone. Below that, a caller is bounded by the statuses its policy
+     * lists (`bookings.removableItemStatuses`): removing from a live booking
+     * reconciles the asset back to available, which is a check-in, and BASE
+     * holds no `booking:checkin`.
      *
      * WHO owns the booking is still settled below by `validateBookingOwnership`.
      */
@@ -1538,10 +1537,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     ];
     if (
       removeIntents.includes(intent) &&
-      // `[role]` is safe here, unlike on the mobile endpoint: `requirePermission`
-      // resolves through `resolveEffectiveRole`, which returns the MOST
-      // PRIVILEGED role on the membership rather than `roles[0]`.
-      !canRoleRemoveBookingAssets({ roles: [role], booking: basicBookingInfo })
+      !canRemoveBookingItems({ access, bookingStatus: basicBookingInfo.status })
     ) {
       throw new ShelfError({
         cause: null,
@@ -1551,7 +1547,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId,
           id,
           intent,
-          role,
+          role: access.role,
           status: basicBookingInfo.status,
         },
         label: "Booking",

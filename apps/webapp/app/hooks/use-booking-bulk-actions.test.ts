@@ -12,6 +12,7 @@ import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { renderHook } from "@testing-library/react";
 import { useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { useBookingBulkActions } from "./use-booking-bulk-actions";
 import { useUserRoleHelper } from "./user-user-role-helper";
@@ -29,6 +30,15 @@ vi.mock("./user-user-role-helper", () => ({
   useUserRoleHelper: vi.fn(),
 }));
 
+/** The roles the role-helper mock returns; the access mock reads the same. */
+let mockRoles: OrganizationRoles[] = [];
+
+// why: the real hook reads the member's access from the `_layout` loader,
+// which is not mounted here; drive it from the same roles as the role helper.
+vi.mock("./use-role-access", () => ({
+  useRoleAccess: () => accessFor(mockRoles),
+}));
+
 const mockedUseLoaderData = vi.mocked(useLoaderData);
 const mockedUseUserRoleHelper = vi.mocked(useUserRoleHelper);
 
@@ -39,6 +49,7 @@ function actions(status: BookingStatus, roles: OrganizationRoles[]) {
   mockedUseUserRoleHelper.mockReturnValue({ roles } as ReturnType<
     typeof useUserRoleHelper
   >);
+  mockRoles = roles;
 
   return renderHook(() => useBookingBulkActions()).result.current;
 }

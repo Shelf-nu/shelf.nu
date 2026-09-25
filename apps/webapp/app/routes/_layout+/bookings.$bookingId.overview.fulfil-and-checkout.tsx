@@ -29,7 +29,7 @@
  * @see {@link file://./../../atoms/qr-scanner.ts} — fulfil atoms.
  */
 
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -58,7 +58,6 @@ import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -74,6 +73,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -146,12 +146,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         action: PermissionAction.checkout,
       });
 
-    // NOTE: BASE is deliberately not folded in here. `canUserManageBookingAssets`
-    // takes an is-self-service flag, and BASE reaching this loader would get the
-    // permissive branch — but BASE does not hold `booking:checkout`, so the gate
-    // above now stops it before this matters.
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
     const booking = await getBooking({
       id: bookingId,
       organizationId,
@@ -159,12 +153,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    // `canUserManageBookingAssets` takes only (status, from, to) plus an
-    // is-self-service flag — it never sees `userId`, so it cannot answer "is
-    // this MY booking". Without this, a SELF_SERVICE user could load another
-    // member's booking, its model requests and its asset data through this
-    // screen, even though the action would refuse the checkout. Read access is
-    // the leak; the write guard does not cover it. No-op when
+    // The manage-items rule below reads only the booking's status, so it cannot
+    // answer "is this MY booking". Without this, a SELF_SERVICE user could load
+    // another member's booking, its model requests and its asset data through
+    // this screen, even though the action would refuse the checkout. Read
+    // access is the leak; the write guard does not cover it. No-op when
     // `access.bookings.writeAll`.
     validateBookingOwnership({
       booking,
@@ -173,7 +166,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: "check out",
     });
 
-    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
+    const canManageAssets = canManageBookingItems({
+      access,
+      bookingStatus: booking.status,
+    });
 
     if (!canManageAssets) {
       throw new ShelfError({
@@ -333,7 +329,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       },
     });
 
-    // The loader's `canUserManageBookingAssets` only shapes what renders; this
+    // The loader's `canManageBookingItems` only shapes what renders; this
     // check is what stops a cross-user check-out on a direct POST. SELF_SERVICE
     // holds `booking:checkout`, and `fulfilAndCheckOut` does not check
     // ownership itself. No-op when `access.bookings.writeAll`. Mirrors

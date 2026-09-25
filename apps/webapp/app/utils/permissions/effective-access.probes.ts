@@ -32,8 +32,8 @@ import {
 } from "~/utils/booking-authorization.server";
 import {
   bookingCustodianIsSelf,
-  canRoleRemoveBookingAssets,
-  canUserManageBookingAssets,
+  canScanAddBookingItems,
+  mayRemoveBookingItems,
 } from "~/utils/bookings";
 import {
   ROLE_PRECEDENCE,
@@ -48,7 +48,11 @@ import {
 } from "~/utils/roles.server";
 import { PermissionAction, PermissionEntity } from "./permission.data";
 import { userHasPermission } from "./permission.validator.client";
-import { resolveRoleAccess } from "./role-access";
+import {
+  canManageBookingItems,
+  canPartialCheckInOut,
+  resolveRoleAccess,
+} from "./role-access";
 
 const R = OrganizationRoles;
 const SINGLE_ROLES = [R.OWNER, R.ADMIN, R.SELF_SERVICE, R.BASE] as const;
@@ -507,7 +511,10 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     ])
   );
 
-  // D-20: add items after DRAFT, as each call-site style passes the flag today.
+  // D-20: add items after DRAFT. The two keys name the two call-site rules:
+  // `selfServiceFlag` is the scan page (bookings.scanAddAfterDraft), and
+  // `restrictedFlag` is manage-assets / manage-kits / mobile add
+  // (bookings.manageItemsAfterDraft).
   snapshot["D-20"] = Object.fromEntries(
     SINGLE_ROLES.map((role) => [
       role,
@@ -515,28 +522,34 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
         BOOKING_STATUSES.map((status) => [
           status,
           {
-            selfServiceFlag: canUserManageBookingAssets(
-              { status, from: null, to: null } as never,
-              role === R.SELF_SERVICE
-            ),
-            restrictedFlag: canUserManageBookingAssets(
-              { status, from: null, to: null } as never,
-              role === R.SELF_SERVICE || role === R.BASE
-            ),
+            selfServiceFlag: canScanAddBookingItems({
+              access: accessFor([role]),
+              bookingStatus: status,
+            }),
+            restrictedFlag: canManageBookingItems({
+              access: accessFor([role]),
+              bookingStatus: status,
+            }),
           },
         ])
       ),
     ])
   );
 
-  // D-21: removable statuses, every role set.
+  // D-21: removable statuses, every role set: the booking:update grant (which
+  // denies an empty or unknown membership) and the policy's statuses.
   snapshot["D-21"] = Object.fromEntries(
     ROLE_SETS.map((roles) => [
       key(roles),
       BOOKING_STATUSES.filter((status) =>
-        canRoleRemoveBookingAssets({
-          roles: roles as OrganizationRoles[],
-          booking: { status } as never,
+        mayRemoveBookingItems({
+          canUpdateBooking: userHasPermission({
+            roles: roles as OrganizationRoles[],
+            entity: PermissionEntity.booking,
+            action: PermissionAction.update,
+          }),
+          access: accessFor(roles),
+          bookingStatus: status,
         })
       ),
     ])
@@ -891,40 +904,39 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Bookings: Task 4e =====================
 
-  // B9:D-20: web add-items rule for every membership, as each call-site style
-  // passes the flag: scan-assets.tsx:68,77 / fulfil loader (effective role ===
-  // SELF_SERVICE), manage-assets / manage-kits (requirePermission's isSelfServiceOrBase).
-  snapshot["B9:D-20:web-server"] = perRoleSet((roles) =>
-    perCase(BOOKING_STATUSES, (status) => ({
-      selfServiceFlag: canUserManageBookingAssets(
-        { status, from: null, to: null } as never,
-        webRole(roles) === R.SELF_SERVICE
-      ),
-      restrictedFlag: canUserManageBookingAssets(
-        { status, from: null, to: null } as never,
-        isSelfServiceOrBaseRole(webRole(roles))
-      ),
-    }))
-  );
+  // B9:D-20: web add-items rule for every membership, per call-site rule:
+  // `selfServiceFlag` is the scan page (`canScanAddBookingItems`),
+  // `restrictedFlag` is manage-assets / manage-kits / the fulfil loader
+  // (`canManageBookingItems`), both on the request's `access`.
+  snapshot["B9:D-20:web-server"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    return perCase(BOOKING_STATUSES, (status) => ({
+      selfServiceFlag: canScanAddBookingItems({
+        access,
+        bookingStatus: status,
+      }),
+      restrictedFlag: canManageBookingItems({ access, bookingStatus: status }),
+    }));
+  });
 
-  // B9:D-15/D-20: mobile add-scanned-assets (bookings.add-scanned-assets.ts:80-85
-  // gate booking:update; :138-148 custodian check; :158 add rule), positional role.
+  // B9:D-15/D-20: mobile add-scanned-assets (bookings.add-scanned-assets.ts:
+  // gate booking:update; a caller who does not write every booking must be
+  // the custodian; then the manage-items rule on the context's `access`).
   snapshot["B9:D-15/D-20:mobile-add-scanned"] = perRoleSet((roles) => {
-    const restricted = isRestricted(mobilePositionalRole(roles));
+    const access = accessFor(roles);
     return Object.fromEntries(
       CUSTODIAN_CASES.flatMap((custodian) =>
         BOOKING_STATUSES.map((status) => [
           `custodian=${custodian}|${status}`,
           firstRefusal([
             ["denied:gate", () => !can(roles, E.booking, A.update)],
-            ["denied:owner", () => restricted && custodian !== "caller"],
+            [
+              "denied:owner",
+              () => !access.bookings.writeAll && custodian !== "caller",
+            ],
             [
               "denied:status",
-              () =>
-                !canUserManageBookingAssets(
-                  { status, from: null, to: null } as never,
-                  restricted
-                ),
+              () => !canManageBookingItems({ access, bookingStatus: status }),
             ],
           ]),
         ])
@@ -932,11 +944,10 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     );
   });
 
-  // B9:D-24: mobile partial check-in (bookings.partial-checkin.ts:45-50 gate
-  // booking:checkin; :103-112 positional SELF_SERVICE custodian shortcut, else
-  // the add-items rule with the positional SELF_SERVICE flag).
+  // B9:D-24: mobile partial check-in (bookings.partial-checkin.ts: gate
+  // booking:checkin; then `canPartialCheckInOut` on the context's `access`).
   snapshot["B9:D-24:mobile-partial-checkin"] = perRoleSet((roles) => {
-    const isSelfService = mobilePositionalRole(roles) === R.SELF_SERVICE;
+    const access = accessFor(roles);
     return Object.fromEntries(
       CUSTODIAN_CASES.flatMap((custodian) =>
         BOOKING_STATUSES.map((status) => [
@@ -945,19 +956,17 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
             ["denied:gate", () => !can(roles, E.booking, A.checkin)],
             [
               "denied:status",
-              () => {
-                const isCheckinEligible =
-                  status === "ONGOING" || status === "OVERDUE";
-                const isCustodian = custodian === "caller";
-                const canCheckin =
-                  isSelfService && isCheckinEligible && isCustodian
-                    ? true
-                    : canUserManageBookingAssets(
-                        { status, from: null, to: null } as never,
-                        isSelfService
-                      );
-                return !canCheckin;
-              },
+              () =>
+                !canPartialCheckInOut({
+                  access,
+                  booking: {
+                    status,
+                    custodianUserId:
+                      custodian === "caller" ? "caller" : "someone-else",
+                  },
+                  userId: "caller",
+                  direction: "checkin",
+                }),
             ],
           ]),
         ])
@@ -966,44 +975,46 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   });
 
   // B9:D-20: booking assets column "can't manage items" on an open booking
-  // (booking-assets-column.tsx:85,140): `(isBase || isSelfService) && status !== DRAFT`.
+  // (booking-assets-column.tsx): `!canManageBookingItems` on `useRoleAccess()`.
   snapshot["B9:D-20:web-assets-column"] = perRoleSet((roles) => {
-    const { isBase, isSelfService } = hookFlags(roles);
+    const access = accessFor(roles);
     return perCase(
       OPEN_STATUSES,
-      (status) => (isBase || isSelfService) && status !== "DRAFT"
+      (status) => !canManageBookingItems({ access, bookingStatus: status })
     );
   });
 
-  // B9:D-15/D-21: booking asset row actions (list-asset-content.tsx:96,144-161,
-  // kit membership aside): everyone without a restricted role; otherwise the
-  // custodian within the union removable statuses.
+  // B9:D-15/D-21: booking asset row actions (list-asset-content.tsx, kit
+  // membership aside): a caller who writes every booking sees them on every
+  // row; otherwise only the custodian, within `mayRemoveBookingItems`.
   snapshot["B9:D-15/D-21:web-list-asset-actions"] = perRoleSet((roles) => {
-    const { isBaseOrSelfService } = hookFlags(roles);
+    const access = accessFor(roles);
+    const canUpdateBooking = can(roles, E.booking, A.update);
     return Object.fromEntries(
       CUSTODIAN_CASES.flatMap((custodian) =>
         BOOKING_STATUSES.map((status) => [
           `custodian=${custodian}|${status}`,
-          !isBaseOrSelfService
+          access.bookings.writeAll
             ? true
             : custodian !== "caller"
             ? false
-            : canRoleRemoveBookingAssets({
-                roles,
-                booking: { status } as never,
+            : mayRemoveBookingItems({
+                canUpdateBooking,
+                access,
+                bookingStatus: status,
               }),
         ])
       )
     );
   });
 
-  // B9:D-21 (+B2): kit row "Remove" menu (kit-row.tsx:95,324):
-  // `(!isBase && isDraft) || isReserved`.
+  // B9:D-21 (+B2): kit row "Remove" menu (kit-row.tsx): `mayRemoveBookingItems`
+  // on the booking:update grant and `useRoleAccess()`.
   snapshot["B9:D-21:web-kit-row-remove"] = perRoleSet((roles) => {
-    const { isBase } = hookFlags(roles);
-    return perCase(
-      BOOKING_STATUSES,
-      (status) => (!isBase && status === "DRAFT") || status === "RESERVED"
+    const access = accessFor(roles);
+    const canUpdateBooking = can(roles, E.booking, A.update);
+    return perCase(BOOKING_STATUSES, (status) =>
+      mayRemoveBookingItems({ canUpdateBooking, access, bookingStatus: status })
     );
   });
 

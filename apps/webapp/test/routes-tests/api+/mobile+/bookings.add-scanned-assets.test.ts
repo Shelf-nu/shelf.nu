@@ -461,3 +461,69 @@ describe("POST /api/mobile/bookings/add-scanned-assets — reads are scoped to t
     expect(bookingAssetFindManyMock).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Who may add to which booking. The caller's `access` decides both halves: a
+ * caller who does not write every booking may only add to one they are the
+ * custodian of, and the manage-items rule holds roles without
+ * `manageItemsAfterDraft` to DRAFT. A membership holding ADMIN beside a
+ * restricted role is judged as ADMIN, whatever order the roles are stored in.
+ */
+describe("POST /api/mobile/bookings/add-scanned-assets: who may add", () => {
+  /** The booking under test, held by `custodianUserId`, in `status`. */
+  function bookingIs(status: string, custodianUserId: string) {
+    findFirstMock.mockResolvedValue({
+      id: BOOKING_ID,
+      status,
+      from: new Date("2026-01-01T00:00:00.000Z"),
+      to: new Date("2026-01-02T00:00:00.000Z"),
+      custodianUserId,
+      bookingAssets: [],
+    } as never);
+  }
+
+  /** Posts one scanned asset as a caller holding `roles`. */
+  function postAs(roles: OrganizationRoles[]) {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles })
+    );
+    assetsExist(["asset-9"]);
+    return post({ assetIds: ["asset-9"] });
+  }
+
+  it("lets a SELF_SERVICE-then-ADMIN membership add to someone else's live booking", async () => {
+    bookingIs("ONGOING", "someone-else");
+
+    await postAs([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]);
+
+    expect(serviceCall().assetIds).toEqual(["asset-9"]);
+  });
+
+  it("refuses SELF_SERVICE on someone else's booking with a 403", async () => {
+    bookingIs("DRAFT", "someone-else");
+
+    const response = await postAs([OrganizationRoles.SELF_SERVICE]);
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(403);
+    expect(addScannedAssetsToBookingMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses SELF_SERVICE on its own booking once it is reserved", async () => {
+    bookingIs("RESERVED", "user-1");
+
+    const response = await postAs([OrganizationRoles.SELF_SERVICE]);
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(403);
+    expect(addScannedAssetsToBookingMock).not.toHaveBeenCalled();
+  });
+
+  it("lets SELF_SERVICE add to its own DRAFT booking", async () => {
+    bookingIs("DRAFT", "user-1");
+
+    await postAs([OrganizationRoles.SELF_SERVICE]);
+
+    expect(serviceCall().assetIds).toEqual(["asset-9"]);
+  });
+});

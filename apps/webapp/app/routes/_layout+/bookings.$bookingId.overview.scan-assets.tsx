@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -25,7 +24,7 @@ import {
 } from "~/modules/booking/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { canUserManageBookingAssets } from "~/utils/bookings";
+import { canScanAddBookingItems } from "~/utils/bookings";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -56,16 +55,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.update,
-      }
-    );
-
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+      });
 
     const booking = await getBooking({
       id: bookingId,
@@ -74,7 +70,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
+    // The scan page keeps its own add rule (`bookings.scanAddAfterDraft`),
+    // which is wider than the manage-items rule for BASE.
+    const canManageAssets = canScanAddBookingItems({
+      access,
+      bookingStatus: booking.status,
+    });
 
     if (!canManageAssets) {
       throw new ShelfError({

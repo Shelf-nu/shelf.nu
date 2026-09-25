@@ -8,8 +8,8 @@ import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import {
-  canRoleRemoveBookingAssets,
   canUserRemoveBookingAssets,
+  mayRemoveBookingItems,
 } from "~/utils/bookings";
 import {
   PermissionAction,
@@ -17,14 +17,15 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { useBookingStatusHelpers } from "./use-booking-status";
+import { useRoleAccess } from "./use-role-access";
 import { useUserRoleHelper } from "./user-user-role-helper";
 
 /**
  * Which bulk actions the current user may take on the booking being viewed.
  *
  * One question per action, because the three do not share a rule: check in and
- * check out are flat permissions, while removal depends on role AND booking
- * status. The column-level `canSeeActions` in `booking-assets-column.tsx`
+ * check out are flat permissions, while removal depends on the caller's policy
+ * AND booking status. The column-level `canSeeActions` in `booking-assets-column.tsx`
  * cannot stand in for any of them — it asks only whether the user is the
  * booking's custodian, which a BASE custodian is at every status while holding
  * neither `booking:checkin` nor `booking:checkout` at any of them.
@@ -39,6 +40,7 @@ import { useUserRoleHelper } from "./user-user-role-helper";
 export function useBookingBulkActions() {
   const { booking } = useLoaderData<BookingPageLoaderData>();
   const { roles } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
   const bookingStatus = useBookingStatusHelpers(
     booking.status as BookingStatus
   );
@@ -53,7 +55,16 @@ export function useBookingBulkActions() {
     entity: PermissionEntity.booking,
     action: PermissionAction.checkout,
   });
-  const canRemove = canRoleRemoveBookingAssets({ roles, booking });
+  const canUpdateBooking = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.update,
+  });
+  const canRemove = mayRemoveBookingItems({
+    canUpdateBooking,
+    access: roleAccess,
+    bookingStatus: booking.status,
+  });
 
   // Partial check-in applies only to ONGOING/OVERDUE bookings.
   const showPartialCheckin = Boolean(
@@ -84,11 +95,13 @@ export function useBookingBulkActions() {
    * The fallback probes DRAFT rather than trusting `isFinished` on its own:
    * every role that removes at all removes in DRAFT, so this asks "is status
    * the only thing in the way". Without it, a session whose roles have not
-   * resolved would still be offered the row on a finished booking.
+   * resolved would still be offered the row on a finished booking:
+   * `canUpdateBooking` is false until they load.
    */
-  const canRemoveAtAnyStatus = canRoleRemoveBookingAssets({
-    roles,
-    booking: { status: BookingStatus.DRAFT },
+  const canRemoveAtAnyStatus = mayRemoveBookingItems({
+    canUpdateBooking,
+    access: roleAccess,
+    bookingStatus: BookingStatus.DRAFT,
   });
   const showRemove = canRemove || (isClosed && canRemoveAtAnyStatus);
 

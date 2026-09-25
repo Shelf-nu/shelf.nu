@@ -1,4 +1,9 @@
-import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
+import {
+  AssetStatus,
+  AssetType,
+  BookingStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
@@ -18,6 +23,7 @@ import {
   loader,
 } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { permissionContext } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -181,17 +187,19 @@ describe("manage-assets route validation", () => {
 
     // Setup default mocks
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
-      isSelfServiceOrBase: false,
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // The fields below keep this suite's fixture: no see-all flags, and a
+      // membership list the mocked booking lookups never read.
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
       userOrganizations: [],
       canSeeAllBookings: false,
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
-      access: {} as any,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -1196,17 +1204,19 @@ describe("manage-assets loader — Models tab payload", () => {
     vi.clearAllMocks();
 
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // The fields below keep this suite's fixture: no see-all flags, and a
+      // membership list the mocked booking lookups never read.
       userOrganizations: [],
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
       canSeeAllBookings: false,
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
-      access: {} as any,
     });
 
     vi.mocked(httpServer.getParams).mockReturnValue({
@@ -1459,17 +1469,19 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     vi.clearAllMocks();
 
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // The fields below keep this suite's fixture: no see-all flags, and a
+      // membership list the mocked booking lookups never read.
       userOrganizations: [],
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
       canSeeAllBookings: false,
       canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
-      access: {} as any,
     });
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "booking123",

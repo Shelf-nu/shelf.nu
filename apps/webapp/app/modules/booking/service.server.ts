@@ -14827,7 +14827,7 @@ async function addScannedAssetsToBookingWithinTx(
   );
 
   // This path had NO booking-status check anywhere — not in the route action,
-  // not here. The scan-assets loader computes `canUserManageBookingAssets`,
+  // not here. The scan-assets loader computes `canScanAddBookingItems`,
   // but that only decides what to render, so a direct POST could add assets to
   // a COMPLETE, ARCHIVED or CANCELLED booking. (detail.dev D097)
   //

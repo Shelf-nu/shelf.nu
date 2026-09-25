@@ -923,7 +923,7 @@ export const IN_FLIGHT_BOOKING_STATUSES: BookingStatus[] = [
  *
  * 1. A route that forgets is simply unguarded. The scan-assets action had no
  *    status check of any kind, so a direct POST could add assets to a
- *    COMPLETE booking; its loader computed `canUserManageBookingAssets`, but
+ *    COMPLETE booking; its loader computed `canScanAddBookingItems`, but
  *    that only decided what to RENDER.
  * 2. A route that checks before calling the service leaves a window open. The
  *    four `updateBookingAssets` callers all validated the status, but each did

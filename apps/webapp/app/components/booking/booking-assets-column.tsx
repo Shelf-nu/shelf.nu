@@ -5,12 +5,12 @@ import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetWithResolvableImage } from "~/modules/asset/image-resolution";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { describeBookingRows } from "~/utils/booking-rows";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { BookingAssetsFilters } from "./booking-assets-filters";
 import { BookingModelReservationsSection } from "./booking-model-reservations-section";
 import { BookingPagination } from "./booking-pagination";
@@ -83,7 +83,6 @@ export function BookingAssetsColumn() {
   // book-by-model booking still shows its reservations while this table
   // correctly reports that no concrete assets have been added yet.
   const hasItems = paginatedItems?.length > 0;
-  const { isBase, isSelfService } = useUserRoleHelper();
   const roleAccess = useRoleAccess();
   const { isCompleted, isArchived, isCancelled } = useBookingStatusHelpers(
     booking.status
@@ -137,9 +136,12 @@ export function BookingAssetsColumn() {
     unhideAssetsBookigIds: booking.id,
   })}`;
 
-  // Self service can only manage assets for bookings that are DRAFT
-  const cantManageAssetsAsBase =
-    (isBase || isSelfService) && booking.status !== BookingStatus.DRAFT;
+  // Items can be added while the booking is open; members held to DRAFT are
+  // told why.
+  const cantManageItems = !canManageBookingItems({
+    access: roleAccess,
+    bookingStatus: booking.status,
+  });
 
   const [expandedKits, setExpandedKits] = useState<Record<string, boolean>>({});
 
@@ -163,7 +165,7 @@ export function BookingAssetsColumn() {
 
   const manageAssetsButtonDisabled = useMemo(
     () =>
-      isCompleted || isArchived || isCancelled || cantManageAssetsAsBase
+      isCompleted || isArchived || isCancelled || cantManageItems
         ? {
             reason: isCompleted
               ? "Booking is completed. You cannot change the assets anymore"
@@ -171,12 +173,12 @@ export function BookingAssetsColumn() {
               ? "Booking is archived. You cannot change the assets anymore"
               : isCancelled
               ? "Booking is cancelled. You cannot change the assets anymore"
-              : cantManageAssetsAsBase
+              : cantManageItems
               ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
               : "You need to select a start and end date and save your booking before you can add assets to your booking",
           }
         : false,
-    [isCompleted, isArchived, isCancelled, cantManageAssetsAsBase]
+    [isCompleted, isArchived, isCancelled, cantManageItems]
   );
 
   /**
