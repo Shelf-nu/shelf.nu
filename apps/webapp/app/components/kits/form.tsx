@@ -11,15 +11,20 @@ import { useDisabled } from "~/hooks/use-disabled";
 import type { action as editKitAction } from "~/routes/_layout+/kits.$kitId_.edit";
 import type { action as createKitAction } from "~/routes/_layout+/kits.new";
 import { resolveCancelTo } from "~/utils/cancel-destination";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
+import KitImage from "./kit-image";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
+import {
+  IMAGE_FIELD_PICTURE_CLASSES,
+  IMAGE_HINT_8MB,
+  ImageFileField,
+} from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
@@ -44,8 +49,10 @@ export const NewKitFormSchema = z.object({
 });
 
 type KitFormProps = Partial<
-  Pick<Kit, "name" | "description" | "categoryId" | "locationId">
+  Pick<Kit, "name" | "description" | "categoryId" | "locationId" | "image">
 > & {
+  /** Expiry of the saved image's signed URL; an expired one is refreshed. */
+  imageExpiration?: Kit["imageExpiration"] | string;
   className?: string;
   /** Present when editing an existing kit; absent on create. Only used to
    * pick a sensible Cancel destination when there's no referer. */
@@ -64,6 +71,8 @@ export default function KitsForm({
   categoryId,
   barcodes,
   locationId,
+  image,
+  imageExpiration,
   referer,
 }: KitFormProps) {
   const disabled = useDisabled();
@@ -100,7 +109,6 @@ export default function KitsForm({
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
-  const [, validateFile] = useAtom(assetImageValidateFileAtom);
 
   const zo = useZorm("NewKitForm", NewKitFormSchema);
 
@@ -304,26 +312,28 @@ export default function KitsForm({
         </FormRow>
 
         <FormRow rowLabel="Image" className="border-b-0 pt-[10px]">
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-            </p>
-            <Input
-              disabled={disabled}
-              accept={ACCEPT_SUPPORTED_IMAGES}
-              name="image"
-              type="file"
-              onChange={validateFile}
-              label="Image"
-              hideLabel
-              error={imageError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-            </p>
-          </div>
+          <ImageFileField
+            name="image"
+            label="Image"
+            currentImage={
+              // Same picture as the kits list: the saved image (its signed
+              // URL refreshed when expired) or the placeholder.
+              <KitImage
+                kit={{
+                  kitId: id ?? "new-kit",
+                  image: image ?? null,
+                  imageExpiration: imageExpiration ?? null,
+                  alt: "Kit image",
+                }}
+                className={IMAGE_FIELD_PICTURE_CLASSES}
+              />
+            }
+            previewAlt="Kit image"
+            validateFileAtom={assetImageValidateFileAtom}
+            hint={IMAGE_HINT_8MB}
+            error={imageError}
+            disabled={disabled}
+          />
         </FormRow>
 
         <When truthy={canUseBarcodes}>

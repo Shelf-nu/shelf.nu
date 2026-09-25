@@ -1,18 +1,18 @@
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import { useActionData } from "react-router";
 import { useZorm } from "react-zorm";
 import z from "zod";
-import { defaultValidateFileAtom, fileErrorAtom } from "~/atoms/file";
+import { fileErrorAtom } from "~/atoms/file";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { getUserWithContact } from "~/modules/user/service.server";
 import type { UserPageActionData } from "~/routes/_layout+/account-details.general";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
 import { ChangeEmailForm } from "./change-email";
 import ProfilePicture from "./profile-picture";
 import FormRow from "../forms/form-row";
+import { ImageFileField } from "../forms/image-file-field";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
@@ -40,7 +40,6 @@ export function UserDetailsForm({
     getValidationErrors<typeof UserDetailsFormSchema>(data?.error)?.username
       ?.message || zo.errors.username()?.message;
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(defaultValidateFileAtom);
 
   const disabled = useDisabled();
   const isDisabled =
@@ -151,29 +150,16 @@ export function UserDetailsForm({
             disabled={isDisabled}
           />
         </FormRow>
-        <FormRow
-          rowLabel="Profile picture"
-          // subHeading="This will be displayed on your profile."
-          className="border-b-0"
-        >
-          <div className="flex gap-3">
-            <ProfilePicture />
-            <div>
-              <p>Accepts PNG, JPG, JPEG, or WebP (max.4 MB)</p>
-              <Input
-                disabled={disabled}
-                accept={ACCEPT_SUPPORTED_IMAGES}
-                name="profile-picture"
-                type="file"
-                onChange={validateFile}
-                label={"profile-picture"}
-                hideLabel
-                error={profilePictureError}
-                className="mt-2"
-                inputClassName="border-0 shadow-none p-0 rounded-none"
-              />
-            </div>
-          </div>
+        <FormRow rowLabel="Profile picture" className="border-b-0">
+          <ImageFileField
+            name="profile-picture"
+            label="Profile picture"
+            currentImage={<ProfilePicture />}
+            previewAlt="New profile picture"
+            previewClassName="size-16 rounded-[4px] object-cover"
+            error={profilePictureError}
+            disabled={disabled}
+          />
         </FormRow>
         <div className="text-right">
           <input type="hidden" name="type" value="updateUser" />

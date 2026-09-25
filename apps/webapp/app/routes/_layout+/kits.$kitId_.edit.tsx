@@ -231,6 +231,8 @@ export default function KitEdit() {
           categoryId={kit.categoryId}
           barcodes={kit.barcodes}
           locationId={kit?.locationId}
+          image={kit.image}
+          imageExpiration={kit.imageExpiration}
           referer={referer}
         />
       </div>

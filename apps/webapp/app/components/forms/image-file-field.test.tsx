@@ -8,6 +8,8 @@
  *    validator clears the input, so nothing would be uploaded),
  *  - object URLs released when replaced and on unmount,
  *  - the format hint describing the input once,
+ *  - no picture at all when there is no saved image, until a file is picked,
+ *  - the caller's validation rules, hint and extra content,
  *  - the field name, error and disabled state reaching the input.
  *
  * @see {@link file://./image-file-field.tsx}
@@ -17,7 +19,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createStore, Provider } from "jotai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
+import { assetImageValidateFileAtom } from "~/atoms/file";
+import {
+  ASSET_MAX_IMAGE_UPLOAD_SIZE,
+  DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+} from "~/utils/constants";
 import { ImageFileField } from "./image-file-field";
 
 type FieldProps = Parameters<typeof ImageFileField>[0];
@@ -81,7 +87,7 @@ describe("ImageFileField", () => {
 
   it("previews a picked file in place of the saved image", async () => {
     const user = userEvent.setup();
-    renderField({ previewClassName: "size-12 rounded border" });
+    renderField();
     const file = pngFile("new.png");
 
     await user.upload(fileInput(), file);
@@ -89,7 +95,8 @@ describe("ImageFileField", () => {
     expect(URL.createObjectURL).toHaveBeenCalledWith(file);
     const preview = screen.getByRole("img", { name: "Picked file" });
     expect(preview).toHaveAttribute("src", "blob:mock-1");
-    expect(preview).toHaveClass("size-12", "rounded", "border");
+    // Same size and shape as the saved pictures of every image form.
+    expect(preview).toHaveClass("size-16", "rounded", "border", "object-cover");
     expect(
       screen.queryByRole("img", { name: "Saved logo" })
     ).not.toBeInTheDocument();
@@ -153,6 +160,61 @@ describe("ImageFileField", () => {
     ).toHaveLength(1);
     expect(fileInput()).toHaveAccessibleDescription(
       "Accepts PNG, JPG, JPEG, or WebP (max.4 MB)"
+    );
+  });
+
+  it("shows no picture without a saved image until a file is picked", async () => {
+    const user = userEvent.setup();
+    renderField({ currentImage: null });
+
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+
+    await user.upload(fileInput(), pngFile("new.png"));
+
+    expect(screen.getByRole("img", { name: "Picked file" })).toHaveAttribute(
+      "src",
+      "blob:mock-1"
+    );
+  });
+
+  it("applies the caller's validation rules", async () => {
+    const user = userEvent.setup();
+    renderField({ validateFileAtom: assetImageValidateFileAtom });
+
+    // Over the default 4 MB limit but within the asset image 8 MB limit.
+    await user.upload(fileInput(), pngFile("large.png", TOO_BIG));
+    expect(screen.getByRole("img", { name: "Picked file" })).toBeVisible();
+
+    await user.upload(
+      fileInput(),
+      pngFile("too-large.png", ASSET_MAX_IMAGE_UPLOAD_SIZE + 1)
+    );
+    expect(screen.getByRole("img", { name: "Saved logo" })).toBeVisible();
+    expect(fileInput().files).toHaveLength(0);
+  });
+
+  it("describes the input with the caller's hint", () => {
+    renderField({ hint: "Accepts PNG, JPG, JPEG, or WebP (max.8 MB)" });
+
+    expect(fileInput()).toHaveAccessibleDescription(
+      "Accepts PNG, JPG, JPEG, or WebP (max.8 MB)"
+    );
+  });
+
+  it("renders extra content above and below the input", () => {
+    renderField({
+      aboveInput: <p>Using the image from the model.</p>,
+      belowInput: <p>Used by 3 assets.</p>,
+    });
+
+    const above = screen.getByText("Using the image from the model.");
+    const below = screen.getByText("Used by 3 assets.");
+    // DOCUMENT_POSITION_FOLLOWING: the second node comes after the first.
+    expect(above.compareDocumentPosition(fileInput())).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(fileInput().compareDocumentPosition(below)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
     );
   });
 

@@ -4,7 +4,7 @@
  *
  * The saved image renders the way the locations list renders it: the stored
  * thumbnail (falling back to the full image), or the placeholder for a
- * location without one. Each upload is stored under a new path, so a replaced
+ * location without one, at the size every image form uses. Each upload is stored under a new path, so a replaced
  * image always comes with a new URL and needs no cache version.
  *
  * @see {@link file://./form.tsx} Location form (new and edit pages)
@@ -44,14 +44,13 @@ export function LocationImageField({
           imageUrl={imageUrl ?? undefined}
           thumbnailUrl={thumbnailUrl}
           alt="Location image"
-          className="size-12"
+          className="size-16"
           // Opens the full image on click. Needs the full-size URL: without
           // it the preview trigger would be focusable but do nothing.
           withPreview={Boolean(imageUrl)}
         />
       }
       previewAlt="Location image"
-      previewClassName="size-12 rounded border object-cover"
       error={error}
       disabled={disabled}
     />

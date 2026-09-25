@@ -10,18 +10,18 @@ import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
+import { fileErrorAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
 import QrIdDisplayPreferenceSelector from "./qr-id-display-preference-selector";
+import { WorkspaceLogoField } from "./workspace-logo-field";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
@@ -139,7 +139,6 @@ const WorkspaceGeneralEditForms = ({
   const fetcher = useFetcher({ key: "general" });
   const disabled = useDisabled(fetcher);
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
   const fetcherError = (
@@ -195,26 +194,12 @@ const WorkspaceGeneralEditForms = ({
         </FormRow>
 
         <FormRow rowLabel={"Main image"} className="border-b-0">
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-            </p>
-            <Input
-              // disabled={disabled}
-              accept={ACCEPT_SUPPORTED_IMAGES}
-              name="image"
-              type="file"
-              onChange={validateFile}
-              label={"Main image"}
-              hideLabel
-              error={imageError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-            </p>
-          </div>
+          <WorkspaceLogoField
+            imageId={organization.imageId}
+            updatedAt={organization.updatedAt}
+            isPersonal={isPersonalWorkspace}
+            error={imageError}
+          />
         </FormRow>
 
         <div>

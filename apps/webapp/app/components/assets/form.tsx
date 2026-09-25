@@ -33,7 +33,6 @@ import type {
   loader,
 } from "~/routes/_layout+/assets.$assetId_.edit";
 import { resolveCancelTo } from "~/utils/cancel-destination";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
@@ -54,6 +53,10 @@ import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
+import {
+  IMAGE_FIELD_PICTURE_CLASSES,
+  ImageFileField,
+} from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
@@ -370,7 +373,6 @@ export const AssetForm = ({
   );
 
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(assetImageValidateFileAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
   const { currency, asset } = useLoaderData<AssetEditLoaderData>();
@@ -966,134 +968,129 @@ export const AssetForm = ({
         </When>
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">
-          <div className="flex items-center gap-2">
-            {/*
-              One preview for both tiers of the cascade. `clearMainImage` makes
+          <ImageFileField
+            name="mainImage"
+            label="Main image"
+            /*
+              One picture for both tiers of the cascade. `clearMainImage` makes
               the row behave as though the asset's own image were already gone,
-              so the user sees exactly what saving will produce — the model's
-              picture, or the placeholder.
-            */}
-            {id && showOwnImagePreview ? (
-              <AssetImage
-                className="size-16 shrink-0 rounded border object-cover"
-                asset={{
-                  id,
-                  // Null-safe: an asset can own an image without a thumbnail
-                  // (lazy generation) or without an expiration.
-                  thumbnailImage: thumbnailImage ?? null,
-                  mainImage: mainImage ?? null,
-                  mainImageExpiration: mainImageExpiration
-                    ? new Date(mainImageExpiration)
-                    : null,
-                  assetModel: inheritableAssetModelImage,
-                }}
-                alt={`${title} main image`}
-              />
-            ) : inheritableAssetModelImage ? (
-              <AssetImage
-                className="size-16 shrink-0 rounded border object-cover"
-                asset={{
-                  id: id ?? "new-asset",
-                  mainImage: null,
-                  thumbnailImage: null,
-                  mainImageExpiration: null,
-                  assetModel: inheritableAssetModelImage,
-                }}
-                alt={`Image from asset model ${
-                  selectedAssetModel?.name ?? "selected model"
-                }`}
-              />
-            ) : null}
-            <div>
-              <When truthy={Boolean(inheritableAssetModelImage)}>
-                <p className="mb-1 text-sm text-gray-600">
-                  {showOwnImagePreview ? (
-                    <>
-                      This asset uses its own image.{" "}
-                      <Button
-                        type="button"
-                        variant="link"
-                        className="!p-0 text-sm"
-                        onClick={() => setClearMainImage(true)}
-                      >
-                        Use the model's image instead
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      Using the image from{" "}
-                      <span className="font-medium text-gray-700">
-                        {selectedAssetModel?.name ?? "the selected model"}
-                      </span>
-                      . Upload one below to override it for this asset.
-                      <When truthy={clearMainImage}>
-                        {" "}
+              so the user sees exactly what saving will produce: the model's
+              picture, or nothing.
+            */
+            currentImage={
+              id && showOwnImagePreview ? (
+                <AssetImage
+                  className={IMAGE_FIELD_PICTURE_CLASSES}
+                  asset={{
+                    id,
+                    // Null-safe: an asset can own an image without a thumbnail
+                    // (lazy generation) or without an expiration.
+                    thumbnailImage: thumbnailImage ?? null,
+                    mainImage: mainImage ?? null,
+                    mainImageExpiration: mainImageExpiration
+                      ? new Date(mainImageExpiration)
+                      : null,
+                    assetModel: inheritableAssetModelImage,
+                  }}
+                  alt={`${title} main image`}
+                />
+              ) : inheritableAssetModelImage ? (
+                <AssetImage
+                  className={IMAGE_FIELD_PICTURE_CLASSES}
+                  asset={{
+                    id: id ?? "new-asset",
+                    mainImage: null,
+                    thumbnailImage: null,
+                    mainImageExpiration: null,
+                    assetModel: inheritableAssetModelImage,
+                  }}
+                  alt={`Image from asset model ${
+                    selectedAssetModel?.name ?? "selected model"
+                  }`}
+                />
+              ) : null
+            }
+            previewAlt="Asset main image"
+            validateFileAtom={assetImageValidateFileAtom}
+            hint={
+              <HoverCard openDelay={50} closeDelay={50}>
+                <HoverCardTrigger className={tw("inline-flex w-full  ")}>
+                  Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
+                </HoverCardTrigger>
+                <HoverCardContent side="left">
+                  Images will be automatically resized on upload. Width will be
+                  set at 1200px and height will be adjusted accordingly to keep
+                  the aspect ratio.
+                </HoverCardContent>
+              </HoverCard>
+            }
+            aboveInput={
+              <>
+                <When truthy={Boolean(inheritableAssetModelImage)}>
+                  <p className="mb-1 text-sm text-gray-600">
+                    {showOwnImagePreview ? (
+                      <>
+                        This asset uses its own image.{" "}
                         <Button
                           type="button"
                           variant="link"
                           className="!p-0 text-sm"
-                          onClick={() => setClearMainImage(false)}
+                          onClick={() => setClearMainImage(true)}
                         >
-                          Undo
+                          Use the model's image instead
                         </Button>
-                      </When>
-                    </>
-                  )}
-                </p>
-              </When>
-              {/*
-                Signals the intent to drop the asset's own image so it falls
-                back down the cascade. Read by the edit action; a create has no
-                image to clear, so it is inert there.
-              */}
-              <input
-                type="hidden"
-                name="clearMainImage"
-                value={clearMainImage ? "true" : "false"}
-              />
-              <When
-                truthy={Boolean(hasOwnImage && !inheritableAssetModelImage)}
-              >
-                <p className="mb-1 text-sm text-gray-600">
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="!p-0 text-sm"
-                    onClick={() => setClearMainImage(!clearMainImage)}
-                  >
-                    {clearMainImage ? "Undo remove image" : "Remove image"}
-                  </Button>
-                </p>
-              </When>
-              <p className="hidden lg:block">
-                <HoverCard openDelay={50} closeDelay={50}>
-                  <HoverCardTrigger className={tw("inline-flex w-full  ")}>
-                    Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-                  </HoverCardTrigger>
-                  <HoverCardContent side="left">
-                    Images will be automatically resized on upload. Width will
-                    be set at 1200px and height will be adjusted accordingly to
-                    keep the aspect ratio.
-                  </HoverCardContent>
-                </HoverCard>
-              </p>
-              <Input
-                disabled={disabled}
-                accept={ACCEPT_SUPPORTED_IMAGES}
-                name="mainImage"
-                type="file"
-                onChange={validateFile}
-                label={"Main image"}
-                hideLabel
-                error={mainImageError}
-                className="mt-2"
-                inputClassName="border-0 shadow-none p-0 rounded-none"
-              />
-              <p className="mt-2 lg:hidden">
-                Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-              </p>
-            </div>
-          </div>
+                      </>
+                    ) : (
+                      <>
+                        Using the image from{" "}
+                        <span className="font-medium text-gray-700">
+                          {selectedAssetModel?.name ?? "the selected model"}
+                        </span>
+                        . Upload one below to override it for this asset.
+                        <When truthy={clearMainImage}>
+                          {" "}
+                          <Button
+                            type="button"
+                            variant="link"
+                            className="!p-0 text-sm"
+                            onClick={() => setClearMainImage(false)}
+                          >
+                            Undo
+                          </Button>
+                        </When>
+                      </>
+                    )}
+                  </p>
+                </When>
+                {/*
+                  Signals the intent to drop the asset's own image so it falls
+                  back down the cascade. Read by the edit action; a create has no
+                  image to clear, so it is inert there.
+                */}
+                <input
+                  type="hidden"
+                  name="clearMainImage"
+                  value={clearMainImage ? "true" : "false"}
+                />
+                <When
+                  truthy={Boolean(hasOwnImage && !inheritableAssetModelImage)}
+                >
+                  <p className="mb-1 text-sm text-gray-600">
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="!p-0 text-sm"
+                      onClick={() => setClearMainImage(!clearMainImage)}
+                    >
+                      {clearMainImage ? "Undo remove image" : "Remove image"}
+                    </Button>
+                  </p>
+                </When>
+              </>
+            }
+            error={mainImageError}
+            disabled={disabled}
+          />
         </FormRow>
 
         <div>
