@@ -360,7 +360,9 @@ export type RemovedPlanningBookingSlice = {
  * @param options.organizationId Acting org — rows outside it are never touched
  * @param options.reason What removed the membership — picks the note wording.
  *   `"kit-deleted"` for the kit-deletion cascade (the asset never left the kit,
- *   the kit ceased to exist); `"membership-removed"` otherwise.
+ *   the kit ceased to exist); `"units-not-returned"` when a check-in on another
+ *   booking consumed, lost or damaged the kit's last units of the asset;
+ *   `"membership-removed"` otherwise.
  * @returns One entry per deleted row, for callers that need to report further.
  */
 export async function removeKitSlicesFromPlanningBookings(
@@ -374,7 +376,7 @@ export async function removeKitSlicesFromPlanningBookings(
   }: {
     actorUserId: string;
     organizationId: string;
-    reason?: "membership-removed" | "kit-deleted";
+    reason?: "membership-removed" | "kit-deleted" | "units-not-returned";
   }
 ): Promise<RemovedPlanningBookingSlice[]> {
   if (assetKitIds.length === 0) return [];
@@ -731,6 +733,8 @@ export async function removeKitSlicesFromPlanningBookings(
     const cause =
       reason === "kit-deleted"
         ? `${actorLink} deleted kit **${safeKitName}**, so ${subjects} ${verb} removed from this booking`
+        : reason === "units-not-returned"
+        ? `${actorLink} checked in another booking where the last units of ${subjects} in kit **${safeKitName}** were not returned, so ${pronoun} ${verb} removed from this booking`
         : `${actorLink} removed ${subjects} from kit **${safeKitName}**, so ${pronoun} ${verb} also removed from this booking`;
     const content = `${cause}. Nothing has been checked out yet, so the booking follows the kit's contents.`;
     const bucket = notesByOrg.get(group.organizationId);
@@ -1227,6 +1231,436 @@ export async function emitAssetKitDetachmentNotes({
       )}**. The kit's booked slice has been converted to a standalone reservation in this booking.`,
     });
   }
+}
+
+/**
+ * Audit trail for kit slices on planning bookings that
+ * {@link removeDestroyedUnitsFromKits} capped to what the kit still holds.
+ *
+ * Mirrors {@link removeKitSlicesFromPlanningBookings}, which covers the same
+ * bookings when the membership empties: one `BOOKING_ASSETS_REMOVED` event per
+ * capped slice with the units it gave up (`meta.viaKitRemoval`), and one note
+ * per booking naming the check-in that caused it. Runs inside the caller's
+ * transaction so the trail rolls back with the cap.
+ *
+ * @param tx Active check-in transaction
+ * @param args.capped The capped slices, with the units each gave up and kept
+ * @param args.organizationId Acting org, owner of every capped booking
+ * @param args.actorUserId User checking the other booking in
+ * @param args.checkinBookingId The booking whose check-in destroyed the units
+ */
+async function recordPlanningKitSliceCaps(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  {
+    capped,
+    organizationId,
+    actorUserId,
+    checkinBookingId,
+  }: {
+    capped: Array<{
+      bookingId: string;
+      membership: {
+        assetId: string;
+        kitId: string;
+        kit: { name: string };
+        asset: { title: string; type: AssetType; unitOfMeasure: string | null };
+      };
+      removed: number;
+      remaining: number;
+    }>;
+    organizationId: string;
+    actorUserId: string;
+    checkinBookingId: string;
+  }
+): Promise<void> {
+  await recordEvents(
+    capped.map(({ bookingId, membership, removed }) => ({
+      organizationId,
+      actorUserId,
+      action: "BOOKING_ASSETS_REMOVED" as const,
+      entityType: "BOOKING" as const,
+      entityId: bookingId,
+      bookingId,
+      assetId: membership.assetId,
+      kitId: membership.kitId,
+      meta: {
+        // Distinguishes this from an operator removing units by hand.
+        viaKitRemoval: true,
+        ...assetQtyMeta(membership.asset, removed),
+      },
+    })),
+    tx
+  );
+
+  // Read on the caller's transaction client, not through `getUserByID`, which
+  // is bound to the global `db` and would take a second pooled connection.
+  const actor = await tx.user.findUnique({
+    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `actorUserId` is the authenticated caller, not request input
+    where: { id: actorUserId },
+    select: { ...USER_NAME_SELECT },
+  });
+  const actorLink = wrapUserLinkForNote({
+    ...(actor ?? { displayName: null }),
+    id: actorUserId,
+  });
+  const checkinLink = wrapLinkForNote(
+    `/bookings/${checkinBookingId}`,
+    "another booking"
+  );
+
+  // One note per booking: several of its kit assets can shrink in the same
+  // check-in, and they collapse into a single line.
+  const cappedByBookingId = new Map<string, typeof capped>();
+  for (const entry of capped) {
+    const bucket = cappedByBookingId.get(entry.bookingId);
+    if (bucket) {
+      bucket.push(entry);
+    } else {
+      cappedByBookingId.set(entry.bookingId, [entry]);
+    }
+  }
+
+  await createSystemBookingNotes(
+    {
+      organizationId,
+      notes: [...cappedByBookingId].map(([bookingId, entries]) => {
+        const described = entries.map(({ membership, removed, remaining }) => {
+          const unitCount = (units: number) =>
+            formatUnitCount(membership.asset, units) ?? String(units);
+          return {
+            // Asset title and kit name are user-supplied literal text here.
+            title: stripMarkdocDelimiters(membership.asset.title),
+            kitName: stripMarkdocDelimiters(membership.kit.name),
+            removed: unitCount(removed),
+            remaining: unitCount(remaining),
+          };
+        });
+        const cause =
+          described.length === 1
+            ? `where **${described[0].removed}** of **${described[0].title}** in kit **${described[0].kitName}** were not returned, so this booking now holds **${described[0].remaining}** of it`
+            : `where kit units were not returned, so this booking now holds less of ${described
+                .map(
+                  (item) =>
+                    `**${item.title}** in kit **${item.kitName}** (**${item.removed}** fewer, **${item.remaining}** left)`
+                )
+                .join(", ")}`;
+        return {
+          bookingId,
+          content: `${actorLink} checked in ${checkinLink} ${cause}. Nothing has been checked out yet, so the booking follows the kit's contents.`,
+        };
+      }),
+    },
+    tx
+  );
+}
+
+/** One kit membership that {@link removeDestroyedUnitsFromKits} emptied and deleted. */
+export type EmptiedKitMembership = {
+  assetId: string;
+  assetTitle: string;
+  assetType: AssetType;
+  unitOfMeasure: string | null;
+  kitId: string;
+  kitName: string;
+  /** Units the membership held before they were destroyed. */
+  quantity: number;
+};
+
+/** What {@link removeDestroyedUnitsFromKits} changed, for the caller's post-transaction notes. */
+export type DestroyedKitUnitsResult = {
+  /** Memberships that reached zero and were deleted. */
+  emptiedMemberships: EmptiedKitMembership[];
+  /**
+   * Live bookings whose kit slice the deletion turned into a standalone one.
+   * Pass it to {@link emitAssetKitDetachmentNotes} once the transaction has
+   * committed, minus the booking being checked in.
+   */
+  detachmentImpact: Awaited<ReturnType<typeof fetchAssetKitDetachmentImpact>>;
+};
+
+/**
+ * Takes units destroyed at booking check-in out of the kits they left through.
+ *
+ * A kit slice's units belong to the kit (`AssetKit.quantity`), so a unit that is
+ * consumed, lost or damaged while out on a kit slice leaves the kit as well as
+ * the stock total. The check-in writes the stock total; this keeps the kit axis
+ * in step inside the same transaction:
+ *
+ * - The membership shrinks by the destroyed units, and the kit-driven
+ *   `AssetLocation` row that mirrors it follows, so the kit's location stops
+ *   showing units that no longer exist.
+ * - A booking still in a planning status that holds the kit is capped at what
+ *   the kit now holds. A booking that has started keeps its slice: it records
+ *   what went out.
+ * - A membership that reaches zero is removed the way the kit service removes a
+ *   member: planning slices deleted, standalone collisions merged, placements
+ *   preserved, then the delete, with one `ASSET_KIT_CHANGED` event per asset.
+ *
+ * It refuses nothing, because the units are already gone. When the asset's
+ * kits would still hold more units than the asset has left, the kit axis
+ * carries a drift this check-in did not cause, and any `AssetKit` write would
+ * trip `enforce_asset_kit_sum_within_total` at commit and roll back a check-in
+ * that physically happened. That asset's kits are left as they are and the
+ * drift is logged.
+ *
+ * Call it AFTER the stock decrement, in the same transaction, and after every
+ * read the check-in makes of its own booking's slices: the collision merge can
+ * fold a finished kit slice into a standalone sibling on that booking.
+ *
+ * @param tx Active check-in transaction
+ * @param args.destroyedUnitsByAssetKitId Units destroyed out of each kit slice,
+ *   keyed by `AssetKit.id`
+ * @param args.organizationId Acting org; memberships outside it are ignored
+ * @param args.actorUserId User checking the booking in
+ * @param args.bookingId Booking being checked in, cross-referenced on the events
+ * @returns What changed, for the post-transaction notes
+ */
+export async function removeDestroyedUnitsFromKits(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  {
+    destroyedUnitsByAssetKitId,
+    organizationId,
+    actorUserId,
+    bookingId,
+  }: {
+    destroyedUnitsByAssetKitId: Map<string, number>;
+    organizationId: string;
+    actorUserId: string;
+    bookingId: string;
+  }
+): Promise<DestroyedKitUnitsResult> {
+  const result: DestroyedKitUnitsResult = {
+    emptiedMemberships: [],
+    detachmentImpact: [],
+  };
+
+  const assetKitIds = [...destroyedUnitsByAssetKitId]
+    .filter(([, units]) => units > 0)
+    .map(([assetKitId]) => assetKitId);
+  if (assetKitIds.length === 0) return result;
+
+  // Lock the memberships before reading them, in a fixed order. Every other
+  // write to these rows then waits for this transaction, and the read below
+  // sees whatever was committed before the lock.
+  await tx.$queryRaw`
+    SELECT id FROM "AssetKit"
+    WHERE id = ANY(${assetKitIds}::text[]) AND "organizationId" = ${organizationId}
+    ORDER BY id
+    FOR UPDATE
+  `;
+
+  type Membership = {
+    id: string;
+    assetId: string;
+    kitId: string;
+    quantity: number;
+    kit: { name: string };
+    asset: {
+      title: string;
+      type: AssetType;
+      unitOfMeasure: string | null;
+      quantity: number | null;
+    };
+  };
+  const memberships: Membership[] = await tx.assetKit.findMany({
+    where: { id: { in: assetKitIds }, organizationId },
+    select: {
+      id: true,
+      assetId: true,
+      kitId: true,
+      quantity: true,
+      kit: { select: { name: true } },
+      // `quantity` is read inside the check-in transaction, so it is the stock
+      // total AFTER the decrement.
+      asset: {
+        select: {
+          title: true,
+          type: true,
+          unitOfMeasure: true,
+          quantity: true,
+        },
+      },
+    },
+  });
+  if (memberships.length === 0) return result;
+
+  /** Units each membership gives up: never more than it holds. */
+  const unitsTaken = (membership: Membership) =>
+    Math.min(
+      destroyedUnitsByAssetKitId.get(membership.id) ?? 0,
+      membership.quantity
+    );
+
+  // The kit-axis total per asset, across every kit, to test the trigger's
+  // invariant before writing anything it would check.
+  const kitSums: Array<{
+    assetId: string;
+    _sum: { quantity: number | null };
+  }> = await tx.assetKit.groupBy({
+    by: ["assetId"],
+    where: {
+      assetId: { in: [...new Set(memberships.map((m) => m.assetId))] },
+      organizationId,
+    },
+    _sum: { quantity: true },
+  });
+  const kitSumByAssetId = new Map(
+    kitSums.map((row) => [row.assetId, row._sum.quantity ?? 0])
+  );
+  const takenByAssetId = new Map<string, number>();
+  for (const membership of memberships) {
+    takenByAssetId.set(
+      membership.assetId,
+      (takenByAssetId.get(membership.assetId) ?? 0) + unitsTaken(membership)
+    );
+  }
+
+  const driftedAssetIds = new Set<string>();
+  for (const membership of memberships) {
+    if (driftedAssetIds.has(membership.assetId)) continue;
+    const kitUnitsAfter =
+      (kitSumByAssetId.get(membership.assetId) ?? 0) -
+      (takenByAssetId.get(membership.assetId) ?? 0);
+    const stockAfter = membership.asset.quantity ?? 0;
+    if (kitUnitsAfter > stockAfter) {
+      driftedAssetIds.add(membership.assetId);
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message:
+            "Check-in destroyed units out of a kit, but the asset's kits still hold more units than it has left. Its kits were not shrunk.",
+          additionalData: {
+            assetId: membership.assetId,
+            bookingId,
+            kitUnitsAfter,
+            stockAfter,
+          },
+          label,
+          shouldBeCaptured: false,
+        })
+      );
+    }
+  }
+
+  const emptied: Membership[] = [];
+  /** Planning-booking slices capped below, for their events and notes. */
+  const capped: Array<{
+    bookingId: string;
+    membership: Membership;
+    /** Units the slice gave up. */
+    removed: number;
+    /** Units the slice holds now. */
+    remaining: number;
+  }> = [];
+  for (const membership of memberships) {
+    if (driftedAssetIds.has(membership.assetId)) continue;
+    const taken = unitsTaken(membership);
+    if (taken <= 0) continue;
+
+    const remaining = membership.quantity - taken;
+    if (remaining === 0) {
+      emptied.push(membership);
+      continue;
+    }
+
+    await tx.assetKit.update({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: membership.id came from the organizationId-scoped findMany above, inside this same tx
+      where: { id: membership.id },
+      data: { quantity: remaining },
+    });
+    // The kit-driven placement mirrors the membership 1:1
+    // (`AssetLocation_kit_unique`). No row exists when the kit has no location.
+    await tx.assetLocation.updateMany({
+      where: { assetKitId: membership.id },
+      data: { quantity: remaining },
+    });
+    // A booking that has not started tracks the kit, so it cannot keep more
+    // of the kit than the kit now holds.
+    const planningSlices: Array<{
+      id: string;
+      bookingId: string;
+      quantity: number;
+    }> = await tx.bookingAsset.findMany({
+      where: {
+        assetKitId: membership.id,
+        quantity: { gt: remaining },
+        booking: { organizationId, status: { in: PLANNING_BOOKING_STATUSES } },
+      },
+      select: { id: true, bookingId: true, quantity: true },
+    });
+    if (planningSlices.length > 0) {
+      await tx.bookingAsset.updateMany({
+        where: { id: { in: planningSlices.map((slice) => slice.id) } },
+        data: { quantity: remaining },
+      });
+      for (const slice of planningSlices) {
+        capped.push({
+          bookingId: slice.bookingId,
+          membership,
+          removed: slice.quantity - remaining,
+          remaining,
+        });
+      }
+    }
+  }
+
+  if (capped.length > 0) {
+    await recordPlanningKitSliceCaps(tx, {
+      capped,
+      organizationId,
+      actorUserId,
+      checkinBookingId: bookingId,
+    });
+  }
+
+  if (emptied.length === 0) return result;
+
+  const emptiedIds = emptied.map((membership) => membership.id);
+  // Same order as the kit service's member removal: planning slices go first so
+  // neither the impact snapshot nor the collision merge sees them.
+  await removeKitSlicesFromPlanningBookings(tx, emptiedIds, {
+    actorUserId,
+    organizationId,
+    reason: "units-not-returned",
+  });
+  result.detachmentImpact = await fetchAssetKitDetachmentImpact(tx, emptiedIds);
+  await mergeStandaloneCollisionsForKitDetachment(tx, emptiedIds);
+  await preserveKitDrivenPlacements(tx, emptiedIds);
+  await tx.assetKit.deleteMany({
+    where: { id: { in: emptiedIds }, organizationId },
+  });
+
+  await recordEvents(
+    emptied.map((membership) => ({
+      organizationId,
+      actorUserId,
+      action: "ASSET_KIT_CHANGED" as const,
+      entityType: "ASSET" as const,
+      entityId: membership.assetId,
+      assetId: membership.assetId,
+      kitId: membership.kitId,
+      bookingId,
+      field: "kitId",
+      fromValue: membership.kitId,
+      toValue: null,
+      // The units the membership held before they were destroyed.
+      meta: { ...assetQtyMeta(membership.asset, membership.quantity) },
+    })),
+    tx
+  );
+
+  result.emptiedMemberships = emptied.map((membership) => ({
+    assetId: membership.assetId,
+    assetTitle: membership.asset.title,
+    assetType: membership.asset.type,
+    unitOfMeasure: membership.asset.unitOfMeasure,
+    kitId: membership.kitId,
+    kitName: membership.kit.name,
+    quantity: membership.quantity,
+  }));
+  return result;
 }
 
 export async function buildKitCustodyInheritData({

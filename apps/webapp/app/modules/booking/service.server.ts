@@ -83,6 +83,11 @@ import {
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
+import {
+  emitAssetKitDetachmentNotes,
+  removeDestroyedUnitsFromKits,
+  type DestroyedKitUnitsResult,
+} from "~/modules/kit/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import {
   bookingWriteScopeClause,
@@ -4023,6 +4028,134 @@ export function attributeCategorizedDispositionsByBookingAsset(args: {
   return breakdown;
 }
 
+/** A check-in disposition category, as `ConsumptionLog.category` stores it. */
+type CheckinDispositionCategory =
+  (typeof CHECKIN_DISPOSITION_CATEGORIES)[number];
+
+/**
+ * Spreads ONE check-in session's dispositions over an asset's slices on a
+ * booking and returns what each slice received, per category.
+ *
+ * A tagged disposition lands on the slice it names. An untagged one (the mobile
+ * check-in names no slice) is spread by
+ * {@link attributeCategorizedDispositionsByBookingAsset}: standalone slices
+ * before kit-driven ones, returns before consumption, loss and damage, each
+ * slice taking what it can still hold.
+ *
+ * What a slice can still hold is measured in two passes. The first measures
+ * against the units the slice actually sent out (`owed`), because a unit used
+ * up in the field can only have come from a slice that left: a standalone slice
+ * that never went out must not absorb units a kit brought back consumed. Units
+ * the first pass cannot place are spread against the booked quantity, the bound
+ * the check-in cap itself enforces. In both passes the dispositions of earlier
+ * sessions fill each slice first, spread the same way, so this session only
+ * claims what they left.
+ *
+ * Pure derivation, no DB calls.
+ *
+ * @param args.slices - Every slice of ONE asset on the booking, with its booked
+ *   quantity and the units it sent out
+ * @param args.priorLogs - The asset's dispositions from earlier sessions
+ * @param args.sessionLogs - This session's dispositions for the asset
+ * @returns Map keyed by every slice `id` to this session's breakdown on it
+ */
+export function spreadSessionDispositionsOverSlices(args: {
+  slices: Array<{
+    id: string;
+    assetKitId: string | null;
+    booked: number;
+    owed: number;
+  }>;
+  priorLogs: Array<{ bookingAssetId: string | null; quantity: number }>;
+  sessionLogs: Array<{
+    bookingAssetId: string | null;
+    category: CheckinDispositionCategory;
+    quantity: number;
+  }>;
+}): Map<string, DispositionCategoryBreakdown> {
+  const { slices, priorLogs, sessionLogs } = args;
+
+  /** The slices as attribution rows, each holding `capacity` units. */
+  const rowsHolding = (capacity: (slice: (typeof slices)[number]) => number) =>
+    slices.map((slice) => ({
+      id: slice.id,
+      assetKitId: slice.assetKitId,
+      quantity: Math.max(0, capacity(slice)),
+    }));
+  const total = (breakdown?: DispositionCategoryBreakdown) =>
+    breakdown
+      ? breakdown.returned +
+        breakdown.consumed +
+        breakdown.lost +
+        breakdown.damaged
+      : 0;
+
+  const priorOnOwed = attributeDispositionsByBookingAsset({
+    bookingAssetRows: rowsHolding((slice) => slice.owed),
+    consumptionLogs: priorLogs,
+  });
+  const firstPass = attributeCategorizedDispositionsByBookingAsset({
+    bookingAssetRows: rowsHolding(
+      (slice) => slice.owed - (priorOnOwed.get(slice.id) ?? 0)
+    ),
+    consumptionLogs: sessionLogs,
+  });
+
+  const CATEGORY_FIELD = {
+    RETURN: "returned",
+    CONSUME: "consumed",
+    LOSS: "lost",
+    DAMAGE: "damaged",
+  } as const;
+
+  // Tagged logs always land, so anything unplaced is untagged overflow.
+  const leftover: typeof sessionLogs = [];
+  for (const category of CHECKIN_DISPOSITION_CATEGORIES) {
+    const requested = sessionLogs
+      .filter((log) => log.category === category)
+      .reduce((sum, log) => sum + log.quantity, 0);
+    const placed = [...firstPass.values()].reduce(
+      (sum, breakdown) => sum + breakdown[CATEGORY_FIELD[category]],
+      0
+    );
+    if (requested > placed) {
+      leftover.push({
+        bookingAssetId: null,
+        category,
+        quantity: requested - placed,
+      });
+    }
+  }
+  if (leftover.length === 0) return firstPass;
+
+  const priorOnBooked = attributeDispositionsByBookingAsset({
+    bookingAssetRows: rowsHolding((slice) => slice.booked),
+    consumptionLogs: priorLogs,
+  });
+  const secondPass = attributeCategorizedDispositionsByBookingAsset({
+    bookingAssetRows: rowsHolding(
+      (slice) =>
+        slice.booked -
+        (priorOnBooked.get(slice.id) ?? 0) -
+        total(firstPass.get(slice.id))
+    ),
+    consumptionLogs: leftover,
+  });
+
+  const spread = new Map<string, DispositionCategoryBreakdown>();
+  for (const slice of slices) {
+    const first = firstPass.get(slice.id);
+    const second = secondPass.get(slice.id);
+    spread.set(slice.id, {
+      returned: (first?.returned ?? 0) + (second?.returned ?? 0),
+      consumed: (first?.consumed ?? 0) + (second?.consumed ?? 0),
+      lost: (first?.lost ?? 0) + (second?.lost ?? 0),
+      damaged: (first?.damaged ?? 0) + (second?.damaged ?? 0),
+    });
+  }
+  return spread;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function computeBookingAssetRemaining(
   tx: any,
@@ -4896,6 +5029,100 @@ async function notifyLowStockForDecrementedAssets({
 
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Notes for the kit memberships a check-in emptied, written after the
+ * transaction commits.
+ *
+ * - Each asset that left a kit gets a note naming the kit and the booking, so
+ *   its activity explains why the kit no longer lists it.
+ * - Every OTHER live booking whose slice of that kit became standalone gets
+ *   the kit service's detachment note. The booking being checked in is left
+ *   out: its slice is the one that was just settled.
+ *
+ * Best-effort, like the other check-in notes: a failure is logged and never
+ * propagated, because the check-in itself has already committed.
+ *
+ * @param args.result - What {@link removeDestroyedUnitsFromKits} changed
+ * @param args.booking - The booking that was checked in
+ * @param args.userId - User who checked it in
+ * @param args.organizationId - Organization that owns the booking
+ */
+async function noteKitUnitsDestroyedAtCheckin({
+  result,
+  booking,
+  userId,
+  organizationId,
+}: {
+  result: DestroyedKitUnitsResult;
+  booking: { id: string; name: string };
+  userId: string;
+  organizationId: string;
+}) {
+  if (
+    result.emptiedMemberships.length === 0 &&
+    result.detachmentImpact.length === 0
+  ) {
+    return;
+  }
+
+  try {
+    const user = await getUserByID(userId, {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        displayName: true,
+      } satisfies Prisma.UserSelect,
+    });
+    const actor = { ...user, id: userId };
+    const actorLink = wrapUserLinkForNote(actor);
+    const bookingLink = wrapLinkForNote(
+      `/bookings/${booking.id}`,
+      booking.name
+    );
+
+    for (const membership of result.emptiedMemberships) {
+      const count =
+        formatUnitCount(
+          {
+            type: membership.assetType,
+            unitOfMeasure: membership.unitOfMeasure,
+          },
+          membership.quantity
+        ) ?? String(membership.quantity);
+      const kitLink = wrapKitsWithDataForNote(
+        { id: membership.kitId, name: membership.kitName.trim() },
+        "removed"
+      );
+      await createNotes({
+        content: `${actorLink} checked in ${bookingLink}. The last **${count}** in ${kitLink} were not returned, so the asset is no longer part of the kit.`,
+        type: "UPDATE",
+        userId,
+        assetIds: [membership.assetId],
+        organizationId,
+      });
+    }
+
+    await emitAssetKitDetachmentNotes({
+      impact: result.detachmentImpact.filter(
+        (row) => row.bookingId !== booking.id
+      ),
+      actor,
+      organizationId,
+    });
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Failed to write the notes for kit units destroyed at check-in",
+        label,
+        additionalData: { userId, bookingId: booking.id },
+      })
+    );
+  }
+}
+
 export async function checkinBooking({
   id,
   organizationId,
@@ -5201,7 +5428,13 @@ export async function checkinBooking({
         assetId: ba.assetId,
         consumptionType: ba.asset.consumptionType,
         title: ba.asset.title,
-      }));
+        // The kit membership the slice draws from, or null when standalone.
+        assetKitId: ba.assetKitId ?? null,
+      }))
+      // The relation carries no ORDER BY, and an asset-level disposition
+      // applies to the FIRST slice of its asset, so the order is fixed here:
+      // standalone before kit-driven, the order every untagged claim uses.
+      .sort(compareSlicesForGreedyFill);
 
     /** Distinct qty-tracked asset ids touched by the slices above. */
     const qtyTrackedAssetIds = [
@@ -5230,6 +5463,11 @@ export async function checkinBooking({
     };
 
     const qtySummariesRef: { value: CheckinQtySummary[] } = { value: [] };
+
+    /** Kit memberships the check-in shrank or emptied, for the post-tx notes. */
+    const destroyedKitUnitsRef: { value: DestroyedKitUnitsResult | null } = {
+      value: null,
+    };
 
     const updatedBooking = await db.$transaction(
       async (tx) => {
@@ -5309,6 +5547,13 @@ export async function checkinBooking({
         // (one round-trip) so the per-slice loop can't blow the interactive-tx
         // budget on large check-ins.
         const quantityChangeEvents: Parameters<typeof recordEvents>[0] = [];
+
+        /**
+         * Units consumed, lost or damaged out of each kit slice, keyed by the
+         * slice's `AssetKit` id. Every log this loop writes is tagged with its
+         * slice, so the attribution is exact.
+         */
+        const destroyedUnitsByAssetKitId = new Map<string, number>();
 
         for (const slice of qtyTrackedSlices) {
           const sliceRemaining = await computeBookingAssetSliceRemaining(
@@ -5490,6 +5735,14 @@ export async function checkinBooking({
               context: "Check-in",
               additionalData: { assetId: slice.assetId, bookingId: id },
             });
+
+            if (slice.assetKitId) {
+              destroyedUnitsByAssetKitId.set(
+                slice.assetKitId,
+                (destroyedUnitsByAssetKitId.get(slice.assetKitId) ?? 0) +
+                  poolDecrement
+              );
+            }
           }
 
           // Decrement the per-asset running pool by the amount claimed so
@@ -5613,6 +5866,20 @@ export async function checkinBooking({
           },
           data: { checkedInAt: new Date(), checkedInById: userId },
         });
+
+        /**
+         * Units destroyed out of a kit slice leave the kit too. Runs after
+         * every read of this booking's slices above, because emptying a
+         * membership can merge its slice into a standalone sibling.
+         */
+        if (userId && destroyedUnitsByAssetKitId.size > 0) {
+          destroyedKitUnitsRef.value = await removeDestroyedUnitsFromKits(tx, {
+            destroyedUnitsByAssetKitId,
+            organizationId,
+            actorUserId: userId,
+            bookingId: bookingFound.id,
+          });
+        }
 
         /** Finally update the booking */
         return tx.booking.update({
@@ -5845,6 +6112,15 @@ export async function checkinBooking({
           })
         );
       }
+    }
+
+    if (userId && destroyedKitUnitsRef.value) {
+      await noteKitUnitsDestroyedAtCheckin({
+        result: destroyedKitUnitsRef.value,
+        booking: { id: updatedBooking.id, name: updatedBooking.name },
+        userId,
+        organizationId,
+      });
     }
 
     /**
@@ -6763,6 +7039,36 @@ export async function partialCheckinBooking({
       // `recordEvents` so the loop stays within the interactive-tx budget.
       const quantityChangeEvents: Parameters<typeof recordEvents>[0] = [];
 
+      /**
+       * Quantity-tracked assets holding at least one kit slice on this
+       * booking. Units destroyed out of a kit slice leave the kit too, so for
+       * these the session's dispositions are kept and later spread over the
+       * slices (see `spreadSessionDispositionsOverSlices`).
+       */
+      const qtyAssetIdsWithKitSlice = new Set(
+        bookingFound.bookingAssets
+          .filter(
+            (ba) =>
+              ba.assetKitId &&
+              assetTypeById.get(ba.assetId) === AssetType.QUANTITY_TRACKED
+          )
+          .map((ba) => ba.assetId)
+      );
+      /** Dispositions logged before this session, per kit-holding asset. */
+      const priorLogsByAssetId = new Map<
+        string,
+        Array<{ bookingAssetId: string | null; quantity: number }>
+      >();
+      /** This session's dispositions, per kit-holding asset. */
+      const sessionLogsByAssetId = new Map<
+        string,
+        Array<{
+          bookingAssetId: string | null;
+          category: CheckinDispositionCategory;
+          quantity: number;
+        }>
+      >();
+
       for (const disp of dispositions) {
         if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
           continue;
@@ -6773,6 +7079,25 @@ export async function partialCheckinBooking({
           disp.assetId,
           organizationId
         );
+
+        // Read under the asset lock and before this session writes any log
+        // for the asset, so a concurrent session cannot slip in between.
+        if (
+          qtyAssetIdsWithKitSlice.has(disp.assetId) &&
+          !priorLogsByAssetId.has(disp.assetId)
+        ) {
+          priorLogsByAssetId.set(
+            disp.assetId,
+            await tx.consumptionLog.findMany({
+              where: {
+                bookingId: id,
+                assetId: disp.assetId,
+                category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+              },
+              select: { bookingAssetId: true, quantity: true },
+            })
+          );
+        }
 
         /**
          * Re-query remaining inside the transaction, AFTER the lock. This
@@ -6919,6 +7244,25 @@ export async function partialCheckinBooking({
             bookingAssetId: dispBookingAssetId,
             tx,
           });
+        }
+
+        if (qtyAssetIdsWithKitSlice.has(disp.assetId)) {
+          const sessionLogs = sessionLogsByAssetId.get(disp.assetId) ?? [];
+          for (const [category, quantity] of [
+            ["RETURN", disp.returned],
+            ["CONSUME", disp.consumed],
+            ["LOSS", disp.lost],
+            ["DAMAGE", disp.damaged],
+          ] as const) {
+            if ((quantity ?? 0) > 0) {
+              sessionLogs.push({
+                bookingAssetId: dispBookingAssetId,
+                category,
+                quantity: quantity!,
+              });
+            }
+          }
+          sessionLogsByAssetId.set(disp.assetId, sessionLogs);
         }
 
         // Decrement the pool for CONSUME/LOSS/DAMAGE only. RETURN leaves
@@ -7074,6 +7418,13 @@ export async function partialCheckinBooking({
        */
       const settledSliceIds = new Set<string>();
 
+      /**
+       * Units this session consumed, lost or damaged out of each kit slice,
+       * keyed by the slice's `AssetKit` id. Filled below, where each slice's
+       * sent-out units are known.
+       */
+      const destroyedUnitsByAssetKitId = new Map<string, number>();
+
       /** Went out on this booking and has not been reconciled yet. */
       const isOutstandingSlice = (slice: {
         checkedOutAt: Date | null;
@@ -7213,6 +7564,35 @@ export async function partialCheckinBooking({
               slice.id,
               dispatched > 0 ? dispatched : slice.quantity
             );
+          }
+
+          // Units this session destroyed out of each kit slice of the asset,
+          // spread over what each slice actually sent out.
+          const sessionLogs = sessionLogsByAssetId.get(assetId);
+          if (sessionLogs) {
+            const spread = spreadSessionDispositionsOverSlices({
+              slices: slices.map((slice) => ({
+                id: slice.id,
+                assetKitId: slice.assetKitId,
+                booked: slice.quantity,
+                owed: owedBySlice.get(slice.id) ?? 0,
+              })),
+              priorLogs: priorLogsByAssetId.get(assetId) ?? [],
+              sessionLogs,
+            });
+            for (const slice of slices) {
+              const onSlice = spread.get(slice.id);
+              const destroyed = onSlice
+                ? onSlice.consumed + onSlice.lost + onSlice.damaged
+                : 0;
+              if (slice.assetKitId && destroyed > 0) {
+                destroyedUnitsByAssetKitId.set(
+                  slice.assetKitId,
+                  (destroyedUnitsByAssetKitId.get(slice.assetKitId) ?? 0) +
+                    destroyed
+                );
+              }
+            }
           }
 
           // The asset's FULL slice set, so a claim tagged to one slice never
@@ -7394,6 +7774,22 @@ export async function partialCheckinBooking({
       // individual + qty-tracked semantics in one place.
       const bookingIsComplete = await isBookingFullyCheckedIn(tx, id);
 
+      /**
+       * Units destroyed out of a kit slice leave the kit too. Runs after the
+       * completion decision above and every other read of this booking's
+       * slices, because emptying a membership can merge its slice into a
+       * standalone sibling.
+       */
+      const destroyedKitUnits =
+        destroyedUnitsByAssetKitId.size > 0
+          ? await removeDestroyedUnitsFromKits(tx, {
+              destroyedUnitsByAssetKitId,
+              organizationId,
+              actorUserId: userId,
+              bookingId: id,
+            })
+          : null;
+
       const updatedBookingSnapshot = await tx.booking.findUniqueOrThrow({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking `id` already org-checked via findUniqueOrThrow({where:{id,organizationId}}) in partialCheckinBooking
         where: { id },
@@ -7456,6 +7852,7 @@ export async function partialCheckinBooking({
           qtySummaries,
           individualAssetIds,
           completeKitIds,
+          destroyedKitUnits,
         };
       }
 
@@ -7466,8 +7863,18 @@ export async function partialCheckinBooking({
         qtySummaries,
         individualAssetIds,
         completeKitIds,
+        destroyedKitUnits,
       };
     });
+
+    if (txResult.destroyedKitUnits) {
+      await noteKitUnitsDestroyedAtCheckin({
+        result: txResult.destroyedKitUnits,
+        booking: { id: txResult.booking.id, name: txResult.booking.name },
+        userId,
+        organizationId,
+      });
+    }
 
     /**
      * Canonical status-transition event for the completion. This path writes
