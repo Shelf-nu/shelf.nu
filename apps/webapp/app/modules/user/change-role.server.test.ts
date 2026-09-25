@@ -60,6 +60,7 @@ describe("changeUserRole", () => {
         organizationId: ORG_ID,
         newRole: OrganizationRoles.OWNER,
         actorOwnsWorkspace: true,
+        tx: db,
       })
     ).rejects.toThrow(ShelfError);
 
@@ -69,6 +70,7 @@ describe("changeUserRole", () => {
         organizationId: ORG_ID,
         newRole: OrganizationRoles.OWNER,
         actorOwnsWorkspace: true,
+        tx: db,
       })
     ).rejects.toThrow(/Cannot assign Owner role/);
   });
@@ -82,6 +84,7 @@ describe("changeUserRole", () => {
         organizationId: ORG_ID,
         newRole: OrganizationRoles.BASE,
         actorOwnsWorkspace: true,
+        tx: db,
       })
     ).rejects.toThrow(/not a member/);
   });
@@ -95,6 +98,7 @@ describe("changeUserRole", () => {
         organizationId: ORG_ID,
         newRole: OrganizationRoles.ADMIN,
         actorOwnsWorkspace: true,
+        tx: db,
       })
     ).rejects.toThrow(/Cannot change the Owner's role/);
   });
@@ -108,6 +112,7 @@ describe("changeUserRole", () => {
         organizationId: ORG_ID,
         newRole: OrganizationRoles.ADMIN,
         actorOwnsWorkspace: false,
+        tx: db,
       })
     ).rejects.toThrow(/Only the workspace owner can promote/);
   });
@@ -121,6 +126,7 @@ describe("changeUserRole", () => {
         organizationId: ORG_ID,
         newRole: OrganizationRoles.BASE,
         actorOwnsWorkspace: false,
+        tx: db,
       })
     ).rejects.toThrow(/Only the workspace owner can change an Administrator/);
   });
@@ -134,6 +140,7 @@ describe("changeUserRole", () => {
       organizationId: ORG_ID,
       newRole: OrganizationRoles.ADMIN,
       actorOwnsWorkspace: true,
+      tx: db,
     });
 
     expect(result.previousRole).toBe(OrganizationRoles.BASE);
@@ -159,6 +166,7 @@ describe("changeUserRole", () => {
       organizationId: ORG_ID,
       newRole: OrganizationRoles.BASE,
       actorOwnsWorkspace: true,
+      tx: db,
     });
 
     expect(result.previousRole).toBe(OrganizationRoles.ADMIN);
@@ -173,6 +181,7 @@ describe("changeUserRole", () => {
       organizationId: ORG_ID,
       newRole: OrganizationRoles.SELF_SERVICE,
       actorOwnsWorkspace: false,
+      tx: db,
     });
 
     expect(result.previousRole).toBe(OrganizationRoles.BASE);
@@ -187,6 +196,7 @@ describe("changeUserRole", () => {
         organizationId: ORG_ID,
         newRole: OrganizationRoles.BASE,
         actorOwnsWorkspace: true,
+        tx: db,
       })
     ).rejects.toThrow(/Cannot change the Owner's role/);
     expect(db.userOrganization.update).not.toHaveBeenCalled();
@@ -201,6 +211,7 @@ describe("changeUserRole", () => {
         organizationId: ORG_ID,
         newRole: OrganizationRoles.BASE,
         actorOwnsWorkspace: false,
+        tx: db,
       })
     ).rejects.toThrow(/Only the workspace owner can change an Administrator/);
     expect(db.userOrganization.update).not.toHaveBeenCalled();
@@ -215,8 +226,32 @@ describe("changeUserRole", () => {
       organizationId: ORG_ID,
       newRole: OrganizationRoles.BASE,
       actorOwnsWorkspace: true,
+      tx: db,
     });
 
     expect(result.previousRole).toBe(OrganizationRoles.ADMIN);
+  });
+
+  it("refuses the two owner cases with client statuses, not a 500", async () => {
+    await expect(
+      changeUserRole({
+        userId: USER_ID,
+        organizationId: ORG_ID,
+        newRole: OrganizationRoles.OWNER,
+        actorOwnsWorkspace: true,
+        tx: db,
+      })
+    ).rejects.toMatchObject({ status: 400 });
+
+    mockUserOrg([OrganizationRoles.OWNER]);
+    await expect(
+      changeUserRole({
+        userId: USER_ID,
+        organizationId: ORG_ID,
+        newRole: OrganizationRoles.ADMIN,
+        actorOwnsWorkspace: true,
+        tx: db,
+      })
+    ).rejects.toMatchObject({ status: 403 });
   });
 });

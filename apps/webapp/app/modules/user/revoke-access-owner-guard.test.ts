@@ -141,6 +141,40 @@ describe("revokeAccessToOrganization — owner protection", () => {
     );
   });
 
+  it("refuses a non-owner when the target was promoted to ADMIN after the initial read", async () => {
+    // The pre-read sees BASE; an owner promotes the target, and the re-read
+    // under the membership lock sees ADMIN. The owner-only rule is decided on
+    // the locked row.
+    dbMock.userOrganization.findFirst
+      .mockResolvedValueOnce({ roles: [OrganizationRoles.BASE] })
+      .mockResolvedValueOnce({ roles: [OrganizationRoles.ADMIN] });
+
+    await expect(
+      revokeAccessToOrganization({
+        userId: "promoted-user",
+        organizationId: "org-1",
+        actorOwnsWorkspace: false,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+
+    expect(dbMock.userOrganization.deleteMany).not.toHaveBeenCalled();
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+
+  it("lets the owner revoke an ADMIN", async () => {
+    dbMock.userOrganization.findFirst.mockResolvedValue({
+      roles: [OrganizationRoles.ADMIN],
+    });
+
+    await revokeAccessToOrganization({
+      userId: "admin-user",
+      organizationId: "org-1",
+      actorOwnsWorkspace: true,
+    });
+
+    expect(dbMock.userOrganization.deleteMany).toHaveBeenCalledTimes(1);
+  });
+
   it("still revokes a non-owner", async () => {
     dbMock.userOrganization.findFirst.mockResolvedValue({
       roles: [OrganizationRoles.ADMIN],

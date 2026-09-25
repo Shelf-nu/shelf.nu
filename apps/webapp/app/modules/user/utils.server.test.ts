@@ -240,6 +240,7 @@ describe("resolveUserAction — revoke access role hierarchy", () => {
     expect(revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "some-admin",
       organizationId: "org-1",
+      actorOwnsWorkspace: true,
     });
   });
 
@@ -289,6 +290,7 @@ describe("resolveUserAction — revoke access role hierarchy", () => {
     expect(revokeAccessToOrganization).toHaveBeenCalledWith({
       userId: "base-user",
       organizationId: "org-1",
+      actorOwnsWorkspace: false,
     });
   });
 });
@@ -340,7 +342,7 @@ describe("resolveUserAction: change role", () => {
       )
     ).rejects.toMatchObject({ status: 400 });
 
-    expect(changeUserRole).not.toHaveBeenCalled();
+    // The role write ran in the same transaction; the refusal rolls it back.
     expect(db.roleChangeLog.create).not.toHaveBeenCalled();
   });
 
@@ -395,7 +397,7 @@ describe("resolveUserAction: change role", () => {
     );
   });
 
-  it("locks and re-reads the target membership before moving anything", async () => {
+  it("locks, then authorizes and writes the role, then moves entities", async () => {
     lockedMembership([OrganizationRoles.ADMIN]);
 
     await resolveUserAction(
@@ -415,9 +417,64 @@ describe("resolveUserAction: change role", () => {
       vi.mocked(transferOnRoleChange).mock.invocationCallOrder[0];
     const roleWriteOrder =
       vi.mocked(changeUserRole).mock.invocationCallOrder[0];
-    expect(lockOrder).toBeLessThan(transferOrder);
-    expect(transferOrder).toBeLessThan(roleWriteOrder);
+    expect(lockOrder).toBeLessThan(roleWriteOrder);
+    expect(roleWriteOrder).toBeLessThan(transferOrder);
     expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves nothing when the role change is refused", async () => {
+    lockedMembership([OrganizationRoles.ADMIN]);
+    vi.mocked(changeUserRole).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "Only the workspace owner can change an Administrator's role.",
+        label: "Team",
+        status: 403,
+      })
+    );
+
+    await expect(
+      resolveUserAction(
+        changeRoleRequest({
+          userId: "target",
+          role: "BASE",
+          transferToUserId: "not-a-member",
+        }),
+        "org-1",
+        "admin-user",
+        accessFor([OrganizationRoles.ADMIN])
+      )
+    ).rejects.toMatchObject({ status: 403 });
+
+    // Authorization comes first: no entity row is touched and nothing about
+    // the recipient is checked or revealed.
+    expect(transferOnRoleChange).not.toHaveBeenCalled();
+    expect(db.roleChangeLog.create).not.toHaveBeenCalled();
+  });
+
+  it("answers a change aimed at the owner with the owner refusal, not a recipient error", async () => {
+    // The target is the workspace owner (the organization's `userId`), so
+    // with no recipient chosen the default recipient would be the target.
+    lockedMembership([OrganizationRoles.OWNER]);
+    vi.mocked(changeUserRole).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message:
+          "Cannot change the Owner's role. Use ownership transfer instead.",
+        label: "Team",
+        status: 403,
+      })
+    );
+
+    await expect(
+      resolveUserAction(
+        changeRoleRequest({ userId: "owner-user", role: "ADMIN" }),
+        "org-1",
+        "co-admin",
+        accessFor([OrganizationRoles.ADMIN])
+      )
+    ).rejects.toThrow(/Cannot change the Owner's role/);
+    expect(transferOnRoleChange).not.toHaveBeenCalled();
   });
 
   it("refuses a member whose membership is gone under the lock, with nothing moved", async () => {

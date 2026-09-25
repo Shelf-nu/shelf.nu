@@ -89,6 +89,39 @@ describe("softDeleteUser lock order", () => {
     expect(db.$transaction).toHaveBeenCalledTimes(1);
   });
 
+  it("locks every membership, in workspace order, before the first write", async () => {
+    vi.mocked(db.user.findUniqueOrThrow).mockResolvedValueOnce({
+      id: "user-1",
+      email: "user@example.com",
+      profilePicture: null,
+      contact: null,
+      userOrganizations: [
+        {
+          organizationId: "org-b",
+          roles: ["ADMIN"],
+          organization: { id: "org-b", userId: "owner-b" },
+        },
+        {
+          organizationId: "org-a",
+          roles: ["BASE"],
+          organization: { id: "org-a", userId: "owner-a" },
+        },
+      ],
+    } as never);
+
+    await softDeleteUser("user-1");
+
+    const lockCalls = vi.mocked(db.$queryRaw).mock;
+    // Tagged-template call: [strings, userId, organizationId].
+    const lockedOrgs = lockCalls.calls.slice(0, 2).map((call) => call[2]);
+    expect(lockedOrgs).toEqual(["org-a", "org-b"]);
+    const firstWrite = Math.min(
+      ...vi.mocked(db.asset.updateMany).mock.invocationCallOrder,
+      ...vi.mocked(db.user.update).mock.invocationCallOrder
+    );
+    expect(lockCalls.invocationCallOrder[1]).toBeLessThan(firstWrite);
+  });
+
   it("aborts when the member became the workspace owner, with nothing transferred", async () => {
     vi.mocked(db.userOrganization.findUnique).mockResolvedValueOnce({
       roles: ["OWNER"],

@@ -1543,9 +1543,15 @@ export async function softDeleteUser(id: User["id"]) {
        *   - [x] Kit
        * The new owner should be the owner of the organization
        */
-      for (const userOrg of organizationsTheUserDoesNotOwn) {
-        // Membership lock first, then entity writes: the order every
-        // role-change and removal path uses (see lockMembership).
+      // Lock every membership being removed before any write, in
+      // `organizationId` order, so this deletion never holds one workspace's
+      // lock and a user-row write while waiting on another workspace's lock.
+      // Every role-change and removal path takes the membership lock before
+      // its writes (see lockMembership).
+      const membershipsToRemove = [...organizationsTheUserDoesNotOwn].sort(
+        (a, b) => a.organizationId.localeCompare(b.organizationId)
+      );
+      for (const userOrg of membershipsToRemove) {
         const persisted = await lockMembership(tx, {
           userId: id,
           organizationId: userOrg.organizationId,
@@ -1567,7 +1573,9 @@ export async function softDeleteUser(id: User["id"]) {
             shouldBeCaptured: false,
           });
         }
+      }
 
+      for (const userOrg of membershipsToRemove) {
         // Entities move even when the membership is already gone: they still
         // belong to the user being deleted.
         const newOwnerId = userOrg.organization?.userId;
@@ -1791,15 +1799,25 @@ export async function lockMembership(
  * @param tx - The surrounding transaction
  * @param args.userId - The member losing access
  * @param args.organizationId - The workspace
+ * @param args.actorOwnsWorkspace - For a member revoking another member:
+ *   `access.ownsWorkspace` of the actor. Left undefined by system callers
+ *   (SSO, SCIM, account deletion), which are not bound by the owner-only rule.
  * @returns The updated user row
- * @throws {ShelfError} 400 when the member owns the workspace
+ * @throws {ShelfError} 400 when the member owns the workspace; 403 when the
+ *   actor does not own the workspace and the member's effective role needs
+ *   the owner to change it
  */
 export async function revokeMembershipInTx(
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
   {
     userId,
     organizationId,
-  }: { userId: User["id"]; organizationId: Organization["id"] }
+    actorOwnsWorkspace,
+  }: {
+    userId: User["id"];
+    organizationId: Organization["id"];
+    actorOwnsWorkspace?: boolean;
+  }
 ) {
   const persisted = await lockMembership(tx, { userId, organizationId });
 
@@ -1814,6 +1832,23 @@ export async function revokeMembershipInTx(
       status: 400,
       shouldBeCaptured: false,
     });
+  }
+
+  // Decided on the row read under the lock: a promotion that commits after
+  // any earlier read is still seen here.
+  if (actorOwnsWorkspace === false && persisted) {
+    const targetRole = resolveRole(persisted.roles);
+    if (roleChangeRequiresOwner(targetRole)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Insufficient permissions",
+        message: `Only the workspace owner can revoke access for a member with the ${ROLE_LABELS[targetRole]} role.`,
+        additionalData: { userId, organizationId },
+        label,
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
   }
 
   // Disconnect EVERY linked team member, not just the first: the schema does
@@ -1882,15 +1917,20 @@ export async function clearLastSelectedOrganization({
  *
  * @param args.userId - The member losing access
  * @param args.organizationId - The workspace
+ * @param args.actorOwnsWorkspace - `access.ownsWorkspace` of the member doing
+ *   the revoking; undefined for system callers (see {@link revokeMembershipInTx})
  * @returns The updated user row
- * @throws {ShelfError} 400 when the member owns the workspace
+ * @throws {ShelfError} 400 when the member owns the workspace; 403 when the
+ *   actor may not revoke this member
  */
 export async function revokeAccessToOrganization({
   userId,
   organizationId,
+  actorOwnsWorkspace,
 }: {
   userId: User["id"];
   organizationId: Organization["id"];
+  actorOwnsWorkspace?: boolean;
 }) {
   try {
     /**
@@ -1917,15 +1957,16 @@ export async function revokeAccessToOrganization({
     }
 
     const result = await db.$transaction((tx) =>
-      revokeMembershipInTx(tx, { userId, organizationId })
+      revokeMembershipInTx(tx, { userId, organizationId, actorOwnsWorkspace })
     );
 
     await clearLastSelectedOrganization({ userId, organizationId });
 
     return result;
   } catch (cause) {
-    // Preserve our own errors: the owner guard is a 400 the user needs to
-    // read, and rewrapping would turn it into a generic captured 500.
+    // Preserve our own errors: the owner guard (400) and the owner-only rule
+    // (403) are messages the user needs to read, and rewrapping would turn
+    // them into a generic captured 500.
     if (isLikeShelfError(cause)) {
       throw cause;
     }
@@ -1941,7 +1982,12 @@ export async function revokeAccessToOrganization({
 
 /**
  * Changes a member's role in an organization in place. Does NOT move entities:
- * the caller runs {@link transferOnRoleChange} in the same transaction.
+ * the caller runs {@link transferOnRoleChange} in the same transaction, after
+ * this call, so a refused change takes no entity row locks.
+ *
+ * Call after {@link lockMembership} in the same transaction: the refusals below
+ * read the membership, and only the lock makes that read the one the write
+ * applies to.
  *
  * Refuses, before writing:
  * - assigning a role that owns the workspace (ownership moves only through
@@ -1958,23 +2004,24 @@ export async function revokeAccessToOrganization({
  * @param args.organizationId - The workspace
  * @param args.newRole - The single role they will hold
  * @param args.actorOwnsWorkspace - `access.ownsWorkspace` of the acting member
- * @param args.tx - The role-change transaction, when there is one
+ * @param args.tx - The role-change transaction holding the membership lock
  * @returns The updated membership plus the member's previous effective role
- * @throws {ShelfError} When a refusal above applies (403 for the owner-only
- *   rules), or the member is not in the workspace
+ * @throws {ShelfError} 400 when assigning a workspace-owning role, 403 when the
+ *   member owns the workspace or an owner-only rule applies, or when the
+ *   member is not in the workspace
  */
 export async function changeUserRole({
   userId,
   organizationId,
   newRole,
   actorOwnsWorkspace,
-  tx: client = db,
+  tx: client,
 }: {
   userId: User["id"];
   organizationId: Organization["id"];
   newRole: OrganizationRoles;
   actorOwnsWorkspace: boolean;
-  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
   try {
     if (ROLE_POLICIES[newRole].membership.ownsWorkspace) {
@@ -1983,6 +2030,7 @@ export async function changeUserRole({
         message:
           "Cannot assign Owner role directly. Use ownership transfer instead.",
         label,
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -2012,6 +2060,7 @@ export async function changeUserRole({
         message:
           "Cannot change the Owner's role. Use ownership transfer instead.",
         label,
+        status: 403,
         shouldBeCaptured: false,
       });
     }
@@ -2063,21 +2112,6 @@ export async function changeUserRole({
     });
   }
 }
-
-/**
- * Why a user's entities are being moved. The two callers have opposite
- * requirements, so this is required with no default — every call site must
- * declare intent and the compiler enforces it.
- *
- * - `"removal"` — the user is losing workspace access entirely. `Booking.creator`
- *   and `Booking.custodianUser` are `onDelete: Cascade` FKs, so they must be
- *   cleared off the departing user. `creatorId` is non-nullable → transferred
- *   rather than nulled.
- * - `"demotion"`: the user KEEPS membership and their role changes; `moves`
- *   says which of the two groups move (see `roleChangeTransfers`). The `User`
- *   row is untouched, so no cascade applies.
- */
-export type EntityTransferReason = "removal" | "demotion";
 
 /**
  * Prisma `where` selecting the bookings a DEMOTION reassigns to the new owner:
@@ -2155,7 +2189,10 @@ export function bookingsReassignedOnDemotionWhere({
  * @param args.id - The user whose entities move
  * @param args.newOwnerId - Who receives them
  * @param args.organizationId - The workspace
- * @param args.reason - `removal`, or `demotion` with what the role change moves
+ * @param args.reason - Why the entities move, required with no default because
+ *   the two callers need opposite booking rewrites: `removal` (the user loses
+ *   access), or `demotion` (the user keeps membership and their role changes)
+ *   with `moves`, what the role change moves (see `roleChangeTransfers`)
  */
 export async function transferEntitiesToNewOwner(
   args: {
@@ -2327,8 +2364,15 @@ export async function transferEntitiesToNewOwner(
 
 /**
  * Refuses a transfer recipient a role change may not use. Runs inside the
- * role-change transaction, before any write, so a refused request leaves
- * roles, entities and the role-change log untouched.
+ * role-change transaction, before any entity write; a refusal rolls the whole
+ * change back, so roles, entities and the role-change log stay untouched.
+ *
+ * The recipient's membership is read without a lock, on purpose. A concurrent
+ * demotion or removal of the recipient can commit between this check and the
+ * entity writes, leaving the entities with a member who may no longer receive
+ * them; they stay in the workspace and the owner can reassign them. Locking the
+ * recipient's row (FOR SHARE) would let two cross role changes deadlock each
+ * other, which costs more than that narrow window.
  *
  * @param args.tx - The role-change transaction
  * @param args.recipientId - Who would receive the member's entities
@@ -2392,7 +2436,7 @@ export async function assertTransferRecipient({
  * stay with the member.
  *
  * Every role-change path calls this inside its transaction, after taking the
- * membership lock ({@link lockMembership}) and before writing the new role.
+ * membership lock ({@link lockMembership}) and authorizing the change.
  *
  * @param args.tx - The role-change transaction
  * @param args.targetUserId - The member whose role changes

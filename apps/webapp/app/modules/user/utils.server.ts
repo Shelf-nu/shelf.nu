@@ -143,8 +143,10 @@ export async function resolveUserAction(
        * by the workspace owner. Revoking is the stronger action, so it can
        * never be looser than a role change.
        *
-       * Revoking the OWNER is also refused by `revokeAccessToOrganization`
-       * itself, so it holds for every caller rather than only this one.
+       * This read is a fast path for a friendly refusal. The decision that
+       * counts is repeated by `revokeAccessToOrganization` on the row re-read
+       * under the membership lock, which also refuses revoking the OWNER for
+       * every caller.
        */
       const targetUserOrg = await db.userOrganization.findFirst({
         where: { userId: targetUserId, organizationId },
@@ -173,6 +175,7 @@ export async function resolveUserAction(
       const user = await revokeAccessToOrganization({
         userId: targetUserId,
         organizationId,
+        actorOwnsWorkspace: callerAccess.ownsWorkspace,
       });
 
       const org = await db.organization
@@ -400,12 +403,13 @@ export async function resolveUserAction(
         });
 
       /**
-       * Lock order: the target's membership row FIRST, then entity writes, the
-       * order every path that changes or removes a membership uses (SSO
-       * transitions and account deletion included). Two role changes on the
-       * same member then queue on the membership lock instead of each holding
-       * a lock the other needs. Everything the change moves, and the role the
-       * audit entry records, is read from the persisted row under that lock.
+       * Lock order: the target's membership row FIRST, then the authorized
+       * role write, then entity writes. Every path that changes or removes a
+       * membership takes that lock first (SSO transitions and account deletion
+       * included), so two role changes on the same member queue on it instead
+       * of each holding a lock the other needs. Everything the change moves,
+       * and the role the audit entry records, is read from the persisted row
+       * under that lock.
        */
       const currentRole = await db.$transaction(async (tx) => {
         const targetUserOrg = await lockMembership(tx, {
@@ -426,9 +430,20 @@ export async function resolveUserAction(
 
         const previousRole = resolveRole(targetUserOrg.roles);
 
-        // Validate the recipient and move entities before the role or the log
-        // is written: a refused recipient stops the request with nothing
-        // changed.
+        // Authorize and write the role, then validate the recipient and move
+        // entities; any refusal rolls the whole change back. Authorizing first
+        // means a refused request takes no entity row locks and never reveals
+        // anything about the recipient.
+        await changeUserRole({
+          userId: targetUserId,
+          organizationId,
+          newRole,
+          actorOwnsWorkspace: callerAccess.ownsWorkspace,
+          tx,
+        });
+
+        // Decides from the roles read under the lock, never from the row the
+        // role write above just changed.
         await transferOnRoleChange({
           tx,
           targetUserId,
@@ -436,14 +451,6 @@ export async function resolveUserAction(
           fromRoles: targetUserOrg.roles,
           toRole: newRole,
           recipientId: transferToUserId || workspaceOwnerId,
-        });
-
-        await changeUserRole({
-          userId: targetUserId,
-          organizationId,
-          newRole,
-          actorOwnsWorkspace: callerAccess.ownsWorkspace,
-          tx,
         });
 
         await tx.roleChangeLog.create({
