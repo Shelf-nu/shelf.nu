@@ -78,4 +78,21 @@ describe("CustodySourceSelect keyboard", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith("loc-camera");
   });
+
+  it("moves focus with the pointer, so the keys act on the hovered option", async () => {
+    const user = userEvent.setup();
+    const onChange = renderPicker();
+
+    await user.click(screen.getByRole("button", { name: /From location/ }));
+    await user.hover(optionNamed(/^Camera Room/));
+    expect(optionNamed(/^Camera Room/)).toHaveFocus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(optionNamed(/^Studio/)).toHaveFocus();
+
+    await user.hover(optionNamed(/^Store/));
+    await user.keyboard("{Enter}");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("loc-store");
+  });
 });

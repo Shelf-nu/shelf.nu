@@ -106,10 +106,11 @@ export function CustodySourceSelect({
   };
 
   /**
-   * The arrow keys move keyboard focus, and focus moves the highlight (see
-   * each option's `onFocus`), so the highlighted option is always the one
-   * that has focus. Enter and Space are handled by the focused option alone;
-   * this list-level handler never picks, so one key press makes one choice.
+   * The arrow keys and the pointer move keyboard focus, and focus moves the
+   * highlight (see each option's `onFocus`), so the highlighted option is
+   * always the one that has focus. Enter and Space are handled by the focused
+   * option alone; this list-level handler never picks, so one key press makes
+   * one choice.
    */
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -203,7 +204,9 @@ export function CustodySourceSelect({
                       isSelected && "font-medium"
                     )}
                     onClick={() => choose(option.value)}
-                    onMouseEnter={() => setHighlightedIndex(index)}
+                    onMouseEnter={() =>
+                      itemRefs.current[index]?.focus({ preventScroll: true })
+                    }
                     onFocus={() => setHighlightedIndex(index)}
                     onKeyDown={handleActivationKeyPress(() =>
                       choose(option.value)
