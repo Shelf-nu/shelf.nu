@@ -2422,10 +2422,12 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
  *   booking's total from each slice, as `getAssetAvailability` does.
  * - **What is still out is what left minus what came back**, per slice, as
  *   `computeUnitsStillOutBySlice` (`modules/booking/checkout-attribution.ts`)
- *   computes it. What left: the larger of one trip's reading (the whole slice
- *   when the asset is CHECKED_OUT and no session claim names it on that
- *   booking, the all-at-once checkout; otherwise its session claims capped at
- *   the booked quantity) and its stored, cumulative `checkedOutQuantity`.
+ *   computes it. What left: the larger of one trip's reading (the slice's
+ *   session claims capped at the booked quantity; with no claim, the whole
+ *   slice when its own `checkedOutAt` is set, which the all-at-once checkout
+ *   stamps; otherwise nothing) and its stored, cumulative `checkedOutQuantity`.
+ *   Never `Asset.status`: it is global, so an asset out on one booking would
+ *   read as out on every booking holding a slice of it.
  *   Untagged claims and untagged returns both fill
  *   standalone slices first, then by id in byte order, which is JavaScript's
  *   string order for these ids.
@@ -2452,6 +2454,7 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
         CASE WHEN bk.status = 'OVERDUE' THEN 'infinity'::timestamptz ELSE bk."to" END AS end_at,
         (ba."assetKitId" IS NULL) AS standalone,
         ba.quantity,
+        ba."checkedOutAt" AS checked_out_at,
         ba."checkedOutQuantity" AS counter
       FROM public."BookingAsset" ba
       -- One primary-key lookup per slice of THIS asset. OFFSET 0 keeps the
@@ -2499,6 +2502,7 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
         act."bookingId",
         act.standalone,
         act.quantity,
+        act.checked_out_at,
         act.counter,
         COALESCE((SELECT c.q FROM claims c WHERE c."bookingId" = act."bookingId" AND c.tag = act.slice_id), 0) AS claim_tagged,
         COALESCE((SELECT c.q FROM claims c WHERE c."bookingId" = act."bookingId" AND c.tag IS NULL), 0) AS claim_pool,
@@ -2528,9 +2532,9 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
         oc.*,
         GREATEST(
           CASE
-            WHEN a.status = 'CHECKED_OUT' AND NOT bool_or(oc.claimed > 0) OVER (PARTITION BY oc."bookingId")
-              THEN oc.quantity
-            ELSE LEAST(oc.quantity, oc.claimed)
+            WHEN oc.claimed > 0 THEN LEAST(oc.quantity, oc.claimed)
+            WHEN oc.checked_out_at IS NOT NULL THEN oc.quantity
+            ELSE 0
           END,
           oc.counter
         ) AS departed

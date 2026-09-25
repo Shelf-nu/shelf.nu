@@ -1394,10 +1394,15 @@ describe("POOL_AGGREGATE_JOIN, the SQL twin of getAssetAvailability", () => {
     // Mirror of computeUnitsStillOutBySlice. What left: the whole slice for an
     // all-at-once checkout, otherwise the larger of the session claims and the
     // stored counter.
+    // One trip's reading: session claims, else the whole slice when the slice
+    // itself is stamped as checked out. Never the asset's global status.
     expect(sql).toContain(
-      `WHEN a.status = 'CHECKED_OUT' AND NOT bool_or(oc.claimed > 0) OVER (PARTITION BY oc."bookingId")`
+      `WHEN oc.claimed > 0 THEN LEAST(oc.quantity, oc.claimed)`
     );
-    expect(sql).toContain(`ELSE LEAST(oc.quantity, oc.claimed)`);
+    expect(sql).toContain(
+      `WHEN oc.checked_out_at IS NOT NULL THEN oc.quantity`
+    );
+    expect(sql).not.toContain(`a.status = 'CHECKED_OUT'`);
     // The cumulative counter floors both readings, so a slice sent out a
     // second time, by either checkout, still counts.
     expect(sql).toMatch(/END,\s+oc\.counter\s+\) AS departed/);
