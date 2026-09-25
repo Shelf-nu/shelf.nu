@@ -30,7 +30,6 @@ import type { InviteUserFormSchema } from "~/components/settings/invite-user-dia
 import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { sendEmail } from "~/emails/mail.server";
-import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { DetectedFormatPrefs } from "~/utils/date-format";
@@ -40,6 +39,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { organizationRolesMap } from "~/utils/organization-roles";
 import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
 import {
   caseInsensitiveEmailFilter,
