@@ -80,6 +80,25 @@ function restore(data: Record<string, unknown>[]) {
 /** Every lookup finds nothing, and every create returns `new-<name>`. */
 function resetDb() {
   vitest.clearAllMocks();
+  // `clearAllMocks` keeps queued `mockResolvedValueOnce` values; a test that
+  // queues more than it uses must not hand the rest to the next test.
+  for (const fn of [
+    locationFindMany,
+    locationCreate,
+    categoryFindMany,
+    categoryCreate,
+    tagFindMany,
+    tagCreate,
+    assetModelFindMany,
+    assetModelCreate,
+    teamMemberFindMany,
+    teamMemberCreate,
+    customFieldFindFirst,
+    customFieldCreate,
+    assetCreate,
+  ]) {
+    fn.mockReset();
+  }
   const createdByName = ({ data }: { data: { name: string } }) =>
     Promise.resolve({ id: `new-${data.name}` });
   for (const findMany of [
@@ -122,25 +141,30 @@ function custodyRow({
   name,
   quantity = 1,
   kitCustodyId = "",
+  sourceId = `source-${name}`,
+  custodianCreatedAt = "2026-08-01T10:00:00.000Z",
 }: {
   name: string;
   quantity?: number;
   kitCustodyId?: string;
+  /** The custodian's team member id in the source workspace. */
+  sourceId?: string;
+  custodianCreatedAt?: string;
 }) {
   return {
-    id: `custody-${name}`,
-    teamMemberId: `source-${name}`,
+    id: `custody-${sourceId}`,
+    teamMemberId: sourceId,
     assetId: "source-id",
     kitCustodyId,
     quantity,
     createdAt: "2026-09-01T10:00:00.000Z",
     updatedAt: "2026-09-01T10:00:00.000Z",
     custodian: {
-      id: `source-${name}`,
+      id: sourceId,
       name,
       organizationId: "source-org",
       userId: "",
-      createdAt: "2026-08-01T10:00:00.000Z",
+      createdAt: custodianCreatedAt,
       updatedAt: "2026-08-02T10:00:00.000Z",
       deletedAt: "",
     },
@@ -383,22 +407,76 @@ describe("createAssetsFromBackupImport custody", () => {
     ]);
   });
 
-  it("adds up a pool's units for two custody rows that name the same custodian", async () => {
+  it("keeps two people who share a name apart", async () => {
+    teamMemberCreate
+      .mockResolvedValueOnce({ id: "tm-ana-1" })
+      .mockResolvedValueOnce({ id: "tm-ana-2" });
+
     await restore([
       row({
         title: "Pens",
         type: "QUANTITY_TRACKED",
         quantity: "100",
         custody: [
-          custodyRow({ name: "Ana", quantity: 30 }),
-          custodyRow({ name: "Ana", quantity: 10 }),
+          custodyRow({ name: "Ana", quantity: 30, sourceId: "ana-1" }),
+          custodyRow({ name: "Ana", quantity: 10, sourceId: "ana-2" }),
+        ],
+      }),
+      row({
+        title: "Tripod",
+        custody: [custodyRow({ name: "Ana", sourceId: "ana-2" })],
+      }),
+    ]);
+
+    expect(teamMemberCreate).toHaveBeenCalledTimes(2);
+    const assets = assetDataByTitle();
+    expect(assets.Pens.custody).toEqual({
+      create: [
+        { teamMemberId: "tm-ana-1", quantity: 30 },
+        { teamMemberId: "tm-ana-2", quantity: 10 },
+      ],
+    });
+    expect(assets.Tripod.custody).toEqual({
+      create: [{ teamMemberId: "tm-ana-2", quantity: 1 }],
+    });
+  });
+
+  it("matches each workspace team member of that name once, oldest first", async () => {
+    teamMemberFindMany.mockResolvedValue([{ id: "tm-existing", name: "Ana" }]);
+    teamMemberCreate.mockResolvedValueOnce({ id: "tm-created" });
+
+    await restore([
+      row({
+        title: "Pens",
+        type: "QUANTITY_TRACKED",
+        quantity: "100",
+        custody: [
+          custodyRow({
+            name: "Ana",
+            quantity: 10,
+            sourceId: "ana-newer",
+            custodianCreatedAt: "2026-08-05T10:00:00.000Z",
+          }),
+          custodyRow({
+            name: "Ana",
+            quantity: 30,
+            sourceId: "ana-older",
+            custodianCreatedAt: "2026-08-01T10:00:00.000Z",
+          }),
         ],
       }),
     ]);
 
     expect(assetDataByTitle().Pens.custody).toEqual({
-      create: [{ teamMemberId: "new-Ana", quantity: 40 }],
+      create: [
+        { teamMemberId: "tm-created", quantity: 10 },
+        { teamMemberId: "tm-existing", quantity: 30 },
+      ],
     });
+    expect(teamMemberCreate).toHaveBeenCalledTimes(1);
+    expect(teamMemberCreate.mock.calls[0][0].data.createdAt).toEqual(
+      new Date("2026-08-05T10:00:00.000Z")
+    );
   });
 
   it("restores an asset held only through its kit as available, without custody", async () => {
@@ -447,7 +525,7 @@ describe("createAssetsFromBackupImport custody", () => {
         deletedAt: null,
         name: { in: ["Ana"] },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { id: true, name: true },
     });
     expect(teamMemberCreate).not.toHaveBeenCalled();
@@ -574,6 +652,31 @@ describe("createAssetsFromBackupImport names shared by several assets", () => {
       assetModelId: "model-sm58",
       customFields: { create: [{ customFieldId: "cf-serial" }] },
     });
+  });
+
+  it("uses the record the database matches when JavaScript lower-cases the name differently", async () => {
+    // Postgres folds `İ` to `i`, JavaScript to `i` plus a combining dot, so
+    // the batch lookup finds a record the file's key does not recognise.
+    categoryFindMany.mockResolvedValue([
+      { id: "cat-istanbul", name: "istanbul" },
+    ]);
+
+    await restore([
+      row({
+        title: "Map",
+        category: { name: "İstanbul", color: "#ab47bc" },
+      }),
+    ]);
+
+    expect(categoryFindMany).toHaveBeenLastCalledWith({
+      where: {
+        organizationId: "org-1",
+        name: { in: ["İstanbul"], mode: "insensitive" },
+      },
+      select: { id: true, name: true },
+    });
+    expect(categoryCreate).not.toHaveBeenCalled();
+    expect(assetDataByTitle().Map.categoryId).toBe("cat-istanbul");
   });
 
   it("creates an option field once, with its listed options and every held one", async () => {

@@ -255,8 +255,9 @@ export const buildCsvBackupDataFromAssets = ({
           );
           break;
         // Custody rows go out whole, ids included. Those ids are
-        // workspace-local: a restore resolves the custodian by name and must
-        // never read an id from the file. A location on custody has to travel
+        // workspace-local: a restore resolves the custodian by name and never
+        // looks an id up. The custodian's id only tells two people who share
+        // a name apart within the file. A location on custody has to travel
         // by name, as `assetLocations` does, never as an id.
         case "custody":
         case "category":

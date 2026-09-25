@@ -32,6 +32,7 @@ describe("custodyForRestore", () => {
     ).toEqual([
       {
         custodian: {
+          key: "id:tm-Ana",
           name: "Ana",
           createdAt: new Date("2026-08-01T10:00:00.000Z"),
           updatedAt: undefined,
@@ -40,6 +41,7 @@ describe("custodyForRestore", () => {
       },
       {
         custodian: {
+          key: "id:tm-Ben",
           name: "Ben",
           createdAt: new Date("2026-08-01T10:00:00.000Z"),
           updatedAt: undefined,
@@ -67,6 +69,23 @@ describe("custodyForRestore", () => {
     });
 
     expect(restored.map(({ custodian }) => custodian.name)).toEqual(["Ana"]);
+  });
+
+  it("tells custodians apart by their source id, or by name without one", () => {
+    const { id: _id, ...withoutId } = custodyRow("Ben").custodian;
+
+    const restored = custodyForRestore({
+      type: "QUANTITY_TRACKED",
+      custody: [
+        custodyRow("Ana"),
+        { ...custodyRow("Ben"), custodian: withoutId },
+      ],
+    });
+
+    expect(restored.map(({ custodian }) => custodian.key)).toEqual([
+      "id:tm-Ana",
+      "name:Ben",
+    ]);
   });
 
   it("gives a pool row without a whole quantity above zero 1 unit", () => {

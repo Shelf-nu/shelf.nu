@@ -154,7 +154,7 @@ import {
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
-import { custodyForRestore } from "./backup-custody";
+import { custodyForRestore, type BackupCustodian } from "./backup-custody";
 import {
   placementsForRestore,
   readLegacyBackupLocation,
@@ -5116,11 +5116,17 @@ export async function createAssetsFromContentImport({
  * name would both miss it and both create it: a duplicate record where the
  * name has no unique index, a failed restore where it has one.
  *
+ * `keyOf` only groups the file's spellings and matches the batch lookup. The
+ * database has the last word before anything is created: a name the batch
+ * missed is looked up once more on its own. JavaScript and Postgres can
+ * lower-case a letter differently (`İ`, or a word-final `Σ`), and a create
+ * the unique index sees as a repeat would fail the restore.
+ *
  * @param args.names - Names from the backup file, repeats allowed.
- * @param args.keyOf - When two names mean the same record. Lower-casing
- *   matches the `LOWER("name")` unique indexes.
+ * @param args.keyOf - When two of the file's names mean the same record.
  * @param args.findExisting - Loads the workspace's records that carry any of
- *   the given names. When several share a key, the first one is used.
+ *   the given names, by the same rule the database's unique index uses. When
+ *   several share a key, the first one is used.
  * @param args.create - Creates a missing record under the file's first
  *   spelling of its name.
  * @returns Record ids keyed by `keyOf(name)`.
@@ -5153,8 +5159,8 @@ async function findOrCreateByName({
 
   for (const [key, name] of spellings) {
     if (ids.has(key)) continue;
-    const created = await create(name, key);
-    ids.set(key, created.id);
+    const [existing] = await findExisting([name]);
+    ids.set(key, existing ? existing.id : (await create(name, key)).id);
   }
 
   return ids;
@@ -5205,6 +5211,70 @@ function readBackupAssetModelName(asset: CreateAssetFromBackupImportPayload) {
   }
   const name = readBackupName((asset.assetModel as { name?: unknown }).name);
   return name ? name.trim() : null;
+}
+
+/**
+ * Resolves the backup's custodians to team members in the workspace, creating
+ * the missing ones.
+ *
+ * Team member names are not unique, so custodians are told apart by
+ * {@link BackupCustodian.key}, never merged by name. Each one is matched to a
+ * workspace team member with exactly that name, and each team member is
+ * matched at most once: two people named alike in the file stay two people.
+ * Both sides are taken oldest first, so restoring a backup into a workspace
+ * that already holds the people it created before pairs each with their own.
+ *
+ * @param args.custodians - Custodians from the backup file, repeats allowed.
+ * @returns Team member ids keyed by {@link BackupCustodian.key}.
+ */
+async function findOrCreateCustodians({
+  custodians,
+  organizationId,
+}: {
+  custodians: BackupCustodian[];
+  organizationId: Organization["id"];
+}) {
+  const byKey = new Map<string, BackupCustodian>();
+  for (const custodian of custodians) {
+    if (!byKey.has(custodian.key)) byKey.set(custodian.key, custodian);
+  }
+
+  const teamMemberIds = new Map<string, TeamMember["id"]>();
+  if (byKey.size === 0) return teamMemberIds;
+
+  const existing = await db.teamMember.findMany({
+    where: {
+      organizationId,
+      deletedAt: null,
+      name: { in: [...new Set([...byKey.values()].map(({ name }) => name))] },
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, name: true },
+  });
+  /** Name -> team members not matched yet, oldest first. */
+  const unmatched = new Map<string, TeamMember["id"][]>();
+  for (const { id: teamMemberId, name } of existing) {
+    unmatched.set(name, [...(unmatched.get(name) ?? []), teamMemberId]);
+  }
+
+  // `sort` is stable, so custodians without a date keep the file's order.
+  const oldestFirst = [...byKey.values()].sort(
+    (a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0)
+  );
+  for (const { key, name, createdAt, updatedAt } of oldestFirst) {
+    const matched = unmatched.get(name)?.shift();
+    const teamMemberId =
+      matched ??
+      (
+        await db.teamMember.create({
+          data: { name, organizationId, createdAt, updatedAt },
+          select: { id: true },
+        })
+      ).id;
+    teamMemberIds.set(key, teamMemberId);
+  }
+
+  return teamMemberIds;
 }
 
 /**
@@ -5375,27 +5445,9 @@ export async function createAssetsFromBackupImport({
     const custodyPerRow = data.map((asset) =>
       custodyForRestore({ type: asset.type, custody: asset.custody })
     );
-    const custodians = custodyPerRow.flat().map(({ custodian }) => custodian);
-    const custodianIds = await findOrCreateByName({
-      names: custodians.map((custodian) => custodian.name),
-      // Custodians match by exact name. Team member names have no unique
-      // index, and two people whose names differ only in case stay two.
-      keyOf: (name) => name,
-      findExisting: (names) =>
-        db.teamMember.findMany({
-          where: { organizationId, deletedAt: null, name: { in: names } },
-          orderBy: { createdAt: "asc" },
-          select: { id: true, name: true },
-        }),
-      create: (name) => {
-        const { createdAt, updatedAt } = custodians.find(
-          (custodian) => custodian.name === name
-        )!;
-        return db.teamMember.create({
-          data: { name, organizationId, createdAt, updatedAt },
-          select: { id: true },
-        });
-      },
+    const teamMemberIds = await findOrCreateCustodians({
+      custodians: custodyPerRow.flat().map(({ custodian }) => custodian),
+      organizationId,
     });
 
     const customFieldDefinitions = collectBackupCustomFields({
@@ -5455,12 +5507,11 @@ export async function createAssetsFromBackupImport({
             ? (asset.consumptionType as ConsumptionType)
             : undefined;
 
-        /** Custody, as operator rows. A custodian named on two rows gets one
-         * row with their units added up: the database allows one operator
-         * row per asset and team member. */
+        /** Custody, as operator rows, keyed by team member: the database
+         * allows one operator row per asset and team member. */
         const unitsByTeamMemberId = new Map<string, number>();
         for (const { custodian, quantity } of custodyPerRow[rowIndex]) {
-          const teamMemberId = custodianIds.get(custodian.name)!;
+          const teamMemberId = teamMemberIds.get(custodian.key)!;
           unitsByTeamMemberId.set(
             teamMemberId,
             (unitsByTeamMemberId.get(teamMemberId) ?? 0) + quantity

@@ -15,6 +15,13 @@ import { AssetType } from "@prisma/client";
 
 /** What the backup says about a custodian, to find or create them by. */
 export type BackupCustodian = {
+  /**
+   * Tells the file's custodians apart: their team member id in the source
+   * workspace, or their name when the row has no id. Team member names are not
+   * unique, so two people can share one. It is a label within the file only;
+   * an id from the file never resolves anything in the target workspace.
+   */
+  key: string;
   name: string;
   createdAt?: Date;
   updatedAt?: Date;
@@ -41,11 +48,15 @@ function readCustodyRow(row: unknown): BackupCustodyRow | null {
   const { custodian, quantity, kitCustodyId } = row as Record<string, unknown>;
   if (typeof custodian !== "object" || custodian === null) return null;
 
-  const { name, createdAt, updatedAt } = custodian as Record<string, unknown>;
+  const { id, name, createdAt, updatedAt } = custodian as Record<
+    string,
+    unknown
+  >;
   if (typeof name !== "string" || name.trim() === "") return null;
 
   return {
     custodian: {
+      key: typeof id === "string" && id !== "" ? `id:${id}` : `name:${name}`,
       name,
       createdAt: readDate(createdAt),
       updatedAt: readDate(updatedAt),
@@ -71,8 +82,7 @@ function readCustodyRow(row: unknown): BackupCustodyRow | null {
  * @param args.type - The row's asset type. Missing means individual, the
  *   column's default.
  * @param args.custody - The parsed `custody` cell, if the row has one.
- * @returns One entry per custody row to create. Two entries may name the same
- *   custodian; the restore adds their units up.
+ * @returns One entry per custody row to create.
  */
 export function custodyForRestore({
   type,
