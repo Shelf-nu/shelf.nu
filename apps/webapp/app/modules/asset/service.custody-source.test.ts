@@ -19,6 +19,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { adjustQuantity } from "~/modules/consumption-log/service.server";
 import type { ShelfError } from "~/utils/error";
 import {
+  custodyFromLocationWhere,
   loadCustodySourcesForAssets,
   rehomeCustodyForPlacementChanges,
 } from "./custody-source.server";
@@ -1032,5 +1033,28 @@ describe("rehomeCustodyForPlacementChanges: many pools at once", () => {
       ["pool-1", 1],
     ]);
     expect(custodyRows()).toEqual([[AHMED, null, 2]]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                               Location page                                */
+/* -------------------------------------------------------------------------- */
+
+describe("custodyFromLocationWhere", () => {
+  it("splits custody by source only for pools placed at two or more locations", () => {
+    expect(
+      custodyFromLocationWhere({
+        locationId: CAMERA_ROOM,
+        multiSourcePoolIds: ["pool-1"],
+      })
+    ).toEqual({
+      OR: [
+        // Every other asset (one location, unplaced units, individual)
+        // keeps all of its custody on the page, as before.
+        { assetId: { notIn: ["pool-1"] } },
+        { locationId: CAMERA_ROOM },
+        { kitCustodyId: { not: null } },
+      ],
+    });
   });
 });

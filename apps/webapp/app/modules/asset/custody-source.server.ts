@@ -667,6 +667,63 @@ export function adjustLocationNoteSuffix(
 }
 
 /**
+ * Ids of the pools at `locationId` that are placed at two or more distinct
+ * manual locations: the only assets whose custody a location page splits by
+ * source. Each manual placement row is one distinct location
+ * (`AssetLocation_manual_unique`), so counting rows counts locations.
+ *
+ * @param locationId - The location the page is about
+ * @param organizationIds - Workspaces the caller may read the location in
+ */
+export async function getMultiSourcePoolIdsAtLocation({
+  locationId,
+  organizationIds,
+}: {
+  locationId: string;
+  organizationIds: string[];
+}): Promise<string[]> {
+  const rows = await db.assetLocation.groupBy({
+    by: ["assetId"],
+    where: {
+      assetKitId: null,
+      organizationId: { in: organizationIds },
+      asset: {
+        type: "QUANTITY_TRACKED",
+        assetLocations: { some: { locationId } },
+      },
+    },
+    having: { assetId: { _count: { gte: 2 } } },
+  });
+  return rows.map((row) => row.assetId);
+}
+
+/**
+ * Custody that counts as "at this location" on a location page. A pool
+ * placed at two or more locations counts only the custody taken from here.
+ * Every other asset counts all of its custody, as it always has: individual
+ * assets, pools at one location (with or without unplaced units, whose
+ * custody may record no source) and kit-inherited rows.
+ *
+ * @param locationId - The location the page is about
+ * @param multiSourcePoolIds - From {@link getMultiSourcePoolIdsAtLocation}
+ */
+export function custodyFromLocationWhere({
+  locationId,
+  multiSourcePoolIds,
+}: {
+  locationId: string;
+  multiSourcePoolIds: string[];
+}): Prisma.CustodyWhereInput {
+  return {
+    OR: [
+      { assetId: { notIn: multiSourcePoolIds } },
+      { locationId },
+      { kitCustodyId: { not: null } },
+    ],
+  };
+}
+
+/**
  * Units in operator custody taken from one location, per quantity-tracked
  * asset, for the location page's "· N in custody". Only pools placed at two
  * or more locations appear in the result, so a pool at one location reads

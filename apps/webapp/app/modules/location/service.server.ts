@@ -13,6 +13,8 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import type { CustodyRehomeResult } from "~/modules/asset/custody-source.server";
 import {
   createCustodyRehomeNote,
+  custodyFromLocationWhere,
+  getMultiSourcePoolIdsAtLocation,
   loadCustodySourcesForAssets,
   rehomeCustodyForPlacementChanges,
 } from "~/modules/asset/custody-source.server";
@@ -204,20 +206,18 @@ export async function getLocation(
     }
 
     /**
-     * Custody that counts as "at this location". A quantity-tracked asset's
-     * operator custody records the location its units were taken from, so
-     * only custody taken from HERE belongs on this page; custody from the
-     * asset's other locations (or from its unplaced units) does not.
-     * Kit-inherited rows and individual assets carry no source and match as
-     * they always have.
+     * Custody that counts as "at this location": for a pool placed at two
+     * or more locations only custody taken from HERE, for every other asset
+     * all of it (see `custodyFromLocationWhere`). Used by the custody
+     * filters and the custodian column alike.
      */
-    const custodyFromHere: Prisma.CustodyWhereInput = {
-      OR: [
-        { locationId: id },
-        { kitCustodyId: { not: null } },
-        { asset: { type: AssetType.INDIVIDUAL } },
-      ],
-    };
+    const custodyFromHere = custodyFromLocationWhere({
+      locationId: id,
+      multiSourcePoolIds: await getMultiSourcePoolIdsAtLocation({
+        locationId: id,
+        organizationIds: [organizationId, ...(otherOrganizationIds ?? [])],
+      }),
+    });
 
     if (teamMemberIds && teamMemberIds.length) {
       assetsWhere.OR = [
