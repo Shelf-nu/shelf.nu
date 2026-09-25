@@ -26,6 +26,7 @@ const option = (
   label,
   placed: left,
   inCustody: 0,
+  onBooking: 0,
   left,
 });
 
