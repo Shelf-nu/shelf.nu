@@ -1,4 +1,5 @@
 import { data, type ActionFunctionArgs } from "react-router";
+import type { InvitableRole } from "~/modules/invite/roles";
 import { INVITABLE_ROLES, isInvitableRole } from "~/modules/invite/roles";
 import { bulkInviteUsers } from "~/modules/invite/service.server";
 import { IMPORT_USERS_CSV_HEADERS } from "~/modules/invite/utils.server";
@@ -10,6 +11,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server";
 
@@ -20,7 +22,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
@@ -81,11 +83,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
+    // The same actor rule the single invite and resend enforce: only the
+    // workspace owner may grant an owner-only role. Refuses the whole file.
+    assertCanAssignRoles({
+      actorOwnsWorkspace: access.ownsWorkspace,
+      roles: users.map((user) => user.role as InvitableRole),
+      organizationId,
+    });
+
     const response = await bulkInviteUsers({
       organizationId,
       userId,
       users,
       extraMessage: formData.get("message") as string,
+      actorOwnsWorkspace: access.ownsWorkspace,
     });
 
     if (!response) {

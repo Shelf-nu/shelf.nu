@@ -1,12 +1,11 @@
 /**
- * Bulk user invite (CSV import) — role validation
+ * Bulk user invite (CSV import): role validation
  *
- * Pins that the CSV import cannot grant a role the invite dialog refuses. The
+ * Pins that the CSV import cannot grant a role the invite dialog refuses, and
+ * that only the workspace owner can grant an owner-only role through it. The
  * `role` column is raw text from an uploaded file and flows into `Invite.roles`
  * verbatim; after acceptance, permissions resolve from `UserOrganization.roles`,
  * so an unvalidated `OWNER` there is a full privilege escalation.
- *
- * Regression coverage for detail.dev finding D032.
  *
  * @see {@link file://./../../../app/routes/api+/settings.import-users.ts}
  * @see {@link file://./../../../app/modules/invite/roles.ts}
@@ -15,6 +14,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { AppLoadContext } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 import { createActionArgs } from "@mocks/remix";
 
 import { bulkInviteUsers } from "~/modules/invite/service.server";
@@ -29,7 +29,8 @@ import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server
 // why: the route parses an uploaded file; we drive rows in directly instead
 vi.mock("~/utils/csv.server", () => ({ csvDataFromRequest: vi.fn() }));
 
-// why: authorization is not under test here — the role gate is
+// why: the permission lookup reads the database; each case supplies the
+// resolved access of the acting member instead
 vi.mock("~/utils/roles.server", () => ({ requirePermission: vi.fn() }));
 
 // why: subscription seat limits are a separate concern from role validation
@@ -84,12 +85,14 @@ describe("settings.import-users role validation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // The route destructures only organizationId; the rest of the permission
-    // payload is irrelevant here, so it is cast to the real return type rather
-    // than reconstructed field by field.
-    vi.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-    } as Awaited<ReturnType<typeof requirePermission>>);
+    // An Administrator acting, unless a case says otherwise. The rest of the
+    // permission payload is irrelevant here, so it is cast to the real return
+    // type rather than reconstructed field by field.
+    vi.mocked(requirePermission).mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as Awaited<
+        ReturnType<typeof requirePermission>
+      >
+    );
     vi.mocked(assertUserCanInviteUsersToWorkspace).mockResolvedValue(undefined);
     vi.mocked(bulkInviteUsers).mockResolvedValue(
       {} as Awaited<ReturnType<typeof bulkInviteUsers>>
@@ -123,7 +126,13 @@ describe("settings.import-users role validation", () => {
     expect(bulkInviteUsers).not.toHaveBeenCalled();
   });
 
-  it("still accepts the three invitable roles", async () => {
+  it("still accepts the three invitable roles from the owner", async () => {
+    vi.mocked(requirePermission).mockResolvedValueOnce(
+      permissionContext({ roles: [OrganizationRoles.OWNER] }) as Awaited<
+        ReturnType<typeof requirePermission>
+      >
+    );
+
     const response = await runImport([
       [OrganizationRoles.ADMIN, "a@example.com", ""],
       [OrganizationRoles.BASE, "b@example.com", ""],
@@ -132,5 +141,33 @@ describe("settings.import-users role validation", () => {
 
     expect(response.init?.status).toBeUndefined();
     expect(bulkInviteUsers).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an ADMIN importing an ADMIN row and creates no invites", async () => {
+    const response = await runImport([
+      [OrganizationRoles.BASE, "fine@example.com", ""],
+      [OrganizationRoles.ADMIN, "admin@example.com", ""],
+    ]);
+
+    expect(response.init?.status).toBe(403);
+    expect(bulkInviteUsers).not.toHaveBeenCalled();
+  });
+
+  it("lets an ADMIN import non-owner-only roles", async () => {
+    const response = await runImport([
+      [OrganizationRoles.BASE, "b@example.com", ""],
+      [OrganizationRoles.SELF_SERVICE, "c@example.com", ""],
+    ]);
+
+    expect(response.init?.status).toBeUndefined();
+    expect(bulkInviteUsers).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the actor's ownership to the service", async () => {
+    await runImport([[OrganizationRoles.BASE, "b@example.com", ""]]);
+
+    expect(bulkInviteUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ actorOwnsWorkspace: false })
+    );
   });
 });

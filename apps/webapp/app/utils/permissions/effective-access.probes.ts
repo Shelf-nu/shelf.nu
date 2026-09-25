@@ -21,7 +21,6 @@ import { getBookingOwnershipScope } from "~/modules/booking/utils.server";
 import { resolveCalendarVisibility } from "~/modules/calendar-subscription/service.server";
 import { INVITABLE_ROLES } from "~/modules/invite/roles";
 import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
-import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import {
   assertCanDeleteBooking,
   assertCanDownloadBookingDocuments,
@@ -40,7 +39,7 @@ import { isOrganizationOwner } from "~/utils/roles.server";
 import type { AdminArea } from "./admin-areas";
 import { canSeeAdminArea } from "./admin-areas";
 import { userHasCustodyViewPermission } from "./custody-and-bookings-permissions.validator.client";
-import { holdsRoleWhere } from "./membership-access";
+import { holdsRoleWhere, roleChangeRequiresOwner } from "./membership-access";
 import { PermissionAction, PermissionEntity } from "./permission.data";
 import { userHasPermission } from "./permission.validator.client";
 import {
@@ -58,6 +57,9 @@ import { visibleSettingsTabs, visibleTeamTabs } from "./settings-tabs";
 
 const R = OrganizationRoles;
 const SINGLE_ROLES = [R.OWNER, R.ADMIN, R.SELF_SERVICE, R.BASE] as const;
+
+/** Key order of the recorded D-10 label map. */
+const D10_KEY_ORDER = [R.ADMIN, R.OWNER, R.BASE, R.SELF_SERVICE] as const;
 
 /** Every role set the fixture evaluates: singles, every ordered pair, empty, unknown. */
 export const ROLE_SETS: string[][] = [
@@ -396,8 +398,12 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     })
   );
   snapshot["D-05:ssoAssignable"] = SSO_ASSIGNABLE_ROLE_PRECEDENCE;
-  snapshot["D-04:invitable"] = INVITABLE_ROLES;
-  snapshot["D-10:labels"] = organizationRolesMap;
+  // The invitable list is recorded sorted, and the labels in a fixed key order,
+  // so the recorded values do not depend on the policy table's rank order.
+  snapshot["D-04:invitable"] = [...INVITABLE_ROLES].sort();
+  snapshot["D-10:labels"] = Object.fromEntries(
+    D10_KEY_ORDER.map((role) => [role, ROLE_LABELS[role]])
+  );
 
   // D-02: ownership transfer on role change.
   snapshot["D-02"] = Object.fromEntries(
@@ -1357,27 +1363,32 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // B9:D-07: team member row menu, caller × target
   // (components/workspace/users-actions-dropdown.tsx, change role and revoke):
-  // locked when the caller holds ADMIN and the target's team-list roleEnum
-  // (its effective role) is ADMIN. The page needs teamMember:read
-  // (settings.team.users.tsx loader); the row menu is hidden when the target's
-  // effective role owns the workspace (settings.team.users.tsx UserRow).
+  // locked when the caller does not own the workspace and the target's
+  // team-list roleEnum (its effective role) needs the owner to change it. The
+  // page needs teamMember:read (settings.team.users.tsx loader); the row menu
+  // is hidden when the target's effective role owns the workspace
+  // (settings.team.users.tsx UserRow).
   snapshot["B9:D-07:users-menu"] = perRoleSet((caller) => {
-    const { isAdministrator } = hookFlags(caller);
+    const { ownsWorkspace } = accessFor(caller);
     const reachesPage = can(caller, E.teamMember, A.read);
     return perRoleSet((target) => {
       const roleEnum = resolveRole(target);
       if (!reachesPage) return "no-page";
       if (ROLE_POLICIES[roleEnum].membership.ownsWorkspace) return "no-menu";
-      return isAdministrator && roleEnum === R.ADMIN ? "locked" : "open";
+      return !ownsWorkspace && roleChangeRequiresOwner(roleEnum)
+        ? "locked"
+        : "open";
     });
   });
 
-  // B9:D-07: server revoke (modules/user/utils.server.ts:135-154; caller role
-  // is requirePermission's effective role), then revokeAccessToOrganization
-  // refusing any OWNER-holding membership (modules/user/service.server.ts:1710-1742).
+  // B9:D-07: server revoke (modules/user/utils.server.ts resolveUserAction,
+  // revokeAccess: refused when the target's effective role needs the owner and
+  // the caller does not own the workspace), then revokeAccessToOrganization
+  // refusing any OWNER-holding membership (modules/user/service.server.ts).
   snapshot["B9:D-07:revoke-guard"] = perRoleSet((target) =>
     perCase(CALLER_ROLES, (caller) =>
-      (target.includes(R.ADMIN) && caller !== R.OWNER) ||
+      (roleChangeRequiresOwner(resolveRole(target)) &&
+        !isWorkspaceOwner([caller])) ||
       target.includes(R.OWNER)
         ? "refused"
         : "allowed"

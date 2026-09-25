@@ -40,6 +40,7 @@ import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { ROLE_LABELS, resolveRole } from "~/utils/permissions/role-access";
+import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
 import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
 import {
   caseInsensitiveEmailFilter,
@@ -49,6 +50,7 @@ import {
   splitName,
 } from "./helpers";
 import { processInvitationMessage } from "./message-validator.server";
+import type { InvitableRole } from "./roles";
 import { isInvitableRole } from "./roles";
 import { createTeamMember } from "../team-member/service.server";
 import { createUserOrAttachOrg } from "../user/service.server";
@@ -150,6 +152,11 @@ export async function createInvite(
     teamMemberId?: Invite["teamMemberId"];
     userId: string;
     extraMessage?: string | null;
+    /**
+     * `access.ownsWorkspace` of the inviter; only the owner may grant an
+     * owner-only role.
+     */
+    actorOwnsWorkspace: boolean;
   }
 ) {
   let {
@@ -161,11 +168,15 @@ export async function createInvite(
     teamMemberId,
     userId,
     extraMessage,
+    actorOwnsWorkspace,
   } = payload;
 
   inviteeEmail = normalizeInviteEmail(inviteeEmail);
 
   try {
+    // Authorize the actor before any read or write.
+    assertCanAssignRoles({ actorOwnsWorkspace, roles, organizationId });
+
     // Add SSO validation before proceeding with invite
     await validateInvite(inviteeEmail, organizationId);
 
@@ -676,11 +687,17 @@ export async function bulkInviteUsers({
   userId,
   organizationId,
   extraMessage,
+  actorOwnsWorkspace,
 }: {
   users: InviteUserSchema[];
   userId: User["id"];
   organizationId: Organization["id"];
   extraMessage?: string | null;
+  /**
+   * `access.ownsWorkspace` of the inviter; only the owner may grant an
+   * owner-only role.
+   */
+  actorOwnsWorkspace: boolean;
 }) {
   try {
     // Validate and sanitize invitation message
@@ -745,6 +762,13 @@ export async function bulkInviteUsers({
         shouldBeCaptured: false,
       });
     }
+
+    // Every row's role is invitable here (checked above); now the actor.
+    assertCanAssignRoles({
+      actorOwnsWorkspace,
+      roles: validUsers.map((user) => user.role as InvitableRole),
+      organizationId,
+    });
 
     // Filter out duplicate emails
     const uniquePayloads = lodash.uniqBy(validUsers, (user) => user.email);

@@ -8,7 +8,6 @@
  * @see {@link file://./../../routes/_layout+/settings.team.invites.tsx}
  * @see {@link file://./../invite/service.server.ts}
  */
-import type { OrganizationRoles } from "@prisma/client";
 import {
   InviteStatuses,
   OrganizationRoles as OrgRolesEnum,
@@ -18,15 +17,22 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { roleChangeTemplateString } from "~/emails/role-change-template";
-import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
+import { roleChangeRequiresOwner } from "~/utils/permissions/membership-access";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
+import {
+  ROLE_LABELS,
+  labelToRole,
+  resolveRole,
+} from "~/utils/permissions/role-access";
+import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
 import { isDemotion } from "~/utils/roles";
 import { randomUsernameFromEmail } from "~/utils/user";
 import {
@@ -43,14 +49,22 @@ import { isInvitableRole } from "../invite/roles";
 import { createInvite } from "../invite/service.server";
 
 /**
- * This function handles the user actions such as deleting, revoking access, resending invite, and cancelling invite.
- * It is currently used in the settings/team/users index & user page.
+ * Handles the team actions posted from the team users list, the member page
+ * and the invites list: delete a team member, revoke access, resend or cancel
+ * an invite, and change a role.
+ *
+ * @param request - The action request; its form data carries the `intent`
+ * @param organizationId - The caller's current organization
+ * @param userId - The acting user's id
+ * @param callerAccess - The acting member's resolved access (from requirePermission)
+ * @throws {ShelfError} On invalid input, or 403 when the caller may not act on
+ *   the target or grant the requested role
  */
 export async function resolveUserAction(
   request: Request,
   organizationId: string,
   userId: string,
-  callerRole: OrgRolesEnum
+  callerAccess: RoleAccess
 ) {
   const formData = await request.formData();
 
@@ -124,28 +138,31 @@ export async function resolveUserAction(
       );
 
       /**
-       * Parity with `changeUserRole`: only the OWNER may act on an ADMIN.
-       * Without this an ADMIN who is refused a role change ("Only the workspace
-       * owner can change an Administrator's role") can just revoke that
-       * ADMIN's access instead, which is the stronger action.
+       * Same rule as `changeUserRole`: a member whose effective role needs the
+       * owner to change it (Administrator, Owner) can only have access revoked
+       * by the workspace owner. Revoking is the stronger action, so it can
+       * never be looser than a role change.
        *
-       * Revoking the OWNER is refused by `revokeAccessToOrganization` itself,
-       * so it holds for every caller rather than only this one.
+       * Revoking the OWNER is also refused by `revokeAccessToOrganization`
+       * itself, so it holds for every caller rather than only this one.
        */
       const targetUserOrg = await db.userOrganization.findFirst({
         where: { userId: targetUserId, organizationId },
         select: { roles: true },
       });
+      const targetRole = targetUserOrg
+        ? resolveRole(targetUserOrg.roles)
+        : null;
 
       if (
-        targetUserOrg?.roles.includes(OrgRolesEnum.ADMIN) &&
-        callerRole !== OrgRolesEnum.OWNER
+        targetRole &&
+        roleChangeRequiresOwner(targetRole) &&
+        !callerAccess.ownsWorkspace
       ) {
         throw new ShelfError({
           cause: null,
           title: "Insufficient permissions",
-          message:
-            "Only the workspace owner can revoke an Administrator's access.",
+          message: `Only the workspace owner can revoke access for a member with the ${ROLE_LABELS[targetRole]} role.`,
           additionalData: { organizationId, targetUserId },
           label: "Team",
           status: 403,
@@ -260,17 +277,14 @@ export async function resolveUserAction(
         }
       );
 
-      /** Find the Role based on its user friendly name */
-      const role = Object.keys(organizationRolesMap).find(
-        (key) => organizationRolesMap[key] === userFriendlyRole
-      ) as OrganizationRoles | undefined;
+      /** The form submits the role's label; map it back through ROLE_LABELS. */
+      const role = labelToRole(userFriendlyRole);
 
       /**
-       * `userFriendlyRole` is free text from the form and `organizationRolesMap`
-       * contains an OWNER entry (it doubles as the display map for the team
-       * list), so "Owner" would resolve here and mint an OWNER invite —
-       * the same escalation the invite dialog and CSV import both refuse.
-       * Ownership moves only through `transferOwnership`.
+       * `userFriendlyRole` is free text from the form. `labelToRole` knows
+       * every role's label, including Owner, so the invitable check is what
+       * refuses an Owner invite. Ownership moves only through
+       * `transferOwnership`.
        */
       if (!role || !isInvitableRole(role)) {
         throw new ShelfError({
@@ -282,6 +296,14 @@ export async function resolveUserAction(
           shouldBeCaptured: false,
         });
       }
+
+      // Authorize before invalidating: a refused resend must leave the
+      // existing invite pending.
+      assertCanAssignRoles({
+        actorOwnsWorkspace: callerAccess.ownsWorkspace,
+        roles: [role],
+        organizationId,
+      });
 
       /**
        * Invalidate every earlier invite for this person in this organization
@@ -318,6 +340,7 @@ export async function resolveUserAction(
         inviterId: userId,
         roles: [role],
         userId,
+        actorOwnsWorkspace: callerAccess.ownsWorkspace,
       });
 
       if (invite) {
@@ -334,7 +357,7 @@ export async function resolveUserAction(
     }
     case "changeRole": {
       await validatePermission({
-        roles: [callerRole],
+        roles: [callerAccess.role],
         action: PermissionAction.changeRole,
         entity: PermissionEntity.teamMember,
         organizationId,
@@ -426,7 +449,7 @@ export async function resolveUserAction(
             userId: targetUserId,
             organizationId,
             newRole,
-            callerRole,
+            callerRole: callerAccess.role,
             tx,
           });
 
@@ -446,7 +469,7 @@ export async function resolveUserAction(
             userId: targetUserId,
             organizationId,
             newRole,
-            callerRole,
+            callerRole: callerAccess.role,
             tx,
           });
 
@@ -474,8 +497,8 @@ export async function resolveUserAction(
         }),
       ]);
 
-      const roleName = organizationRolesMap[newRole] || newRole;
-      const previousRoleName = organizationRolesMap[currentRole] || currentRole;
+      const roleName = ROLE_LABELS[newRole];
+      const previousRoleName = ROLE_LABELS[currentRole];
 
       sendEmail({
         to: targetUser.email,

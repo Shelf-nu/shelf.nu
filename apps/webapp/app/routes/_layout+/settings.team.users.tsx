@@ -114,14 +114,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.update,
     });
 
-    return await resolveUserAction(request, organizationId, userId, role);
+    return await resolveUserAction(request, organizationId, userId, access);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
