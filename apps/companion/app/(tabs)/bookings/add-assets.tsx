@@ -42,6 +42,11 @@ import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import {
+  canCancelModelReservation,
+  modelReservationBounds,
+} from "@/lib/booking-model-reservation";
+import { submitFromSheet } from "@/lib/sheet-submit";
 
 type Mode = "assets" | "kits" | "models";
 
@@ -353,35 +358,46 @@ export default function AddBookingAssetsScreen() {
   // ── Book-by-model reserve / edit / remove ────────────────────────────────
 
   /**
-   * Upper bound for reserving a model: what's free in the window PLUS the units
-   * this booking has already had assigned (they can't be re-reserved away but
-   * the total can't drop below them). Mirrors the server cap in
-   * `upsertBookingModelRequest` (available + existingFulfilled).
+   * How far this model's reservation may be moved — free pool plus the units
+   * the booking already holds, floored at what is already assigned. See
+   * {@link modelReservationBounds}; the server enforces the same range.
    */
-  const reserveMax = (model: AvailableModel) => {
-    const existing = modelRequestsById[model.id];
-    return model.available + (existing?.fulfilledQuantity ?? 0);
-  };
+  const reserveBounds = (model: AvailableModel) =>
+    modelReservationBounds({
+      available: model.available,
+      fulfilledQuantity: modelRequestsById[model.id]?.fulfilledQuantity,
+    });
 
+  /**
+   * Held while a reservation request runs, so a second tap on Reserve cannot
+   * send it twice. A ref rather than state: a state flag cannot block a tap
+   * delivered in the same tick.
+   */
+  const reserveSubmitLock = useRef(false);
+
+  /**
+   * Sends the reservation with the sheet still open; the sheet's confirm IS
+   * the confirmation step. The sheet closes only once the server accepts, so a
+   * refusal — the model's free pool no longer fits the quantity — keeps the
+   * entered number on screen to lower and retry.
+   */
   const handleReserveSubmit = async (quantity: number) => {
     if (!currentOrg || !bookingId || !activeModel) return;
-    const model = activeModel;
-    setActiveModel(null); // the sheet's confirm IS the confirmation step
-    setIsSubmitting(true);
-    const { error: err } = await api.upsertModelRequest(
-      currentOrg.id,
-      bookingId,
-      model.id,
-      quantity
-    );
-    setIsSubmitting(false);
-    if (err) {
-      Alert.alert("Couldn't reserve model", err);
-      return;
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    markBookingDirty(bookingId);
-    reload(); // refresh availability + the reserved amounts
+    const orgId = currentOrg.id;
+    const modelId = activeModel.id;
+    await submitFromSheet({
+      lock: reserveSubmitLock,
+      request: () =>
+        api.upsertModelRequest(orgId, bookingId, modelId, quantity),
+      onAccepted: () => {
+        setActiveModel(null);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        markBookingDirty(bookingId);
+        reload(); // refresh availability + the reserved amounts
+      },
+      setSubmitting: setIsSubmitting,
+      showError: (message) => Alert.alert("Couldn't reserve model", message),
+    });
   };
 
   // Memoized so `renderModel` (which references it) keeps a stable identity
@@ -519,7 +535,11 @@ export default function AddBookingAssetsScreen() {
     ({ item }: { item: AvailableModel }) => {
       const existing = modelRequestsById[item.id];
       const reserved = existing?.quantity ?? 0;
-      const max = item.available + (existing?.fulfilledQuantity ?? 0);
+      const assigned = existing?.fulfilledQuantity ?? 0;
+      const { max } = modelReservationBounds({
+        available: item.available,
+        fulfilledQuantity: assigned,
+      });
       // Nothing free to reserve AND nothing already reserved → can't act.
       const canReserve = max >= 1;
       return (
@@ -534,9 +554,12 @@ export default function AddBookingAssetsScreen() {
             <Text style={styles.modelMeta}>
               {item.available} of {item.total} available
               {reserved > 0 ? ` · ${reserved} reserved here` : ""}
+              {assigned > 0 ? ` · ${assigned} assigned` : ""}
             </Text>
           </View>
-          {reserved > 0 && (
+          {/* Edit, floored at the assigned count, is the route that works
+              once units are on the booking. */}
+          {reserved > 0 && canCancelModelReservation(assigned) && (
             <TouchableOpacity
               style={styles.modelRemoveButton}
               onPress={() => handleRemoveModel(item)}
@@ -736,12 +759,14 @@ export default function AddBookingAssetsScreen() {
             : "Reserve model"
         }
         subtitle={activeModel?.name}
-        max={activeModel ? reserveMax(activeModel) : 1}
+        max={activeModel ? reserveBounds(activeModel).max : 1}
+        min={activeModel ? reserveBounds(activeModel).min : 1}
         defaultValue={
           activeModel ? modelRequestsById[activeModel.id]?.quantity ?? 1 : 1
         }
         confirmLabel="Reserve"
-        onSubmit={handleReserveSubmit}
+        isSubmitting={isSubmitting}
+        onSubmit={(quantity) => void handleReserveSubmit(quantity)}
         onClose={() => setActiveModel(null)}
       />
 

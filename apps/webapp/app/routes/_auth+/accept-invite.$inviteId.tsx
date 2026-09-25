@@ -13,7 +13,10 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { signInWithEmail } from "~/modules/auth/service.server";
-import { generateRandomCode } from "~/modules/invite/helpers";
+import {
+  generateRandomCode,
+  normalizeInviteEmail,
+} from "~/modules/invite/helpers";
 import {
   checkUserAndInviteMatch,
   updateInviteStatus,
@@ -177,9 +180,15 @@ export async function action({ context, params, request }: LoaderFunctionArgs) {
       });
     }
 
-    /** Sign in the user */
+    /**
+     * Sign in the user.
+     *
+     * `updateInviteStatus` keys the account on the normalised address, so the
+     * sign-in has to use the same form: a stored invite can still hold the
+     * capitals of the CSV row it came from.
+     */
     const authSession = await signInWithEmail(
-      updatedInvite.inviteeEmail,
+      normalizeInviteEmail(updatedInvite.inviteeEmail),
       password
     ).catch(
       // We don't care about the error here, let the user login if he's already registered

@@ -36,11 +36,14 @@
  * // singleton directly; both take their Prisma client as an explicit `tx`/`db`
  * // argument, which this suite always supplies as the fixture-backed fake.
  */
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { describe, expect, it, vitest } from "vitest";
+import { getQuantityData } from "~/components/assets/asset-status-badge/quantity-data";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { computeCheckedOutForAsset } from "~/modules/booking/checked-out.server";
 import type { AvailabilityBatchClient } from "./availability.server";
 import { getAssetAvailabilityBatch } from "./availability.server";
+import { getAssetQuantityRows } from "./quantity-breakdown.server";
 
 // why: see the module doc above — importing the real `booking/service.server`
 // module (for the real `computeCheckedOutForAsset`) transitively imports
@@ -66,6 +69,23 @@ type FixtureBookingAsset = {
   quantity: number;
   /** `null`/omitted = standalone (free-pool) slice; a value = kit-driven slice. */
   assetKitId?: string | null;
+  /** Stored cumulative departure counter. Omitted = 0. */
+  checkedOutQuantity?: number;
+  /**
+   * Whether the slice carries its `checkedOutAt` marker, which the all-at-once
+   * checkout stamps without writing a session. Omitted = not stamped.
+   */
+  stamped?: boolean;
+};
+
+/** One `ConsumptionLog` row recorded against a booking. */
+type FixtureDisposition = {
+  assetId: string;
+  bookingId: string;
+  /** The slice the log names, or `null` when it names only the asset. */
+  bookingAssetId?: string | null;
+  category: "RETURN" | "CONSUME" | "LOSS" | "DAMAGE" | "CHECKOUT";
+  quantity: number;
 };
 
 /** One `Asset` row in the in-memory fixture (only `quantity`, the availability `total`). */
@@ -114,7 +134,8 @@ function matchesFilter(value: string, filter: ScalarFilter): boolean {
  * driven by the SAME fixture rows, so both real implementations read identical
  * underlying data. `asset`/`assetKit` are backed by optional fixtures so tests
  * that assert `physicalAvailable` (which needs `total` and `inKits`) can supply
- * them; `custody`/`consumptionLog` stay stubbed empty (not exercised here).
+ * them; `consumptionLog.findMany` serves the optional `dispositions` fixture
+ * (what came back or was used up), and `custody` stays stubbed empty.
  *
  * @param fixture - The booking-assets, bookings, checkout sessions, and
  *   (optionally) assets + kit memberships both formulas under test will query.
@@ -125,14 +146,7 @@ function createFakeClient(fixture: {
   sessions: FixtureSession[];
   assets?: FixtureAsset[];
   assetKits?: FixtureAssetKit[];
-  /**
-   * Live `Asset.status` per asset id. Both formulas gate their legacy
-   * all-at-once branch on this, because a quick checkout flips every asset it
-   * processed to CHECKED_OUT while an asset ADDED to the booking later stays
-   * AVAILABLE (GitHub #2815). Defaults to CHECKED_OUT, which is what the
-   * pre-existing fixtures model: assets that really are off the shelf.
-   */
-  assetStatuses?: Record<string, AssetStatus>;
+  dispositions?: FixtureDisposition[];
 }) {
   const bookingById = new Map(fixture.bookings.map((b) => [b.id, b]));
   const assets = fixture.assets ?? [];
@@ -147,7 +161,10 @@ function createFakeClient(fixture: {
     bookingId: row.bookingId,
     quantity: row.quantity,
     assetKitId: row.assetKitId ?? null,
+    checkedOutQuantity: row.checkedOutQuantity ?? 0,
+    checkedOutAt: row.stamped ? new Date("2026-09-01T09:00:00Z") : null,
   }));
+  const dispositions = fixture.dispositions ?? [];
 
   return {
     asset: {
@@ -156,6 +173,41 @@ function createFakeClient(fixture: {
           .filter((a) => !where.id || where.id.in.includes(a.id))
           .map((a) => ({ id: a.id, quantity: a.quantity }))
       ),
+      // `getAssetQuantityRows` reads the asset with its RESERVED / ONGOING /
+      // OVERDUE slices nested, each carrying its booking.
+      findFirst: vitest.fn(({ where }: { where: { id: string } }) => {
+        const asset = assets.find((a) => a.id === where.id);
+        if (!asset) return null;
+        return {
+          id: asset.id,
+          type: "QUANTITY_TRACKED",
+          quantity: asset.quantity,
+          custody: [],
+          assetKits: [],
+          bookingAssets: bookingAssetRows
+            .filter((row) => row.assetId === asset.id)
+            .flatMap((row) => {
+              const booking = bookingById.get(row.bookingId);
+              if (
+                !booking ||
+                !["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status)
+              ) {
+                return [];
+              }
+              return [
+                {
+                  quantity: row.quantity,
+                  assetKitId: row.assetKitId,
+                  booking: {
+                    id: booking.id,
+                    name: booking.id,
+                    status: booking.status,
+                  },
+                },
+              ];
+            }),
+        };
+      }),
     },
     custody: { groupBy: vitest.fn().mockResolvedValue([]) },
     assetKit: {
@@ -177,7 +229,33 @@ function createFakeClient(fixture: {
         }
       ),
     },
-    consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
+    consumptionLog: {
+      findMany: vitest.fn(
+        ({
+          where,
+        }: {
+          where: {
+            assetId?: ScalarFilter;
+            bookingId?: ScalarFilter;
+            category?: { in: string[] };
+          };
+        }) =>
+          dispositions
+            .filter(
+              (log) =>
+                matchesFilter(log.assetId, where.assetId) &&
+                matchesFilter(log.bookingId, where.bookingId) &&
+                (!where.category || where.category.in.includes(log.category))
+            )
+            .map((log) => ({
+              bookingId: log.bookingId,
+              assetId: log.assetId,
+              bookingAssetId: log.bookingAssetId ?? null,
+              quantity: log.quantity,
+            }))
+      ),
+      groupBy: vitest.fn().mockResolvedValue([]),
+    },
     bookingAsset: {
       findMany: vitest.fn(
         ({
@@ -219,13 +297,8 @@ function createFakeClient(fixture: {
               bookingId: row.bookingId,
               quantity: row.quantity,
               assetKitId: row.assetKitId,
-              // Both formulas read the live asset status to decide whether the
-              // legacy all-at-once branch applies to THIS asset.
-              asset: {
-                status:
-                  fixture.assetStatuses?.[row.assetId] ??
-                  AssetStatus.CHECKED_OUT,
-              },
+              checkedOutQuantity: row.checkedOutQuantity,
+              checkedOutAt: row.checkedOutAt,
               // Neither formula under test reads `booking.from`/`.to` for the
               // checked-out computation (that's only consulted by the
               // `reserved` side of `getAssetAvailabilityBatch`, which this
@@ -259,7 +332,9 @@ function createFakeClient(fixture: {
 describe("getAssetAvailabilityBatch vs computeCheckedOutForAsset (real implementations)", () => {
   it("agree on a legacy all-at-once checkout (zero PartialBookingCheckout sessions)", async () => {
     const client = createFakeClient({
-      bookingAssets: [{ assetId: "a1", bookingId: "legacy", quantity: 5 }],
+      bookingAssets: [
+        { assetId: "a1", bookingId: "legacy", quantity: 5, stamped: true },
+      ],
       bookings: [
         { id: "legacy", status: BookingStatus.ONGOING, organizationId: ORG_ID },
       ],
@@ -278,25 +353,18 @@ describe("getAssetAvailabilityBatch vs computeCheckedOutForAsset (real implement
   });
 
   it("agree that an asset added AFTER an all-at-once checkout holds no units", async () => {
-    // GitHub #2815. Both assets sit on the SAME zero-session ONGOING booking,
-    // so the booking-level legacy signal fires for both. Only the live asset
-    // status tells them apart: `a1` was on the booking when it was checked out
-    // (CHECKED_OUT), `a2` was added afterwards and `updateBookingAssets`
-    // deliberately left it AVAILABLE. Treating `a2` as fully checked out
-    // inflated its checked-out count and starved its availability.
+    // Both assets sit on the SAME zero-session ONGOING booking. Only the slice
+    // marker tells them apart: `a1` was on the booking when it was checked out
+    // (stamped), `a2` was added afterwards and never went out.
     const client = createFakeClient({
       bookingAssets: [
-        { assetId: "a1", bookingId: "legacy", quantity: 5 },
+        { assetId: "a1", bookingId: "legacy", quantity: 5, stamped: true },
         { assetId: "a2", bookingId: "legacy", quantity: 20 },
       ],
       bookings: [
         { id: "legacy", status: BookingStatus.ONGOING, organizationId: ORG_ID },
       ],
       sessions: [],
-      assetStatuses: {
-        a1: AssetStatus.CHECKED_OUT,
-        a2: AssetStatus.AVAILABLE,
-      },
     });
 
     const realA1 = await computeCheckedOutForAsset(client, "a1", ORG_ID);
@@ -311,6 +379,39 @@ describe("getAssetAvailabilityBatch vs computeCheckedOutForAsset (real implement
     expect(realA2).toBe(0);
     expect(batch.get("a1")?.checkedOut).toBe(realA1);
     expect(batch.get("a2")?.checkedOut).toBe(realA2);
+  });
+
+  it("agree that a slice on a booking that never checked it out holds no units", async () => {
+    // The asset went out with the button on `b-out`, so the asset as a whole
+    // reads checked out. `b-waiting` is also ONGOING and books 8 of it, but
+    // never sent any: its slice has no marker and no session.
+    const client = createFakeClient({
+      bookingAssets: [
+        { assetId: "a1", bookingId: "b-out", quantity: 5, stamped: true },
+        { assetId: "a1", bookingId: "b-waiting", quantity: 8 },
+      ],
+      bookings: [
+        { id: "b-out", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+        {
+          id: "b-waiting",
+          status: BookingStatus.ONGOING,
+          organizationId: ORG_ID,
+        },
+      ],
+      sessions: [],
+      assets: [{ id: "a1", quantity: 20 }],
+    });
+
+    const real = await computeCheckedOutForAsset(client, "a1", ORG_ID);
+    const batch = await getAssetAvailabilityBatch(["a1"], {
+      organizationId: ORG_ID,
+      window: null,
+      db: client as unknown as AvailabilityBatchClient,
+    });
+
+    expect(real).toBe(5);
+    expect(batch.get("a1")?.checkedOut).toBe(real);
+    expect(batch.get("a1")?.physicalAvailable).toBe(15);
   });
 
   it("agree on a partial checkout (booked minus claimed remains on the shelf)", async () => {
@@ -347,8 +448,8 @@ describe("getAssetAvailabilityBatch vs computeCheckedOutForAsset (real implement
   it("agree on multiple active bookings for one asset (legacy + partial summed)", async () => {
     const client = createFakeClient({
       bookingAssets: [
-        { assetId: "a1", bookingId: "legacy", quantity: 5 },
-        { assetId: "a1", bookingId: "partial", quantity: 8 },
+        { assetId: "a1", bookingId: "legacy", quantity: 5, stamped: true },
+        { assetId: "a1", bookingId: "partial", quantity: 8, stamped: true },
       ],
       bookings: [
         { id: "legacy", status: BookingStatus.ONGOING, organizationId: ORG_ID },
@@ -439,6 +540,7 @@ describe("getAssetAvailabilityBatch vs computeCheckedOutForAsset (real implement
           bookingId: "b1",
           quantity: 10,
           assetKitId: "kit1",
+          stamped: true,
         },
       ],
       bookings: [
@@ -513,5 +615,459 @@ describe("getAssetAvailabilityBatch vs computeCheckedOutForAsset (real implement
     // physicalAvailable = 20 − 0 − 5(inKits) − 8(standaloneCheckedOut) = 7.
     expect(a1?.inKits).toBe(5);
     expect(a1?.physicalAvailable).toBe(7);
+  });
+});
+
+describe("units that came back or were used up are no longer checked out", () => {
+  /** Runs both real implementations and returns their figures for one asset. */
+  async function bothFor(
+    client: ReturnType<typeof createFakeClient>,
+    assetId: string
+  ) {
+    const real = await computeCheckedOutForAsset(client, assetId, ORG_ID);
+    const batch = await getAssetAvailabilityBatch([assetId], {
+      organizationId: ORG_ID,
+      window: null,
+      db: client as unknown as AvailabilityBatchClient,
+    });
+    return { real, batch: batch.get(assetId) };
+  }
+
+  it("counts a partial check-in's returned units as back on the shelf", async () => {
+    // 10 of a 20-unit pool went out, 4 came back: 6 are out, 14 are free.
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 10,
+          checkedOutQuantity: 10,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1"],
+          quantities: [10],
+          bookingAssetIds: [""],
+        },
+      ],
+      dispositions: [
+        { assetId: "a1", bookingId: "b1", category: "RETURN", quantity: 4 },
+      ],
+      assets: [{ id: "a1", quantity: 20 }],
+    });
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    expect(real).toBe(6);
+    expect(batch?.checkedOut).toBe(real);
+    expect(batch?.physicalAvailable).toBe(14);
+  });
+
+  it("does not count a consumed unit as both gone from stock and still out", async () => {
+    // 20 went out, 10 were used up (the pool dropped from 50 to 40): 10 are
+    // still out, so 30 of the remaining 40 are on the shelf.
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 20,
+          checkedOutQuantity: 20,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1"],
+          quantities: [20],
+          bookingAssetIds: [""],
+        },
+      ],
+      dispositions: [
+        { assetId: "a1", bookingId: "b1", category: "CONSUME", quantity: 10 },
+      ],
+      assets: [{ id: "a1", quantity: 40 }],
+    });
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    expect(real).toBe(10);
+    expect(batch?.checkedOut).toBe(real);
+    expect(batch?.physicalAvailable).toBe(30);
+  });
+
+  it("ignores CHECKOUT logs, which record a departure rather than a return", async () => {
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 5,
+          checkedOutQuantity: 5,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1"],
+          quantities: [5],
+          bookingAssetIds: ["s1"],
+        },
+      ],
+      dispositions: [
+        { assetId: "a1", bookingId: "b1", category: "CHECKOUT", quantity: 5 },
+      ],
+    });
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    expect(real).toBe(5);
+    expect(batch?.checkedOut).toBe(real);
+  });
+
+  it("nets returns off an all-at-once checkout too", async () => {
+    // No session names the slice and its marker is set: the whole slice went
+    // out with the button. 2 of its 5 came back.
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 5,
+          stamped: true,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.OVERDUE, organizationId: ORG_ID },
+      ],
+      sessions: [],
+      dispositions: [
+        { assetId: "a1", bookingId: "b1", category: "RETURN", quantity: 2 },
+      ],
+    });
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    expect(real).toBe(3);
+    expect(batch?.checkedOut).toBe(real);
+  });
+
+  it("keeps a slice sent out a second time counted as out", async () => {
+    // Out 10, back 10, out 10 again: the stored counter reads 20 and one trip's
+    // worth has come back.
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 10,
+          checkedOutQuantity: 20,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1", "a1"],
+          quantities: [10, 10],
+          bookingAssetIds: ["s1", "s1"],
+        },
+      ],
+      dispositions: [
+        {
+          assetId: "a1",
+          bookingId: "b1",
+          bookingAssetId: "s1",
+          category: "RETURN",
+          quantity: 10,
+        },
+      ],
+    });
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    expect(real).toBe(10);
+    expect(batch?.checkedOut).toBe(real);
+  });
+
+  it("reads zero once both trips of a twice-sent slice are back", async () => {
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 10,
+          checkedOutQuantity: 20,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1", "a1"],
+          quantities: [10, 10],
+          bookingAssetIds: ["", ""],
+        },
+      ],
+      dispositions: [
+        { assetId: "a1", bookingId: "b1", category: "RETURN", quantity: 10 },
+        { assetId: "a1", bookingId: "b1", category: "RETURN", quantity: 10 },
+      ],
+    });
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    expect(real).toBe(0);
+    expect(batch?.checkedOut).toBe(real);
+  });
+
+  it("keeps a slice re-sent with the all-at-once checkout counted as out", async () => {
+    // No session ever names the asset, so both trips went out with the button;
+    // the stored counter reads 20 and one trip's worth has come back.
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 10,
+          checkedOutQuantity: 20,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [],
+      dispositions: [
+        { assetId: "a1", bookingId: "b1", category: "RETURN", quantity: 10 },
+      ],
+    });
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    expect(real).toBe(10);
+    expect(batch?.checkedOut).toBe(real);
+  });
+
+  it("takes an untagged return off the standalone slice first, then the kit slice", async () => {
+    // Standalone 5 out + kit 5 out; 7 came back without naming a slice. The
+    // standalone slice absorbs 5, the kit slice the other 2.
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s-standalone",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 5,
+          checkedOutQuantity: 5,
+        },
+        {
+          id: "s-kit",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 5,
+          assetKitId: "ak1",
+          checkedOutQuantity: 5,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1", "a1"],
+          quantities: [5, 5],
+          bookingAssetIds: ["s-standalone", "s-kit"],
+        },
+      ],
+      dispositions: [
+        { assetId: "a1", bookingId: "b1", category: "RETURN", quantity: 7 },
+      ],
+      assets: [{ id: "a1", quantity: 30 }],
+      assetKits: [{ assetId: "a1", quantity: 5 }],
+    });
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    expect(real).toBe(3);
+    expect(batch?.checkedOut).toBe(real);
+    // Only the standalone slice feeds the physical headline: 30 - 5 in kits - 0.
+    expect(batch?.physicalAvailable).toBe(25);
+  });
+
+  it("does not let a slice that never went out absorb an untagged return", async () => {
+    // The standalone slice is booked but still on the shelf; the kit slice is
+    // out. A return that names no slice can only have come from the kit.
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s-standalone",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 5,
+          checkedOutQuantity: 0,
+        },
+        {
+          id: "s-kit",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 5,
+          assetKitId: "ak1",
+          checkedOutQuantity: 5,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1"],
+          quantities: [5],
+          bookingAssetIds: ["s-kit"],
+        },
+      ],
+      dispositions: [
+        { assetId: "a1", bookingId: "b1", category: "RETURN", quantity: 2 },
+      ],
+    });
+
+    const { real, batch } = await bothFor(client, "a1");
+
+    expect(real).toBe(3);
+    expect(batch?.checkedOut).toBe(real);
+  });
+});
+
+describe("the status-badge tooltip and mobile detail agree with the overview", () => {
+  /**
+   * Runs the rows the tooltip and the mobile asset detail read through
+   * `getQuantityData`, next to the overview's own checked-out figure.
+   */
+  async function tooltipAndOverviewFor(
+    client: ReturnType<typeof createFakeClient>,
+    assetId: string
+  ) {
+    const rows = await getAssetQuantityRows(
+      client as unknown as ExtendedPrismaClient,
+      { assetId, organizationId: ORG_ID }
+    );
+    const overview = await computeCheckedOutForAsset(client, assetId, ORG_ID);
+    return { rows, breakdown: getQuantityData(rows), overview };
+  }
+
+  it("counts a partial check-in's returned units as back on the shelf", async () => {
+    // All 10 went out on an ONGOING booking and 7 came back: 3 are out, 7 free.
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 10,
+          checkedOutQuantity: 10,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+      ],
+      sessions: [
+        {
+          bookingId: "b1",
+          assetIds: ["a1"],
+          quantities: [10],
+          bookingAssetIds: ["s1"],
+        },
+      ],
+      dispositions: [
+        {
+          assetId: "a1",
+          bookingId: "b1",
+          bookingAssetId: "s1",
+          category: "RETURN",
+          quantity: 7,
+        },
+      ],
+      assets: [{ id: "a1", quantity: 10 }],
+    });
+
+    const { rows, breakdown, overview } = await tooltipAndOverviewFor(
+      client,
+      "a1"
+    );
+
+    expect(overview).toBe(3);
+    expect(rows.bookingAssets).toEqual([
+      expect.objectContaining({ quantity: 3, booking: expect.anything() }),
+    ]);
+    expect(breakdown?.checkedOut).toBe(overview);
+    expect(breakdown?.available).toBe(7);
+  });
+
+  it("drops a booking whose units have all come back, and keeps RESERVED rows", async () => {
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 4,
+          checkedOutQuantity: 4,
+        },
+        { id: "s2", assetId: "a1", bookingId: "b2", quantity: 5 },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.OVERDUE, organizationId: ORG_ID },
+        { id: "b2", status: BookingStatus.RESERVED, organizationId: ORG_ID },
+      ],
+      sessions: [],
+      dispositions: [
+        {
+          assetId: "a1",
+          bookingId: "b1",
+          bookingAssetId: "s1",
+          category: "RETURN",
+          quantity: 4,
+        },
+      ],
+      assets: [{ id: "a1", quantity: 10 }],
+    });
+
+    const { rows, breakdown, overview } = await tooltipAndOverviewFor(
+      client,
+      "a1"
+    );
+
+    expect(overview).toBe(0);
+    expect(rows.bookingAssets).toEqual([
+      expect.objectContaining({
+        quantity: 5,
+        booking: expect.objectContaining({ id: "b2", status: "RESERVED" }),
+      }),
+    ]);
+    expect(breakdown?.checkedOut).toBe(0);
+    expect(breakdown?.reserved).toBe(5);
   });
 });

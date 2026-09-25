@@ -18,7 +18,11 @@
 import { OrganizationRoles, OrganizationType, Roles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { isSsoUser, transferOwnership } from "./service.server";
+import {
+  createOrganization,
+  isSsoUser,
+  transferOwnership,
+} from "./service.server";
 
 // @vitest-environment node
 
@@ -33,12 +37,18 @@ type MockDb = {
   user: {
     findUniqueOrThrow: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
+    findFirstOrThrow: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
   };
   userOrganization: {
     findMany: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
-  organization: { update: ReturnType<typeof vi.fn> };
+  organization: {
+    update: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+  };
+  image: { create: ReturnType<typeof vi.fn> };
 };
 
 const dbMock = vi.hoisted<MockDb>(() => ({
@@ -46,9 +56,27 @@ const dbMock = vi.hoisted<MockDb>(() => ({
     <T>(callback: (tx: MockDb) => Promise<T>): Promise<T> =>
       callback(dbMock as MockDb)
   ) as <T>(callback: (tx: MockDb) => Promise<T>) => Promise<T>,
-  user: { findUniqueOrThrow: vi.fn(), findUnique: vi.fn() },
+  user: {
+    findUniqueOrThrow: vi.fn(),
+    findUnique: vi.fn(),
+    // why: createOrganization reads the owner only to build the team member's
+    // display name — not the behaviour under test, so it is stubbed to let the
+    // logo path be reached.
+    findFirstOrThrow: vi.fn(),
+    // why: the only write that carries the spent free trial to the new owner,
+    // so whether it ran is the assertion target of the free-trial tests.
+    update: vi.fn(),
+  },
   userOrganization: { findMany: vi.fn(), update: vi.fn() },
-  organization: { update: vi.fn() },
+  organization: {
+    update: vi.fn(),
+    // why: this is the assertion target. Whether it was called is exactly what
+    // distinguishes "validated before writing" from "left an orphan workspace".
+    create: vi.fn(),
+  },
+  // why: the second write in the same flow, asserted both for the content type
+  // it persists and for not running when validation refuses the bytes.
+  image: { create: vi.fn() },
 }));
 
 // why: isolating database calls so the authorization branch can be unit tested
@@ -79,7 +107,11 @@ const currentOrganization = {
 };
 
 /** Builds a UserOrganization row shaped like the service's `select` clause */
-function userOrg(userId: string, roles: OrganizationRoles[]) {
+function userOrg(
+  userId: string,
+  roles: OrganizationRoles[],
+  usedFreeTrial = false
+) {
   return {
     id: `uo-${userId}`,
     user: {
@@ -91,7 +123,7 @@ function userOrg(userId: string, roles: OrganizationRoles[]) {
       roles: [],
       customerId: null,
       tierId: "free",
-      usedFreeTrial: false,
+      usedFreeTrial,
     },
     roles,
   };
@@ -191,6 +223,86 @@ describe("transferOwnership authorization", () => {
   });
 });
 
+/**
+ * Ownership transfer carries the spent free trial to the new owner.
+ *
+ * A workspace whose plan has ended transfers no subscription, so a rule tied to
+ * the subscription transfer never fires and leaves the new owner able to start
+ * a second 7-day trial on a workspace that is already full of assets.
+ *
+ * These tests run with `premiumIsEnabled: false` (see the module mock above) to
+ * pin that the flag is carried regardless of whether billing is switched on.
+ */
+describe("transferOwnership free trial flag", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    (dbMock.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
+      <T>(callback: (tx: MockDb) => Promise<T>): Promise<T> => callback(dbMock)
+    );
+
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      id: OWNER_ID,
+      roles: [],
+    });
+    dbMock.user.update.mockResolvedValue({ id: NEW_OWNER_ID });
+    dbMock.userOrganization.update.mockResolvedValue({});
+    dbMock.organization.update.mockResolvedValue({});
+  });
+
+  it("marks the new owner when no subscription moves with the workspace", async () => {
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      userOrg(OWNER_ID, [OrganizationRoles.OWNER], true),
+      userOrg(NEW_OWNER_ID, [OrganizationRoles.ADMIN], false),
+    ]);
+
+    await transferOwnership({
+      currentOrganization,
+      newOwnerId: NEW_OWNER_ID,
+      userId: OWNER_ID,
+      // The cancelled-plan case: the caller asks for no subscription transfer
+      // because there is no live subscription left to carry.
+      transferSubscription: false,
+    });
+
+    expect(dbMock.user.update).toHaveBeenCalledWith({
+      where: { id: NEW_OWNER_ID },
+      data: { usedFreeTrial: true },
+      select: { id: true },
+    });
+  });
+
+  it("leaves the new owner's trial alone when the outgoing owner never used one", async () => {
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      userOrg(OWNER_ID, [OrganizationRoles.OWNER], false),
+      userOrg(NEW_OWNER_ID, [OrganizationRoles.ADMIN], false),
+    ]);
+
+    await transferOwnership({
+      currentOrganization,
+      newOwnerId: NEW_OWNER_ID,
+      userId: OWNER_ID,
+    });
+
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+
+  it("does not write again when the new owner has already used their trial", async () => {
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      userOrg(OWNER_ID, [OrganizationRoles.OWNER], true),
+      userOrg(NEW_OWNER_ID, [OrganizationRoles.ADMIN], true),
+    ]);
+
+    await transferOwnership({
+      currentOrganization,
+      newOwnerId: NEW_OWNER_ID,
+      userId: OWNER_ID,
+    });
+
+    expect(dbMock.user.update).not.toHaveBeenCalled();
+  });
+});
+
 describe("isSsoUser", () => {
   /**
    * The SSO flag is carried on every membership, so it is usually read from the
@@ -228,5 +340,74 @@ describe("isSsoUser", () => {
     await expect(
       isSsoUser({ userId: "user-1", userOrganizations: [] })
     ).resolves.toBe(false);
+  });
+});
+
+/**
+ * A workspace logo the caller claims is a PNG. `type` is the client's claim and
+ * is deliberately not the thing under test — validation reads the bytes.
+ */
+function logoFile(bytes: BlobPart) {
+  return new File([bytes], "logo.png", { type: "image/png" });
+}
+
+const PNG_BYTES = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
+const HTML_BYTES = "<script>alert(document.domain)</script>";
+
+describe("createOrganization logo validation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.user.findFirstOrThrow.mockResolvedValue({
+      id: OWNER_ID,
+      firstName: "Ada",
+      lastName: "Lovelace",
+      displayName: null,
+    });
+    dbMock.organization.create.mockResolvedValue({ id: ORG_ID });
+    dbMock.image.create.mockResolvedValue({ id: "image-1" });
+  });
+
+  const args = (image: File | null) => ({
+    name: "Acme",
+    userId: OWNER_ID,
+    currency: "USD" as Parameters<typeof createOrganization>[0]["currency"],
+    image,
+  });
+
+  it("does not create the workspace when the logo is not an image", async () => {
+    await expect(
+      createOrganization(args(logoFile(HTML_BYTES)))
+    ).rejects.toThrow();
+
+    // The workspace counts against the caller's plan limit the moment it is
+    // written, so a rejected logo must not leave one behind.
+    expect(dbMock.organization.create).not.toHaveBeenCalled();
+    expect(dbMock.image.create).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected logo as user input rather than a server fault", async () => {
+    await expect(
+      createOrganization(args(logoFile(HTML_BYTES)))
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+  });
+
+  it("stores the format proved by the bytes for a valid logo", async () => {
+    await createOrganization(args(logoFile(PNG_BYTES)));
+
+    expect(dbMock.organization.create).toHaveBeenCalledOnce();
+    expect(dbMock.image.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ contentType: "image/png" }),
+      })
+    );
+  });
+
+  it("creates the workspace when no logo is supplied", async () => {
+    await createOrganization(args(null));
+
+    expect(dbMock.organization.create).toHaveBeenCalledOnce();
+    expect(dbMock.image.create).not.toHaveBeenCalled();
   });
 });

@@ -61,7 +61,44 @@ export async function getOrCreateCalendarToken({
     return membership.calendarTokenId;
   }
 
-  return rotateCalendarToken({ userId, organizationId });
+  /**
+   * First use. The write is conditional on the token still being unset, so of
+   * two callers arriving together — a double-click, two tabs, a retried
+   * request — exactly one lands. Rotating unconditionally here would let both
+   * generate a token and both return it while only the last write survives,
+   * handing one caller a subscription URL the row no longer holds.
+   */
+  const calendarTokenId = generateCalendarToken();
+  const claimed = await db.userOrganization.updateMany({
+    where: { userId, organizationId, calendarTokenId: null },
+    data: { calendarTokenId },
+  });
+
+  if (claimed.count === 1) {
+    return calendarTokenId;
+  }
+
+  // Someone else set it in between. Report what persisted, not what this call
+  // generated.
+  const current = await db.userOrganization.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { calendarTokenId: true },
+  });
+
+  if (!current?.calendarTokenId) {
+    throw new ShelfError({
+      cause: null,
+      title: "Calendar unavailable",
+      message:
+        "We couldn't set up your calendar feed. Please refresh and try again.",
+      additionalData: { userId, organizationId },
+      status: 409,
+      shouldBeCaptured: false,
+      label: "Booking",
+    });
+  }
+
+  return current.calendarTokenId;
 }
 
 /**

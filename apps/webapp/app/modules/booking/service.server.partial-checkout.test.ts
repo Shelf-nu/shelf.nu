@@ -6,6 +6,7 @@ import {
   KitStatus,
 } from "@prisma/client";
 import { onTestFinished } from "vitest";
+import type { Mock } from "vitest";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
@@ -164,9 +165,8 @@ vitest.mock("~/database/db.server", () => {
         updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
         deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
       },
-      // why: checkoutBooking's defence-in-depth guard reads
-      // `bookingModelRequest` for outstanding model-request rows that would
-      // block checkout. Default to none so the delegate path proceeds.
+      // why: the add-assets and remove-assets flows this suite reaches read
+      // and drain model reservations. Default to none.
       bookingModelRequest: {
         findMany: vitest.fn().mockResolvedValue([]),
         findUnique: vitest.fn().mockResolvedValue(null),
@@ -2342,8 +2342,10 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         const assetKitFindMany = db.assetKit.findMany as ReturnType<
           typeof vitest.fn
         >;
-        const bookingAssetFindMany = db.bookingAsset.findMany as ReturnType<
-          typeof vitest.fn
+        const bookingAssetFindMany = db.bookingAsset.findMany as Mock<
+          (args?: {
+            where?: { assetKitId?: { in?: string[] } | null };
+          }) => Promise<unknown[]>
         >;
         const priorAssetKit = assetKitFindMany.getMockImplementation();
         const priorBookingAsset = bookingAssetFindMany.getMockImplementation();
