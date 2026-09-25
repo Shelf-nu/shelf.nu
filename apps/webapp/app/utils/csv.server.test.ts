@@ -5,11 +5,14 @@ import {
 } from "@remix-run/form-data-parser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Column } from "~/modules/asset-index-settings/helpers";
+import { defaultFields } from "~/modules/asset-index-settings/helpers";
 import {
   buildCsvBackupDataFromAssets,
   buildCsvExportDataFromAssets,
   buildCsvExportDataFromBookings,
   buildCsvExportDataFromTeamMembers,
+  buildIndexExportColumns,
   csvDataFromRequest,
   formatValueForCsv,
   parseCsv,
@@ -589,6 +592,163 @@ describe("buildCsvExportDataFromAssets", () => {
 
     expect(headers).toEqual(['"Name"', '"Value"', '"Total value"']);
     expect(row).toEqual(['"Pens"', '"$1.00"', '"$100.00"']);
+  });
+});
+
+describe("quantity and unit of measure in the index export", () => {
+  const ORG = {
+    id: "org-1",
+    barcodesEnabled: false,
+    currency: "USD" as const,
+  };
+
+  /** A consumable counted in pieces and an individual asset. */
+  const ASSETS = [
+    {
+      id: "asset-gloves",
+      title: "Gloves",
+      type: "QUANTITY_TRACKED",
+      quantity: 5,
+      unitOfMeasure: "pcs",
+      tags: [],
+      custody: [],
+      customFields: [],
+    },
+    {
+      id: "asset-drill",
+      title: "Drill",
+      type: "INDIVIDUAL",
+      quantity: 1,
+      unitOfMeasure: null,
+      tags: [],
+      custody: [],
+      customFields: [],
+    },
+  ];
+
+  /** Default columns with only the named ones visible. */
+  function columnsWithVisible(...visible: string[]): Column[] {
+    return defaultFields.map((col) => ({
+      ...col,
+      visible: visible.includes(col.name),
+    }));
+  }
+
+  function exportCsv(
+    settingsColumns: Column[],
+    columnScope: "visible" | "all"
+  ) {
+    return buildCsvExportDataFromAssets({
+      assets: ASSETS as any,
+      columns: buildIndexExportColumns({ settingsColumns, columnScope }),
+      currentOrganization: ORG,
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+  }
+
+  it("exports quantity as a bare number and the unit in its own column", () => {
+    const [headers, gloves, drill] = exportCsv(
+      columnsWithVisible("quantity", "unitOfMeasure"),
+      "visible"
+    );
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Quantity"',
+      '"Unit of measure"',
+      '"Total value"',
+    ]);
+    expect(gloves).toEqual(['"Gloves"', '"5"', '"pcs"', '""']);
+    // Individual assets have no stock count and no unit.
+    expect(drill).toEqual(['"Drill"', '""', '""', '""']);
+  });
+
+  it("writes a unit that looks like a formula as plain text", () => {
+    const [, row] = buildCsvExportDataFromAssets({
+      assets: [{ ...ASSETS[0], unitOfMeasure: '=HYPERLINK("x")' }] as any,
+      columns: buildIndexExportColumns({
+        settingsColumns: columnsWithVisible("quantity", "unitOfMeasure"),
+        columnScope: "visible",
+      }),
+      currentOrganization: ORG,
+      prefs: HARDCODED_DEFAULT_PREFS,
+    });
+
+    expect(row[2]).toBe('"\'=HYPERLINK(""x"")"');
+  });
+
+  it("adds the unit right after quantity when only quantity is visible", () => {
+    const [headers, gloves] = exportCsv(
+      columnsWithVisible("sequentialId", "quantity", "minQuantity"),
+      "visible"
+    );
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Asset ID"',
+      '"Quantity"',
+      '"Unit of measure"',
+      '"Min quantity"',
+      '"Total value"',
+    ]);
+    expect(gloves.slice(2, 4)).toEqual(['"5"', '"pcs"']);
+  });
+
+  it("keeps the unit where the user put it when it is already visible", () => {
+    // Unit of measure moved to the front of the index, Quantity left in place.
+    const settingsColumns = columnsWithVisible(
+      "sequentialId",
+      "quantity",
+      "unitOfMeasure"
+    ).map((col) =>
+      col.name === "unitOfMeasure" ? { ...col, position: 0 } : col
+    );
+
+    const [headers] = exportCsv(settingsColumns, "visible");
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"Unit of measure"',
+      '"Asset ID"',
+      '"Quantity"',
+      '"Total value"',
+    ]);
+  });
+
+  it("does not add the unit when quantity is not exported", () => {
+    const [headers] = exportCsv(columnsWithVisible("sequentialId"), "visible");
+
+    expect(headers).toEqual(['"Name"', '"Asset ID"', '"Total value"']);
+  });
+
+  it("exports every column in 'all' scope, with the unit right after quantity", () => {
+    const [headers] = exportCsv(columnsWithVisible(), "all");
+
+    expect(headers).toEqual([
+      '"Name"',
+      '"ID"',
+      '"Asset ID"',
+      '"QR ID"',
+      '"Status"',
+      '"Description"',
+      '"Value"',
+      '"Available to book"',
+      '"Created at"',
+      '"Updated at"',
+      '"Category"',
+      '"Tags"',
+      '"Location"',
+      '"Kit"',
+      '"Custody"',
+      '"Upcoming Reminder"',
+      '"Upcoming Bookings"',
+      '"Quantity"',
+      '"Unit of measure"',
+      '"Tracking method"',
+      '"Asset model"',
+      '"Min quantity"',
+      '"Total value"',
+    ]);
   });
 });
 

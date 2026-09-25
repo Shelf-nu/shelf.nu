@@ -98,6 +98,7 @@ export const fixedFields = [
   "upcomingReminder",
   "actions",
   "quantity",
+  "unitOfMeasure",
   "minQuantity",
   "type",
   "upcomingBookings",
@@ -162,6 +163,7 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
   barcode_ExternalQR: "External QR",
   barcode_EAN13: "EAN-13",
   quantity: "Quantity",
+  unitOfMeasure: "Unit of measure",
   minQuantity: "Min quantity",
   type: "Tracking method",
   upcomingBookings: "Upcoming Bookings",
@@ -187,10 +189,75 @@ export const defaultFields: Column[] = [
   { name: "actions", visible: true, position: 15 },
   { name: "upcomingBookings", visible: true, position: 16 },
   { name: "quantity", visible: false, position: 17 },
-  { name: "type", visible: false, position: 18 },
-  { name: "assetModel", visible: false, position: 19 },
-  { name: "minQuantity", visible: false, position: 20 },
+  { name: "unitOfMeasure", visible: false, position: 18 },
+  { name: "type", visible: false, position: 19 },
+  { name: "assetModel", visible: false, position: 20 },
+  { name: "minQuantity", visible: false, position: 21 },
 ];
+
+/**
+ * Default columns that belong right after another column, keyed by the column
+ * they follow. The Quantity cell holds only the number and the unit lives in
+ * `unitOfMeasure`, so the unit column sits next to Quantity and is shown
+ * whenever Quantity is.
+ */
+const followsColumn: Partial<Record<ColumnLabelKey, ColumnLabelKey>> = {
+  unitOfMeasure: "quantity",
+};
+
+/**
+ * Adds default columns that a saved column set lacks.
+ *
+ * Settings rows are per user and outlive the default list, so a fixed column
+ * added to `defaultFields` is missing from every row saved before it existed.
+ * Each missing column is inserted and every saved column at or after its
+ * position moves down by one, so the user's own order is kept.
+ *
+ * - A column listed in {@link followsColumn} goes right after the column it
+ *   follows, wherever the saved set has that column, and is shown when that
+ *   column is shown. Adding it never separates it from its partner or hides
+ *   what the user already saw.
+ * - Any other column goes in at the position a fresh row would give it, with
+ *   its default visibility.
+ *
+ * @param columns - The row's saved columns; not modified
+ * @param missing - Names of the default columns to add
+ * @returns A new column list with the missing default columns inserted
+ */
+export function insertMissingDefaultColumns(
+  columns: Column[],
+  missing: ColumnLabelKey[]
+): Column[] {
+  // Ascending default order, so a column that follows another is inserted
+  // after it when both are missing.
+  const toInsert = defaultFields
+    .filter((field) => missing.includes(field.name))
+    .sort((a, b) => a.position - b.position);
+
+  return toInsert.reduce<Column[]>(
+    (acc, field) => {
+      const partnerName = followsColumn[field.name];
+      const partner = partnerName
+        ? acc.find((col) => col.name === partnerName)
+        : undefined;
+      const position = partner ? partner.position + 1 : field.position;
+
+      return [
+        ...acc.map((col) =>
+          col.position >= position
+            ? { ...col, position: col.position + 1 }
+            : col
+        ),
+        {
+          ...field,
+          position,
+          visible: field.visible || Boolean(partner?.visible),
+        },
+      ];
+    },
+    [...columns]
+  );
+}
 
 // Generate barcode columns when barcodes are enabled
 export const generateBarcodeColumns = (): Column[] =>

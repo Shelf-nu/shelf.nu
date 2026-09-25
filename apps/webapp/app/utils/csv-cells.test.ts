@@ -12,7 +12,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { decodeCsvListCell, encodeCsvListCell } from "./csv-cells";
+import {
+  decodeCsvListCell,
+  encodeCsvListCell,
+  neutralizeSpreadsheetFormula,
+} from "./csv-cells";
 
 describe("encodeCsvListCell", () => {
   it("leaves a plain list alone", () => {
@@ -87,5 +91,20 @@ describe("round trip", () => {
     [["https://maps.example.com?loc=40.7,-74.0"]],
   ])("survives %j", (values) => {
     expect(decodeCsvListCell(encodeCsvListCell(values))).toEqual(values);
+  });
+});
+
+describe("neutralizeSpreadsheetFormula", () => {
+  it.each(["=SUM(A1)", "+1", "-1", "@SUM(1,1)", "  =HYPERLINK(1)"])(
+    "prefixes %j with a single quote so it reads as text",
+    (value) => {
+      expect(neutralizeSpreadsheetFormula(value)).toBe(`'${value.trim()}`);
+    }
+  );
+
+  it("leaves ordinary text as it is, trimmed", () => {
+    expect(neutralizeSpreadsheetFormula("pcs")).toBe("pcs");
+    expect(neutralizeSpreadsheetFormula(" kg ")).toBe("kg");
+    expect(neutralizeSpreadsheetFormula("")).toBe("");
   });
 });
