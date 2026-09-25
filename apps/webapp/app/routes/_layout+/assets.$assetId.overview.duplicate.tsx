@@ -85,6 +85,13 @@ const DuplicateAssetSchema = z.object({
     }),
 });
 
+/**
+ * Creates `amountOfDuplicates` copies of the asset through `duplicateAsset`.
+ *
+ * Redirects to the new asset for a single copy and to the assets index for
+ * several. A client error from the service (for example a quantity-tracked
+ * asset with no units in stock) is returned to the dialog as written.
+ */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -108,8 +115,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         custody: { include: { custodian: true } },
         tags: true,
         customFields: true,
-        // Pulled so the duplicate inherits the source asset's primary
-        // placement (`duplicateAsset` reads it via `getPrimaryLocation`).
+        // Pulled so an individual duplicate inherits the source asset's
+        // primary placement (`duplicateAsset` reads it via
+        // `getPrimaryLocation`). A quantity-tracked duplicate starts unplaced.
         assetLocations: {
           select: { location: { select: { id: true } } },
         },

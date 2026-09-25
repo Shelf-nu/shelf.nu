@@ -4071,9 +4071,16 @@ export function createCustomFieldsPayloadFromAsset(
 /**
  * Creates one or more copies of an existing asset within the same organization.
  *
- * Copies the source asset's title, description, category, location, tags,
- * valuation, custom field values and (best-effort) main image onto each
- * duplicate.
+ * Copies the source asset's title, description, category, tags, valuation,
+ * custom field values, tracking method and (best-effort) main image onto each
+ * duplicate. A quantity-tracked copy also carries the quantity, unit of
+ * measure, consumption type and low-stock threshold, and starts unplaced: the
+ * source pool can be split across several locations, so its units are placed
+ * from the copy's asset page. An individual copy keeps the source's primary
+ * location.
+ *
+ * Titles read "<title> (copy)" for a single duplicate and
+ * "<title> (copy 1)", "<title> (copy 2)", … for several.
  *
  * @param params.asset - The org-scoped source asset (with tags, custody, custom fields)
  * @param params.userId - The acting user's ID
@@ -4119,15 +4126,44 @@ export async function duplicateAsset({
       includeAllCategories: true,
     });
 
+    const isPool = isQuantityTracked(asset);
+
+    // A quantity-tracked asset needs at least one unit (`createAsset` enforces
+    // it), so a used-up pool cannot be copied until it is restocked.
+    if (isPool && !(asset.quantity && asset.quantity > 0)) {
+      throw new ShelfError({
+        cause: null,
+        title: "No units to copy",
+        message:
+          "This asset has no units in stock, and a quantity-tracked asset needs at least 1. Add stock with Adjust quantity, then duplicate it.",
+        additionalData: { assetId: asset.id, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     const payload = {
       title: `${asset.title}`,
       organizationId,
       description: asset.description,
       userId,
       categoryId: asset.categoryId,
-      locationId: getPrimaryLocation(asset)?.id ?? undefined,
+      // why: `createAsset` places the whole pool at `locationId`, which would
+      // collapse a pool split across locations into one. A pool copy starts
+      // unplaced instead; an individual copy keeps the primary location.
+      locationId: isPool
+        ? undefined
+        : getPrimaryLocation(asset)?.id ?? undefined,
       tags: { set: copiedTagIds.map((id) => ({ id })) },
       valuation: asset.valuation,
+      type: asset.type,
+      ...(isPool && {
+        quantity: asset.quantity,
+        minQuantity: asset.minQuantity,
+        consumptionType: asset.consumptionType,
+        unitOfMeasure: asset.unitOfMeasure,
+      }),
     };
 
     const customFieldValues = createCustomFieldsPayloadFromAsset(asset);
@@ -4140,7 +4176,9 @@ export async function duplicateAsset({
     for (const i of [...Array(amountOfDuplicates)].keys()) {
       const duplicatedAsset = await createAsset({
         ...payload,
-        title: `${asset.title} (copy ${amountOfDuplicates > 1 ? i + 1 : ""})`,
+        title: `${asset.title} (copy${
+          amountOfDuplicates > 1 ? ` ${i + 1}` : ""
+        })`,
         customFieldsValues: extractedCustomFieldValues,
       });
 
@@ -4185,6 +4223,7 @@ export async function duplicateAsset({
 
     return duplicatedAssets;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while duplicating the asset",
