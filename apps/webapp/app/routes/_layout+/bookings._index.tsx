@@ -36,6 +36,7 @@ import {
 } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -65,18 +66,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const {
-      organizationId,
-      currentOrganization,
-      isSelfServiceOrBase,
-      canSeeAllCustody,
-      access,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, canSeeAllCustody, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -176,17 +172,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         userId,
       }),
 
-      // team members for booking form - BASE/SELF_SERVICE users need their team member guaranteed
-      isSelfServiceOrBase
+      // Team members for the booking form: a member whose booking custodian is
+      // fixed to themself needs their own team member guaranteed.
+      bookingCustodianIsSelf(access)
         ? getTeamMemberForForm({
             organizationId,
             userId,
-            isSelfServiceOrBase,
+            access,
             getAll:
               searchParams.has("getAll") &&
               hasGetAllValue(searchParams, "teamMember"),
           })
-        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+        : Promise.resolve(null), // Everyone else reuses teamMembersData
 
       db.tag.findMany({
         where: {
@@ -236,11 +233,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         modelName,
         hasActiveFilters,
         ...teamMembersData,
-        // For BASE/SELF_SERVICE users, provide dedicated form team members
-        // For ADMIN users, reuse the filter team members
+        // Members fixed to themselves get dedicated form team members;
+        // everyone else reuses the filter team members.
         teamMembersForForm:
           teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
-        isSelfServiceOrBase,
         ...notifyData,
         tags,
         totalTags: tags.length,

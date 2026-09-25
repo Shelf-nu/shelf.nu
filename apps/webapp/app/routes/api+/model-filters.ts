@@ -237,18 +237,30 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * the list grew from "just me" to the entire roster the moment the user
        * typed.
        */
+      // Fail closed: an unmigrated call site gets the NARROWER assignment
+      // rule, so it shows too few names rather than too many.
+      const purpose = modelFilters.custodyPurpose ?? "custody-assignment";
       const role = resolveEffectiveRole({ userOrganizations, organizationId });
-      const custodyScope = resolveCustodianPickerScope({
-        // Fail closed: an unmigrated call site gets the NARROWER assignment
-        // rule, so it shows too few names rather than too many.
-        purpose: modelFilters.custodyPurpose ?? "custody-assignment",
-        role,
-        canSeeAllCustody: resolveCanSeeAllCustody({
-          role,
-          currentOrganization,
-        }),
-        userId,
-      });
+      const custodyScope =
+        purpose === "booking-custodian"
+          ? resolveCustodianPickerScope({
+              purpose,
+              access: resolveMembershipAccess({
+                userOrganizations,
+                organizationId,
+                workspace: currentOrganization,
+              }),
+              userId,
+            })
+          : resolveCustodianPickerScope({
+              purpose,
+              role,
+              canSeeAllCustody: resolveCanSeeAllCustody({
+                role,
+                currentOrganization,
+              }),
+              userId,
+            });
 
       // BASE may never assign custody, so there is nothing to offer and no
       // reason to hit the database.

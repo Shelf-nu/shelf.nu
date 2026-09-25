@@ -16,11 +16,13 @@ import { Card } from "~/components/shared/card";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
@@ -35,8 +37,9 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const workingHoursData = useWorkingHours();
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
-  const { isBaseOrSelfService, roles, isAdministratorOrOwner } =
-    useUserRoleHelper();
+  const { roles, isAdministratorOrOwner } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
+  const custodianIsSelf = bookingCustodianIsSelf(roleAccess);
   // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone
   // (matches display + the server parse), not the browser hint.
   const prefs = useFormatPrefs();
@@ -63,9 +66,10 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const [endDate, setEndDate] = useState(defaultEndDate);
 
   const user = useUserData();
-  // Use teamMembersForForm for BASE/SELF_SERVICE users to ensure their team member is always available
+  // teamMembersForForm guarantees the caller's own team member when their
+  // booking custodian is fixed to themself.
   const teamMembersToUse = teamMembersForForm || teamMembers;
-  const defaultTeamMember = isBaseOrSelfService
+  const defaultTeamMember = custodianIsSelf
     ? teamMembersToUse.find((tm) => tm.userId === user!.id)
     : undefined;
 
@@ -141,7 +145,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
             <Card className="m-0 mb-2">
               <CustodianField
                 defaultTeamMember={defaultTeamMember}
-                disabled={disabled || isBaseOrSelfService}
+                disabled={disabled || custodianIsSelf}
                 userCanSeeCustodian={userCanSeeCustodian}
                 isNewBooking
                 error={

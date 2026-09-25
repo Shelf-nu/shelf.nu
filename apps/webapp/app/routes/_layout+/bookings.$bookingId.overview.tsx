@@ -432,7 +432,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getTeamMemberForForm({
         organizationId,
         userId,
-        isSelfServiceOrBase,
+        access,
         custodianUserId: booking.custodianUserId || undefined,
         custodianTeamMemberId: booking.custodianTeamMemberId || undefined,
         bookingStatus: booking.status,

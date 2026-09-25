@@ -7,6 +7,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import {
   getAdvancedFiltersFromRequest,
@@ -29,6 +30,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { canImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
@@ -71,6 +73,8 @@ interface Props {
    * and an optional field would let a caller silently restore that.
    */
   canSeeAllCustody: boolean;
+  /** The viewer's access, for the booking form's custodian seed. */
+  access: RoleAccess;
 }
 
 const searchFieldTooltipText = `
@@ -157,14 +161,13 @@ export async function simpleModeLoader({
   user,
   settings,
   canSeeAllCustody,
+  access,
 }: Props) {
   // Threaded into the asset query so the custodian FILTER seed is scoped —
   // it used a role-only check that let BASE through unscoped. See
   // `getPaginatedAndFilterableAssets`.
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-  const isSelfServiceOrBase =
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
 
   // Check if URL contains advanced filter syntax (from browser back button or old bookmark)
   // URLSearchParams.toString() encodes colons as %3A, so we must check the decoded values
@@ -299,12 +302,13 @@ export async function simpleModeLoader({
     getTagsForBookingTagsFilter({
       organizationId,
     }),
-    // Team members for booking form - BASE/SELF_SERVICE always get their team member
-    isSelfServiceOrBase
+    // Team members for the booking form: a member whose booking custodian is
+    // fixed to themself always gets their own team member.
+    bookingCustodianIsSelf(access)
       ? getTeamMemberForForm({
           organizationId,
           userId,
-          isSelfServiceOrBase,
+          access,
           getAll:
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
@@ -491,10 +495,10 @@ export async function advancedModeLoader({
   user,
   settings,
   canSeeAllCustody,
+  access,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-  const isSelfServiceOrBase = isSelfService || role === OrganizationRoles.BASE;
 
   /** Parse filters */
   const {
@@ -638,12 +642,13 @@ export async function advancedModeLoader({
     getTagsForBookingTagsFilter({
       organizationId,
     }),
-    // Team members for booking form - BASE/SELF_SERVICE always get their team member
-    isSelfServiceOrBase
+    // Team members for the booking form: a member whose booking custodian is
+    // fixed to themself always gets their own team member.
+    bookingCustodianIsSelf(access)
       ? getTeamMemberForForm({
           organizationId,
           userId,
-          isSelfServiceOrBase,
+          access,
           getAll:
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),

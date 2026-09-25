@@ -3,6 +3,7 @@ import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import type { ErrorLabel } from "~/utils/error";
@@ -14,6 +15,7 @@ import {
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { resolveUserDisplayName } from "~/utils/user";
 import { getNrmIndexWhere, getNrmSelectionWhere } from "./nrm-scope";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
@@ -345,45 +347,64 @@ export type CustodianPickerScope =
   | { mode: "self"; userId: string }
   | { mode: "none" };
 
+/** Arguments for {@link resolveCustodianPickerScope}, per purpose. */
+export type CustodianPickerScopeArgs =
+  | {
+      purpose: "booking-custodian";
+      /** The caller's access; `bookings.custodianPicker` decides. */
+      access: RoleAccess;
+      /** The caller, for the `self` mode. */
+      userId: string;
+    }
+  | {
+      purpose: "custody-filter" | "custody-assignment";
+      /** Effective role from `resolveEffectiveRole`. */
+      role: OrganizationRoles;
+      /** Resolved via `resolveCanSeeAllCustody`. */
+      canSeeAllCustody: boolean;
+      /** The caller, for the `self` mode. */
+      userId: string;
+    };
+
 /**
  * The scope one custodian picker should apply.
  *
  * Custodian pickers serve two different questions and a single rule cannot
  * answer both:
  *
- * - `custody-filter` — "whose custody may I look at?" A read-visibility
+ * - `custody-filter`: "whose custody may I look at?" A read-visibility
  *   question, so the workspace overrides (`selfServiceCanSeeCustody` /
  *   `baseUserCanSeeCustody`, already resolved into `canSeeAllCustody`) govern.
- * - `custody-assignment` — "who may I hand this ASSET to?" A business rule the
+ * - `custody-assignment`: "who may I hand this ASSET to?" A business rule the
  *   overrides never widen: SELF_SERVICE assigns only to itself and BASE may
  *   not assign at all. The setting is about SEEING custody, not granting it.
- * - `booking-custodian` — "who may this BOOKING be assigned to?" Distinct from
- *   asset custody: BASE holds `booking:create`, so it must be able to put
- *   itself on a booking even though it may never take custody of an asset.
- *   Restricted roles get themselves; ADMIN / OWNER get everyone.
+ * - `booking-custodian`: "who may this BOOKING be assigned to?" Distinct from
+ *   asset custody, and answered by `bookings.custodianPicker`: members fixed
+ *   to themselves get their own row; others get everyone.
  *
- * Every custodian picker — seed and search alike — resolves through here, so
- * the seeded list and the typed list cannot disagree. They previously did:
- * the search applied no scope at all, so a restricted user saw only themselves
- * until they typed, at which point the whole roster appeared.
+ * Every custodian picker, seed and search alike, resolves through here, so
+ * the seeded list and the typed list cannot disagree: a search that applied
+ * no scope would show a restricted user the whole roster the moment they
+ * typed.
  *
- * @param args.purpose - Which question this picker is asking.
- * @param args.role - Effective role from `resolveEffectiveRole`.
- * @param args.canSeeAllCustody - Resolved via `resolveCanSeeAllCustody`.
- * @param args.userId - The caller, for the `self` mode.
+ * @param args - The purpose and, per purpose, the caller's access or role and
+ *   custody visibility
  * @returns `all` (unrestricted), `self` (own team-member rows), or `none`.
  */
-export function resolveCustodianPickerScope({
-  purpose,
-  role,
-  canSeeAllCustody,
-  userId,
-}: {
-  purpose: CustodianPickerPurpose;
-  role: OrganizationRoles;
-  canSeeAllCustody: boolean;
-  userId: string;
-}): CustodianPickerScope {
+export function resolveCustodianPickerScope(
+  args: CustodianPickerScopeArgs
+): CustodianPickerScope {
+  if (args.purpose === "booking-custodian") {
+    // A member whose booking custodian is fixed to themself books for
+    // themself, including BASE, which holds `booking:create` but may never
+    // take asset custody. Mirrors `getTeamMemberForForm`'s seed.
+    return bookingCustodianIsSelf(args.access)
+      ? { mode: "self", userId: args.userId }
+      : { mode: "all" };
+  }
+
+  const { purpose, role, canSeeAllCustody, userId } = args;
+
   if (purpose === "custody-assignment") {
     // BASE may never take custody of an asset, whatever the override says.
     if (role === OrganizationRoles.BASE) {
@@ -393,16 +414,6 @@ export function resolveCustodianPickerScope({
       return { mode: "self", userId };
     }
     return { mode: "all" };
-  }
-
-  if (purpose === "booking-custodian") {
-    // Restricted roles book for themselves. Unlike asset custody this includes
-    // BASE, which holds `booking:create` and would otherwise be unable to name
-    // a custodian at all. Mirrors `getTeamMemberForForm`'s seed.
-    return role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE
-      ? { mode: "self", userId }
-      : { mode: "all" };
   }
 
   return canSeeAllCustody ? { mode: "all" } : { mode: "self", userId };
@@ -579,8 +590,10 @@ export async function getTeamMemberForCustodianFilter({
  * 2. Draft: Fetch team members list, always including current custodian
  * 3. New booking (no status): Standard fetch without custodian guarantee
  *
- * For BASE/SELF_SERVICE users: Returns only their team member (optimized single query)
- * For ADMIN users: Returns paginated list with conditional custodian inclusion
+ * Members whose booking custodian is fixed to themselves
+ * (`bookings.custodianPicker === "self"`) get only their own team member
+ * (a single query). Everyone else gets the paginated list, with conditional
+ * custodian inclusion.
  *
  * This is separate from getTeamMemberForCustodianFilter to avoid mixing concerns:
  * - Filter: needs paginated list for sidebar filters
@@ -589,7 +602,7 @@ export async function getTeamMemberForCustodianFilter({
 export async function getTeamMemberForForm({
   organizationId,
   userId,
-  isSelfServiceOrBase,
+  access,
   getAll,
   custodianUserId,
   custodianTeamMemberId,
@@ -598,7 +611,8 @@ export async function getTeamMemberForForm({
 }: {
   organizationId: Organization["id"];
   userId: string;
-  isSelfServiceOrBase: boolean;
+  /** The caller's access; `bookings.custodianPicker` decides the seed. */
+  access: RoleAccess;
   getAll?: boolean;
   custodianUserId?: string;
   custodianTeamMemberId?: string;
@@ -609,13 +623,14 @@ export async function getTeamMemberForForm({
   usersOnly?: boolean;
 }) {
   try {
-    // BASE/SELF_SERVICE users can only see their own bookings, so always return only their team member.
+    // A member whose booking custodian is fixed to themself gets only their
+    // own team member.
     //
     // This is the `booking-custodian` rule in `resolveCustodianPickerScope`,
     // which the search endpoint resolves for the same picker. The two must stay
     // in step: if this branch changes, change that purpose too, or the list
     // will differ before and after the user types.
-    if (isSelfServiceOrBase) {
+    if (bookingCustodianIsSelf(access)) {
       const teamMember = await db.teamMember.findFirst({
         where: {
           organizationId,
@@ -747,7 +762,11 @@ export async function getTeamMemberForForm({
     throw new ShelfError({
       cause,
       message: "Failed to fetch team member for form",
-      additionalData: { organizationId, userId, isSelfServiceOrBase },
+      additionalData: {
+        organizationId,
+        userId,
+        custodianIsSelf: bookingCustodianIsSelf(access),
+      },
       label,
     });
   }

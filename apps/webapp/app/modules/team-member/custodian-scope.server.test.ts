@@ -13,7 +13,9 @@
  */
 import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { resolveCustodianPickerScope } from "./service.server";
 
 // why: service.server imports ~/database/db.server, whose non-production branch
@@ -107,8 +109,7 @@ describe("resolveCustodianPickerScope", () => {
         expect(
           resolveCustodianPickerScope({
             purpose: "booking-custodian",
-            role,
-            canSeeAllCustody: false,
+            access: accessFor([role]),
             userId: ME,
           }).mode
         ).toBe("all");
@@ -116,30 +117,41 @@ describe("resolveCustodianPickerScope", () => {
     );
 
     it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
-      "%s books only for themselves — including BASE, unlike asset custody",
+      "%s books only for themselves, including BASE, unlike asset custody",
       (role) => {
         expect(
           resolveCustodianPickerScope({
             purpose: "booking-custodian",
-            role,
-            canSeeAllCustody: false,
+            access: accessFor([role]),
             userId: ME,
           })
         ).toEqual({ mode: "self", userId: ME });
       }
     );
 
-    it("is unaffected by the custody override", () => {
-      // The override governs custody VISIBILITY; it says nothing about who a
-      // booking may be assigned to.
+    it("is unaffected by the visibility toggles", () => {
+      // The toggles govern SEEING bookings and custody; they say nothing about
+      // who a booking may be assigned to.
       expect(
         resolveCustodianPickerScope({
           purpose: "booking-custodian",
-          role: OrganizationRoles.SELF_SERVICE,
-          canSeeAllCustody: true,
+          access: accessFor([OrganizationRoles.SELF_SERVICE], {
+            selfServiceCanSeeBookings: true,
+            selfServiceCanSeeCustody: true,
+          }),
           userId: ME,
         })
       ).toEqual({ mode: "self", userId: ME });
+    });
+
+    it("judges a mixed membership by its highest role", () => {
+      expect(
+        resolveCustodianPickerScope({
+          purpose: "booking-custodian",
+          access: accessFor([OrganizationRoles.BASE, OrganizationRoles.ADMIN]),
+          userId: ME,
+        }).mode
+      ).toBe("all");
     });
   });
 });
@@ -200,22 +212,28 @@ describe("seed and search agree", () => {
   );
 
   it.each(CASES)(
-    "booking-custodian: $role mirrors getTeamMemberForForm's isSelfServiceOrBase branch",
+    "booking-custodian: $role mirrors getTeamMemberForForm's self-only branch",
     ({ role, canSeeAllCustody }) => {
+      const access = accessFor([role], {
+        selfServiceCanSeeCustody: canSeeAllCustody,
+        baseUserCanSeeCustody: canSeeAllCustody,
+      });
       const scope = resolveCustodianPickerScope({
         purpose: "booking-custodian",
-        role,
-        canSeeAllCustody,
+        access,
         userId: ME,
       });
 
-      const isSelfServiceOrBase =
+      // `getTeamMemberForForm` returns only the caller's own team member
+      // exactly when `bookingCustodianIsSelf(access)`, so the search must too.
+      expect(scope.mode).toBe(bookingCustodianIsSelf(access) ? "self" : "all");
+      // ...which holds for SELF_SERVICE and BASE, whatever the toggles say.
+      expect(scope.mode).toBe(
         role === OrganizationRoles.SELF_SERVICE ||
-        role === OrganizationRoles.BASE;
-
-      // `getTeamMemberForForm` returns only the caller's own team member for
-      // exactly this set, so the search must too.
-      expect(scope.mode).toBe(isSelfServiceOrBase ? "self" : "all");
+          role === OrganizationRoles.BASE
+          ? "self"
+          : "all"
+      );
     }
   );
 });

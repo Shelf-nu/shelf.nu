@@ -10995,7 +10995,7 @@
     "BASE+ADMIN": "all",
     "BASE+SELF_SERVICE": "self",
     "(none)": "self",
-    "UNKNOWN_ROLE": "all"
+    "UNKNOWN_ROLE": "self"
   },
   "B9:D-19:mobile-self-lock": {
     "OWNER": {
@@ -11104,8 +11104,8 @@
         "update": "allowed"
       },
       "someoneElse": {
-        "create": "denied:self",
-        "update": "denied:self"
+        "create": "allowed",
+        "update": "allowed"
       }
     },
     "SELF_SERVICE+ADMIN": {
@@ -11114,8 +11114,8 @@
         "update": "allowed"
       },
       "someoneElse": {
-        "create": "denied:self",
-        "update": "denied:self"
+        "create": "allowed",
+        "update": "allowed"
       }
     },
     "SELF_SERVICE+BASE": {
@@ -11134,8 +11134,8 @@
         "update": "allowed"
       },
       "someoneElse": {
-        "create": "denied:self",
-        "update": "denied:self"
+        "create": "allowed",
+        "update": "allowed"
       }
     },
     "BASE+ADMIN": {
@@ -11144,8 +11144,8 @@
         "update": "allowed"
       },
       "someoneElse": {
-        "create": "denied:self",
-        "update": "denied:self"
+        "create": "allowed",
+        "update": "allowed"
       }
     },
     "BASE+SELF_SERVICE": {
@@ -11326,12 +11326,12 @@
         "reserve": "allowed"
       },
       "creatorNotCustodian": {
-        "update": "denied:owner",
-        "reserve": "denied:owner"
+        "update": "allowed",
+        "reserve": "allowed"
       },
       "neither": {
-        "update": "denied:owner",
-        "reserve": "denied:owner"
+        "update": "allowed",
+        "reserve": "allowed"
       }
     },
     "SELF_SERVICE+ADMIN": {
@@ -11340,12 +11340,12 @@
         "reserve": "allowed"
       },
       "creatorNotCustodian": {
-        "update": "denied:owner",
-        "reserve": "denied:owner"
+        "update": "allowed",
+        "reserve": "allowed"
       },
       "neither": {
-        "update": "denied:owner",
-        "reserve": "denied:owner"
+        "update": "allowed",
+        "reserve": "allowed"
       }
     },
     "SELF_SERVICE+BASE": {
@@ -11368,12 +11368,12 @@
         "reserve": "allowed"
       },
       "creatorNotCustodian": {
-        "update": "denied:owner",
-        "reserve": "denied:owner"
+        "update": "allowed",
+        "reserve": "allowed"
       },
       "neither": {
-        "update": "denied:owner",
-        "reserve": "denied:owner"
+        "update": "allowed",
+        "reserve": "allowed"
       }
     },
     "BASE+ADMIN": {
@@ -11382,12 +11382,12 @@
         "reserve": "allowed"
       },
       "creatorNotCustodian": {
-        "update": "denied:owner",
-        "reserve": "denied:owner"
+        "update": "allowed",
+        "reserve": "allowed"
       },
       "neither": {
-        "update": "denied:owner",
-        "reserve": "denied:owner"
+        "update": "allowed",
+        "reserve": "allowed"
       }
     },
     "BASE+SELF_SERVICE": {
@@ -11485,14 +11485,14 @@
       "reserve": true
     },
     "SELF_SERVICE+OWNER": {
-      "create": false,
-      "update": false,
-      "reserve": false
+      "create": true,
+      "update": true,
+      "reserve": true
     },
     "SELF_SERVICE+ADMIN": {
-      "create": false,
-      "update": false,
-      "reserve": false
+      "create": true,
+      "update": true,
+      "reserve": true
     },
     "SELF_SERVICE+BASE": {
       "create": false,
@@ -11500,14 +11500,14 @@
       "reserve": false
     },
     "BASE+OWNER": {
-      "create": false,
-      "update": false,
-      "reserve": false
+      "create": true,
+      "update": true,
+      "reserve": true
     },
     "BASE+ADMIN": {
-      "create": false,
-      "update": false,
-      "reserve": false
+      "create": true,
+      "update": true,
+      "reserve": true
     },
     "BASE+SELF_SERVICE": {
       "create": false,
@@ -11568,11 +11568,11 @@
     },
     "SELF_SERVICE+OWNER": {
       "web": false,
-      "mobile": true
+      "mobile": false
     },
     "SELF_SERVICE+ADMIN": {
       "web": false,
-      "mobile": true
+      "mobile": false
     },
     "SELF_SERVICE+BASE": {
       "web": true,
@@ -11580,11 +11580,11 @@
     },
     "BASE+OWNER": {
       "web": false,
-      "mobile": true
+      "mobile": false
     },
     "BASE+ADMIN": {
       "web": false,
-      "mobile": true
+      "mobile": false
     },
     "BASE+SELF_SERVICE": {
       "web": true,
@@ -11626,14 +11626,14 @@
       "createBookingForSelectedAssets": false
     },
     "OWNER+SELF_SERVICE": {
-      "editBookingForm": true,
-      "newBookingForm": true,
-      "createBookingForSelectedAssets": true
+      "editBookingForm": false,
+      "newBookingForm": false,
+      "createBookingForSelectedAssets": false
     },
     "OWNER+BASE": {
-      "editBookingForm": true,
-      "newBookingForm": true,
-      "createBookingForSelectedAssets": true
+      "editBookingForm": false,
+      "newBookingForm": false,
+      "createBookingForSelectedAssets": false
     },
     "ADMIN+OWNER": {
       "editBookingForm": false,
@@ -11641,24 +11641,24 @@
       "createBookingForSelectedAssets": false
     },
     "ADMIN+SELF_SERVICE": {
-      "editBookingForm": true,
-      "newBookingForm": true,
-      "createBookingForSelectedAssets": true
+      "editBookingForm": false,
+      "newBookingForm": false,
+      "createBookingForSelectedAssets": false
     },
     "ADMIN+BASE": {
-      "editBookingForm": true,
-      "newBookingForm": true,
-      "createBookingForSelectedAssets": true
+      "editBookingForm": false,
+      "newBookingForm": false,
+      "createBookingForSelectedAssets": false
     },
     "SELF_SERVICE+OWNER": {
-      "editBookingForm": true,
-      "newBookingForm": true,
-      "createBookingForSelectedAssets": true
+      "editBookingForm": false,
+      "newBookingForm": false,
+      "createBookingForSelectedAssets": false
     },
     "SELF_SERVICE+ADMIN": {
-      "editBookingForm": true,
-      "newBookingForm": true,
-      "createBookingForSelectedAssets": true
+      "editBookingForm": false,
+      "newBookingForm": false,
+      "createBookingForSelectedAssets": false
     },
     "SELF_SERVICE+BASE": {
       "editBookingForm": true,
@@ -11666,14 +11666,14 @@
       "createBookingForSelectedAssets": true
     },
     "BASE+OWNER": {
-      "editBookingForm": true,
-      "newBookingForm": true,
-      "createBookingForSelectedAssets": true
+      "editBookingForm": false,
+      "newBookingForm": false,
+      "createBookingForSelectedAssets": false
     },
     "BASE+ADMIN": {
-      "editBookingForm": true,
-      "newBookingForm": true,
-      "createBookingForSelectedAssets": true
+      "editBookingForm": false,
+      "newBookingForm": false,
+      "createBookingForSelectedAssets": false
     },
     "BASE+SELF_SERVICE": {
       "editBookingForm": true,
@@ -11681,14 +11681,14 @@
       "createBookingForSelectedAssets": true
     },
     "(none)": {
-      "editBookingForm": false,
-      "newBookingForm": false,
-      "createBookingForSelectedAssets": false
+      "editBookingForm": true,
+      "newBookingForm": true,
+      "createBookingForSelectedAssets": true
     },
     "UNKNOWN_ROLE": {
-      "editBookingForm": false,
-      "newBookingForm": false,
-      "createBookingForSelectedAssets": false
+      "editBookingForm": true,
+      "newBookingForm": true,
+      "createBookingForSelectedAssets": true
     }
   },
   "B9:D-20:web-server": {

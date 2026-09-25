@@ -6,7 +6,6 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
-import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -22,8 +21,9 @@ import { makeShelfError } from "~/utils/error";
  *
  * `booking-custodian` is the widest purpose this endpoint serves, and the one
  * it must answer for: BASE holds `booking:create` and has to be able to put
- * itself on a booking. Restricted roles get their own row and nothing else;
- * ADMIN and OWNER get the roster. A caller who may not actually take asset
+ * itself on a booking. Members whose booking custodian is fixed to themselves
+ * (`bookings.custodianPicker`) get their own row and nothing else; everyone
+ * else gets the roster. A caller who may not actually take asset
  * custody is still refused by the custody services, which gate on the
  * permission matrix rather than on this list.
  */
@@ -31,17 +31,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { roles, canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
-    // Resolved from the whole membership, not `roles[0]`: a membership ordered
-    // [SELF_SERVICE, ADMIN] reads as SELF_SERVICE by position, which narrows a
-    // genuine admin to their own row.
+    const { access } = await getMobileUserContext(user.id, organizationId);
     const scope = resolveCustodianPickerScope({
       purpose: "booking-custodian",
-      role: resolveMostPrivilegedRole(roles),
-      canSeeAllCustody,
+      access,
       userId: user.id,
     });
 

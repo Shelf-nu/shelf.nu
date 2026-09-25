@@ -7,6 +7,7 @@ import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
@@ -15,6 +16,7 @@ import type {
   NewBookingLoaderReturnType,
 } from "~/routes/_layout+/bookings.new";
 
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { tw } from "~/utils/tw";
@@ -71,8 +73,8 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
 
-  const { roles, isBaseOrSelfService, isAdministratorOrOwner } =
-    useUserRoleHelper();
+  const { roles, isAdministratorOrOwner } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
 
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes(
@@ -166,7 +168,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               <Card className="field-card m-0">
                 <CustodianField
                   defaultTeamMember={defaultTeamMember}
-                  disabled={disabled || isBaseOrSelfService}
+                  disabled={disabled || bookingCustodianIsSelf(roleAccess)}
                   userCanSeeCustodian={userCanSeeCustodian}
                   isNewBooking={true}
                   error={

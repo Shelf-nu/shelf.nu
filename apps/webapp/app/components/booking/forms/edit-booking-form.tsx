@@ -19,6 +19,7 @@ import type {
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
@@ -163,13 +164,8 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     );
   const bookingSettings = useBookingSettings();
 
-  const {
-    roles,
-    isBaseOrSelfService,
-    isBase,
-    isAdministratorOrOwner,
-    effectiveRole,
-  } = useUserRoleHelper();
+  const { roles, isBase, isAdministratorOrOwner, effectiveRole } =
+    useUserRoleHelper();
   const roleAccess = useRoleAccess();
 
   const zo = useZorm(
@@ -537,7 +533,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   disabled={
                     disabled ||
                     isLoadingWorkingHours ||
-                    isBaseOrSelfService ||
+                    bookingCustodianIsSelf(roleAccess) ||
                     inputFieldIsDisabled
                   }
                   userCanSeeCustodian={userCanSeeCustodian}

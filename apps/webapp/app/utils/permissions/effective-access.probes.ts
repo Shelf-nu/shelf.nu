@@ -487,12 +487,20 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
         ).flatMap((purpose) =>
           [false, true].map((canSeeAllCustody) => [
             `${purpose}|seeAll=${canSeeAllCustody}`,
-            resolveCustodianPickerScope({
-              purpose,
-              role,
-              canSeeAllCustody,
-              userId: "caller",
-            }),
+            // The `seeAll=` half of a booking-custodian key never influences
+            // it: that purpose reads only the caller's access.
+            purpose === "booking-custodian"
+              ? resolveCustodianPickerScope({
+                  purpose,
+                  access: accessFor([role]),
+                  userId: "caller",
+                })
+              : resolveCustodianPickerScope({
+                  purpose,
+                  role,
+                  canSeeAllCustody,
+                  userId: "caller",
+                }),
           ])
         )
       ),
@@ -767,8 +775,9 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Bookings: Task 4d =====================
 
-  // B9:D-19/D-29: picker scopes for every membership on the web (effective
-  // role). Task 4d rewrites the booking-custodian half, Task 5b the custody halves.
+  // B9:D-19/D-29: picker scopes for every membership on the web. The
+  // booking-custodian purpose reads the membership's access; the custody
+  // purposes read its effective role.
   snapshot["B9:D-19/D-29:web-server"] = perRoleSet((roles) =>
     Object.fromEntries(
       (
@@ -776,35 +785,41 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
       ).flatMap((purpose) =>
         [false, true].map((canSeeAllCustody) => [
           `${purpose}|seeAll=${canSeeAllCustody}`,
-          resolveCustodianPickerScope({
-            purpose,
-            role: webRole(roles),
-            canSeeAllCustody,
-            userId: "caller",
-          }),
+          purpose === "booking-custodian"
+            ? resolveCustodianPickerScope({
+                purpose,
+                access: accessFor(roles),
+                userId: "caller",
+              })
+            : resolveCustodianPickerScope({
+                purpose,
+                role: webRole(roles),
+                canSeeAllCustody,
+                userId: "caller",
+              }),
         ])
       )
     )
   );
 
-  // B9:D-19: mobile booking-custodian picker (routes/api+/mobile+/team-members.ts:34-46;
-  // resolveMostPrivilegedRole, which keeps an unknown role instead of BASE).
+  // B9:D-19: mobile booking-custodian picker (routes/api+/mobile+/team-members.ts,
+  // on the context's `access`).
   snapshot["B9:D-19:mobile-team-members"] = perRoleSet(
     (roles) =>
       resolveCustodianPickerScope({
         purpose: "booking-custodian",
-        role: resolveMostPrivilegedRole(roles),
-        canSeeAllCustody: false,
+        access: accessFor(roles),
         userId: "caller",
       }).mode
   );
 
-  // B9:D-19: mobile custodian self-lock on create (bookings.create.ts:92-97
-  // gate booking:create; :106-110; :134) and update (bookings.update.ts:82-87
-  // gate booking:update; :93-97; :144: the booking itself is the caller's, so
-  // the :114 check passes and only the lock is probed).
+  // B9:D-19: mobile custodian self-lock on create (bookings.create.ts: gate
+  // booking:create, then `bookingCustodianIsSelf` on the context's `access`)
+  // and update (bookings.update.ts: gate booking:update, then the same lock;
+  // the booking itself is the caller's, so the custodian-only check passes
+  // and only the lock is probed).
   snapshot["B9:D-19:mobile-self-lock"] = perRoleSet((roles) => {
-    const restricted = isRestricted(mobilePositionalRole(roles));
+    const restricted = bookingCustodianIsSelf(accessFor(roles));
     const lock = (action: PermissionAction, custodian: string) =>
       firstRefusal([
         ["denied:gate", () => !can(roles, E.booking, action)],
@@ -816,11 +831,12 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     }));
   });
 
-  // B9:D-15: mobile update / reserve on another member's booking, custodian
-  // only: update bookings.update.ts:82-87 (booking:update), :114; reserve
-  // bookings.reserve.ts:78-83 (booking:create), :124.
+  // B9:D-15: mobile update / reserve on another member's booking: a caller
+  // who does not write every booking must be the custodian. update
+  // bookings.update.ts (gate booking:update); reserve bookings.reserve.ts
+  // (gate booking:create).
   snapshot["B9:D-15:mobile-update-reserve"] = perRoleSet((roles) => {
-    const restricted = isRestricted(mobilePositionalRole(roles));
+    const restricted = !accessFor(roles).bookings.writeAll;
     const custodianOnly = (rel: RelationshipName, action: PermissionAction) =>
       firstRefusal([
         ["denied:gate", () => !can(roles, E.booking, action)],
@@ -835,11 +851,11 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     }));
   });
 
-  // B9:D-25: mobile time-limit bypass `isAdminOrOwner = !isSelfServiceOrBase`
-  // on the positional role: create :107-110,:170; update :93-97,:180; reserve
-  // :90-93,:260.
+  // B9:D-25: mobile time-limit bypass, `access.policy.bookings.bypassTimeLimits`
+  // on the context's `access` (bookings.create.ts, bookings.update.ts,
+  // bookings.reserve.ts).
   snapshot["B9:D-25:mobile-time-bypass"] = perRoleSet((roles) => {
-    const bypass = !isRestricted(mobilePositionalRole(roles));
+    const bypass = accessFor(roles).policy.bookings.bypassTimeLimits;
     const gated = (action: PermissionAction) =>
       can(roles, E.booking, action) ? bypass : "denied:gate";
     return {
@@ -852,19 +868,20 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // B9:D-46: does a reservation made by this member trigger the org broadcast?
   // web: bookings.$bookingId.overview.tsx reserve intent (~1692-1705) passes
   // requirePermission's isSelfServiceOrBase (effective role); mobile:
-  // bookings.reserve.ts:90-93,:299 passes the positional one.
+  // bookings.reserve.ts passes the context's isSelfServiceOrBase, the same
+  // effective role, which the policy's `reservationAlertsAdmins` answers.
   snapshot["B9:D-46:reservation-trigger"] = perRoleSet((roles) => ({
     web: isSelfServiceOrBaseRole(webRole(roles)),
     mobile: can(roles, E.booking, A.create)
-      ? isRestricted(mobilePositionalRole(roles))
+      ? accessFor(roles).policy.notifications.reservationAlertsAdmins
       : "denied:gate",
   }));
 
-  // B9:D-19: web custodian field lock / seed (any restricted role held):
-  // edit-booking-form.tsx:541, new-booking-form.tsx:169,
-  // components/assets/assets-index/create-booking-for-selected-assets-dialog.tsx:68,144.
+  // B9:D-19: web custodian field lock / seed, `bookingCustodianIsSelf` on
+  // `useRoleAccess()`: edit-booking-form.tsx, new-booking-form.tsx,
+  // components/assets/assets-index/create-booking-for-selected-assets-dialog.tsx.
   snapshot["B9:D-19:web-custodian-lock"] = perRoleSet((roles) => {
-    const locked = hookFlags(roles).isBaseOrSelfService;
+    const locked = bookingCustodianIsSelf(accessFor(roles));
     return {
       editBookingForm: locked,
       newBookingForm: locked,

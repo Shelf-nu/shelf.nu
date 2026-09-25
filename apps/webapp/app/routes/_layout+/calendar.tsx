@@ -41,6 +41,7 @@ import {
 } from "~/modules/team-member/service.server";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import {
   getCalendarTitleAndSubtitle,
   getStatusClasses,
@@ -121,18 +122,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const {
-      isSelfServiceOrBase,
-      currentOrganization,
-      organizationId,
-      canSeeAllCustody,
-      access,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { currentOrganization, organizationId, canSeeAllCustody, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -168,17 +164,18 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         filterByUserId: !canSeeAllCustody,
         userId,
       }),
-      // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
-      isSelfServiceOrBase
+      // Team members for CreateBookingDialog: a member whose booking custodian
+      // is fixed to themself always gets their own team member.
+      bookingCustodianIsSelf(access)
         ? getTeamMemberForForm({
             organizationId,
             userId,
-            isSelfServiceOrBase,
+            access,
             getAll:
               searchParams.has("getAll") &&
               hasGetAllValue(searchParams, "teamMember"),
           })
-        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+        : Promise.resolve(null), // Everyone else reuses teamMembersData
       getTagsForBookingTagsFilter({
         organizationId,
       }),
@@ -202,14 +199,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       events,
       organizationId,
       ...teamMembersData,
-      // For BASE/SELF_SERVICE users, provide dedicated form team members
-      // For ADMIN users, reuse the filter team members
+      // Members fixed to themselves get dedicated form team members;
+      // everyone else reuses the filter team members.
       teamMembersForForm:
         teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
       currentOrganization,
       ...tagsData,
       modelName,
-      isSelfServiceOrBase,
       userId,
       calendarFeedUrl,
       searchFieldTooltip: {
