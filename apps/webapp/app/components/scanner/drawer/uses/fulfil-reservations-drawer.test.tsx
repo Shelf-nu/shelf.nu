@@ -135,9 +135,30 @@ const ALREADY_ON_BOOKING: Exclude<
   mainImage: null,
   thumbnailImage: null,
   assetModelId: null,
+  // Its row already answered something, or answers nothing this booking
+  // reserves. Either way scanning it cannot claim.
+  claimable: false,
   kitId: null,
   bookedQuantity: 1,
   type: "INDIVIDUAL",
+};
+
+/**
+ * An item already on the booking whose row answered no reservation, and whose
+ * model the booking still has outstanding.
+ *
+ * This is the state a unit lands in when it was added before the reservation
+ * existed, or before its model matched one.
+ */
+const CLAIMABLE_ON_BOOKING: Exclude<
+  FulfilSessionInfo,
+  null
+>["alreadyIncluded"][number] = {
+  ...ALREADY_ON_BOOKING,
+  id: "asset-claimable",
+  title: "Claimable Tripod",
+  assetModelId: "model-0",
+  claimable: true,
 };
 
 /** One member of a scanned kit, as `KIT_INCLUDE` selects it. */
@@ -433,6 +454,97 @@ describe("FulfilReservationsDrawer check-out rule", () => {
     expect(document.querySelector('input[name="assetIds[0]"]')).toHaveAttribute(
       "value",
       "asset-tripod"
+    );
+  });
+});
+
+describe("FulfilReservationsDrawer already-on-booking scans", () => {
+  /**
+   * How many places report `fulfilled / booked` for the one model rendered.
+   *
+   * With a single model the header total and the model's own strip carry the
+   * same text, so the count is what tells them apart from absence.
+   */
+  function progressReadings(text: string): number {
+    return screen.queryAllByText(text).length;
+  }
+
+  /** A resolved scan of an asset that is already on the booking. */
+  function scanOf(id: string, assetModelId: string | null) {
+    return {
+      id,
+      title: id,
+      type: "INDIVIDUAL" as const,
+      assetModelId,
+      mainImage: null,
+      thumbnailImage: null,
+    };
+  }
+
+  it("counts a unit already on the booking whose row answered nothing", () => {
+    // The customer-reported case: the unit is in the booking's asset list, its
+    // model is reserved, and scanning it used to report only that it was
+    // already there.
+    renderDrawer(1, {
+      alreadyIncluded: [CLAIMABLE_ON_BOOKING],
+      scannedAssets: { "qr-claimable": scanOf("asset-claimable", "model-0") },
+    });
+
+    expect(screen.getByText(/Already here, now counts toward/)).toBeTruthy();
+    // It answers a reserved unit, so the model's strip has to move.
+    expect(progressReadings("1 / 4")).toBeGreaterThan(0);
+    expect(progressReadings("0 / 4")).toBe(0);
+    // And it has to reach the server, or nothing is stamped.
+    expect(submittedValues("assetIds")).toContain("asset-claimable");
+  });
+
+  it("leaves a unit whose row already answered as a plain duplicate", () => {
+    // Its reservation is already discharged, so counting it again would report
+    // a reserved unit as satisfied twice over by one asset.
+    renderDrawer(1, {
+      alreadyIncluded: [{ ...CLAIMABLE_ON_BOOKING, claimable: false }],
+      scannedAssets: { "qr-claimable": scanOf("asset-claimable", "model-0") },
+    });
+
+    expect(screen.getByText(/Already on this booking/)).toBeTruthy();
+    expect(progressReadings("0 / 4")).toBeGreaterThan(0);
+    expect(progressReadings("1 / 4")).toBe(0);
+    expect(submittedValues("assetIds")).not.toContain("asset-claimable");
+  });
+
+  it("leaves a claimable unit alone when the booking reserves nothing it answers", () => {
+    renderDrawer(1, {
+      alreadyIncluded: [
+        { ...CLAIMABLE_ON_BOOKING, assetModelId: "model-not-reserved" },
+      ],
+      scannedAssets: {
+        "qr-claimable": scanOf("asset-claimable", "model-not-reserved"),
+      },
+    });
+
+    expect(screen.getByText(/Already on this booking/)).toBeTruthy();
+    expect(progressReadings("0 / 4")).toBeGreaterThan(0);
+    expect(submittedValues("assetIds")).not.toContain("asset-claimable");
+  });
+
+  it("counts a claimable unit only up to what is still reserved", () => {
+    // One unit left outstanding, two claimable units scanned: the second is an
+    // over-scan and must not move the strip past its reservation.
+    renderDrawer(1, {
+      alreadyIncluded: [
+        { ...CLAIMABLE_ON_BOOKING, id: "asset-a" },
+        { ...CLAIMABLE_ON_BOOKING, id: "asset-b" },
+      ],
+      scannedAssets: {
+        "qr-a": scanOf("asset-a", "model-0"),
+        "qr-b": scanOf("asset-b", "model-0"),
+      },
+    });
+
+    // Both are claimable and the model reserves 4, so both count here.
+    expect(progressReadings("2 / 4")).toBeGreaterThan(0);
+    expect(submittedValues("assetIds")).toEqual(
+      expect.arrayContaining(["asset-a", "asset-b"])
     );
   });
 });

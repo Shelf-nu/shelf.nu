@@ -233,12 +233,36 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     }
 
+    /**
+     * Assets whose standalone row carries no reservation stamp.
+     *
+     * Such a row answers nothing: it arrived before the reservation existed,
+     * through a re-save, or before the asset's model matched one. Scanning it
+     * can still claim a reserved unit, which is what the drawer needs to know
+     * to show it as counted rather than as a duplicate. Computed here rather
+     * than shipped as raw ids because an asset can hold both a standalone row
+     * and kit rows, which the flat list below cannot express, and because the
+     * server owns the rule the write enforces.
+     *
+     * Kit-driven rows are excluded: a reservation promises loose units, and a
+     * kit's are answered by scanning the kit.
+     */
+    const claimableAssetIds = new Set(
+      booking.bookingAssets
+        .filter(
+          (ba) => ba.assetKitId === null && ba.bookingModelRequestId === null
+        )
+        .map((ba) => ba.asset.id)
+    );
+
     const alreadyIncluded = booking.bookingAssets.map((ba) => ({
       id: ba.asset.id,
       title: ba.asset.title,
       mainImage: ba.asset.mainImage,
       thumbnailImage: ba.asset.thumbnailImage,
       assetModelId: assetModelIdByAssetId.get(ba.asset.id) ?? null,
+      /** Whether scanning this asset could still answer a reservation. */
+      claimable: claimableAssetIds.has(ba.asset.id),
       kitId: ba.asset.assetKits[0]?.kitId ?? null,
       // `ba.quantity` is the BOOKING-specific unit count (from the
       // `BookingAsset` pivot) — always `1` for INDIVIDUAL, `N` for

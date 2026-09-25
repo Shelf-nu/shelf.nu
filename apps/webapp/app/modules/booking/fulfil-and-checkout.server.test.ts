@@ -16,6 +16,7 @@ import {
   fulfilModelRequestsAndCheckout,
   partialCheckoutBooking,
 } from "~/modules/booking/service.server";
+import { claimUnstampedBookingRows } from "~/modules/booking-model-request/service.server";
 
 import { fulfilAndCheckOut } from "./fulfil-and-checkout.server";
 
@@ -33,6 +34,9 @@ vi.mock("~/database/db.server", () => ({
     // to none so only the cases about that rule have to stage memberships.
     asset: { findMany: vi.fn() },
     bookingModelRequest: { findMany: vi.fn() },
+    // why: the claim step runs in its own transaction, since the assign above
+    // manages one of its own. Hand the callback the same stub.
+    $transaction: vi.fn((cb: (tx: unknown) => unknown) => cb({})),
   },
 }));
 
@@ -51,6 +55,12 @@ vi.mock("~/modules/booking/service.server", () => ({
   // checkout sessions and is covered where that math lives; this module only
   // has to ask for it per kit-driven row and pass the answer through.
   computeBookingAssetSliceRemainingToCheckOut: vi.fn(),
+}));
+
+// why: the claim step has its own suite next to the helper it wraps; here only
+// which assets this module offers it matters.
+vi.mock("~/modules/booking-model-request/service.server", () => ({
+  claimUnstampedBookingRows: vi.fn(),
 }));
 
 const hints = { timeZone: "Europe/Sofia", locale: "en-US" } as never;
@@ -75,6 +85,7 @@ beforeEach(() => {
   // quantity-tracked members have to state a figure.
   vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(0);
   vi.mocked(db.asset.findMany).mockResolvedValue([]);
+  vi.mocked(claimUnstampedBookingRows).mockResolvedValue(new Map());
 });
 
 /** One `AssetKit` membership, in the shape `buildKitSlicesForBooking` returns. */
@@ -335,6 +346,51 @@ describe("fulfilAndCheckOut", () => {
     expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
     expect(partialCheckoutBooking).toHaveBeenCalledWith(
       expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+  });
+
+  it("offers a scanned unit already on the booking to the claim step", async () => {
+    // The row exists but carries no stamp, which is the state a unit lands in
+    // when it was added before the reservation existed, or before its model
+    // matched one. Nothing new is added, but the unit must still be able to
+    // answer a reservation, or scanning it reports nothing and the operator is
+    // told it is merely a duplicate.
+    primeRulePath();
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
+    ] as never);
+
+    await fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: true });
+
+    expect(claimUnstampedBookingRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        assetIds: ["dell-1"],
+      }),
+      expect.anything()
+    );
+  });
+
+  it("offers the claim step only the units it did not add", async () => {
+    // A unit the scan adds is stamped as it is inserted, so offering it again
+    // would ask the same reservation to answer twice.
+    primeRulePath();
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
+    ] as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      assetIds: ["dell-1", "dell-2"],
+      requireExplicitCheckout: true,
+    });
+
+    expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-2"] })
+    );
+    expect(claimUnstampedBookingRows).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] }),
+      expect.anything()
     );
   });
 

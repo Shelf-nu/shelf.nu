@@ -147,10 +147,21 @@ type ScannedAssetRow = {
    *                    part of that kit rather than as a loose unit
    * - `"included"`   — asset is already on the booking and submit sends out
    *                    only scanned items; the scan checks this item out.
+   * - `"claimed"`    : asset is already on the booking but its row answered no
+   *                    reservation, and this scan makes it answer one. Counts
+   *                    toward progress and is submitted.
    */
-  bucket: "matched" | "unmatched" | "duplicate" | "included" | "viaKit";
+  bucket:
+    | "matched"
+    | "unmatched"
+    | "duplicate"
+    | "included"
+    | "viaKit"
+    | "claimed";
   /** Name of the scanned kit this asset arrives with — `viaKit` rows only. */
   viaKitName?: string;
+  /** Model this row answered. `claimed` rows only. */
+  claimedModelName?: string;
 };
 
 /**
@@ -219,6 +230,21 @@ export default function FulfilReservationsDrawer({
     const set = new Set<string>();
     for (const item of session?.alreadyIncluded ?? []) {
       set.add(item.id);
+    }
+    return set;
+  }, [session?.alreadyIncluded]);
+
+  /**
+   * Already-included assets whose row still answers no reservation.
+   *
+   * The server decides this, because it depends on the row's stamp rather than
+   * on anything the scan can see. An asset listed twice, once standalone and
+   * once through a kit, is claimable if any of its entries says so.
+   */
+  const claimableIncludedIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of session?.alreadyIncluded ?? []) {
+      if (item.claimable) set.add(item.id);
     }
     return set;
   }, [session?.alreadyIncluded]);
@@ -324,11 +350,39 @@ export default function FulfilReservationsDrawer({
 
       const asset = (item.data ?? undefined) as AssetFromQr | undefined;
 
-      // An asset already on the booking never counts as a fresh match, or
-      // re-scanning it would fill the progress bar with nothing new. Whether
-      // the scan does anything depends on what submit sends out: when only
-      // scanned items leave, scanning it is how it gets checked out.
+      // An asset already on the booking can still answer a reservation, if its
+      // row never did. That is the ordinary state for a unit added before the
+      // reservation existed, or before its model matched one, and scanning it
+      // is how the operator says so. It counts toward progress exactly once,
+      // bounded by the same outstanding count a fresh scan is.
       if (asset && alreadyIncludedIds.has(asset.id)) {
+        const includedModelId = asset.assetModelId ?? null;
+        const includedExpected = includedModelId
+          ? expectedByModelId.get(includedModelId)
+          : undefined;
+        const consumed = includedExpected
+          ? matchedCountByModel.get(includedExpected.assetModelId) ?? 0
+          : 0;
+
+        if (
+          includedExpected &&
+          claimableIncludedIds.has(asset.id) &&
+          consumed < includedExpected.remaining
+        ) {
+          matchedCountByModel.set(includedExpected.assetModelId, consumed + 1);
+          rows.push({
+            qrId,
+            asset,
+            bucket: "claimed",
+            claimedModelName: includedExpected.assetModelName,
+          });
+          continue;
+        }
+
+        // Answers nothing: re-scanning it would fill the progress bar with
+        // nothing new. Whether the scan does anything depends on what submit
+        // sends out: when only scanned items leave, scanning it is how it gets
+        // checked out.
         rows.push({
           qrId,
           asset,
@@ -372,6 +426,7 @@ export default function FulfilReservationsDrawer({
     items,
     expectedModelRequests,
     alreadyIncludedIds,
+    claimableIncludedIds,
     session?.checksOutScannedOnly,
   ]);
 
@@ -579,6 +634,7 @@ export default function FulfilReservationsDrawer({
           asset={data as AssetFromQr}
           bucket={row.bucket}
           viaKitName={row.viaKitName}
+          claimedModelName={row.claimedModelName}
         />
       )}
     />
@@ -622,6 +678,7 @@ export default function FulfilReservationsDrawer({
     const nonMatchingKits = scannedBuckets.kitRows.filter(
       (r) => r.matchedMemberCount === 0
     );
+    const claimed = scannedBuckets.rows.filter((r) => r.bucket === "claimed");
     const included = scannedBuckets.rows.filter((r) => r.bucket === "included");
     const duplicate = scannedBuckets.rows.filter(
       (r) => r.bucket === "duplicate"
@@ -641,6 +698,7 @@ export default function FulfilReservationsDrawer({
         {/* Bucket 2: matched scanned rows (green "Ready" chip), then the
             kits whose members assign reserved units. */}
         {matched.map(renderScannedItemRow)}
+        {claimed.map(renderScannedItemRow)}
         {matchingKits.map(renderScannedKitRow)}
 
         {/* Scanned alongside their own kit: the kit above assigns them, so
@@ -960,10 +1018,12 @@ function ScannedAssetRowBody({
   asset,
   bucket,
   viaKitName,
+  claimedModelName,
 }: {
   asset: AssetFromQr;
   bucket: ScannedAssetRow["bucket"];
   viaKitName?: string;
+  claimedModelName?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -996,6 +1056,17 @@ function ScannedAssetRowBody({
               {viaKitName
                 ? `Arrives with ${viaKitName}`
                 : "Arrives with its kit"}
+            </Badge>
+          ) : bucket === "claimed" ? (
+            <Badge
+              color={BADGE_COLORS.green.bg}
+              textColor={BADGE_COLORS.green.text}
+              withDot={false}
+              className="max-w-full"
+            >
+              {claimedModelName
+                ? `Already here, now counts toward ${claimedModelName}`
+                : "Already here, now counts"}
             </Badge>
           ) : bucket === "included" ? (
             <Badge

@@ -2082,6 +2082,124 @@ export async function fulfilModelRequestsForAssets({
   return fulfilledRequestIdByAssetId;
 }
 
+/**
+ * Lets units ALREADY on a booking answer its outstanding reservations.
+ *
+ * A `BookingAsset` row carries a stamp only when it was inserted while a
+ * matching reservation was outstanding. Rows arrive without one all the time:
+ * added before the reservation existed, re-saved through manage-assets, or
+ * added when the asset's model did not yet match. Such a unit sits on the
+ * booking answering nothing, and scanning it reported only that it was already
+ * there.
+ *
+ * {@link fulfilModelRequestsForAssets} has always been willing to claim these,
+ * because its once-per-booking guard keys on the STAMP rather than on whether a
+ * row exists. What kept them away from it is that its scanning callers decide
+ * "is this asset new to the booking" and use that one answer for two questions:
+ * whether to insert a row, and whether to offer the asset for fulfilment. The
+ * first answer is right, the second is not. This function is the second
+ * question asked on its own.
+ *
+ * Only STANDALONE rows are eligible. A reservation promises loose units, and a
+ * kit-driven row is answered by scanning its kit.
+ *
+ * Safe to call with assets that are not on the booking, hold a stamp already,
+ * or match nothing: each is filtered out, here or by the helper.
+ *
+ * @param args.bookingId - Booking whose reservations may be answered.
+ * @param args.assetIds - Scanned assets to consider. Rows are looked up here
+ *   rather than taken as data, because the caller knows the scan, not which of
+ *   it is already on the booking and unstamped.
+ * @param args.organizationId - Caller's org, for the error payload.
+ * @param args.userId - Actor, for the per-assignment activity note.
+ * @param tx - Interactive transaction client. Required: the decrements and the
+ *   stamps written here must commit or roll back as one.
+ * @returns `assetId -> BookingModelRequest.id` for every row that answered a
+ *   reservation. Empty is the ordinary outcome, not an error.
+ * @throws {ShelfError} Only on internal failure.
+ */
+export async function claimUnstampedBookingRows(
+  {
+    bookingId,
+    assetIds,
+    organizationId,
+    userId,
+  }: {
+    bookingId: string;
+    assetIds: string[];
+    organizationId: string;
+    userId?: string;
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any
+): Promise<Map<string, string>> {
+  const uniqueAssetIds = [...new Set(assetIds)];
+  if (uniqueAssetIds.length === 0) return new Map();
+
+  try {
+    /**
+     * The eligible rows, and the asset fields the helper matches on. Scoped
+     * through the booking's own organization because `assetIds` is request
+     * input.
+     */
+    const rows: Array<{
+      asset: Pick<Asset, "id" | "title" | "assetModelId" | "type">;
+    }> = await tx.bookingAsset.findMany({
+      where: {
+        bookingId,
+        assetId: { in: uniqueAssetIds },
+        assetKitId: null,
+        bookingModelRequestId: null,
+        booking: { organizationId },
+      },
+      select: {
+        asset: {
+          select: { id: true, title: true, assetModelId: true, type: true },
+        },
+      },
+    });
+
+    if (rows.length === 0) return new Map();
+
+    const fulfilledRequestIdByAssetId = await fulfilModelRequestsForAssets({
+      bookingId,
+      assets: rows.map((row) => row.asset),
+      organizationId,
+      userId,
+      tx,
+    });
+
+    /**
+     * Persist the provenance onto the rows that already exist. Every other
+     * caller stamps while INSERTing, so this is the only path that writes the
+     * column on its own. The `where` repeats `bookingModelRequestId: null` so a
+     * row claimed concurrently keeps the stamp it was given rather than having
+     * this one written over it.
+     */
+    for (const [assetId, requestId] of fulfilledRequestIdByAssetId) {
+      await tx.bookingAsset.updateMany({
+        where: {
+          bookingId,
+          assetId,
+          assetKitId: null,
+          bookingModelRequestId: null,
+        },
+        data: { bookingModelRequestId: requestId },
+      });
+    }
+
+    return fulfilledRequestIdByAssetId;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while counting scanned items toward this booking's reservations.",
+      additionalData: { bookingId, assetIds: uniqueAssetIds, organizationId },
+      label,
+    });
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                  helpers                                   */
 /* -------------------------------------------------------------------------- */

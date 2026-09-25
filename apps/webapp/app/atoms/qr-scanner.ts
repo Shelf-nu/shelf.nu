@@ -761,6 +761,12 @@ export type FulfilSessionInfo = {
     mainImage: string | null;
     thumbnailImage: string | null;
     assetModelId: string | null;
+    /**
+     * Whether this asset's standalone row still carries no reservation stamp,
+     * so scanning it could answer a reserved unit. The server decides it; the
+     * drawer only reads it to tell a countable scan from a plain duplicate.
+     */
+    claimable: boolean;
     kitId: string | null;
     /**
      * `BookingAsset.quantity` on this booking — `1` for INDIVIDUAL
