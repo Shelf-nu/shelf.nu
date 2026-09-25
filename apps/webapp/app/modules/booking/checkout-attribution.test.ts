@@ -244,6 +244,7 @@ describe("computeUnitsStillOutBySlice", () => {
     id: "s1",
     quantity: 10,
     assetKitId: null,
+    checkedOutAt: null,
     checkedOutQuantity: 10,
   };
 
@@ -252,7 +253,6 @@ describe("computeUnitsStillOutBySlice", () => {
       slices: [{ ...slice, checkedOutQuantity: 30 }],
       checkoutClaims: [],
       dispositions: [],
-      assetIsCheckedOut: false,
     });
 
     expect(out.get("s1")).toBe(10);
@@ -263,7 +263,6 @@ describe("computeUnitsStillOutBySlice", () => {
       slices: [slice],
       checkoutClaims: [],
       dispositions: [{ bookingAssetId: "s1", quantity: 12 }],
-      assetIsCheckedOut: false,
     });
 
     expect(out.get("s1")).toBe(0);
@@ -274,7 +273,6 @@ describe("computeUnitsStillOutBySlice", () => {
       slices: [{ ...slice, checkedOutQuantity: 0 }],
       checkoutClaims: [],
       dispositions: [],
-      assetIsCheckedOut: false,
     });
 
     expect(out.get("s1")).toBe(0);

@@ -12,7 +12,7 @@
  * @see {@link file://./checkout-attribution.ts} per-slice attribution and the shared session parser.
  * @see {@link file://../asset/availability.server.ts} the main consumer (`getAssetAvailability`).
  */
-import { AssetStatus, BookingStatus, type Asset } from "@prisma/client";
+import { BookingStatus, type Asset } from "@prisma/client";
 import { RESERVATION_REDUCING_CATEGORIES } from "@shelf/quantity-control";
 
 import {
@@ -79,9 +79,9 @@ export async function computeCheckedOutForAsset(
  *                   slices, the figure `physicalAvailable` subtracts.
  *
  * Per (booking, asset), the units still out come from
- * {@link computeUnitsStillOutBySlice}: what left (the all-at-once legacy
- * reading, or the larger of the session claims and the stored
- * `checkedOutQuantity`) minus what came back or was used up
+ * {@link computeUnitsStillOutBySlice}: what left (the larger of the slice's
+ * session claims, or the whole slice when only its `checkedOutAt` records the
+ * departure, and the stored `checkedOutQuantity`) minus what came back or was used up
  * (RETURN / CONSUME / LOSS / DAMAGE). A partial check-in therefore puts its
  * units back on the shelf straight away, and a consumed unit is not counted as
  * both gone from the stock and still out.
@@ -150,32 +150,19 @@ export async function computeCheckedOutByBookingForAsset(
       quantity: true,
       assetKitId: true,
       bookingId: true,
+      checkedOutAt: true,
       checkedOutQuantity: true,
-      // Live asset status: the per-asset half of the all-at-once detection in
-      // `computeUnitsStillOutBySlice`. Joined here so it costs no round-trip.
-      asset: { select: { status: true } },
     },
   })) as Array<{
     id: string;
     quantity: number;
     assetKitId: string | null;
     bookingId: string;
+    checkedOutAt?: Date | null;
     checkedOutQuantity?: number | null;
-    asset?: { status: AssetStatus } | null;
   }>;
 
   if (slices.length === 0) return byBooking;
-
-  /**
-   * Whether the asset itself is flagged off the shelf. The all-at-once
-   * checkout sets `CHECKED_OUT` on every asset it processed, which separates
-   * "was on the booking when it went out" from "added afterwards" (left
-   * AVAILABLE by `updateBookingAssets`). Only the former takes the legacy
-   * reading.
-   */
-  const assetIsCheckedOut = slices.some(
-    (slice) => slice.asset?.status === AssetStatus.CHECKED_OUT
-  );
 
   // An asset can hold several slices on one booking (a standalone free-pool
   // slice plus kit-driven ones), and attribution is per (booking, asset).
@@ -185,6 +172,7 @@ export async function computeCheckedOutByBookingForAsset(
       id: string;
       quantity: number;
       assetKitId: string | null;
+      checkedOutAt: Date | null;
       checkedOutQuantity: number;
     }>
   >();
@@ -193,6 +181,7 @@ export async function computeCheckedOutByBookingForAsset(
       id: slice.id,
       quantity: slice.quantity,
       assetKitId: slice.assetKitId,
+      checkedOutAt: slice.checkedOutAt ?? null,
       checkedOutQuantity: slice.checkedOutQuantity ?? 0,
     };
     const list = slicesByBooking.get(slice.bookingId);
@@ -269,7 +258,6 @@ export async function computeCheckedOutByBookingForAsset(
           (id) => id === assetId
         ).get(assetId) ?? [],
       dispositions: dispositionsByBooking.get(bookingId) ?? [],
-      assetIsCheckedOut,
     });
 
     let total = 0;

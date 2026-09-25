@@ -11,7 +11,6 @@
  * (inline `db` mock with `$transaction` routing the callback through the same
  * mock, plus per-method `mockResolvedValue` overrides per test).
  */
-import { AssetStatus } from "@prisma/client";
 import { describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -1038,11 +1037,10 @@ describe("getAssetAvailabilityBatch", () => {
         assetId: "a1",
         bookingId: "legacy",
         quantity: 5,
-        // The legacy branch is gated on the asset being flagged off the shelf,
-        // which is what an all-at-once checkout does to every asset it
-        // processed. Without it this row is treated as "added later" and
-        // contributes 0 (GitHub #2815).
-        asset: { status: AssetStatus.CHECKED_OUT },
+        // The all-at-once checkout stamps the slice's marker and writes no
+        // session. Without it this row is treated as never sent out and
+        // contributes 0.
+        checkedOutAt: new Date("2026-01-01"),
         booking: {
           from: new Date("2026-01-01"),
           to: new Date("2026-01-05"),
@@ -1052,7 +1050,7 @@ describe("getAssetAvailabilityBatch", () => {
         assetId: "a1",
         bookingId: "partial",
         quantity: 8,
-        asset: { status: AssetStatus.CHECKED_OUT },
+        checkedOutAt: new Date("2026-01-01"),
         booking: {
           from: new Date("2026-01-01"),
           to: new Date("2026-01-05"),
@@ -1171,11 +1169,10 @@ describe("getAssetAvailabilityBatch", () => {
         bookingId: "od1",
         quantity: 4,
         // This OVERDUE booking was checked out all-at-once (no session rows),
-        // which flips the asset itself to CHECKED_OUT — the flag the legacy
-        // branch is gated on. The singular side is stubbed to report the same
-        // 4 units, so omitting it would break batch/singular parity for a
-        // reason unrelated to the windowing this test is about.
-        asset: { status: AssetStatus.CHECKED_OUT },
+        // which stamps the slice's marker. The singular side is stubbed to
+        // report the same 4 units, so omitting it would break batch/singular
+        // parity for a reason unrelated to the windowing this test is about.
+        checkedOutAt: new Date("2026-07-01T00:00:00Z"),
         booking: {
           from: new Date("2026-07-01T00:00:00Z"),
           to: new Date("2026-07-10T00:00:00Z"),

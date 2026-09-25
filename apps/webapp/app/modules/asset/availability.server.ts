@@ -62,7 +62,7 @@
  */
 
 import type { Prisma } from "@prisma/client";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import {
   checkQuantityAvailable,
   computeAvailability,
@@ -570,13 +570,10 @@ export type AvailabilityBatchClient = {
         quantity: true;
         assetKitId?: true;
         // Optional like `id`/`assetKitId`: only the checked-out read needs the
-        // stored departure counter.
+        // slice's departure records.
+        checkedOutAt?: true;
         checkedOutQuantity?: true;
         booking: { select: { from: true; to: true; status: true } };
-        // Optional like `id`/`assetKitId`: only the checked-out read needs the
-        // live asset status (to gate the legacy all-at-once branch per asset);
-        // the reserved-rows read leaves it off.
-        asset?: { select: { status: true } };
       };
     }) => Promise<
       Array<{
@@ -585,9 +582,9 @@ export type AvailabilityBatchClient = {
         bookingId: string;
         quantity: number;
         assetKitId?: string | null;
+        checkedOutAt?: Date | null;
         checkedOutQuantity?: number | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
-        asset?: { status: AssetStatus } | null;
       }>
     >;
   };
@@ -960,10 +957,11 @@ type CheckedOutBreakdown = { total: number; standalone: number };
  *
  * Per (booking, asset), the units still out come from the same
  * {@link computeUnitsStillOutBySlice} the singular
- * {@link computeCheckedOutBreakdownForAsset} runs: what left (the all-at-once
- * legacy reading, or the larger of the session claims and the stored
- * `checkedOutQuantity`) minus what came back or was used up. The two are pinned
- * together by `checked-out-batch-parity.test.ts`.
+ * {@link computeCheckedOutBreakdownForAsset} runs: what left (the larger of the
+ * slice's session claims, or the whole slice when only its `checkedOutAt`
+ * records the departure, and the stored `checkedOutQuantity`) minus what came
+ * back or was used up. The two are pinned together by
+ * `checked-out-batch-parity.test.ts`.
  *
  * Booking statuses are pre-filtered to ONGOING/OVERDUE by the pivots query,
  * so — unlike the check-out-side helpers, which fetch `Booking.status`
@@ -1004,37 +1002,20 @@ async function computeCheckedOutBreakdownBatch(
       bookingId: true,
       quantity: true,
       assetKitId: true,
+      checkedOutAt: true,
       checkedOutQuantity: true,
       booking: { select: { from: true, to: true, status: true } },
-      // Live asset status: the per-asset half of the legacy all-at-once
-      // detection in `computeUnitsStillOutBySlice`. Must stay in step with the
-      // singular `computeCheckedOutBreakdownForAsset`, which the parity test
-      // pins.
-      asset: { select: { status: true } },
     },
   });
 
   if (pivots.length === 0) return breakdownByAsset;
-
-  /**
-   * Assets currently flagged off the shelf. The all-at-once checkout sets
-   * CHECKED_OUT on every asset it processed, so this separates "was on the
-   * booking when it was checked out" from "added afterwards" (which
-   * `updateBookingAssets` leaves AVAILABLE on purpose). Only the former may
-   * take the legacy branch below — see GitHub #2815.
-   */
-  const checkedOutAssetIds = new Set<string>();
-  for (const p of pivots) {
-    if (p.asset?.status === AssetStatus.CHECKED_OUT) {
-      checkedOutAssetIds.add(p.assetId);
-    }
-  }
 
   /** slices grouped: bookingId → assetId → its slices on that booking. */
   type Slice = {
     id: string;
     quantity: number;
     assetKitId: string | null;
+    checkedOutAt: Date | null;
     checkedOutQuantity: number;
   };
   const slicesByBookingByAsset = new Map<string, Map<string, Slice[]>>();
@@ -1051,6 +1032,7 @@ async function computeCheckedOutBreakdownBatch(
       id: p.id ?? `${p.bookingId}:${p.assetId}`,
       quantity: p.quantity ?? 0,
       assetKitId: p.assetKitId ?? null,
+      checkedOutAt: p.checkedOutAt ?? null,
       checkedOutQuantity: p.checkedOutQuantity ?? 0,
     };
     const list = byAsset.get(p.assetId);
@@ -1127,7 +1109,6 @@ async function computeCheckedOutBreakdownBatch(
         checkoutClaims: logsByAsset.get(assetId) ?? [],
         dispositions:
           dispositionsByBookingByAsset.get(bookingId)?.get(assetId) ?? [],
-        assetIsCheckedOut: checkedOutAssetIds.has(assetId),
       });
 
       const acc = breakdownByAsset.get(assetId) ?? { total: 0, standalone: 0 };
