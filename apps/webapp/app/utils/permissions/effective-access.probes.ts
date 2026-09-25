@@ -273,21 +273,6 @@ function throws(fn: () => unknown): boolean {
   return outcome(fn) === "denied";
 }
 
-/**
- * `getMobileUserContext().role`: `roles[0] ?? BASE`
- * (`modules/api/mobile-auth.server.ts:379`). The mobile routes below
- * destructure this same field, never the `effectiveRole` the context also
- * returns.
- */
-function mobilePositionalRole(roles: OrganizationRoles[]): OrganizationRoles {
-  return roles[0] ?? R.BASE;
-}
-
-/** The inline "restricted" test mobile routes run on the positional role. */
-function isRestricted(role: string): boolean {
-  return role === R.SELF_SERVICE || role === R.BASE;
-}
-
 /** Whether the membership holds any of `set`: Prisma `roles: { hasSome: set }`. */
 function holdsAny(
   roles: OrganizationRoles[],
@@ -1242,28 +1227,32 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Audits: Tasks 6a, 6b =====================
 
-  // B9:D-42: mobile audit scope, positional role:
-  // audits.ts (no matrix gate today), audits.complete.ts:43-47 gate
-  // audit:update, :50; audits.record-scan.ts:57-61 gate audit:update, :41.
+  // B9:D-42: mobile audit scope from `access.audits.seeAll`: audits.ts gates
+  // audit:read; audits.complete.ts and audits.record-scan.ts gate
+  // audit:update.
   snapshot["B9:D-42:mobile-audits"] = perRoleSet((roles) => {
-    const scope = isRestricted(mobilePositionalRole(roles))
-      ? "assigned"
-      : "all";
-    const gated = can(roles, E.audit, A.update) ? scope : "denied:gate";
+    const scope = accessFor(roles).audits.seeAll ? "all" : "assigned";
+    const gatedOn = (action: PermissionAction) =>
+      can(roles, E.audit, action) ? scope : "denied:gate";
     return {
-      audits: scope,
-      "audits.complete": gated,
-      "audits.record-scan": gated,
+      audits: gatedOn(A.read),
+      "audits.complete": gatedOn(A.update),
+      "audits.record-scan": gatedOn(A.update),
     };
   });
 
-  // B9:D-43: web audit "is admin": allow-list `includes(ADMIN|OWNER)`
-  // (audits.$auditId.tsx:298-299; audits.$auditId.overview.tsx:181-182) and
-  // deny-list on the effective role (audits.$auditId.tsx:156,175,200).
-  snapshot["B9:D-43:web-audit-admin"] = perRoleSet((roles) => ({
-    detailAndOverviewAllowList: holdsAny(roles, [R.ADMIN, R.OWNER]),
-    effectiveRoleDenyList: !isSelfServiceOrBaseRole(webRole(roles)),
-  }));
+  // B9:D-43: web audit management. The detail loader opens an unassigned
+  // audit on `access.audits.seeAll` and the overview lets a non-creator remove
+  // assets on `access.policy.audits.manageOthers` (audits.$auditId.tsx,
+  // audits.$auditId.overview.tsx); cancel reads `manageOthers` as well.
+  snapshot["B9:D-43:web-audit-admin"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    return {
+      detailAndOverviewAllowList:
+        access.audits.seeAll && access.policy.audits.manageOthers,
+      effectiveRoleDenyList: access.policy.audits.manageOthers,
+    };
+  });
 
   // ===================== Admin areas: Tasks 7b, 7e =====================
 

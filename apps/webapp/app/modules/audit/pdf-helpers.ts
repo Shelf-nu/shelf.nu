@@ -4,7 +4,6 @@ import type {
   Category,
   Organization,
   Prisma,
-  OrganizationRoles,
   AuditImage,
   AuditNote,
   AuditAssetStatus,
@@ -130,7 +129,7 @@ export interface AuditPdfDbResult {
  * @param auditSessionId - ID of the audit session
  * @param organizationId - Organization owning the audit
  * @param userId - Current user ID (for permission checks)
- * @param role - User's role in the organization
+ * @param assignedOnly - The caller sees only audits assigned to them
  * @param _request - HTTP request (unused but kept for API consistency)
  * @returns Complete audit data for PDF generation
  * @throws {ShelfError} If audit not found or permission denied
@@ -139,7 +138,7 @@ export async function fetchAllAuditPdfRelatedData(
   auditSessionId: string,
   organizationId: string,
   userId: string,
-  role: OrganizationRoles | undefined,
+  assignedOnly: boolean,
   _request: Request
 ): Promise<AuditPdfDbResult> {
   try {
@@ -186,8 +185,8 @@ export async function fetchAllAuditPdfRelatedData(
       });
     }
 
-    // Permission check: BASE/SELF_SERVICE users can only view audits they're assigned to
-    if (role && (role === "BASE" || role === "SELF_SERVICE")) {
+    // Callers limited to assigned audits may only print audits they're assigned to
+    if (assignedOnly) {
       const isAssignee = session.assignments.some(
         (assignment) => assignment.user.id === userId
       );

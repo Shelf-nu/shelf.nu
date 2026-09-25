@@ -14813,14 +14813,14 @@
       "audits.record-scan": "all"
     },
     "SELF_SERVICE+OWNER": {
-      "audits": "assigned",
-      "audits.complete": "assigned",
-      "audits.record-scan": "assigned"
+      "audits": "all",
+      "audits.complete": "all",
+      "audits.record-scan": "all"
     },
     "SELF_SERVICE+ADMIN": {
-      "audits": "assigned",
-      "audits.complete": "assigned",
-      "audits.record-scan": "assigned"
+      "audits": "all",
+      "audits.complete": "all",
+      "audits.record-scan": "all"
     },
     "SELF_SERVICE+BASE": {
       "audits": "assigned",
@@ -14828,14 +14828,14 @@
       "audits.record-scan": "assigned"
     },
     "BASE+OWNER": {
-      "audits": "assigned",
-      "audits.complete": "assigned",
-      "audits.record-scan": "assigned"
+      "audits": "all",
+      "audits.complete": "all",
+      "audits.record-scan": "all"
     },
     "BASE+ADMIN": {
-      "audits": "assigned",
-      "audits.complete": "assigned",
-      "audits.record-scan": "assigned"
+      "audits": "all",
+      "audits.complete": "all",
+      "audits.record-scan": "all"
     },
     "BASE+SELF_SERVICE": {
       "audits": "assigned",
@@ -14843,12 +14843,12 @@
       "audits.record-scan": "assigned"
     },
     "(none)": {
-      "audits": "assigned",
+      "audits": "denied:gate",
       "audits.complete": "denied:gate",
       "audits.record-scan": "denied:gate"
     },
     "UNKNOWN_ROLE": {
-      "audits": "all",
+      "audits": "denied:gate",
       "audits.complete": "denied:gate",
       "audits.record-scan": "denied:gate"
     }

@@ -10,7 +10,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAuditNotes } from "~/modules/audit/note-service.server";
 import {
   getAuditSessionDetails,
-  requireAuditAssigneeForBaseSelfService,
+  requireAuditAssigneeForScopedViewer,
 } from "~/modules/audit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -54,8 +54,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { organizationId, userOrganizations, isSelfServiceOrBase } =
-      permissionResult;
+    const { organizationId, userOrganizations, access } = permissionResult;
 
     const { session } = await getAuditSessionDetails({
       // Reads `session` only, so no photo is signed here.
@@ -66,10 +65,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    requireAuditAssigneeForBaseSelfService({
+    requireAuditAssigneeForScopedViewer({
       audit: session,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
     });
 

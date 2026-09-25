@@ -41,6 +41,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
@@ -55,12 +56,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.audit,
-      action: PermissionAction.read,
-    });
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
+        userId: authSession.userId,
+        request,
+        entity: PermissionEntity.audit,
+        action: PermissionAction.read,
+      });
+
+    /** Every role the caller holds in this workspace, for the matrix checks below. */
+    const roles =
+      userOrganizations.find((o) => o.organization.id === organizationId)
+        ?.roles ?? [];
 
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -82,7 +89,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const { audits, totalAudits } = await getAuditsForOrganization({
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       page,
       perPage,
       search,
@@ -112,7 +119,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
-        isSelfServiceOrBase,
+        canCreateAudits: userHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: PermissionAction.create,
+        }),
+        canBulkActAudits: userHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: [PermissionAction.archive, PermissionAction.delete],
+        }),
         searchFieldTooltip: {
           title: "Search audits",
           text: "Search audits by name or description.",
@@ -136,10 +152,10 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export type AuditsIndexLoaderData = typeof loader;
 
 export default function AuditsIndexPage() {
-  const { isSelfServiceOrBase } = useLoaderData<typeof loader>();
+  const { canCreateAudits, canBulkActAudits } = useLoaderData<typeof loader>();
   return (
     <>
-      <Header>{!isSelfServiceOrBase && <NewAuditInfoDialog />}</Header>
+      <Header>{canCreateAudits && <NewAuditInfoDialog />}</Header>
       <ListContentWrapper>
         <Filters
           slots={{
@@ -165,7 +181,7 @@ export default function AuditsIndexPage() {
         />
         <List
           bulkActions={
-            isSelfServiceOrBase ? undefined : <AuditIndexBulkActionsDropdown />
+            canBulkActAudits ? <AuditIndexBulkActionsDropdown /> : undefined
           }
           ItemComponent={ListItemContent}
           headerChildren={

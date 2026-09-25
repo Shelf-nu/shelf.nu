@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import {
   AUDIT_ASSET_STATUS_LABELS,
   AUDIT_UNASSIGNED_LABELS,
@@ -40,7 +39,7 @@ import {
   getAssetsForAuditSession,
   cancelAuditSession,
   requireAuditAssignee,
-  requireAuditAssigneeForBaseSelfService,
+  requireAuditAssigneeForScopedViewer,
   removeAssetFromAudit,
   removeAssetsFromAudit,
 } from "~/modules/audit/service.server";
@@ -97,8 +96,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { organizationId, userOrganizations } = permissionResult;
-    const isSelfServiceOrBase = permissionResult.isSelfServiceOrBase || false;
+    const { organizationId, userOrganizations, access } = permissionResult;
 
     const [{ session }, assetsData, allImages] = await Promise.all([
       getAuditSessionDetails({
@@ -123,10 +121,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     // Gate here, not at the end: this is the earliest point `session` exists,
     // and every query below is work a caller about to be refused never sees.
-    requireAuditAssigneeForBaseSelfService({
+    requireAuditAssigneeForScopedViewer({
       audit: session,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
     });
 
@@ -173,25 +171,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const header = { title: `${session.name} · Overview` };
 
-    const rolesForOrg = userOrganizations.find(
-      (org) => org.organization.id === organizationId
-    )?.roles;
-
-    const isAdminOrOwner = rolesForOrg
-      ? rolesForOrg.includes(OrganizationRoles.ADMIN) ||
-        rolesForOrg.includes(OrganizationRoles.OWNER)
-      : false;
-
-    // Calculate permission to remove assets
-    // Only creator or admins/owners can remove assets, and only from PENDING audits
+    // Only the creator or a caller who manages others' audits can remove
+    // assets, and only from PENDING audits
     const isCreator = session.createdById === userId;
     const canRemoveAssets =
-      (isCreator || isAdminOrOwner) && session.status === "PENDING";
+      (isCreator || access.policy.audits.manageOthers) &&
+      session.status === "PENDING";
 
     return data(
       payload({
         session,
-        isAdminOrOwner,
         canRemoveAssets,
         userId,
         header,
@@ -218,7 +207,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -240,21 +229,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const INTENTS_WITH_THEIR_OWN_RULE = new Set(["cancel-audit"]);
 
-    // Assignee-gated by DEFAULT: ADMIN/OWNER may act on any audit,
-    // BASE/SELF_SERVICE only on audits assigned to them.
+    // Assignee-gated by DEFAULT: callers who see every audit may act on any
+    // audit, everyone else only on audits assigned to them.
     //
     // Expressed as an exclusion rather than a list of guarded intents so the
-    // default is fail-closed — a newly added intent inherits the guard instead
-    // of silently escaping it. Only `complete-audit` used to carry a check, so
-    // `remove-asset` and `bulk-remove-assets` let an unassigned member strip
-    // assets out of anyone's audit by direct POST; the loader's
-    // `canRemoveAssets` is display-only. (detail.dev D101)
+    // default is fail-closed: a newly added intent inherits the guard instead
+    // of silently escaping it. The loader's `canRemoveAssets` is display-only,
+    // so `remove-asset` and `bulk-remove-assets` rely on this guard to stop an
+    // unassigned member stripping assets out of an audit by direct POST.
     if (!INTENTS_WITH_THEIR_OWN_RULE.has(String(intent))) {
       await requireAuditAssignee({
         auditSessionId: auditId,
         organizationId,
         userId,
-        isSelfServiceOrBase,
+        assignedOnly: !access.audits.seeAll,
       });
     }
 
@@ -275,9 +263,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         auditSessionId: auditId,
         organizationId,
         userId,
-        // Admin/owner is the inverse of self-service/base in this codebase.
-        // Allows non-creator admin/owners to cancel team-managed audits.
-        isAdminOrOwner: !isSelfServiceOrBase,
+        canManageOthers: access.policy.audits.manageOthers,
         hints,
       });
 
