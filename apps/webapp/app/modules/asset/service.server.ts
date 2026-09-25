@@ -153,6 +153,7 @@ import {
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
+import { placementsForRestore } from "./backup-placements";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
@@ -5100,6 +5101,59 @@ export async function createAssetsFromContentImport({
   }
 }
 
+/**
+ * Finds a workspace's locations by name for a backup restore, creating the
+ * ones that are missing. Names match regardless of case, the same way the
+ * database's unique index on location names compares them.
+ *
+ * @param args.names - Location names from the backup file, repeats allowed.
+ * @returns Location ids keyed by lower-cased name.
+ */
+async function findOrCreateLocationsByName({
+  names,
+  userId,
+  organizationId,
+}: {
+  names: string[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  /** Lower-cased name -> the first spelling the file uses for it. */
+  const spellings = new Map<string, string>();
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (!spellings.has(key)) spellings.set(key, name);
+  }
+
+  const locationIds = new Map<string, Location["id"]>();
+  if (spellings.size === 0) return locationIds;
+
+  // `in` + insensitive compiles to LOWER(name) IN (LOWER($1), …): an exact
+  // match. `equals` + insensitive would be an ILIKE, where `_` and `%` in a
+  // location name act as wildcards.
+  const existing = await db.location.findMany({
+    where: {
+      organizationId,
+      name: { in: [...spellings.values()], mode: "insensitive" },
+    },
+    select: { id: true, name: true },
+  });
+  for (const location of existing) {
+    locationIds.set(location.name.toLowerCase(), location.id);
+  }
+
+  for (const [key, name] of spellings) {
+    if (locationIds.has(key)) continue;
+    const created = await db.location.create({
+      data: { name, organizationId, userId },
+      select: { id: true },
+    });
+    locationIds.set(key, created.id);
+  }
+
+  return locationIds;
+}
+
 export async function createAssetsFromBackupImport({
   data,
   userId,
@@ -5110,9 +5164,26 @@ export async function createAssetsFromBackupImport({
   organizationId: Organization["id"];
 }) {
   try {
+    // Placements travel by location name. Every name is resolved once, here,
+    // before the assets are created in parallel: resolving per asset would let
+    // two assets that share a new location each create their own copy of it.
+    const placementsPerRow = data.map((asset) =>
+      placementsForRestore({
+        type: asset.type,
+        quantity: asset.quantity,
+        assetLocations: asset.assetLocations,
+        location: asset.location,
+      })
+    );
+    const locationIds = await findOrCreateLocationsByName({
+      names: placementsPerRow.flat().map((placement) => placement.location),
+      userId,
+      organizationId,
+    });
+
     //TODO use concurrency control or it will overload the server
     await Promise.all(
-      data.map(async (asset) => {
+      data.map(async (asset, rowIndex) => {
         /** Quantity-tracked + assetModel fields — passed through from
          * the backup payload. Backup export emits these as raw string
          * values (per-Asset scalar columns); on restore we read them
@@ -5258,40 +5329,26 @@ export async function createAssetsFromBackupImport({
           }
         }
 
-        /** Location */
-        if (asset.location && Object.keys(asset?.location).length > 0) {
-          const location = asset.location as Location;
-
-          const existingLoc = await db.location.findFirst({
-            where: {
+        /** Placements. They are created with the asset, in one write, so the
+         * database checks them together: a pool's placed units may not
+         * exceed its quantity. Names that differ only in case resolve to one
+         * location, so their units are added up. */
+        const unitsByLocationId = new Map<string, number>();
+        for (const { location, quantity } of placementsPerRow[rowIndex]) {
+          const locationId = locationIds.get(location.toLowerCase())!;
+          unitsByLocationId.set(
+            locationId,
+            (unitsByLocationId.get(locationId) ?? 0) + quantity
+          );
+        }
+        if (unitsByLocationId.size > 0) {
+          const placements: Prisma.AssetLocationUncheckedCreateWithoutAssetInput[] =
+            [...unitsByLocationId].map(([locationId, quantity]) => ({
+              locationId,
               organizationId,
-              name: location.name,
-            },
-          });
-
-          /** If it doesn't exist, create a new one */
-          if (!existingLoc) {
-            const newLoc = await db.location.create({
-              data: {
-                name: location.name,
-                description: location.description || "",
-                address: location.address || "",
-                organizationId,
-                userId,
-                createdAt: new Date(location.createdAt),
-                updatedAt: new Date(location.updatedAt),
-              },
-            });
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              locationId: newLoc.id,
-            });
-          } else {
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              locationId: existingLoc.id,
-            });
-          }
+              quantity,
+            }));
+          Object.assign(d.data, { assetLocations: { create: placements } });
         }
 
         /** Custody */
