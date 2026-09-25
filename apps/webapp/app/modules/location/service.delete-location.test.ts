@@ -23,11 +23,12 @@ vi.mock("~/database/db.server", () => ({
   db: dbMocks,
 }));
 
-// why: removePublicFile calls Supabase storage over HTTP; mock it so the
-// tests stay offline and can assert which files are removed
-const removePublicFileMock = vi.hoisted(() => vi.fn());
+// why: removePublicFiles calls Supabase storage over HTTP; mock it so the
+// tests stay offline and can assert which files each request removes
+const removePublicFilesMock = vi.hoisted(() => vi.fn());
 vi.mock("~/utils/storage.server", () => ({
-  removePublicFile: removePublicFileMock,
+  MAX_PUBLIC_FILES_PER_REMOVE: 1000,
+  removePublicFiles: removePublicFilesMock,
 }));
 
 const { deleteLocation, bulkDeleteLocations } = await import(
@@ -71,7 +72,7 @@ let loggerErrorSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   vi.resetAllMocks();
   loggerErrorSpy = vi.spyOn(Logger, "error").mockImplementation(() => {});
-  removePublicFileMock.mockResolvedValue(undefined);
+  removePublicFilesMock.mockResolvedValue({ invalidUrlCount: 0 });
   dbMocks.$transaction.mockImplementation(
     (cb: (tx: typeof dbMocks) => Promise<unknown>) => cb(dbMocks)
   );
@@ -90,12 +91,12 @@ describe("deleteLocation", () => {
     expect(dbMocks.location.delete).toHaveBeenCalledWith({
       where: { id: "loc-1", organizationId: "org-1" },
     });
-    expect(removePublicFileMock.mock.calls).toEqual([
-      [{ publicUrl: imageUrlFor("loc-1") }],
-      [{ publicUrl: thumbnailUrlFor("loc-1") }],
+    // One storage request for both files.
+    expect(removePublicFilesMock.mock.calls).toEqual([
+      [{ publicUrls: [imageUrlFor("loc-1"), thumbnailUrlFor("loc-1")] }],
     ]);
     expect(dbMocks.location.delete.mock.invocationCallOrder[0]).toBeLessThan(
-      removePublicFileMock.mock.invocationCallOrder[0]
+      removePublicFilesMock.mock.invocationCallOrder[0]
     );
   });
 
@@ -109,7 +110,9 @@ describe("deleteLocation", () => {
     expect(dbMocks.image.delete).toHaveBeenCalledWith({
       where: { id: "image-1" },
     });
-    expect(removePublicFileMock).toHaveBeenCalledTimes(2);
+    expect(removePublicFilesMock).toHaveBeenCalledWith({
+      publicUrls: [imageUrlFor("loc-1"), thumbnailUrlFor("loc-1")],
+    });
   });
 
   it("removes only the image when the location has no thumbnail", async () => {
@@ -119,8 +122,8 @@ describe("deleteLocation", () => {
 
     await deleteLocation({ id: "loc-1", organizationId: "org-1" });
 
-    expect(removePublicFileMock.mock.calls).toEqual([
-      [{ publicUrl: imageUrlFor("loc-1") }],
+    expect(removePublicFilesMock.mock.calls).toEqual([
+      [{ publicUrls: [imageUrlFor("loc-1")] }],
     ]);
   });
 
@@ -131,27 +134,35 @@ describe("deleteLocation", () => {
 
     await deleteLocation({ id: "loc-1", organizationId: "org-1" });
 
-    expect(removePublicFileMock).not.toHaveBeenCalled();
+    expect(removePublicFilesMock).not.toHaveBeenCalled();
   });
 
-  it("logs a storage failure, keeps going, and does not fail the delete", async () => {
+  it("logs a storage failure and does not fail the delete", async () => {
     dbMocks.location.delete.mockResolvedValue(makeLocation("loc-1"));
-    removePublicFileMock.mockRejectedValueOnce(new Error("storage down"));
+    removePublicFilesMock.mockRejectedValueOnce(new Error("storage down"));
 
     await expect(
       deleteLocation({ id: "loc-1", organizationId: "org-1" })
     ).resolves.toMatchObject({ id: "loc-1" });
 
-    // The thumbnail is still attempted after the image removal fails.
-    expect(removePublicFileMock).toHaveBeenCalledTimes(2);
     expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
     expect(loggerErrorSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: "Failed to remove location image from storage during delete",
-        additionalData: {
-          locationId: "loc-1",
-          storageError: "storage down",
-        },
+        message: "Failed to remove location images from storage during delete",
+        additionalData: { locationIds: ["loc-1"] },
+      })
+    );
+  });
+
+  it("logs image URLs that are not in the public bucket", async () => {
+    dbMocks.location.delete.mockResolvedValue(makeLocation("loc-1"));
+    removePublicFilesMock.mockResolvedValueOnce({ invalidUrlCount: 2 });
+
+    await deleteLocation({ id: "loc-1", organizationId: "org-1" });
+
+    expect(loggerErrorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        additionalData: { locationIds: ["loc-1"], invalidUrlCount: 2 },
       })
     );
   });
@@ -165,7 +176,7 @@ describe("deleteLocation", () => {
       message: "Something went wrong while deleting the location",
     });
 
-    expect(removePublicFileMock).not.toHaveBeenCalled();
+    expect(removePublicFilesMock).not.toHaveBeenCalled();
   });
 
   it("deletes the location and its legacy Image row in one transaction", async () => {
@@ -185,7 +196,7 @@ describe("deleteLocation", () => {
     expect(dbMocks.$transaction).toHaveBeenCalledTimes(1);
     expect(dbMocks.location.delete).toHaveBeenCalledTimes(1);
     expect(dbMocks.image.delete).toHaveBeenCalledTimes(1);
-    expect(removePublicFileMock).not.toHaveBeenCalled();
+    expect(removePublicFilesMock).not.toHaveBeenCalled();
   });
 });
 
@@ -215,29 +226,32 @@ describe("bulkDeleteLocations", () => {
     expect(dbMocks.location.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["loc-1", "loc-2", "loc-3"] } },
     });
+    // Every file of the selection goes in one storage request.
     await vi.waitFor(() =>
-      expect(removePublicFileMock).toHaveBeenCalledTimes(3)
-    );
-    // Locations in a batch are cleaned up in parallel, so compare as a set.
-    expect(removePublicFileMock.mock.calls).toEqual(
-      expect.arrayContaining([
-        [{ publicUrl: imageUrlFor("loc-1") }],
-        [{ publicUrl: thumbnailUrlFor("loc-1") }],
-        [{ publicUrl: imageUrlFor("loc-2") }],
+      expect(removePublicFilesMock.mock.calls).toEqual([
+        [
+          {
+            publicUrls: [
+              imageUrlFor("loc-1"),
+              thumbnailUrlFor("loc-1"),
+              imageUrlFor("loc-2"),
+            ],
+          },
+        ],
       ])
     );
     expect(
       dbMocks.location.deleteMany.mock.invocationCallOrder[0]
-    ).toBeLessThan(removePublicFileMock.mock.invocationCallOrder[0]);
+    ).toBeLessThan(removePublicFilesMock.mock.invocationCallOrder[0]);
   });
 
   it("resolves without waiting for the storage cleanup to finish", async () => {
     dbMocks.location.findMany.mockResolvedValue([makeLocation("loc-1")]);
-    const releaseRemovals: Array<() => void> = [];
-    removePublicFileMock.mockImplementation(
+    let releaseRemoval: () => void = () => {};
+    removePublicFilesMock.mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          releaseRemovals.push(resolve);
+        new Promise<{ invalidUrlCount: number }>((resolve) => {
+          releaseRemoval = () => resolve({ invalidUrlCount: 0 });
         })
     );
 
@@ -245,18 +259,15 @@ describe("bulkDeleteLocations", () => {
       bulkDeleteLocations({ locationIds: ["loc-1"], organizationId: "org-1" })
     ).resolves.toBeUndefined();
 
-    // The image removal has started and is still pending.
-    expect(removePublicFileMock).toHaveBeenCalledTimes(1);
-
-    releaseRemovals.forEach((release) => release());
-    await vi.waitFor(() =>
-      expect(removePublicFileMock).toHaveBeenCalledTimes(2)
-    );
-    releaseRemovals.forEach((release) => release());
+    // The storage request has started and is still pending.
+    expect(removePublicFilesMock).toHaveBeenCalledTimes(1);
+    releaseRemoval();
   });
 
-  it("removes files for every location across cleanup batches", async () => {
-    const locations = Array.from({ length: 23 }, (_, i) =>
+  it("splits a large selection into requests the storage API accepts", async () => {
+    // 1,200 locations with two files each: 500 locations (1,000 files) per
+    // request, so three requests in total.
+    const locations = Array.from({ length: 1200 }, (_, i) =>
       makeLocation(`loc-${i}`)
     );
     dbMocks.location.findMany.mockResolvedValue(locations);
@@ -270,41 +281,42 @@ describe("bulkDeleteLocations", () => {
       expect.objectContaining({ where: { organizationId: "org-1" } })
     );
     await vi.waitFor(() =>
-      expect(removePublicFileMock).toHaveBeenCalledTimes(46)
+      expect(removePublicFilesMock).toHaveBeenCalledTimes(3)
     );
-    for (const location of locations) {
-      expect(removePublicFileMock).toHaveBeenCalledWith({
-        publicUrl: location.imageUrl,
-      });
-      expect(removePublicFileMock).toHaveBeenCalledWith({
-        publicUrl: location.thumbnailUrl,
-      });
-    }
+    const sentUrls = removePublicFilesMock.mock.calls.map(
+      ([{ publicUrls }]) => publicUrls as string[]
+    );
+    expect(sentUrls.map((urls) => urls.length)).toEqual([1000, 1000, 400]);
+    expect(sentUrls.flat()).toEqual(
+      locations.flatMap((location) => [
+        location.imageUrl,
+        location.thumbnailUrl,
+      ])
+    );
   });
 
-  it("logs a storage failure and still removes the other files", async () => {
-    dbMocks.location.findMany.mockResolvedValue([
-      makeLocation("loc-1", { thumbnailUrl: null }),
-      makeLocation("loc-2"),
-    ]);
-    removePublicFileMock.mockRejectedValueOnce(new Error("storage down"));
+  it("logs a failed request and still sends the next one", async () => {
+    const locations = Array.from({ length: 600 }, (_, i) =>
+      makeLocation(`loc-${i}`)
+    );
+    dbMocks.location.findMany.mockResolvedValue(locations);
+    removePublicFilesMock.mockRejectedValueOnce(new Error("storage down"));
 
     await expect(
       bulkDeleteLocations({
-        locationIds: ["loc-1", "loc-2"],
+        locationIds: [ALL_SELECTED_KEY],
         organizationId: "org-1",
       })
     ).resolves.toBeUndefined();
 
     await vi.waitFor(() =>
-      expect(removePublicFileMock).toHaveBeenCalledTimes(3)
+      expect(removePublicFilesMock).toHaveBeenCalledTimes(2)
     );
     expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
     expect(loggerErrorSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         additionalData: {
-          locationId: "loc-1",
-          storageError: "storage down",
+          locationIds: locations.slice(0, 500).map((location) => location.id),
         },
       })
     );
@@ -322,6 +334,6 @@ describe("bulkDeleteLocations", () => {
 
     // Give any background cleanup a chance to start before asserting.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(removePublicFileMock).not.toHaveBeenCalled();
+    expect(removePublicFilesMock).not.toHaveBeenCalled();
   });
 });

@@ -40,8 +40,10 @@ import {
 } from "~/utils/markdoc-wrappers";
 import {
   getFileUploadPath,
+  MAX_PUBLIC_FILES_PER_REMOVE,
   parseFileFormData,
   removePublicFile,
+  removePublicFiles,
 } from "~/utils/storage.server";
 import {
   formatLocationLink,
@@ -889,40 +891,67 @@ export async function createLocation({
 type LocationImageFiles = Pick<Location, "id" | "imageUrl" | "thumbnailUrl">;
 
 /**
- * Removes a location's image and thumbnail from the public storage bucket.
- *
- * Call this only after the location row is deleted. Each file is removed on a
- * best-effort basis: a failure is logged and swallowed, because a stale storage
- * object can be cleaned up later, while failing the request would report a
- * delete that already happened as an error.
- *
- * @param location - The deleted location's id and its stored image URLs
+ * Locations per storage request. Each location has at most two files, so a
+ * chunk stays within the storage API's per-request limit.
  */
-async function safeRemoveLocationImageFiles(
-  location: LocationImageFiles
-): Promise<void> {
-  const files = [
-    { publicUrl: location.imageUrl, kind: "image" },
-    { publicUrl: location.thumbnailUrl, kind: "thumbnail" },
-  ];
+const LOCATIONS_PER_STORAGE_REMOVE = MAX_PUBLIC_FILES_PER_REMOVE / 2;
 
-  for (const { publicUrl, kind } of files) {
-    if (!publicUrl) continue;
+/**
+ * Removes the image and thumbnail files of deleted locations from the public
+ * storage bucket.
+ *
+ * Call this only after the location rows are deleted. Files are removed in one
+ * storage request per {@link LOCATIONS_PER_STORAGE_REMOVE} locations, one
+ * request after another, so even a select-all delete makes only a handful of
+ * requests. Best effort: a failed request is logged and the next one still
+ * runs, because a stale storage object can be cleaned up later, while failing
+ * would report a delete that already happened as an error. Never rejects.
+ *
+ * @param locations - The deleted locations and their stored image URLs
+ */
+async function safeRemoveImageFilesOfLocations(
+  locations: LocationImageFiles[]
+): Promise<void> {
+  const locationsWithFiles = locations.filter(
+    (location) => !!location.imageUrl || !!location.thumbnailUrl
+  );
+
+  for (
+    let i = 0;
+    i < locationsWithFiles.length;
+    i += LOCATIONS_PER_STORAGE_REMOVE
+  ) {
+    const chunk = locationsWithFiles.slice(i, i + LOCATIONS_PER_STORAGE_REMOVE);
+    const publicUrls = chunk.flatMap((location) =>
+      [location.imageUrl, location.thumbnailUrl].filter(
+        (url): url is string => !!url
+      )
+    );
+    // The raw URLs stay out of the logs: they contain the storage object
+    // keys. The location ids are enough to trace the files.
+    const locationIds = chunk.map((location) => location.id);
 
     try {
-      await removePublicFile({ publicUrl });
+      const { invalidUrlCount } = await removePublicFiles({ publicUrls });
+
+      if (invalidUrlCount > 0) {
+        Logger.error(
+          new ShelfError({
+            cause: null,
+            message:
+              "Skipped location image files outside the public bucket during delete",
+            additionalData: { locationIds, invalidUrlCount },
+            label,
+          })
+        );
+      }
     } catch (cause) {
-      // The raw URL stays out of additionalData: it contains the storage
-      // object key. The location id is enough to trace the file.
       Logger.error(
         new ShelfError({
-          cause: null,
-          message: `Failed to remove location ${kind} from storage during delete`,
-          additionalData: {
-            locationId: location.id,
-            storageError:
-              cause instanceof Error ? cause.message : "Unknown storage error",
-          },
+          cause,
+          message:
+            "Failed to remove location images from storage during delete",
+          additionalData: { locationIds },
           label,
         })
       );
@@ -931,41 +960,11 @@ async function safeRemoveLocationImageFiles(
 }
 
 /**
- * Removes the stored image files of many deleted locations.
- *
- * Works through the locations 10 at a time, so a large selection never has
- * more than a few storage requests open at once. Never rejects: each failed
- * file is logged by {@link safeRemoveLocationImageFiles}.
- *
- * @param locations - The deleted locations and their stored image URLs
- */
-async function safeRemoveImageFilesOfLocations(
-  locations: LocationImageFiles[]
-): Promise<void> {
-  const STORAGE_CLEANUP_BATCH_SIZE = 10;
-  const locationsWithFiles = locations.filter(
-    (location) => !!location.imageUrl || !!location.thumbnailUrl
-  );
-
-  for (
-    let i = 0;
-    i < locationsWithFiles.length;
-    i += STORAGE_CLEANUP_BATCH_SIZE
-  ) {
-    await Promise.allSettled(
-      locationsWithFiles
-        .slice(i, i + STORAGE_CLEANUP_BATCH_SIZE)
-        .map((location) => safeRemoveLocationImageFiles(location))
-    );
-  }
-}
-
-/**
  * Deletes a location, its legacy `Image` row, and its stored image files.
  *
  * The location and its `Image` row are deleted in one transaction. The image
  * and thumbnail files are removed after it commits, see
- * {@link safeRemoveLocationImageFiles}.
+ * {@link safeRemoveImageFilesOfLocations}.
  *
  * @param id - ID of the location to delete
  * @param organizationId - Organization the location must belong to
@@ -995,7 +994,7 @@ export async function deleteLocation({
       return deleted;
     });
 
-    await safeRemoveLocationImageFiles(location);
+    await safeRemoveImageFilesOfLocations([location]);
 
     return location;
   } catch (cause) {
