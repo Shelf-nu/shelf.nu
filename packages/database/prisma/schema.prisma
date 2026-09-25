@@ -831,6 +831,12 @@ model Location {
   kits           Kit[]
   notes          LocationNote[] @relation("LocationNotes")
 
+  // Quantity custody taken from this location, and the stock movements
+  // recorded against it. Both point at the location itself, never at an
+  // `AssetLocation` row, so moving a kit or re-creating a placement keeps them.
+  custodies       Custody[]
+  consumptionLogs ConsumptionLog[]
+
   // Self-relation for nested locations
   parentId String?
   parent   Location?  @relation("LocationHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
@@ -912,25 +918,37 @@ model Custody {
 
   quantity Int @default(1) // How many units in custody (1 for individual assets)
 
+  // The manual placement the units were taken from, for a quantity-tracked
+  // asset's operator custody. NULL means the unplaced units, or a source
+  // that was never recorded (custody older than this column on an asset
+  // placed at several locations). Always NULL for kit-inherited rows and for
+  // individual assets. Custody never changes a location's count: this only
+  // says which location loses the units when they are used up.
+  // `onDelete: SetNull` so deleting the location keeps the custody.
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  locationId String?
+
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Two partial uniques split the old global @@unique([assetId, teamMemberId])
-  // so the same (asset, custodian) pair can hold BOTH an operator-allocated
-  // row AND one-or-more kit-allocated rows simultaneously. The partials live
-  // in raw SQL (Prisma can't express partial uniques in the schema) — see
-  // migration 20260603100000_custody_partial_uniques_split_operator_kit:
-  //   • Custody_operator_unique → UNIQUE (assetId, teamMemberId)
-  //                               WHERE "kitCustodyId" IS NULL
-  //   • Custody_kit_unique      → UNIQUE (assetId, kitCustodyId)
-  //                               WHERE "kitCustodyId" IS NOT NULL
-  // The total cap (sum ≤ Asset.quantity) is enforced at the application
+  // Two partial uniques live in raw SQL (Prisma can't express partial
+  // uniques in the schema); see migrations
+  // 20260603100000_custody_partial_uniques_split_operator_kit and
+  // 20260925100000_custody_source_location:
+  //   - Custody_operator_unique -> UNIQUE (assetId, teamMemberId, locationId)
+  //                                NULLS NOT DISTINCT
+  //                                WHERE "kitCustodyId" IS NULL
+  //     One operator row per holder per source location, NULL included.
+  //   - Custody_kit_unique      -> UNIQUE (assetId, kitCustodyId)
+  //                                WHERE "kitCustodyId" IS NOT NULL
+  // The total cap (sum <= Asset.quantity) is enforced at the application
   // layer by buildKitCustodyInheritData / checkOutQuantity.
   @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
   // Index for foreign key
   @@index([teamMemberId])
   @@index([kitCustodyId])
+  @@index([locationId])
 }
 
 model Organization {
@@ -1539,6 +1557,13 @@ model ConsumptionLog {
   // render sensibly.
   bookingAssetId String?
 
+  // The location the units left or arrived at, when the movement had one:
+  // the custody source for CHECKOUT / RETURN / CONSUME, and the chosen
+  // location for a RESTOCK / LOSS / ADJUSTMENT made at a location. NULL for
+  // the unplaced units and for rows written before the column existed.
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  locationId String?
+
   // Datetime
   createdAt DateTime @default(now())
 
@@ -1547,6 +1572,7 @@ model ConsumptionLog {
   @@index([bookingId])
   @@index([custodianId])
   @@index([bookingAssetId])
+  @@index([locationId])
 }
 
 /**
@@ -1695,6 +1721,29 @@ model BookingAsset {
   // departure nothing can size.
   checkedOutQuantity Int @default(0)
 
+  // The location a QUANTITY_TRACKED slice's units left from, recorded once,
+  // when the slice is first checked out (`checkedOutQuantity` goes from 0).
+  // A slice sent out again keeps it.
+  //
+  // Check-in reads it: units reported consumed, lost or damaged come off this
+  // location's manual placement, so a pool placed at several locations loses
+  // them where they actually came from. NULL = the pool's unplaced units, a
+  // pool with no placements, or a slice checked out before this column
+  // existed; check-in then lets the unplaced units absorb the drop, as before.
+  //
+  // A kit-driven slice records its kit's location (`Kit.locationId`, may be
+  // NULL). That is for display only: kit units never come off a manual
+  // placement.
+  //
+  // Same plain-column treatment as `assetKitId` / `sourceKitId` above: the FK
+  // to `Location("id")` with `ON DELETE SET NULL ON UPDATE CASCADE` lives in
+  // the migration SQL, not in a Prisma `@relation`, because one more relation
+  // on this model (its grandparent `Booking` is a hub) pushes the extended
+  // client's generics past TS's recursion limit (TS2321), and a
+  // `bookingAssets` back-relation on `Location` would add another. Services
+  // read the id and look the location up themselves.
+  sourceLocationId String?
+
   // The old `@@unique([bookingId, assetId])` is replaced by two partial
   // unique indexes in the migration SQL (Postgres-only feature Prisma
   // can't express in the schema):
@@ -1706,6 +1755,7 @@ model BookingAsset {
   @@index([assetId])
   @@index([assetKitId])
   @@index([sourceKitId])
+  @@index([sourceLocationId])
 }
 
 model Booking {

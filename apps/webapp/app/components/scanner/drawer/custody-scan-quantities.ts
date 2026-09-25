@@ -20,6 +20,8 @@
  */
 
 import type { ScanListItems } from "~/atoms/qr-scanner";
+import type { CustodySourceOption } from "~/modules/asset/custody-source";
+import { defaultSourceOption } from "~/modules/asset/custody-source";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 
@@ -59,9 +61,13 @@ export function releasableUnits(asset: AssetFromQr): number {
  * it, so it is only unambiguous while exactly one person does. The route
  * refuses anything else by name, pointing at the asset's own custody list; the
  * drawer reads this to say so before the operator submits.
+ *
+ * Counted by team member, not by row: one person holds one operator row per
+ * location their units came from.
  */
 export function operatorHolderCount(asset: AssetFromQr): number {
-  return operatorCustodyRows(asset).length;
+  return new Set(operatorCustodyRows(asset).map((row) => row.teamMemberId))
+    .size;
 }
 
 /**
@@ -134,6 +140,88 @@ export function buildQuantitiesPayload({
     if (!isQuantityTracked(asset) || unitsFor(asset) <= 0) continue;
 
     payload[asset.id] = assetQuantities[asset.id] ?? 1;
+  }
+
+  return payload;
+}
+
+/**
+ * The "From location" choices of a scanned pool and the one in effect: the
+ * operator's pick, else the location with the most units left (also when the
+ * pick is no longer among the options). No options for an individual asset
+ * or a pool placed at fewer than two locations: those rows show no picker and
+ * send no entry, exactly as before sources existed.
+ *
+ * @param picked - `scannedAssetSourcesAtom`, keyed by asset id
+ */
+export function scannedSourceChoice(
+  asset: AssetFromQr,
+  picked: Record<string, string>
+): { options: CustodySourceOption[]; value: string | null } {
+  const sources = asset.pickerMeta?.sources;
+  const options =
+    isQuantityTracked(asset) && sources?.multiSource ? sources.options : [];
+  if (options.length === 0) return { options, value: null };
+
+  const pick = picked[asset.id];
+  const value =
+    pick !== undefined && options.some((option) => option.value === pick)
+      ? pick
+      : defaultSourceOption(options)?.value ?? null;
+  return { options, value };
+}
+
+/**
+ * The most units a scanned pool's row can hand over: the pool-wide ceiling,
+ * lowered to what the source in effect has left when the row shows a
+ * "From location" picker. The same cap the bulk route checks up front, so a
+ * row never offers units its location cannot give.
+ *
+ * @param maxAllowed - The row's pool-wide ceiling (`assignableUnits`)
+ * @param choice - The row's {@link scannedSourceChoice}, or one with the
+ *   source about to be picked as `value`
+ * @returns The row's cap; 0 when the chosen source has nothing left
+ */
+export function sourceCappedMax(
+  maxAllowed: number,
+  choice: { options: CustodySourceOption[]; value: string | null }
+): number {
+  if (choice.value === null) return maxAllowed;
+  const option = choice.options.find((o) => o.value === choice.value);
+  return option ? Math.min(maxAllowed, option.left) : maxAllowed;
+}
+
+/**
+ * The `sourceLocations` field the assign drawer submits beside
+ * `quantities`: one entry per submitted pool that shows a "From location"
+ * picker, holding the source in effect for its row.
+ *
+ * @param args.items - The scanned rows, keyed by the code that resolved them.
+ * @param args.assetIds - Asset ids in this submission.
+ * @param args.picked - `scannedAssetSourcesAtom`.
+ * @returns `assetId -> location id or "unplaced"`.
+ */
+export function buildSourceLocationsPayload({
+  items,
+  assetIds,
+  picked,
+}: {
+  items: ScanListItems;
+  assetIds: string[];
+  picked: Record<string, string>;
+}): Record<string, string> {
+  const submitted = new Set(assetIds);
+  const payload: Record<string, string> = {};
+
+  for (const item of Object.values(items)) {
+    if (item?.type !== "asset") continue;
+
+    const asset = item.data as AssetFromQr | undefined;
+    if (!asset || !submitted.has(asset.id)) continue;
+    if (assignableUnits(asset) <= 0) continue;
+
+    const { value } = scannedSourceChoice(asset, picked);
+    if (value !== null) payload[asset.id] = value;
   }
 
   return payload;

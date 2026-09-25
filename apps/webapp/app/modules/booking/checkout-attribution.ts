@@ -21,6 +21,17 @@
  */
 
 /**
+ * The `ConsumptionLog` categories that account for a booked unit coming off a
+ * booking. Callers filter their disposition-log query to these.
+ */
+export const BOOKING_DISPOSITION_CATEGORIES = [
+  "RETURN",
+  "CONSUME",
+  "LOSS",
+  "DAMAGE",
+] as const;
+
+/**
  * One raw persisted checkout session, as stored on `PartialBookingCheckout`.
  *
  * The three arrays are positional (see module docs): element `i` of each

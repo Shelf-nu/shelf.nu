@@ -206,6 +206,28 @@ describe("api/assets/bulk-release-custody", () => {
     expect(mockReleaseQuantity).not.toHaveBeenCalled();
   });
 
+  it("treats one person holding units from two locations as one holder", async () => {
+    // One operator row per source location: 2 from one, 1 from another.
+    dbMocks.custodyFindMany.mockResolvedValue([
+      holder("asset-qty", "tm-1", { quantity: 2 }),
+      holder("asset-qty", "tm-1", { quantity: 1 }),
+    ]);
+
+    const response = (await action(
+      makeRequest(["asset-qty"], { "asset-qty": 3 })
+    )) as unknown as Response;
+
+    expect(response.status).toBe(200);
+    // The service draws from the person's rows; the route only resolves who.
+    expect(mockReleaseQuantity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-qty",
+        teamMemberId: "tm-1",
+        quantity: 3,
+      })
+    );
+  });
+
   it("writes nothing when one asset asks for more units than its holder has", async () => {
     dbMocks.custodyFindMany.mockResolvedValue([
       holder("asset-ok", "tm-1", { quantity: 50 }),

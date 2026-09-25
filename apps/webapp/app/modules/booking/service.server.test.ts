@@ -335,6 +335,50 @@ vitest.mock("~/database/db.server", () => ({
   },
 }));
 
+/**
+ * Placement rows that behave like the table for the reconcile: reads honour
+ * the `locationId` filter and see earlier updates, so a test can assert the
+ * end state of every location after a check-in.
+ *
+ * @param rows - The pool's manual placements
+ * @returns The live rows, for assertions
+ */
+function installStatefulPlacements(
+  rows: Array<{ id: string; locationId: string; quantity: number }>
+) {
+  const live = rows.map((row) => ({ ...row }));
+  (
+    db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+  ).mockImplementation((args?: { where?: { locationId?: string } }) =>
+    Promise.resolve(
+      live
+        .filter(
+          (row) =>
+            !args?.where?.locationId || row.locationId === args.where.locationId
+        )
+        .map((row) => ({ ...row }))
+    )
+  );
+  (db.assetLocation.update as ReturnType<typeof vitest.fn>).mockImplementation(
+    (args: { where: { id: string }; data: { quantity: number } }) => {
+      const row = live.find((r) => r.id === args.where.id);
+      if (row) row.quantity = args.data.quantity;
+      return Promise.resolve(row);
+    }
+  );
+  // `clearAllMocks` keeps implementations, so hand the next test the empty
+  // defaults the module mock starts with.
+  onTestFinished(() => {
+    (
+      db.assetLocation.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.assetLocation.update as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {}
+    );
+  });
+  return live;
+}
+
 // why: ensuring predictable ID generation for consistent test assertions
 vitest.mock("~/utils/id/id.server", () => ({
   id: vitest.fn(() => "mock-id"),
@@ -12529,6 +12573,80 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     });
   });
 
+  it("takes a partial CONSUME off the location the slice left from, and tags every log with it", async () => {
+    expect.assertions(4);
+
+    // 60 at Store + 40 at Studio, fully placed; the booked 10 left from Studio.
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        {
+          ...booking.bookingAssets[0],
+          id: "ba-pens",
+          assetKitId: null,
+          sourceLocationId: "loc-studio",
+        },
+      ],
+    });
+    const placements = installStatefulPlacements([
+      { id: "al-store", locationId: "loc-store", quantity: 60 },
+      { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 4, consumed: 6 }],
+    });
+
+    expect(placements).toEqual([
+      { id: "al-store", locationId: "loc-store", quantity: 60 },
+      { id: "al-studio", locationId: "loc-studio", quantity: 34 },
+    ]);
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "CONSUME", locationId: "loc-studio" })
+    );
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "RETURN", locationId: "loc-studio" })
+    );
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: mockQtyAssetId },
+      data: { quantity: { decrement: 6 } },
+    });
+  });
+
+  it("changes no placement when everything checked in is returned", async () => {
+    expect.assertions(1);
+
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        {
+          ...booking.bookingAssets[0],
+          id: "ba-pens",
+          assetKitId: null,
+          sourceLocationId: "loc-studio",
+        },
+      ],
+    });
+    installStatefulPlacements([
+      { id: "al-store", locationId: "loc-store", quantity: 60 },
+      { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, returned: 10 }],
+    });
+
+    expect(db.assetLocation.update).not.toHaveBeenCalled();
+  });
+
   it("writes no placement when a partial CONSUME is absorbed by the unplaced residual", async () => {
     expect.assertions(1);
 
@@ -12992,6 +13110,36 @@ describe("checkinBooking — qty-tracked auto-default", () => {
       where: { id: "al-pens" },
       data: { quantity: 90 },
     });
+  });
+
+  it("takes a CONSUME check-in off the location the slice left from", async () => {
+    expect.assertions(2);
+
+    // 60 at Store + 40 at Studio, fully placed; the booked 10 left from Studio.
+    setupCheckinMocks(ConsumptionType.ONE_WAY);
+    const booking = makeBooking(ConsumptionType.ONE_WAY);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        { ...booking.bookingAssets[0], sourceLocationId: "loc-studio" },
+      ],
+    });
+    const placements = installStatefulPlacements([
+      { id: "al-store", locationId: "loc-store", quantity: 60 },
+      { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+    ]);
+
+    await checkinBooking(baseParams);
+
+    // All 10 were used up (the ONE_WAY default): Studio 40 -> 30.
+    expect(placements).toEqual([
+      { id: "al-store", locationId: "loc-store", quantity: 60 },
+      { id: "al-studio", locationId: "loc-studio", quantity: 30 },
+    ]);
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "CONSUME", locationId: "loc-studio" })
+    );
   });
 
   it("leaves placements alone on a CONSUME check-in the unplaced residual absorbs", async () => {

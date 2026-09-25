@@ -167,40 +167,50 @@ export async function action({ request, context }: ActionFunctionArgs) {
       });
 
       for (const assetId of quantityAssetIds) {
-        const holders = custodyRows.filter((row) => row.assetId === assetId);
+        const rows = custodyRows.filter((row) => row.assetId === assetId);
+        /**
+         * One person can hold several operator rows on the same asset, one
+         * per location the units came from, so holders are counted by team
+         * member and their units summed. `releaseQuantity` draws from those
+         * rows itself.
+         */
+        const holderIds = Array.from(
+          new Set(rows.map((row) => row.teamMemberId))
+        );
+        const held = rows.reduce((sum, row) => sum + row.quantity, 0);
 
-        if (holders.length !== 1) {
+        if (holderIds.length !== 1) {
           throw new ShelfError({
             cause: null,
             status: 400,
             label: "Assets",
             shouldBeCaptured: false,
             message:
-              holders.length === 0
+              holderIds.length === 0
                 ? "This asset has no units in anyone's custody to release."
-                : `"${holders[0].asset.title}" is held by more than one person. Release it from the asset's custody list, where each holder is listed separately.`,
-            additionalData: { assetId, holders: holders.length },
+                : `"${rows[0].asset.title}" is held by more than one person. Release it from the asset's custody list, where each holder is listed separately.`,
+            additionalData: { assetId, holders: holderIds.length },
           });
         }
 
-        if (quantities[assetId] > holders[0].quantity) {
+        if (quantities[assetId] > held) {
           throw new ShelfError({
             cause: null,
             status: 400,
             label: "Assets",
             shouldBeCaptured: false,
-            message: `Nothing was released. "${holders[0].asset.title}" has only ${holders[0].quantity} unit(s) in custody.`,
+            message: `Nothing was released. "${rows[0].asset.title}" has only ${held} unit(s) in custody.`,
             additionalData: {
               assetId,
               requested: quantities[assetId],
-              held: holders[0].quantity,
+              held,
             },
           });
         }
 
         resolvedReleases.push({
           assetId,
-          teamMemberId: holders[0].teamMemberId,
+          teamMemberId: holderIds[0],
         });
       }
     }

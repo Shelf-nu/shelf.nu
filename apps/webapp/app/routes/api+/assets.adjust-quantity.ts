@@ -18,6 +18,7 @@
 import type { Prisma } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { adjustLocationNoteSuffix } from "~/modules/asset/custody-source.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { adjustQuantity } from "~/modules/consumption-log/service.server";
 import { createNote } from "~/modules/note/service.server";
@@ -54,6 +55,12 @@ export const AdjustQuantitySchema = z
       .string()
       .optional()
       .transform((val) => (val === "" ? undefined : val)),
+    /**
+     * Where the units arrived or were lost: a location id, or `"unplaced"`
+     * for the unplaced units. Only sent by the dialog for a pool with two or more
+     * sources; absent keeps the adjustment total-only.
+     */
+    locationId: z.string().optional(),
   })
   .refine(
     ({ category, direction }) =>
@@ -83,12 +90,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetId, quantity, category, direction, note } = parseData(
-      formData,
-      AdjustQuantitySchema
-    );
+    const { assetId, quantity, category, direction, note, locationId } =
+      parseData(formData, AdjustQuantitySchema);
 
-    await adjustQuantity({
+    const { location } = await adjustQuantity({
       assetId,
       quantity,
       category,
@@ -96,6 +101,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       organizationId,
       note,
+      locationId,
     });
 
     /** Best-effort audit note — don't fail the action if note creation fails */
@@ -112,7 +118,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       const actor = wrapUserLinkForNote(user);
       const sign = direction === "add" ? "+" : "-";
       const categoryLabel = category.toLowerCase();
-      const baseLine = `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel}).`;
+      const atLocation = adjustLocationNoteSuffix(
+        location,
+        locationId !== undefined
+      );
+      const baseLine = `${actor} adjusted quantity by **${sign}${quantity}** (${categoryLabel})${atLocation}.`;
       const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({
