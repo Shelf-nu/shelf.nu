@@ -10982,10 +10982,16 @@ export async function revertBookingToDraft({
 /**
  * Extends an ongoing or overdue booking to a new end date.
  *
+ * @param params.id - The booking to extend
+ * @param params.organizationId - The caller's workspace; the lookup is scoped to it
+ * @param params.newEndDate - The new live end (`to`); the planned end is left alone
+ * @param params.hints - Client hints, for the note's dates, the check-in
+ *   reminder and the scheduled overdue job
  * @param params.userId - The caller
  * @param params.access - The caller's access, for the ownership gate
  * @param params.roles - Every role on the caller's membership, for the
  *   `booking:extend` grant
+ * @returns The updated booking
  * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
  *   own the booking
  */
