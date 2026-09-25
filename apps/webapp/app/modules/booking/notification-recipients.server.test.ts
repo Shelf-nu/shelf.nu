@@ -477,10 +477,10 @@ describe("getBookingNotificationRecipients", () => {
    * has here, and it is the ONLY signal this resolver gets — none of the
    * team-member branches re-check membership.
    *
-   * Before that fix the group-claim path deleted the `UserOrganization` alone,
-   * so `TeamMember.user` still resolved and the revoked person carried on
-   * receiving this workspace's booking emails. For a university running an
-   * annual cohort rollover through IdP groups, that is a whole year group.
+   * Revocation must therefore disconnect every linked team member: a
+   * `TeamMember.user` that still resolves keeps the revoked person on this
+   * workspace's booking emails. An IdP group rollover can revoke a whole
+   * cohort at once.
    *
    * @see {@link file://../user/sso-group-claim-revocation.test.ts}
    */

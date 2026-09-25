@@ -301,9 +301,6 @@ describe("updateUserFromSSO — SCIM deactivation guard", () => {
     // reports that the membership row is gone.
     // @ts-expect-error - vitest mock type
     mockDb.db.$queryRaw.mockResolvedValue([]);
-    // The transition reads the same state under its own lock: the membership
-    // is gone, so it reports no access and the repair never runs.
-    persisted.roles = null;
 
     await login({
       userOrganizations: [
