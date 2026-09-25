@@ -15062,10 +15062,12 @@ async function addScannedAssetsToBookingWithinTx(
   }
 
   /**
-   * Scans that gain a standalone row on this call.
+   * Scans that gain a standalone row on this call: the ones this booking does
+   * not already hold loose. Deduped, because one asset owns at most one
+   * standalone row per booking.
    *
-   * Assets missing from `scannedAssetsMetaById` aren't in this org; they are
-   * skipped here and rejected by the FK on the create below.
+   * `assertAssetsBelongToOrg` above has already refused a foreign id, so an
+   * asset missing from `scannedAssetsMetaById` cannot reach here.
    */
   const newStandaloneScans = [...new Set(assetIds)]
     .filter((assetId) => !preExistingStandaloneScannedIds.has(assetId))
@@ -15251,14 +15253,20 @@ async function addScannedAssetsToBookingWithinTx(
         create: [
           // Standalone scans: `assetKitId = null`. Quantity precedence:
           // explicit per-row qty input → 1 (schema default).
-          ...assetIds.map((id) => ({
-            assetId: id,
-            quantity: quantities[id] ?? 1,
+          //
+          // `newStandaloneScans`, not the raw scan: a scanned asset the
+          // booking already holds loose keeps the row it has. Every caller
+          // sends what the operator scanned, which legitimately includes
+          // units already on the booking, and a second standalone row for one
+          // of them collides with `BookingAsset_manual_unique`.
+          ...newStandaloneScans.map((meta) => ({
+            assetId: meta.id,
+            quantity: quantities[meta.id] ?? 1,
             assetKitId: null,
             // No kit provenance for a standalone scan — kept explicit so the
             // "assetKitId null ⇔ sourceKitId null" invariant reads locally.
             sourceKitId: null,
-            bookingModelRequestId: takeModelRequestId(id),
+            bookingModelRequestId: takeModelRequestId(meta.id),
           })),
           // Kit-driven slices: `assetKitId` set, plus `sourceKitId` — the
           // durable owning-kit pointer that survives the membership row's
