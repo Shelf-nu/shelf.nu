@@ -74,19 +74,42 @@ export const triggerEmail = async ({
   from,
   replyTo,
 }: EmailPayloadType) => {
-  if (to.endsWith(SOFT_DELETED_EMAIL_DOMAIN)) {
+  /**
+   * `to` can carry a comma separated list of addresses (in-app feedback goes
+   * to every inbox in FEEDBACK_EMAIL), so the soft-deleted check runs per
+   * address instead of on the whole string. Two things this fixes for lists:
+   * one soft-deleted recipient no longer drops the email for everybody else,
+   * and the outcome no longer depends on which address happens to be last.
+   * An empty/unparseable `to` is passed through untouched so it still fails
+   * loudly in nodemailer rather than being silently swallowed here.
+   */
+  const recipients = to
+    .split(",")
+    .map((address) => address.trim())
+    .filter(Boolean);
+  const deliverableRecipients = recipients.filter(
+    // Lower-cased first: domains are case-insensitive, so an address stored
+    // as "@DELETED.SHELF.NU" is the same dead inbox and must not be mailed
+    (address) => !address.toLowerCase().endsWith(SOFT_DELETED_EMAIL_DOMAIN)
+  );
+
+  if (recipients.length > 0 && deliverableRecipients.length === 0) {
     Logger.warn(
       `Skipping email to soft-deleted user: ${to} (subject: ${subject})`
     );
     return;
   }
 
+  const toHeader = deliverableRecipients.length
+    ? deliverableRecipients.join(", ")
+    : to;
+
   try {
     // send mail with defined transport object
     await transporter.sendMail({
       from: from || SMTP_FROM || `"Shelf" <hello@example.com>`, // sender address
       replyTo: replyTo || SUPPORT_EMAIL, // reply to
-      to, // list of receivers
+      to: toHeader, // list of receivers
       subject, // Subject line
       text, // plain text body
       html: html || "", // html body
