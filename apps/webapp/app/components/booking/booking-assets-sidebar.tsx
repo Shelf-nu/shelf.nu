@@ -25,6 +25,7 @@
  */
 import React, { useState } from "react";
 import type { ReactNode } from "react";
+import { AssetStatus } from "@prisma/client";
 import type { BookingStatus, Prisma } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { Link, useFetcher } from "react-router";
@@ -453,12 +454,14 @@ function AssetTitleAndStatus({
    *  3. Progressively checked out, NO returns yet →
    *     `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` (amber, "action
    *     required") — new branch for the sidebar.
-   *  4. Otherwise the asset's raw status.
+   *  4. Otherwise the asset's raw status, except that `IN_CUSTODY` on a
+   *     quantity-tracked asset reads `AVAILABLE`: custody covers units held
+   *     by a team member outside this booking, so it says nothing about
+   *     the units this booking took. Mirrors `getBookingContextAssetStatus`.
    *
    * Order matters: the check-IN branches must win at the aggregate
    * level so a multi-slice asset with mixed in/out slices reads
-   * "checked in" rather than "still out" (matches the existing
-   * behavior before this change).
+   * "checked in" rather than "still out".
    */
   const effectiveStatus = isQtyFullyCheckedIn
     ? "PARTIALLY_CHECKED_IN"
@@ -466,6 +469,8 @@ function AssetTitleAndStatus({
     ? "PARTIALLY_CHECKED_OUT_QTY"
     : isQtyPartiallyCheckedOut
     ? "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN"
+    : isQuantityTracked(asset) && asset.status === AssetStatus.IN_CUSTODY
+    ? AssetStatus.AVAILABLE
     : asset.status;
 
   /**
