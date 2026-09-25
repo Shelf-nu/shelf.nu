@@ -75,10 +75,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // here; the filtering happens below, after shaping. `access.bookings.seeAll`
     // is the booking screen's own read gate, which `activeBooking.canOpen`
     // answers in advance.
-    const { canSeeAllCustody, access } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const storedAsset = await db.asset.findUnique({
       where: {
@@ -428,7 +425,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodyList: flattened.custodyList,
         custodyRows: detailCustody,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       });
 
     // Legacy single `custody`: the web HIDES its single-custodian card from
@@ -443,7 +440,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       viewerCanSeeLegacyCustody({
         custodianUserId: primaryCustody.custodian.userId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       })
         ? primaryCustody
         : null;
@@ -468,7 +465,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const activeBooking =
       checkedOutOn &&
       canSeeBookingCustodian({
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         booking: checkedOutOn,
         userId: user.id,
       })
@@ -478,7 +475,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             from: checkedOutOn.from,
             // The resolver every mobile booking surface names a holder with.
             custodianName: resolveBookingCustodianName({
-              canSeeAllCustody,
+              canSeeAllCustody: access.custody.seeAll,
               booking: checkedOutOn,
               userId: user.id,
             }),

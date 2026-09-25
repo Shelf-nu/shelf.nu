@@ -158,7 +158,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, access, canSeeAllCustody } =
+    const { organizationId, userOrganizations, access } =
       await requirePermission({
         userId,
         request,
@@ -229,7 +229,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         currentBookingId: bookingId,
         // Only reaches `?teamMember=` here; pass the resolved rule so an
         // admin's custodian filter still works on this dialog.
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
@@ -336,7 +336,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // identity has to be redacted here too. Not the literal `false` passed to
       // the filter: that argument is deliberately fixed for a seed nothing
       // renders, and reusing it would redact for ADMIN/OWNER as well.
-      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
+      items: redactCustodianForViewer(kits, {
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }),
       totalItems: totalKits,
       bookingKitIds,
       ...modelTabData,

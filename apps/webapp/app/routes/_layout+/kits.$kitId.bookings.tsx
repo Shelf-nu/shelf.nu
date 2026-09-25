@@ -49,13 +49,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId, canSeeAllCustody, access } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.kit,
-        action: PermissionAction.read,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.kit,
+      action: PermissionAction.read,
+    });
 
     const searchParams = getCurrentSearchParams(request);
     const {
@@ -122,7 +121,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // A FILTER. This passed no scoping argument at all, so a restricted
           // user — /kits is gated on `kit:read`, which BASE holds — received
           // the entire team roster here.
-          filterByUserId: !canSeeAllCustody,
+          filterByUserId: !access.custody.seeAll,
         }),
         getTagsForBookingTagsFilter({
           organizationId,

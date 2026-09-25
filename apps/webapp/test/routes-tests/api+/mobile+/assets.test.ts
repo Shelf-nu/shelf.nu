@@ -20,6 +20,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
@@ -73,6 +74,7 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
   const actual = await vi.importActual<typeof MobileAuthServer>(
     "~/modules/api/mobile-auth.server"
   );
+  const { accessFor } = await import("@helpers/role-access");
   return {
     ...actual,
     requireMobileAuth: vi.fn(),
@@ -82,6 +84,7 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
     // shaper, not the custody gate — which has its own tests below.
     getMobileUserContext: vi.fn().mockResolvedValue({
       canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     }),
   };
 });
@@ -591,6 +594,7 @@ describe("GET /api/mobile/assets — custody visibility", () => {
     // holder name was readable one endpoint over.
     vi.mocked(getMobileUserContext).mockResolvedValue({
       canSeeAllCustody: false,
+      access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const response = await loader(createLoaderArgs({}));
@@ -623,6 +627,7 @@ describe("GET /api/mobile/assets — custody visibility", () => {
     ] as never);
     vi.mocked(getMobileUserContext).mockResolvedValue({
       canSeeAllCustody: false,
+      access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const response = await loader(createLoaderArgs({}));
@@ -635,6 +640,7 @@ describe("GET /api/mobile/assets — custody visibility", () => {
   it("keeps custody visible for a viewer who may see all of it", async () => {
     vi.mocked(getMobileUserContext).mockResolvedValue({
       canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const response = await loader(createLoaderArgs({}));

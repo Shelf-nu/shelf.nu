@@ -99,7 +99,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations, role, canSeeAllCustody } =
+    const { organizationId, userOrganizations, access } =
       await requirePermission({
         userId,
         request,
@@ -273,11 +273,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           organizationId,
           request,
           userId,
-          // The rule, not a role check: `isSelfService` was false for BASE, so
-          // the seed shipped the whole roster — with every user's email and
-          // Stripe id — to a role that cannot assign custody at all.
-          role,
-          canSeeAllCustody,
+          access,
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
@@ -294,7 +290,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const [redactedAsset] = redactCustodianForViewer(
       [assetWithEffectiveBookingAssets],
-      { canSeeAllCustody, userId }
+      { canSeeAllCustody: access.custody.seeAll, userId }
     );
 
     return payload({

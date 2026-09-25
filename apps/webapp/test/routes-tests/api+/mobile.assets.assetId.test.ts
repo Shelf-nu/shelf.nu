@@ -392,6 +392,7 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
       canSeeAllBookings: true,
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
@@ -404,6 +405,7 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: false,
+      access: accessFor(["SELF_SERVICE"]),
       canSeeAllBookings: false,
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
@@ -441,6 +443,7 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: false,
+      access: accessFor(["SELF_SERVICE"]),
       canSeeAllBookings: false,
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     // Reorder so the caller's row is the primary (oldest) one
@@ -506,6 +509,7 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
       canSeeAllBookings: true,
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     assetFindUniqueMock.mockResolvedValue(buildAsset());
@@ -853,6 +857,7 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
       canUseBarcodes: true,
       canUseAudits: false,
       canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     canUseBarcodesMock.mockReturnValue(true);
   });

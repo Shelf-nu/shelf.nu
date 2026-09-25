@@ -97,7 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
-      canSeeAllCustody,
+      access,
     } = await requirePermission({
       userId,
       request,
@@ -229,7 +229,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // from the REDACTED kit: it is returned beside the kit, so reading the raw
     // one would ship the holders the redaction just emptied.
     const [redactedKit] = redactCustodianForViewer([kit], {
-      canSeeAllCustody,
+      canSeeAllCustody: access.custody.seeAll,
       userId,
     });
     const currentBooking = getKitCurrentBooking({

@@ -191,10 +191,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
      * asks the same context the same question: the two must agree, or one lens
      * shows a booking the other says is not there.
      */
-    const { access, canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const custodianScope = access.bookings.seeAll
       ? null
@@ -334,7 +331,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         // resolver is what keeps this lens agreeing with the list lens on the
         // same screen about who holds a booking.
         custodianName: resolveBookingCustodianName({
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           booking: b,
           userId: user.id,
         }),

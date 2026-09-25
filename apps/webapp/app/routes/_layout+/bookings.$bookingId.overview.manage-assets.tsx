@@ -283,7 +283,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizationId, userOrganizations, access, canSeeAllCustody } =
+    const { organizationId, userOrganizations, access } =
       await requirePermission({
         userId: authSession?.userId,
         request,
@@ -579,7 +579,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetsWithAvailability as unknown as Array<
           (typeof assetsWithAvailability)[number] & RowWithCustody
         >,
-        { canSeeAllCustody, userId: authSession?.userId }
+        { canSeeAllCustody: access.custody.seeAll, userId: authSession?.userId }
       ),
       categories,
       tags,
@@ -629,13 +629,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, access, canSeeAllCustody } =
-      await requirePermission({
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     let {
       assetIds,
@@ -720,7 +719,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // copy of exactly what a colleague holds.
         allowedTeamMemberIds: await scopeCustodianFilterIds({
           teamMemberIds: searchParams.getAll("teamMember"),
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           userId: authSession?.userId,
           organizationId,
         }),

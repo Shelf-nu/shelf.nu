@@ -205,12 +205,6 @@ export async function requirePermission({
     currentOrganization,
   });
 
-  // Determine if user can see all custody information
-  const canSeeAllCustody = resolveCanSeeAllCustody({
-    role,
-    currentOrganization,
-  });
-
   // Determine if user can use barcodes based on organization settings
   const canUseBarcodes = currentOrganization.barcodesEnabled ?? false;
 
@@ -225,6 +219,9 @@ export async function requirePermission({
       ?.roles,
     workspace: currentOrganization,
   });
+
+  // Mirrors `access.custody.seeAll` for callers that still read the flag.
+  const canSeeAllCustody = access.custody.seeAll;
 
   return {
     organizations,

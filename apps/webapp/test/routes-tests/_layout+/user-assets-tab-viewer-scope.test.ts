@@ -25,6 +25,7 @@
  * @see {@link file://./../../../app/modules/asset/service.server.ts} — `getUserAssetsTabLoaderData`
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 import * as assetService from "~/modules/asset/service.server";
 import * as httpServer from "~/utils/http.server";
@@ -47,9 +48,9 @@ vi.mock("~/components/assets/assets-index/assets-list", () => ({
 // in this file queries.
 vi.mock("~/database/db.server", () => ({ db: {} }));
 
-// why: `canSeeAllCustody` is the value under test on one axis, so each case has
-// to set it directly rather than build an org whose override flags happen to
-// resolve to it.
+// why: custody visibility is the value under test on one axis, so each case
+// sets it directly through the returned `access` instead of building an org
+// whose settings happen to resolve to it.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
@@ -90,7 +91,8 @@ function mockPermission(canSeeAllCustody: boolean) {
     canSeeAllCustody,
     canUseBarcodes: false,
     canUseAudits: false,
-    access: {} as any,
+    // A BASE member whose workspace toggle decides custody visibility.
+    access: accessFor(["BASE"], { baseUserCanSeeCustody: canSeeAllCustody }),
   });
 }
 

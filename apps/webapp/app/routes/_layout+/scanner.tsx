@@ -56,7 +56,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role, isSelfServiceOrBase, canSeeAllCustody } =
+    const { organizationId, access, isSelfServiceOrBase } =
       await requirePermission({
         userId,
         request,
@@ -74,20 +74,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     const { teamMemberIds } = paramsValues;
 
     /**
-     * An ASSIGNMENT picker: this drawer assigns custody. Self-service may only
-     * assign to themselves and BASE may not assign at all.
-     *
-     * The previous `filterByUserId: role === SELF_SERVICE` encoded only half of
-     * that — it evaluated to `false` for BASE, so this loader handed a BASE
-     * user the entire team roster. /scanner is gated on `asset:read`, which
-     * BASE holds, so that list was reachable. (The assign action itself is
-     * gated on `asset:custody`, which BASE lacks, so it was a disclosure rather
-     * than an escalation.)
+     * An ASSIGNMENT picker: the role's `custody.assign` scope decides who it
+     * lists: everyone, only the caller, or no one.
      */
     const custodyScope = resolveCustodianPickerScope({
       purpose: "custody-assignment",
-      role,
-      canSeeAllCustody,
+      access,
       userId,
     });
 

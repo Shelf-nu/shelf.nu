@@ -14,6 +14,7 @@
  * @see {@link file://./../../../app/routes/api+/mobile+/custody.release-quantity.ts}
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 // why: the routes import the real Prisma client transitively; a body that fails
 // to parse never reaches a query.
@@ -91,6 +92,7 @@ describe("mobile actions with a body that is not JSON", () => {
     vi.mocked(getMobileUserContext).mockResolvedValue({
       role: "ADMIN",
       canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
       canUseAudits: true,
     } as never);
   });

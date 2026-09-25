@@ -70,8 +70,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const { assetIds, custodianId } = parsed.data;
 
     // Get user context (role + barcode access) for asset index settings
-    const { role, canUseBarcodes, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    const { role, canUseBarcodes, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const settings = await getAssetIndexSettings({
       userId: user.id,
@@ -118,7 +120,7 @@ export async function action({ request }: ActionFunctionArgs) {
        * custodian filter. Swap in `scopeCustodianFilterIds` at that point, so
        * they can still filter by their OWN custody.
        */
-      allowedTeamMemberIds: canSeeAllCustody ? "all" : [],
+      allowedTeamMemberIds: access.custody.seeAll ? "all" : [],
     });
 
     // Additive: the service silently skips QUANTITY_TRACKED assets on mixed

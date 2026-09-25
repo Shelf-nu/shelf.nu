@@ -150,8 +150,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
-      role,
-      canSeeAllCustody,
+      access,
     } = await requirePermission({
       userId,
       request,
@@ -273,18 +272,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * For QUANTITY_TRACKED assets, fetch team members for the custody
-     * dialog. Self-service users are scoped to only their own record.
+     * dialog, scoped by the caller's custody assignment scope.
      */
     const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
       ? await getTeamMembersForQuantityCustody({
           organizationId,
           request,
           userId,
-          // The rule, not a role check: `isSelfService` was false for BASE, so
-          // the seed shipped the whole roster — with every user's email and
-          // Stripe id — to a role that cannot assign custody at all.
-          role,
-          canSeeAllCustody,
+          access,
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
@@ -391,7 +386,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // Same reasoning as the parent detail route: this payload carries
       // `custody[].custodian` and is reachable with `asset: read`.
       asset: redactCustodianForViewer([{ ...asset, customFields }], {
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
       })[0],
       currentOrganization,

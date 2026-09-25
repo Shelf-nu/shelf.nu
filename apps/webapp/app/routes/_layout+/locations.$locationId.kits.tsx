@@ -73,7 +73,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, canSeeAllCustody } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.location,
@@ -110,7 +110,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
           selectedTeamMembers: teamMemberIds,
-          filterByUserId: !canSeeAllCustody, // When the user cannot see all custody, only return their own team member
+          filterByUserId: !access.custody.seeAll, // When the user cannot see all custody, only return their own team member
           userId,
         }),
       ]);
@@ -133,7 +133,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // whether the UI draws them, so a viewer without custody visibility can
       // read them straight out of the route's data payload. Redact here, not
       // in the component.
-      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
+      items: redactCustodianForViewer(kits, {
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }),
       page,
       totalItems: totalKits,
       perPage,

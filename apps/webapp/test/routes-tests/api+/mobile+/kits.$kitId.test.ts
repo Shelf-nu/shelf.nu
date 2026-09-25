@@ -15,6 +15,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
@@ -135,6 +136,7 @@ beforeEach(() => {
   requireMobilePermissionMock.mockResolvedValue(undefined);
   getMobileUserContextMock.mockResolvedValue({
     canSeeAllCustody: true,
+    access: accessFor(["ADMIN"]),
   } as Awaited<ReturnType<typeof getMobileUserContext>>);
 });
 
@@ -324,6 +326,7 @@ describe("GET /api/mobile/kits/:kitId — custody visibility", () => {
     // `custodian.user.email` — without the gate the whole identity is sent.
     getMobileUserContextMock.mockResolvedValue({
       canSeeAllCustody: false,
+      access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     findFirstMock.mockResolvedValue(kitInColleaguesCustody() as never);
 
@@ -340,6 +343,7 @@ describe("GET /api/mobile/kits/:kitId — custody visibility", () => {
   it("keeps the viewer's OWN custody visible", async () => {
     getMobileUserContextMock.mockResolvedValue({
       canSeeAllCustody: false,
+      access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     const own = kitInColleaguesCustody();
     own.custody.custodian.userId = FAKE_USER_ID;

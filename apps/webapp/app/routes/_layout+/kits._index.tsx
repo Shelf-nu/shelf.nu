@@ -76,7 +76,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, canSeeAllCustody, role } = await requirePermission({
+    const { organizationId, access, role } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -110,7 +110,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const custodianFilterWhere = {
       deletedAt: null,
       organizationId,
-      userId: !canSeeAllCustody ? userId : undefined,
+      userId: !access.custody.seeAll ? userId : undefined,
     };
 
     let [
@@ -124,7 +124,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         // Governs `?teamMember=`: a viewer who may not see all custody may
         // only ever filter this list by their own custody.
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
         extraInclude: {
           qrCodes: { select: { id: true } },
@@ -272,7 +272,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         // name and `user.email` shipped in this payload regardless, so a
         // restricted viewer read them straight out of `/kits.data` while the
         // page showed "private". Redact server-side.
-        items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
+        items: redactCustodianForViewer(kits, {
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         page,
         totalItems: totalKits,
         totalPages,

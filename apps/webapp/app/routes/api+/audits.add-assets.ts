@@ -36,7 +36,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       organizationId,
       canUseBarcodes,
       role,
-      canSeeAllCustody,
+      access,
       isSelfServiceOrBase,
     } = await requirePermission({
       userId,
@@ -106,7 +106,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
             "teamMember"
           ),
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           userId,
           organizationId,
         }),

@@ -1,5 +1,6 @@
 import { action } from "~/routes/api+/mobile+/bulk-release-custody";
 import { createActionArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -111,6 +112,7 @@ describe("POST /api/mobile/bulk-release-custody", () => {
 
     (getMobileUserContext as any).mockResolvedValue({
       role: "ADMIN",
+      access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     });
   });
@@ -166,6 +168,7 @@ describe("POST /api/mobile/bulk-release-custody", () => {
     // the route now plumbs `role` through.
     (getMobileUserContext as any).mockResolvedValue({
       role: "SELF_SERVICE",
+      access: accessFor(["SELF_SERVICE"]),
       canUseBarcodes: false,
     });
 

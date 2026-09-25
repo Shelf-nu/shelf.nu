@@ -150,7 +150,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       isSelfServiceOrBase,
       currentOrganization,
       userOrganizations,
-      canSeeAllCustody,
       access,
     } = await requirePermission({
       userId: authSession?.userId,
@@ -424,7 +423,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // role alone ignored the workspace's `selfServiceCanSeeCustody` /
         // `baseUserCanSeeCustody` overrides, which made this seed disagree with
         // the search endpoint.
-        filterByUserId: !canSeeAllCustody,
+        filterByUserId: !access.custody.seeAll,
         userId,
       }),
 

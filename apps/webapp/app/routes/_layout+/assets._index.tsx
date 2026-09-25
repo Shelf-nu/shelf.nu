@@ -74,7 +74,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         currentOrganization,
         role,
         canUseBarcodes,
-        canSeeAllCustody,
         access,
       },
       user,
@@ -142,7 +141,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization,
           user,
           settings,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           access,
         })
       : await advancedModeLoader({
@@ -154,7 +153,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization,
           user,
           settings,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           access,
         });
   } catch (cause) {

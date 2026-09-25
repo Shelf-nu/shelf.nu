@@ -86,14 +86,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
      * and OWNER see every booking, SELF_SERVICE and BASE see only their own
      * unless the workspace has switched their override on.
      *
-     * `canSeeAllCustody` decides whether the custodian's NAME may be shown on
+     * `access.custody.seeAll` decides whether the custodian's NAME may be shown on
      * a row that already exists. A workspace may grant either without the
      * other, so never let one stand in for the other.
      */
-    const { access, canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     /**
      * Custodian scope (web parity). Web matches a self-service or base user's
@@ -207,13 +204,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
         // these rows cannot disagree about who holds a booking. Answers a
         // name, null for "no custodian", or the withheld sentinel.
         custodianName: resolveBookingCustodianName({
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           booking: b,
           userId: user.id,
         }),
         // The face is as identifying as the name, so it follows the same gate.
         custodianImage: canSeeBookingCustodian({
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           booking: b,
           userId: user.id,
         })

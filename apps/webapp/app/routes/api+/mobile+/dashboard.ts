@@ -52,10 +52,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // dashboard never serves activeAudits to non-add-on workspaces — a
     // paywall bypass / data leak even with the client cards hidden.
     // The same call yields `access.bookings.seeAll`, which decides which
-    // bookings the sections may draw from, and `canSeeAllCustody` for their
-    // names.
-    const { canUseAudits, access, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    // bookings the sections may draw from, and `access.custody.seeAll` for
+    // their names.
+    const { canUseAudits, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     // Which bookings the Home sections may draw from.
     // `requireOrganizationAccess` above proves membership and performs NO role
@@ -329,7 +331,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // is what keeps Home naming a booking's holder the same way the list and
       // the calendar do.
       custodianName: resolveBookingCustodianName({
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         booking: b,
         userId: user.id,
       }),

@@ -84,7 +84,7 @@ export const loader = async ({
       });
     }
 
-    const { organizationId, canSeeAllCustody } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.qr,
@@ -119,7 +119,7 @@ export const loader = async ({
         // This picker renders the custodian filter, so pass the resolved rule
         // rather than a fixed answer — hardcoding `false` would refuse an
         // admin's own filter.
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
         extraInclude: {
           assetKits: {

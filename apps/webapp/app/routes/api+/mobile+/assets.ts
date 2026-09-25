@@ -63,10 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const url = new URL(request.url);
 
@@ -316,7 +313,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           custodyList: shaped.custodyList,
           custodyRows: asset.custody,
           viewerUserId: user.id,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
         });
 
       const primaryCustody = asset.custody[0] ?? null;
@@ -325,7 +322,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         viewerCanSeeLegacyCustody({
           custodianUserId: primaryCustody.custodian.userId,
           viewerUserId: user.id,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
         })
           ? shaped.custody
           : null;

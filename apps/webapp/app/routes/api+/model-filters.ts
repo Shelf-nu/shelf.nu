@@ -17,10 +17,6 @@ import {
   isSearchableKey,
 } from "~/utils/model-filters-registry.server";
 import { resolveMembershipAccess } from "~/utils/permissions/membership-access";
-import {
-  resolveCanSeeAllCustody,
-  resolveEffectiveRole,
-} from "~/utils/roles.server";
 
 /**
  * Booking statuses a booking search returns when the caller does not ask for a
@@ -137,6 +133,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     const { organizationId, userOrganizations, currentOrganization } =
       await getSelectedOrganization({ userId, request });
+    // The caller's access in the active organization, resolved from the
+    // session and the workspace toggles, never from a request param.
+    const access = resolveMembershipAccess({
+      userOrganizations,
+      organizationId,
+      workspace: currentOrganization,
+    });
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
@@ -240,30 +243,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // Fail closed: an unmigrated call site gets the NARROWER assignment
       // rule, so it shows too few names rather than too many.
       const purpose = modelFilters.custodyPurpose ?? "custody-assignment";
-      const role = resolveEffectiveRole({ userOrganizations, organizationId });
-      const custodyScope =
-        purpose === "booking-custodian"
-          ? resolveCustodianPickerScope({
-              purpose,
-              access: resolveMembershipAccess({
-                userOrganizations,
-                organizationId,
-                workspace: currentOrganization,
-              }),
-              userId,
-            })
-          : resolveCustodianPickerScope({
-              purpose,
-              role,
-              canSeeAllCustody: resolveCanSeeAllCustody({
-                role,
-                currentOrganization,
-              }),
-              userId,
-            });
+      const custodyScope = resolveCustodianPickerScope({
+        purpose,
+        access,
+        userId,
+      });
 
-      // BASE may never assign custody, so there is nothing to offer and no
-      // reason to hit the database.
+      // A caller who may not assign custody at all has nothing to be offered,
+      // so there is no reason to hit the database.
       if (custodyScope.mode === "none") {
         return data(payload({ filters: [] }));
       }
@@ -298,12 +285,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * it back open.
        */
       where.AND = [...(where.AND ?? []), bookingDraftVisibilityClause(userId)];
-
-      const access = resolveMembershipAccess({
-        userOrganizations,
-        organizationId,
-        workspace: currentOrganization,
-      });
 
       /**
        * Standard booking READ visibility: SELF_SERVICE / BASE users only see

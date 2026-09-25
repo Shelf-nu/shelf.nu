@@ -60,7 +60,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       "bulk-update-location": PermissionAction.update,
     };
 
-    const { organizationId, role, canSeeAllCustody } = await requirePermission({
+    const { organizationId, role, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
@@ -78,7 +78,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
         "teamMember"
       ),
-      canSeeAllCustody,
+      canSeeAllCustody: access.custody.seeAll,
       userId,
       organizationId,
     });

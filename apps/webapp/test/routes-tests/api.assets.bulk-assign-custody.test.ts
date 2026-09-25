@@ -1,6 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
@@ -127,6 +128,7 @@ describe("api/assets/bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     } as any);
 
@@ -167,6 +169,7 @@ describe("api/assets/bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     } as any);
 
@@ -219,6 +222,7 @@ describe("api/assets/bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor(["SELF_SERVICE"]),
       canUseBarcodes: false,
     } as any);
 
@@ -261,6 +265,7 @@ describe("api/assets/bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     } as any);
 

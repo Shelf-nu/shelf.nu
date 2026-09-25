@@ -99,7 +99,9 @@ export function mayRemoveBookingItems({
  * @param access - The caller's access
  * @returns `true` when the caller may only book for themself
  */
-export function bookingCustodianIsSelf(access: RoleAccess): boolean {
+export function bookingCustodianIsSelf(
+  access: Pick<RoleAccess, "policy">
+): boolean {
   return access.policy.bookings.custodianPicker === "self";
 }
 

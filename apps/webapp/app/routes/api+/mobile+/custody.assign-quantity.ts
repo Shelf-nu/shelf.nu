@@ -87,10 +87,10 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.custody,
     });
 
-    // Role for the SELF_SERVICE guard below; canSeeAllCustody for shaping
-    // the refreshed asset. No getAssetIndexSettings here: checkOutQuantity
+    // Role for the SELF_SERVICE guard below; access for shaping the
+    // refreshed asset. No getAssetIndexSettings here: checkOutQuantity
     // takes no `settings` param (that call is bulk-route plumbing only).
-    const { role, canSeeAllCustody } = await getMobileUserContext(
+    const { role, access } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -243,7 +243,7 @@ export async function action({ request }: ActionFunctionArgs) {
         assetId,
         organizationId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       });
     } catch (refreshError) {
       Logger.error(

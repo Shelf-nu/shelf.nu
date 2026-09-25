@@ -33,7 +33,6 @@ import {
   canUseBarcodes,
 } from "~/utils/subscription.server";
 import {
-  computeCanSeeAllCustody,
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "./mobile-custody-visibility.server";
@@ -405,6 +404,11 @@ export async function getMobileUserContext(
   // that still read it.
   const effectiveRole = resolveMostPrivilegedRole(userOrg.roles);
 
+  const access = resolveRoleAccess({
+    roles: userOrg.roles,
+    workspace: userOrg.organization,
+  });
+
   return {
     role,
     roles: userOrg.roles,
@@ -412,18 +416,12 @@ export async function getMobileUserContext(
     isSelfServiceOrBase: isSelfServiceOrBaseRole(effectiveRole),
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
-    canSeeAllCustody: computeCanSeeAllCustody({
-      role: effectiveRole,
-      organization: userOrg.organization,
-    }),
+    canSeeAllCustody: access.custody.seeAll,
     canSeeAllBookings: resolveCanSeeAllBookings({
       role: effectiveRole,
       currentOrganization: userOrg.organization,
     }),
-    access: resolveRoleAccess({
-      roles: userOrg.roles,
-      workspace: userOrg.organization,
-    }),
+    access,
   };
 }
 

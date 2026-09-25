@@ -42,7 +42,6 @@ import {
 import { isDemotion } from "~/utils/roles";
 import {
   isOrganizationOwner,
-  resolveCanSeeAllCustody,
   resolveEffectiveRole,
 } from "~/utils/roles.server";
 import { userHasCustodyViewPermission } from "./custody-and-bookings-permissions.validator.client";
@@ -123,6 +122,17 @@ function accessFor(
   workspace: (typeof TOGGLE_COMBOS)[number] = OFF
 ) {
   return resolveRoleAccess({ roles, workspace });
+}
+
+/**
+ * `access` with custody visibility forced to `seeAll`, for probes keyed on the
+ * visibility flag rather than on a toggle combination.
+ */
+function withCustodySeeAll(
+  access: ReturnType<typeof accessFor>,
+  seeAll: boolean
+) {
+  return { ...access, custody: { ...access.custody, seeAll } };
 }
 
 /** Runs a throwing guard and records whether it allowed the call. */
@@ -427,10 +437,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
       Object.fromEntries(
         TOGGLE_COMBOS.map((t) => [
           toggleKey(t),
-          resolveCanSeeAllCustody({
-            role: webRole(roles),
-            currentOrganization: t,
-          }),
+          accessFor(roles, t).custody.seeAll,
         ])
       ),
     ])
@@ -493,19 +500,12 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
           [false, true].map((canSeeAllCustody) => [
             `${purpose}|seeAll=${canSeeAllCustody}`,
             // The `seeAll=` half of a booking-custodian key never influences
-            // it: that purpose reads only the caller's access.
-            purpose === "booking-custodian"
-              ? resolveCustodianPickerScope({
-                  purpose,
-                  access: accessFor([role]),
-                  userId: "caller",
-                })
-              : resolveCustodianPickerScope({
-                  purpose,
-                  role,
-                  canSeeAllCustody,
-                  userId: "caller",
-                }),
+            // it: that purpose reads the role's booking policy only.
+            resolveCustodianPickerScope({
+              purpose,
+              access: withCustodySeeAll(accessFor([role]), canSeeAllCustody),
+              userId: "caller",
+            }),
           ])
         )
       ),
@@ -814,9 +814,8 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Bookings: Task 4d =====================
 
-  // B9:D-19/D-29: picker scopes for every membership on the web. The
-  // booking-custodian purpose reads the membership's access; the custody
-  // purposes read its effective role.
+  // B9:D-19/D-29: picker scopes for every membership on the web, all read
+  // from the membership's access.
   snapshot["B9:D-19/D-29:web-server"] = perRoleSet((roles) =>
     Object.fromEntries(
       (
@@ -824,18 +823,11 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
       ).flatMap((purpose) =>
         [false, true].map((canSeeAllCustody) => [
           `${purpose}|seeAll=${canSeeAllCustody}`,
-          purpose === "booking-custodian"
-            ? resolveCustodianPickerScope({
-                purpose,
-                access: accessFor(roles),
-                userId: "caller",
-              })
-            : resolveCustodianPickerScope({
-                purpose,
-                role: webRole(roles),
-                canSeeAllCustody,
-                userId: "caller",
-              }),
+          resolveCustodianPickerScope({
+            purpose,
+            access: withCustodySeeAll(accessFor(roles), canSeeAllCustody),
+            userId: "caller",
+          }),
         ])
       )
     )
@@ -1560,15 +1552,14 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   );
 
   // D-29:assign: the WEB custody-assignment scope, every role set. Services,
-  // routes and the assignment picker all pass the effective role to
-  // `resolveCustodianPickerScope` (modules/team-member/service.server.ts:408-417).
+  // routes and the assignment picker all pass the caller's access to
+  // `resolveCustodianPickerScope` (modules/team-member/service.server.ts).
   snapshot["D-29:assign"] = Object.fromEntries(
     ROLE_SETS.map((roles) => [
       key(roles),
       resolveCustodianPickerScope({
         purpose: "custody-assignment",
-        role: webRole(roles),
-        canSeeAllCustody: false,
+        access: accessFor(roles),
         userId: "caller",
       }).mode,
     ])

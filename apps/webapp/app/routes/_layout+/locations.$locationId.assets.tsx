@@ -104,7 +104,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, userOrganizations, canSeeAllCustody } =
+    const { organizationId, userOrganizations, access } =
       await requirePermission({
         request,
         userId,
@@ -150,7 +150,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
         // When the user cannot see all custody, only return their own team member
-        filterByUserId: !canSeeAllCustody,
+        filterByUserId: !access.custody.seeAll,
         userId,
       }),
     ]);

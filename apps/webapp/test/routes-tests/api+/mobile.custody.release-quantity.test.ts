@@ -18,6 +18,7 @@
  */
 import { action } from "~/routes/api+/mobile+/custody.release-quantity";
 import { createActionArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -185,6 +186,7 @@ describe("POST /api/mobile/custody/release-quantity", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     });
 
     (getTeamMember as any).mockResolvedValue({
@@ -396,6 +398,7 @@ describe("POST /api/mobile/custody/release-quantity", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: false,
+      access: accessFor(["SELF_SERVICE"]),
     });
     (getTeamMember as any).mockResolvedValue({
       id: "tm-1",
@@ -426,6 +429,7 @@ describe("POST /api/mobile/custody/release-quantity", () => {
       canUseBarcodes: false,
       canUseAudits: false,
       canSeeAllCustody: false,
+      access: accessFor(["SELF_SERVICE"]),
     });
     (getTeamMember as any).mockResolvedValue({
       id: "tm-1",

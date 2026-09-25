@@ -24,7 +24,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
+    const { organizationId, role, canUseBarcodes, access } =
       await requirePermission({
         userId,
         request,
@@ -111,7 +111,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
           "teamMember"
         ),
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
         organizationId,
       }),

@@ -23,6 +23,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { MemoryRouter, useLoaderData } from "react-router";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { getQr } from "~/modules/qr/service.server";
@@ -133,6 +134,7 @@ describe("qr+/_private+/$qrId_.link.kit loader", () => {
     } as any);
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
+      access: accessFor(["ADMIN"]),
     } as any);
     getPaginatedAndFilterableKitsMock.mockResolvedValue({
       kits: [],

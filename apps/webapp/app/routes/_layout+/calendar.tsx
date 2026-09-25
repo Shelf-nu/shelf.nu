@@ -122,7 +122,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const { currentOrganization, organizationId, canSeeAllCustody, access } =
+    const { currentOrganization, organizationId, access } =
       await requirePermission({
         userId,
         request,
@@ -154,14 +154,15 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       events,
       calendarFeedUrl,
     ] = await Promise.all([
-      // Team members for filters - when canSeeAllCustody is false, only current user's team member
+      // Team members for filters: when custody is not visible to the caller,
+      // only the caller's own team member
       getTeamMemberForCustodianFilter({
         organizationId,
         selectedTeamMembers: teamMemberIds,
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: !canSeeAllCustody,
+        filterByUserId: !access.custody.seeAll,
         userId,
       }),
       // Team members for CreateBookingDialog: a member whose booking custodian
@@ -184,7 +185,7 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         organizationId,
         userId,
         canSeeAllBookings: access.bookings.seeAll,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       }),
       getMemberCalendarFeedUrl({ organizationId, userId }),
     ]);

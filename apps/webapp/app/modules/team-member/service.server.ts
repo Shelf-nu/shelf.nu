@@ -347,76 +347,55 @@ export type CustodianPickerScope =
   | { mode: "self"; userId: string }
   | { mode: "none" };
 
-/** Arguments for {@link resolveCustodianPickerScope}, per purpose. */
-export type CustodianPickerScopeArgs =
-  | {
-      purpose: "booking-custodian";
-      /** The caller's access; `bookings.custodianPicker` decides. */
-      access: RoleAccess;
-      /** The caller, for the `self` mode. */
-      userId: string;
-    }
-  | {
-      purpose: "custody-filter" | "custody-assignment";
-      /** Effective role from `resolveEffectiveRole`. */
-      role: OrganizationRoles;
-      /** Resolved via `resolveCanSeeAllCustody`. */
-      canSeeAllCustody: boolean;
-      /** The caller, for the `self` mode. */
-      userId: string;
-    };
-
 /**
  * The scope one custodian picker should apply.
  *
- * Custodian pickers serve two different questions and a single rule cannot
- * answer both:
+ * Custodian pickers serve three different questions and a single rule cannot
+ * answer all of them:
  *
  * - `custody-filter`: "whose custody may I look at?" A read-visibility
- *   question, so the workspace overrides (`selfServiceCanSeeCustody` /
- *   `baseUserCanSeeCustody`, already resolved into `canSeeAllCustody`) govern.
- * - `custody-assignment`: "who may I hand this ASSET to?" A business rule the
- *   overrides never widen: SELF_SERVICE assigns only to itself and BASE may
- *   not assign at all. The setting is about SEEING custody, not granting it.
- * - `booking-custodian`: "who may this BOOKING be assigned to?" Distinct from
- *   asset custody, and answered by `bookings.custodianPicker`: members fixed
- *   to themselves get their own row; others get everyone.
+ *   question, answered by `access.custody.seeAll`, which already folds in the
+ *   workspace visibility toggles.
+ * - `custody-assignment`: "who may I hand this ASSET to?" The role's
+ *   `custody.assign` scope. The visibility toggles never widen it: they are
+ *   about SEEING custody, not granting it.
+ * - `booking-custodian`: "who may this BOOKING be assigned to?" The role's
+ *   `bookings.custodianPicker`. Distinct from asset custody: a role may put
+ *   itself on a booking without being allowed to take custody of an asset.
  *
  * Every custodian picker, seed and search alike, resolves through here, so
  * the seeded list and the typed list cannot disagree: a search that applied
  * no scope would show a restricted user the whole roster the moment they
  * typed.
  *
- * @param args - The purpose and, per purpose, the caller's access or role and
- *   custody visibility
- * @returns `all` (unrestricted), `self` (own team-member rows), or `none`.
+ * @param args.purpose - Which question this picker is asking
+ * @param args.access - The caller's resolved access (`requirePermission().access`)
+ * @param args.userId - The caller, for the `self` mode
+ * @returns `all` (unrestricted), `self` (own team-member rows), or `none`
  */
-export function resolveCustodianPickerScope(
-  args: CustodianPickerScopeArgs
-): CustodianPickerScope {
-  if (args.purpose === "booking-custodian") {
-    // A member whose booking custodian is fixed to themself books for
-    // themself, including BASE, which holds `booking:create` but may never
-    // take asset custody. Mirrors `getTeamMemberForForm`'s seed.
-    return bookingCustodianIsSelf(args.access)
-      ? { mode: "self", userId: args.userId }
-      : { mode: "all" };
-  }
-
-  const { purpose, role, canSeeAllCustody, userId } = args;
-
+export function resolveCustodianPickerScope({
+  purpose,
+  access,
+  userId,
+}: {
+  purpose: CustodianPickerPurpose;
+  access: Pick<RoleAccess, "custody" | "policy">;
+  userId: string;
+}): CustodianPickerScope {
   if (purpose === "custody-assignment") {
-    // BASE may never take custody of an asset, whatever the override says.
-    if (role === OrganizationRoles.BASE) {
-      return { mode: "none" };
-    }
-    if (role === OrganizationRoles.SELF_SERVICE) {
-      return { mode: "self", userId };
-    }
+    if (access.custody.assign === "none") return { mode: "none" };
+    if (access.custody.assign === "self") return { mode: "self", userId };
     return { mode: "all" };
   }
 
-  return canSeeAllCustody ? { mode: "all" } : { mode: "self", userId };
+  if (purpose === "booking-custodian") {
+    // Mirrors `getTeamMemberForForm`'s seed, which reads the same helper.
+    return bookingCustodianIsSelf(access)
+      ? { mode: "self", userId }
+      : { mode: "all" };
+  }
+
+  return access.custody.seeAll ? { mode: "all" } : { mode: "self", userId };
 }
 
 export async function getTeamMemberForCustodianFilter({
@@ -1310,46 +1289,37 @@ export async function getTeamMembersForNotify({
  * Fetches team members for the quantity custody dialog's DynamicSelect.
  *
  * Returns the first page (12 items) by default, or all items when
- * `getAll=teamMember` is present in the search params. Self-service
- * users are scoped to only their own team member record.
+ * `getAll=teamMember` is present in the search params. The list is scoped
+ * by the caller's custody assignment scope: everyone, only the caller's own
+ * team member, or no one.
  *
- * @param args - Organization, request, user ID, and role
+ * @param args - Organization, request, user ID, and the caller's access
  * @returns Object with `teamMembers` array and `totalTeamMembers` count
  */
 export async function getTeamMembersForQuantityCustody({
   organizationId,
   request,
   userId,
-  role,
-  canSeeAllCustody,
+  access,
 }: {
   organizationId: string;
   request: Request;
   userId: string;
-  /**
-   * Caller's role. Takes the place of an `isSelfService` boolean, which was a
-   * ROLE check where a RULE was needed: it is false for BASE, so the scope
-   * below collapsed to `undefined` and the whole roster shipped to a BASE user
-   * — who cannot assign custody at all (`asset: [read]`).
-   */
-  role: OrganizationRoles;
-  /** Resolved by `resolveCanSeeAllCustody`, for the shared scope resolver. */
-  canSeeAllCustody: boolean;
+  /** The caller's access; the ASSIGNMENT scope governs this picker. */
+  access: RoleAccess;
 }) {
   try {
     const searchParams = getCurrentSearchParams(request);
 
     /**
-     * This seeds an ASSIGNMENT picker, so the assignment rule governs, not the
-     * custody read rule: BASE may not assign at all, SELF_SERVICE only to
-     * themselves. Same resolver the search endpoint uses for
+     * This seeds an ASSIGNMENT picker, so the role's `custody.assign` scope
+     * governs, not the custody read rule. Same resolver the search endpoint uses for
      * `custodyPurpose: "custody-assignment"`, so the seed and the list the user
      * gets after typing cannot disagree.
      */
     const scope = resolveCustodianPickerScope({
       purpose: "custody-assignment",
-      role,
-      canSeeAllCustody,
+      access,
       userId,
     });
 

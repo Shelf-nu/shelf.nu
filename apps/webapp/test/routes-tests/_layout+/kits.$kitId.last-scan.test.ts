@@ -23,6 +23,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { accessFor } from "@helpers/role-access";
 
 // why: importing the route pulls in `db.server`, whose non-production
 // initialization calls `db.$connect()`. Without this the test attempts a real
@@ -97,6 +98,10 @@ function callerHolds(roles: OrganizationRoles[]) {
     currentOrganization: { id: ORG },
     canUseBarcodes: false,
     canSeeAllCustody: true,
+    access: accessFor(roles, {
+      selfServiceCanSeeCustody: true,
+      baseUserCanSeeCustody: true,
+    }),
     userOrganizations: [{ organization: { id: ORG }, roles }],
   });
 }
