@@ -19,6 +19,7 @@ import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { ShelfError } from "~/utils/error";
 import {
   assertModelUnitsNotReservedElsewhere,
+  claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
   getAssetModelAvailability,
   getBookingModelTabData,
@@ -71,6 +72,9 @@ vitest.mock("~/database/db.server", () => ({
       // the booking already holds of a model, which count on the claiming
       // side. Default to none; the guard's tests stage held rows per case.
       findMany: vitest.fn().mockResolvedValue([]),
+      // why: `claimUnstampedBookingRows` writes the provenance onto rows that
+      // already exist, which is the one path that stamps without inserting.
+      updateMany: vitest.fn().mockResolvedValue({ count: 1 }),
     },
     bookingModelRequest: {
       // why: `fulfilModelRequestsForAssets` short-circuits on a count of the
@@ -2325,6 +2329,228 @@ describe("getBookingModelTabData", () => {
  * the mobile API. Its guarantees are what make those surfaces agree, so they
  * are pinned here rather than left to whichever caller happens to be tested.
  */
+describe("claimUnstampedBookingRows", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tx = db as any;
+
+  /** One eligible row, in the shape the claim selects. */
+  const row = (id: string, assetModelId: string | null = MODEL_ID) => ({
+    asset: {
+      id,
+      title: `Asset ${id}`,
+      assetModelId,
+      type: AssetType.INDIVIDUAL,
+    },
+  });
+
+  /**
+   * `bookingAsset.findMany` serves two reads here: this function's eligible-row
+   * lookup (`bookingModelRequestId: null`) and the helper's stamp guard
+   * (`{ not: null }`). Route on the `where` rather than on call order, which
+   * breaks silently the moment a read is added between them.
+   */
+  function stageRows(
+    eligible: ReturnType<typeof row>[],
+    stampedAssetIds: string[] = []
+  ) {
+    // @ts-expect-error mocked
+    db.bookingAsset.findMany.mockImplementation(
+      (args: { where?: { bookingModelRequestId?: unknown } }) =>
+        args?.where?.bookingModelRequestId === null
+          ? eligible
+          : stampedAssetIds.map((assetId) => ({ assetId }))
+    );
+  }
+
+  /**
+   * An outstanding reservation for `MODEL_ID`, and nothing for any other model.
+   *
+   * The lookup is keyed on `bookingId_assetModelId`, so a blanket resolve would
+   * answer for every model and hide the case where an asset's model reserves
+   * nothing here. The claim simulator calls this same stub with no arguments to
+   * read the current row, which is why a missing `where` still resolves.
+   */
+  function stageRequest(quantity = 5, fulfilledQuantity = 0) {
+    const request = {
+      id: "req-1",
+      bookingId: BOOKING_ID,
+      assetModelId: MODEL_ID,
+      quantity,
+      fulfilledQuantity,
+      fulfilledAt: null,
+      assetModel: { name: "Dell Latitude 5550" },
+    };
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockImplementation(
+      (args?: {
+        where?: { bookingId_assetModelId?: { assetModelId?: string } };
+      }) => {
+        const asked = args?.where?.bookingId_assetModelId?.assetModelId;
+        return asked === undefined || asked === MODEL_ID ? request : null;
+      }
+    );
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    installClaimSimulator();
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue(null);
+    stageRows([]);
+  });
+
+  it("claims for a standalone row that carries no stamp, and writes it", async () => {
+    // The state a unit lands in when it was added before the reservation
+    // existed. It is on the booking answering nothing until this runs.
+    stageRows([row("asset-1")]);
+    stageRequest();
+
+    const result = await claimUnstampedBookingRows(
+      {
+        bookingId: BOOKING_ID,
+        assetIds: ["asset-1"],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      },
+      tx
+    );
+
+    expect(result).toEqual(new Map([["asset-1", "req-1"]]));
+    // Every other caller stamps while inserting; this is the only path that
+    // writes the column onto a row that already exists.
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          bookingId: BOOKING_ID,
+          assetId: "asset-1",
+          assetKitId: null,
+          bookingModelRequestId: null,
+        }),
+        data: { bookingModelRequestId: "req-1" },
+      })
+    );
+  });
+
+  it("reads only standalone, unstamped rows of this booking and org", async () => {
+    stageRows([row("asset-1")]);
+    stageRequest();
+
+    await claimUnstampedBookingRows(
+      {
+        bookingId: BOOKING_ID,
+        assetIds: ["asset-1"],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      },
+      tx
+    );
+
+    // A kit-driven row is answered by scanning its kit, and `assetIds` is
+    // request input, so the read is org-scoped through the booking.
+    expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          bookingId: BOOKING_ID,
+          assetKitId: null,
+          bookingModelRequestId: null,
+          booking: { organizationId: ORG_ID },
+        }),
+      })
+    );
+  });
+
+  it("writes nothing when the asset already answered on this booking", async () => {
+    // The row this function reads is unstamped, but the asset holds a stamped
+    // row elsewhere on the booking, so it has already discharged a unit.
+    stageRows([row("asset-1")], ["asset-1"]);
+    stageRequest();
+
+    const result = await claimUnstampedBookingRows(
+      {
+        bookingId: BOOKING_ID,
+        assetIds: ["asset-1"],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      },
+      tx
+    );
+
+    expect(result).toEqual(new Map());
+    expect(db.bookingAsset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the asset's model answers no reservation here", async () => {
+    stageRows([row("asset-1", "some-other-model")]);
+    stageRequest();
+
+    const result = await claimUnstampedBookingRows(
+      {
+        bookingId: BOOKING_ID,
+        assetIds: ["asset-1"],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      },
+      tx
+    );
+
+    expect(result).toEqual(new Map());
+    expect(db.bookingAsset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("stops at the reserved quantity", async () => {
+    stageRows([row("asset-1"), row("asset-2"), row("asset-3")]);
+    stageRequest(2);
+
+    const result = await claimUnstampedBookingRows(
+      {
+        bookingId: BOOKING_ID,
+        assetIds: ["asset-1", "asset-2", "asset-3"],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      },
+      tx
+    );
+
+    // Two reserved units, three units present: the third stays a plain row.
+    expect(result.size).toBe(2);
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("touches nothing when no eligible row comes back", async () => {
+    stageRows([]);
+    stageRequest();
+
+    const result = await claimUnstampedBookingRows(
+      {
+        bookingId: BOOKING_ID,
+        assetIds: ["asset-1"],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      },
+      tx
+    );
+
+    expect(result).toEqual(new Map());
+    expect(db.bookingModelRequest.count).not.toHaveBeenCalled();
+    expect(db.bookingAsset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not read anything for an empty scan", async () => {
+    const result = await claimUnstampedBookingRows(
+      {
+        bookingId: BOOKING_ID,
+        assetIds: [],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      },
+      tx
+    );
+
+    expect(result).toEqual(new Map());
+    expect(db.bookingAsset.findMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("fulfilModelRequestsForAssets", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tx = db as any;

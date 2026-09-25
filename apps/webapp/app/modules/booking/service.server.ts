@@ -78,6 +78,7 @@ import {
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
   assertModelUnitsNotReservedElsewhere,
+  claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
 } from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
@@ -15061,10 +15062,12 @@ async function addScannedAssetsToBookingWithinTx(
   }
 
   /**
-   * Scans that gain a standalone row on this call.
+   * Scans that gain a standalone row on this call: the ones this booking does
+   * not already hold loose. Deduped, because one asset owns at most one
+   * standalone row per booking.
    *
-   * Assets missing from `scannedAssetsMetaById` aren't in this org; they are
-   * skipped here and rejected by the FK on the create below.
+   * `assertAssetsBelongToOrg` above has already refused a foreign id, so an
+   * asset missing from `scannedAssetsMetaById` cannot reach here.
    */
   const newStandaloneScans = [...new Set(assetIds)]
     .filter((assetId) => !preExistingStandaloneScannedIds.has(assetId))
@@ -15155,6 +15158,33 @@ async function addScannedAssetsToBookingWithinTx(
   });
 
   /**
+   * Scans whose standalone row was already here get to answer a reservation
+   * too, if that row carries no stamp.
+   *
+   * They are deliberately absent from `fulfilmentCandidates`: no row is being
+   * inserted for them, and re-sending one must not discharge a reservation a
+   * second time. That rule is about the STAMP, not about the row, so the claim
+   * below re-reads them and takes only the unstamped ones. Without it a unit
+   * added before its reservation existed can never answer it, however often it
+   * is scanned.
+   */
+  const preExistingScannedAssetIds = [...new Set(assetIds)].filter((assetId) =>
+    preExistingStandaloneScannedIds.has(assetId)
+  );
+
+  if (preExistingScannedAssetIds.length > 0) {
+    await claimUnstampedBookingRows(
+      {
+        bookingId,
+        assetIds: preExistingScannedAssetIds,
+        organizationId,
+        userId,
+      },
+      tx
+    );
+  }
+
+  /**
    * Resolve the slice quantity for kit-driven scans. When a kit QR is
    * scanned, the drawer attributes each member to its `AssetKit` via
    * `kitSlices` but may not pass an explicit slice quantity — so a
@@ -15223,14 +15253,20 @@ async function addScannedAssetsToBookingWithinTx(
         create: [
           // Standalone scans: `assetKitId = null`. Quantity precedence:
           // explicit per-row qty input → 1 (schema default).
-          ...assetIds.map((id) => ({
-            assetId: id,
-            quantity: quantities[id] ?? 1,
+          //
+          // `newStandaloneScans`, not the raw scan: a scanned asset the
+          // booking already holds loose keeps the row it has. Every caller
+          // sends what the operator scanned, which legitimately includes
+          // units already on the booking, and a second standalone row for one
+          // of them collides with `BookingAsset_manual_unique`.
+          ...newStandaloneScans.map((meta) => ({
+            assetId: meta.id,
+            quantity: quantities[meta.id] ?? 1,
             assetKitId: null,
             // No kit provenance for a standalone scan — kept explicit so the
             // "assetKitId null ⇔ sourceKitId null" invariant reads locally.
             sourceKitId: null,
-            bookingModelRequestId: takeModelRequestId(id),
+            bookingModelRequestId: takeModelRequestId(meta.id),
           })),
           // Kit-driven slices: `assetKitId` set, plus `sourceKitId` — the
           // durable owning-kit pointer that survives the membership row's
