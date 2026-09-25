@@ -146,13 +146,20 @@ export function QuantityCustodyDialog({
     if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
       setOpen(false);
       setSelectedTeamMemberId(null);
-      setPickedSource(null);
       formRef.current?.reset();
     }
   }, [fetcher.state, fetcher.data, setOpen]);
 
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        // Each open starts from the pre-selected source. The header menu
+        // mounts this dialog only while open, which resets it the same way.
+        if (next) setPickedSource(null);
+        setOpen(next);
+      }}
+    >
       {trigger ? (
         <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       ) : null}

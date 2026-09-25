@@ -355,7 +355,7 @@ function CustodyRow({
                 {" · "}
                 {sourceParts.map((part, index) => (
                   <span
-                    key={`${part.text}-${index}`}
+                    key={part.key}
                     className={part.muted ? "text-gray-400" : undefined}
                   >
                     {index > 0 ? ", " : null}

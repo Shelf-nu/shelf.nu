@@ -63,7 +63,7 @@ describe("describeCustodySources", () => {
         [{ quantity: 2, location: studio, custodian: { id: "tm" } }],
         false
       )
-    ).toEqual([{ text: "from Studio", muted: false }]);
+    ).toEqual([{ key: "loc-studio", text: "from Studio", muted: false }]);
   });
 
   it("lists every source with its count when there are several", () => {
@@ -84,7 +84,7 @@ describe("describeCustodySources", () => {
         [{ quantity: 1, location: null, custodian: { id: "tm" } }],
         true
       )
-    ).toEqual([{ text: "unplaced", muted: false }]);
+    ).toEqual([{ key: "none", text: "unplaced", muted: false }]);
   });
 
   it("marks a missing source on a fully placed pool as not recorded, lighter", () => {
@@ -93,7 +93,7 @@ describe("describeCustodySources", () => {
         [{ quantity: 2, location: null, custodian: { id: "tm" } }],
         false
       )
-    ).toEqual([{ text: "location not recorded", muted: true }]);
+    ).toEqual([{ key: "none", text: "location not recorded", muted: true }]);
   });
 });
 

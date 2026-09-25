@@ -94,6 +94,8 @@ export function nullSourceLabel(poolHasUnplaced: boolean): string {
 
 /** One part of a person's source text. */
 export type SourcePart = {
+  /** Stable React key: the source's location id, or "none". */
+  key: string;
   text: string;
   /** Rendered lighter: the source was never recorded. */
   muted: boolean;
@@ -101,7 +103,7 @@ export type SourcePart = {
 
 /**
  * The source text after a person's quantity, for a pool with two or more
- * sources: "from MDA Tower" for a single source, "2 from Camera Room, 1 from
+ * sources: "from Studio" for a single source, "2 from Camera Room, 1 from
  * Studio" for several, "unplaced" / "location not recorded" for NULL.
  *
  * @param rows - The person's operator rows
@@ -116,15 +118,29 @@ export function describeCustodySources(
   if (rows.length === 1) {
     const [only] = rows;
     return only.location
-      ? [{ text: `from ${only.location.name}`, muted: false }]
-      : [{ text: nullText, muted: !poolHasUnplaced }];
+      ? [
+          {
+            key: only.location.id,
+            text: `from ${only.location.name}`,
+            muted: false,
+          },
+        ]
+      : [{ key: "none", text: nullText, muted: !poolHasUnplaced }];
   }
 
   return rows.map((row) => {
     const quantity = row.quantity ?? 1;
     return row.location
-      ? { text: `${quantity} from ${row.location.name}`, muted: false }
-      : { text: `${quantity} ${nullText}`, muted: !poolHasUnplaced };
+      ? {
+          key: row.location.id,
+          text: `${quantity} from ${row.location.name}`,
+          muted: false,
+        }
+      : {
+          key: "none",
+          text: `${quantity} ${nullText}`,
+          muted: !poolHasUnplaced,
+        };
   });
 }
 

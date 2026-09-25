@@ -136,7 +136,6 @@ export function QuickAdjustDialog({
     if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
       setOpen(false);
       setQuantityError(null);
-      setPickedLocation(null);
       formRef.current?.reset();
     }
   }, [fetcher.state, fetcher.data, setOpen]);
@@ -179,7 +178,15 @@ export function QuickAdjustDialog({
   }
 
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        // Each open starts from the pre-selected location. The header menu
+        // mounts this dialog only while open, which resets it the same way.
+        if (next) setPickedLocation(null);
+        setOpen(next);
+      }}
+    >
       {trigger ? (
         <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       ) : null}
