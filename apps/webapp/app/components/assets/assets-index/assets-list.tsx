@@ -108,7 +108,9 @@ export const AssetsList = ({
         </Th>
       </When>
       <Th>Location</Th>
-      <Th>{ASSET_QUANTITY_FIGURE_LABELS.TOTAL}</Th>
+      <Th className="whitespace-nowrap">
+        {ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
+      </Th>
       <Th>Actions</Th>
     </>
   ) : (
