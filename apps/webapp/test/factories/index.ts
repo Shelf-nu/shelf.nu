@@ -27,6 +27,7 @@ export * from "./layoutLoaderData";
 /** `stripePriceFactory` + `tierMetadata`/`addonMetadata` — resolved Stripe
  * prices, whose four entitlement-relevant properties must all be set. */
 export * from "./stripePrice";
+export * from "./scan";
 /** `createBookingSettings` — the full `getBookingSettingsForOrganization`
  * shape, every switch off, for typed mocks of that service. */
 export * from "./bookingSettings";
