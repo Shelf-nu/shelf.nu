@@ -30,7 +30,7 @@ import {
 import { resolveUserDisplayName } from "~/utils/user";
 import { newOwnerEmailText, previousOwnerEmailText } from "./email";
 import { recordEvent } from "../activity-event/service.server";
-import { defaultFields } from "../asset-index-settings/helpers";
+import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
 import { USER_NAME_SELECT } from "../user/fields";
@@ -240,7 +240,8 @@ export async function createOrganization({
       assetIndexSettings: {
         create: {
           mode: AssetIndexMode.ADVANCED,
-          columns: defaultFields,
+          // A new workspace has no assets yet, so no quantity-tracked ones.
+          columns: defaultColumnsForWorkspace({ hasQuantityAssets: false }),
           user: {
             connect: {
               id: userId,

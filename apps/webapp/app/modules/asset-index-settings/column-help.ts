@@ -63,7 +63,7 @@ export type ColumnHelp = {
  */
 export const COLUMN_HELP: Partial<Record<ColumnLabelKey, ColumnHelp>> = {
   available: {
-    summary: "Units you could hand over right now, today.",
+    summary: "Units you could hand over right now, out of the total you own.",
     formula: [
       { label: "Total quantity" },
       { op: "−", label: "In custody" },
@@ -86,7 +86,7 @@ export const COLUMN_HELP: Partial<Record<ColumnLabelKey, ColumnHelp>> = {
     legend: [
       {
         status: "SHORT",
-        text: "At some point ahead, custody, kits and overlapping bookings need more than you own",
+        text: "At some point ahead, custody, kits and overlapping bookings need more than you own. The badge says by how many",
       },
       { status: "NONE_FREE", text: "Nothing available to hand over" },
       { status: "LOW", text: "At or below your min quantity" },

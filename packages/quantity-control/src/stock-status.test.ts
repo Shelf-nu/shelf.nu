@@ -20,6 +20,7 @@ import {
   classifyStockStatus,
   committedUnits,
   isActionableStockStatus,
+  shortfallUnits,
   STOCK_STATUSES,
   STOCK_STATUS_SEVERITY,
   type StockStatusInputs,
@@ -155,6 +156,30 @@ test("no floor still yields NONE_FREE when the pool is empty", () => {
 
 test("committedUnits is custody plus kits plus the booking peak", () => {
   assert.equal(committedUnits({ peakBooked: 1, inCustody: 2, inKits: 3 }), 6);
+});
+
+test("shortfallUnits is what is committed beyond what is owned", () => {
+  // 12 booked at the busiest point against 10 owned: short by 2.
+  assert.equal(
+    shortfallUnits({ total: 10, peakBooked: 12, inCustody: 0, inKits: 0 }),
+    2
+  );
+  // Custody and kits count too: 5 + 3 + 4 = 12 against 10.
+  assert.equal(
+    shortfallUnits({ total: 10, peakBooked: 4, inCustody: 5, inKits: 3 }),
+    2
+  );
+});
+
+test("shortfallUnits is 0 for a pool that is not short", () => {
+  assert.equal(
+    shortfallUnits({ total: 10, peakBooked: 10, inCustody: 0, inKits: 0 }),
+    0
+  );
+  assert.equal(
+    shortfallUnits({ total: 10, peakBooked: 1, inCustody: 0, inKits: 0 }),
+    0
+  );
 });
 
 /* -------------------------------- severity ------------------------------- */

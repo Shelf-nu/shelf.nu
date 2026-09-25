@@ -152,6 +152,24 @@ export function committedUnits(a: {
 }
 
 /**
+ * How many units a pool is short by: the units committed at the busiest point
+ * ahead ({@link committedUnits}) minus the units owned, never below 0. It is
+ * the number a `SHORT` verdict is about, so the badge ("Short by 2") and the
+ * Reserved cell both read it from here.
+ *
+ * @param a - The claim counts plus `total`, the units owned.
+ * @returns Units missing at the busiest point ahead; 0 when nothing is short.
+ */
+export function shortfallUnits(a: {
+  total: number;
+  peakBooked: number;
+  inCustody: number;
+  inKits: number;
+}): number {
+  return Math.max(0, committedUnits(a) - a.total);
+}
+
+/**
  * Classifies one QUANTITY_TRACKED asset's pool.
  *
  * Evaluated most-urgent first, and the order is load-bearing:

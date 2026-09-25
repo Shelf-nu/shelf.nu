@@ -36,7 +36,11 @@
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { STOCK_STATUS_LABELS } from "@shelf/labels";
 import { ASSET_QUANTITY_FIGURE_LABELS } from "@shelf/labels";
-import { committedUnits, type StockStatus } from "@shelf/quantity-control";
+import {
+  committedUnits,
+  shortfallUnits,
+  type StockStatus,
+} from "@shelf/quantity-control";
 import { Link } from "react-router";
 import { Badge } from "~/components/shared/badge";
 import { EmptyTableValue } from "~/components/shared/empty-table-value";
@@ -190,6 +194,26 @@ function DetailRow({
  * @param props.breakdown - This row's figures.
  * @returns The tooltip body.
  */
+/**
+ * The words on the badge and at the top of its hover. A `SHORT` pool with
+ * figures says how many units it is short by, the number to act on; the
+ * column legend has no figures and shows the verdict name alone.
+ *
+ * @param status - A badged verdict
+ * @param breakdown - The row's figures, when there are any
+ * @returns "Short by 2", or the verdict's label
+ */
+export function stockStatusText(
+  status: Exclude<StockStatus, "NO_THRESHOLD">,
+  breakdown?: StockStatusBreakdown | null
+): string {
+  const shortBy =
+    status === "SHORT" && breakdown ? shortfallUnits(breakdown) : 0;
+  return shortBy > 0
+    ? `${STOCK_STATUS_LABELS.SHORT} by ${shortBy}`
+    : STOCK_STATUS_LABELS[status];
+}
+
 function StockStatusDetail({
   status,
   breakdown,
@@ -261,7 +285,7 @@ function StockStatusDetail({
   return (
     <div className="flex max-w-xs flex-col gap-2 text-left">
       <p className="text-sm font-medium text-gray-900">
-        {STOCK_STATUS_LABELS[status]}
+        {stockStatusText(status, breakdown)}
       </p>
       <p className="text-xs text-gray-600">{reason}</p>
 
@@ -403,7 +427,7 @@ export function StockStatusBadge({ status, breakdown }: StockStatusBadgeProps) {
   const colors = STOCK_STATUS_COLORS[status];
   const badge = (
     <Badge color={colors.bg} textColor={colors.text}>
-      {STOCK_STATUS_LABELS[status]}
+      {stockStatusText(status, breakdown)}
     </Badge>
   );
 
@@ -426,7 +450,7 @@ export function StockStatusBadge({ status, breakdown }: StockStatusBadgeProps) {
       <HoverCardTrigger asChild>
         <button
           type="button"
-          aria-label={`${STOCK_STATUS_LABELS[status]}: show levels`}
+          aria-label={`${stockStatusText(status, breakdown)}: show levels`}
           className="cursor-default rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
         >
           {badge}

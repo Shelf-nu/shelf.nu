@@ -25,7 +25,7 @@
  * @see {@link file://./advanced-asset-columns.tsx} - the cell that renders this.
  */
 
-import { committedUnits, type StockStatus } from "@shelf/quantity-control";
+import { shortfallUnits, type StockStatus } from "@shelf/quantity-control";
 
 /** The figures a row carries for its reserved cell. */
 export type ReservedDisplayInput = {
@@ -81,7 +81,12 @@ export function resolveReservedDisplay(
   const unit = isPool && unitOfMeasure ? ` ${unitOfMeasure}` : "";
   const owned = quantity ?? 0;
 
-  const shortfall = committedUnits({ inCustody, inKits, peakBooked }) - owned;
+  const shortfall = shortfallUnits({
+    total: owned,
+    inCustody,
+    inKits,
+    peakBooked,
+  });
 
   /**
    * `peakBooked > 0` keeps the flag off a row whose shortfall comes entirely

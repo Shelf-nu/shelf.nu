@@ -66,6 +66,7 @@ import { QrIdCell } from "./advanced-columns/qr-id-cell";
 import { SamIdCell } from "./advanced-columns/sam-id-cell";
 import { Td } from "./advanced-columns/td";
 import AssetQuickActions from "./asset-quick-actions";
+import { resolveFreeNowText } from "./free-now-display";
 import { freezeColumnClassNames } from "./freeze-column-classes";
 import { ListItemTagsColumn } from "./list-item-tags-column";
 import { resolveReservedDisplay } from "./reserved-display";
@@ -369,15 +370,20 @@ export function AdvancedIndexColumn({
 
     case "available":
       // Units free to hand over right now: total minus custody, kits and
-      // checked-out. Deliberately NOT reduced by future reservations, those
-      // units are still physically on the shelf, which is why `reserved` sits
-      // next to it as its own column rather than in a tooltip.
+      // checked-out. Deliberately NOT reduced by future reservations: those
+      // units are still physically on the shelf.
+      //
+      // Reads "14 of 20 pcs", see `resolveFreeNowText`.
       return (
         <Td className="w-full max-w-none whitespace-nowrap">
           {isQuantityTracked(item) && item.available != null ? (
-            `${item.available}${
-              item.unitOfMeasure ? ` ${item.unitOfMeasure}` : ""
-            }`
+            <span className="tabular-nums">
+              {resolveFreeNowText({
+                available: item.available,
+                total: item.quantity,
+                unitOfMeasure: item.unitOfMeasure,
+              })}
+            </span>
           ) : (
             <EmptyTableValue />
           )}

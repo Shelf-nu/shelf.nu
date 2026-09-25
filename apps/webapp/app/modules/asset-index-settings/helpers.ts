@@ -191,23 +191,18 @@ export const columnsLabelsMap: { [key in ColumnLabelKey]: string } = {
 };
 
 export const defaultFields: Column[] = [
-  // ORDER IS THE FEATURE. The pool columns sit immediately after `status`:
-  // shipped at the end of the list they landed past every custom field,
-  // ~3000px off the right edge, and a column you have to hunt for is the
-  // problem this set exists to solve.
-  //
-  // `quantity` (labelled "Total quantity") is visible and sits directly after
-  // `available`, because a free count with no denominator is not an answer:
-  // "4 pcs" is a crisis at 4-of-5 and a non-event at 4-of-400. The customer
-  // who started this asked to see available "also", meaning ALONGSIDE the
-  // total, shipping one and hiding the other answers half the question.
+  // The quantity columns sit together right after `status`, in
+  // QUANTITY_COLUMN_BLOCK order. Only Free now and Stock status start visible:
+  // Free now reads "14 of 20 pcs", so it already carries the total and the
+  // unit, and Stock status says how short a pool is. Total quantity and
+  // Reserved are one switch away in the columns list.
   { name: "id", visible: false, position: 0 },
   { name: "sequentialId", visible: true, position: 1 },
   { name: "qrId", visible: true, position: 2 },
   { name: "status", visible: true, position: 3 },
   { name: "available", visible: true, position: 4 },
-  { name: "quantity", visible: true, position: 5 },
-  { name: "reserved", visible: true, position: 6 },
+  { name: "quantity", visible: false, position: 5 },
+  { name: "reserved", visible: false, position: 6 },
   { name: "stockStatus", visible: true, position: 7 },
   { name: "description", visible: true, position: 8 },
   { name: "valuation", visible: true, position: 9 },
@@ -226,6 +221,120 @@ export const defaultFields: Column[] = [
   { name: "assetModel", visible: false, position: 22 },
   { name: "minQuantity", visible: false, position: 23 },
 ];
+
+/**
+ * The quantity columns, in the order they sit side by side. They describe one
+ * pool, so they are kept together: a saved column set that lacks some of them
+ * gets each missing one placed next to the ones it already has.
+ */
+export const QUANTITY_COLUMN_BLOCK: readonly ColumnLabelKey[] = [
+  "available",
+  "quantity",
+  "reserved",
+  "stockStatus",
+];
+
+function isQuantityColumn(name: ColumnLabelKey): boolean {
+  return QUANTITY_COLUMN_BLOCK.includes(name);
+}
+
+/**
+ * The default columns for a column set created from scratch.
+ *
+ * Free now and Stock status only have values for quantity-tracked assets, so a
+ * workspace without any starts with every quantity column hidden instead of
+ * two columns of dashes. This decides the starting state only: nothing is
+ * switched on or off later when the workspace adds quantity-tracked assets.
+ *
+ * @param hasQuantityAssets - Whether the workspace has any quantity-tracked asset
+ * @returns A fresh copy of {@link defaultFields} with that visibility applied
+ */
+export function defaultColumnsForWorkspace({
+  hasQuantityAssets,
+}: {
+  hasQuantityAssets: boolean;
+}): Column[] {
+  return defaultFields.map((column) =>
+    !hasQuantityAssets && isQuantityColumn(column.name)
+      ? { ...column, visible: false }
+      : { ...column }
+  );
+}
+
+/**
+ * Where a missing quantity column goes in a saved column set: right after the
+ * nearest block column before it, or else right before the nearest one after
+ * it. `undefined` when the column is not a quantity column or the set has none.
+ */
+function positionInQuantityBlock(
+  columns: Column[],
+  name: ColumnLabelKey
+): number | undefined {
+  const index = QUANTITY_COLUMN_BLOCK.indexOf(name);
+  if (index === -1) return undefined;
+
+  const find = (blockName: ColumnLabelKey) =>
+    columns.find((col) => col.name === blockName);
+
+  const before = QUANTITY_COLUMN_BLOCK.slice(0, index)
+    .reverse()
+    .map(find)
+    .find(Boolean);
+  if (before) return before.position + 1;
+
+  const after = QUANTITY_COLUMN_BLOCK.slice(index + 1)
+    .map(find)
+    .find(Boolean);
+  return after?.position;
+}
+
+/**
+ * Adds default columns that a saved column set lacks.
+ *
+ * Settings rows are per user and outlive the default list, so a fixed column
+ * added to `defaultFields` is missing from every row saved before it existed.
+ * Each missing column is inserted and every saved column at or after its
+ * position moves down by one, so the user's own order is kept.
+ *
+ * - A quantity column goes next to the quantity columns the set already has
+ *   (see {@link QUANTITY_COLUMN_BLOCK}), wherever the user put them, and starts
+ *   hidden: the user switches it on from the columns list.
+ * - Any other column goes in at the position a fresh row would give it, with
+ *   its default visibility.
+ *
+ * @param columns - The row's saved columns; not modified
+ * @param missing - Names of the default columns to add
+ * @returns A new column list with the missing default columns inserted
+ */
+export function insertMissingDefaultColumns(
+  columns: Column[],
+  missing: ColumnLabelKey[]
+): Column[] {
+  // Ascending default order, so block columns missing together are inserted
+  // in block order, each next to the one before it.
+  const toInsert = defaultFields
+    .filter((field) => missing.includes(field.name))
+    .sort((a, b) => a.position - b.position);
+
+  return toInsert.reduce<Column[]>(
+    (acc, field) => {
+      const position =
+        positionInQuantityBlock(acc, field.name) ?? field.position;
+
+      const visible = isQuantityColumn(field.name) ? false : field.visible;
+
+      return [
+        ...acc.map((col) =>
+          col.position >= position
+            ? { ...col, position: col.position + 1 }
+            : col
+        ),
+        { ...field, position, visible },
+      ];
+    },
+    [...columns]
+  );
+}
 
 // Generate barcode columns when barcodes are enabled
 export const generateBarcodeColumns = (): Column[] =>

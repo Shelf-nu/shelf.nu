@@ -25,7 +25,7 @@ import {
   createUserOrAttachOrg,
   defaultUserCategories,
 } from "./service.server";
-import { defaultFields } from "../asset-index-settings/helpers";
+import { defaultColumnsForWorkspace } from "../asset-index-settings/helpers";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -275,7 +275,10 @@ describe(createUserAccountForTesting.name, () => {
               assetIndexSettings: {
                 create: {
                   mode: AssetIndexMode.ADVANCED,
-                  columns: defaultFields,
+                  // A brand-new personal workspace has no quantity-tracked assets.
+                  columns: defaultColumnsForWorkspace({
+                    hasQuantityAssets: false,
+                  }),
                   user: {
                     connect: {
                       id: USER_ID,
