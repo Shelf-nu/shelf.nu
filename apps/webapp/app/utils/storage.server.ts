@@ -388,8 +388,11 @@ export async function parseFileFormData({
       const originalName =
         upload?.name ?? upload?.filename ?? file?.name ?? undefined;
 
-      // Only process image files
-      if (mimeType && !mimeType.includes("image")) {
+      // Only process image files. Matched as a prefix rather than a substring:
+      // `.includes("image")` also accepts a parameterised type such as
+      // `text/html; x=image`, which would then be handed to `uploadFile` as the
+      // content type the object is stored and served with.
+      if (mimeType && !String(mimeType).startsWith("image/")) {
         return undefined;
       }
 

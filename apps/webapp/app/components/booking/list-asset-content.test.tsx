@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { OrganizationRoles } from "@prisma/client";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -103,13 +104,13 @@ vi.mock("~/hooks/use-booking-status", () => ({
     mockUseBookingStatusHelpers(status),
 }));
 
-// why: providing test user role context without auth dependencies
+const mockUseUserRoleHelper = vi.fn();
+
+// why: providing test user role context without auth dependencies, and letting
+// a test choose the roles — the row's checkbox is gated on what those roles may
+// actually do with a selection.
 vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({
-    isBase: false,
-    isSelfService: false,
-    isBaseOrSelfService: false,
-  }),
+  useUserRoleHelper: () => mockUseUserRoleHelper(),
 }));
 
 // why: providing test user data without session/auth lookups
@@ -164,6 +165,15 @@ describe("ListAssetContent", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Default: no roles, matching what every test here assumed before the
+    // checkbox became role-dependent. Tests that care set their own.
+    mockUseUserRoleHelper.mockReturnValue({
+      isBase: false,
+      isSelfService: false,
+      isBaseOrSelfService: false,
+      roles: undefined,
+    });
 
     mockUseBookingStatusHelpers.mockImplementation((status: string) => ({
       isCompleted: status === "COMPLETE",
@@ -553,6 +563,51 @@ describe("ListAssetContent", () => {
       expect(tooltip.textContent).toMatch(/only 3/);
     });
 
+    it("renders no stock badge for a kit-driven QT row even when the loader reports no loose units", () => {
+      // A kit holding the asset's last units: the loose pool is 0/0, and the
+      // row is booked through the kit, so neither the red nor the amber badge
+      // applies. The same numbers on a standalone row are test (c)'s red case.
+      const kitRow = {
+        ...qtCheckedOutAsset,
+        status: "AVAILABLE",
+        bookedQuantity: 1,
+        isKitDriven: true,
+      } as unknown as AssetWithBooking;
+      // why: the loader map reports zero loose-pool units for this asset, the
+      // figure that would light the red badge on a standalone row.
+      mockUseLoaderData.mockReturnValue({
+        booking: {
+          id: "booking-reserved-kit",
+          status: "RESERVED",
+          bookingAssets: [{ assetId: kitRow.id }],
+          custodianUser: null,
+        },
+        availableUnitsByAsset: { [kitRow.id]: { bookable: 0, physicalNow: 0 } },
+      });
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={kitRow}
+                isKitAsset
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+
+      expect(screen.queryByText("Insufficient stock")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Checked out elsewhere")
+      ).not.toBeInTheDocument();
+    });
+
     it("still renders the amber 'Checked out' AvailabilityBadge for an INDIVIDUAL row whose asset is checked out elsewhere", () => {
       // (d) — Regression guard: the QT short-circuits MUST NOT affect the
       // INDIVIDUAL path. An INDIVIDUAL asset with global CHECKED_OUT status
@@ -896,6 +951,36 @@ describe("ListAssetContent", () => {
       expect(tooltip.textContent).toMatch(/record of what was booked/i);
     });
 
+    it("names the reserved model a row answered, and explains it in a keyboard-reachable tooltip", async () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        // The loader resolved the name behind `bookingModelRequestId`.
+        fulfilsModelName: "Dell Latitude 5550",
+      } as unknown as AssetWithBooking);
+
+      const trigger = screen.getByText("Fulfils Dell Latitude 5550");
+      expect(trigger).toBeInTheDocument();
+      // Focusable trigger: the tooltip must not be hover-only (WCAG 2.1 AA).
+      expect(trigger.tagName).toBe("BUTTON");
+
+      await userEvent.hover(trigger);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toMatch(/without naming them/i);
+      expect(tooltip.textContent).toMatch(/counts toward it/i);
+    });
+
+    it("does NOT label a row that answered no reservation", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      // Every other row on a booking: added directly, with no promise to
+      // answer. That is most rows, so a badge here would be noise.
+      renderRow({ ...baseAsset } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText(/^Fulfils /)).not.toBeInTheDocument();
+    });
+
     it("does NOT label a live kit member", () => {
       mockUseLoaderData.mockReturnValue(finishedBooking);
 
@@ -916,6 +1001,93 @@ describe("ListAssetContent", () => {
       } as unknown as AssetWithBooking);
 
       expect(screen.queryByText("Removed from kit")).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The row's checkbox exists to feed the bulk actions menu, so it is offered
+   * only when those roles have an action to take at this status. A checkbox
+   * that can only ever feed an empty menu is dead UI.
+   *
+   * These assert the WIRING, which the hook's own tests cannot: they prove this
+   * row reads `hasAny` at all. Without them the gate could be deleted outright
+   * and every test here would still pass.
+   */
+  describe("bulk-selection checkbox", () => {
+    const bookingAt = (status: string) => ({
+      booking: {
+        id: "booking-1",
+        status,
+        assets: [],
+        custodianUser: { id: "user-1" },
+      },
+    });
+
+    const renderAs = (
+      status: string,
+      roles: OrganizationRoles[] = [OrganizationRoles.BASE]
+    ) => {
+      const restricted =
+        roles.includes(OrganizationRoles.BASE) ||
+        roles.includes(OrganizationRoles.SELF_SERVICE);
+      mockUseUserRoleHelper.mockReturnValue({
+        isBase: roles.includes(OrganizationRoles.BASE),
+        isSelfService: roles.includes(OrganizationRoles.SELF_SERVICE),
+        isBaseOrSelfService: restricted,
+        roles,
+      });
+      mockUseLoaderData.mockReturnValue(bookingAt(status));
+
+      render(
+        <table>
+          <tbody>
+            <tr>
+              <ListAssetContent
+                item={baseAsset}
+                partialCheckinDetails={basePartialDetails}
+                shouldShowCheckinColumns={false}
+                partialCheckoutDetails={{}}
+                shouldShowCheckoutColumns={false}
+              />
+            </tr>
+          </tbody>
+        </table>
+      );
+    };
+
+    it("offers a checkbox to a BASE custodian on a DRAFT booking", () => {
+      renderAs("DRAFT");
+
+      expect(screen.getByTestId("bulk-checkbox")).toBeInTheDocument();
+    });
+
+    /**
+     * The reported bug's surface: BASE may not remove past DRAFT and holds
+     * neither check-in nor check-out, so there is nothing a selection could do.
+     */
+    it("withholds it from a BASE custodian once the booking is reserved", () => {
+      renderAs("RESERVED");
+
+      expect(screen.queryByTestId("bulk-checkbox")).not.toBeInTheDocument();
+    });
+
+    /**
+     * Status is held constant and only the role varies, so the checkbox is the
+     * single difference between the two renders — this row's other columns come
+     * and go with status, which would otherwise swamp the comparison.
+     */
+    it("keeps the column aligned when the checkbox is withheld", () => {
+      renderAs("RESERVED", [OrganizationRoles.ADMIN]);
+      const withCheckbox = screen.getAllByRole("cell").length;
+
+      cleanup();
+
+      renderAs("RESERVED", [OrganizationRoles.BASE]);
+      const withoutCheckbox = screen.getAllByRole("cell").length;
+
+      // The fallback is an empty cell, not a missing one — dropping it would
+      // shift every column in the table by one for exactly these roles.
+      expect(withoutCheckbox).toBe(withCheckbox);
     });
   });
 });

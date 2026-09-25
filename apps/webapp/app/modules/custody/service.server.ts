@@ -6,12 +6,70 @@ import { ShelfError } from "~/utils/error";
 import { releaseAssetsToAvailableUnlessCheckedOut } from "../asset/custody-status.server";
 
 /**
+ * Refuses to release custody rows that a kit put there.
+ *
+ * A `Custody` row with `kitCustodyId` set exists because the asset's KIT is in
+ * custody; the kit is the source of truth for it, and releasing the kit is what
+ * removes it (the FK cascades). Deleting such a row directly makes the member
+ * read "Available" while the kit still names a custodian — the system would
+ * give two answers to "who has this?".
+ *
+ * Call it AFTER the caller's own (kit-scoped-away) delete, inside the same
+ * transaction. The delete never touches kit-derived rows, so a row that exists
+ * by the time this read runs is still there to be found, and aborts the whole
+ * transaction rather than being silently deleted.
+ *
+ * It does NOT serialise against a kit assignment. Under READ COMMITTED — the
+ * default here, with no row lock — a kit custody row committed after this read
+ * is invisible to it, and the caller goes on to mark the asset AVAILABLE (or
+ * take custody of it) beside a live KitCustody. Closing that needs a
+ * `SELECT … FOR UPDATE` on the asset; what this guard rules out is the far
+ * likelier case of a kit-derived row that already existed.
+ *
+ * @param tx - the active transaction the release runs in
+ * @param assetIds - assets about to have their custody rows deleted
+ * @param organizationId - proves org ownership of the rows being checked
+ * @throws {ShelfError} 400 when any custody on these assets is kit-derived
+ */
+export async function assertNoKitDerivedCustody(
+  tx: Pick<typeof db, "custody">,
+  assetIds: Asset["id"][],
+  organizationId: Asset["organizationId"]
+) {
+  const kitDerived = await tx.custody.findFirst({
+    where: {
+      assetId: { in: assetIds },
+      asset: { organizationId },
+      kitCustodyId: { not: null },
+    },
+    select: { assetId: true },
+  });
+
+  if (kitDerived) {
+    throw new ShelfError({
+      cause: null,
+      title: "Custody is managed by the kit",
+      message:
+        "This asset is in custody because its kit is. Release the kit's custody instead.",
+      additionalData: { assetId: kitDerived.assetId, organizationId },
+      label: "Custody",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Releases all custody for an asset, setting its status to AVAILABLE unless it
  * is checked out on a booking.
  *
- * **INDIVIDUAL assets only.** The `deleteMany` below releases ALL custodians at
- * once, which is exactly one row for an INDIVIDUAL asset and every custodian's
- * row for a `QUANTITY_TRACKED` one. QT releases belong to `releaseQuantity()`
+ * **INDIVIDUAL assets only, and never kit-derived custody.** The `deleteMany`
+ * below releases ALL custodians at once, which is exactly one row for an
+ * INDIVIDUAL asset and every custodian's row for a `QUANTITY_TRACKED` one.
+ * Custody a kit put on the asset is owned by the kit and is refused here by
+ * {@link assertNoKitDerivedCustody}; it clears when the kit's own custody is
+ * released, or when the asset leaves the kit. QT releases belong to
+ * `releaseQuantity()`
  * in the asset service, which takes a quantity and releases one custodian's
  * slice. Both callers enforce the contract with `isQuantityTracked` before
  * calling in, so the delete is deliberately NOT scoped to a single custodian —
@@ -106,9 +164,16 @@ export async function releaseCustody({
       // only be undone by the `findUniqueOrThrow` below happening to throw. That
       // is incidental ordering, not a guard.
       // @see .claude/rules/org-scope-user-supplied-ids.md
+      // `kitCustodyId: null` — this release owns only operator-assigned rows.
+      // Kit-derived rows are the kit's to remove, so they are scoped out of
+      // the delete and left for the assert below to reject.
+      // @see {@link assertNoKitDerivedCustody} for what that ordering does and
+      // does not guarantee.
       await tx.custody.deleteMany({
-        where: { assetId, asset: { organizationId } },
+        where: { assetId, asset: { organizationId }, kitCustodyId: null },
       });
+
+      await assertNoKitDerivedCustody(tx, [assetId], organizationId);
 
       await releaseAssetsToAvailableUnlessCheckedOut(
         tx,

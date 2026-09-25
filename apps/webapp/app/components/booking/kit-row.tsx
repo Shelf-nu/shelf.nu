@@ -1,12 +1,32 @@
+/**
+ * Kit Row
+ *
+ * One kit in a booking's asset table. The header shows the kit's image and
+ * name, its booking-aware status (or a Returned badge), its code chip, the
+ * "Already booked" overlap signal and the number of member rows; when expanded,
+ * each booked member asset renders beneath it through `ListAssetContent`.
+ *
+ * "Already booked" comes from the member assets' bookings and this kit's own
+ * booking slices, never from `Kit.status`: a kit that an overlapping booking has
+ * only reserved is still AVAILABLE.
+ *
+ * @see {@link file://./booking-assets-column.tsx} renders one KitRow per kit
+ * @see {@link file://./list-asset-content.tsx} the member asset rows
+ */
 import React from "react";
 import type { Barcode, BookingStatus, Category, Kit } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { LocationBadge } from "~/components/location/location-badge";
+import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { resolveDisplayCode } from "~/modules/barcode/display";
-import { hasAssetBookingConflicts } from "~/modules/booking/helpers";
+import {
+  hasAssetBookingConflicts,
+  hasKitBookingConflicts,
+} from "~/modules/booking/helpers";
+import type { KitBookingSlice } from "~/modules/booking/helpers";
 import type {
   PartialCheckinDetailsType,
   PartialCheckoutDetailsType,
@@ -73,6 +93,7 @@ export default function KitRow({
   shouldShowCheckoutColumns,
 }: KitRowProps) {
   const { isBase } = useUserRoleHelper();
+  const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
   const { isDraft, isReserved, isInProgress, isFinished } =
     useBookingStatusHelpers(bookingStatus);
   // Workspace pref + addon entitlement — resolver short-circuits to QR when
@@ -100,11 +121,34 @@ export default function KitRow({
     bookingStatus
   );
 
-  // Kit is overlapping if it's not AVAILABLE and has conflicting bookings
-  // Use centralized booking conflict logic
+  /**
+   * Kit-driven slices of THIS kit across its member assets. A slice belongs to
+   * this kit when it is live (`assetKitId` set) and either its `sourceKitId`
+   * names the kit or its `assetKitId` is one of the asset's own memberships of
+   * the kit — the second covers rows written without `sourceKitId`. Never a
+   * standalone row of the same asset, or a slice held through another kit.
+   */
+  const thisKitSlices: KitBookingSlice[] = assets.flatMap((asset) => {
+    const membershipIdsOfThisKit = new Set(
+      (asset.assetKits ?? [])
+        .filter((membership) => membership.kitId === kit.id)
+        .map((membership) => membership.id)
+    );
+    return (asset.bookingAssets ?? []).filter(
+      (ba) =>
+        ba.assetKitId !== null &&
+        (ba.sourceKitId === kit.id || membershipIdsOfThisKit.has(ba.assetKitId))
+    );
+  });
+
+  // "Already booked" comes from the bookings and their slices, never from
+  // `Kit.status`: a kit another booking has only reserved is still AVAILABLE.
+  // `hasAssetBookingConflicts` exempts QUANTITY_TRACKED members, since several
+  // bookings may share a pool, so `hasKitBookingConflicts` is ORed in to catch a
+  // conflict recorded on the kit's own slices.
   const isOverlapping =
-    kit.status !== "AVAILABLE" &&
-    assets.some((asset) => hasAssetBookingConflicts(asset, bookingId));
+    assets.some((asset) => hasAssetBookingConflicts(asset, bookingId)) ||
+    hasKitBookingConflicts(thisKitSlices, bookingId);
 
   // A kit "returned" as a unit only when EVERY one of its assets was actually
   // checked out — the same unanimity rule the lifecycle bar uses in unit mode
@@ -120,7 +164,13 @@ export default function KitRow({
   return (
     <React.Fragment>
       <ListItem item={kit} className="relative bg-gray-50">
-        <BulkListItemCheckbox item={kit} bulkItems={assets} />
+        {/* Same gate the asset rows use, and the empty cell keeps the column
+            aligned with them. A checkbox is only offered when this user has a
+            bulk action to feed: selecting rows for a menu that renders nothing
+            is dead UI. */}
+        <When truthy={hasAnyBulkAction} fallback={<Td> </Td>}>
+          <BulkListItemCheckbox item={kit} bulkItems={assets} />
+        </When>
 
         <Td
           className={tw(
@@ -172,12 +222,16 @@ export default function KitRow({
 
         {/*
           why: out of this rule — kit header has no status badge.
-          Per the code-bearing-entity-list-consistency rule, the
-          per-row InsufficientStockBadge fires inside ListAssetContent
-          for each expanded QT asset child (kit-row delegates to it
-          via the loop below). The kit header itself only surfaces the
-          "Already booked" overlap signal and an asset count; it has
-          no aggregate stock or per-unit booking semantics of its own,
+          Per the code-bearing-entity-list-consistency rule, badges
+          live on the expanded asset child rows (kit-row delegates to
+          ListAssetContent via the loop below). A live kit-driven child
+          (`assetKitId` set, so `isKitDriven`) gets no stock badge
+          there either: its units are bounded by the kit's allocation,
+          not the loose pool. Only a child whose slice no longer points
+          at a membership (`assetKitId` null) is measured like a
+          standalone slice. The kit header itself only surfaces the "Already
+          booked" overlap signal and an asset count; it has no
+          aggregate stock or per-unit booking semantics of its own,
           so no insufficient-stock badge belongs here.
         */}
         <Td>

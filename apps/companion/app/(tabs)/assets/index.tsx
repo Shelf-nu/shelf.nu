@@ -254,16 +254,41 @@ function AssetsListContent() {
         ? formatQuantity(item.quantity, item.unitOfMeasure)
         : null;
 
+      // Memberships beyond the one the row names. `item.kit` is the primary
+      // kit of possibly several — a quantity-tracked asset can sit in more
+      // than one — so without this the row passes it off as the only one. A
+      // server that sends no `kitCount` knows of no others, hence the 1.
+      const knownKitCount = item.kitCount ?? (item.kit ? 1 : 0);
+      const extraKitCount = Math.max(0, knownKitCount - 1);
+      // The count reaches a screen reader as words, so it carries the same
+      // fact the "+N" beside the name gives a sighted user.
+      const kitSuffix =
+        extraKitCount > 0
+          ? ` and ${extraKitCount} more kit${extraKitCount === 1 ? "" : "s"}`
+          : "";
+      const kitAccessibilityLabel = item.kit
+        ? `, kit ${item.kit.name}${kitSuffix}`
+        : "";
+      // The server resolves WHICH identifier this workspace shows; the SAM id
+      // is the fallback for servers that predate that.
+      const rowCode = item.displayCode?.value
+        ? item.displayCode
+        : item.sequentialId
+        ? { value: item.sequentialId, label: "SAM ID" }
+        : null;
+
       return (
         <TouchableOpacity
           style={styles.assetCard}
           onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
           activeOpacity={0.6}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
-            item.sequentialId ? `, ${item.sequentialId}` : ""
+            rowCode ? `, ${rowCode.label} ${rowCode.value}` : ""
           }${quantityLabel ? `, quantity ${quantityLabel}` : ""}${
             item.category ? `, ${item.category.name}` : ""
-          }${item.location ? `, ${item.location.name}` : ""}`}
+          }${
+            item.location ? `, ${item.location.name}` : ""
+          }${kitAccessibilityLabel}`}
           accessibilityRole="button"
         >
           {item.thumbnailImage || item.mainImage ? (
@@ -283,13 +308,13 @@ function AssetsListContent() {
               {item.title}
             </Text>
             <View style={styles.assetMeta}>
-              {/* Search accepts a SAM ID, so a hit has to be able to show WHICH
-                  id it is — otherwise the row identifies itself by title only
-                  and the user has to open it to find out. Absent on older
-                  servers, where the row renders exactly as before. */}
-              {item.sequentialId ? (
+              {/* The identifier the workspace labels its assets with, so a row
+                  can be matched against a physical label without opening it.
+                  Falls back to the SAM ID on older servers that send no
+                  resolved code. */}
+              {rowCode ? (
                 <Text style={styles.assetSequentialId} numberOfLines={1}>
-                  {item.sequentialId}
+                  {rowCode.value}
                 </Text>
               ) : null}
               {item.category && (
@@ -307,6 +332,30 @@ function AssetsListContent() {
                   <Text style={styles.assetLocation} numberOfLines={1}>
                     {item.location.name}
                   </Text>
+                </View>
+              )}
+              {/* Which kit to look in. A quantity-tracked asset can belong
+                  to several kits at once, so the row names the primary one —
+                  the same one the website names — and counts the rest rather
+                  than passing it off as the only kit. */}
+              {item.kit && (
+                <View style={styles.locationRow}>
+                  <Ionicons
+                    name="albums-outline"
+                    size={11}
+                    color={colors.mutedLight}
+                  />
+                  <Text
+                    style={[styles.assetLocation, styles.assetKitName]}
+                    numberOfLines={1}
+                  >
+                    {item.kit.name}
+                  </Text>
+                  {extraKitCount > 0 && (
+                    <Text style={styles.assetKitOverflow}>
+                      +{extraKitCount}
+                    </Text>
+                  )}
                 </View>
               )}
               {/* Quantity chip — shared QuantityBadge (QUANTITY_TRACKED only).
@@ -674,6 +723,16 @@ const useStyles = createStyles((colors, shadows) => ({
   assetLocation: {
     fontSize: fontSize.xs,
     color: colors.mutedLight,
+  },
+  // Only the kit name shrinks: it shares its row with the "+N" count, which
+  // must stay legible even when the name is long enough to truncate.
+  assetKitName: {
+    flexShrink: 1,
+  },
+  assetKitOverflow: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+    flexShrink: 0,
   },
   assetSequentialId: {
     fontSize: fontSize.xs,

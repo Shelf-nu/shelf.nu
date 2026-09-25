@@ -1,5 +1,7 @@
 # Shelf Companion App
 
+> **License:** this directory is **not open source** and is not under the AGPL-3.0 license of the rest of this repository. Its source is available under the [PolyForm Internal Use License 1.0.0](./LICENSE). You may not distribute this app or an app based on it. Publishing on the Apple App Store, Google Play or any other store is distribution.
+
 > **Status:** Under review — ready for local testing
 > **Branch:** `feat/mobile-companion-app` (162 files, ~33k lines)
 > **Decision needed:** Where should this code live? See [Architecture Decision](#architecture-decision-monorepo-vs-separate-repo) below.

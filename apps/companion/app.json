@@ -96,7 +96,17 @@
       "expo-web-browser",
       "expo-quick-actions",
       "./plugins/swift-concurrency-fix",
-      "@sentry/react-native"
+      "@sentry/react-native",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "extraProguardRules": "# Expo resolves module and Record classes reflectively from the generated\n# package list, so R8 cannot see those constructors as reachable.\n-keep class expo.modules.** { *; }\n-keep class com.shelf.companion.** { *; }\n\n# React Native marks JNI-reachable members with @DoNotStrip.\n-keepclassmembers class * { @com.facebook.proguard.annotations.DoNotStrip *; }\n-keepclassmembers class * { @com.facebook.react.bridge.ReactMethod *; }\n\n# expo-image references expo.modules.kotlin.runtime.Runtime, which is absent from\n# expo-modules-core. R8 treats a missing class as a hard error, so the reference is\n# suppressed here. The reference is unreachable from our code: nothing calls the\n# Image(Drawable) constructor it sits on.\n-dontwarn expo.modules.kotlin.runtime.**\n"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

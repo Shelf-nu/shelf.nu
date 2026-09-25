@@ -5,6 +5,7 @@ import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { createSignedUrl } from "~/utils/storage.server";
 import { sendAuditCancelledEmails } from "./email-helpers";
 import {
   createAuditResumedNote,
@@ -16,6 +17,7 @@ import {
   removeAssetFromAudit,
   removeAssetsFromAudit,
   getAuditsForOrganization,
+  getAuditSessionDetails,
   getPendingAuditsForOrganization,
   getAuditWhereInput,
   bulkArchiveAudits,
@@ -26,11 +28,16 @@ import {
   getAuditScans,
   recordAuditScan,
   requireAuditAssignee,
+  completeAuditSession,
+  createWhileAuditAcceptsComments,
 } from "./service.server";
 
 // why: storage.server calls Supabase over HTTP; mock so delete tests stay offline
 vi.mock("~/utils/storage.server", () => ({
   removePublicFile: vi.fn(),
+  // why: the expected-asset photo re-sign signs through Supabase Storage; the
+  // getAuditSessionDetails tests count these calls.
+  createSignedUrl: vi.fn(),
 }));
 
 // why: Mock the helper functions that create automatic notes to avoid database dependencies in unit tests
@@ -123,6 +130,9 @@ vi.mock("~/database/db.server", () => {
       updateMany: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn(),
+      // why: completing an audit counts found/missing/unexpected rows inside
+      // its transaction before the session write.
+      count: vi.fn(),
     },
     auditAssignment: {
       createMany: vi.fn(),
@@ -139,8 +149,12 @@ vi.mock("~/database/db.server", () => {
     asset: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      // why: a re-signed photo is written back with a guarded updateMany.
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     $transaction: vi.fn(),
+    // why: comment writes lock the audit row with a raw SELECT ... FOR UPDATE.
+    $queryRaw: vi.fn(),
   };
 
   mockDb.$transaction.mockImplementation((cb: any) => cb(mockDb));
@@ -180,6 +194,7 @@ const mockDb = db as unknown as {
     findUnique: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
     deleteMany: ReturnType<typeof vi.fn>;
+    count: ReturnType<typeof vi.fn>;
   };
   auditAssignment: {
     createMany: ReturnType<typeof vi.fn>;
@@ -198,6 +213,7 @@ const mockDb = db as unknown as {
     findUnique: ReturnType<typeof vi.fn>;
   };
   $transaction: ReturnType<typeof vi.fn>;
+  $queryRaw: ReturnType<typeof vi.fn>;
 };
 
 describe("audit service", () => {
@@ -441,6 +457,9 @@ describe("audit service", () => {
   describe("addAssetsToAudit", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      // why: the counter write is guarded on the audit still being pending and
+      // refuses unless it matched the one audit.
+      mockDb.auditSession.updateMany.mockResolvedValue({ count: 1 });
     });
 
     it("adds new assets to pending audit", async () => {
@@ -480,8 +499,12 @@ describe("audit service", () => {
         ],
       });
 
-      expect(mockDb.auditSession.update).toHaveBeenCalledWith({
-        where: { id: "audit-1" },
+      expect(mockDb.auditSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: "audit-1",
+          organizationId: "org-1",
+          status: { in: ["PENDING"] },
+        },
         data: {
           expectedAssetCount: { increment: 2 },
           missingAssetCount: { increment: 2 },
@@ -566,11 +589,13 @@ describe("audit service", () => {
   describe("removeAssetFromAudit", () => {
     beforeEach(() => {
       vi.clearAllMocks();
-      // why: the removal paths now check the affected-row count, because
-      // `deleteMany` reports a vanished row as `{ count: 0 }` where the old
-      // unique `delete` threw. `clearAllMocks` wipes implementations set in an
-      // earlier describe, so this has to be re-established per test.
+      // why: the removal paths check the affected-row count, because
+      // `deleteMany` reports a vanished row as `{ count: 0 }` rather than
+      // throwing. `clearAllMocks` wipes implementations set in an earlier
+      // describe, so this has to be re-established per test.
       mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 1 });
+      // why: the counter write is guarded on the audit still being pending.
+      mockDb.auditSession.updateMany.mockResolvedValue({ count: 1 });
     });
 
     it("removes expected asset from pending audit", async () => {
@@ -603,8 +628,12 @@ describe("audit service", () => {
         where: { id: "audit-asset-1", auditSessionId: "audit-1" },
       });
 
-      expect(mockDb.auditSession.update).toHaveBeenCalledWith({
-        where: { id: "audit-1" },
+      expect(mockDb.auditSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: "audit-1",
+          organizationId: "org-1",
+          status: { in: ["PENDING"] },
+        },
         data: {
           expectedAssetCount: { decrement: 1 },
           missingAssetCount: { decrement: 1 },
@@ -631,7 +660,20 @@ describe("audit service", () => {
       });
 
       expect(mockDb.auditAsset.deleteMany).toHaveBeenCalled();
-      expect(mockDb.auditSession.update).not.toHaveBeenCalled();
+      // The counts do not move for an unexpected asset, but the write still
+      // runs with a zero delta: it is what refuses a removal from an audit
+      // that stopped being pending.
+      expect(mockDb.auditSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: "audit-1",
+          organizationId: "org-1",
+          status: { in: ["PENDING"] },
+        },
+        data: {
+          expectedAssetCount: { decrement: 0 },
+          missingAssetCount: { decrement: 0 },
+        },
+      });
     });
 
     it("throws error when audit not found", async () => {
@@ -685,6 +727,8 @@ describe("audit service", () => {
       // why: see the singular describe — the bulk path aborts unless the
       // delete count matches the ids it just proved were in this audit.
       mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 3 });
+      // why: the counter write is guarded on the audit still being pending.
+      mockDb.auditSession.updateMany.mockResolvedValue({ count: 1 });
     });
 
     it("removes multiple assets from pending audit", async () => {
@@ -715,8 +759,12 @@ describe("audit service", () => {
         },
       });
 
-      expect(mockDb.auditSession.update).toHaveBeenCalledWith({
-        where: { id: "audit-1" },
+      expect(mockDb.auditSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: "audit-1",
+          organizationId: "org-1",
+          status: { in: ["PENDING"] },
+        },
         data: {
           expectedAssetCount: { decrement: 2 },
           missingAssetCount: { decrement: 2 },
@@ -2883,5 +2931,220 @@ describe("getAuditScans — a scan whose asset was deleted", () => {
 
     expect(scan.assetDeleted).toBe(false);
     expect(scan.isExpected).toBe(false);
+  });
+});
+
+/**
+ * A status change that commits first wins.
+ *
+ * Each of these functions checks the audit's status and then, later in the same
+ * transaction, writes its counters or its own transition. Under READ COMMITTED a
+ * complete, cancel or archive can commit in between, so the write carries the
+ * status in its own predicate. When that matches nothing the function refuses
+ * with a 409, which rolls back everything the transaction did.
+ */
+describe("audit status guards", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // why: the transition this write races already committed, so the guarded
+    // write matches no row.
+    mockDb.auditSession.updateMany.mockResolvedValue({ count: 0 });
+  });
+
+  it("does not complete an audit that was cancelled after the check", async () => {
+    mockDb.auditSession.findUnique.mockResolvedValue({
+      id: "audit-1",
+      status: "ACTIVE",
+    });
+    // why: marking unscanned assets missing and counting them precede the write.
+    mockDb.auditAsset.updateMany.mockResolvedValue({ count: 0 });
+    mockDb.auditAsset.count.mockResolvedValue(0);
+
+    await expect(
+      completeAuditSession({
+        sessionId: "audit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        hints: { locale: "en-US", timeZone: "UTC" } as never,
+      })
+    ).rejects.toMatchObject({ status: 409 });
+
+    expect(mockDb.auditSession.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "audit-1",
+        organizationId: "org-1",
+        status: { in: ["PENDING", "ACTIVE"] },
+      },
+      data: expect.objectContaining({ status: "COMPLETED" }),
+    });
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it("does not add assets to an audit that stopped being pending", async () => {
+    mockDb.auditSession.findUnique.mockResolvedValue({
+      id: "audit-1",
+      name: "Test Audit",
+      status: "PENDING",
+    });
+    mockDb.auditAsset.findMany.mockResolvedValue([]);
+    // why: the org-ownership check reads the assets before they are attached.
+    mockDb.asset.findMany.mockResolvedValue([{ id: "asset-1" }]);
+
+    await expect(
+      addAssetsToAudit({
+        auditId: "audit-1",
+        assetIds: ["asset-1"],
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("does not remove an unexpected asset from an audit that stopped being pending", async () => {
+    // An unexpected asset moves no counters, which is exactly the case an
+    // "only write when the counts change" guard would let through.
+    mockDb.auditSession.findUnique.mockResolvedValue({
+      id: "audit-1",
+      name: "Test Audit",
+      status: "PENDING",
+    });
+    mockDb.auditAsset.findFirst.mockResolvedValue({
+      assetId: "asset-1",
+      expected: false,
+    });
+    mockDb.auditAsset.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      removeAssetFromAudit({
+        auditId: "audit-1",
+        auditAssetId: "audit-asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+/**
+ * Comments are written against the locked audit row.
+ *
+ * Reading the status and then inserting leaves room for a completion to commit
+ * in between. The write takes the audit row with FOR UPDATE and reads the status
+ * from it, so a finished audit refuses the comment whichever commits first.
+ */
+describe("createWhileAuditAcceptsComments", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const run = (write = vi.fn().mockResolvedValue("note")) =>
+    createWhileAuditAcceptsComments(
+      { auditSessionId: "audit-1", organizationId: "org-1" },
+      write
+    );
+
+  it("locks the audit row before reading its status", async () => {
+    mockDb.$queryRaw.mockResolvedValue([{ status: "ACTIVE" }]);
+
+    await run();
+
+    const sql = (mockDb.$queryRaw.mock.calls[0][0] as string[]).join("?");
+    expect(sql).toContain('FROM "AuditSession"');
+    expect(sql).toContain("FOR UPDATE");
+  });
+
+  it("writes through the transaction while the audit is open", async () => {
+    mockDb.$queryRaw.mockResolvedValue([{ status: "PENDING" }]);
+    const write = vi.fn().mockResolvedValue("note");
+
+    await expect(run(write)).resolves.toBe("note");
+    expect(write).toHaveBeenCalledWith(mockDb);
+  });
+
+  it("refuses without writing once the audit is finished", async () => {
+    mockDb.$queryRaw.mockResolvedValue([{ status: "COMPLETED" }]);
+    const write = vi.fn();
+
+    await expect(run(write)).rejects.toMatchObject({ status: 400 });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 for an audit outside the organization", async () => {
+    mockDb.$queryRaw.mockResolvedValue([]);
+    const write = vi.fn();
+
+    await expect(run(write)).rejects.toMatchObject({ status: 404 });
+    expect(write).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `getAuditSessionDetails` serves five loaders, and only the web scan tab and
+ * the mobile audit screen render the expected-asset photos. Signing is opt-in so
+ * the other callers make no storage calls, and it covers expected rows only.
+ */
+describe("getAuditSessionDetails photo re-sign", () => {
+  const lapsedAsset = (id: string) => ({
+    id,
+    title: `Asset ${id}`,
+    mainImage: `https://storage.test/storage/v1/object/sign/assets/org-owner/${id}/photo.png?token=old`,
+    thumbnailImage: null,
+    mainImageExpiration: new Date("2020-01-01T00:00:00.000Z"),
+    assetModel: null,
+    category: null,
+    custody: [],
+    assetLocations: [],
+  });
+  const sessionRow = {
+    id: "audit-1",
+    organizationId: "org-owner",
+    assets: [
+      {
+        id: "audit-asset-1",
+        assetId: "asset-expected",
+        expected: true,
+        asset: lapsedAsset("asset-expected"),
+        _count: { notes: 0, images: 0 },
+      },
+      {
+        id: "audit-asset-2",
+        assetId: "asset-unexpected",
+        expected: false,
+        asset: lapsedAsset("asset-unexpected"),
+        _count: { notes: 0, images: 0 },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    mockDb.auditSession.findFirst.mockResolvedValue(sessionRow);
+    vi.mocked(createSignedUrl)
+      .mockReset()
+      .mockResolvedValue("https://storage.test/fresh.png?token=new");
+  });
+
+  it("signs nothing for a caller that reads the session only", async () => {
+    await getAuditSessionDetails({
+      id: "audit-1",
+      organizationId: "org-owner",
+      refreshExpectedAssetImages: false,
+    });
+
+    expect(createSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("re-signs the expected rows only, for a caller that renders them", async () => {
+    const { expectedAssets } = await getAuditSessionDetails({
+      id: "audit-1",
+      organizationId: "org-owner",
+      refreshExpectedAssetImages: true,
+    });
+
+    expect(expectedAssets).toHaveLength(1);
+    expect(expectedAssets[0].mainImage).toBe(
+      "https://storage.test/fresh.png?token=new"
+    );
+    // One call, for the expected row's photo; the unexpected row is not signed.
+    expect(createSignedUrl).toHaveBeenCalledTimes(1);
   });
 });

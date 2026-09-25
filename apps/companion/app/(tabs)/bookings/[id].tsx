@@ -1,9 +1,5 @@
-import {
-  ASSET_STATUS_LABELS,
-  BOOKING_RESERVE_BLOCKED_LABELS,
-  BOOKING_STATUS_LABELS,
-} from "@shelf/labels";
-import { useState, useCallback, useRef } from "react";
+import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
+import { useState, useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -16,6 +12,7 @@ import {
   Platform,
   ActionSheetIOS,
   Modal,
+  type LayoutChangeEvent,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
@@ -37,6 +34,8 @@ import {
   type CheckinDisposition,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { useAuth } from "@/lib/auth-context";
+import { userHasPermission } from "@/lib/permissions";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
@@ -49,53 +48,34 @@ import {
   type CheckinDispositionValue,
 } from "@/components/checkin-disposition-sheet";
 import { announce } from "@/lib/a11y";
+import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
-
-const bookingAssetKeyExtractor = (item: BookingAsset) => item.id;
-
-/**
- * Booking-scoped lifecycle state for a QUANTITY_TRACKED asset row. The asset's
- * GLOBAL status ("Available") is meaningless on a booking — what matters is how
- * many of the booked units are reserved / checked out / returned. Derived from
- * the server's per-asset remaining counts. `key` indexes the shared
- * `bookingStatusBadge` colours so the row reuses the booking colour vocabulary
- * (blue reserved, orange in-progress, green complete).
- *
- * @param args - booked units, remaining-to-check-out/in, and the parent
- *   booking's status (to tell a DRAFT line apart from a reserved one).
- * @returns The badge `{ key, label }` for this asset on this booking.
- */
-function getBookingAssetState({
-  booked,
-  remOut,
-  remIn,
-  bookingStatus,
-}: {
-  booked: number;
-  remOut?: number;
-  remIn?: number;
-  bookingStatus: string;
-}): { key: string; label: string } {
-  const clampedOut = Math.min(Math.max(remOut ?? booked, 0), booked);
-  const clampedIn = Math.min(Math.max(remIn ?? booked, 0), booked);
-  const checkedOut = booked - clampedOut; // units taken from the workspace
-  const checkedIn = booked - clampedIn; // units reconciled back in
-
-  // why: the labels that name a real status read from @shelf/labels. The
-  // fraction forms and "Returned" stay bespoke — they are booking-scoped
-  // progress, not statuses, so the package has no entry for them.
-  if (booked <= 0 || checkedOut <= 0) {
-    return bookingStatus === "DRAFT"
-      ? { key: "DRAFT", label: BOOKING_STATUS_LABELS.DRAFT }
-      : { key: "RESERVED", label: BOOKING_STATUS_LABELS.RESERVED };
-  }
-  if (checkedIn >= booked) return { key: "COMPLETE", label: "Returned" };
-  if (checkedIn > 0)
-    return { key: "ONGOING", label: `${checkedIn}/${booked} returned` };
-  if (checkedOut >= booked)
-    return { key: "ONGOING", label: ASSET_STATUS_LABELS.CHECKED_OUT };
-  return { key: "ONGOING", label: `${checkedOut}/${booked} out` };
-}
+import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import {
+  hasAssetsLeftToCheckOut,
+  unassignedCheckoutConfirm,
+} from "@/lib/booking-reservation-checkout";
+import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
+import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
+import {
+  bookingRowKey,
+  buildBookingRows,
+  countSelection,
+  describeBatch,
+  describeBatchConfirm,
+  describeBatchResult,
+  describeBookingRows,
+  describeSelection,
+  isBookingAssetSelectable,
+  getBookingAssetState,
+  resolveBookingKitBadge,
+  resolveKitSelectionState,
+  splitRemovalSelection,
+  unitsStillOut,
+  type BookingRow,
+  type SelectionCounts,
+} from "@/lib/booking-kit-rows";
+import { filterBookingAssets } from "@/lib/booking-search";
 
 /**
  * Segment colours for the booking lifecycle progress bar. Fixed hues matched to
@@ -110,21 +90,40 @@ const LIFECYCLE_COLORS = {
   returned: "#22C55E",
 } as const;
 
+/**
+ * The booking detail screen: the booking's details, the actions its status and
+ * the caller's role allow, its reserved models, and its assets and kits, which
+ * can be searched, grouped under their kits, and selected for check-in,
+ * check-out or removal.
+ */
 export default function BookingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { currentOrg } = useOrg();
+  // Current auth user — the booking's creator/custodian ids are compared
+  // against it to mirror the server's ownership gate for restricted roles.
+  const { user } = useAuth();
   const { colors, statusBadge, bookingStatusBadge } = useTheme();
   const styles = useStyles();
   const { formatDateTime } = useDateFormatter();
 
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [checkedInAssetIds, setCheckedInAssetIds] = useState<string[]>([]);
+  // Which assets this booking sent out, from the per-slice check-out markers.
+  // Empty when the server does not send the field — an older one does not — and
+  // a kit badge reads that as "no record either way" rather than "nothing left".
+  const [checkedOutAssetIds, setCheckedOutAssetIds] = useState<string[]>([]);
   const [canCheckout, setCanCheckout] = useState(false);
   const [canCheckin, setCanCheckin] = useState(false);
-  // False when the workspace requires explicit (scan/select) check-in for this
-  // user's role — hide the quick "Check In All" button to match web policy.
-  const [canQuickCheckin, setCanQuickCheckin] = useState(true);
+  // Whether the quick "Check In All" is offered. Separate from `canCheckin`,
+  // which gates the scan and select paths: those submit to
+  // `partialCheckinBooking` and need units actually out, while this one
+  // completes the booking whatever went out. The workspace's explicit-check-in
+  // policy is already folded in by the server.
+  const [canCheckinAll, setCanCheckinAll] = useState(false);
+  // The check-out twin: false hides "Check Out All Assets". Read through
+  // canOfferQuickCheckout, which keeps the button for servers without the flag.
+  const [canQuickCheckout, setCanQuickCheckout] = useState(true);
   // Per-booking lifecycle-action availability (cancel/archive/duplicate/delete),
   // computed server-side mirroring the web ActionsDropdown gating.
   const [bookingActions, setBookingActions] = useState({
@@ -136,15 +135,25 @@ export default function BookingDetailScreen() {
   // Android overflow-menu visibility (iOS uses the native ActionSheetIOS).
   const [showActionsMenu, setShowActionsMenu] = useState(false);
 
-  // Mirrors the web's canUserManageBookingAssets: closed statuses reject;
-  // self-service users may only build their own DRAFT bookings.
-  const isSelfService = currentOrg?.roles?.includes("SELF_SERVICE") ?? false;
+  /**
+   * Mirrors the web's `canUserManageBookingAssets`: closed statuses reject, and
+   * a RESTRICTED role may only build its own DRAFT booking.
+   *
+   * BASE as well as SELF_SERVICE: the web passes both roles into that helper
+   * (its parameter is named `isSelfService`, but every caller hands it
+   * `isBaseOrSelfService`). The add, browse, remove and fulfil affordances
+   * below therefore turn off past DRAFT for both roles.
+   */
+  const isRestrictedRole = Boolean(
+    currentOrg?.roles?.some((r) => r === "SELF_SERVICE" || r === "BASE")
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // For progressive check-in/check-out: selected assets
+  // The asset ids picked in the current selection mode. A kit enters as the
+  // members its header picked; a member's own row never adds itself.
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(
     new Set()
   );
@@ -155,15 +164,32 @@ export default function BookingDetailScreen() {
     "checkin" | "checkout" | "remove" | null
   >(null);
   const isSelectMode = selectMode !== null;
+  // Kits open collapsed, as on the website: a booking of several kits should
+  // read as a short list of cases, not as every asset inside them. Only the
+  // user opens a kit; entering a selection mode leaves them as they are.
+  const [expandedKitIds, setExpandedKitIds] = useState<Set<string>>(new Set());
+  // What the user typed into the assets search. It narrows what the list shows
+  // and nothing else: the selection, the select modes and the counts above the
+  // list all keep reading the whole booking.
+  const [searchTerm, setSearchTerm] = useState("");
+  const isSearching = searchTerm.trim().length > 0;
+  const listRef = useRef<FlatList<BookingRow>>(null);
+  // The search box's offset from the top of the list's content. The box sits
+  // directly in the list header, which starts the content, so its layout `y`
+  // is that offset.
+  const searchBoxY = useRef(0);
 
   // Sequential quantity picker for checking out QUANTITY_TRACKED assets: the
   // user selects the rows, then we walk each QT asset asking "how many units?"
   // (defaulting to all remaining), collect the dispositions, then submit.
+  // `batch` is the selection counted when the walk starts, for the success
+  // message the submit ends in.
   const [checkoutQueue, setCheckoutQueue] = useState<{
     queue: BookingAsset[];
     index: number;
     collected: CheckoutDisposition[];
     individualIds: string[];
+    batch: SelectionCounts;
   } | null>(null);
 
   // Sequential disposition picker for checking IN quantity-tracked assets:
@@ -173,9 +199,17 @@ export default function BookingDetailScreen() {
     index: number;
     collected: CheckinDisposition[];
     individualIds: string[];
+    batch: SelectionCounts;
   } | null>(null);
 
   const lastFetchedAt = useRef(0);
+
+  /**
+   * Held while a check-in or check-out request runs, so a second tap cannot
+   * send it twice. A ref rather than state: a state flag cannot block a tap
+   * delivered in the same tick.
+   */
+  const bookingSubmitLock = useRef(false);
 
   const fetchBooking = useCallback(async () => {
     if (!id || !currentOrg) return;
@@ -189,13 +223,37 @@ export default function BookingDetailScreen() {
     setError(null);
     setBooking(data.booking);
     setCheckedInAssetIds(data.checkedInAssetIds);
+    setCheckedOutAssetIds(data.checkedOutAssetIds ?? []);
     setCanCheckout(data.canCheckout);
     setCanCheckin(data.canCheckin);
-    setCanQuickCheckin(data.canQuickCheckin);
+    // An older server gates the quick check-in on `canCheckin` too, so read
+    // its absence as that server's own answer rather than hiding the button.
+    setCanCheckinAll(
+      data.canCheckinAll ?? (data.canCheckin && data.canQuickCheckin)
+    );
+    setCanQuickCheckout(canOfferQuickCheckout(data));
     setBookingActions(data.bookingActions);
     // Clear stale selections — checked-in assets are no longer selectable
     setSelectedAssetIds(new Set());
     lastFetchedAt.current = Date.now();
+  }, [id, currentOrg]);
+
+  /**
+   * The booking's model reservations as they stand right now, for a
+   * confirmation that is about to name them.
+   *
+   * Deliberately does NOT apply the response to the screen. `fetchBooking`
+   * clears the selection, and the selection is what a "Select to Check Out"
+   * confirm is built from — refreshing there would wipe what the operator is
+   * checking out. A failed read answers `null` and the caller falls back to
+   * what the screen already holds.
+   *
+   * @returns The reservations, or `null` when the read failed.
+   */
+  const readModelRequestsNow = useCallback(async () => {
+    if (!id || !currentOrg) return null;
+    const { data } = await api.booking(id, currentOrg.id);
+    return data?.booking.modelRequests ?? null;
   }, [id, currentOrg]);
 
   // Stale-while-revalidate: refetch on focus if data is > 60s old — UNLESS
@@ -240,35 +298,56 @@ export default function BookingDetailScreen() {
     }
   };
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (!booking || !currentOrg) return;
+
+    const submit = async () => {
+      setIsActioning(true);
+      const { error: err } = await api.checkoutBooking(
+        currentOrg.id,
+        booking.id,
+        getTimeZone()
+      );
+      setIsActioning(false);
+      if (err) {
+        Alert.alert("Error", err);
+        return;
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Mutation changed this booking — force the list to refetch.
+      markBookingsListDirty();
+      Alert.alert("Checked Out", `"${booking.name}" is now ongoing.`, [
+        { text: "OK", onPress: () => fetchBooking() },
+      ]);
+    };
+
+    // Reserved units nobody has assigned yet don't stop the check-out; they
+    // stay open on the booking. This confirm stands in for the plain one, so
+    // the operator agrees to both in a single step.
+    //
+    // Named from a read taken now: the screen's copy can be up to a minute old
+    // (see the focus effect), and a reservation someone else added in that
+    // window would otherwise go unmentioned.
+    setIsActioning(true);
+    const freshRequests = await readModelRequestsNow();
+    setIsActioning(false);
+    const unassignedConfirm = unassignedCheckoutConfirm(
+      freshRequests ?? booking.modelRequests ?? []
+    );
+    if (unassignedConfirm) {
+      Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
+        { text: "Cancel", style: "cancel" },
+        { text: unassignedConfirm.confirmLabel, onPress: () => void submit() },
+      ]);
+      return;
+    }
+
     Alert.alert(
       "Check Out",
       `Check out "${booking.name}"?\n\nAll ${booking.assetCount} assets will be marked as checked out.`,
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Check Out",
-          onPress: async () => {
-            setIsActioning(true);
-            const { error: err } = await api.checkoutBooking(
-              currentOrg.id,
-              booking.id,
-              getTimeZone()
-            );
-            setIsActioning(false);
-            if (err) {
-              Alert.alert("Error", err);
-              return;
-            }
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            // Mutation changed this booking — force the list to refetch.
-            markBookingsListDirty();
-            Alert.alert("Checked Out", `"${booking.name}" is now ongoing.`, [
-              { text: "OK", onPress: () => fetchBooking() },
-            ]);
-          },
-        },
+        { text: "Check Out", onPress: () => void submit() },
       ]
     );
   };
@@ -315,69 +394,84 @@ export default function BookingDetailScreen() {
   };
 
   // Send the check-in. `assetIds` = INDIVIDUAL rows (a bare QT id would default
-  // to all-remaining server-side); `checkins` = per-QT-asset dispositions.
+  // to all-remaining server-side); `checkins` = per-QT-asset dispositions;
+  // `batch` = the selection as the confirm and the button counted it, which the
+  // success message names. `closeSheet` runs only once the server accepts, so a
+  // refused check-in keeps the disposition sheet open with every collected
+  // disposition intact.
   const submitCheckin = async (
     assetIds: string[],
-    checkins: CheckinDisposition[]
+    checkins: CheckinDisposition[],
+    batch: SelectionCounts,
+    closeSheet?: () => void
   ) => {
     if (!booking || !currentOrg) return;
-    setIsActioning(true);
-    const { data, error: err } = await api.partialCheckinBooking(
-      currentOrg.id,
-      booking.id,
-      assetIds,
-      getTimeZone(),
-      checkins.length > 0 ? checkins : undefined
-    );
-    setIsActioning(false);
-    if (err) {
-      Alert.alert("Error", err);
-      return;
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // Mutation changed this booking — force the list to refetch.
-    markBookingsListDirty();
-    const msg = data?.isComplete
-      ? `All assets checked in. "${booking.name}" is now complete.`
-      : `${data?.checkedInCount ?? "Some"} checked in, ${
-          data?.remainingCount ?? "some"
-        } remaining.`;
-    Alert.alert("Checked In", msg, [
-      {
-        text: "OK",
-        onPress: () => {
-          setSelectedAssetIds(new Set());
-          setSelectMode(null);
-          fetchBooking();
-        },
+    const orgId = currentOrg.id;
+    const bookingId = booking.id;
+    const bookingName = booking.name;
+    await submitFromSheet({
+      lock: bookingSubmitLock,
+      request: () =>
+        api.partialCheckinBooking(
+          orgId,
+          bookingId,
+          assetIds,
+          getTimeZone(),
+          checkins.length > 0 ? checkins : undefined
+        ),
+      onAccepted: ({ data }) => {
+        closeSheet?.();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Mutation changed this booking — force the list to refetch.
+        markBookingsListDirty();
+        const msg = describeBatchResult({
+          direction: "checkin",
+          counts: batch,
+          isComplete: data?.isComplete,
+          bookingName,
+        });
+        Alert.alert("Checked In", msg, [
+          {
+            text: "OK",
+            onPress: () => {
+              setSelectedAssetIds(new Set());
+              setSelectMode(null);
+              fetchBooking();
+            },
+          },
+        ]);
       },
-    ]);
+      setSubmitting: setIsActioning,
+      showError: (message) => Alert.alert("Error", message),
+    });
   };
 
   const handlePartialCheckin = () => {
     if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
     const selected = booking.assets.filter((a) => selectedAssetIds.has(a.id));
     // QT assets get a returned/consumed/lost/damaged split; INDIVIDUAL rows
-    // just flip back to available. Checkinable = booked units still to
-    // reconcile (remainingToCheckIn > 0), matching the web check-in drawer.
+    // just flip back to available. Checkinable = units this booking sent out
+    // that are not back yet, the same rule the rows were offered by.
     const qtAssets = selected.filter(
-      (a) => a.type === "QUANTITY_TRACKED" && (a.remainingToCheckIn ?? 0) > 0
+      (a) => a.type === "QUANTITY_TRACKED" && unitsStillOut(a) > 0
     );
     const individualIds = selected
       .filter((a) => a.type !== "QUANTITY_TRACKED")
       .map((a) => a.id);
+    // Counted now, from the selection: the request carries member asset ids,
+    // so the server's reply cannot tell a picked kit from its assets.
+    const batch = selectionCounts;
     if (qtAssets.length === 0) {
       // No disposition to collect (INDIVIDUAL-only, or the server didn't send
       // QT metadata) — keep the simple confirm + bare send.
-      const count = selectedAssetIds.size;
       Alert.alert(
         "Check In Selected",
-        `Check in ${count} selected ${count === 1 ? "asset" : "assets"}?`,
+        describeBatchConfirm({ direction: "checkin", counts: batch }),
         [
           { text: "Cancel", style: "cancel" },
           {
             text: "Check In",
-            onPress: () => void submitCheckin(individualIds, []),
+            onPress: () => void submitCheckin(individualIds, [], batch),
           },
         ]
       );
@@ -389,50 +483,76 @@ export default function BookingDetailScreen() {
       index: 0,
       collected: [],
       individualIds,
+      batch,
     });
   };
 
   // Send the check-out. `assetIds` = INDIVIDUAL rows (implicit 1 unit);
-  // `checkouts` = per-QT-asset quantities the picker collected.
+  // `checkouts` = per-QT-asset quantities the picker collected; `batch` = the
+  // selection as the confirm and the button counted it, which the success
+  // message names. `closeSheet` runs only once the server accepts, so a refused
+  // check-out keeps the quantity sheet open with every collected quantity
+  // intact.
   const submitCheckout = async (
     assetIds: string[],
-    checkouts: CheckoutDisposition[]
+    checkouts: CheckoutDisposition[],
+    batch: SelectionCounts,
+    closeSheet?: () => void
   ) => {
     if (!booking || !currentOrg) return;
-    setIsActioning(true);
-    const { data, error: err } = await api.partialCheckoutBooking(
-      currentOrg.id,
-      booking.id,
-      assetIds,
-      getTimeZone(),
-      checkouts.length > 0 ? checkouts : undefined
-    );
-    setIsActioning(false);
-    if (err) {
-      Alert.alert("Error", err);
-      return;
-    }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // Mutation changed this booking — force the list to refetch.
-    markBookingsListDirty();
-    const msg = data?.isComplete
-      ? `All assets are now checked out for "${booking.name}".`
-      : `${data?.checkedOutCount ?? "Some"} checked out, ${
-          data?.remainingCount ?? "some"
-        } still reserved.`;
-    Alert.alert("Checked Out", msg, [
-      {
-        text: "OK",
-        onPress: () => {
-          setSelectedAssetIds(new Set());
-          setSelectMode(null);
-          fetchBooking();
-        },
+    const orgId = currentOrg.id;
+    const bookingId = booking.id;
+    const bookingName = booking.name;
+    await submitFromSheet({
+      lock: bookingSubmitLock,
+      request: () =>
+        api.partialCheckoutBooking(
+          orgId,
+          bookingId,
+          assetIds,
+          getTimeZone(),
+          checkouts.length > 0 ? checkouts : undefined
+        ),
+      onAccepted: ({ data }) => {
+        closeSheet?.();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Mutation changed this booking — force the list to refetch.
+        markBookingsListDirty();
+        const msg = describeBatchResult({
+          direction: "checkout",
+          counts: batch,
+          isComplete: data?.isComplete,
+          bookingName,
+          // The server skips an asset another check-out already took; this
+          // lets the message say so rather than claim the whole batch moved.
+          assets:
+            data?.checkedOutCount === undefined
+              ? undefined
+              : {
+                  sent: new Set([
+                    ...assetIds,
+                    ...checkouts.map((c) => c.assetId),
+                  ]).size,
+                  moved: data.checkedOutCount,
+                },
+        });
+        Alert.alert("Checked Out", msg, [
+          {
+            text: "OK",
+            onPress: () => {
+              setSelectedAssetIds(new Set());
+              setSelectMode(null);
+              fetchBooking();
+            },
+          },
+        ]);
       },
-    ]);
+      setSubmitting: setIsActioning,
+      showError: (message) => Alert.alert("Error", message),
+    });
   };
 
-  const handlePartialCheckout = () => {
+  const handlePartialCheckout = async () => {
     if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
     const selected = booking.assets.filter((a) => selectedAssetIds.has(a.id));
     // QT assets need an explicit quantity; INDIVIDUAL rows are implicit 1 unit.
@@ -442,30 +562,70 @@ export default function BookingDetailScreen() {
     const individualIds = selected
       .filter((a) => a.type !== "QUANTITY_TRACKED")
       .map((a) => a.id);
+    // Counted now, from the selection: the request carries member asset ids,
+    // so the server's reply cannot tell a picked kit from its assets.
+    const batch = selectionCounts;
+
+    // Walk each QT asset through the quantity picker before submitting.
+    const startQuantityPicker = () =>
+      setCheckoutQueue({
+        queue: qtAssets,
+        index: 0,
+        collected: [],
+        individualIds,
+        batch,
+      });
+
+    // The selection that takes a RESERVED booking out is the one that leaves
+    // its unassigned reservations open, so that is where the operator confirms
+    // it; an ongoing booking already went out with them open. The confirm
+    // stands in for the plain one, then the check-out carries on as usual.
+    // Named from a read taken now, for the same reason as the full check-out
+    // above. Only a RESERVED booking asks: an ongoing one already went out with
+    // its reservations open.
+    let unassignedConfirm = null;
+    if (booking.status === "RESERVED") {
+      setIsActioning(true);
+      const freshRequests = await readModelRequestsNow();
+      setIsActioning(false);
+      unassignedConfirm = unassignedCheckoutConfirm(
+        freshRequests ?? booking.modelRequests ?? []
+      );
+    }
+    if (unassignedConfirm) {
+      Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: unassignedConfirm.confirmLabel,
+          onPress: () => {
+            if (qtAssets.length === 0) {
+              void submitCheckout(individualIds, [], batch);
+            } else {
+              startQuantityPicker();
+            }
+          },
+        },
+      ]);
+      return;
+    }
+
     if (qtAssets.length === 0) {
       // No quantity to pick (INDIVIDUAL-only, or the server didn't send QT
       // metadata) — keep the simple confirm + bare send.
-      const count = selectedAssetIds.size;
       Alert.alert(
         "Check Out Selected",
-        `Check out ${count} selected ${count === 1 ? "asset" : "assets"}?`,
+        describeBatchConfirm({ direction: "checkout", counts: batch }),
         [
           { text: "Cancel", style: "cancel" },
           {
             text: "Check Out",
-            onPress: () => void submitCheckout(individualIds, []),
+            onPress: () => void submitCheckout(individualIds, [], batch),
           },
         ]
       );
       return;
     }
-    // Walk each QT asset through the quantity picker before submitting.
-    setCheckoutQueue({
-      queue: qtAssets,
-      index: 0,
-      collected: [],
-      individualIds,
-    });
+    startQuantityPicker();
   };
 
   const handleReserve = () => {
@@ -503,12 +663,20 @@ export default function BookingDetailScreen() {
 
   const handleRemoveAssets = () => {
     if (!booking || !currentOrg || selectedAssetIds.size === 0) return;
-    const count = selectedAssetIds.size;
+    // A kit whose whole membership is on this booking and fully selected is
+    // removed as a kit, which is what writes the kit-level note. Everything
+    // else goes by asset id, and `standaloneAssetIds` tells the server which of
+    // those ids were ticked as rows of their own rather than pulled in by a kit.
+    const { assetIds, kitIds, standaloneAssetIds } = splitRemovalSelection({
+      rows,
+      selectedAssetIds,
+    });
     Alert.alert(
       "Remove Selected",
-      `Remove ${count} selected ${
-        count === 1 ? "asset" : "assets"
-      } from this booking?`,
+      `Remove ${describeBatch({
+        assetCount: assetIds.length,
+        kitCount: kitIds.length,
+      })} from "${booking.name}"?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -519,7 +687,9 @@ export default function BookingDetailScreen() {
             const { error: err } = await api.removeAssets(
               currentOrg.id,
               booking.id,
-              Array.from(selectedAssetIds)
+              assetIds,
+              kitIds,
+              standaloneAssetIds
             );
             setIsActioning(false);
             if (err) {
@@ -742,8 +912,122 @@ export default function BookingDetailScreen() {
     });
   }, []);
 
+  /**
+   * The whole booking as rows: one header per kit, its members beneath when
+   * open, and every ungrouped asset where the server put it.
+   *
+   * Everything that acts on the selection reads these rows, never the searched
+   * ones. A selection made before a search can hold assets the search hides,
+   * and `splitRemovalSelection` has to see all of them to tell a whole kit from
+   * a standalone row.
+   */
+  const rows = useMemo(
+    () =>
+      buildBookingRows({
+        assets: booking?.assets ?? [],
+        kits: booking?.kits,
+        expandedKitIds,
+      }),
+    [booking?.assets, booking?.kits, expandedKitIds]
+  );
+
+  /**
+   * The rows the list shows: the whole booking, or what the search found. A
+   * search returns kits whole, so a kit header here counts, badges and selects
+   * the same members it does in `rows`.
+   */
+  const visibleRows = useMemo(() => {
+    const allAssets = booking?.assets ?? [];
+    const found = filterBookingAssets(allAssets, booking?.kits, searchTerm);
+    if (found === allAssets) return rows;
+    return buildBookingRows({
+      assets: found,
+      kits: booking?.kits,
+      expandedKitIds,
+    });
+  }, [booking?.assets, booking?.kits, expandedKitIds, rows, searchTerm]);
+
+  /**
+   * Scrolls the search box to the top of the list, so the rows it finds fill
+   * the space above the keyboard rather than sitting behind it.
+   */
+  const revealSearchResults = useCallback(() => {
+    listRef.current?.scrollToOffset({
+      offset: Math.max(0, searchBoxY.current - spacing.sm),
+      animated: true,
+    });
+  }, []);
+
+  /** Keeps `searchBoxY` in step with where the search box is laid out. */
+  const recordSearchBoxY = useCallback((event: LayoutChangeEvent) => {
+    searchBoxY.current = event.nativeEvent.layout.y;
+  }, []);
+
+  const toggleKitExpansion = useCallback((kitId: string) => {
+    setExpandedKitIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(kitId)) next.delete(kitId);
+      else next.add(kitId);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Picks or drops a kit's members in one tap. This is the only way a member
+   * enters a selection: a kit is picked as one unit, as on the website, so no
+   * one checks out or removes part of a kit by accident.
+   *
+   * Only the members the current mode can act on move, so a header in check-in
+   * mode leaves an already-returned member alone rather than selecting
+   * something the submit would drop.
+   */
+  const toggleKitSelection = useCallback(
+    (members: BookingAsset[]) => {
+      const selectable = members.filter((member) =>
+        isBookingAssetSelectable(member, selectMode, checkedInAssetIds)
+      );
+      if (selectable.length === 0) return;
+      setSelectedAssetIds((prev) => {
+        const next = new Set(prev);
+        const allPicked = selectable.every((member) => next.has(member.id));
+        for (const member of selectable) {
+          if (allPicked) next.delete(member.id);
+          else next.add(member.id);
+        }
+        return next;
+      });
+    },
+    [selectMode, checkedInAssetIds]
+  );
+
+  /**
+   * Enters or leaves a selection mode, starting from an empty selection.
+   *
+   * Kits stay open or closed as the user left them: a kit is picked from its
+   * header, so nothing inside it has to be on screen to be selected.
+   */
+  const toggleSelectMode = useCallback(
+    (mode: "checkin" | "checkout" | "remove") => {
+      setSelectMode((prev) => (prev === mode ? null : mode));
+      setSelectedAssetIds(new Set());
+    },
+    []
+  );
+
+  /** What the selection holds, for the floating action button's label. */
+  const selectionCounts = useMemo(
+    () =>
+      countSelection({
+        rows,
+        selectedAssetIds,
+        selectMode,
+        checkedInAssetIds,
+      }),
+    [rows, selectedAssetIds, selectMode, checkedInAssetIds]
+  );
+
   const renderAsset = useCallback(
-    ({ item }: { item: BookingAsset }) => {
+    (item: BookingAsset, inKit: boolean) => {
       const fallbackBadge = {
         bg: colors.backgroundTertiary,
         text: colors.muted,
@@ -757,6 +1041,8 @@ export default function BookingDetailScreen() {
               booked: item.quantity ?? 0,
               remOut: item.remainingToCheckOut,
               remIn: item.remainingToCheckIn,
+              dispatched: item.dispatchedUnitsTotal,
+              dispositioned: item.dispositionedUnitsTotal,
               bookingStatus: booking?.status ?? "",
             })
           : null;
@@ -765,41 +1051,29 @@ export default function BookingDetailScreen() {
         : statusBadge[item.status] ?? fallbackBadge;
       const stateLabel = qtState ? qtState.label : formatStatus(item.status);
       const isCheckedIn = checkedInAssetIds.includes(item.id);
-      const isCheckedOut = item.status === "CHECKED_OUT";
+      // A member of a picked kit reads as selected too, which shows what the
+      // kit's one tick covers — in check-in mode, only the members still out.
       const isSelected = selectedAssetIds.has(item.id);
-      // QUANTITY_TRACKED selectability is quantity-based, not status-based: a
-      // partially-checked-out QT asset stays AVAILABLE while units remain, so
-      // the global-status test wrongly excluded it. Check-in = booked units
-      // still to reconcile (remainingToCheckIn, the SAME "remaining" the web
-      // check-in drawer caps at); check-out = units still to take
-      // (remainingToCheckOut).
-      const isQt = item.type === "QUANTITY_TRACKED";
-      const qtRemainingIn = isQt ? item.remainingToCheckIn ?? 0 : 0;
-      const qtRemainingOut = isQt ? item.remainingToCheckOut ?? 0 : 0;
-      // What's selectable depends on the mode. A returned INDIVIDUAL asset is
-      // back to AVAILABLE, so `!isCheckedOut` alone would re-offer it for
-      // check-out — exclude the already-returned ones with `!isCheckedIn`.
+      // A kit member has no checkbox of its own: its kit is picked as one unit,
+      // from the header. A standalone row is offered by the same rule the header
+      // applies to its members, so an asset in a given state is selectable or
+      // not wherever it sits.
       const selectable =
-        selectMode === "checkin"
-          ? isQt
-            ? qtRemainingIn > 0
-            : isCheckedOut && !isCheckedIn
-          : selectMode === "checkout"
-          ? isQt
-            ? qtRemainingOut > 0
-            : !isCheckedOut && !isCheckedIn
-          : selectMode === "remove"
-          ? true
-          : false;
+        !inKit && isBookingAssetSelectable(item, selectMode, checkedInAssetIds);
 
       return (
         <TouchableOpacity
           style={[
             styles.assetCard,
+            inKit && styles.assetCardInKit,
             isSelected && styles.assetCardSelected,
             isCheckedIn && styles.assetCardCheckedIn,
           ]}
           activeOpacity={selectable ? 0.6 : 1}
+          // In a selection mode a row either toggles itself or does nothing,
+          // so a tap meant for the selection never navigates away. Disabling
+          // the inert ones lets a screen reader say so.
+          disabled={isSelectMode && !selectable}
           onPress={() => {
             if (selectable) {
               toggleAssetSelection(item.id);
@@ -807,11 +1081,11 @@ export default function BookingDetailScreen() {
               pushIntoTab("/(tabs)/assets", `/(tabs)/assets/${item.id}`);
             }
           }}
-          accessibilityLabel={`${item.title}, ${stateLabel}${
-            isCheckedIn ? ", checked in" : ""
-          }${isSelected ? ", selected" : ""}${
-            selectable ? ". Tap to select" : ""
-          }`}
+          accessibilityLabel={`${item.title}${
+            item.location ? `, at ${item.location.name}` : ""
+          }, ${stateLabel}${isCheckedIn ? ", checked in" : ""}${
+            isSelected ? ", selected" : ""
+          }${selectable ? ". Tap to select" : ""}`}
           accessibilityRole="button"
         >
           {selectable && (
@@ -878,7 +1152,9 @@ export default function BookingDetailScreen() {
                     label="booked"
                   />
                 )}
-                {item.kit && (
+                {/* Under a kit header the name is already on screen; naming
+                    it again on every member is noise. */}
+                {item.kit && !inKit && (
                   <Text style={styles.assetKit} numberOfLines={1}>
                     Kit: {item.kit.name}
                   </Text>
@@ -890,6 +1166,20 @@ export default function BookingDetailScreen() {
                 {item.category.name}
               </Text>
             )}
+            {/* Kit members carry their own location too, as on the website.
+                An older server sends none, and the row then has no line. */}
+            {item.location ? (
+              <View style={styles.assetLocationRow}>
+                <Ionicons
+                  name="location-outline"
+                  size={11}
+                  color={colors.mutedLight}
+                />
+                <Text style={styles.assetLocation} numberOfLines={1}>
+                  {item.location.name}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
@@ -915,6 +1205,60 @@ export default function BookingDetailScreen() {
       booking?.status,
       styles,
     ]
+  );
+
+  const renderKit = useCallback(
+    (row: Extract<BookingRow, { type: "kit" }>) => (
+      <BookingKitHeader
+        kit={row.kit}
+        name={row.name}
+        memberCount={row.members.length}
+        badge={resolveBookingKitBadge({
+          kit: row.kit,
+          members: row.members,
+          bookingStatus: booking?.status ?? "",
+          checkedInAssetIds,
+          checkedOutAssetIds,
+        })}
+        expanded={expandedKitIds.has(row.kitId)}
+        selectionState={
+          selectMode === null
+            ? null
+            : resolveKitSelectionState({
+                members: row.members,
+                selectMode,
+                selectedAssetIds,
+                checkedInAssetIds,
+              })
+        }
+        onToggleExpand={() => toggleKitExpansion(row.kitId)}
+        onToggleSelection={() => toggleKitSelection(row.members)}
+      />
+    ),
+    [
+      booking?.status,
+      checkedInAssetIds,
+      checkedOutAssetIds,
+      expandedKitIds,
+      selectMode,
+      selectedAssetIds,
+      toggleKitExpansion,
+      toggleKitSelection,
+    ]
+  );
+
+  const renderRow = useCallback(
+    ({ item: row }: { item: BookingRow }) => {
+      switch (row.type) {
+        case "kit":
+          return renderKit(row);
+        case "kit-end":
+          return <View style={styles.kitEndBand} />;
+        default:
+          return renderAsset(row.item, row.inKit);
+      }
+    },
+    [renderKit, renderAsset, styles]
   );
 
   if (isLoading) {
@@ -943,6 +1287,19 @@ export default function BookingDetailScreen() {
     text: colors.muted,
   };
 
+  /** How many kit groups the list holds; 0 means nothing is grouped. */
+  const kitRowCount = rows.filter((row) => row.type === "kit").length;
+
+  // The floating action names what it acts on, counting a kit as one thing:
+  // "Check Out 1 Kit & 1 Asset".
+  const selectionActionLabel = `${
+    selectMode === "checkout"
+      ? "Check Out"
+      : selectMode === "remove"
+      ? "Remove"
+      : "Check In"
+  } ${describeSelection(selectionCounts)}`;
+
   /**
    * Why Reserve is unavailable, or null when it is fine. Mirrors all THREE of
    * the web form's disable rules so the app never offers a tap the server
@@ -952,8 +1309,8 @@ export default function BookingDetailScreen() {
    *
    * The first two are decided from rows this screen already holds. The third
    * cannot be — it needs the overlapping-booking query — so the server sends
-   * it as a flag. `?? false` keeps a not-yet-updated server (rolling deploy,
-   * field absent) on the old behavior rather than blocking Reserve outright.
+   * it as a flag. `?? false` reads a server that does not send the flag
+   * (rolling deploy) as reporting no conflict, rather than blocking Reserve.
    *
    * All three are enforced server-side too: the first two in
    * `bookings.reserve.ts`, the third by `reserveBooking`'s race-safe conflict
@@ -976,17 +1333,10 @@ export default function BookingDetailScreen() {
     booking.custodianTeamMember?.name ||
     formatPersonName(booking.custodianUser);
 
-  // Lifecycle counts for the progress bar: every asset is in exactly one of three
-  // states. `checkedOutCount` (status === CHECKED_OUT) already EXCLUDES returned
-  // assets — partial check-in flips them back to AVAILABLE — so it IS the live
-  // "on job" count, and returns are subtracted from the reserved bucket (not from
-  // checkedOutCount again, which would double-count them).
-  const checkedInCount = checkedInAssetIds.length; // returned
-  const onJobCount = booking.checkedOutCount; // still out
-  const reservedCount = Math.max(
-    0,
-    booking.assetCount - onJobCount - checkedInCount
-  ); // never checked out
+  // How many of the booking's assets have been returned. Drives whether the
+  // progress card is worth showing at all; the card's own segments come from
+  // the server's shared helper further down.
+  const checkedInCount = checkedInAssetIds.length;
   // Only show the bar once there's check-out activity — otherwise it's a flat,
   // single-colour bar that adds noise to a freshly-reserved booking.
   const showProgress =
@@ -999,40 +1349,81 @@ export default function BookingDetailScreen() {
   // omits the card rather than crashing.
   const lp = booking.lifecycleProgress ?? null;
 
-  // Book-by-model reservations still awaiting assignment. Fulfilled rows
-  // (`fulfilledAt` set) are hidden here — the concrete assets they became
-  // already appear in the assets list, so showing them too would double up.
-  // Mirrors the web booking overview (booking-assets-column.tsx). The `?? []`
-  // matches the web guard + this file's cross-version convention: a booking
-  // detail from a not-yet-updated server (rolling deploy) omits the field, and
-  // an unguarded `.filter` would crash the whole screen to the error boundary.
+  // Book-by-model reservations still awaiting assignment. Fulfilled rows are
+  // hidden here — the concrete assets they became already appear in the
+  // assets list, so showing them too would double up. MIRROR of the web
+  // predicate `getOutstandingModelRequests` (apps/webapp/app/utils/
+  // booking-model-requests.ts): a request is outstanding only while it is
+  // unstamped AND has units left, which is also when the server accepts a
+  // fulfilment. The `?? []` matches the web guard + this file's cross-version
+  // convention: a booking detail from a not-yet-updated server (rolling
+  // deploy) omits the field, and an unguarded `.filter` would crash the whole
+  // screen to the error boundary.
   const outstandingModelRequests = (booking.modelRequests ?? []).filter(
-    (mr) => mr.fulfilledAt === null
+    (mr) => mr.fulfilledAt === null && mr.fulfilledQuantity < mr.quantity
   );
-  // A booking with unfulfilled model reservations can't be checked out at all
-  // (full OR partial): the shared checkout service hard-blocks RESERVED →
-  // ONGOING until every request is assigned to concrete assets. So gate BOTH
-  // checkout paths on this — the app surfaces an "Assign to check out" CTA
-  // instead of a checkout the server would reject. (`canCheckout` from the
-  // loader already accounts for this; `canPartialCheckout` is derived here.)
+  // Unassigned reservations never stop a check-out: a booking goes out as soon
+  // as one item leaves, and the rest stay open on it. They only decide whether
+  // to offer the scan-to-assign CTA below, and a check-out that takes the
+  // booking out of RESERVED confirms them before going ahead.
   const hasOutstandingModelRequests = outstandingModelRequests.length > 0;
 
   // Progressive check-out stays available while the booking is active AND still
   // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
   // RESERVED/ONGOING/OVERDUE, but the loader's `canCheckout` is RESERVED-only (it
-  // gates the full "Check Out All" button), so we derive our own flag for the
-  // partial path — otherwise "Select to Check Out" disappears the moment the
-  // first batch flips the booking to ONGOING.
+  // gates the full "Check Out All" button), so this flag is derived separately
+  // for the partial path, which must outlive the first batch that flips the
+  // booking to ONGOING. Whether anything is left is answered row by row; see
+  // `hasAssetsLeftToCheckOut`.
+  const hasUnitsLeftToCheckOut = hasAssetsLeftToCheckOut(
+    booking.assets,
+    new Set(checkedInAssetIds)
+  );
+
   const canPartialCheckout =
-    reservedCount > 0 &&
-    !hasOutstandingModelRequests &&
+    hasUnitsLeftToCheckOut &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
+
+  /**
+   * Whether the server would scope this user's booking writes to their own
+   * bookings.
+   *
+   * Roles are a set, and the server judges a request by the most privileged
+   * one it contains, so someone holding both SELF_SERVICE and ADMIN writes to
+   * any booking. `isRestrictedRole` asks the opposite question — whether ANY
+   * restricted role is present — which is the right test for the DRAFT-only
+   * editing rules above but would hide controls from a multi-role admin here.
+   */
+  const isRestrictedToOwnBookings =
+    isRestrictedRole &&
+    !currentOrg?.roles?.some((r) => r === "OWNER" || r === "ADMIN");
+
+  /**
+   * Whether to offer the progressive check-out affordances (scan and select).
+   *
+   * Both submit to the same endpoint, so they share one gate. It mirrors what
+   * the server will accept: the `booking:checkout` permission, and — for a
+   * restricted role, whose writes are scoped to their own bookings — being the
+   * booking's creator or its custodian. Offering either to someone the server
+   * would reject just trades a visible button for a 403.
+   */
+  const canUseProgressiveCheckout =
+    canPartialCheckout &&
+    userHasPermission({
+      roles: currentOrg?.roles,
+      entity: "booking",
+      action: "checkout",
+    }) &&
+    (!isRestrictedToOwnBookings ||
+      (!!user?.id &&
+        (booking.creator.id === user.id ||
+          booking.custodianUser?.id === user.id)));
 
   // Same gate the manage buttons use: an editable booking, and self-service
   // users only on their own DRAFTs (server re-checks ownership + status).
   const canManageModels =
     !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-    (!isSelfService || booking.status === "DRAFT");
+    (!isRestrictedRole || booking.status === "DRAFT");
 
   /**
    * Open the model-reservation manager (the picker's Models tab) for this
@@ -1060,10 +1451,19 @@ export default function BookingDetailScreen() {
       )}
 
       <FlatList
-        data={booking.assets}
-        renderItem={renderAsset}
-        keyExtractor={bookingAssetKeyExtractor}
+        ref={listRef}
+        data={visibleRows}
+        renderItem={renderRow}
+        keyExtractor={bookingRowKey}
         contentContainerStyle={styles.list}
+        // With the search keyboard up, the first tap on a row selects it
+        // instead of only closing the keyboard; scrolling puts it away. On iOS
+        // the keyboard's height is added below the rows, so the search box can
+        // scroll to the top even when few rows match. Android resizes the
+        // window instead, where a short list may stop short of the top.
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
         removeClippedSubviews
         maxToRenderPerBatch={10}
         windowSize={5}
@@ -1075,6 +1475,13 @@ export default function BookingDetailScreen() {
             tintColor={colors.muted}
             accessibilityLabel="Pull to refresh"
           />
+        }
+        ListEmptyComponent={
+          isSearching ? (
+            <Text style={styles.searchEmpty}>
+              No assets match &ldquo;{searchTerm.trim()}&rdquo;
+            </Text>
+          ) : null
         }
         ListHeaderComponent={
           <View style={styles.header}>
@@ -1153,10 +1560,9 @@ export default function BookingDetailScreen() {
                   </View>
                 )}
 
-                {/* why: web shows who created the booking on this same screen,
-                    and the field was already in the payload — fetched, then
-                    dropped. Custodian and creator are different people often
-                    enough that showing only one is misleading. */}
+                {/* why: web shows who created the booking on this same screen.
+                    Custodian and creator are different people often enough
+                    that showing only one is misleading. */}
                 {creatorName ? (
                   <View style={styles.infoRow}>
                     <Ionicons
@@ -1285,11 +1691,10 @@ export default function BookingDetailScreen() {
                 </View>
               </View>
             )}
-            {/* why visible rather than only in an alert: the disabled Reserve
-                  button was a dead control - tapping it produced nothing on
-                  device, so the one thing a user needs (what to fix) was
-                  unreachable. Stating it here does not depend on a tap firing,
-                  and it is readable before you even reach for the button. */}
+            {/* why visible rather than only in an alert: a disabled button
+                  takes no taps, so a reason shown on tap could never appear.
+                  Stating it here does not depend on a tap firing, and it is
+                  readable before you even reach for the button. */}
             {booking.status === "DRAFT" && reserveBlockedReason ? (
               <Text style={styles.reserveBlockedNote}>
                 {reserveBlockedReason}
@@ -1369,7 +1774,7 @@ export default function BookingDetailScreen() {
 
             {booking &&
               !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isSelfService || booking.status === "DRAFT") && (
+              (!isRestrictedRole || booking.status === "DRAFT") && (
                 <TouchableOpacity
                   style={styles.actionButtonOutline}
                   onPress={() =>
@@ -1397,7 +1802,7 @@ export default function BookingDetailScreen() {
 
             {/* Browse available assets/kits to add (date-aware picker) */}
             {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isSelfService || booking.status === "DRAFT") && (
+              (!isRestrictedRole || booking.status === "DRAFT") && (
                 <TouchableOpacity
                   style={styles.actionButtonOutline}
                   onPress={() =>
@@ -1427,7 +1832,7 @@ export default function BookingDetailScreen() {
 
             {/* Select assets to remove (editable bookings with assets) */}
             {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isSelfService || booking.status === "DRAFT") &&
+              (!isRestrictedRole || booking.status === "DRAFT") &&
               booking.assetCount > 0 && (
                 <TouchableOpacity
                   style={[
@@ -1435,8 +1840,7 @@ export default function BookingDetailScreen() {
                     selectMode === "remove" && styles.actionButtonOutlineActive,
                   ]}
                   onPress={() => {
-                    setSelectMode(selectMode === "remove" ? null : "remove");
-                    setSelectedAssetIds(new Set());
+                    toggleSelectMode("remove");
                   }}
                   accessibilityLabel={
                     selectMode === "remove"
@@ -1466,11 +1870,15 @@ export default function BookingDetailScreen() {
               )}
 
             {/* Full check-out is RESERVED-only (web parity); the loader's
-                canCheckout reflects that. */}
-            {canCheckout && (
+                canCheckout reflects that. It is hidden when the workspace
+                requires explicit check-out for this role, which leaves
+                "Select to Check Out" below as the way to check out.
+                Unassigned reservations don't hide it: handleCheckout names
+                them and asks before checking out. */}
+            {canCheckout && canQuickCheckout && (
               <TouchableOpacity
                 style={styles.actionButton}
-                onPress={handleCheckout}
+                onPress={() => void handleCheckout()}
                 accessibilityLabel="Check out all assets in this booking"
                 accessibilityRole="button"
               >
@@ -1487,16 +1895,43 @@ export default function BookingDetailScreen() {
 
             {/* Progressive check-out persists while reserved assets remain, even
                 after the booking has gone ONGOING (canPartialCheckout, not
-                canCheckout) so the user can keep taking the rest. */}
-            {canPartialCheckout && (
+                canCheckout) so the user can keep taking the rest. Scanning is
+                the twin of "Scan to Check In" below: one asset at a time,
+                batched, submitted to the partial-checkout endpoint. */}
+            {canUseProgressiveCheckout && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/scanner?bookingId=${
+                      booking.id
+                    }&bookingName=${encodeURIComponent(
+                      booking.name
+                    )}&bookingAction=checkout`
+                  )
+                }
+                accessibilityLabel="Scan assets to check out"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="scan"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>
+                  Scan to Check Out
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {canUseProgressiveCheckout && (
               <TouchableOpacity
                 style={[
                   styles.actionButtonOutline,
                   selectMode === "checkout" && styles.actionButtonOutlineActive,
                 ]}
                 onPress={() => {
-                  setSelectMode(selectMode === "checkout" ? null : "checkout");
-                  setSelectedAssetIds(new Set());
+                  toggleSelectMode("checkout");
                 }}
                 accessibilityLabel={
                   selectMode === "checkout"
@@ -1528,22 +1963,22 @@ export default function BookingDetailScreen() {
             )}
 
             {/* Book-by-model: a RESERVED booking with unfulfilled reservations
-                has no plain checkout button (the server hard-blocks checkout
-                until every reserved unit is assigned to a concrete asset).
-                Route the operator to the fulfil-and-check-out SCANNER
-                (`bookingAction=fulfil`): it shows what's reserved, they scan
-                the physical units, and on submit the reservations are
-                materialised AND the booking is checked out in one atomic call
-                (`fulfilModelRequestsAndCheckout`) — full web parity with the
-                web `fulfil-and-checkout` scanner. Scan-first IS the point of
-                book-by-model: reserve the count now, scan the items when you
-                grab them, no browse picker. (Browse to Add above stays for
-                hand-picking.) Gated `!isSelfService` to match the add/browse
-                affordances above: a self-service custodian can only edit a
-                DRAFT booking, so on a RESERVED booking the assign+checkout flow
-                can't succeed for them — showing the CTA would just lead to a
-                rejected submit. */}
-            {!isSelfService &&
+                offers the fulfil-and-check-out SCANNER
+                (`bookingAction=fulfil`): it shows what's reserved, the
+                operator scans the physical units, and on submit the scanned
+                units are assigned AND the booking is checked out in one call
+                (`fulfilAndCheckOut`) — web parity with the web
+                `fulfil-and-checkout` scanner. The scan need not cover every
+                reserved unit; whatever it leaves unassigned stays open on the
+                booking, and the scanner confirms that before submitting.
+                Scan-first IS the point of book-by-model: reserve the count
+                now, scan the items when you grab them, no browse picker.
+                (Browse to Add above stays for hand-picking.) Gated
+                `!isRestrictedRole` to match the add/browse affordances above:
+                a restricted custodian can only edit a DRAFT booking, so on a
+                RESERVED booking the assign+checkout flow can't succeed for
+                them — showing the CTA would just lead to a rejected submit. */}
+            {!isRestrictedRole &&
               booking.status === "RESERVED" &&
               hasOutstandingModelRequests && (
                 <TouchableOpacity
@@ -1575,15 +2010,17 @@ export default function BookingDetailScreen() {
                 </TouchableOpacity>
               )}
 
-            {canCheckin && (
+            {(canCheckin || canCheckinAll) && (
               <View style={styles.checkinActions}>
                 {/* Quick "Check In All" is hidden when the workspace requires
                     explicit check-in for this role — the scan/select paths
                     below remain (they ARE explicit check-in). Mirrors web's
                     CheckinDropdown, which offers this "Quick check-in" (full
                     checkinBooking = return all remaining) on any ongoing
-                    booking, partial included. */}
-                {canQuickCheckin && (
+                    booking, partial included — including one whose rows were
+                    all added after check-out, which the explicit paths below
+                    cannot act on because nothing on it ever left. */}
+                {canCheckinAll && (
                   <TouchableOpacity
                     style={styles.actionButton}
                     onPress={handleFullCheckin}
@@ -1599,65 +2036,72 @@ export default function BookingDetailScreen() {
                   </TouchableOpacity>
                 )}
 
-                <TouchableOpacity
-                  style={styles.actionButtonOutline}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/scanner?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(booking.name)}`
-                    )
-                  }
-                  accessibilityLabel="Scan assets to check in"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="scan"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>
-                    Scan to Check In
-                  </Text>
-                </TouchableOpacity>
+                {canCheckin && (
+                  <>
+                    <TouchableOpacity
+                      style={styles.actionButtonOutline}
+                      onPress={() =>
+                        router.push(
+                          `/(tabs)/scanner?bookingId=${
+                            booking.id
+                          }&bookingName=${encodeURIComponent(booking.name)}`
+                        )
+                      }
+                      accessibilityLabel="Scan assets to check in"
+                      accessibilityRole="button"
+                    >
+                      <Ionicons
+                        name="scan"
+                        size={18}
+                        color={colors.buttonSecondaryText}
+                      />
+                      <Text style={styles.actionButtonOutlineText}>
+                        Scan to Check In
+                      </Text>
+                    </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[
-                    styles.actionButtonOutline,
-                    selectMode === "checkin" &&
-                      styles.actionButtonOutlineActive,
-                  ]}
-                  onPress={() => {
-                    setSelectMode(selectMode === "checkin" ? null : "checkin");
-                    setSelectedAssetIds(new Set());
-                  }}
-                  accessibilityLabel={
-                    selectMode === "checkin"
-                      ? "Cancel selection"
-                      : "Select assets to check in"
-                  }
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name={
-                      selectMode === "checkin" ? "close" : "checkbox-outline"
-                    }
-                    size={18}
-                    color={
-                      selectMode === "checkin"
-                        ? colors.error
-                        : colors.buttonSecondaryText
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.actionButtonOutlineText,
-                      selectMode === "checkin" && { color: colors.error },
-                    ]}
-                  >
-                    {selectMode === "checkin" ? "Cancel" : "Select to Check In"}
-                  </Text>
-                </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.actionButtonOutline,
+                        selectMode === "checkin" &&
+                          styles.actionButtonOutlineActive,
+                      ]}
+                      onPress={() => {
+                        toggleSelectMode("checkin");
+                      }}
+                      accessibilityLabel={
+                        selectMode === "checkin"
+                          ? "Cancel selection"
+                          : "Select assets to check in"
+                      }
+                      accessibilityRole="button"
+                    >
+                      <Ionicons
+                        name={
+                          selectMode === "checkin"
+                            ? "close"
+                            : "checkbox-outline"
+                        }
+                        size={18}
+                        color={
+                          selectMode === "checkin"
+                            ? colors.error
+                            : colors.buttonSecondaryText
+                        }
+                      />
+                      <Text
+                        style={[
+                          styles.actionButtonOutlineText,
+                          selectMode === "checkin" && { color: colors.error },
+                        ]}
+                      >
+                        {selectMode === "checkin"
+                          ? "Cancel"
+                          : "Select to Check In"}
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                )}
               </View>
             )}
 
@@ -1762,10 +2206,39 @@ export default function BookingDetailScreen() {
               </View>
             )}
 
-            {/* Assets section header */}
-            <Text style={styles.sectionTitle}>
-              Assets ({booking.assetCount})
-            </Text>
+            {/* Assets section header. A booking holding kits counts them
+                separately, the way the website's does — the assets figure is
+                the ungrouped rows, so expanding a kit never changes it. */}
+            {kitRowCount > 0 ? (
+              <View>
+                <Text style={styles.sectionTitle}>Assets &amp; Kits</Text>
+                <Text style={styles.sectionSubtitle}>
+                  {describeBookingRows({
+                    standaloneAssetCount: booking.assets.filter(
+                      (a) => a.kitId == null
+                    ).length,
+                    kitCount: kitRowCount,
+                  })}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.sectionTitle}>
+                Assets ({booking.assetCount})
+              </Text>
+            )}
+
+            {/* The booking arrives whole, so the search filters the rows the
+                screen already holds and fetches nothing. The box stays while a
+                term is set, so a term that outlives the last asset can still
+                be cleared. */}
+            {booking.assets.length > 0 || searchTerm !== "" ? (
+              <BookingAssetsSearch
+                value={searchTerm}
+                onChangeText={setSearchTerm}
+                onFocus={revealSearchResults}
+                onLayout={recordSearchBoxY}
+              />
+            ) : null}
           </View>
         }
       />
@@ -1777,18 +2250,12 @@ export default function BookingDetailScreen() {
             style={styles.floatingButton}
             onPress={
               selectMode === "checkout"
-                ? handlePartialCheckout
+                ? () => void handlePartialCheckout()
                 : selectMode === "remove"
                 ? handleRemoveAssets
                 : handlePartialCheckin
             }
-            accessibilityLabel={`${
-              selectMode === "checkout"
-                ? "Check out"
-                : selectMode === "remove"
-                ? "Remove"
-                : "Check in"
-            } ${selectedAssetIds.size} selected assets`}
+            accessibilityLabel={selectionActionLabel}
             accessibilityRole="button"
           >
             <Ionicons
@@ -1803,13 +2270,7 @@ export default function BookingDetailScreen() {
               color={colors.primaryForeground}
             />
             <Text style={styles.floatingButtonText}>
-              {selectMode === "checkout"
-                ? "Check Out"
-                : selectMode === "remove"
-                ? "Remove"
-                : "Check In"}{" "}
-              {selectedAssetIds.size}{" "}
-              {selectedAssetIds.size === 1 ? "Asset" : "Assets"}
+              {selectionActionLabel}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1884,6 +2345,7 @@ export default function BookingDetailScreen() {
               ? "Next"
               : "Check out"
           }
+          isSubmitting={isActioning}
           onSubmit={(quantity) => {
             const cur = checkoutQueue.queue[checkoutQueue.index];
             const collected = [
@@ -1897,9 +2359,15 @@ export default function BookingDetailScreen() {
                 collected,
               });
             } else {
-              const { individualIds } = checkoutQueue;
-              setCheckoutQueue(null);
-              void submitCheckout(individualIds, collected);
+              // The last asset submits with the sheet still open. The queue
+              // clears only once the server accepts, so a refusal keeps every
+              // collected quantity for a retry.
+              void submitCheckout(
+                checkoutQueue.individualIds,
+                collected,
+                checkoutQueue.batch,
+                () => setCheckoutQueue(null)
+              );
             }
           }}
           onClose={() => setCheckoutQueue(null)}
@@ -1916,17 +2384,23 @@ export default function BookingDetailScreen() {
           key={checkinQueue.queue[checkinQueue.index].id}
           visible
           assetTitle={checkinQueue.queue[checkinQueue.index].title}
-          // Cap the picker to booked units still to reconcile
-          // (remainingToCheckIn = booked − returned/consumed/lost/damaged), the
-          // SAME "remaining" the web check-in drawer uses.
-          remaining={
-            checkinQueue.queue[checkinQueue.index].remainingToCheckIn ?? 1
-          }
+          // Cap the picker to the units that are actually out — what this
+          // booking sent out, less what has come back. Capping at booked units
+          // still to reconcile would propose returning units that never left,
+          // which the server refuses. A row with nothing out never enters the
+          // queue (`handlePartialCheckin` filters on the same helper), so the
+          // floor of 1 only keeps the picker renderable and never widens an
+          // offer.
+          remaining={Math.max(
+            1,
+            unitsStillOut(checkinQueue.queue[checkinQueue.index])
+          )}
           consumptionType={
             checkinQueue.queue[checkinQueue.index].consumptionType
           }
           unitOfMeasure={checkinQueue.queue[checkinQueue.index].unitOfMeasure}
           isLast={checkinQueue.index + 1 >= checkinQueue.queue.length}
+          isSubmitting={isActioning}
           onSubmit={(value: CheckinDispositionValue) => {
             const cur = checkinQueue.queue[checkinQueue.index];
             const collected = [
@@ -1946,9 +2420,15 @@ export default function BookingDetailScreen() {
                 collected,
               });
             } else {
-              const { individualIds } = checkinQueue;
-              setCheckinQueue(null);
-              void submitCheckin(individualIds, collected);
+              // The last asset submits with the sheet still open. The queue
+              // clears only once the server accepts, so a refusal keeps every
+              // collected disposition for a retry.
+              void submitCheckin(
+                checkinQueue.individualIds,
+                collected,
+                checkinQueue.batch,
+                () => setCheckinQueue(null)
+              );
             }
           }}
           onClose={() => setCheckinQueue(null)}
@@ -2228,6 +2708,17 @@ const useStyles = createStyles((colors, shadows) => ({
     color: colors.foreground,
     marginTop: spacing.xs,
   },
+  sectionSubtitle: {
+    fontSize: fontSize.xs,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  searchEmpty: {
+    fontSize: fontSize.base,
+    color: colors.muted,
+    textAlign: "center",
+    paddingVertical: spacing.xl,
+  },
 
   // Reserved-models (book-by-model) section
   modelsSection: {
@@ -2308,8 +2799,26 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
     gap: spacing.sm,
   },
+  // A member of a kit: the thick left edge is the gutter that ties the card to
+  // the header above it, and the softer fill sets the group apart from the
+  // ungrouped assets around it.
+  assetCardInKit: {
+    borderLeftWidth: 8,
+    borderLeftColor: colors.backgroundTertiary,
+    backgroundColor: colors.backgroundSecondary,
+  },
+  // Closes an expanded kit, so the last member and the next ungrouped asset
+  // are not simply two cards in a row.
+  kitEndBand: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.backgroundTertiary,
+    marginBottom: spacing.sm,
+  },
   assetCardSelected: {
     borderColor: colors.primary,
+    // A kit member sets its own left edge colour, which wins over borderColor.
+    borderLeftColor: colors.primary,
     backgroundColor: colors.primaryBg,
   },
   assetCardCheckedIn: {
@@ -2349,6 +2858,19 @@ const useStyles = createStyles((colors, shadows) => ({
   assetCategory: {
     fontSize: fontSize.xs,
     color: colors.muted,
+  },
+  // The location line matches the kit header's, so a kit and the assets under
+  // it name their locations the same way.
+  assetLocationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  assetLocation: {
+    fontSize: fontSize.xs,
+    color: colors.mutedLight,
+    // Shrinks beside the icon, so a long name truncates inside the card.
+    flexShrink: 1,
   },
 
   // Checkbox for selection

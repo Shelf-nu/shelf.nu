@@ -14,18 +14,23 @@ import { Button } from "~/components/shared/button";
 
 import { DateS } from "~/components/shared/date";
 import { WarningBox } from "~/components/shared/warning-box";
+import { resolveBillingSectionState } from "~/components/subscription/billing-section";
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import type { PaidInvoice } from "~/components/subscription/invoice-history";
 import { InvoiceHistory } from "~/components/subscription/invoice-history";
+import { OwnPlanOptions } from "~/components/subscription/own-plan-options";
 import { PricingTable } from "~/components/subscription/pricing-table";
 import { SubscriptionsOverview } from "~/components/subscription/subscriptions-overview";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
+import { WorkspacePlansTable } from "~/components/subscription/workspace-plans-table";
 import { db } from "~/database/db.server";
 import { useUserData } from "~/hooks/use-user-data";
 import {
   assertPriceIsForAddon,
   assertPriceMatchesTier,
 } from "~/modules/billing/price-validation.server";
+import { getWorkspacePlansForUser } from "~/modules/billing/workspace-plans.server";
+import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { getUserTierLimit } from "~/modules/tier/service.server";
 
 import { getUserByID } from "~/modules/user/service.server";
@@ -47,8 +52,9 @@ import {
   getStripeCustomer,
   getOrCreateCustomerId,
 } from "~/utils/stripe.server";
+import { findPaidWorkspaceThroughOthers } from "~/utils/workspace-plans";
 
-export async function loader({ context }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -60,7 +66,12 @@ export async function loader({ context }: LoaderFunctionArgs) {
      * NOTE: all users should be able to access the subscription route no matter which role they have
      * as its their own account settings.
      */
-    const [user, tierLimit] = await Promise.all([
+    const { organizationId } = await getSelectedOrganization({
+      userId,
+      request,
+    });
+
+    const [user, tierLimit, workspacePlans] = await Promise.all([
       getUserByID(userId, {
         select: {
           id: true,
@@ -74,7 +85,15 @@ export async function loader({ context }: LoaderFunctionArgs) {
         } satisfies Prisma.UserSelect,
       }),
       getUserTierLimit(userId),
+      getWorkspacePlansForUser({
+        userId,
+        currentOrganizationId: organizationId,
+      }),
     ]);
+
+    /** A paid workspace the user works in that someone else pays for. */
+    const workspaceAccessedThroughOthers =
+      findPaidWorkspaceThroughOthers(workspacePlans);
 
     /** Get the Stripe customer */
     const customer = (await getStripeCustomer(
@@ -137,12 +156,16 @@ export async function loader({ context }: LoaderFunctionArgs) {
 
     return payload({
       title: `Subscriptions`,
-      subTitle:
-        customer?.subscriptions.data.length === 0
-          ? "Pick an account plan that fits your workflow."
-          : "Manage your account plan.",
+      subTitle: "The plans and add-ons you pay for.",
       tier: user.tierId,
       tierLimit,
+      workspacePlans,
+      workspaceAccessedThroughOthersName:
+        workspaceAccessedThroughOthers?.name ?? null,
+      // SSO users have no personal workspace to upgrade.
+      hasPersonalWorkspace: workspacePlans.some(
+        (row) => row.type === "PERSONAL"
+      ),
       prices,
       customer,
       subscriptionsWithProducts,
@@ -304,7 +327,6 @@ export const handle = {
 
 export default function SubscriptionPage() {
   const {
-    title,
     subTitle,
     prices,
     tier,
@@ -314,6 +336,9 @@ export default function SubscriptionPage() {
     openInvoices,
     paidInvoices,
     upcomingInvoices,
+    workspacePlans,
+    workspaceAccessedThroughOthersName,
+    hasPersonalWorkspace,
   } = useLoaderData<typeof loader>();
   const user = useUserData();
   const hasUnpaidInvoice = user?.hasUnpaidInvoice ?? false;
@@ -337,36 +362,45 @@ export default function SubscriptionPage() {
     })
   );
 
+  const billingSectionState = resolveBillingSectionState({
+    hasSubscription: !hasNoSubscription,
+    hasWorkspacePlan,
+    hasPaidAccessThroughOthers: !!workspaceAccessedThroughOthersName,
+  });
+
   /**
-   * This handles the case when there is no subscription and custom tier is set.
-   * This is some special cases only used for certain clients. Most users that have customTier also have a subscription
+   * Custom tier without a Stripe subscription: a handful of clients are set up
+   * this way by hand, so there is nothing to bill or manage here.
    */
   if (isCustomTier && hasNoSubscription) {
     return (
-      <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
-        <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-          <InfoIcon />
+      <div className="flex flex-col gap-8">
+        <WorkspacePlansTable rows={workspacePlans} />
+        <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
+          <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+            <InfoIcon />
+          </div>
+          <p className="text-[14px] font-medium text-gray-700">
+            You’re currently using the{" "}
+            {isEnterprise ? (
+              <>
+                <span className="font-semibold">ENTERPRISE</span> version
+              </>
+            ) : (
+              <>
+                <span className="font-semibold">CUSTOM</span> plan
+              </>
+            )}{" "}
+            of Shelf.
+            <br />
+            {isEnterprise && <>That means you have a custom plan. </>}
+            To get more information about your plan, please{" "}
+            <CrispButton variant="link" className="inline w-auto">
+              contact support
+            </CrispButton>
+            .
+          </p>
         </div>
-        <p className="text-[14px] font-medium text-gray-700">
-          You’re currently using the{" "}
-          {isEnterprise ? (
-            <>
-              <span className="font-semibold">ENTERPRISE</span> version
-            </>
-          ) : (
-            <>
-              <span className="font-semibold">CUSTOM</span> plan
-            </>
-          )}{" "}
-          of Shelf.
-          <br />
-          {isEnterprise && <>That means you have a custom plan. </>}
-          To get more information about your plan, please{" "}
-          <CrispButton variant="link" className="inline w-auto">
-            contact support
-          </CrispButton>
-          .
-        </p>
       </div>
     );
   }
@@ -378,80 +412,77 @@ export default function SubscriptionPage() {
           <UnpaidInvoiceWarning invoices={openInvoices} />
         ) : null}
 
-        {!hasWorkspacePlan ? (
-          <div className="mb-8">
-            {hasNoSubscription ? (
-              <>
-                <div className="mb-2 mt-3 flex items-center gap-3 rounded border border-gray-300 p-4">
-                  <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-                    <InfoIcon />
-                  </div>
-                  <p className="text-[14px] font-medium text-gray-700">
-                    You're currently using the{" "}
-                    <span className="font-semibold">FREE</span> version of Shelf
-                  </p>
-                </div>
-                <h3 className="text-text-lg font-semibold">
-                  Choose your workspace plan
-                </h3>
-                <PricingTable prices={prices} />
-              </>
-            ) : (
-              <>
-                <div className="mb-2 mt-3 flex items-center justify-between gap-3 rounded border border-gray-300 p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-                      <InfoIcon />
-                    </div>
-                    <div>
-                      <p className="text-[14px] font-medium text-gray-700">
-                        You have no workspace plan
-                      </p>
-                      <p className="text-[13px] text-gray-500">
-                        Upgrade to a workspace plan to unlock the full potential
-                        of Shelf alongside your add-ons.
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="whitespace-nowrap"
-                    onClick={() => setPricingOpen(true)}
-                  >
-                    View workspace plans
-                  </Button>
-                </div>
-                <DialogPortal>
-                  <Dialog
-                    open={pricingOpen}
-                    onClose={() => setPricingOpen(false)}
-                    className="h-[90vh] w-[90vw]"
-                    title={
-                      <h3 className="text-text-lg font-semibold">
-                        Choose your workspace plan
-                      </h3>
-                    }
-                  >
-                    <div className="p-6">
-                      <PricingTable prices={prices} />
-                    </div>
-                  </Dialog>
-                </DialogPortal>
-              </>
-            )}
-          </div>
-        ) : null}
+        <div className="mb-8 mt-3">
+          <WorkspacePlansTable
+            rows={workspacePlans}
+            onUpgradePersonal={() => setPricingOpen(true)}
+          />
+        </div>
 
+        {/* Everything below is the user's own billing, not the workspace's */}
         <div className="mb-8 justify-between border-b pb-5 lg:flex">
           <div className="mb-8 lg:mb-0">
-            <h3 className="text-text-lg font-semibold">{title}</h3>
+            <h3 className="text-text-lg font-semibold">Billed to you</h3>
             <p className="text-sm text-gray-600">{subTitle}</p>
           </div>
           {!hasNoSubscription && (
             <CustomerPortalForm buttonText="Manage subscriptions" />
           )}
         </div>
+
+        {billingSectionState === "own-plan-options" &&
+        workspaceAccessedThroughOthersName ? (
+          <div className="mb-8">
+            <OwnPlanOptions
+              prices={prices}
+              currentWorkspaceName={workspaceAccessedThroughOthersName}
+              showPersonalUpgrade={hasPersonalWorkspace}
+              onComparePlans={() => setPricingOpen(true)}
+            />
+          </div>
+        ) : null}
+
+        {billingSectionState === "choose-plan" ? (
+          <div className="mb-8">
+            <div className="mb-4 flex items-center gap-3 rounded border border-gray-300 p-4">
+              <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+                <InfoIcon />
+              </div>
+              <p className="text-[14px] font-medium text-gray-700">
+                You don't pay for any subscriptions yet.
+              </p>
+            </div>
+            <h3 className="text-text-lg font-semibold">Choose a plan</h3>
+            <PricingTable prices={prices} />
+          </div>
+        ) : null}
+
+        {billingSectionState === "no-workspace-plan" ? (
+          <div className="mb-8 flex items-center justify-between gap-3 rounded border border-gray-300 p-4">
+            <div className="flex items-center gap-3">
+              <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+                <InfoIcon />
+              </div>
+              <div>
+                <p className="text-[14px] font-medium text-gray-700">
+                  You have no workspace plan
+                </p>
+                <p className="text-[13px] text-gray-500">
+                  Upgrade to a workspace plan to unlock the full potential of
+                  Shelf alongside your add-ons.
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              className="whitespace-nowrap"
+              onClick={() => setPricingOpen(true)}
+            >
+              View workspace plans
+            </Button>
+          </div>
+        ) : null}
 
         {!hasNoSubscription && (
           <>
@@ -467,6 +498,18 @@ export default function SubscriptionPage() {
           </>
         )}
       </div>
+      <DialogPortal>
+        <Dialog
+          open={pricingOpen}
+          onClose={() => setPricingOpen(false)}
+          className="h-[90vh] w-[90vw]"
+          title={<h3 className="text-text-lg font-semibold">Choose a plan</h3>}
+        >
+          <div className="p-6">
+            <PricingTable prices={prices} />
+          </div>
+        </Dialog>
+      </DialogPortal>
       <SuccessfulSubscriptionModal />
     </>
   );

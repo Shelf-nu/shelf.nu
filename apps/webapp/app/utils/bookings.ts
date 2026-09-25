@@ -1,5 +1,5 @@
 import type { Booking, Currency } from "@prisma/client";
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { BADGE_COLORS, type BadgeColorScheme } from "./badge-colors";
 import { formatCurrency } from "./currency";
 import type { UserNameFields } from "./user";
@@ -25,30 +25,112 @@ export function canUserManageBookingAssets(
 }
 
 /**
+ * The statuses a booking is still open to item removal in — every status that
+ * is not a closed record (COMPLETE, ARCHIVED, CANCELLED).
+ *
+ * Spelled as an explicit list so {@link REMOVABLE_STATUSES_BY_ROLE} can say
+ * "unrestricted" by reference instead of restating it and drifting from it.
+ */
+const REMOVABLE_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
+/**
  * Whether items may still be REMOVED from a booking in its current status.
  *
  * Removal stays open until the booking is finished — a booking that is
  * COMPLETE, ARCHIVED or CANCELLED is a closed record and its contents must not
  * change.
  *
- * Deliberately status-only, unlike {@link canUserManageBookingAssets}. Who may
- * remove is a separate question that the callers already answer, and answer
- * differently from "who may add": a self-service custodian may remove items
- * from their own RESERVED booking, which a role+status check with no notion of
- * custodianship cannot express. Ownership is enforced by the caller — the web
- * UI's `canSeeActions` gating and the mobile endpoint's own-booking 403.
+ * Status-only, unlike {@link canUserManageBookingAssets}: this is the
+ * closed-record half of the rule and every remove path needs it, including the
+ * services, which have no role in scope. Callers acting on behalf of a user
+ * want {@link canRoleRemoveBookingAssets}, which adds the role half.
+ *
+ * Ownership remains the caller's to enforce either way.
  *
  * @param booking - The booking being modified; only `status` is consulted
  * @returns `true` when the booking is still open to item removal
  */
 export function canUserRemoveBookingAssets(booking: Pick<Booking, "status">) {
-  const closedStatuses: BookingStatus[] = [
-    BookingStatus.COMPLETE,
-    BookingStatus.ARCHIVED,
-    BookingStatus.CANCELLED,
-  ];
+  return REMOVABLE_STATUSES.includes(booking.status);
+}
 
-  return !closedStatuses.includes(booking.status);
+/**
+ * Statuses in which a restricted role may still remove items from a booking
+ * it owns.
+ *
+ * BASE stops at DRAFT: once a booking is reserved, a BASE custodian is already
+ * refused the ADD half of the same operation (`canUserManageBookingAssets`,
+ * and the DRAFT-only gate in the manage-assets / manage-kits routes), which
+ * tells them to cancel and recreate the booking instead. SELF_SERVICE keeps
+ * RESERVED because that role is trusted to adjust its own reservation before
+ * pickup.
+ *
+ * Neither role reaches ONGOING or OVERDUE. Removing an asset from a live
+ * booking reconciles that asset's status back to available (see `removeAssets`
+ * in `booking/service.server.ts`), which is a return — and returns are
+ * `booking:checkin`, an action neither role holds on its own booking.
+ */
+const REMOVABLE_STATUSES_BY_ROLE: Record<OrganizationRoles, BookingStatus[]> = {
+  [OrganizationRoles.BASE]: [BookingStatus.DRAFT],
+  [OrganizationRoles.SELF_SERVICE]: [
+    BookingStatus.DRAFT,
+    BookingStatus.RESERVED,
+  ],
+  // Unrestricted beyond the closed-record rule, mirroring the ADMIN/OWNER
+  // allow-all short-circuit in `@shelf/permissions`.
+  [OrganizationRoles.ADMIN]: REMOVABLE_STATUSES,
+  [OrganizationRoles.OWNER]: REMOVABLE_STATUSES,
+};
+
+/**
+ * Whether the acting user's roles may remove items from a booking in its
+ * current status.
+ *
+ * The role half of the question {@link canUserRemoveBookingAssets} leaves open.
+ * `booking:update` is the permission every remove path checks and BASE holds
+ * it, so the permission matrix alone does not answer this — every surface that
+ * offers or performs a removal has to ask here.
+ *
+ * Takes an ARRAY and resolves it with `.some()`, matching `roleHasPermission`
+ * in `@shelf/permissions`: a membership carries a role list, and reading
+ * `roles[0]` for an authorization decision resolves `[SELF_SERVICE, ADMIN]` to
+ * the restricted answer.
+ *
+ * Ownership is still the caller's to enforce: this answers "may these roles act
+ * at this status", not "is this their booking".
+ *
+ * @param roles - The acting user's roles in the booking's organization. Empty
+ *   or `undefined` denies, the safe direction while a session is still loading.
+ * @param booking - The booking being modified; only `status` is consulted
+ * @returns `true` when those roles may remove items at this status
+ */
+export function canRoleRemoveBookingAssets({
+  roles,
+  booking,
+}: {
+  roles: OrganizationRoles[] | undefined;
+  booking: Pick<Booking, "status">;
+}) {
+  if (!roles?.length) {
+    return false;
+  }
+
+  if (!canUserRemoveBookingAssets(booking)) {
+    return false;
+  }
+
+  // ALLOW-list, not a deny-list, and typed as a total `Record` so a role added
+  // to the enum later fails to compile in the map instead of silently
+  // inheriting unrestricted removal. Same discipline as
+  // `bookingWriteScopeFilter` in `booking-authorization.server.ts`.
+  return roles.some(
+    (role) => REMOVABLE_STATUSES_BY_ROLE[role]?.includes(booking.status)
+  );
 }
 
 export const bookingStatusColorMap: {

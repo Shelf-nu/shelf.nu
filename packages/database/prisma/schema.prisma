@@ -145,6 +145,11 @@ model User {
 
   @@unique([email, username])
   @@index([firstName, lastName])
+  // Invites and CSV import match an account without regard to letter case,
+  // comparing LOWER("email"), which the unique btree above cannot serve.
+  // Prisma has no syntax for an expression index, so it is created in
+  // migrations/20260921100000_add_user_email_lower_index.
+  // @@index([lower(email)])
   // Indexes for foreign keys
   @@index([tierId])
   @@index([lastSelectedOrganizationId])
@@ -1013,6 +1018,10 @@ model Organization {
   // Branding preference for downloadable labels
   showShelfBranding Boolean @default(true)
 
+  // Whether the booking checklist and audit receipt PDFs print the QR image.
+  // Off means the sheet cannot be scanned in place of the label on the item.
+  showQrCodesOnPdfs Boolean @default(true)
+
   // Custom footer text appended to workspace emails
   customEmailFooter String? @db.VarChar(500)
 
@@ -1553,8 +1562,14 @@ model BookingAsset {
   quantity  Int     @default(1) // For quantity-tracked assets: how many booked
 
   // The model reservation this row discharged, when it came from one. `null`
-  // for assets added directly — picked, scanned onto the booking, or pulled in
-  // via a kit. That is most rows.
+  // for assets added directly — picked or scanned onto a booking with no
+  // matching reservation to answer. That is most rows.
+  //
+  // A kit-driven row carries it too: a unit sitting inside a kit answers a
+  // promise for units of its model exactly like a loose one, and the pool math
+  // counts it either way. At most ONE row per (booking, asset) is ever stamped
+  // — one physical unit discharges one reserved unit, however many rows the
+  // asset holds on the booking.
   //
   // Without it the link is narrative only: `materializeModelRequestForAsset`
   // writes a note ("assigned X (Model A) — 2 remaining") and then the
@@ -1656,6 +1671,29 @@ model BookingAsset {
   checkedOutById String?
   checkedInAt    DateTime? @db.Timestamptz(3)
   checkedInById  String?
+
+  // How many of this slice's units have been sent out on this booking.
+  //
+  // `checkedOutAt` answers WHETHER any units left; this answers HOW MANY. A
+  // QUANTITY_TRACKED slice can go out a few units at a time, and a timestamp
+  // cannot express "3 of 10 are out" — so any reader deriving an obligation
+  // from the timestamp alone must guess, and both guesses are wrong: the full
+  // quantity demands back units that never moved, zero strands the ones that
+  // did.
+  //
+  // CUMULATIVE units dispatched, never decremented. Units coming back are
+  // counted by `ConsumptionLog`, so what is still out is
+  // `checkedOutQuantity - dispositioned`. That split matches the counters the
+  // booking surfaces already read (`bookedQuantity` / `checkedOutQuantity` /
+  // `dispositionedQuantity`); this column is where the second one lives so it
+  // no longer has to be reconstructed from scan sessions. A slice returned in
+  // full and sent out again simply adds to it.
+  //
+  // Every writer that sends units out maintains it — the all-at-once checkout,
+  // progressive checkout, and the kit-member propagation in `updateKitAssets`.
+  // A writer that sets `checkedOutAt` without adding here leaves a slice whose
+  // departure nothing can size.
+  checkedOutQuantity Int @default(0)
 
   // The old `@@unique([bookingId, assetId])` is replaced by two partial
   // unique indexes in the migration SQL (Postgres-only feature Prisma
@@ -1770,6 +1808,9 @@ model BookingSettings {
 
   requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
+
+  requireExplicitCheckoutForAdmin       Boolean @default(false) // When true, admins must use explicit check-out (scan or select) instead of quick check-out
+  requireExplicitCheckoutForSelfService Boolean @default(false) // When true, self-service users must use explicit check-out (scan or select) instead of quick check-out
 
   // Progressive check-in/out settings
   countKitsAsSingleUnit Boolean @default(false) // When true, the booking check-in progress bar treats each kit as one unit instead of counting the assets inside it
@@ -2547,6 +2588,7 @@ enum ActivityAction {
   ASSET_NAME_CHANGED
   ASSET_DESCRIPTION_CHANGED
   ASSET_CATEGORY_CHANGED
+  ASSET_MODEL_CHANGED
   ASSET_KIT_CHANGED
   ASSET_LOCATION_CHANGED
   ASSET_TAGS_CHANGED

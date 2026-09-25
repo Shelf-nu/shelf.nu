@@ -16,6 +16,7 @@ import type {
 import type { AssetWithStatus } from "~/utils/booking-assets";
 import {
   flattenSelectedBookingItems,
+  getRemainingCheckedOutAssetIds,
   isAssetCheckableIn,
 } from "~/utils/booking-assets";
 import { tw } from "~/utils/tw";
@@ -119,11 +120,12 @@ export default function BulkPartialCheckinDialog({
   // Source remaining-CHECKED_OUT assets from the denormalised `assetsList`
   // (pivot-aware) — `booking.assets` was the pre-pivot shape and no longer
   // exists. Check-in eligibility is fully encoded in `partialCheckinDetails`
-  // (see `isAssetCheckableIn`), so we only need the plain status probe here
-  // to detect the "final checkin" case.
-  const remainingCheckedOutAssets = assetsList.filter(
-    (asset) =>
-      asset.status === "CHECKED_OUT" && !checkedInAssetIds.has(asset.id)
+  // (see `isAssetCheckableIn`), so the shared helper's plain status probe is
+  // all the "final checkin" case needs. It returns distinct ids because the
+  // selection compared against it is deduped too.
+  const remainingCheckedOutAssetIds = getRemainingCheckedOutAssetIds(
+    assetsList,
+    checkedInAssetIds
   );
   // Deduped asset ids being checked in (kits excluded). The selection can
   // contain the same asset twice (e.g. selected standalone and as a kit
@@ -132,8 +134,8 @@ export default function BulkPartialCheckinDialog({
   const selectedAssetIds = Array.from(eligibleAssetIds);
 
   const isFinalCheckin =
-    selectedAssetIds.length === remainingCheckedOutAssets.length &&
-    remainingCheckedOutAssets.length > 0;
+    selectedAssetIds.length === remainingCheckedOutAssetIds.size &&
+    remainingCheckedOutAssetIds.size > 0;
 
   // Check if it's an early check-in (only relevant for final check-ins)
   const isEarlyCheckin = Boolean(
