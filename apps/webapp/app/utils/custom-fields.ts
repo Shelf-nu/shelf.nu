@@ -11,6 +11,39 @@ import {
 } from "./client-hints";
 import { ShelfError, isLikeShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
+/**
+ * Schema for a REQUIRED numeric custom field (AMOUNT or NUMBER).
+ *
+ * The bound is "a value was entered", not "the value is non-zero". Zero is an
+ * ordinary answer (none left, nothing owed), so a required field that refuses
+ * it has no valid input for an operator whose answer is 0.
+ *
+ * Emptiness therefore has to be rejected BEFORE coercion: `Number("")` is `0`,
+ * so once the value is a number, an omitted field and a deliberate zero are the
+ * same value and no predicate can separate them.
+ */
+const requiredNumber = (field_name?: string) =>
+  z
+    .union([z.string(), z.number()])
+    .superRefine((value, ctx) => {
+      if (typeof value === "string" && value.trim() === "") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: field_name
+            ? `${field_name} is required`
+            : `This field is required`,
+        });
+      }
+    })
+    .pipe(z.coerce.number());
+
+/** Schema for an OPTIONAL numeric custom field; blank stays blank. */
+const optionalNumber = (params: {
+  invalid_type_error?: string | undefined;
+  required_error?: string | undefined;
+  description?: string | undefined;
+}) => z.coerce.number(params).optional().nullable();
+
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
  * This was greatly inspired and done with the help of @rphlmr (https://github.com/rphlmr)
@@ -65,12 +98,8 @@ const getSchema = ({
       }
       return v;
     }),
-    amount: required
-      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
-      : z.coerce.number(params).optional().nullable(),
-    number: required
-      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
-      : z.coerce.number(params).optional().nullable(),
+    amount: required ? requiredNumber(field_name) : optionalNumber(params),
+    number: required ? requiredNumber(field_name) : optionalNumber(params),
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 

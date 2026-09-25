@@ -1,10 +1,13 @@
 import type { CustomField } from "@prisma/client";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import {
   buildAssetOverviewCustomFields,
   buildCustomFieldValue,
   getCustomFieldDisplayValue,
+  mergedSchema,
+  type CustomFieldZodSchema,
 } from "./custom-fields";
 
 /**
@@ -203,5 +206,79 @@ describe("buildAssetOverviewCustomFields", () => {
       "Zoom",
       "Aperture",
     ]);
+  });
+});
+
+/**
+ * Required numeric custom fields.
+ *
+ * "Required" means a value was given, not that the value is non-zero. Zero is an
+ * ordinary number (a count of nothing, a price of nothing), and a required
+ * field that refuses it cannot be satisfied by an operator whose answer is 0.
+ */
+describe("mergedSchema: required numeric fields accept zero", () => {
+  /** Builds the merged schema for one required field of the given type. */
+  function schemaFor(type: "number" | "amount") {
+    return mergedSchema({
+      baseSchema: z.object({}),
+      customFields: [
+        {
+          id: "cf1",
+          name: "Shelf count",
+          type,
+          helpText: "",
+          required: true,
+        } satisfies CustomFieldZodSchema,
+      ],
+    });
+  }
+
+  it.each(["number", "amount"] as const)(
+    "accepts 0 for a required %s field",
+    (type) => {
+      const result = schemaFor(type).safeParse({ "cf-cf1": "0" });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        // `buildSchema` composes the shape from field definitions at runtime, so
+        // the `cf-<id>` key is not statically knowable; read it as unknown data
+        // rather than widening the schema's inferred type.
+        const parsed = result.data as Record<string, unknown>;
+        expect(parsed["cf-cf1"]).toBe(0);
+      }
+    }
+  );
+
+  it.each(["number", "amount"] as const)(
+    "still rejects an empty required %s field",
+    (type) => {
+      const result = schemaFor(type).safeParse({ "cf-cf1": "" });
+
+      expect(result.success).toBe(false);
+    }
+  );
+
+  it("accepts a negative value for a required number field", () => {
+    const result = schemaFor("number").safeParse({ "cf-cf1": "-5" });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a whitespace-only required number field", () => {
+    const result = schemaFor("number").safeParse({ "cf-cf1": "   " });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an omitted required number field", () => {
+    const result = schemaFor("number").safeParse({});
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a non-numeric required number field", () => {
+    const result = schemaFor("number").safeParse({ "cf-cf1": "abc" });
+
+    expect(result.success).toBe(false);
   });
 });

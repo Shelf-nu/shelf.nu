@@ -138,6 +138,12 @@ export const NewAssetFormSchema = z.object({
         .positive("Quantity is required and must be at least 1")
         .optional()
     ),
+  // Zero is a real threshold, not a missing one: it means "alert when nothing is
+  // left". `low-stock.server.ts` documents that semantics and tests
+  // `minQuantity != null` rather than truthiness, and the CSV importer accepts
+  // any non-negative whole number, so the bound here is non-negative, and
+  // "no threshold" is carried by the null the transform produces for an empty
+  // input.
   minQuantity: z
     .string()
     .optional()
@@ -146,7 +152,7 @@ export const NewAssetFormSchema = z.object({
       z
         .number({ invalid_type_error: "Min quantity must be a number" })
         .int("Min quantity must be a whole number")
-        .positive("Min quantity must be at least 1")
+        .nonnegative("Min quantity cannot be negative")
         .nullable()
     ),
   consumptionType: z

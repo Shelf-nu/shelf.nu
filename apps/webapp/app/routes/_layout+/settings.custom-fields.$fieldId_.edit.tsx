@@ -9,7 +9,7 @@ import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   CustomFieldForm,
-  NewCustomFieldFormSchema,
+  CustomFieldSubmissionSchema,
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -103,7 +103,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const parsedData = parseData(
       await request.formData(),
-      NewCustomFieldFormSchema
+      CustomFieldSubmissionSchema
     );
 
     const { name, helpText, active, required, options, categories } =
